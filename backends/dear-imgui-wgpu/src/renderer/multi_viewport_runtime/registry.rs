@@ -150,10 +150,12 @@ pub(super) fn renderer_globals(
             .as_ref()
             .ok_or(WgpuViewportError::RendererNotInitialized)?;
         let instance = backend
+            .init_info
             .instance
             .clone()
             .ok_or(WgpuViewportError::MissingInstance)?;
         let adapter = backend
+            .init_info
             .adapter
             .clone()
             .ok_or(WgpuViewportError::MissingAdapter)?;

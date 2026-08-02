@@ -126,8 +126,8 @@ fn snapshot_preserves_standard_sampler_callbacks() {
     let frame = ctx.begin_frame();
     let draw_list = frame.ui().get_foreground_draw_list();
     unsafe {
-        draw_list.add_callback(Some(linear), std::ptr::null_mut(), 0);
-        draw_list.add_callback(Some(nearest), std::ptr::null_mut(), 0);
+        draw_list.add_callback(linear, std::ptr::null_mut(), 0);
+        draw_list.add_callback(nearest, std::ptr::null_mut(), 0);
     }
     drop(draw_list);
     let snapshot = frame.render_snapshot(&consumer).unwrap();
@@ -157,16 +157,22 @@ fn unsupported_user_callback_is_an_explicit_capture_error() {
     let consumer = ctx.create_renderer_consumer().unwrap();
     let frame = ctx.begin_frame();
     unsafe {
-        frame.ui().get_foreground_draw_list().add_callback(
-            Some(user_callback),
-            std::ptr::null_mut(),
-            0,
-        );
+        frame
+            .ui()
+            .get_foreground_draw_list()
+            .add_callback(user_callback, std::ptr::null_mut(), 0);
     }
     assert!(matches!(
         frame.render_snapshot(&consumer),
         Err(imgui::render::SnapshotError::UserCallbackUnsupported)
     ));
+    assert_eq!(ctx.poll_snapshot_completions().unwrap().watermark(), 0);
+
+    let snapshot = ctx
+        .begin_frame()
+        .render_snapshot(&consumer)
+        .expect("callback rejection must not claim detached mode or allocate an epoch");
+    assert_eq!(snapshot.epoch().sequence(), 1);
 }
 
 #[test]

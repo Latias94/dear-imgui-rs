@@ -825,7 +825,7 @@ struct ViewRtt {
     #[allow(dead_code)] // Keep the depth texture alive for the depth view.
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
-    texture_id: TextureId,
+    texture_id: dear_imgui_wgpu::ExternalTextureId,
     #[allow(dead_code)] // Fixed-size RTT for this example.
     size: (u32, u32),
 }
@@ -835,9 +835,8 @@ impl ViewRtt {
         device: &wgpu::Device,
         renderer: &mut WgpuRenderer,
         format: wgpu::TextureFormat,
-        sampler: &wgpu::Sampler,
         label: &str,
-    ) -> Self {
+    ) -> dear_imgui_wgpu::RendererResult<Self> {
         let size = (512, 512);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some(label),
@@ -871,16 +870,16 @@ impl ViewRtt {
         });
         let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let texture_id = renderer.register_external_texture_with_sampler(&texture, &view, sampler);
+        let texture_id = renderer.register_external_texture(&view)?;
 
-        Self {
+        Ok(Self {
             texture,
             view,
             depth_texture,
             depth_view,
             texture_id,
             size,
-        }
+        })
     }
 
     fn render_into(
@@ -1052,31 +1051,19 @@ impl AppWindow {
         // Unify visuals (sRGB): auto gamma by format
         renderer.set_gamma_mode(dear_imgui_wgpu::GammaMode::Auto);
 
-        let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("view_rtt_sampler"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::MipmapFilterMode::Linear,
-            ..Default::default()
-        });
         let scene_renderer = SimpleSceneRenderer::new(&self.device, self.surface_desc.format);
         let scene_view_rtt = ViewRtt::create(
             &self.device,
             &mut renderer,
             self.surface_desc.format,
-            &sampler,
             "scene_view_rtt",
-        );
+        )?;
         let game_view_rtt = ViewRtt::create(
             &self.device,
             &mut renderer,
             self.surface_desc.format,
-            &sampler,
             "game_view_rtt",
-        );
+        )?;
 
         let clear_color = wgpu::Color {
             r: 0.1,
@@ -1222,12 +1209,12 @@ impl AppWindow {
         render_scene_view(
             ui,
             &mut imgui.game_state,
-            Some(imgui.scene_view_rtt.texture_id),
+            Some(imgui.scene_view_rtt.texture_id.texture_id()),
         );
         render_game_view(
             ui,
             &mut imgui.game_state,
-            Some(imgui.game_view_rtt.texture_id),
+            Some(imgui.game_view_rtt.texture_id.texture_id()),
         );
         render_console(ui, &mut imgui.game_state);
         render_asset_browser(ui, &mut imgui.game_state);

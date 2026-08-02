@@ -6,9 +6,10 @@ fn prepare_headless_context(
     display_size: [f32; 2],
 ) -> imgui::ImGuiResult<()> {
     ctx.set_ini_filename::<PathBuf>(None)?;
-    ctx.prepare_frame(
-        imgui::FramePrepareOptions::new(display_size, 1.0 / 60.0).renderer_has_textures(),
-    );
+    // This example only proves Context activation and suspension. It intentionally uses the
+    // legacy headless font-atlas path instead of advertising a renderer capability it does not
+    // provide.
+    ctx.prepare_frame(imgui::FramePrepareOptions::new(display_size, 1.0 / 60.0));
     let _ = ctx.font_atlas().build();
     Ok(())
 }

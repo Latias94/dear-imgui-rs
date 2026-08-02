@@ -29,9 +29,9 @@ struct ImguiState {
 
 struct OffscreenRtt {
     size: (u32, u32),
-    texture: wgpu::Texture,
+    _texture: wgpu::Texture,
     view: wgpu::TextureView,
-    texture_id: dear_imgui_rs::TextureId,
+    texture_id: dear_imgui_wgpu::ExternalTextureId,
 }
 
 impl OffscreenRtt {
@@ -40,8 +40,7 @@ impl OffscreenRtt {
         renderer: &mut WgpuRenderer,
         size: (u32, u32),
         format: wgpu::TextureFormat,
-        sampler: &wgpu::Sampler,
-    ) -> Self {
+    ) -> dear_imgui_wgpu::RendererResult<Self> {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("offscreen-rtt"),
             size: wgpu::Extent3d {
@@ -58,14 +57,14 @@ impl OffscreenRtt {
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let texture_id = renderer.register_external_texture_with_sampler(&texture, &view, sampler);
+        let texture_id = renderer.register_external_texture(&view)?;
 
-        Self {
+        Ok(Self {
             size,
-            texture,
+            _texture: texture,
             view,
             texture_id,
-        }
+        })
     }
 
     fn recreate(
@@ -74,13 +73,14 @@ impl OffscreenRtt {
         renderer: &mut WgpuRenderer,
         size: (u32, u32),
         format: wgpu::TextureFormat,
-        sampler: &wgpu::Sampler,
-    ) {
-        // Destroy old registration
-        renderer.unregister_texture(self.texture_id);
-
-        let new_self = OffscreenRtt::create(device, renderer, size, format, sampler);
-        *self = new_self;
+    ) -> dear_imgui_wgpu::RendererResult<()> {
+        let replacement = OffscreenRtt::create(device, renderer, size, format)?;
+        if let Err(error) = renderer.unregister_external_texture(self.texture_id) {
+            let _ = renderer.unregister_external_texture(replacement.texture_id);
+            return Err(error);
+        }
+        *self = replacement;
+        Ok(())
     }
 }
 
@@ -210,8 +210,6 @@ struct AppWindow {
     imgui: ImguiState,
     rtt: OffscreenRtt,
     offscreen_pipeline: wgpu::RenderPipeline,
-    linear_sampler: wgpu::Sampler,
-    nearest_sampler: wgpu::Sampler,
     use_nearest_sampler: bool,
 }
 
@@ -252,31 +250,10 @@ impl AppWindow {
         let mut renderer = WgpuRenderer::new(init_info, &mut context)?;
         renderer.set_gamma_mode(dear_imgui_wgpu::GammaMode::Auto);
 
-        // Two samplers to demonstrate runtime switching.
-        let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("rtt_linear_sampler"),
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::MipmapFilterMode::Linear,
-            ..Default::default()
-        });
-        let nearest_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("rtt_nearest_sampler"),
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
-            ..Default::default()
-        });
         let use_nearest_sampler = false;
 
         // Create offscreen RTT at initial size
-        let rtt = OffscreenRtt::create(
-            &device,
-            &mut renderer,
-            (640, 360),
-            surface_desc.format,
-            &linear_sampler,
-        );
+        let rtt = OffscreenRtt::create(&device, &mut renderer, (640, 360), surface_desc.format)?;
 
         // Create a simple pipeline that draws a procedural grid and a triangle
         let offscreen_pipeline = create_offscreen_pipeline(&device, surface_desc.format);
@@ -297,8 +274,6 @@ impl AppWindow {
             imgui,
             rtt,
             offscreen_pipeline,
-            linear_sampler,
-            nearest_sampler,
             use_nearest_sampler,
         })
     }
@@ -327,18 +302,12 @@ impl AppWindow {
             (logical.height as f32 * 0.5).max(1.0) as u32,
         );
         if target != self.rtt.size {
-            let sampler_for_rtt = if self.use_nearest_sampler {
-                &self.nearest_sampler
-            } else {
-                &self.linear_sampler
-            };
             self.rtt.recreate(
                 &self.device,
                 &mut self.imgui.renderer,
                 target,
                 self.surface_desc.format,
-                sampler_for_rtt,
-            );
+            )?;
         }
 
         // Render pass to offscreen RTT (grid + triangle)
@@ -432,17 +401,18 @@ impl AppWindow {
                 let off_y = (avail_h - disp_h) * 0.5;
                 ui.set_cursor_pos([cur[0] + off_x, cur[1] + off_y]);
 
-                ui.image(self.rtt.texture_id, [disp_w, disp_h]);
+                let draw_list = ui.get_window_draw_list();
+                if self.use_nearest_sampler {
+                    draw_list.set_sampler_nearest();
+                } else {
+                    draw_list.set_sampler_linear();
+                }
+                ui.image(self.rtt.texture_id.texture_id(), [disp_w, disp_h]);
+                draw_list.set_sampler_linear();
             });
 
         if want_toggle_sampler {
             self.use_nearest_sampler = !self.use_nearest_sampler;
-            let sampler = if self.use_nearest_sampler {
-                &self.nearest_sampler
-            } else {
-                &self.linear_sampler
-            };
-            let _ = renderer.update_external_texture_sampler(self.rtt.texture_id, sampler);
         }
 
         // Render to swapchain
@@ -564,15 +534,6 @@ impl ApplicationHandler for App {
                         }
                         Key::Character(s) if s.as_str().eq_ignore_ascii_case("f") => {
                             window.use_nearest_sampler = !window.use_nearest_sampler;
-                            let sampler = if window.use_nearest_sampler {
-                                &window.nearest_sampler
-                            } else {
-                                &window.linear_sampler
-                            };
-                            let _ = window
-                                .imgui
-                                .renderer
-                                .update_external_texture_sampler(window.rtt.texture_id, sampler);
                             window.window.request_redraw();
                         }
                         _ => {}

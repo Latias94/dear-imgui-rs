@@ -3,13 +3,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use build_support::binding::{
-    ArtifactProfile, BindingSpec, BuildRequest, BuildRequestInput, CORE_BUILD_ENV_VARS,
-    CoreArtifactIdentity, CrateBindingDefine, NativeAbiProfile, RELEASE_CANDIDATE_SHA_ENV,
-    SourceRevisions, TargetFacts, bindgen_rerun_env_vars, is_supported_wasm_target,
-    validate_wasm_feature_contract,
+    ArtifactProfile, ArtifactProfileInput, BindingSpec, BuildRequest, BuildRequestInput,
+    CORE_BUILD_ENV_VARS, CoreArtifactIdentity, CrateBindingDefine, NativeAbiProfile,
+    RELEASE_CANDIDATE_SHA_ENV, SourceRevisions, TargetFacts, bindgen_rerun_env_vars,
+    core_source_contract_hash, is_supported_wasm_target, validate_wasm_feature_contract,
 };
 
-const CORE_WASM_IMPORT_MODULE: &str = "imgui-sys-v0";
+fn core_wasm_import_module() -> &'static str {
+    &build_support::source_inventory::SourceInventory::embedded().wasm_import_module
+}
 
 // Asset-importer style build configuration and structure
 #[derive(Clone, Debug)]
@@ -61,8 +63,17 @@ impl BuildConfig {
                 .split(',')
                 .any(|f| f == "crt-static")
     }
+    fn maintained_source_paths(&self) -> build_support::source_inventory::MaintainedSourcePaths {
+        build_support::source_inventory::MaintainedSourcePaths::for_crate(
+            env!("CARGO_PKG_NAME"),
+            self.manifest_dir.clone(),
+        )
+        .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}"))
+    }
     fn cimgui_root(&self) -> PathBuf {
-        self.manifest_dir.join("third-party/cimgui")
+        self.maintained_source_paths()
+            .source_root()
+            .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}"))
     }
     fn imgui_src(&self) -> PathBuf {
         self.cimgui_root().join("imgui")
@@ -130,22 +141,23 @@ impl BuildConfig {
     }
     fn binding_spec(&self) -> BindingSpec {
         if self.is_core_wasm_target() {
-            BindingSpec::core_wasm(CORE_WASM_IMPORT_MODULE)
+            BindingSpec::core_wasm(core_wasm_import_module())
         } else {
             BindingSpec::core_native(self.native_abi_profile())
         }
     }
     fn artifact_profile(&self) -> ArtifactProfile {
-        ArtifactProfile::new(
-            "dear-imgui",
-            env!("CARGO_PKG_VERSION"),
-            &self.target_triple,
-            "static",
-            self.crt_profile(),
-            self.artifact_features(),
-            self.source_revisions(),
-            self.binding_spec().deterministic_hash(),
-        )
+        ArtifactProfile::new(ArtifactProfileInput {
+            crate_name: "dear-imgui",
+            version: env!("CARGO_PKG_VERSION"),
+            target: &self.target_triple,
+            link_type: "static",
+            crt: self.crt_profile(),
+            features: self.artifact_features(),
+            source_revisions: self.source_revisions(),
+            binding_spec_hash: self.binding_spec().deterministic_hash(),
+            source_contract_hash: core_source_contract_hash(),
+        })
     }
     fn build_request(&self) -> BuildRequest {
         let artifact_features = self.artifact_features();
@@ -197,14 +209,25 @@ fn write_package_metadata(cfg: &BuildConfig, profile: &ArtifactProfile) {
 
 fn main() {
     let cfg = BuildConfig::new();
+    let sources = cfg.maintained_source_paths();
     if cfg!(all(feature = "package-bin", feature = "test-engine")) {
         panic!(
             "dear-imgui-sys: feature `test-engine` is source-only and cannot be packaged as a prebuilt core artifact"
         );
     }
+    if cfg!(all(feature = "package-bin", feature = "abi-probe")) {
+        panic!(
+            "dear-imgui-sys: feature `abi-probe` is CI-only and cannot be packaged as a prebuilt core artifact"
+        );
+    }
     validate_wasm_feature_contract(&cfg.target_triple, cfg!(feature = "wasm"))
         .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}"));
     let skip_cc = env::var("IMGUI_SYS_SKIP_CC").is_ok();
+    if cfg!(feature = "abi-probe") && (cfg.is_core_wasm_target() || skip_cc) {
+        panic!(
+            "dear-imgui-sys: feature `abi-probe` requires a native source build and cannot be combined with WASM or IMGUI_SYS_SKIP_CC"
+        );
+    }
     let mut has_platform_io_hooks = false;
     let artifact_profile = cfg.artifact_profile();
     let build_request = cfg.build_request();
@@ -215,6 +238,7 @@ fn main() {
     // Re-run triggers
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=Cargo.toml");
+    println!("cargo:rustc-check-cfg=cfg(dear_imgui_rs_native_symbols)");
     println!("cargo:rustc-check-cfg=cfg(dear_imgui_rs_platform_io_hooks)");
     println!("cargo:rustc-check-cfg=cfg(dear_imgui_rs_wasm_import_target)");
     if cfg.is_core_wasm_target() {
@@ -237,8 +261,9 @@ fn main() {
     println!("cargo:rerun-if-changed=backend-shims/android.cpp");
     println!("cargo:rerun-if-changed=backend-shims/win32.cpp");
     println!("cargo:rerun-if-changed=backend-shims/dx11.cpp");
-    println!("cargo:rerun-if-changed=third-party/cimgui/imgui/imgui.cpp");
-    println!("cargo:rerun-if-changed=third-party/cimgui/imgui/imgui_demo.cpp");
+    for path in sources.all_candidate_paths() {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
     for name in CORE_BUILD_ENV_VARS {
         println!("cargo:rerun-if-env-changed={name}");
     }
@@ -281,7 +306,8 @@ fn main() {
         if cfg.is_core_wasm_target() {
             panic!(
                 "dear-imgui-sys: WASM bindings are generated through the import-provider adapter; \
-                 run `cargo run -p xtask -- wasm-bindgen` (provider: {CORE_WASM_IMPORT_MODULE})"
+                 run `cargo run -p xtask -- wasm-bindgen` (provider: {})",
+                core_wasm_import_module()
             );
         }
         generate_bindings_native(&cfg);
@@ -339,7 +365,7 @@ fn main() {
     // Build from sources when needed
     if !linked_prebuilt && !skip_cc {
         if !cfg.is_core_wasm_target() {
-            build_with_cc_cfg(&cfg);
+            build_with_cc_cfg(&cfg, &sources);
             has_platform_io_hooks = true;
         }
     } else if !linked_prebuilt && skip_cc && !cfg.is_core_wasm_target() {
@@ -362,6 +388,10 @@ fn main() {
              aggregate callback installation \
              will panic if used."
         );
+    }
+
+    if linked_prebuilt || (!skip_cc && !cfg.is_core_wasm_target()) {
+        println!("cargo:rustc-cfg=dear_imgui_rs_native_symbols");
     }
 
     // ImGui core includes default platform handlers on Windows (clipboard, IME, open-in-shell)
@@ -605,35 +635,73 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
     linked
 }
 
-fn build_with_cc_cfg(cfg: &BuildConfig) {
+fn build_with_cc_cfg(
+    cfg: &BuildConfig,
+    sources: &build_support::source_inventory::MaintainedSourcePaths,
+) {
+    sources
+        .validate_native()
+        .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}"));
     let cimgui_root = cfg.cimgui_root();
-    let imgui_src = cfg.imgui_src();
     let mut build = new_native_cpp_build(cfg);
     build.include(&cimgui_root);
+    let imgui_core = sources
+        .file("imgui-core")
+        .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}"));
     let imgui_cpp = if cfg!(feature = "stack-layout") {
-        let patched = write_stack_layout_patched_imgui_cpp(cfg, &imgui_src.join("imgui.cpp"));
-        build.file(cfg.manifest_dir.join("src/stack_layout_shim.cpp"));
+        let patched = write_stack_layout_patched_imgui_cpp(cfg, &imgui_core);
+        build.file(
+            sources
+                .file("stack-layout-shim")
+                .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}")),
+        );
         patched
     } else {
-        imgui_src.join("imgui.cpp")
+        imgui_core
     };
     build.file(write_safe_demo_patched_imgui_cpp(cfg, &imgui_cpp));
-    build.file(imgui_src.join("imgui_draw.cpp"));
-    build.file(imgui_src.join("imgui_widgets.cpp"));
-    build.file(imgui_src.join("imgui_tables.cpp"));
-    build.file(cfg.manifest_dir.join("src/demo_window_shim.cpp"));
-    build.file(cfg.manifest_dir.join("src/platform_io_hooks.cpp"));
+    build.file(write_numeric_patched_imgui_widgets_cpp(
+        cfg,
+        &sources
+            .file("imgui-widgets")
+            .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}")),
+    ));
+    for file_id in [
+        "imgui-draw",
+        "imgui-tables",
+        "demo-window-shim",
+        "platform-io-hooks",
+    ] {
+        build.file(
+            sources
+                .file(file_id)
+                .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}")),
+        );
+    }
     // Include official demo/metrics/debug windows for native builds so symbols like
     // ImGui::ShowDemoWindow/ShowAboutWindow/ShowStyleEditor resolve.
     // This is excluded from the WASM single‑module path below.
     build.file(write_safe_demo_patched_imgui_demo_cpp(
         cfg,
-        &imgui_src.join("imgui_demo.cpp"),
+        &sources
+            .file("imgui-demo")
+            .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}")),
     ));
-    build.file(cimgui_root.join("cimgui.cpp"));
+    build.file(
+        sources
+            .file("cimgui-wrapper")
+            .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}")),
+    );
     if cfg!(feature = "test-engine") {
         build.define("IMGUI_ENABLE_TEST_ENGINE", None);
-        build.file(cfg.manifest_dir.join("src/imgui_test_engine_hooks.cpp"));
+        build.file(
+            sources
+                .file("test-engine-hooks")
+                .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}")),
+        );
+    }
+    if cfg!(feature = "abi-probe") {
+        build.define("DEAR_IMGUI_RS_ABI_PROBE", Some("1"));
     }
     #[cfg(feature = "freetype")]
     {
@@ -647,7 +715,11 @@ fn build_with_cc_cfg(cfg: &BuildConfig) {
         for include in &freetype.include_paths {
             build.include(include.display().to_string());
         }
-        build.file(cfg.imgui_src().join("misc/freetype/imgui_freetype.cpp"));
+        build.file(
+            sources
+                .file("freetype")
+                .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}")),
+        );
     }
 
     build.compile("dear_imgui");
@@ -679,6 +751,22 @@ fn write_safe_demo_patched_imgui_demo_cpp(cfg: &BuildConfig, imgui_demo_cpp: &Pa
             )
         });
     let out = cfg.out_dir.join("imgui_demo_safe_demo_patched.cpp");
+    std::fs::write(&out, patched)
+        .unwrap_or_else(|error| panic!("failed to write {}: {error}", out.display()));
+    out
+}
+
+fn write_numeric_patched_imgui_widgets_cpp(cfg: &BuildConfig, imgui_widgets_cpp: &Path) -> PathBuf {
+    let source = std::fs::read_to_string(imgui_widgets_cpp)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", imgui_widgets_cpp.display()));
+    let patched = build_support::patch_imgui_widgets_cpp_for_defined_numeric_conversions(&source)
+        .unwrap_or_else(|error| {
+            panic!(
+                "failed to patch {} for defined numeric conversions: {error}",
+                imgui_widgets_cpp.display()
+            )
+        });
+    let out = cfg.out_dir.join("imgui_widgets_numeric_patched.cpp");
     std::fs::write(&out, patched)
         .unwrap_or_else(|error| panic!("failed to write {}: {error}", out.display()));
     out
@@ -1228,7 +1316,7 @@ fn use_pregenerated_bindings(cfg: &BuildConfig) -> bool {
     let (pregenerated, spec) = if cfg.is_core_wasm_target() {
         (
             Path::new("src").join("wasm_bindings_pregenerated.rs"),
-            BindingSpec::core_wasm(CORE_WASM_IMPORT_MODULE),
+            BindingSpec::core_wasm(core_wasm_import_module()),
         )
     } else {
         let profile = cfg.native_abi_profile();

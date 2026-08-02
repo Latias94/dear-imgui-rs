@@ -92,7 +92,7 @@ struct PrimitivesDemo {
 
     /// Integer displayed in hexadecimal form to demonstrate numeric formatting.
     #[imgui(name = "Hex Counter", as_input, hex)]
-    hex_counter: i32,
+    hex_counter: u32,
 
     /// Floating-point value displayed as a percentage.
     #[imgui(name = "Percent", as_drag, percentage, speed = 0.5)]
@@ -171,12 +171,14 @@ struct ReflectDemoState {
 }
 
 fn configure_reflect_settings(session: &mut reflect::ReflectSession) {
-    use reflect::{NumericRange, NumericTypeSettings, NumericWidgetKind, TupleRenderMode};
+    use reflect::{
+        F32NumericSettings, I32NumericSettings, NumericRange, NumericWidgetKind, TupleRenderMode,
+    };
 
     {
         let settings = session.settings_mut();
         // Demonstrate type-level defaults for i32: sliders 0..100 with clamping.
-        *settings.numerics_i32_mut() = NumericTypeSettings {
+        *settings.numerics_i32_mut() = I32NumericSettings {
             widget: NumericWidgetKind::Slider,
             range: NumericRange::Explicit {
                 min: 0.0,
@@ -186,19 +188,20 @@ fn configure_reflect_settings(session: &mut reflect::ReflectSession) {
             step_fast: Some(10.0),
             clamp: true,
             always_clamp: true,
-            ..NumericTypeSettings::default()
+            ..I32NumericSettings::default()
         }
-        .with_float(0);
+        .with_decimal();
 
         // Demonstrate type-level defaults for f32: drag widgets with a small speed.
-        *settings.numerics_f32_mut() = NumericTypeSettings {
+        *settings.numerics_f32_mut() = F32NumericSettings {
             widget: NumericWidgetKind::Drag,
             range: NumericRange::None,
             speed: Some(0.1),
             no_speed_tweaks: true,
-            ..NumericTypeSettings::default()
+            ..F32NumericSettings::default()
         }
-        .with_float(3);
+        .try_with_fixed(3)
+        .expect("reflect demo uses a valid f32 precision");
 
         // Use grid rendering for tuples to highlight TupleSettings.
         let tuples = settings.tuples_mut();
@@ -216,18 +219,23 @@ fn configure_reflect_settings(session: &mut reflect::ReflectSession) {
         // - color[3]: slider in [0, 1] but read-only
         settings
             .for_member::<MapAndTupleDemo>("color[0]")
-            .numerics_f32_slider_0_to_1(3);
+            .try_numerics_f32_slider_0_to_1(3)
+            .expect("reflect demo uses a valid f32 precision");
 
         settings
             .for_member::<MapAndTupleDemo>("color[1]")
-            .numerics_f32_slider_minus1_to_1(3);
+            .try_numerics_f32_slider_minus1_to_1(3)
+            .expect("reflect demo uses a valid f32 precision");
 
         settings
             .for_member::<MapAndTupleDemo>("color[2]")
-            .numerics_f32_drag_with_speed(0.01, 4);
+            .try_numerics_f32_drag_with_speed(0.01, 4)
+            .expect("reflect demo uses a valid f32 precision");
 
         let color3_member = settings.for_member::<MapAndTupleDemo>("color[3]");
-        color3_member.numerics_f32_slider_0_to_1(2);
+        color3_member
+            .try_numerics_f32_slider_0_to_1(2)
+            .expect("reflect demo uses a valid f32 precision");
         color3_member.read_only = true;
     }
 }

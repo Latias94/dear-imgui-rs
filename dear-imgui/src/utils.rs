@@ -18,6 +18,7 @@ mod validation;
 mod visibility;
 mod window;
 
+pub(crate) use counts::non_negative_count_from_i32;
 pub use focus::FocusedFlags;
 pub use hover_flags::{ItemHoveredFlags, TooltipHoveredFlags, WindowHoveredFlags};
 pub(crate) use hover_flags::{validate_item_hovered_flags, validate_tooltip_hovered_flags};

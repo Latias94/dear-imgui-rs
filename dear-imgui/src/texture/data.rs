@@ -110,6 +110,22 @@ impl TextureData {
         TextureStatus::from(self.inner().Status)
     }
 
+    /// Marks this allocation as retained by the Context-owned renderer queue.
+    ///
+    /// The marker is opaque and is never dereferenced. Keeping it on the native allocation tells
+    /// Dear ImGui not to auto-complete a destroy while Rust still owns queued work.
+    pub(crate) fn claim_managed_queue(&mut self) {
+        let raw = self.as_raw_mut();
+        let marker = raw.cast::<c_void>();
+        unsafe {
+            assert!(
+                (*raw).QueueUserData.is_null() || (*raw).QueueUserData == marker,
+                "managed texture is already retained by a different native queue"
+            );
+            (*raw).QueueUserData = marker;
+        }
+    }
+
     /// Set the renderer-owned lifecycle status of this texture.
     ///
     /// Managed renderers should return request-bound `TextureFeedback` instead of calling this
@@ -131,6 +147,7 @@ impl TextureData {
             if status == TextureStatus::Destroyed {
                 sys::ImTextureData_SetTexID(self.as_raw_mut(), 0 as sys::ImTextureID);
                 (*self.as_raw_mut()).BackendUserData = std::ptr::null_mut();
+                (*self.as_raw_mut()).QueueUserData = std::ptr::null_mut();
             }
             sys::ImTextureData_SetStatus(self.as_raw_mut(), status.into());
         }

@@ -1,6 +1,6 @@
+use crate::sys;
 use crate::ui::Ui;
-use crate::widget::table::{TableColumnIndex, optional_user_id_from_raw};
-use crate::{Id, sys};
+use crate::widget::table::{TableColumnIndex, TableColumnUserData};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -28,7 +28,7 @@ impl From<SortDirection> for sys::ImGuiSortDirection {
 /// One column sort spec.
 #[derive(Copy, Clone, Debug)]
 pub struct TableColumnSortSpec {
-    pub column_user_id: Option<Id>,
+    pub column_user_data: TableColumnUserData,
     pub column_index: TableColumnIndex,
     pub sort_order: i16,
     pub sort_direction: SortDirection,
@@ -108,7 +108,7 @@ impl<'a> Iterator for TableSortSpecsIter<'a> {
                 SortDirection::None
             };
             Some(TableColumnSortSpec {
-                column_user_id: optional_user_id_from_raw(spec.ColumnUserID),
+                column_user_data: TableColumnUserData::new(spec.ColumnUserID),
                 column_index: TableColumnIndex::from_imgui_column_idx(
                     spec.ColumnIndex,
                     "TableSortSpecsIter::next()",

@@ -89,21 +89,11 @@ impl ShaderManager {
         Ok(())
     }
 
-    /// Get the shader module
-    pub fn shader_module(&self) -> Option<&ShaderModule> {
-        self.shader_module.as_ref()
-    }
-
     /// Get the shader module reference (with error handling)
     pub fn get_shader_module(&self) -> RendererResult<&ShaderModule> {
         self.shader_module.as_ref().ok_or_else(|| {
             RendererError::ShaderCompilationFailed("Shader module not initialized".to_string())
         })
-    }
-
-    /// Check if shaders are initialized
-    pub fn is_initialized(&self) -> bool {
-        self.shader_module.is_some()
     }
 }
 

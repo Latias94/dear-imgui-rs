@@ -1,6 +1,6 @@
 //! Texture management for Dear ImGui
 
-use crate::{GlTexture, GlVersion, InitError, InitResult};
+use crate::{GlBuffer, GlTexture, GlVersion, InitError, InitResult};
 use dear_imgui_rs::{TextureFormat, TextureId};
 use glow::{Context, HasContext};
 use std::borrow::Cow;
@@ -12,6 +12,7 @@ struct TextureUploadStateGuard<'a> {
     texture_2d_binding_unit_0: Option<GlTexture>,
     unpack_alignment: i32,
     unpack_row_state: Option<[i32; 3]>,
+    pixel_unpack_buffer_binding: Option<GlBuffer>,
 }
 
 impl<'a> TextureUploadStateGuard<'a> {
@@ -21,12 +22,10 @@ impl<'a> TextureUploadStateGuard<'a> {
                 .ok()
                 .unwrap_or(glow::TEXTURE0);
             gl.active_texture(glow::TEXTURE0);
-            let texture_2d_binding_unit_0 =
-                u32::try_from(gl.get_parameter_i32(glow::TEXTURE_BINDING_2D))
-                    .ok()
-                    .and_then(std::num::NonZeroU32::new)
-                    .map(glow::NativeTexture);
+            let texture_2d_binding_unit_0 = gl.get_parameter_texture(glow::TEXTURE_BINDING_2D);
             let unpack_alignment = gl.get_parameter_i32(glow::UNPACK_ALIGNMENT);
+            let pixel_unpack_buffer_binding =
+                gl.get_parameter_buffer(glow::PIXEL_UNPACK_BUFFER_BINDING);
             let gl_version = GlVersion::read(gl);
             let unpack_row_state = (!gl_version.is_es || gl_version.major >= 3).then(|| {
                 [
@@ -41,6 +40,7 @@ impl<'a> TextureUploadStateGuard<'a> {
                 gl.pixel_store_i32(glow::UNPACK_SKIP_PIXELS, 0);
                 gl.pixel_store_i32(glow::UNPACK_SKIP_ROWS, 0);
             }
+            gl.bind_buffer(glow::PIXEL_UNPACK_BUFFER, None);
             gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
 
             Self {
@@ -49,6 +49,7 @@ impl<'a> TextureUploadStateGuard<'a> {
                 texture_2d_binding_unit_0,
                 unpack_alignment,
                 unpack_row_state,
+                pixel_unpack_buffer_binding,
             }
         }
     }
@@ -65,12 +66,19 @@ impl Drop for TextureUploadStateGuard<'_> {
             }
             self.gl
                 .pixel_store_i32(glow::UNPACK_ALIGNMENT, self.unpack_alignment);
+            self.gl
+                .bind_buffer(glow::PIXEL_UNPACK_BUFFER, self.pixel_unpack_buffer_binding);
             self.gl.active_texture(glow::TEXTURE0);
             self.gl
                 .bind_texture(glow::TEXTURE_2D, self.texture_2d_binding_unit_0);
             self.gl.active_texture(self.active_texture);
         }
     }
+}
+
+#[cfg(test)]
+pub(crate) fn texture_upload_state_guard_for_test(gl: &Context) -> impl Drop + '_ {
+    TextureUploadStateGuard::enter(gl)
 }
 
 struct PendingTexture<'a> {
@@ -263,6 +271,7 @@ pub fn create_texture_from_rgba(
     data: &[u8],
 ) -> InitResult<GlTexture> {
     let (width_i32, height_i32) = checked_gl_texture_size(width, height)?;
+    let data = validated_rgba_upload_data(TextureFormat::RGBA32, width, height, data)?;
     let _state = TextureUploadStateGuard::enter(gl);
     let texture = PendingTexture::create(gl)?;
     unsafe {
@@ -276,7 +285,7 @@ pub fn create_texture_from_rgba(
             0,
             glow::RGBA,
             glow::UNSIGNED_BYTE,
-            glow::PixelUnpackData::Slice(Some(data)),
+            glow::PixelUnpackData::Slice(Some(data.as_ref())),
         );
 
         // Set texture parameters
@@ -523,6 +532,28 @@ mod tests {
                 format: TextureFormat::RGBA32,
                 expected: 16,
                 actual: 15,
+            })
+        ));
+    }
+
+    #[test]
+    fn rgba_upload_validation_rejects_long_source_data() {
+        assert!(matches!(
+            validated_rgba_upload_data(TextureFormat::RGBA32, 2, 2, &[0; 17]),
+            Err(InitError::TextureDataSizeMismatch {
+                format: TextureFormat::RGBA32,
+                expected: 16,
+                actual: 17,
+            })
+        ));
+    }
+
+    #[test]
+    fn rgba_upload_validation_rejects_size_overflow() {
+        assert!(matches!(
+            validated_rgba_upload_data(TextureFormat::RGBA32, u32::MAX, u32::MAX, &[]),
+            Err(InitError::TextureSizeOverflow {
+                format: TextureFormat::RGBA32,
             })
         ));
     }

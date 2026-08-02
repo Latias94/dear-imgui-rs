@@ -77,7 +77,7 @@ impl DrawList {
 
     /// Returns an iterator over the draw commands in this draw list
     pub fn commands(&self) -> DrawCmdIterator<'_> {
-        unsafe { DrawCmdIterator::new(self.cmd_buffer().iter()) }
+        unsafe { DrawCmdIterator::new(&self.0, self.cmd_buffer().iter()) }
     }
 
     /// Get vertex buffer as slice

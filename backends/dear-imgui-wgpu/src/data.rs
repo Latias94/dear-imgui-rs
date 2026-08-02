@@ -3,59 +3,131 @@
 //! This module contains the main backend data structure and initialization info,
 //! following the pattern from imgui_impl_wgpu.cpp
 
+use std::{cell::Cell, ffi::c_void, marker::PhantomData, num::NonZeroU32, ptr::NonNull, rc::Rc};
+
 use crate::{FrameResources, RenderResources};
+use dear_imgui_rs::sys;
+use thiserror::Error;
 use wgpu::*;
 
-/// Selected render state data shared with callbacks
-///
-/// This corresponds to ImGui_ImplWGPU_RenderState in the C++ implementation.
-/// This is temporarily stored during the rendered-frame call to allow
-/// draw callbacks to access the current render state.
-#[derive(Debug)]
-pub struct WgpuRenderState {
-    /// WGPU device for creating resources (raw pointer for lifetime flexibility)
-    pub device: *const Device,
-    /// Current render pass encoder for drawing (raw pointer for lifetime flexibility)
-    pub render_pass_encoder: *mut std::ffi::c_void,
+/// Error returned while borrowing the transient WGPU draw-callback state.
+#[derive(Copy, Clone, Debug, Eq, Error, PartialEq)]
+#[non_exhaustive]
+pub enum WgpuRenderStateAccessError {
+    /// No WGPU render state is active on the current Dear ImGui Context.
+    #[error("no WGPU render state is active on the current Dear ImGui context")]
+    Inactive,
+    /// The active callback state is already borrowed by an outer scoped access.
+    #[error("the active WGPU render state is already borrowed")]
+    AlreadyBorrowed,
 }
 
-impl WgpuRenderState {
-    /// Create a new render state from references
+pub(crate) struct WgpuRenderStateStorage {
+    device: NonNull<Device>,
+    render_pass: NonNull<c_void>,
+    borrowed: Cell<bool>,
+}
+
+impl WgpuRenderStateStorage {
+    pub(crate) fn new(device: &Device, render_pass: &mut RenderPass<'_>) -> Self {
+        Self {
+            device: NonNull::from(device),
+            render_pass: NonNull::from(render_pass).cast(),
+            borrowed: Cell::new(false),
+        }
+    }
+}
+
+struct WgpuRenderStateBorrow<'storage>(&'storage Cell<bool>);
+
+impl Drop for WgpuRenderStateBorrow<'_> {
+    fn drop(&mut self) {
+        self.0.set(false);
+    }
+}
+
+/// Scoped access to the WGPU resources selected for a raw draw callback.
+///
+/// This corresponds to ImGui_ImplWGPU_RenderState in the C++ implementation.
+/// The value can only be obtained through [`Self::with_current`] while the
+/// renderer is invoking a raw callback. It cannot outlive that callback scope.
+///
+/// The state borrows the renderer's device and render pass; it does not own
+/// either resource and does not provide access to the Dear ImGui [`Context`].
+///
+/// ```compile_fail
+/// use dear_imgui_wgpu::WgpuRenderState;
+///
+/// // Callback-scoped resources cannot be returned from the higher-ranked borrow.
+/// let _escaped = unsafe { WgpuRenderState::with_current(|state| state.device()) };
+/// ```
+///
+/// [`Context`]: dear_imgui_rs::Context
+#[derive(Debug)]
+pub struct WgpuRenderState<'callback> {
+    storage: NonNull<WgpuRenderStateStorage>,
+    _callback: PhantomData<&'callback mut WgpuRenderStateStorage>,
+    _ui_thread: PhantomData<Rc<()>>,
+}
+
+impl WgpuRenderState<'_> {
+    /// Borrows the state published for the current raw draw callback.
     ///
     /// # Safety
     ///
-    /// The caller must ensure that the device and render pass remain valid
-    /// for the lifetime of this render state.
-    pub unsafe fn new(device: &Device, render_pass: &mut RenderPass) -> Self {
-        Self {
-            device: device as *const Device,
-            render_pass_encoder: render_pass as *mut _ as *mut std::ffi::c_void,
+    /// This function may only be called from a raw draw callback currently
+    /// invoked by `dear-imgui-wgpu`. The current Dear ImGui Context must be the
+    /// renderer owner and its `Renderer_RenderState` slot must still contain
+    /// the WGPU state installed for this callback. The callback must not replace
+    /// that slot while `callback` is running.
+    ///
+    /// The higher-ranked closure prevents references to the render pass from
+    /// escaping the callback scope. Recursive access is rejected at runtime.
+    pub unsafe fn with_current<R>(
+        callback: impl for<'callback> FnOnce(WgpuRenderState<'callback>) -> R,
+    ) -> Result<R, WgpuRenderStateAccessError> {
+        let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
+        let raw_state = if platform_io.is_null() {
+            None
+        } else {
+            NonNull::new(unsafe { (*platform_io).Renderer_RenderState })
+        }
+        .ok_or(WgpuRenderStateAccessError::Inactive)?;
+        let storage = raw_state.cast::<WgpuRenderStateStorage>();
+        let borrowed = unsafe { &storage.as_ref().borrowed };
+        if borrowed.replace(true) {
+            return Err(WgpuRenderStateAccessError::AlreadyBorrowed);
+        }
+        let _borrow = WgpuRenderStateBorrow(borrowed);
+        Ok(callback(WgpuRenderState {
+            storage,
+            _callback: PhantomData,
+            _ui_thread: PhantomData,
+        }))
+    }
+
+    /// Returns the renderer device for the callback duration.
+    pub fn device(&self) -> &Device {
+        unsafe { self.storage.as_ref().device.as_ref() }
+    }
+
+    /// Returns the active render pass for the duration of this borrow.
+    pub fn render_pass(&mut self) -> &mut RenderPass<'_> {
+        unsafe {
+            self.storage
+                .as_ref()
+                .render_pass
+                .cast::<RenderPass<'_>>()
+                .as_mut()
         }
     }
 
-    /// Get the device reference
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure that the device pointer is still valid.
-    pub unsafe fn device(&self) -> &Device {
-        unsafe { &*self.device }
-    }
-
-    /// Get the render pass encoder reference
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure that:
-    /// 1. The render pass pointer is still valid
-    /// 2. No other mutable references to the render pass exist
-    /// 3. The lifetime is appropriate
-    ///
-    /// This method returns a mutable reference and therefore requires `&mut self`.
-    /// In callbacks, you typically obtain `&mut WgpuRenderState` by casting the raw
-    /// `Renderer_RenderState` pointer provided by Dear ImGui.
-    pub unsafe fn render_pass_encoder(&mut self) -> &mut RenderPass<'_> {
-        unsafe { &mut *(self.render_pass_encoder as *mut RenderPass) }
+    /// Returns the device and render pass as disjoint callback-scoped borrows.
+    pub fn resources(&mut self) -> (&Device, &mut RenderPass<'_>) {
+        let storage = unsafe { self.storage.as_ref() };
+        let device = unsafe { storage.device.as_ref() };
+        let render_pass = unsafe { storage.render_pass.cast::<RenderPass<'_>>().as_mut() };
+        (device, render_pass)
     }
 }
 
@@ -107,8 +179,8 @@ pub struct WgpuInitInfo {
     pub device: Device,
     /// WGPU queue
     pub queue: Queue,
-    /// Number of frames in flight (default: 3)
-    pub num_frames_in_flight: u32,
+    /// Number of frames in flight (default: 3).
+    pub num_frames_in_flight: NonZeroU32,
     /// Render target format
     pub render_target_format: TextureFormat,
     /// Presentation policy for secondary viewport surfaces.
@@ -127,7 +199,7 @@ impl WgpuInitInfo {
             adapter: None,
             device,
             queue,
-            num_frames_in_flight: 3,
+            num_frames_in_flight: NonZeroU32::new(3).expect("three is non-zero"),
             render_target_format,
             viewport_surface_config: WgpuViewportSurfaceConfig::default(),
             depth_stencil_format: None,
@@ -140,7 +212,7 @@ impl WgpuInitInfo {
     }
 
     /// Set the number of frames in flight
-    pub fn with_frames_in_flight(mut self, count: u32) -> Self {
+    pub fn with_frames_in_flight(mut self, count: NonZeroU32) -> Self {
         self.num_frames_in_flight = count;
         self
     }
@@ -173,6 +245,72 @@ impl WgpuInitInfo {
     pub fn with_viewport_surface_config(mut self, config: WgpuViewportSurfaceConfig) -> Self {
         self.viewport_surface_config = config;
         self
+    }
+}
+
+/// Main backend data structure
+///
+/// This corresponds to ImGui_ImplWGPU_Data in the C++ implementation
+pub(crate) struct WgpuBackendData {
+    /// Initialization info
+    pub(crate) init_info: WgpuInitInfo,
+    /// WGPU device
+    pub(crate) device: Device,
+    /// Default queue
+    pub(crate) queue: Queue,
+    /// Render target format
+    pub(crate) render_target_format: TextureFormat,
+    /// Depth stencil format
+    pub(crate) depth_stencil_format: Option<TextureFormat>,
+    /// Render pipeline
+    pub(crate) pipeline_state: Option<RenderPipeline>,
+    /// Render resources (samplers, uniforms, bind groups)
+    pub(crate) render_resources: RenderResources,
+    /// Frame resources (per-frame buffers)
+    pub(crate) frame_resources: Vec<FrameResources>,
+    /// Number of frames in flight
+    pub(crate) num_frames_in_flight: NonZeroU32,
+    /// Current frame index
+    pub(crate) frame_index: u32,
+}
+
+impl WgpuBackendData {
+    /// Create new backend data from initialization info
+    pub(crate) fn new(init_info: WgpuInitInfo) -> Self {
+        let queue = init_info.queue.clone();
+        let num_frames = init_info.num_frames_in_flight;
+
+        // Create frame resources for each frame in flight
+        let frame_resources = (0..num_frames.get())
+            .map(|_| FrameResources::new())
+            .collect();
+
+        Self {
+            device: init_info.device.clone(),
+            queue,
+            render_target_format: init_info.render_target_format,
+            depth_stencil_format: init_info.depth_stencil_format,
+            pipeline_state: None,
+            render_resources: RenderResources::new(),
+            frame_resources,
+            num_frames_in_flight: num_frames,
+            frame_index: u32::MAX, // Will be set to 0 on first frame
+            init_info,
+        }
+    }
+
+    /// Advance to the next frame
+    pub(crate) fn next_frame(&mut self) {
+        if self.frame_index == u32::MAX {
+            self.frame_index = 0;
+        } else {
+            self.frame_index = self.frame_index.wrapping_add(1);
+        }
+    }
+
+    /// Check if the backend is initialized
+    pub(crate) fn is_initialized(&self) -> bool {
+        self.pipeline_state.is_some()
     }
 }
 
@@ -210,86 +348,5 @@ mod tests {
             viewport.desired_maximum_frame_latency,
             surface.desired_maximum_frame_latency
         );
-    }
-}
-
-/// Main backend data structure
-///
-/// This corresponds to ImGui_ImplWGPU_Data in the C++ implementation
-pub struct WgpuBackendData {
-    /// Initialization info
-    pub init_info: WgpuInitInfo,
-    /// WGPU instance (required by multi-viewport; optional for single-window rendering)
-    pub instance: Option<Instance>,
-    /// WGPU adapter (required by multi-viewport; optional for single-window rendering)
-    pub adapter: Option<Adapter>,
-    /// WGPU device
-    pub device: Device,
-    /// Default queue
-    pub queue: Queue,
-    /// Render target format
-    pub render_target_format: TextureFormat,
-    /// Depth stencil format
-    pub depth_stencil_format: Option<TextureFormat>,
-    /// Render pipeline
-    pub pipeline_state: Option<RenderPipeline>,
-    /// Render resources (samplers, uniforms, bind groups)
-    pub render_resources: RenderResources,
-    /// Frame resources (per-frame buffers)
-    pub frame_resources: Vec<FrameResources>,
-    /// Number of frames in flight
-    pub num_frames_in_flight: u32,
-    /// Current frame index
-    pub frame_index: u32,
-}
-
-impl WgpuBackendData {
-    /// Create new backend data from initialization info
-    pub fn new(init_info: WgpuInitInfo) -> Self {
-        let queue = init_info.queue.clone();
-        let num_frames = init_info.num_frames_in_flight;
-
-        // Create frame resources for each frame in flight
-        let frame_resources = (0..num_frames).map(|_| FrameResources::new()).collect();
-
-        Self {
-            instance: init_info.instance.clone(),
-            adapter: init_info.adapter.clone(),
-            device: init_info.device.clone(),
-            queue,
-            render_target_format: init_info.render_target_format,
-            depth_stencil_format: init_info.depth_stencil_format,
-            pipeline_state: None,
-            render_resources: RenderResources::new(),
-            frame_resources,
-            num_frames_in_flight: num_frames,
-            frame_index: u32::MAX, // Will be set to 0 on first frame
-            init_info,
-        }
-    }
-
-    /// Get the current frame resources
-    pub fn current_frame_resources(&mut self) -> &mut FrameResources {
-        let index = (self.frame_index % self.num_frames_in_flight) as usize;
-        &mut self.frame_resources[index]
-    }
-
-    /// Get frame resources by index
-    pub fn frame_resources_at(&mut self, index: usize) -> Option<&mut FrameResources> {
-        self.frame_resources.get_mut(index)
-    }
-
-    /// Advance to the next frame
-    pub fn next_frame(&mut self) {
-        if self.frame_index == u32::MAX {
-            self.frame_index = 0;
-        } else {
-            self.frame_index = self.frame_index.wrapping_add(1);
-        }
-    }
-
-    /// Check if the backend is initialized
-    pub fn is_initialized(&self) -> bool {
-        self.pipeline_state.is_some()
     }
 }

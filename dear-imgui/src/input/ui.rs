@@ -143,8 +143,20 @@ impl crate::Ui {
     /// Returns `true` if the mouse button was released and the given delay has passed.
     #[doc(alias = "IsMouseReleasedWithDelay")]
     pub fn is_mouse_released_with_delay(&self, button: MouseButton, delay: f32) -> bool {
+        assert!(
+            delay.is_finite() && delay >= 0.0,
+            "Ui::is_mouse_released_with_delay() delay must be finite and non-negative"
+        );
         self.run_with_bound_context(|| unsafe {
             sys::igIsMouseReleasedWithDelay(button.into(), delay)
+        })
+    }
+
+    /// Returns `true` when a mouse release reaches [`Io::mouse_single_click_delay`](crate::Io::mouse_single_click_delay).
+    #[doc(alias = "IsMouseReleasedWithDelay")]
+    pub fn is_mouse_released_with_single_click_delay(&self, button: MouseButton) -> bool {
+        self.run_with_bound_context(|| unsafe {
+            sys::igIsMouseReleasedWithDelay(button.into(), -1.0)
         })
     }
 

@@ -7,5 +7,6 @@ extensions/target
 *.ttf
 !backends/dear-imgui-bevy/examples/assets/Roboto-Medium.ttf
 repo-ref/
+tools/upstream_contract_decisions.pending.json
 __pycache__/
 docs/plans/

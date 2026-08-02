@@ -19,7 +19,8 @@ pub use self::bool::{BoolSettings, BoolStyle};
 pub use self::container::{ArraySettings, MapSettings, VecSettings};
 pub use self::member::MemberSettings;
 pub use self::numeric::{
-    NumericDefaultRange, NumericRange, NumericTypeSettings, NumericWidgetKind,
+    F32NumericSettings, F64NumericSettings, I32NumericSettings, NumericDefaultRange, NumericRange,
+    NumericTypeSettings, NumericWidgetKind, U32NumericSettings,
 };
 pub use self::tuple::{TupleRenderMode, TupleSettings};
 
@@ -35,10 +36,10 @@ pub struct ReflectSettings {
     arrays: ArraySettings,
     maps: MapSettings,
     tuples: TupleSettings,
-    numerics_i32: NumericTypeSettings,
-    numerics_f32: NumericTypeSettings,
-    numerics_u32: NumericTypeSettings,
-    numerics_f64: NumericTypeSettings,
+    numerics_i32: I32NumericSettings,
+    numerics_f32: F32NumericSettings,
+    numerics_u32: U32NumericSettings,
+    numerics_f64: F64NumericSettings,
     member_overrides: HashMap<TypeId, HashMap<String, MemberSettings>>,
 }
 
@@ -99,42 +100,42 @@ impl ReflectSettings {
     }
 
     /// Type-level numeric settings for `i32` values rendered via reflection.
-    pub fn numerics_i32(&self) -> &NumericTypeSettings {
+    pub fn numerics_i32(&self) -> &I32NumericSettings {
         &self.numerics_i32
     }
 
     /// Mutable access to type-level numeric settings for `i32` values.
-    pub fn numerics_i32_mut(&mut self) -> &mut NumericTypeSettings {
+    pub fn numerics_i32_mut(&mut self) -> &mut I32NumericSettings {
         &mut self.numerics_i32
     }
 
     /// Type-level numeric settings for `f32` values rendered via reflection.
-    pub fn numerics_f32(&self) -> &NumericTypeSettings {
+    pub fn numerics_f32(&self) -> &F32NumericSettings {
         &self.numerics_f32
     }
 
     /// Mutable access to type-level numeric settings for `f32` values.
-    pub fn numerics_f32_mut(&mut self) -> &mut NumericTypeSettings {
+    pub fn numerics_f32_mut(&mut self) -> &mut F32NumericSettings {
         &mut self.numerics_f32
     }
 
     /// Type-level numeric settings for `u32` values rendered via reflection.
-    pub fn numerics_u32(&self) -> &NumericTypeSettings {
+    pub fn numerics_u32(&self) -> &U32NumericSettings {
         &self.numerics_u32
     }
 
     /// Mutable access to type-level numeric settings for `u32` values.
-    pub fn numerics_u32_mut(&mut self) -> &mut NumericTypeSettings {
+    pub fn numerics_u32_mut(&mut self) -> &mut U32NumericSettings {
         &mut self.numerics_u32
     }
 
     /// Type-level numeric settings for `f64` values rendered via reflection.
-    pub fn numerics_f64(&self) -> &NumericTypeSettings {
+    pub fn numerics_f64(&self) -> &F64NumericSettings {
         &self.numerics_f64
     }
 
     /// Mutable access to type-level numeric settings for `f64` values.
-    pub fn numerics_f64_mut(&mut self) -> &mut NumericTypeSettings {
+    pub fn numerics_f64_mut(&mut self) -> &mut F64NumericSettings {
         &mut self.numerics_f64
     }
 

@@ -2,11 +2,16 @@
 //! register it with the dear-imgui-wgpu backend, and show it via `Image`.
 
 use ::image::ImageReader;
+use dear_imgui_examples::animated_texture::animated_rgba_pixels;
 use dear_imgui_rs::*;
 use dear_imgui_wgpu::WgpuRenderer;
 use dear_imgui_winit::WinitPlatform;
 use pollster::block_on;
-use std::{path::PathBuf, sync::Arc, time::Instant};
+use std::{
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
@@ -21,6 +26,7 @@ struct ImguiState {
     platform: WinitPlatform,
     renderer: WgpuRenderer,
     last_frame: Instant,
+    animation_started: Instant,
 }
 
 struct AppWindow {
@@ -34,7 +40,6 @@ struct AppWindow {
     img_tex: dear_imgui_rs::ManagedTextureId,
     photo_tex: Option<(dear_imgui_rs::ManagedTextureId, (u32, u32))>,
     tex_size: (u32, u32),
-    frame: u32,
 }
 
 #[derive(Default)]
@@ -115,17 +120,7 @@ impl AppWindow {
         let mut img_tex = dear_imgui_rs::texture::OwnedTextureData::new();
         img_tex.create(dear_imgui_rs::texture::TextureFormat::RGBA32, tex_w, tex_h);
 
-        // Seed pixels (gradient)
-        let mut pixels = vec![0u8; (tex_w * tex_h * 4) as usize];
-        for y in 0..tex_h {
-            for x in 0..tex_w {
-                let i = ((y * tex_w + x) * 4) as usize;
-                pixels[i + 0] = (x as f32 / tex_w as f32 * 255.0) as u8;
-                pixels[i + 1] = (y as f32 / tex_h as f32 * 255.0) as u8;
-                pixels[i + 2] = 128;
-                pixels[i + 3] = 255;
-            }
-        }
+        let pixels = animated_rgba_pixels(tex_w, tex_h, Duration::ZERO);
         img_tex.set_data(&pixels);
 
         // Optionally, create a second managed texture from a user image
@@ -137,11 +132,13 @@ impl AppWindow {
             (context.register_texture(photo), size)
         });
 
+        let now = Instant::now();
         let imgui = ImguiState {
             context,
             platform,
             renderer,
-            last_frame: Instant::now(),
+            last_frame: now,
+            animation_started: now,
         };
 
         Ok(Self {
@@ -154,7 +151,6 @@ impl AppWindow {
             img_tex,
             photo_tex,
             tex_size: (tex_w, tex_h),
-            frame: 0,
         })
     }
 
@@ -215,28 +211,13 @@ impl AppWindow {
     }
 
     fn update_texture(&mut self) {
-        // Create a simple animated pattern
         let (w, h) = self.tex_size;
-        let mut pixels = vec![0u8; (w * h * 4) as usize];
-        let t = self.frame as f32 * 0.08;
-        for y in 0..h {
-            for x in 0..w {
-                let i = ((y * w + x) * 4) as usize;
-                let fx = x as f32 / w as f32;
-                let fy = y as f32 / h as f32;
-                pixels[i + 0] = ((fx * 255.0 + t.sin() * 128.0).clamp(0.0, 255.0)) as u8;
-                pixels[i + 1] = ((fy * 255.0 + (t * 1.7).cos() * 128.0).clamp(0.0, 255.0)) as u8;
-                pixels[i + 2] = (((fx + fy + t * 0.1).sin().abs()) * 255.0) as u8;
-                pixels[i + 3] = 255;
-            }
-        }
+        let pixels = animated_rgba_pixels(w, h, self.imgui.animation_started.elapsed());
 
         self.imgui
             .context
             .with_texture_mut(self.img_tex, |mut texture| texture.set_data(&pixels))
             .expect("animated texture should remain active");
-
-        self.frame = self.frame.wrapping_add(1);
     }
 
     fn render(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -271,7 +252,7 @@ impl AppWindow {
         ui.window("WGPU Texture Demo (ImGui-managed)")
             .size([520.0, 420.0], Condition::FirstUseEver)
             .build(|| {
-                ui.text("This texture is updated every frame (CPU → backend → GPU)");
+                ui.text("Wall-clock animation; pixels upload every rendered frame");
                 ui.separator();
                 Image::new(ui, self.img_tex, [256.0, 256.0]).build();
 

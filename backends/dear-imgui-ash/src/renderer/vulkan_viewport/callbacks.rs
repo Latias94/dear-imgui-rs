@@ -3,13 +3,14 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use dear_imgui_rs::internal::RawCast;
 use dear_imgui_rs::platform_io::{PlatformIo, Viewport};
-use dear_imgui_rs::{BackendFlags, Context};
+use dear_imgui_rs::{BackendFlags, Context, ContextLifecycle};
+
+use crate::renderer::lifecycle::DeviceIdleOutcome;
 
 use super::registry::{
     ViewportIdentity, current_context, preflight_registered_viewport_data, register_viewport_data,
     resolve_viewport, restore_registered_viewport_data, runtime_for_context,
     take_registered_viewport_data, take_viewport_data_from_viewport, viewport_user_data_mut,
-    with_current_runtime,
 };
 use super::runtime::{AshViewportError, RuntimeControl};
 use super::*;
@@ -552,8 +553,35 @@ unsafe fn renderer_set_window_size(
         if data.state == ViewportRuntimeState::Failed {
             return Ok(());
         }
+        if data.state.recovery_frame_index().is_some() {
+            return Ok(());
+        }
         rebuild_viewport(renderer, globals, data, desired_extent)
     })
+}
+
+pub(super) fn advance_acquired_frame_recovery(
+    state: &mut ViewportRuntimeState,
+    wait_device_idle: impl FnOnce() -> Result<DeviceIdleOutcome, AshViewportError>,
+    replace_sync: impl FnOnce(usize) -> Result<(), AshViewportError>,
+) -> Result<DeviceIdleOutcome, AshViewportError> {
+    let Some(frame_index) = state.recovery_frame_index() else {
+        return Err(AshViewportError::InvalidCallbackArgument {
+            callback: "recover viewport acquire state",
+        });
+    };
+
+    match wait_device_idle()? {
+        DeviceIdleOutcome::Complete => {
+            replace_sync(frame_index)?;
+            *state = ViewportRuntimeState::RebuildRequired;
+            Ok(DeviceIdleOutcome::Complete)
+        }
+        DeviceIdleOutcome::DeviceLost => {
+            *state = ViewportRuntimeState::Failed;
+            Ok(DeviceIdleOutcome::DeviceLost)
+        }
+    }
 }
 
 fn recover_aborted_acquire(
@@ -565,26 +593,44 @@ fn recover_aborted_acquire(
     desired_extent: Option<vk::Extent2D>,
 ) -> Result<(), AshViewportError> {
     data.pending_present = None;
-    data.state = ViewportRuntimeState::RebuildRequired;
-    control.wait_device_idle(renderer, "recover aborted viewport acquire")?;
-
-    let Some(frame) = data.frames.get_mut(frame_index) else {
+    if data.state.recovery_frame_index() != Some(frame_index)
+        || data.frames.get(frame_index).is_none()
+    {
         data.mark_failed();
         return Err(AshViewportError::InvalidCallbackArgument {
             callback: "recover viewport frame",
         });
-    };
-    let abandoned_fence = frame.fence;
-    if let Some(resources) = data.swapchain.as_mut() {
-        for image_fence in &mut resources.images_in_flight {
-            if *image_fence == abandoned_fence {
-                *image_fence = vk::Fence::null();
-            }
-        }
     }
-    if let Err(error) = replace_frame_sync(&renderer.device, data.command_pool, frame) {
-        data.mark_failed();
-        return Err(error.into());
+
+    let outcome = {
+        let state = &mut data.state;
+        let frames = &mut data.frames;
+        let swapchain = &mut data.swapchain;
+        let command_pool = data.command_pool;
+        advance_acquired_frame_recovery(
+            state,
+            || control.wait_device_idle_outcome(renderer, "recover aborted viewport acquire"),
+            |recovery_frame_index| {
+                let frame = frames.get_mut(recovery_frame_index).ok_or(
+                    AshViewportError::InvalidCallbackArgument {
+                        callback: "recover viewport frame",
+                    },
+                )?;
+                let abandoned_fence = frame.fence;
+                if let Some(resources) = swapchain.as_mut() {
+                    for image_fence in &mut resources.images_in_flight {
+                        if *image_fence == abandoned_fence {
+                            *image_fence = vk::Fence::null();
+                        }
+                    }
+                }
+                replace_frame_sync(&renderer.device, command_pool, frame).map_err(Into::into)
+            },
+        )?
+    };
+
+    if outcome == DeviceIdleOutcome::DeviceLost {
+        return Ok(());
     }
 
     if desired_extent.is_none() {
@@ -641,7 +687,20 @@ unsafe fn renderer_render_window(
 
     control.with_renderer_callback("Renderer_RenderWindow", |renderer, globals| {
         let data = unsafe { &mut *data };
-        if data.pending_present.is_some() || data.frames.is_empty() {
+        if data.pending_present.is_some() {
+            return Ok(());
+        }
+        if let Some(frame_index) = data.state.recovery_frame_index() {
+            recover_aborted_acquire(
+                control,
+                renderer,
+                globals,
+                data,
+                frame_index,
+                desired_extent,
+            )?;
+        }
+        if data.frames.is_empty() {
             return Ok(());
         }
         if data.state != ViewportRuntimeState::Failed
@@ -706,6 +765,12 @@ unsafe fn renderer_render_window(
                 return Err(RendererError::from(error).into());
             }
         };
+        if !data.state.begin_acquire(frame_index) {
+            data.mark_failed();
+            return Err(AshViewportError::InvalidCallbackArgument {
+                callback: "begin viewport acquire transaction",
+            });
+        }
         data.rebuild_after_present |= suboptimal;
         let image_index_usize = image_index as usize;
         let Some(resources) = data.swapchain.as_ref() else {
@@ -775,11 +840,16 @@ unsafe fn renderer_render_window(
             );
         };
         #[cfg(feature = "dynamic-rendering")]
-        let old_layout = resources
-            .image_layouts
-            .get(image_index_usize)
-            .copied()
-            .unwrap_or(vk::ImageLayout::UNDEFINED);
+        let Some(old_layout) = resources.image_layouts.get(image_index_usize).copied() else {
+            return recover_aborted_acquire(
+                control,
+                renderer,
+                globals,
+                data,
+                frame_index,
+                desired_extent,
+            );
+        };
 
         if image_fence != vk::Fence::null() {
             recover_acquired_step(
@@ -1013,6 +1083,13 @@ unsafe fn renderer_render_window(
         }
         data.frame_index = (data.frame_index + 1) % data.frames.len();
         data.pending_present = Some(image_index);
+        if !data.state.finish_submission(frame_index) {
+            data.mark_failed();
+            return Err(AshViewportError::InvalidCallbackArgument {
+                callback: "finish viewport acquire transaction",
+            });
+        }
+        control.record_viewport_render_submitted(viewport.id());
         Ok(())
     })
 }
@@ -1032,20 +1109,25 @@ unsafe fn renderer_swap_buffers(
     let data = renderer_data_pointer(control, viewport, "Renderer_SwapBuffers")?;
     control.with_renderer_callback("Renderer_SwapBuffers", |renderer, globals| {
         let data = unsafe { &mut *data };
-        let Some(image_index) = data.pending_present.take() else {
+        let Some(image_index) = data.pending_present else {
             return Ok(());
         };
         if !data.state.can_acquire() {
-            return Ok(());
+            data.state = ViewportRuntimeState::Failed;
+            return Err(AshViewportError::InvalidCallbackArgument {
+                callback: "Renderer_SwapBuffers runtime state",
+            });
         }
         let Some(resources) = data.swapchain.as_ref() else {
-            data.state = ViewportRuntimeState::RebuildRequired;
-            return Ok(());
+            data.state = ViewportRuntimeState::Failed;
+            return Err(AshViewportError::InvalidCallbackArgument {
+                callback: "Renderer_SwapBuffers swapchain",
+            });
         };
         let Some(present_semaphore) =
             present_semaphore_for_image(&resources.present_semaphores, image_index)
         else {
-            data.mark_failed();
+            data.state = ViewportRuntimeState::Failed;
             return Err(AshViewportError::InvalidCallbackArgument {
                 callback: "Renderer_SwapBuffers image index",
             });
@@ -1054,14 +1136,19 @@ unsafe fn renderer_swap_buffers(
             .wait_semaphores(std::slice::from_ref(&present_semaphore))
             .swapchains(std::slice::from_ref(&resources.swapchain))
             .image_indices(std::slice::from_ref(&image_index));
+        data.pending_present = None;
         match unsafe {
             data.swapchain_loader
                 .queue_present(globals.present_queue, &present_info)
         } {
             Ok(suboptimal) if suboptimal || data.rebuild_after_present => {
+                control.record_viewport_present_submitted(viewport.id());
                 rebuild_viewport(renderer, globals, data, desired_extent)
             }
-            Ok(_) => Ok(()),
+            Ok(_) => {
+                control.record_viewport_present_submitted(viewport.id());
+                Ok(())
+            }
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR) => {
                 rebuild_viewport(renderer, globals, data, desired_extent)
             }
@@ -1088,11 +1175,18 @@ fn run_callback(
         if !control.can_enter_callback() {
             return None;
         }
-        with_current_runtime(|active| {
-            #[cfg(test)]
-            active.maybe_panic_callback_for_test();
-            callback(active)
-        })
+        match control.binding().lifecycle() {
+            ContextLifecycle::Alive => control
+                .binding()
+                .try_with_bound_context(|| {
+                    #[cfg(test)]
+                    control.maybe_panic_callback_for_test();
+                    callback(&control)
+                })
+                .ok(),
+            ContextLifecycle::Dropping | ContextLifecycle::NativeDestroyed => None,
+            _ => None,
+        }
     }));
     match result {
         Ok(Some(Err(error))) => control.record_fault(error),

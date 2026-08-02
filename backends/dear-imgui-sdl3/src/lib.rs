@@ -123,6 +123,9 @@ pub use self::gamepad::GamepadMode;
 use self::gamepad::{set_gamepad_mode, set_gamepad_mode_manual};
 #[cfg(feature = "multi-viewport")]
 pub use self::runtime::Sdl3VulkanSurfaceProvider;
+pub use self::runtime::{
+    Sdl3OpenGlViewportFrameReport, Sdl3OpenGlViewportFrameTrace, Sdl3OpenGlViewportFrameTraceError,
+};
 #[cfg(feature = "sdlgpu3-renderer")]
 pub use self::viewport::SdlGpu3InitInfo;
 pub use self::viewport::enable_native_ime_ui;

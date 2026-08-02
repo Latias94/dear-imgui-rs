@@ -8,7 +8,6 @@ use dear_imgui_rs::{ContextBinding, ContextId, ContextLifecycle};
 use super::runtime::{AshViewportError, RuntimeControl};
 use super::{SurfaceAdapter, ViewportAshData, ViewportSwapchainPolicy, khr_surface, sys, vk};
 
-#[derive(Clone)]
 pub(super) struct GlobalHandles {
     pub(super) entry: ash::Entry,
     pub(super) instance: ash::Instance,
@@ -18,6 +17,7 @@ pub(super) struct GlobalHandles {
     pub(super) present_queue_family_index: u32,
     pub(super) in_flight_frames: usize,
     pub(super) swapchain_policy: ViewportSwapchainPolicy,
+    pub(super) swapchain_image_usage: vk::ImageUsageFlags,
     pub(super) surface_adapter: Arc<dyn SurfaceAdapter>,
 }
 
@@ -161,23 +161,6 @@ pub(super) fn runtime_for_context(
             .find(|entry| entry.context_raw == context_raw as usize)
             .and_then(|entry| entry.control.upgrade())
     })
-}
-
-pub(super) fn with_current_runtime<R>(
-    callback: impl FnOnce(&Rc<RuntimeControl>) -> R,
-) -> Option<R> {
-    let control = runtime_for_context(current_context())?;
-    if !control.is_callback_accessible() {
-        return None;
-    }
-    match control.binding().lifecycle() {
-        ContextLifecycle::Alive => control
-            .binding()
-            .try_with_bound_context(|| callback(&control))
-            .ok(),
-        ContextLifecycle::Dropping | ContextLifecycle::NativeDestroyed => None,
-        _ => None,
-    }
 }
 
 fn binding_has_native_context(binding: &ContextBinding) -> bool {
@@ -327,6 +310,12 @@ pub(super) fn preflight_registered_viewport_data(
     Ok(())
 }
 
+// Each live native viewport stores the address of its boxed sidecar in RendererUserData. The box
+// therefore intentionally keeps the allocation stable while the vector is compacted or moved.
+#[allow(
+    clippy::vec_box,
+    reason = "native viewport callbacks retain sidecar addresses"
+)]
 pub(super) fn take_viewport_data(context: ContextId) -> Vec<Box<ViewportAshData>> {
     take_registered_viewport_data(context)
         .into_iter()
@@ -361,8 +350,13 @@ pub enum SurfaceSupportError {
     PresentUnsupported { queue_family_index: u32 },
     #[error("querying surface capabilities failed: {0:?}")]
     CapabilitiesQuery(vk::Result),
-    #[error("the surface does not support COLOR_ATTACHMENT swapchain images")]
-    ColorAttachmentUnsupported,
+    #[error(
+        "the surface supports swapchain image usage {supported:?}, not the required {required:?}"
+    )]
+    ImageUsageUnsupported {
+        required: vk::ImageUsageFlags,
+        supported: vk::ImageUsageFlags,
+    },
     #[error("querying surface formats failed: {0:?}")]
     FormatsQuery(vk::Result),
     #[error("the surface reports no formats")]
@@ -385,6 +379,23 @@ pub(super) struct SurfaceSupport {
     pub(super) capabilities: vk::SurfaceCapabilitiesKHR,
     pub(super) formats: Vec<vk::SurfaceFormatKHR>,
     pub(super) present_modes: Vec<vk::PresentModeKHR>,
+}
+
+pub(super) fn required_swapchain_image_usage(extra: vk::ImageUsageFlags) -> vk::ImageUsageFlags {
+    vk::ImageUsageFlags::COLOR_ATTACHMENT | extra
+}
+
+pub(super) fn validate_swapchain_image_usage(
+    supported: vk::ImageUsageFlags,
+    extra: vk::ImageUsageFlags,
+) -> Result<vk::ImageUsageFlags, SurfaceSupportError> {
+    let required = required_swapchain_image_usage(extra);
+    supported.contains(required).then_some(required).ok_or(
+        SurfaceSupportError::ImageUsageUnsupported {
+            required,
+            supported,
+        },
+    )
 }
 
 pub(super) fn validate_vulkan_handles(
@@ -475,12 +486,10 @@ pub(super) fn query_surface_support(
     let capabilities =
         unsafe { loader.get_physical_device_surface_capabilities(global.physical_device, surface) }
             .map_err(SurfaceSupportError::CapabilitiesQuery)?;
-    if !capabilities
-        .supported_usage_flags
-        .contains(vk::ImageUsageFlags::COLOR_ATTACHMENT)
-    {
-        return Err(SurfaceSupportError::ColorAttachmentUnsupported);
-    }
+    validate_swapchain_image_usage(
+        capabilities.supported_usage_flags,
+        global.swapchain_image_usage,
+    )?;
 
     let formats =
         unsafe { loader.get_physical_device_surface_formats(global.physical_device, surface) }

@@ -106,7 +106,7 @@ pub use ffi::*;
 
 #[cfg_attr(
     dear_imgui_rs_wasm_import_target,
-    link(wasm_import_module = "imgui-sys-v0")
+    link(wasm_import_module = "imgui-sys-v1")
 )]
 unsafe extern "C" {
     pub fn dear_imgui_rs_show_demo_window_without_font_atlas(p_open: *mut bool);
@@ -477,6 +477,56 @@ pub struct DearImguiRsPlatformIoAggregateProbeResult {
     pub PlatformGetWindowSize: ImVec2,
     pub PlatformGetWindowFramebufferScale: ImVec2,
     pub PlatformGetWindowWorkAreaInsets: ImVec4,
+}
+
+/// C++ measurements for selected public Dear ImGui aggregate layouts.
+///
+/// This is an internal CI-only ABI probe enabled by the `abi-probe` feature.
+#[cfg(feature = "abi-probe")]
+#[doc(hidden)]
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DearImguiRsPublicAggregateLayoutProbe {
+    pub ImDrawDataSize: usize,
+    pub ImDrawDataAlign: usize,
+    pub ImDrawDataFrameCountOffset: usize,
+    pub ImDrawDataCmdListsOffset: usize,
+    pub ImDrawDataTexturesOffset: usize,
+    pub ImTextureDataSize: usize,
+    pub ImTextureDataAlign: usize,
+    pub ImTextureDataUniqueIDOffset: usize,
+    pub ImTextureDataQueueUserDataOffset: usize,
+    pub ImTextureDataTexIDOffset: usize,
+    pub ImTextureDataUpdatesOffset: usize,
+    pub ImTextureDataWantDestroyNextFrameOffset: usize,
+    pub ImGuiPlatformIOSize: usize,
+    pub ImGuiPlatformIOAlign: usize,
+    pub ImGuiPlatformIOSessionDateOffset: usize,
+    pub ImGuiPlatformIORenderStateOffset: usize,
+    pub ImGuiPlatformIOPlatformCreateWindowOffset: usize,
+    pub ImGuiPlatformIORendererCreateWindowOffset: usize,
+    pub ImGuiPlatformIOMonitorsOffset: usize,
+    pub ImGuiPlatformIOTexturesOffset: usize,
+    pub ImGuiPlatformIOViewportsOffset: usize,
+}
+
+#[cfg(feature = "abi-probe")]
+unsafe extern "C" {
+    fn dear_imgui_rs_probe_public_aggregate_layouts(
+        out_probe: *mut DearImguiRsPublicAggregateLayoutProbe,
+    ) -> std::os::raw::c_int;
+}
+
+/// Ask the native C++ translation unit to measure selected aggregate layouts.
+///
+/// This is test support, not a stable downstream API.
+#[cfg(feature = "abi-probe")]
+#[doc(hidden)]
+#[inline]
+pub fn ImGui_ProbePublicAggregateLayouts(
+    out_probe: &mut DearImguiRsPublicAggregateLayoutProbe,
+) -> bool {
+    unsafe { dear_imgui_rs_probe_public_aggregate_layouts(out_probe) != 0 }
 }
 
 /// Install a C-compatible pointer-parameter callback for

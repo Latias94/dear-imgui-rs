@@ -22,6 +22,36 @@ This backend is compatible with both `ash` loader modes:
 - Upload path uses in-flight fences to avoid `vkQueueWaitIdle` stalls.
 - Sub-rect texture updates (uses `UpdateRect` bounding box).
 
+### Shader artifacts
+
+Managed textures are tightly packed RGBA bytes and are always stored as
+`vk::Format::R8G8B8A8_UNORM`. Use external sampled-image registration for application images with
+another compatible format.
+
+Regenerate the checked-in SPIR-V after changing a shader source:
+
+```console
+python tools/generate_ash_shaders.py --compiler /path/to/glslangValidator
+```
+
+The generator runs each source from the shader directory with a stable relative source name, so
+debug metadata does not embed a checkout path. It compiles every output into an isolated temporary
+directory and publishes the SPIR-V files and manifest only after the complete set passes validation;
+if any replacement fails, the generator restores every previously published artifact.
+The compiler-free check verifies manifest hashes, exact embedded `OpSource`, and stable debug
+`OpString` filenames:
+
+```console
+python tools/generate_ash_shaders.py --check
+```
+
+Authoritative CI additionally builds the pinned glslang 15.1.0 source revision and requires a clean
+byte-identical regeneration. Run the same contract locally with a matching compiler:
+
+```console
+python tools/generate_ash_shaders.py --check --recompile --compiler /path/to/glslangValidator
+```
+
 ## Managed textures
 
 `AshRenderer::cmd_draw` consumes a `RenderedFrame`, uploads its owned texture requests, reconciles
@@ -55,6 +85,12 @@ resources. The next frame can then acknowledge Dear ImGui's repeated destroy req
 current token if command recording returns an error after retirement began. Resource and texture
 entries consistently return `RendererDestroyed` after shutdown, before touching Vulkan.
 
+Device idle covers submitted work, not command buffers that were recorded but never submitted.
+Retirement, legacy texture updates, and shutdown invalidate any such command buffer that references
+released renderer resources. Submitting it afterwards violates `AshRenderer::cmd_draw`'s safety
+contract. The application must also wait the fence for an in-flight frame before Ash reuses that
+frame's internal mesh slot.
+
 Advanced render loops may instead associate the batch with synchronization submitted after all
 relevant Ash uploads, main-viewport commands, and secondary-viewport commands. Once every relevant
 queue has completed, `unsafe complete_texture_retirements_with_fences(batch, fences)` validates
@@ -63,9 +99,11 @@ Vulkan cannot prove fence device lineage or that the supplied fences cover every
 still reference the batch.
 
 The retirement protocol is identical for classic render passes and dynamic rendering. In multi-
-viewport mode, render/submit the main viewport, run the secondary viewport renderer callbacks, and
-only then establish the completion point associated with the batch. Merely finishing command
-recording is never sufficient.
+viewport mode, call the owning runtime's `prepare_frame(&mut frame)` before any renderer callback.
+That no-surface phase reconciles managed textures so secondary viewports never observe the previous
+texture revision merely because platform WSI requires them to submit before the main viewport.
+Establish the completion point only after every relevant secondary and main submission. Merely
+finishing command recording is never sufficient.
 
 Call `AshRenderer::shutdown(&mut imgui)` before dropping a single-viewport Context or renderer.
 Shutdown waits for device idle, destroys active and retiring GPU textures, resets Context-owned
@@ -85,19 +123,71 @@ That order is significant: `Context::prepare_renderer_texture_reset` validates a
 before resource release, and its returned permit may be committed only after the corresponding
 Vulkan resources are actually gone. Finishing CPU command recording is not enough.
 
-## External textures & custom sampler
+## External textures and sampler selection
 
-To display an existing Vulkan image via the legacy `TextureId` path:
+Ash models an external texture as an application-owned sampled image. The renderer allocates and
+owns its set-0 sampled-image descriptor, while the application keeps ownership of the image and
+view:
 
-- `AshRenderer::register_external_texture_with_sampler(image_view, sampler) -> RendererResult<TextureId>`
-- `AshRenderer::update_external_texture_view(texture_id, image_view) -> RendererResult<bool>`
-- `AshRenderer::update_external_texture_sampler(texture_id, sampler) -> RendererResult<bool>`
-- `AshRenderer::unregister_texture(texture_id) -> RendererResult<()>` (frees the descriptor set only for textures
-  registered via `register_external_texture_with_sampler()`)
+```rust,no_run
+# use ash::vk;
+# use dear_imgui_ash::{AshRenderer, RendererResult};
+# use dear_imgui_rs::TextureId;
+# fn register(
+#     renderer: &mut AshRenderer,
+#     image_view: vk::ImageView,
+# ) -> RendererResult<TextureId> {
+// SAFETY: the view belongs to renderer's device, remains live until unregister plus GPU
+// completion, and its subresources remain in the declared layout while referenced.
+let texture = unsafe {
+    renderer.register_external_texture(
+        image_view,
+        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+    )?
+};
+# Ok(texture)
+# }
+```
 
-These safe mutation and removal methods wait for device idle before changing a descriptor set. The
-matching `unsafe *_unchecked` methods are available when the application can independently prove
-that no submitted or recorded command still accesses that descriptor set.
+Registration is intentionally `unsafe`: Rust cannot prove the raw Vulkan device lineage, image
+usage, layout transitions, or GPU lifetime. `update_external_texture` and `unregister_texture` are
+also unsafe and wait for device idle before changing or freeing the descriptor. That wait covers
+submitted work, but the caller must still guarantee that no previously recorded command buffer
+will be submitted later. Their `*_unchecked` counterparts additionally skip the device wait.
+
+The default sampler is linear. Select nearest sampling for one image by bracketing it with the
+standard callbacks published on the owning Context, then restore linear sampling for later draws:
+
+```rust,no_run
+# use dear_imgui_rs::{Context, TextureId};
+# fn draw_external(context: &mut Context, texture: TextureId) {
+let nearest = context
+    .platform_io()
+    .draw_callback_set_sampler_nearest_raw()
+    .expect("the Ash renderer must be attached");
+let linear = context
+    .platform_io()
+    .draw_callback_set_sampler_linear_raw()
+    .expect("the Ash renderer must be attached");
+let ui = context.frame();
+
+unsafe {
+    ui.get_window_draw_list()
+        .add_callback(nearest, std::ptr::null_mut(), 0);
+}
+ui.image(texture, [256.0, 256.0]);
+unsafe {
+    ui.get_window_draw_list()
+        .add_callback(linear, std::ptr::null_mut(), 0);
+}
+# }
+```
+
+Raw draw callbacks may inspect the active device, command buffer, pipeline, and two-set pipeline
+layout through `unsafe AshRenderState::with_current`. The borrow is scoped to the callback and
+cannot escape. Commands recorded there must preserve the active render-pass, synchronization, and
+resource-lifetime contracts; use the standard reset callback before later ImGui draws if custom
+commands replace renderer state.
 
 ## Native multi-viewport
 
@@ -142,6 +232,7 @@ VulkanViewportConfig {
         main_surface_format,
         main_present_mode,
     ),
+    swapchain_image_usage: vk::ImageUsageFlags::empty(),
 }
 # }
 ```
@@ -154,6 +245,11 @@ surfaces may not expose the main pair, or `PresentModePolicy::Exact` when fallba
 Unsupported exact choices return `SurfaceSupportError` instead of silently selecting a different
 swapchain configuration.
 
+`swapchain_image_usage` requests additional usage beyond the color-attachment bit required by the
+renderer. Attachment and every swapchain rebuild verify that the surface supports the complete
+set; unsupported transfer, storage, or other usage fails with `ImageUsageUnsupported` before a
+secondary swapchain is created.
+
 All handles must have one device lineage: the instance owns the physical device and
 `validation_surface`; `AshRenderer`'s device was created from that physical device with
 `VK_KHR_swapchain`; both queues belong to that device and to the declared families. The unsafe
@@ -164,6 +260,12 @@ viewport runtime, serialize its secondary-window `queue_submit`, `queue_present`
 `device_wait_idle` work with every application host call that touches the same graphics queue,
 present queue, or logical device. This applies when both configured queue handles are identical as
 well as when presentation uses a separate family.
+
+Use one acquire semaphore, command buffer, and submit fence per frame in flight, but one present
+semaphore per swapchain image. A submit fence does not prove that the presentation engine has
+finished waiting on a semaphore. The Ash examples also treat acquire through successful submit as
+one transaction: any intervening wait, reset, record, or submit failure idles the device, replaces
+the abandoned frame sync, and rebuilds the swapchain before rendering can continue.
 
 `validation_surface` is an existing, live application surface, normally the main window surface.
 The runtime never destroys it. Before claiming callback slots, `attach` checks that required
@@ -217,14 +319,19 @@ renderer retains an exclusive, generation-bound surface-provider lease. SDL shut
 while that lease is live, and every surface creation revalidates the SDL callback owner and the
 specific viewport sidecar immediately before calling native code.
 
-Each frame, render and present the main window first, then render secondary windows:
+Each frame, reconcile managed textures before either main or secondary viewport work. WSI-sensitive
+integrations may then submit secondary swapchains before acquiring the main surface, while simpler
+integrations may choose another order. The texture retirement completion point must cover both:
 
-```rust,no_run
-# use dear_imgui_rs::Context;
-# fn render_secondary_windows(imgui: &mut Context) {
-imgui.update_platform_windows();
-imgui.render_platform_windows_default();
-# }
+```rust,ignore
+let mut frame = imgui.render();
+let prepared_retirement = renderer_runtime.prepare_frame(&mut frame)?;
+
+frame.update_and_render_platform_windows_default();
+let recorded_retirement = record_and_submit_main_viewport(frame)?;
+
+let retirement = merge_retirement_batches(prepared_retirement, recorded_retirement)?;
+complete_after_all_relevant_submissions(retirement)?;
 ```
 
 ### Ownership and shutdown
@@ -293,8 +400,8 @@ If your swapchain/render target uses an sRGB format (e.g. `VK_FORMAT_B8G8R8A8_SR
 `Options::framebuffer_srgb = true`.
 
 Note: internally managed textures default to `vk::Format::R8G8B8A8_UNORM` (not `*_SRGB`) to keep
-this behavior consistent. If you register external descriptor sets that sample from `*_SRGB`
-textures, the shader gamma path will not match (you'll effectively decode twice).
+this behavior consistent. If you register an external sampled image backed by an `*_SRGB` format,
+the shader gamma path will not match (you'll effectively decode twice).
 
 ## Compatibility
 
@@ -316,7 +423,7 @@ This backend is inspired by the excellent `imgui-rs-vulkan-renderer` project:
 
 ```rust,no_run
 use ash::vk;
-use dear_imgui_ash::{AshRenderer, Options};
+use dear_imgui_ash::{AshRenderer, AshRendererConfig, Options};
 use dear_imgui_rs::Context;
 
 # fn example() -> Result<(), dear_imgui_ash::RendererError> {
@@ -324,21 +431,30 @@ use dear_imgui_rs::Context;
 # let (instance, physical_device, device, queue, command_pool, render_pass) = todo!();
 
 let mut imgui = Context::create();
-let mut renderer = AshRenderer::with_default_allocator(
-    &instance,
-    physical_device,
+let renderer_config = AshRendererConfig::with_render_pass(
     device.clone(),
     queue,
     command_pool,
     render_pass,
-    &mut imgui,
-    Some(Options::default()),
-)?;
+)
+.with_options(Options::default());
+// SAFETY: all handles share one live device lineage; the queue, command pool, and render pass
+// satisfy AshRenderer's documented graphics, transfer, and target-compatibility requirements.
+let mut renderer = unsafe {
+    AshRenderer::with_default_allocator(
+        &instance,
+        physical_device,
+        renderer_config,
+        &mut imgui,
+    )?
+};
 
 // In your render loop (inside a render pass):
 # let command_buffer = vk::CommandBuffer::null();
 let frame = imgui.render();
-let retirement = renderer.cmd_draw(command_buffer, frame)?;
+// SAFETY: command_buffer is recording inside the compatible render pass and will be submitted
+// before renderer resources referenced by it are changed or destroyed.
+let retirement = unsafe { renderer.cmd_draw(command_buffer, frame)? };
 
 // Submit command_buffer. The safe path waits for all device work before releasing retired textures.
 if let Some(batch) = retirement {

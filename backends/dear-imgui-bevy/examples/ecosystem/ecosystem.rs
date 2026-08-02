@@ -199,17 +199,19 @@ fn render_frame_graph(
 ) {
     ui.text("ImNodes shares the Bevy-managed frame.");
     let nodes_ui = ui.imnodes(nodes_context);
-    let editor = nodes_ui.editor(Some(node_editor_context));
+    let editor_setup = nodes_ui.editor(Some(node_editor_context));
     let source_output = dear_imnodes::PinId::new(11);
     let pass_input = dear_imnodes::PinId::new(21);
     let pass_output = dear_imnodes::PinId::new(22);
     let sink_input = dear_imnodes::PinId::new(31);
     if !*positions_initialized {
-        editor.set_node_pos_grid(dear_imnodes::NodeId::new(1), [48.0, 80.0]);
-        editor.set_node_pos_grid(dear_imnodes::NodeId::new(2), [180.0, 230.0]);
-        editor.set_node_pos_grid(dear_imnodes::NodeId::new(3), [64.0, 360.0]);
+        editor_setup.set_node_pos_grid(dear_imnodes::NodeId::new(1), [48.0, 80.0]);
+        editor_setup.set_node_pos_grid(dear_imnodes::NodeId::new(2), [180.0, 230.0]);
+        editor_setup.set_node_pos_grid(dear_imnodes::NodeId::new(3), [64.0, 360.0]);
         *positions_initialized = true;
     }
+
+    let editor = editor_setup.begin_nodes();
 
     render_graph_source(ui, &editor, source_output);
     render_graph_pass(ui, &editor, pass_input, pass_output);
@@ -227,7 +229,7 @@ fn render_graph_source(
 ) {
     let node = editor.node(dear_imnodes::NodeId::new(1));
     node.title_bar(|| ui.text("Extract"));
-    let output = editor.output_attr(output_id, dear_imnodes::PinShape::CircleFilled);
+    let output = node.output_attr(output_id, dear_imnodes::PinShape::CircleFilled);
     ui.text("Frame Data");
     output.end();
     node.end();
@@ -241,10 +243,10 @@ fn render_graph_pass(
 ) {
     let node = editor.node(dear_imnodes::NodeId::new(2));
     node.title_bar(|| ui.text("Render Pass"));
-    let input = editor.input_attr(input_id, dear_imnodes::PinShape::TriangleFilled);
+    let input = node.input_attr(input_id, dear_imnodes::PinShape::TriangleFilled);
     ui.text("Input");
     input.end();
-    let output = editor.output_attr(output_id, dear_imnodes::PinShape::TriangleFilled);
+    let output = node.output_attr(output_id, dear_imnodes::PinShape::TriangleFilled);
     ui.text("Color Target");
     output.end();
     node.end();
@@ -257,7 +259,7 @@ fn render_graph_sink(
 ) {
     let node = editor.node(dear_imnodes::NodeId::new(3));
     node.title_bar(|| ui.text("Present"));
-    let input = editor.input_attr(input_id, dear_imnodes::PinShape::QuadFilled);
+    let input = node.input_attr(input_id, dear_imnodes::PinShape::QuadFilled);
     ui.text("Swapchain");
     input.end();
     node.end();

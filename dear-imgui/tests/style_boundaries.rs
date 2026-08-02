@@ -142,6 +142,9 @@ fn style_setters_reject_non_finite_or_invalid_runtime_numbers_before_storing() {
     style.set_tab_close_button_min_width_unselected(100.0);
     style.set_button_text_align([0.0, 1.0]);
     style.set_mouse_cursor_scale(1.0);
+    style.set_input_text_cursor_size(2.0);
+    style.set_menu_item_rounding(3.0);
+    style.set_selectable_rounding(4.0);
     style.set_hover_delay_short(0.0);
 
     assert_eq!(style.font_scale_main(), 1.2);
@@ -156,6 +159,9 @@ fn style_setters_reject_non_finite_or_invalid_runtime_numbers_before_storing() {
     assert_eq!(style.tab_close_button_min_width_unselected(), 100.0);
     assert_eq!(style.button_text_align(), [0.0, 1.0]);
     assert_eq!(style.mouse_cursor_scale(), 1.0);
+    assert_eq!(style.input_text_cursor_size(), 2.0);
+    assert_eq!(style.menu_item_rounding(), 3.0);
+    assert_eq!(style.selectable_rounding(), 4.0);
     assert_eq!(style.hover_delay_short(), 0.0);
 
     assert_panics!({
@@ -217,6 +223,21 @@ fn style_setters_reject_non_finite_or_invalid_runtime_numbers_before_storing() {
         style.set_mouse_cursor_scale(0.0);
     });
     assert_eq!(style.mouse_cursor_scale(), 1.0);
+
+    assert_panics!({
+        style.set_input_text_cursor_size(0.0);
+    });
+    assert_eq!(style.input_text_cursor_size(), 2.0);
+
+    assert_panics!({
+        style.set_menu_item_rounding(-0.1);
+    });
+    assert_eq!(style.menu_item_rounding(), 3.0);
+
+    assert_panics!({
+        style.set_selectable_rounding(f32::NAN);
+    });
+    assert_eq!(style.selectable_rounding(), 4.0);
 
     assert_panics!({
         style.set_hover_delay_short(-0.1);
@@ -286,6 +307,29 @@ fn style_stack_rejects_invalid_values_before_push_and_leaves_style_unchanged() {
         unsafe { ui.style().drag_drop_target_rounding() },
         baseline.drag_drop_target_rounding()
     );
+
+    let token = ui.push_style_var(imgui::StyleVar::MenuItemRounding(4.0));
+    assert_eq!(unsafe { ui.style().menu_item_rounding() }, 4.0);
+    token.pop();
+    assert_eq!(
+        unsafe { ui.style().menu_item_rounding() },
+        baseline.menu_item_rounding()
+    );
+
+    let token = ui.push_style_var(imgui::StyleVar::SelectableRounding(5.0));
+    assert_eq!(unsafe { ui.style().selectable_rounding() }, 5.0);
+    token.pop();
+    assert_eq!(
+        unsafe { ui.style().selectable_rounding() },
+        baseline.selectable_rounding()
+    );
+
+    assert_panics!({
+        let _ = ui.push_style_var(imgui::StyleVar::MenuItemRounding(-0.1));
+    });
+    assert_panics!({
+        let _ = ui.push_style_var(imgui::StyleVar::SelectableRounding(f32::NAN));
+    });
 
     assert_panics!({
         let _ = ui.push_style_var(imgui::StyleVar::DragDropTargetRounding(f32::NAN));

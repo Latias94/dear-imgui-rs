@@ -1,3 +1,4 @@
+mod admission;
 mod lifecycle;
 mod recovery;
 mod runner;

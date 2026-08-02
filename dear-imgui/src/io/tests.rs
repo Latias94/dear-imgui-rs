@@ -59,3 +59,31 @@ fn mouse_hovered_viewport_round_trips_through_io() {
 
     assert_eq!(io.mouse_hovered_viewport(), viewport_id);
 }
+
+#[test]
+fn mouse_click_timing_enforces_single_click_after_double_click() {
+    let mut ctx = crate::Context::create();
+    let io = ctx.io_mut();
+
+    io.set_mouse_double_click_time(0.2);
+    io.set_mouse_single_click_delay(0.4);
+
+    assert_eq!(io.mouse_double_click_time(), 0.2);
+    assert_eq!(io.mouse_single_click_delay(), 0.4);
+
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            io.set_mouse_double_click_time(0.4);
+        }))
+        .is_err()
+    );
+    assert_eq!(io.mouse_double_click_time(), 0.2);
+
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            io.set_mouse_single_click_delay(0.2);
+        }))
+        .is_err()
+    );
+    assert_eq!(io.mouse_single_click_delay(), 0.4);
+}

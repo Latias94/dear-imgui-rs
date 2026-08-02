@@ -1,8 +1,8 @@
-use crate::{Id, ui::Ui};
+use crate::ui::Ui;
 
 use super::{
-    TableColumnFlags, TableColumnIndent, TableColumnSetup, TableColumnWidth, TableFlags,
-    TableOptions, TableSizingPolicy, assert_explicit_user_id,
+    TableColumnFlags, TableColumnIndent, TableColumnSetup, TableColumnUserData, TableColumnWidth,
+    TableFlags, TableOptions, TableSizingPolicy,
 };
 use std::borrow::Cow;
 
@@ -118,12 +118,12 @@ impl<'ui> TableBuilder<'ui> {
 
         if !self.columns.is_empty() {
             for col in &self.columns {
-                self.ui.table_setup_column_with_indent(
+                self.ui.table_setup_column_with_indent_and_user_data(
                     col.name.as_ref(),
                     col.flags,
                     col.width,
                     col.indent,
-                    col.user_id,
+                    col.user_data,
                 );
             }
             if self.use_headers {
@@ -197,11 +197,11 @@ impl<'ui> ColumnBuilder<'ui> {
         self
     }
 
-    /// Sets the non-zero user ID associated with this column.
+    /// Sets the opaque user data associated with this column.
     ///
-    /// See [`TableColumnSetup::user_id`] for accepted inputs and value semantics.
-    pub fn user_id(mut self, id: impl Into<Id>) -> Self {
-        self.column.user_id = Some(assert_explicit_user_id(id, "ColumnBuilder::user_id()"));
+    /// See [`TableColumnSetup::user_data`] for value semantics.
+    pub fn user_data(mut self, user_data: impl Into<TableColumnUserData>) -> Self {
+        self.column.user_data = user_data.into();
         self
     }
 

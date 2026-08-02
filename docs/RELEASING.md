@@ -31,7 +31,7 @@ Key flags:
 - `--profile`: `debug` or `release` (affects target build dir only).
 - `--submodules`: `update` (update all known submodules), `auto` (update only selected crates), `skip` (don’t touch submodules).
 - `--wasm`: regenerate/verify the core WASM profile and compile-check the explicit provider feature.
-- The WASM import module is fixed to `imgui-sys-v0`; it is not a command-line option.
+- The WASM import module is fixed to `imgui-sys-v1`; it is not a command-line option.
 - `--wasm-ext`: comma-separated WASM extension bindings (`implot,implot3d,imnodes,imguizmo,imguizmo-quat`).
 - Per-submodule branches:
   - `--cimgui-branch` (default `docking_inter`)

@@ -6,6 +6,41 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- OpenGL capabilities are now detected from the live context. The renderer requires OpenGL 3.0+,
+  OpenGL ES 3.0+, or WebGL 2; the old compile-time capability features were removed. WebAssembly
+  users must enable the new `wasm` provider feature. The `debug_message_insert_support` feature was
+  also removed because WebGL cannot execute that debug entry point and native availability is a
+  live extension property rather than a Cargo feature.
+- Linear and nearest filtering now use renderer-owned sampler objects where available. OpenGL
+  3.0-3.2 uses a temporary, fully restorative texture-parameter fallback, so application-owned
+  mipmap filters are no longer overwritten by ImGui rendering.
+- Raw draw callbacks execute with callback-scoped `GlowRenderState`; the renderer restores its GL
+  bindings and clears `Renderer_RenderState` on success, error, and unwind-adjacent paths.
+- `set_framebuffer_srgb_enabled` now returns `RenderResult<()>` and rejects `true` on OpenGL ES
+  and WebGL rather than issuing a desktop-only GL enum. Its temporary desktop state is restored
+  after rendering and re-established after a standard reset callback.
+- `GlowRenderer` GPU handles and capability fields are private. Use `gl_version()`,
+  `supports_clip_origin()`, `supports_framebuffer_srgb_control()`, `supports_sampler_objects()`,
+  and `is_destroyed()` for supported observations.
+- `GlVersion::{bind_vertex_array_support,vertex_offset_support,clip_origin_support,
+  bind_sampler_support,polygon_mode_support,primitive_restart_support}` were replaced by
+  `is_supported`, `supports_vertex_offset`, `supports_clip_origin`,
+  `supports_sampler_objects`, `supports_polygon_mode`, and `supports_primitive_restart`.
+- `RenderError::InvalidTexture(String)` was replaced by typed
+  `RenderError::UnknownTextureId(TextureId)` and `RenderError::ManagedTextureMissing(SnapshotTextureId)`.
+
+### Fixed
+
+- Renderer capability flags now reflect whether the live API can execute vertex-offset commands.
+  Invalid draw ranges, non-finite clip rectangles, and oversized OpenGL parameters fail before the
+  invalid draw command is issued, while the draw-scope guard restores OpenGL state.
+- Uniform locations are borrowed rather than moved, keeping the same render path valid for native
+  Glow and WebGL handles.
+- Texture uploads validate the complete byte length before issuing GL calls, preserve unpack-buffer
+  state, and keep legacy registrations renderer-owned if a custom `TextureMap` panics during setup.
+
 ## [0.16.0-alpha.1]
 
 ### Changed

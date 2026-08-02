@@ -1,6 +1,6 @@
 use super::super::color::ImColor32;
 use super::super::counts::{
-    DrawCornerFlags, DrawNgonSegmentCount, DrawSegmentCount, PolylineFlags,
+    DrawCornerFlags, DrawListFlags, DrawNgonSegmentCount, DrawSegmentCount, PolylineFlags,
 };
 use super::super::util::draw_list_counts;
 use super::DrawListMut;
@@ -25,6 +25,11 @@ impl TestDrawList {
             draw_list: self.raw,
             ui: None,
         }
+    }
+
+    fn borrowed_draw_list(&self) -> DrawListMut<'static> {
+        DrawListMut::borrow_draw_list(self.raw);
+        self.draw_list()
     }
 
     fn path_size(&self) -> i32 {
@@ -54,6 +59,25 @@ fn assert_panics_without_buffer_change(
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&draw_list)));
     assert!(result.is_err());
     assert_eq!(draw_list_counts(fixture.raw), before);
+}
+
+#[test]
+#[should_panic(
+    expected = "A DrawListMut is already in use for this draw list; reuse the existing wrapper or drop it before acquiring another"
+)]
+fn draw_list_exclusive_use_guard_rejects_duplicate_wrapper() {
+    let fixture = TestDrawList::new();
+    let _first = fixture.borrowed_draw_list();
+    let _duplicate = fixture.borrowed_draw_list();
+}
+
+#[test]
+fn draw_list_exclusive_use_guard_allows_reacquisition_after_drop() {
+    let fixture = TestDrawList::new();
+    let first = fixture.borrowed_draw_list();
+    drop(first);
+    let reacquired = fixture.borrowed_draw_list();
+    drop(reacquired);
 }
 
 #[test]
@@ -247,6 +271,154 @@ fn primitive_reserve_counts_reject_overflow_before_ffi() {
 }
 
 #[test]
+fn raw_callback_copy_inputs_validate_before_ffi() {
+    unsafe extern "C" fn callback(
+        _parent_list: *const sys::ImDrawList,
+        _command: *const sys::ImDrawCmd,
+    ) {
+    }
+
+    let fixture = TestDrawList::new();
+    assert_panics_without_buffer_change(&fixture, |draw_list| unsafe {
+        draw_list.add_callback(callback, std::ptr::null_mut(), 1);
+    });
+    assert_panics_without_buffer_change(&fixture, |draw_list| unsafe {
+        draw_list.add_callback(callback, std::ptr::dangling_mut(), 1usize << 31);
+    });
+}
+
+#[test]
+fn raw_callback_data_modes_preserve_borrow_or_copy_semantics() {
+    unsafe extern "C" fn callback(
+        _parent_list: *const sys::ImDrawList,
+        _command: *const sys::ImDrawCmd,
+    ) {
+    }
+
+    let fixture = TestDrawList::new();
+    let draw_list = fixture.draw_list();
+    draw_list.add_draw_cmd();
+
+    let mut borrowed = 41_u8;
+    let borrowed_ptr = std::ptr::from_mut(&mut borrowed).cast();
+    unsafe {
+        draw_list.add_callback(callback, borrowed_ptr, 0);
+    }
+
+    let mut copied = [3_u8, 1, 4, 1, 5];
+    unsafe {
+        draw_list.add_callback(callback, copied.as_mut_ptr().cast(), copied.len());
+
+        let commands = std::slice::from_raw_parts(
+            (*fixture.raw).CmdBuffer.Data,
+            usize::try_from((*fixture.raw).CmdBuffer.Size).unwrap(),
+        );
+        assert_eq!(commands[0].UserCallbackData, borrowed_ptr);
+        assert_eq!(commands[0].UserCallbackDataSize, 0);
+        assert_eq!(commands[0].UserCallbackDataOffset, -1);
+
+        assert!(commands[1].UserCallbackData.is_null());
+        assert_eq!(commands[1].UserCallbackDataSize, copied.len() as i32);
+        assert_eq!(commands[1].UserCallbackDataOffset, 0);
+        let copied_storage = std::slice::from_raw_parts(
+            (*fixture.raw)._CallbacksDataBuf.Data,
+            usize::try_from((*fixture.raw)._CallbacksDataBuf.Size).unwrap(),
+        );
+        assert_eq!(copied_storage, copied);
+    }
+}
+
+#[test]
+fn standard_sampler_commands_are_safe_and_preserve_order() {
+    unsafe extern "C" fn linear(
+        _parent_list: *const sys::ImDrawList,
+        _command: *const sys::ImDrawCmd,
+    ) {
+    }
+    unsafe extern "C" fn nearest(
+        _parent_list: *const sys::ImDrawList,
+        _command: *const sys::ImDrawCmd,
+    ) {
+    }
+
+    let mut context = crate::Context::create();
+    let binding = context.binding();
+    context.io_mut().set_display_size([128.0, 128.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
+    let _ = context.font_atlas().build();
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_draw_callback_set_sampler_linear_raw(Some(linear));
+        context
+            .platform_io_mut()
+            .set_draw_callback_set_sampler_nearest_raw(Some(nearest));
+    }
+
+    {
+        let ui = context.frame();
+        ui.window("standard sampler commands")
+            .size([96.0, 96.0], crate::Condition::Always)
+            .build(|| {
+                let draw_list = ui.get_window_draw_list();
+                draw_list.set_sampler_nearest();
+                draw_list
+                    .add_rect([8.0, 8.0], [24.0, 24.0], ImColor32::WHITE)
+                    .filled(true)
+                    .build();
+                draw_list.set_sampler_linear();
+                draw_list
+                    .add_rect([32.0, 8.0], [48.0, 24.0], ImColor32::WHITE)
+                    .filled(true)
+                    .build();
+            });
+    }
+    let frame = context.render();
+    let commands = binding.with_bound_context(|| {
+        frame
+            .draw_data()
+            .draw_lists()
+            .flat_map(|list| list.commands())
+            .filter(|command| {
+                matches!(
+                    command,
+                    crate::render::DrawCmd::SetSamplerLinear
+                        | crate::render::DrawCmd::SetSamplerNearest
+                )
+            })
+            .collect::<Vec<_>>()
+    });
+
+    assert_eq!(commands.len(), 2);
+    assert!(matches!(
+        commands[0],
+        crate::render::DrawCmd::SetSamplerNearest
+    ));
+    assert!(matches!(
+        commands[1],
+        crate::render::DrawCmd::SetSamplerLinear
+    ));
+}
+
+#[test]
+fn standard_sampler_commands_validate_backend_support_before_ffi() {
+    let mut context = crate::Context::create();
+    context.io_mut().set_display_size([128.0, 128.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
+    let _ = context.font_atlas().build();
+
+    let ui = context.frame();
+    let draw_list = ui.get_window_draw_list();
+    let before = draw_list_counts(draw_list.draw_list);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        draw_list.set_sampler_nearest();
+    }));
+
+    assert!(result.is_err());
+    assert_eq!(draw_list_counts(draw_list.draw_list), before);
+}
+
+#[test]
 fn text_and_clip_inputs_validate_before_ffi() {
     let mut ctx = crate::Context::create();
     {
@@ -298,4 +470,62 @@ fn raw_draw_list_clip_helper_reads_stack_without_mutation() {
 
     assert!(result.is_err());
     assert_eq!(fixture.clip_stack_size(), before);
+}
+
+#[test]
+fn text_no_pixel_snap_scope_restores_only_its_flag() {
+    let fixture = TestDrawList::new();
+    let draw_list = fixture.draw_list();
+    unsafe {
+        (*fixture.raw).Flags = DrawListFlags::ANTI_ALIASED_FILL.bits();
+    }
+
+    draw_list.with_text_no_pixel_snap(|| {
+        let flags = DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags });
+        assert!(flags.contains(DrawListFlags::TEXT_NO_PIXEL_SNAP));
+        assert!(flags.contains(DrawListFlags::ANTI_ALIASED_FILL));
+
+        unsafe {
+            (*fixture.raw).Flags |= DrawListFlags::ALLOW_VTX_OFFSET.bits();
+        }
+    });
+
+    let flags = DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags });
+    assert!(!flags.contains(DrawListFlags::TEXT_NO_PIXEL_SNAP));
+    assert!(flags.contains(DrawListFlags::ANTI_ALIASED_FILL));
+    assert!(flags.contains(DrawListFlags::ALLOW_VTX_OFFSET));
+}
+
+#[test]
+fn text_no_pixel_snap_scope_is_nested_and_panic_safe() {
+    let fixture = TestDrawList::new();
+    let draw_list = fixture.draw_list();
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _outer = draw_list.push_text_no_pixel_snap();
+        assert!(
+            DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags })
+                .contains(DrawListFlags::TEXT_NO_PIXEL_SNAP)
+        );
+
+        {
+            let _inner = draw_list.push_text_no_pixel_snap();
+            assert!(
+                DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags })
+                    .contains(DrawListFlags::TEXT_NO_PIXEL_SNAP)
+            );
+        }
+
+        assert!(
+            DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags })
+                .contains(DrawListFlags::TEXT_NO_PIXEL_SNAP)
+        );
+        panic!("forced panic inside text flag scope");
+    }));
+
+    assert!(result.is_err());
+    assert!(
+        !DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags })
+            .contains(DrawListFlags::TEXT_NO_PIXEL_SNAP)
+    );
 }

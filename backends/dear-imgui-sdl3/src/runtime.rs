@@ -37,7 +37,7 @@ use dear_imgui_rs::render::{TextureFeedback, TextureRequest};
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
     ContextAttachmentTeardownError, ContextBinding, ContextDestroyed, ContextLifecycle,
-    ContextTeardown, TextureData, sys,
+    ContextTeardown, Id, TextureData, sys,
 };
 
 struct Sdl3PlatformAttachmentMarker;
@@ -56,6 +56,92 @@ pub(super) enum PlatformGraphicsKind {
     Other,
     OpenGl,
     Vulkan,
+}
+
+/// Native OpenGL platform callbacks that completed successfully during one viewport frame.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Sdl3OpenGlViewportFrameReport {
+    context_activated_viewports: Vec<Id>,
+    swapped_viewports: Vec<Id>,
+}
+
+impl Sdl3OpenGlViewportFrameReport {
+    /// Returns secondary viewport IDs whose native render-context transaction completed.
+    pub fn context_activated_viewports(&self) -> &[Id] {
+        &self.context_activated_viewports
+    }
+
+    /// Returns secondary viewport IDs whose native swap transaction completed.
+    pub fn swapped_viewports(&self) -> &[Id] {
+        &self.swapped_viewports
+    }
+}
+
+/// Failure to begin or finish an SDL3 OpenGL viewport frame trace.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum Sdl3OpenGlViewportFrameTraceError {
+    /// The underlying platform runtime rejected the operation.
+    #[error(transparent)]
+    Backend(#[from] Sdl3BackendError),
+    /// The platform runtime was not initialized for OpenGL.
+    #[error("SDL3 OpenGL viewport tracing requires an OpenGL platform runtime")]
+    RequiresOpenGl,
+    /// Another guard is already collecting the runtime's callback events.
+    #[error("an SDL3 OpenGL viewport frame trace is already active")]
+    AlreadyActive,
+}
+
+#[derive(Debug)]
+struct ActiveOpenGlViewportFrameTrace {
+    context_activated_viewports: HashSet<Id>,
+    swapped_viewports: HashSet<Id>,
+}
+
+#[derive(Debug, Default)]
+struct OpenGlViewportFrameTraceState {
+    active: Option<ActiveOpenGlViewportFrameTrace>,
+}
+
+/// Scoped collector for one SDL3 OpenGL secondary-viewport platform pass.
+///
+/// Dropping this guard without calling [`Self::finish`] aborts its report. Each runtime accepts
+/// only one live trace, and callback routing remains bound to that runtime's Context attachment.
+#[must_use = "keep the trace alive through the platform-window pump, then call finish"]
+pub struct Sdl3OpenGlViewportFrameTrace<'runtime> {
+    control: &'runtime RuntimeControl,
+    finished: bool,
+}
+
+impl fmt::Debug for Sdl3OpenGlViewportFrameTrace<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Sdl3OpenGlViewportFrameTrace")
+            .field("context", &self.control.binding.id())
+            .field("finished", &self.finished)
+            .finish()
+    }
+}
+
+impl Sdl3OpenGlViewportFrameTrace<'_> {
+    /// Finishes this frame trace and returns only successful native transactions.
+    ///
+    /// The caller should restore the main OpenGL context before finishing the trace, then call
+    /// [`Sdl3PlatformBackend::poll_fault`](crate::Sdl3PlatformBackend::poll_fault) before the main
+    /// window is swapped.
+    pub fn finish(mut self) -> Sdl3OpenGlViewportFrameReport {
+        let report = self.control.finish_opengl_viewport_frame_trace();
+        self.finished = true;
+        report
+    }
+}
+
+impl Drop for Sdl3OpenGlViewportFrameTrace<'_> {
+    fn drop(&mut self) {
+        if !self.finished {
+            self.control.abort_opengl_viewport_frame_trace();
+        }
+    }
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -225,10 +311,12 @@ impl RuntimeFault {
     }
 }
 
+type RendererTextureUpdate = Rc<dyn Fn(&mut TextureData)>;
+
 struct NativeLifecycle {
     renderer_shutdown: Option<Rc<dyn Fn()>>,
     renderer_device_objects_destroy: Option<Rc<dyn Fn()>>,
-    renderer_texture_update: Option<Rc<dyn Fn(&mut TextureData)>>,
+    renderer_texture_update: Option<RendererTextureUpdate>,
     platform_shutdown: Rc<dyn Fn()>,
 }
 
@@ -321,6 +409,7 @@ pub(super) struct RuntimeControl {
     deferred_renderer_viewport_restores: RefCell<HashMap<usize, *mut std::ffi::c_void>>,
     failed_viewports: RefCell<HashSet<usize>>,
     faults: RefCell<VecDeque<RuntimeFault>>,
+    opengl_viewport_frame_trace: RefCell<OpenGlViewportFrameTraceState>,
     reported_replacements: RefCell<HashSet<&'static str>>,
     revoked_capabilities: Cell<i32>,
     foreign_capabilities: Cell<i32>,
@@ -347,7 +436,7 @@ impl RuntimeControl {
         context: &Context,
         renderer_shutdown: Option<Rc<dyn Fn()>>,
         renderer_device_objects_destroy: Option<Rc<dyn Fn()>>,
-        renderer_texture_update: Option<Rc<dyn Fn(&mut TextureData)>>,
+        renderer_texture_update: Option<RendererTextureUpdate>,
         platform_shutdown: Rc<dyn Fn()>,
         platform_graphics: PlatformGraphicsKind,
         native_renderer: NativeRendererKind,
@@ -392,6 +481,7 @@ impl RuntimeControl {
             deferred_renderer_viewport_restores: RefCell::new(HashMap::new()),
             failed_viewports: RefCell::new(HashSet::new()),
             faults: RefCell::new(VecDeque::new()),
+            opengl_viewport_frame_trace: RefCell::new(OpenGlViewportFrameTraceState::default()),
             reported_replacements: RefCell::new(HashSet::new()),
             revoked_capabilities: Cell::new(0),
             foreign_capabilities: Cell::new(0),
@@ -422,6 +512,81 @@ impl RuntimeControl {
 
     pub(super) fn expects_opengl(&self) -> bool {
         self.platform_graphics == PlatformGraphicsKind::OpenGl
+    }
+
+    fn begin_opengl_viewport_frame_trace(
+        &self,
+    ) -> Result<Sdl3OpenGlViewportFrameTrace<'_>, Sdl3OpenGlViewportFrameTraceError> {
+        if self.opengl_viewport_frame_trace.borrow().active.is_some() {
+            return Err(Sdl3OpenGlViewportFrameTraceError::AlreadyActive);
+        }
+        self.ensure_bound_entry()?;
+        if !self.expects_opengl() {
+            return Err(Sdl3OpenGlViewportFrameTraceError::RequiresOpenGl);
+        }
+        {
+            let mut trace = self.opengl_viewport_frame_trace.borrow_mut();
+            if trace.active.is_some() {
+                return Err(Sdl3OpenGlViewportFrameTraceError::AlreadyActive);
+            }
+            trace.active = Some(ActiveOpenGlViewportFrameTrace {
+                context_activated_viewports: HashSet::new(),
+                swapped_viewports: HashSet::new(),
+            });
+        }
+        Ok(Sdl3OpenGlViewportFrameTrace {
+            control: self,
+            finished: false,
+        })
+    }
+
+    fn finish_opengl_viewport_frame_trace(&self) -> Sdl3OpenGlViewportFrameReport {
+        let active = {
+            let mut trace = self.opengl_viewport_frame_trace.borrow_mut();
+            trace
+                .active
+                .take()
+                .expect("a live SDL3 OpenGL frame-trace guard owns the active trace")
+        };
+        let mut context_activated_viewports = active
+            .context_activated_viewports
+            .into_iter()
+            .collect::<Vec<_>>();
+        context_activated_viewports.sort_unstable_by_key(|id| id.raw());
+        let mut swapped_viewports = active.swapped_viewports.into_iter().collect::<Vec<_>>();
+        swapped_viewports.sort_unstable_by_key(|id| id.raw());
+        Sdl3OpenGlViewportFrameReport {
+            context_activated_viewports,
+            swapped_viewports,
+        }
+    }
+
+    fn abort_opengl_viewport_frame_trace(&self) {
+        self.opengl_viewport_frame_trace.borrow_mut().active = None;
+    }
+
+    pub(super) fn record_opengl_viewport_context_activated(&self, viewport_id: sys::ImGuiID) {
+        if let Some(active) = self
+            .opengl_viewport_frame_trace
+            .borrow_mut()
+            .active
+            .as_mut()
+        {
+            active
+                .context_activated_viewports
+                .insert(Id::from(viewport_id));
+        }
+    }
+
+    pub(super) fn record_opengl_viewport_swapped(&self, viewport_id: sys::ImGuiID) {
+        if let Some(active) = self
+            .opengl_viewport_frame_trace
+            .borrow_mut()
+            .active
+            .as_mut()
+        {
+            active.swapped_viewports.insert(Id::from(viewport_id));
+        }
     }
 
     #[cfg(feature = "multi-viewport")]
@@ -652,10 +817,10 @@ impl RuntimeControl {
             }
         };
         let main_viewport = unsafe { sys::igGetMainViewport() };
-        if !main_viewport.is_null() {
-            if let Some(restore) = restore.as_ref() {
-                self.defer_platform_viewport_restore(main_viewport, restore.main_viewport());
-            }
+        if !main_viewport.is_null()
+            && let Some(restore) = restore.as_ref()
+        {
+            self.defer_platform_viewport_restore(main_viewport, restore.main_viewport());
         }
         self.callback_teardown_active.set(true);
         struct CallbackTeardownGuard<'a>(&'a Cell<bool>);
@@ -1677,6 +1842,12 @@ impl RuntimeRegistration {
         self.control.poll_fault()
     }
 
+    pub(super) fn begin_opengl_viewport_frame_trace(
+        &self,
+    ) -> Result<Sdl3OpenGlViewportFrameTrace<'_>, Sdl3OpenGlViewportFrameTraceError> {
+        self.control.begin_opengl_viewport_frame_trace()
+    }
+
     #[cfg(feature = "multi-viewport")]
     pub(super) fn acquire_vulkan_surface_provider(
         &self,
@@ -1780,30 +1951,29 @@ impl RuntimeRegistration {
             return first_error([pending, None]);
         }
 
-        let consumer_guard =
-            (!self.control.renderer_released()).then(|| self.control.renderer_consumer.borrow());
-        let mut reset = match consumer_guard.as_ref() {
-            Some(consumer) => {
-                let consumer = consumer
-                    .as_ref()
-                    .expect("initialized SDL3 renderer lost its renderer consumer");
-                match context.prepare_renderer_texture_reset(consumer) {
-                    Ok(reset) => Some(reset),
-                    Err(error) => return Err(error.into()),
+        let (pending, shutdown_result, renderer_released) = {
+            let consumer_guard = (!self.control.renderer_released())
+                .then(|| self.control.renderer_consumer.borrow());
+            let reset = match consumer_guard.as_ref() {
+                Some(consumer) => {
+                    let consumer = consumer
+                        .as_ref()
+                        .expect("initialized SDL3 renderer lost its renderer consumer");
+                    match context.prepare_renderer_texture_reset(consumer) {
+                        Ok(reset) => Some(reset),
+                        Err(error) => return Err(error.into()),
+                    }
                 }
-            }
-            None => None,
-        };
-        let pending = self.control.take_pending_fault();
-        let shutdown_result = self.control.shutdown_native_explicit();
-        let renderer_released = self.control.renderer_released();
-        if renderer_released {
-            if let Some(reset) = reset.take() {
+                None => None,
+            };
+            let pending = self.control.take_pending_fault();
+            let shutdown_result = self.control.shutdown_native_explicit();
+            let renderer_released = self.control.renderer_released();
+            if renderer_released && let Some(reset) = reset {
                 let _ = reset.commit();
             }
-        }
-        drop(reset);
-        drop(consumer_guard);
+            (pending, shutdown_result, renderer_released)
+        };
         if renderer_released {
             self.control.take_renderer_consumer();
             self.control.clear_destroyed_textures();
@@ -2184,6 +2354,65 @@ mod tests {
         registration.control.platform_initialized.set(true);
         registration.control.renderer_initialized.set(true);
         registration
+    }
+
+    #[test]
+    fn opengl_frame_trace_is_instance_bound_non_nested_and_drop_abortable() {
+        let _guard = crate::tests::test_guard();
+        let context = Context::create();
+        let control = RuntimeControl::new_with_backend(
+            &context,
+            None,
+            None,
+            None,
+            Rc::new(|| {}),
+            PlatformGraphicsKind::OpenGl,
+            NativeRendererKind::None,
+        );
+
+        let trace = control.begin_opengl_viewport_frame_trace().unwrap();
+        assert!(matches!(
+            control.begin_opengl_viewport_frame_trace(),
+            Err(Sdl3OpenGlViewportFrameTraceError::AlreadyActive)
+        ));
+        control.record_opengl_viewport_context_activated(17);
+        control.record_opengl_viewport_context_activated(9);
+        control.record_opengl_viewport_context_activated(17);
+        control.record_opengl_viewport_swapped(17);
+        let report = trace.finish();
+        assert_eq!(
+            report.context_activated_viewports(),
+            &[Id::from(9), Id::from(17)]
+        );
+        assert_eq!(report.swapped_viewports(), &[Id::from(17)]);
+
+        drop(control.begin_opengl_viewport_frame_trace().unwrap());
+        let report = control
+            .begin_opengl_viewport_frame_trace()
+            .unwrap()
+            .finish();
+        assert!(report.context_activated_viewports().is_empty());
+        assert!(report.swapped_viewports().is_empty());
+    }
+
+    #[test]
+    fn opengl_frame_trace_rejects_an_unrelated_platform_runtime() {
+        let _guard = crate::tests::test_guard();
+        let context = Context::create();
+        let control = RuntimeControl::new_with_backend(
+            &context,
+            None,
+            None,
+            None,
+            Rc::new(|| {}),
+            PlatformGraphicsKind::Other,
+            NativeRendererKind::None,
+        );
+
+        assert!(matches!(
+            control.begin_opengl_viewport_frame_trace(),
+            Err(Sdl3OpenGlViewportFrameTraceError::RequiresOpenGl)
+        ));
     }
 
     fn synthetic_claimed_registration(

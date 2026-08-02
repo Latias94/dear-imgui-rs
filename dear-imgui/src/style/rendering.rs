@@ -2,6 +2,19 @@ use super::Style;
 use super::validation::assert_positive_f32;
 
 impl Style {
+    /// Returns the input-text cursor thickness.
+    #[doc(alias = "InputTextCursorSize")]
+    pub fn input_text_cursor_size(&self) -> f32 {
+        self.inner().InputTextCursorSize
+    }
+
+    /// Sets the input-text cursor thickness.
+    #[doc(alias = "InputTextCursorSize")]
+    pub fn set_input_text_cursor_size(&mut self, value: f32) {
+        assert_positive_f32("Style::set_input_text_cursor_size()", "value", value);
+        self.inner_mut().InputTextCursorSize = value;
+    }
+
     pub fn mouse_cursor_scale(&self) -> f32 {
         self.inner().MouseCursorScale
     }

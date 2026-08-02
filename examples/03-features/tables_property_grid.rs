@@ -69,7 +69,8 @@ fn main() -> Result<(), RunError> {
                             ui.drag_float_config("##speed")
                                 .range(0.0, 20.0)
                                 .speed(0.1)
-                                .display_format("%.2f")
+                                .try_display_format("%.2f")
+                                .expect("static numeric format is valid")
                                 .build(ui, &mut properties.speed);
                         });
                         property_row(ui, "Size", || {

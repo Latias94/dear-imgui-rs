@@ -75,6 +75,7 @@ PACKAGE_TEST_FEATURES = {
 }
 WASM_RELEASE_PACKAGES = (
     "dear-imgui-rs",
+    "dear-imgui-glow",
     "dear-implot",
     "dear-implot3d",
     "dear-imnodes",

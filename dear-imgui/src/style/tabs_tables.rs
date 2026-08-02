@@ -98,4 +98,32 @@ impl Style {
         assert_unit_vec2("Style::set_table_angled_headers_text_align()", "v", v);
         self.inner_mut().TableAngledHeadersTextAlign = sys::ImVec2 { x: v[0], y: v[1] };
     }
+
+    /// Returns the rounding radius of menu items and menus.
+    #[doc(alias = "MenuItemRounding")]
+    pub fn menu_item_rounding(&self) -> f32 {
+        self.inner().MenuItemRounding
+    }
+
+    /// Sets the rounding radius of menu items and menus.
+    #[doc(alias = "MenuItemRounding")]
+    pub fn set_menu_item_rounding(&mut self, value: f32) {
+        assert_non_negative_f32("Style::set_menu_item_rounding()", "value", value);
+        self.inner_mut().MenuItemRounding = value;
+    }
+
+    /// Returns the rounding radius of selectable items.
+    #[doc(alias = "SelectableRounding")]
+    pub fn selectable_rounding(&self) -> f32 {
+        self.inner().SelectableRounding
+    }
+
+    /// Sets the rounding radius of selectable items.
+    ///
+    /// Non-zero values may make contiguous selections look discontinuous.
+    #[doc(alias = "SelectableRounding")]
+    pub fn set_selectable_rounding(&mut self, value: f32) {
+        assert_non_negative_f32("Style::set_selectable_rounding()", "value", value);
+        self.inner_mut().SelectableRounding = value;
+    }
 }

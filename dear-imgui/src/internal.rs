@@ -34,7 +34,11 @@ pub enum DataType {
 /// representation in memory as the primitive value described by the associated `KIND` constant.
 ///
 /// # Safety
-/// The `DataType` *must* have the same representation as the primitive value of `KIND`.
+///
+/// Implementors must have the same size, alignment, valid bit patterns, and
+/// in-memory representation as the primitive value identified by `KIND`.
+/// Dear ImGui may read and write a pointer to the implementor as that primitive,
+/// and numeric formatting selects its exact C variadic carrier from `KIND`.
 pub unsafe trait DataTypeKind: Copy {
     const KIND: DataType;
 }

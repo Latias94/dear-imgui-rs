@@ -103,12 +103,15 @@ Configure a session before creating an inspector:
 ```rust
 use dear_imgui_reflect as reflect;
 
-fn configure(session: &mut reflect::ReflectSession) {
+fn configure(
+    session: &mut reflect::ReflectSession,
+) -> Result<(), reflect::imgui::NumericFormatError> {
     let settings = session.settings_mut();
     *settings.vec_mut() = reflect::VecSettings::reorder_only();
     *settings.maps_mut() = reflect::MapSettings::const_map();
-    *settings.numerics_f32_mut() =
-        reflect::NumericTypeSettings::default().slider_0_to_1(3);
+    *settings.numerics_f32_mut() = reflect::F32NumericSettings::default()
+        .try_slider_0_to_1(3)?;
+    Ok(())
 }
 ```
 
@@ -121,17 +124,20 @@ Per-member settings are keyed by reflected type and generated member path:
 # use dear_imgui_reflect as reflect;
 # #[derive(reflect::ImGuiReflect)]
 # struct Material { color: (f32, f32, f32, f32), layers: Vec<i32> }
-fn configure_material(session: &mut reflect::ReflectSession) {
+fn configure_material(
+    session: &mut reflect::ReflectSession,
+) -> Result<(), reflect::imgui::NumericFormatError> {
     let settings = session.settings_mut();
     settings
         .for_member::<Material>("layers")
         .vec_reorder_only();
     settings
         .for_member::<Material>("color[0]")
-        .numerics_f32_slider_0_to_1(3);
+        .try_numerics_f32_slider_0_to_1(3)?;
     settings
         .for_member::<Material>("color[3]")
         .read_only = true;
+    Ok(())
 }
 ```
 
@@ -181,7 +187,15 @@ Common derive attributes include:
 
 - `skip`, `name`, and `read_only`.
 - `as_input`, `as_drag`, `slider`, `min`, `max`, `step`, and `speed`.
-- `format`, `hex`, `percentage`, `prefix`, and `suffix`.
+- `format`, unsigned-integer `hex`, floating-point `percentage`, `prefix`, and `suffix`.
+
+Numeric formats are validated against the exact field type. Runtime settings
+store `NumericFormat<'static, T>` rather than raw strings; use
+`try_with_format` when a format comes from configuration or user input.
+Custom derive formats intentionally require fixed-width numeric fields because
+one `isize`/`usize` format cannot be correct for every target pointer width.
+Wide integer literals using MSVC `%I64*` syntax are normalized before code is
+generated, and the runtime `NumericFormat` validator applies the target form.
 - `bool_style = "checkbox|button|radio|dropdown"`.
 - `multiline`, `lines`, `hint`, `auto_resize`, and `display_only`.
 - `tuple_render`, `tuple_dropdown`, `tuple_columns`, and `tuple_min_width`.

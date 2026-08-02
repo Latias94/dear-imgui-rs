@@ -9,7 +9,7 @@ impl WgpuTextureManager {
         height: u32,
         row_pitch: usize,
         pixels: &[u8],
-    ) -> RendererResult<WgpuTexture> {
+    ) -> RendererResult<OwnedWgpuTexture> {
         let rgba = convert_rows_to_rgba(format, width, height, row_pitch, pixels)?;
         let texture = device.create_texture(&TextureDescriptor {
             label: Some("Dear ImGui managed texture"),
@@ -27,7 +27,7 @@ impl WgpuTextureManager {
         });
         write_rgba_region(queue, &texture, Origin3d::ZERO, width, height, &rgba)?;
         let texture_view = texture.create_view(&TextureViewDescriptor::default());
-        Ok(WgpuTexture::new(texture, texture_view))
+        Ok(OwnedWgpuTexture::new(texture, texture_view))
     }
 
     pub(super) fn upload_managed_texture_contents(

@@ -1,6 +1,6 @@
 use dear_imgui_rs::Ui;
 
-use crate::{Context, EditorContext, NodeEditor, NodesUi};
+use crate::{Context, EditorContext, NodeEditorSetup, NodesUi};
 
 /// Ui extension entry point for ImNodes
 pub trait ImNodesExt {
@@ -8,8 +8,8 @@ pub trait ImNodesExt {
     fn imnodes_editor<'ui>(
         &'ui self,
         ctx: &'ui Context,
-        editor: Option<&'ui EditorContext>,
-    ) -> NodeEditor<'ui>;
+        editor: Option<&EditorContext>,
+    ) -> NodeEditorSetup<'ui>;
 }
 
 impl ImNodesExt for Ui {
@@ -20,8 +20,8 @@ impl ImNodesExt for Ui {
     fn imnodes_editor<'ui>(
         &'ui self,
         ctx: &'ui Context,
-        editor: Option<&'ui EditorContext>,
-    ) -> NodeEditor<'ui> {
+        editor: Option<&EditorContext>,
+    ) -> NodeEditorSetup<'ui> {
         self.imnodes(ctx).editor(editor)
     }
 }

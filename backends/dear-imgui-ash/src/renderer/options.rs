@@ -13,7 +13,10 @@ pub struct Options {
     pub subpass: u32,
     /// Sample count for the graphics pipeline multisampling state.
     pub sample_count: vk::SampleCountFlags,
-    /// Maximum number of texture descriptor sets allocated from the pool.
+    /// Maximum number of sampled-image descriptor sets allocated from the pool.
+    ///
+    /// This excludes the two renderer-owned standard sampler sets and must be at least 8 so font
+    /// atlas replacements and fence-delayed texture retirement have bounded headroom.
     pub max_textures: u32,
     /// If true, treat the render target as sRGB.
     ///
@@ -26,10 +29,6 @@ pub struct Options {
     /// - `None`: auto (2.2 when `framebuffer_srgb`, else 1.0)
     /// - `Some(gamma)`: force a value (e.g. 2.2 or 1.0)
     pub color_gamma_override: Option<f32>,
-    /// Format used for internally managed RGBA textures (font atlas, `TextureData` uploads).
-    ///
-    /// Recommended: keep this as `vk::Format::R8G8B8A8_UNORM` to match the shader gamma path.
-    pub texture_format: vk::Format,
 }
 
 impl Default for Options {
@@ -43,8 +42,67 @@ impl Default for Options {
             max_textures: 1024,
             framebuffer_srgb: false,
             color_gamma_override: None,
-            texture_format: vk::Format::R8G8B8A8_UNORM,
         }
+    }
+}
+
+/// Renderer-owned Vulkan handles and target configuration.
+///
+/// Construct this value from handles that belong to one logical-device lineage, then pass it to
+/// one of [`super::AshRenderer`]'s unsafe constructors. The constructors retain `device`; the
+/// caller retains ownership of the queue and command pool and must keep them live and externally
+/// synchronized for the renderer lifetime.
+pub struct AshRendererConfig {
+    pub(super) device: Device,
+    pub(super) queue: vk::Queue,
+    pub(super) command_pool: vk::CommandPool,
+    #[cfg(not(feature = "dynamic-rendering"))]
+    pub(super) render_pass: vk::RenderPass,
+    #[cfg(feature = "dynamic-rendering")]
+    pub(super) dynamic_rendering: DynamicRendering,
+    pub(super) options: Options,
+}
+
+impl AshRendererConfig {
+    /// Configure a renderer for one compatible render pass.
+    #[cfg(not(feature = "dynamic-rendering"))]
+    pub fn with_render_pass(
+        device: Device,
+        queue: vk::Queue,
+        command_pool: vk::CommandPool,
+        render_pass: vk::RenderPass,
+    ) -> Self {
+        Self {
+            device,
+            queue,
+            command_pool,
+            render_pass,
+            options: Options::default(),
+        }
+    }
+
+    /// Configure a renderer for Vulkan dynamic rendering.
+    #[cfg(feature = "dynamic-rendering")]
+    pub fn with_dynamic_rendering(
+        device: Device,
+        queue: vk::Queue,
+        command_pool: vk::CommandPool,
+        dynamic_rendering: DynamicRendering,
+    ) -> Self {
+        Self {
+            device,
+            queue,
+            command_pool,
+            dynamic_rendering,
+            options: Options::default(),
+        }
+    }
+
+    /// Replace the renderer options.
+    #[must_use]
+    pub fn with_options(mut self, options: Options) -> Self {
+        self.options = options;
+        self
     }
 }
 

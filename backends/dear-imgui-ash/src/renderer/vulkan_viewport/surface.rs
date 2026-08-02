@@ -5,12 +5,36 @@ pub(super) enum ViewportRuntimeState {
     Active,
     Paused,
     RebuildRequired,
+    AcquireRecoveryRequired { frame_index: usize },
     Failed,
 }
 
 impl ViewportRuntimeState {
     pub(super) fn can_acquire(self) -> bool {
         self == Self::Active
+    }
+
+    pub(super) fn begin_acquire(&mut self, frame_index: usize) -> bool {
+        if *self != Self::Active {
+            return false;
+        }
+        *self = Self::AcquireRecoveryRequired { frame_index };
+        true
+    }
+
+    pub(super) fn recovery_frame_index(self) -> Option<usize> {
+        match self {
+            Self::AcquireRecoveryRequired { frame_index } => Some(frame_index),
+            Self::Active | Self::Paused | Self::RebuildRequired | Self::Failed => None,
+        }
+    }
+
+    pub(super) fn finish_submission(&mut self, frame_index: usize) -> bool {
+        if self.recovery_frame_index() != Some(frame_index) {
+            return false;
+        }
+        *self = Self::Active;
+        true
     }
 }
 

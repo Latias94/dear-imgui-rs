@@ -273,6 +273,7 @@ impl ViewportDrawDataSnapshot {
     /// };
     ///
     /// let draw = DrawDataSnapshot {
+    ///     frame_count: 1,
     ///     display_pos: [0.0, 0.0],
     ///     display_size: [640.0, 480.0],
     ///     framebuffer_scale: [1.0, 1.0],
@@ -300,6 +301,8 @@ impl ViewportDrawDataSnapshot {
 /// Thread-safe draw data snapshot.
 #[derive(Debug)]
 pub struct DrawDataSnapshot {
+    /// Frame counter of the Context that emitted this draw data.
+    pub frame_count: usize,
     pub display_pos: [f32; 2],
     pub display_size: [f32; 2],
     pub framebuffer_scale: [f32; 2],
@@ -582,6 +585,10 @@ pub enum RendererConsumerError {
     UnknownEpoch { epoch: u64 },
     #[error("snapshot epoch {epoch} was completed more than once")]
     EpochAlreadyCompleted { epoch: u64 },
+    #[error(
+        "the synchronous render lease still has {pending_requests} unreconciled texture request(s)"
+    )]
+    FrameNotReconciled { pending_requests: usize },
     #[error("renderer consumer still owns {count} outstanding epoch(s)")]
     OutstandingEpochs { count: usize },
     #[error("snapshot epoch {epoch} contains duplicate feedback for {texture:?}")]
@@ -819,6 +826,7 @@ pub(crate) fn capture_draw_data(
         *const sys::ImTextureData,
     ) -> Result<ResolvedSnapshotTexture, SnapshotError>,
 ) -> Result<PendingSnapshot, SnapshotError> {
+    preflight_detached_callbacks(draw_data)?;
     let draw = snapshot_draw_data(draw_data, resolve)?;
     let texture_requests = snapshot_texture_requests(draw_data, resolve)?;
     let (main_draw, viewports) = match owner_viewport_identity(draw_data) {
@@ -842,6 +850,16 @@ pub(crate) fn capture_platform_io(
         *const sys::ImTextureData,
     ) -> Result<ResolvedSnapshotTexture, SnapshotError>,
 ) -> Result<PendingSnapshot, SnapshotError> {
+    for viewport in platform_io.viewports_iter() {
+        let Some(raw_draw_data) = viewport.draw_data_ref() else {
+            continue;
+        };
+        let draw_data = draw_data_from_sys(raw_draw_data);
+        if draw_data.valid() {
+            preflight_detached_callbacks(draw_data)?;
+        }
+    }
+
     let mut viewports = Vec::new();
     let mut main_draw_index = None;
     let mut main_draw_data = None;
@@ -887,6 +905,7 @@ pub(crate) fn capture_platform_io(
 #[cfg(feature = "multi-viewport")]
 fn empty_draw_data_snapshot() -> DrawDataSnapshot {
     DrawDataSnapshot {
+        frame_count: 0,
         display_pos: [0.0, 0.0],
         display_size: [0.0, 0.0],
         framebuffer_scale: [1.0, 1.0],
@@ -922,11 +941,32 @@ fn snapshot_draw_data(
         draw_lists.push(snapshot_draw_list(draw_list, resolve)?);
     }
     Ok(DrawDataSnapshot {
+        frame_count: draw_data.frame_count(),
         display_pos: draw_data.display_pos(),
         display_size: draw_data.display_size(),
         framebuffer_scale: draw_data.framebuffer_scale(),
         draw_lists,
     })
+}
+
+fn detached_callback_kind(
+    callback: sys::ImDrawCallback,
+) -> Result<Option<StandardDrawCallback>, SnapshotError> {
+    match callback {
+        None => Ok(None),
+        Some(_) => classify_standard_draw_callback(callback)
+            .map(Some)
+            .ok_or(SnapshotError::UserCallbackUnsupported),
+    }
+}
+
+fn preflight_detached_callbacks(draw_data: &DrawData) -> Result<(), SnapshotError> {
+    for draw_list in draw_data.draw_lists() {
+        for command in unsafe { draw_list.cmd_buffer() } {
+            let _ = detached_callback_kind(command.UserCallback)?;
+        }
+    }
+    Ok(())
 }
 
 fn snapshot_draw_list(
@@ -939,22 +979,19 @@ fn snapshot_draw_list(
     let idx = draw_list.idx_buffer().to_vec();
     let mut commands = Vec::new();
     for cmd in unsafe { draw_list.cmd_buffer() } {
-        if cmd.UserCallback.is_some() {
-            match classify_standard_draw_callback(cmd.UserCallback) {
-                Some(StandardDrawCallback::ResetRenderState) => {
-                    commands.push(DrawCmdSnapshot::ResetRenderState);
-                    continue;
+        if let Some(callback) = detached_callback_kind(cmd.UserCallback)? {
+            match callback {
+                StandardDrawCallback::ResetRenderState => {
+                    commands.push(DrawCmdSnapshot::ResetRenderState)
                 }
-                Some(StandardDrawCallback::SetSamplerLinear) => {
-                    commands.push(DrawCmdSnapshot::SetSamplerLinear);
-                    continue;
+                StandardDrawCallback::SetSamplerLinear => {
+                    commands.push(DrawCmdSnapshot::SetSamplerLinear)
                 }
-                Some(StandardDrawCallback::SetSamplerNearest) => {
-                    commands.push(DrawCmdSnapshot::SetSamplerNearest);
-                    continue;
+                StandardDrawCallback::SetSamplerNearest => {
+                    commands.push(DrawCmdSnapshot::SetSamplerNearest)
                 }
-                None => return Err(SnapshotError::UserCallbackUnsupported),
             }
+            continue;
         }
 
         commands.push(DrawCmdSnapshot::Elements {
@@ -1314,9 +1351,62 @@ fn copy_upload_rect(
     })
 }
 
+#[cfg(test)]
+mod callback_preflight_tests {
+    use super::*;
+
+    unsafe extern "C" fn raw_callback(
+        _draw_list: *const sys::ImDrawList,
+        _command: *const sys::ImDrawCmd,
+    ) {
+    }
+
+    #[test]
+    fn raw_callback_preflight_runs_before_any_texture_resolution() {
+        let _guard = crate::test_support::imgui_context_guard();
+        let mut context = crate::Context::create();
+        context.io_mut().set_display_size([128.0, 128.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        let _ = context.font_atlas().build();
+
+        let mut texture = crate::texture::OwnedTextureData::new();
+        texture.create(crate::texture::TextureFormat::RGBA32, 1, 1);
+        texture.set_data(&[255, 255, 255, 255]);
+        let texture = context.register_texture(texture);
+
+        let frame = context.begin_frame();
+        frame.ui().image(texture, [16.0, 16.0]);
+        unsafe {
+            frame.ui().get_foreground_draw_list().add_callback(
+                raw_callback,
+                std::ptr::null_mut(),
+                0,
+            );
+        }
+        let rendered = frame.render();
+        let mut resolve_calls = 0usize;
+        let result = capture_draw_data(rendered.draw_data(), &mut |_| {
+            resolve_calls += 1;
+            Err(SnapshotError::UnknownManagedTexture)
+        });
+
+        assert!(matches!(
+            result,
+            Err(SnapshotError::UserCallbackUnsupported)
+        ));
+        assert_eq!(resolve_calls, 0);
+    }
+}
+
 #[cfg(all(test, feature = "multi-viewport"))]
 mod tests {
     use super::*;
+
+    unsafe extern "C" fn raw_callback(
+        _draw_list: *const sys::ImDrawList,
+        _command: *const sys::ImDrawCmd,
+    ) {
+    }
 
     fn empty_native_draw_data(
         viewport: *mut sys::ImGuiViewport,
@@ -1399,6 +1489,104 @@ mod tests {
             (*main).DrawData = previous_main_draw;
             sys::ImDrawData_destroy(secondary_draw);
             sys::ImDrawData_destroy(main_draw);
+            sys::ImGuiViewport_destroy(secondary);
+        }
+    }
+
+    #[test]
+    fn platform_callback_preflight_precedes_every_viewport_texture_resolution() {
+        let _guard = crate::test_support::imgui_context_guard();
+        let mut context = crate::Context::create();
+        let _ = context.font_atlas().build();
+        let main = context.main_viewport().as_raw_mut();
+        let previous_main_draw = unsafe { (*main).DrawData };
+        let secondary = viewport(
+            unsafe { (*main).ID.wrapping_add(1).max(1) },
+            std::ptr::null_mut(),
+        );
+        let mut texture = crate::texture::OwnedTextureData::new();
+        texture.create(crate::texture::TextureFormat::RGBA32, 1, 1);
+        texture.set_data(&[255, 255, 255, 255]);
+
+        let mut main_command = sys::ImDrawCmd {
+            TexRef: unsafe { sys::ImTextureData_GetTexRef(texture.as_raw_mut()) },
+            ..Default::default()
+        };
+        let mut secondary_command = sys::ImDrawCmd {
+            UserCallback: Some(raw_callback),
+            ..Default::default()
+        };
+        let mut main_list = sys::ImDrawList {
+            CmdBuffer: sys::ImVector_ImDrawCmd {
+                Size: 1,
+                Capacity: 1,
+                Data: &mut main_command,
+            },
+            ..Default::default()
+        };
+        let mut secondary_list = sys::ImDrawList {
+            CmdBuffer: sys::ImVector_ImDrawCmd {
+                Size: 1,
+                Capacity: 1,
+                Data: &mut secondary_command,
+            },
+            ..Default::default()
+        };
+        let mut main_lists = [&mut main_list as *mut sys::ImDrawList];
+        let mut secondary_lists = [&mut secondary_list as *mut sys::ImDrawList];
+        let mut main_draw = sys::ImDrawData {
+            Valid: true,
+            CmdLists: sys::ImVector_ImDrawListPtr {
+                Size: 1,
+                Capacity: 1,
+                Data: main_lists.as_mut_ptr(),
+            },
+            DisplaySize: sys::ImVec2 { x: 128.0, y: 128.0 },
+            FramebufferScale: sys::ImVec2 { x: 1.0, y: 1.0 },
+            OwnerViewport: main,
+            ..Default::default()
+        };
+        let mut secondary_draw = sys::ImDrawData {
+            Valid: true,
+            CmdLists: sys::ImVector_ImDrawListPtr {
+                Size: 1,
+                Capacity: 1,
+                Data: secondary_lists.as_mut_ptr(),
+            },
+            DisplayPos: sys::ImVec2 { x: 128.0, y: 0.0 },
+            DisplaySize: sys::ImVec2 { x: 128.0, y: 128.0 },
+            FramebufferScale: sys::ImVec2 { x: 1.0, y: 1.0 },
+            OwnerViewport: secondary,
+            ..Default::default()
+        };
+        unsafe {
+            (*main).DrawData = &mut main_draw;
+            (*secondary).DrawData = &mut secondary_draw;
+        }
+        let mut viewport_ptrs = [main, secondary];
+        let raw = sys::ImGuiPlatformIO {
+            Viewports: sys::ImVector_ImGuiViewportPtr {
+                Size: 2,
+                Capacity: 2,
+                Data: viewport_ptrs.as_mut_ptr(),
+            },
+            ..Default::default()
+        };
+        let platform_io = unsafe { crate::platform_io::PlatformIo::from_raw(&raw) };
+        let mut resolve_calls = 0usize;
+        let result = capture_platform_io(platform_io, &mut |_| {
+            resolve_calls += 1;
+            Err(SnapshotError::UnknownManagedTexture)
+        });
+
+        assert!(matches!(
+            result,
+            Err(SnapshotError::UserCallbackUnsupported)
+        ));
+        assert_eq!(resolve_calls, 0);
+
+        unsafe {
+            (*main).DrawData = previous_main_draw;
             sys::ImGuiViewport_destroy(secondary);
         }
     }

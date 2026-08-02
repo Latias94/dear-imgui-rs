@@ -1,11 +1,10 @@
-#[cfg(feature = "bind_vertex_array_support")]
-use crate::GlVertexArray;
 use crate::{GlBuffer, GlTexture, shaders::Shaders, texture::TextureMap, versions::GlVersion};
 use dear_imgui_rs::ContextBinding;
 use dear_imgui_rs::render::{RendererConsumer, SnapshotTextureId};
 use std::collections::HashMap;
 use std::ffi::c_void;
 
+use super::sampler::SamplerObjects;
 use super::texture::ManagedTextureBinding;
 
 /// Stable marker stored in `BackendRendererUserData` while Glow owns renderer state.
@@ -39,14 +38,15 @@ impl RendererStateFault {
 pub struct GlowRenderer {
     // Core rendering state
     pub(super) shaders: Shaders,
-    pub vbo_handle: Option<GlBuffer>,
-    pub ebo_handle: Option<GlBuffer>,
+    pub(super) vbo_handle: Option<GlBuffer>,
+    pub(super) ebo_handle: Option<GlBuffer>,
     pub(super) owned_textures: Vec<GlTexture>,
-    #[cfg(feature = "bind_vertex_array_support")]
-    pub vertex_array_object: Option<GlVertexArray>,
-    pub gl_version: GlVersion,
-    pub has_clip_origin_support: bool,
-    pub is_destroyed: bool,
+    pub(super) samplers: Option<SamplerObjects>,
+    pub(super) gl_version: GlVersion,
+    pub(super) has_clip_origin_support: bool,
+    pub(super) has_separate_polygon_modes: bool,
+    pub(super) has_sampler_object_support: bool,
+    pub(super) is_destroyed: bool,
 
     // Resource management
     pub(super) gl_context: Option<std::rc::Rc<glow::Context>>, // None = externally managed
@@ -72,6 +72,31 @@ pub struct GlowRenderer {
 }
 
 impl GlowRenderer {
+    /// Returns the OpenGL version detected from the live context at initialization.
+    pub fn gl_version(&self) -> GlVersion {
+        self.gl_version
+    }
+
+    /// Returns whether the live context supports querying `GL_CLIP_ORIGIN`.
+    pub fn supports_clip_origin(&self) -> bool {
+        self.has_clip_origin_support
+    }
+
+    /// Returns whether the live context exposes desktop `GL_FRAMEBUFFER_SRGB` control.
+    pub fn supports_framebuffer_srgb_control(&self) -> bool {
+        !self.gl_version.is_es
+    }
+
+    /// Returns whether the live context supports independent sampler objects.
+    pub fn supports_sampler_objects(&self) -> bool {
+        self.has_sampler_object_support
+    }
+
+    /// Returns whether this renderer has completed terminal destruction.
+    pub fn is_destroyed(&self) -> bool {
+        self.is_destroyed
+    }
+
     pub(super) fn track_owned_texture(&mut self, texture: GlTexture) {
         if !self.owned_textures.contains(&texture) {
             self.owned_textures.push(texture);

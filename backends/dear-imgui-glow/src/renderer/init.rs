@@ -19,10 +19,18 @@ use crate::{
 };
 
 const RENDERER_NAME: &str = concat!("dear-imgui-glow ", env!("CARGO_PKG_VERSION"));
-const CORE_RENDERER_FLAGS: i32 = sys::ImGuiBackendFlags_RendererHasVtxOffset as i32
-    | sys::ImGuiBackendFlags_RendererHasTextures as i32;
+const CORE_RENDERER_RESERVED_FLAGS: i32 =
+    sys::ImGuiBackendFlags_RendererHasVtxOffset | sys::ImGuiBackendFlags_RendererHasTextures;
 const RENDERER_RESERVED_FLAGS: i32 =
-    CORE_RENDERER_FLAGS | sys::ImGuiBackendFlags_RendererHasViewports as i32;
+    CORE_RENDERER_RESERVED_FLAGS | sys::ImGuiBackendFlags_RendererHasViewports;
+
+fn core_renderer_flags(gl_version: GlVersion) -> i32 {
+    let mut flags = sys::ImGuiBackendFlags_RendererHasTextures;
+    if gl_version.supports_vertex_offset() {
+        flags |= sys::ImGuiBackendFlags_RendererHasVtxOffset;
+    }
+    flags
+}
 
 impl GlowRenderer {
     /// Create a new Glow renderer with owned OpenGL context (recommended)
@@ -165,30 +173,31 @@ impl GlowRenderer {
     ) -> InitResult<Self> {
         preflight_renderer_state(imgui_context)?;
         let gl_version = GlVersion::read(gl);
+        if !gl_version.is_supported() {
+            return Err(InitError::UnsupportedVersion(format!(
+                "{}.{}{} (requires OpenGL 3.0, OpenGL ES 3.0, or WebGL 2)",
+                gl_version.major,
+                gl_version.minor,
+                if gl_version.is_es { " ES" } else { "" }
+            )));
+        }
         let renderer_texture_max = unsafe { gl.get_parameter_i32(glow::MAX_TEXTURE_SIZE) }.max(0);
 
-        #[cfg(feature = "clip_origin_support")]
-        let has_clip_origin_support = {
-            let support = gl_version.clip_origin_support();
+        let has_clip_origin_support = gl_version.supports_clip_origin()
+            || (!gl_version.is_es && has_extension(gl, "GL_ARB_clip_control"));
+        let has_sampler_object_support = gl_version.supports_sampler_objects()
+            || (!gl_version.is_es && has_extension(gl, "GL_ARB_sampler_objects"));
 
-            #[cfg(feature = "gl_extensions_support")]
-            if support {
-                support
-            } else {
-                let extensions_count = unsafe { gl.get_parameter_i32(glow::NUM_EXTENSIONS) } as u32;
-                (0..extensions_count).any(|index| {
-                    let extension_name =
-                        unsafe { gl.get_parameter_indexed_string(glow::EXTENSIONS, index) };
-                    extension_name == "GL_ARB_clip_control"
-                })
-            }
-            #[cfg(not(feature = "gl_extensions_support"))]
-            support
-        };
-        #[cfg(not(feature = "clip_origin_support"))]
-        let has_clip_origin_support = false;
+        let compatibility_profile = !gl_version.is_es
+            && (gl_version.major > 3 || (gl_version.major == 3 && gl_version.minor >= 2))
+            && unsafe { gl.get_parameter_i32(glow::CONTEXT_PROFILE_MASK) }
+                & glow::CONTEXT_COMPATIBILITY_PROFILE_BIT as i32
+                != 0;
+        let has_separate_polygon_modes =
+            gl_version.uses_separate_polygon_modes(compatibility_profile);
 
-        let pending_device_objects = PendingDeviceObjects::create_all(gl, gl_version)?;
+        let pending_device_objects =
+            PendingDeviceObjects::create_all(gl, gl_version, has_sampler_object_support)?;
         preflight_renderer_state(imgui_context)?;
         let renderer_consumer = imgui_context.create_renderer_consumer()?;
         // Construction has not emitted a renderer epoch or installed a Context-managed texture
@@ -203,18 +212,20 @@ impl GlowRenderer {
             imgui_context,
             backend_user_data_ptr,
             [renderer_texture_max; 2],
+            core_renderer_flags(gl_version),
         )?;
-        let (shaders, vbo_handle, ebo_handle) = pending_device_objects.into_parts();
+        let (shaders, vbo_handle, ebo_handle, samplers) = pending_device_objects.into_parts();
 
         let renderer = Self {
             shaders,
             vbo_handle: Some(vbo_handle),
             ebo_handle: Some(ebo_handle),
             owned_textures: Vec::new(),
-            #[cfg(feature = "bind_vertex_array_support")]
-            vertex_array_object: None,
+            samplers,
             gl_version,
             has_clip_origin_support,
+            has_separate_polygon_modes,
+            has_sampler_object_support,
             is_destroyed: false,
             gl_context: owned_gl,
             context_binding: Some(imgui_context.binding()),
@@ -285,10 +296,15 @@ impl GlowRenderer {
         if io.BackendRendererName != self.renderer_name_ptr {
             return Some(RendererStateFault::State("BackendRendererName"));
         }
-        if io.BackendFlags & sys::ImGuiBackendFlags_RendererHasVtxOffset as i32 == 0 {
+        let expected_core_flags = core_renderer_flags(self.gl_version);
+        let actual_core_flags = io.BackendFlags & CORE_RENDERER_RESERVED_FLAGS;
+        if actual_core_flags != expected_core_flags
+            && actual_core_flags & sys::ImGuiBackendFlags_RendererHasVtxOffset
+                != expected_core_flags & sys::ImGuiBackendFlags_RendererHasVtxOffset
+        {
             return Some(RendererStateFault::Capability("RENDERER_HAS_VTX_OFFSET"));
         }
-        if io.BackendFlags & sys::ImGuiBackendFlags_RendererHasTextures as i32 == 0 {
+        if actual_core_flags != expected_core_flags {
             return Some(RendererStateFault::Capability("RENDERER_HAS_TEXTURES"));
         }
 
@@ -337,8 +353,7 @@ impl GlowRenderer {
             return Some(RendererStateFault::Callback(callback));
         }
 
-        let viewport_flag =
-            io.BackendFlags & sys::ImGuiBackendFlags_RendererHasViewports as i32 != 0;
+        let viewport_flag = io.BackendFlags & sys::ImGuiBackendFlags_RendererHasViewports != 0;
         let viewport_callback = renderer_render_callback_is_glow(platform_io.Renderer_RenderWindow);
         if viewport_flag != viewport_callback {
             return Some(RendererStateFault::Capability("RENDERER_HAS_VIEWPORTS"));
@@ -376,7 +391,7 @@ impl GlowRenderer {
         let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
         if platform_io.is_null() {
             if user_data_is_ours || owned_name {
-                io.BackendFlags &= !CORE_RENDERER_FLAGS;
+                io.BackendFlags &= !CORE_RENDERER_RESERVED_FLAGS;
             }
             return owned_name;
         }
@@ -402,10 +417,10 @@ impl GlowRenderer {
         let still_owns_core_publication =
             user_data_is_ours || owned_name || owns_standard_draw_callback;
         if still_owns_core_publication {
-            io.BackendFlags &= !CORE_RENDERER_FLAGS;
+            io.BackendFlags &= !CORE_RENDERER_RESERVED_FLAGS;
         }
         if owns_viewport_callback {
-            io.BackendFlags &= !(sys::ImGuiBackendFlags_RendererHasViewports as i32);
+            io.BackendFlags &= !sys::ImGuiBackendFlags_RendererHasViewports;
         }
         if still_owns_core_publication {
             if platform_io.Renderer_TextureMaxWidth == self.renderer_texture_max[0] {
@@ -438,6 +453,10 @@ impl GlowRenderer {
         }
         owned_name
     }
+}
+
+fn has_extension(gl: &Context, expected: &str) -> bool {
+    gl.supported_extensions().contains(expected)
 }
 
 fn preflight_renderer_state(imgui_context: &ImGuiContext) -> InitResult<()> {
@@ -536,6 +555,7 @@ fn publish_renderer_state(
     imgui_context: &mut ImGuiContext,
     backend_user_data: *mut c_void,
     texture_max: [i32; 2],
+    renderer_flags: i32,
 ) -> InitResult<*const std::ffi::c_char> {
     imgui_context
         .set_renderer_name(Some(RENDERER_NAME.to_owned()))
@@ -548,11 +568,7 @@ fn publish_renderer_state(
 
     let io = imgui_context.io_mut();
     unsafe { io.set_backend_renderer_user_data(backend_user_data) };
-    io.set_backend_flags(
-        io.backend_flags()
-            | BackendFlags::RENDERER_HAS_VTX_OFFSET
-            | BackendFlags::RENDERER_HAS_TEXTURES,
-    );
+    io.set_backend_flags(io.backend_flags() | BackendFlags::from_bits_retain(renderer_flags));
 
     let platform_io = imgui_context.platform_io_mut();
     let raw = unsafe { &mut *platform_io.as_raw_mut() };
@@ -622,6 +638,97 @@ mod tests {
 
     use super::*;
     use crate::shaders::test_support::{FakeFailure, TEST_LOCK, fake_gl, reset};
+
+    unsafe extern "system" fn unsupported_get_string(name: u32) -> *const u8 {
+        if name == glow::VERSION {
+            c"2.1".as_ptr().cast()
+        } else {
+            c"".as_ptr().cast()
+        }
+    }
+
+    unsafe extern "system" fn unsupported_get_string_i(_name: u32, _index: u32) -> *const u8 {
+        c"".as_ptr().cast()
+    }
+
+    unsafe extern "system" fn unsupported_get_integer(_name: u32, value: *mut i32) {
+        if !value.is_null() {
+            unsafe { *value = 0 };
+        }
+    }
+
+    fn unsupported_gl() -> glow::Context {
+        unsafe {
+            glow::Context::from_loader_function(|name| {
+                match name {
+                    "glGetString" => unsupported_get_string as *const (),
+                    "glGetStringi" => unsupported_get_string_i as *const (),
+                    "glGetIntegerv" => unsupported_get_integer as *const (),
+                    _ => std::ptr::null(),
+                }
+                .cast()
+            })
+        }
+    }
+
+    #[test]
+    fn renderer_capabilities_do_not_claim_unavailable_vertex_offsets() {
+        let gl_30 = GlVersion {
+            major: 3,
+            minor: 0,
+            is_es: false,
+        };
+        let gl_32 = GlVersion {
+            major: 3,
+            minor: 2,
+            is_es: false,
+        };
+        let es_32 = GlVersion {
+            major: 3,
+            minor: 2,
+            is_es: true,
+        };
+
+        assert_eq!(
+            core_renderer_flags(gl_30),
+            sys::ImGuiBackendFlags_RendererHasTextures
+        );
+        assert_eq!(
+            core_renderer_flags(es_32),
+            sys::ImGuiBackendFlags_RendererHasTextures
+        );
+        assert_eq!(
+            core_renderer_flags(gl_32),
+            sys::ImGuiBackendFlags_RendererHasTextures
+                | sys::ImGuiBackendFlags_RendererHasVtxOffset
+        );
+    }
+
+    #[test]
+    fn unsupported_context_fails_before_gpu_or_context_publication() {
+        let gl = unsupported_gl();
+        let mut context = ImGuiContext::create();
+
+        let result = GlowRenderer::with_external_context(
+            &gl,
+            &mut context,
+            Box::new(SimpleTextureMap::default()),
+        );
+
+        assert!(matches!(result, Err(InitError::UnsupportedVersion(_))));
+        assert!(context.io().backend_renderer_user_data().is_null());
+        assert!(context.io().backend_renderer_name().is_none());
+        assert_eq!(
+            context.io().backend_flags().bits() & RENDERER_RESERVED_FLAGS,
+            0
+        );
+        let raw = unsafe { &*context.platform_io().as_raw() };
+        assert!(raw.DrawCallback_ResetRenderState.is_none());
+        assert!(raw.DrawCallback_SetSamplerLinear.is_none());
+        assert!(raw.DrawCallback_SetSamplerNearest.is_none());
+        assert_eq!(raw.Renderer_TextureMaxWidth, 0);
+        assert_eq!(raw.Renderer_TextureMaxHeight, 0);
+    }
 
     #[test]
     fn gpu_creation_failure_does_not_claim_or_reset_context_state() {

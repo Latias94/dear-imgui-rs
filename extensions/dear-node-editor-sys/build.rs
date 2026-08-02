@@ -84,7 +84,7 @@ fn panic_wasm_unsupported() -> ! {
     panic!(
         "dear-node-editor-sys is native-only in this integration phase. \
          wasm32 support needs a complete cimnodes_editor/imgui-node-editor integration for \
-         this workspace's import-style imgui-sys-v0 WASM provider: pregenerated wasm bindings, \
+         this workspace's import-style imgui-sys-v1 WASM provider: pregenerated wasm bindings, \
          provider exports, Emscripten source wiring, and web demo/smoke coverage. \
          Use dear-imnodes for the current wasm node-editor path."
     );
@@ -110,6 +110,16 @@ fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
 fn native_binding_spec() -> &'static build_support::binding::CrateBindingSpec {
     build_support::binding::CrateBindingSpec::for_crate_and_target(env!("CARGO_PKG_NAME"), "native")
         .expect("missing dear-node-editor-sys native binding spec")
+}
+
+fn maintained_source_paths(
+    cfg: &BuildConfig,
+) -> build_support::source_inventory::MaintainedSourcePaths {
+    build_support::source_inventory::MaintainedSourcePaths::for_crate(
+        env!("CARGO_PKG_NAME"),
+        cfg.manifest_dir.clone(),
+    )
+    .unwrap_or_else(|error| panic!("dear-node-editor-sys: {error}"))
 }
 
 #[cfg(feature = "bindgen")]
@@ -355,7 +365,13 @@ fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
     None
 }
 
-fn build_with_cc(cfg: &BuildConfig, node_editor_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
+fn build_with_cc(
+    cfg: &BuildConfig,
+    sources: &build_support::source_inventory::MaintainedSourcePaths,
+    node_editor_root: &Path,
+    imgui_src: &Path,
+    cimgui_root: &Path,
+) {
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
     build_support::configure_cpp_runtime_linkage(&mut build, &cfg.target_os, &cfg.target_env);
@@ -368,12 +384,13 @@ fn build_with_cc(cfg: &BuildConfig, node_editor_root: &Path, imgui_src: &Path, c
     // Keep ImGui internal ABI macros in lockstep with dear-imgui-sys. imgui-node-editor includes
     // imgui_internal.h, so local-only layout-affecting defines can corrupt the shared context.
 
-    build.file(node_editor_root.join("cimnodes_editor.cpp"));
-    build.file(node_editor_root.join("imgui-node-editor/imgui_node_editor.cpp"));
-    build.file(node_editor_root.join("imgui-node-editor/imgui_node_editor_api.cpp"));
-    build.file(node_editor_root.join("imgui-node-editor/imgui_canvas.cpp"));
-    build.file(node_editor_root.join("imgui-node-editor/crude_json.cpp"));
-    build.file(cfg.manifest_dir.join("shim/node_editor_extra.cpp"));
+    for file_id in ["wrapper", "core", "api", "canvas", "json", "shim"] {
+        build.file(
+            sources
+                .file(file_id)
+                .unwrap_or_else(|error| panic!("dear-node-editor-sys: {error}")),
+        );
+    }
 
     if cfg.is_msvc() && cfg.is_windows() {
         build.flag("/EHsc");
@@ -398,19 +415,18 @@ fn build_with_cc(cfg: &BuildConfig, node_editor_root: &Path, imgui_src: &Path, c
 
 fn main() {
     let cfg = BuildConfig::new();
+    let sources = maintained_source_paths(&cfg);
 
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=shim/node_editor_extra.h");
-    println!("cargo:rerun-if-changed=shim/node_editor_extra.cpp");
     println!("cargo:rerun-if-changed=third-party/cimnodes_editor/cimnodes_editor.h");
-    println!("cargo:rerun-if-changed=third-party/cimnodes_editor/cimnodes_editor.cpp");
     println!(
         "cargo:rerun-if-changed=third-party/cimnodes_editor/imgui-node-editor/imgui_node_editor.h"
     );
-    println!(
-        "cargo:rerun-if-changed=third-party/cimnodes_editor/imgui-node-editor/imgui_node_editor.cpp"
-    );
+    for path in sources.native_candidate_paths() {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
     println!("cargo:rerun-if-env-changed=NODE_EDITOR_SYS_LIB_DIR");
     println!("cargo:rerun-if-env-changed=NODE_EDITOR_SYS_SKIP_CC");
     println!("cargo:rerun-if-env-changed=NODE_EDITOR_SYS_PREBUILT_URL");
@@ -461,7 +477,9 @@ fn main() {
     }
 
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
-    let node_editor_root = cfg.manifest_dir.join("third-party/cimnodes_editor");
+    let node_editor_root = sources
+        .source_root()
+        .unwrap_or_else(|error| panic!("dear-node-editor-sys: {error}"));
 
     if !imgui_src.exists() {
         panic!("ImGui include not found at {:?}", imgui_src);
@@ -496,6 +514,9 @@ fn main() {
         try_link_prebuilt_all(&cfg)
     };
     if !linked {
-        build_with_cc(&cfg, &node_editor_root, &imgui_src, &cimgui_root);
+        sources
+            .validate_native()
+            .unwrap_or_else(|error| panic!("dear-node-editor-sys: {error}"));
+        build_with_cc(&cfg, &sources, &node_editor_root, &imgui_src, &cimgui_root);
     }
 }

@@ -199,5 +199,19 @@ fn popup_options_reject_mouse_button_bits_in_flags_before_ffi() {
             imgui::PopupContextOptions::new().mouse_button(imgui::PopupContextMouseButton::Left),
         );
         let _ = ui.is_popup_open_with_flags("popup", imgui::PopupQueryFlags::ANY_POPUP);
+
+        assert!(ui.open_popup("returning popup"));
+        assert!(!ui.open_popup_with_flags("returning popup", imgui::PopupOpenFlags::NO_REOPEN,));
+
+        let popup_id = ui.get_id("id popup");
+        assert!(ui.open_popup_id(popup_id));
+        assert!(!ui.open_popup_id_with_flags(popup_id, imgui::PopupOpenFlags::NO_REOPEN,));
+
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = ui.open_popup_id(imgui::Id::default());
+            }))
+            .is_err()
+        );
     });
 }

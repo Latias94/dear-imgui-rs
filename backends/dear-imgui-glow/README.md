@@ -27,8 +27,10 @@ renderer.render(frame)?;
 ## What You Get
 
 - ImGui v1.92 texture system integration (font atlas upload + dynamic texture updates)
-- OpenGL 2.1+/ES 2.0+ compatible shaders and state setup
+- OpenGL 3.0+, OpenGL ES 3.0+, and WebGL 2 shaders and state setup
+- Runtime capability detection from the live context
 - Full GL state backup/restore around ImGui rendering
+- Renderer-owned linear and nearest sampling without taking ownership of application textures
 
 ## Renderer Lifecycle
 
@@ -52,6 +54,48 @@ For a single-viewport renderer created with `with_external_context`, pass the sa
 to `destroy`. `destroy_device_objects` uses the same prepare-delete-commit transaction but keeps the
 consumer attached for later device-object recreation. After an outstanding-work error, finish or
 drop that work, poll completions, and retry teardown with the renderer still intact.
+
+## Runtime Capabilities and Texture Sampling
+
+The renderer derives its OpenGL behavior from the context used during initialization. Desktop
+OpenGL 3.3+, desktop contexts exposing `GL_ARB_sampler_objects`, and OpenGL ES 3.0+/WebGL 2 use
+renderer-owned sampler objects. Other desktop OpenGL 3.0-3.2 contexts use a restorative
+texture-parameter fallback. The fallback changes `TEXTURE_MIN_FILTER` and `TEXTURE_MAG_FILTER`
+only for an explicit linear or nearest sampler command and restores their exact previous values
+after the draw, including mipmapped filters.
+
+On sampler-object contexts, the renderer's default and reset state use its linear sampler without
+changing the texture object. On fallback contexts, the default path honors the texture's own
+filtering. A standard sampler command affects only subsequent ImGui elements in the current
+command stream. On the fallback path, `ResetRenderState` clears an explicit sampler selection and
+returns to texture-owned filtering; on the sampler-object path it rebinds the renderer's linear
+sampler. This is an intentional backend contract: reset produces a deterministic state regardless
+of what a raw callback changed.
+
+Raw callbacks can inspect the live renderer state through a callback-scoped borrow:
+
+```rust
+use dear_imgui_glow::GlowRenderState;
+
+unsafe extern "C" fn callback(
+    _parent_list: *const dear_imgui_rs::sys::ImDrawList,
+    _command: *const dear_imgui_rs::sys::ImDrawCmd,
+) {
+    // SAFETY: this runs synchronously inside dear-imgui-glow's raw callback scope.
+    let _ = unsafe {
+        GlowRenderState::with_current(|state| {
+            let gl = state.gl();
+            let sampler_strategy = state.sampler_strategy();
+            // Use `gl` only for this callback and do not unwind across the C ABI.
+            let _ = (gl, sampler_strategy);
+        })
+    };
+}
+```
+
+`GlowRenderState` cannot escape the closure, is neither `Send` nor `Sync`, and rejects recursive
+borrows. The returned `glow::Context` is still an unsafe OpenGL function table; callers remain
+responsible for valid OpenGL operations and must not unwind across the native callback ABI.
 
 ## Multi-Viewport Runtime
 
@@ -117,9 +161,12 @@ renderer and runtime retain the exact same `Rc<glow::Context>` from initializati
   - Linear FB: keep `FRAMEBUFFER_SRGB` disabled (default). Colors are passed through without gamma.
   - sRGB FB: request an sRGB-capable surface and enable `FRAMEBUFFER_SRGB`.
     ```rust
-    renderer.set_framebuffer_srgb_enabled(true) // enabled during render, disabled after
+    renderer.set_framebuffer_srgb_enabled(true)?; // enabled during render, then restored
     ```
   - Pick exactly one path to avoid double correction.
+  - `set_framebuffer_srgb_enabled(true)` is fallible and returns
+    `RenderError::FramebufferSrgbUnsupported` on OpenGL ES and WebGL, where this desktop state is
+    not a portable renderer contract. Disabling it is always accepted.
 
 - Vertex color gamma (auto + override)
   - The renderer applies gamma to ImGui vertex colors in the fragment shader via a `ColorGamma` uniform.
@@ -154,11 +201,31 @@ See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob
 
 ## Features
 
-- Default (core): `bind_vertex_array_support`, `vertex_offset_support`
-- Extras (opt-in as a group): enable `extras` to include
-  `gl_extensions_support`, `bind_sampler_support`, `clip_origin_support`,
-  `polygon_mode_support`, `primitive_restart_support`
-- Debug helper: `debug_message_insert_support` (no-op if disabled)
+- Default: no optional features. Renderer capabilities are detected from the live context.
+- WebAssembly provider: `wasm` (required for `wasm32-unknown-unknown`/WebGL 2 builds)
 - Multi-viewport: `multi-viewport` (owning renderer runtime; off by default)
 
-Rule of thumb: use the defaults; turn on `extras` only if you need those GL knobs.
+The former capability features, including `bind_sampler_support`, have been removed. They could
+describe how the crate was compiled, but not what the active OpenGL context supports.
+
+## 0.16 Migration
+
+- OpenGL 2.1, OpenGL ES 2.0, and WebGL 1 contexts are no longer accepted. Use OpenGL 3.0,
+  OpenGL ES 3.0, or WebGL 2 or newer.
+- Remove `extras`, `bind_vertex_array_support`, `vertex_offset_support`,
+  `gl_extensions_support`, `bind_sampler_support`, `clip_origin_support`,
+  `polygon_mode_support`, `primitive_restart_support`, and
+  `debug_message_insert_support` from dependency features.
+- Renderer GPU handles and capability fields are private implementation details. Use
+  `gl_version()`, `supports_clip_origin()`, `supports_framebuffer_srgb_control()`,
+  `supports_sampler_objects()`, and `is_destroyed()` for the supported observations.
+- `GlVersion` capability queries now use explicit runtime names:
+  `bind_vertex_array_support` -> `is_supported`, `vertex_offset_support` ->
+  `supports_vertex_offset`, `clip_origin_support` -> `supports_clip_origin`,
+  `bind_sampler_support` -> `supports_sampler_objects`, `polygon_mode_support` ->
+  `supports_polygon_mode`, and `primitive_restart_support` ->
+  `supports_primitive_restart`. The last query now correctly reports `false` for OpenGL ES,
+  where fixed-index restart is not the desktop toggle restored by this backend.
+- Match `RenderError::UnknownTextureId(TextureId)` for a legacy texture ID that is not in the
+  renderer map, or `RenderError::ManagedTextureMissing(SnapshotTextureId)` for a managed update
+  received before its matching GPU create request, instead of parsing `RenderError::InvalidTexture(String)`.

@@ -22,6 +22,7 @@ fn thread_safety_context_and_render_markers() {
     assert_not_impl_any!(dear_imgui_rs::FontAtlasTexture<'static>: Send, Sync);
 
     assert_not_impl_any!(dear_imgui_rs::render::RenderedFrame<'static>: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::render::ReconciledFrame<'static>: Send, Sync, Clone, Copy);
     assert_not_impl_any!(dear_imgui_rs::render::RendererConsumer: Send, Sync, Clone);
 
     // Detached snapshots move across threads but cannot be cloned.

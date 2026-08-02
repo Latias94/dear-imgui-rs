@@ -20,6 +20,8 @@ bitflags! {
         const ANTI_ALIASED_FILL = sys::ImDrawListFlags_AntiAliasedFill as i32;
         /// Can emit 'VtxOffset > 0' to allow large meshes
         const ALLOW_VTX_OFFSET = sys::ImDrawListFlags_AllowVtxOffset as i32;
+        /// Disable pixel-boundary snapping for text added to this draw list.
+        const TEXT_NO_PIXEL_SNAP = sys::ImDrawListFlags_TextNoPixelSnap as i32;
     }
 }
 

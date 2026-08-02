@@ -39,18 +39,18 @@ fn extensions_compose_inside_one_engine_managed_imgui_frame() {
     }
 
     let imnodes_ui = ui.imnodes(&imnodes_ctx);
-    let imnodes = imnodes_ui.editor(Some(&imnodes_editor));
+    let imnodes = imnodes_ui.editor(Some(&imnodes_editor)).begin_nodes();
     let output = dear_imnodes::PinId::new(11);
     let input = dear_imnodes::PinId::new(21);
     {
         let node = imnodes.node(dear_imnodes::NodeId::new(1));
         node.title_bar(|| ui.text("Source"));
-        drop(imnodes.output_attr(output, dear_imnodes::PinShape::CircleFilled));
+        drop(node.output_attr(output, dear_imnodes::PinShape::CircleFilled));
     }
     {
         let node = imnodes.node(dear_imnodes::NodeId::new(2));
         node.title_bar(|| ui.text("Target"));
-        drop(imnodes.input_attr(input, dear_imnodes::PinShape::CircleFilled));
+        drop(node.input_attr(input, dear_imnodes::PinShape::CircleFilled));
     }
     imnodes.link(dear_imnodes::LinkId::new(100), output, input);
     let _ = imnodes.end();

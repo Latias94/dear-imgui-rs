@@ -12,8 +12,7 @@
 //!   - `wgpu-27` (for ecosystems pinned to wgpu 27.x, e.g. some Bevy version trains)
 //! - **Diagnostics**: `tracing` emits renderer debug and warning events and is off by default
 //! - **Managed textures**: pointer-free create/update/destroy requests owned by rendered frames
-//! - **External textures**: Register existing `wgpu::Texture` resources for UI display,
-//!   with optional per-texture custom samplers.
+//! - **External textures**: Register application-owned `wgpu::TextureView` handles for UI display
 //! - **Gamma correction**: Automatic sRGB format detection and gamma correction
 //! - **Multi-frame buffering**: Support for multiple frames in flight
 //! - **Device object management**: Helpers to recreate device objects (pipelines/buffers/textures) after loss
@@ -213,16 +212,6 @@ macro_rules! backend_debug {
     ($($arg:tt)*) => {};
 }
 
-#[cfg(feature = "tracing")]
-macro_rules! backend_warn {
-    ($($arg:tt)*) => { tracing::warn!($($arg)*); };
-}
-
-#[cfg(not(feature = "tracing"))]
-macro_rules! backend_warn {
-    ($($arg:tt)*) => {};
-}
-
 // Module declarations
 mod data;
 mod error;
@@ -233,15 +222,103 @@ mod shaders;
 mod texture;
 mod uniforms;
 
-// Re-exports
-pub use data::*;
-pub use error::*;
-pub use frame_resources::*;
-pub use render_resources::*;
-pub use renderer::*;
-pub use shaders::*;
-pub use texture::*;
-pub use uniforms::*;
+#[cfg(doctest)]
+mod removed_public_contracts {
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::WgpuRenderer;
+    /// let _ = WgpuRenderer::empty;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::WgpuRenderer;
+    /// let _ = WgpuRenderer::new_without_font_atlas;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::WgpuRenderer;
+    /// let _ = WgpuRenderer::init_with_context;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::WgpuRenderer;
+    /// let _ = WgpuRenderer::default();
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::WgpuRenderer;
+    /// let _ = WgpuRenderer::is_initialized;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::WgpuRenderer;
+    /// let _ = WgpuRenderer::texture_manager;
+    /// ```
+    struct TwoPhaseRendererInitialization;
+
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::FrameResources;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::RenderResources;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::ShaderManager;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::UniformBuffer;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::Uniforms;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::WgpuTextureManager;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::WgpuTexture;
+    /// ```
+    struct RendererInternals;
+
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::WgpuRenderer;
+    /// let _ = WgpuRenderer::register_external_texture_with_sampler;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::WgpuRenderer;
+    /// let _ = WgpuRenderer::update_external_texture_sampler;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::WgpuRenderer;
+    /// let _ = WgpuRenderer::update_external_texture_view;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::WgpuRenderer;
+    /// let _ = WgpuRenderer::unregister_texture;
+    /// ```
+    struct PerTextureSamplers;
+}
+
+pub use data::{
+    WgpuInitInfo, WgpuRenderState, WgpuRenderStateAccessError, WgpuViewportSurfaceConfig,
+};
+pub use error::{RendererError, RendererResult};
+pub use renderer::WgpuRenderer;
+pub use texture::ExternalTextureId;
+
+pub(crate) use data::{WgpuBackendData, WgpuRenderStateStorage};
+pub(crate) use frame_resources::FrameResources;
+pub(crate) use render_resources::RenderResources;
+pub(crate) use shaders::ShaderManager;
+pub(crate) use texture::{OwnedWgpuTexture, WgpuTextureManager};
+pub(crate) use uniforms::{UniformBuffer, Uniforms};
 
 // Re-export multi-viewport helpers when enabled
 #[cfg(feature = "multi-viewport-winit")]

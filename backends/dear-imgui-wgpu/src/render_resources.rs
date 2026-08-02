@@ -173,29 +173,9 @@ impl RenderResources {
         self.image_bind_groups.remove(&texture_id);
     }
 
-    /// Clear all image bind groups
-    pub fn clear_image_bind_groups(&mut self) {
-        self.image_bind_groups.clear();
-    }
-
-    /// Get the texture sampler
-    pub fn sampler(&self) -> Option<&Sampler> {
-        self.sampler.as_ref()
-    }
-
-    /// Get the nearest/point texture sampler
-    pub fn sampler_nearest(&self) -> Option<&Sampler> {
-        self.sampler_nearest.as_ref()
-    }
-
     /// Get the uniform buffer
     pub fn uniform_buffer(&self) -> Option<&UniformBuffer> {
         self.uniform_buffer.as_ref()
-    }
-
-    /// Get the common bind group
-    pub fn common_bind_group(&self) -> Option<&BindGroup> {
-        self.uniform_buffer.as_ref().map(|ub| ub.bind_group())
     }
 
     /// Get the common bind group using nearest/point sampling
@@ -207,34 +187,10 @@ impl RenderResources {
     pub fn image_bind_group_layout(&self) -> Option<&BindGroupLayout> {
         self.image_bind_group_layout.as_ref()
     }
-
-    /// Check if resources are initialized
-    pub fn is_initialized(&self) -> bool {
-        self.sampler.is_some()
-            && self.sampler_nearest.is_some()
-            && self.uniform_buffer.is_some()
-            && self.nearest_common_bind_group.is_some()
-            && self.image_bind_group_layout.is_some()
-    }
-
-    /// Get statistics for debugging
-    pub fn stats(&self) -> RenderResourcesStats {
-        RenderResourcesStats {
-            image_bind_groups_count: self.image_bind_groups.len(),
-            is_initialized: self.is_initialized(),
-        }
-    }
 }
 
 impl Default for RenderResources {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Statistics for render resources
-#[derive(Debug, Clone)]
-pub struct RenderResourcesStats {
-    pub image_bind_groups_count: usize,
-    pub is_initialized: bool,
 }

@@ -1,5 +1,5 @@
+use crate::sys;
 use crate::widget::table::{TABLE_MAX_COLUMNS, TableColumnIndex, TableColumnRef, TableFlags};
-use crate::{Id, sys};
 
 pub(crate) fn table_column_count_to_i32(column_count: usize) -> i32 {
     assert!(
@@ -122,21 +122,4 @@ pub(crate) fn assert_current_table_row(caller: &str) {
         unsafe { (*table).CurrentRow } >= 0,
         "{caller} must be called while a table row is current"
     );
-}
-
-pub(crate) fn assert_explicit_user_id(id: impl Into<Id>, caller: &str) -> Id {
-    let id = id.into();
-    assert!(
-        id.raw() != 0,
-        "{caller} user_id must be non-zero; use None for automatic user id"
-    );
-    id
-}
-
-pub(crate) fn optional_user_id_raw(user_id: Option<Id>, caller: &str) -> sys::ImGuiID {
-    user_id.map_or(0, |id| assert_explicit_user_id(id, caller).raw())
-}
-
-pub(crate) fn optional_user_id_from_raw(user_id: sys::ImGuiID) -> Option<Id> {
-    (user_id != 0).then(|| Id::from(user_id))
 }

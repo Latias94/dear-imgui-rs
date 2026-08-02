@@ -137,7 +137,7 @@ impl AppWindow {
             &mut imgui_context,
             Box::new(SimpleTextureMap::default()),
         )?;
-        renderer.set_framebuffer_srgb_enabled(true);
+        renderer.set_framebuffer_srgb_enabled(true)?;
         renderer.create_device_objects(&gl)?;
 
         let mut managed_texture = OwnedTextureData::new();

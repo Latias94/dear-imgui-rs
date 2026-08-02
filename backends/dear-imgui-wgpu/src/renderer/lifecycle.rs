@@ -210,10 +210,12 @@ impl WgpuRenderer {
         Ok(())
     }
 
-    /// Invalidate device objects and reset their managed texture bindings.
+    /// Invalidate renderer-owned device objects and reset managed texture bindings.
     ///
     /// This corresponds to `ImGui_ImplWGPU_InvalidateDeviceObjects`. Passing the context makes
-    /// destroying GPU textures and requeueing Context-owned uploads one operation.
+    /// destroying renderer-owned GPU textures and requeueing Context-owned uploads one operation.
+    /// Application-owned external texture handles remain registered; after device loss, replace
+    /// their views through [`Self::update_external_texture`] before drawing them again.
     pub fn invalidate_device_objects(&mut self, imgui_context: &mut Context) -> RendererResult<()> {
         self.ensure_context_matches(imgui_context)?;
         self.ensure_renderer_contract()?;
@@ -248,10 +250,14 @@ impl WgpuRenderer {
             }
         }
 
-        // Clear texture manager
-        self.texture_manager.clear();
+        self.texture_manager.clear_renderer_owned_textures();
         self.default_texture = None;
         self.shader_manager = ShaderManager::new();
+    }
+
+    fn release_all_device_objects_only(&mut self) {
+        self.invalidate_device_objects_only();
+        self.texture_manager.clear_external_views();
     }
 
     /// Shutdown the renderer and detach its Dear ImGui state.
@@ -278,7 +284,7 @@ impl WgpuRenderer {
             }
         };
 
-        self.invalidate_device_objects_only();
+        self.release_all_device_objects_only();
         let _invalidated = reset.commit();
         self.texture_manager.clear_destroyed_managed_textures();
         self.backend_data = None;
@@ -377,7 +383,7 @@ impl WgpuRenderer {
         let result = context
             .with_renderer_texture_reset(&consumer, || {
                 release_viewports()?;
-                self.invalidate_device_objects_only();
+                self.release_all_device_objects_only();
                 self.backend_data = None;
                 Ok(())
             })
@@ -398,7 +404,7 @@ impl WgpuRenderer {
 
     #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     pub(super) fn shutdown_after_context_destroyed(&mut self) {
-        self.invalidate_device_objects_only();
+        self.release_all_device_objects_only();
         self.backend_data = None;
         self.renderer_consumer = None;
         self.clear_context_state();

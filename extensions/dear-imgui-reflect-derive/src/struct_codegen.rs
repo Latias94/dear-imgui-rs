@@ -6,9 +6,15 @@ use syn::{Fields, Type, parse_quote};
 use crate::attrs::{FieldAttrs, parse_field_attrs};
 use crate::field_codegen;
 use crate::internal::{
-    FieldTypeKind, NumericTypeTag, NumericWidgetKind, classify_field_type, classify_numeric_type,
+    FieldTypeKind, NumericFormatType, NumericTypeTag, NumericWidgetKind, classify_field_type,
+    classify_numeric_format_type, classify_numeric_type,
 };
+use crate::numeric_format::validate_and_normalize;
 use crate::settings_codegen::reflect_settings_ident;
+
+fn escape_format_literal(text: &str) -> String {
+    text.replace('%', "%%")
+}
 
 pub(crate) fn derive_for_struct(
     ident: syn::Ident,
@@ -130,19 +136,7 @@ pub(crate) fn derive_for_struct(
         // Additional validation for numeric-format helpers: they are restricted
         // to appropriate primitive numeric types.
         if matches!(kind, FieldTypeKind::Numeric) {
-            // Determine whether this numeric type is integral or floating-point.
-            let (mut is_float, mut is_int) = (false, false);
-            if let Type::Path(tp) = &ty
-                && let Some(seg) = tp.path.segments.last()
-            {
-                let ident = seg.ident.to_string();
-                match ident.as_str() {
-                    "f32" | "f64" => is_float = true,
-                    "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16" | "u32" | "u64"
-                    | "usize" => is_int = true,
-                    _ => {}
-                }
-            }
+            let numeric_format_type = classify_numeric_format_type(&ty);
 
             let fmt_style_count = (fmt_hex as u8) + (fmt_percentage as u8) + (fmt_scientific as u8);
             if fmt_style_count > 1 {
@@ -154,16 +148,23 @@ pub(crate) fn derive_for_struct(
                 .into();
             }
 
-            if fmt_hex && !is_int {
+            if fmt_hex
+                && !matches!(
+                    numeric_format_type,
+                    Some(NumericFormatType::Unsigned32 | NumericFormatType::Unsigned64)
+                )
+            {
                 return syn::Error::new(
                     field_ident.span(),
-                    "imgui(hex) is only supported on integral numeric types",
+                    "imgui(hex) is only supported on unsigned fixed-width integer fields",
                 )
                 .to_compile_error()
                 .into();
             }
 
-            if (fmt_percentage || fmt_scientific) && !is_float {
+            if (fmt_percentage || fmt_scientific)
+                && numeric_format_type != Some(NumericFormatType::Float)
+            {
                 return syn::Error::new(
                     field_ident.span(),
                     "imgui(percentage/scientific) are only supported on floating-point numeric types",
@@ -478,6 +479,20 @@ pub(crate) fn derive_for_struct(
                     }
                 }
 
+                // A field-level format is an explicit widget override. When
+                // no other selector is present, render it with InputScalar
+                // instead of silently dropping the format in the settings path.
+                if matches!(widget_kind, NumericWidgetKind::Default)
+                    && (format_str.is_some()
+                        || fmt_hex
+                        || fmt_percentage
+                        || fmt_scientific
+                        || fmt_prefix.is_some()
+                        || fmt_suffix.is_some())
+                {
+                    widget_kind = NumericWidgetKind::Input;
+                }
+
                 // Slider flags are only meaningful for slider/drag widgets.
                 if log_scale
                     || always_clamp_flag
@@ -537,13 +552,10 @@ pub(crate) fn derive_for_struct(
                     .into();
                 }
 
-                // Precompute helpers for numeric format attributes (hex/percentage/scientific,
-                // prefix/suffix). These are used by all numeric widget kinds.
-                // Compute an effective numeric format string, if any. Explicit
-                // `format = "..."` takes precedence; otherwise hex/percentage/
-                // scientific/prefix/suffix are combined into a single printf-
-                // style format string at compile time.
-                let effective_format_lit: Option<syn::LitStr> = {
+                // Compute and validate the exact typed numeric format at macro
+                // expansion time. Generated code constructs NumericFormat<T>
+                // instead of passing a raw string to a widget.
+                let mut effective_format_lit: Option<syn::LitStr> = {
                     if let Some(lit) = format_str.clone() {
                         Some(lit)
                     } else if fmt_hex
@@ -552,35 +564,56 @@ pub(crate) fn derive_for_struct(
                         || fmt_prefix.is_some()
                         || fmt_suffix.is_some()
                     {
-                        let (mut is_float_ty, mut is_int_ty) = (false, false);
-                        if let Type::Path(tp) = &ty
-                            && let Some(seg) = tp.path.segments.last()
-                        {
-                            let ident = seg.ident.to_string();
-                            match ident.as_str() {
-                                "f32" | "f64" => is_float_ty = true,
-                                "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16" | "u32"
-                                | "u64" | "usize" => is_int_ty = true,
-                                _ => {}
-                            }
-                        }
-
-                        let base = if fmt_hex {
-                            "%#x"
-                        } else if fmt_percentage {
-                            "%.2f%%"
-                        } else if fmt_scientific {
-                            "%e"
-                        } else if is_int_ty {
-                            "%d"
-                        } else if is_float_ty {
-                            "%.3f"
-                        } else {
-                            "%g"
+                        let Some(numeric_format_type) = classify_numeric_format_type(&ty) else {
+                            return syn::Error::new(
+                                field_ident.span(),
+                                "numeric format attributes require a supported primitive numeric field",
+                            )
+                            .to_compile_error()
+                            .into();
                         };
 
-                        let prefix_val = fmt_prefix.as_ref().map(|l| l.value()).unwrap_or_default();
-                        let suffix_val = fmt_suffix.as_ref().map(|l| l.value()).unwrap_or_default();
+                        let base = match (
+                            fmt_hex,
+                            fmt_percentage,
+                            fmt_scientific,
+                            numeric_format_type,
+                        ) {
+                            (true, _, _, NumericFormatType::Unsigned32) => "%#x",
+                            (true, _, _, NumericFormatType::Unsigned64) => "%#llx",
+                            (_, true, _, NumericFormatType::Float) => "%.2f%%",
+                            (_, _, true, NumericFormatType::Float) => "%e",
+                            (false, false, false, NumericFormatType::Signed32) => "%d",
+                            (false, false, false, NumericFormatType::Unsigned32) => "%u",
+                            (false, false, false, NumericFormatType::Signed64) => "%lld",
+                            (false, false, false, NumericFormatType::Unsigned64) => "%llu",
+                            (false, false, false, NumericFormatType::Float) => "%.3f",
+                            (_, _, _, NumericFormatType::PointerSized) => {
+                                return syn::Error::new(
+                                    field_ident.span(),
+                                    "custom formats for isize/usize are target-width dependent; use a fixed-width numeric field",
+                                )
+                                .to_compile_error()
+                                .into();
+                            }
+                            _ => {
+                                return syn::Error::new(
+                                    field_ident.span(),
+                                    "numeric format helper does not match the field type",
+                                )
+                                .to_compile_error()
+                                .into();
+                            }
+                        };
+
+                        let prefix_val = fmt_prefix
+                            .as_ref()
+                            .map(|literal| escape_format_literal(&literal.value()))
+                            .unwrap_or_default();
+                        let suffix_val = fmt_suffix
+                            .as_ref()
+                            .map(|literal| escape_format_literal(&literal.value()))
+                            .unwrap_or_default();
                         let combined = format!("{prefix_val}{base}{suffix_val}");
                         Some(syn::LitStr::new(&combined, field_ident.span()))
                     } else {
@@ -588,13 +621,41 @@ pub(crate) fn derive_for_struct(
                     }
                 };
 
+                if let Some(format) = effective_format_lit.clone() {
+                    let Some(numeric_format_type) = classify_numeric_format_type(&ty) else {
+                        return syn::Error::new(
+                            format.span(),
+                            "numeric format requires a supported primitive numeric field",
+                        )
+                        .to_compile_error()
+                        .into();
+                    };
+                    let normalized =
+                        match validate_and_normalize(&format.value(), numeric_format_type) {
+                            Ok(normalized) => normalized,
+                            Err(message) => {
+                                return syn::Error::new(format.span(), message)
+                                    .to_compile_error()
+                                    .into();
+                            }
+                        };
+                    effective_format_lit = Some(syn::LitStr::new(&normalized, format.span()));
+                }
+
+                let typed_format_expr = effective_format_lit.as_ref().map(|format| {
+                    quote! {
+                        ::dear_imgui_reflect::imgui::NumericFormat::<#ty>::new(#format)
+                            .expect("ImGuiReflect derive validated this numeric format")
+                    }
+                });
+
                 match widget_kind {
                     NumericWidgetKind::Input => {
                         let step = step_expr.clone();
                         let step_fast = step_fast_expr.clone();
 
-                        let fmt_stmt = if let Some(f) = effective_format_lit.clone() {
-                            quote! { builder = builder.display_format(#f); }
+                        let fmt_stmt = if let Some(format) = typed_format_expr.clone() {
+                            quote! { let mut builder = builder.display_format(#format); }
                         } else {
                             quote! {}
                         };
@@ -620,8 +681,8 @@ pub(crate) fn derive_for_struct(
                         }
                     }
                     NumericWidgetKind::Slider => {
-                        let fmt_stmt = if let Some(f) = effective_format_lit.clone() {
-                            quote! { slider = slider.display_format(#f); }
+                        let fmt_stmt = if let Some(format) = typed_format_expr.clone() {
+                            quote! { let mut slider = slider.display_format(#format); }
                         } else {
                             quote! {}
                         };
@@ -765,8 +826,8 @@ pub(crate) fn derive_for_struct(
                             quote! {}
                         };
 
-                        let fmt_stmt = if let Some(f) = effective_format_lit.clone() {
-                            quote! { drag = drag.display_format(#f); }
+                        let fmt_stmt = if let Some(format) = typed_format_expr.clone() {
+                            quote! { let mut drag = drag.display_format(#format); }
                         } else {
                             quote! {}
                         };
@@ -875,30 +936,24 @@ pub(crate) fn derive_for_struct(
                                             NumericRange as __NumRange,
                                         };
                                         let settings = &#reflect_settings_ident;
-                                        let numeric: ::dear_imgui_reflect::NumericTypeSettings = {
-                                            if let Some(member) = settings.member::<Self>(#field_name_lit) {
-                                                if let Some(ref override_settings) = member.numerics_i32 {
-                                                    override_settings.clone()
-                                                } else {
-                                                    settings.numerics_i32().clone()
-                                                }
-                                            } else {
-                                                settings.numerics_i32().clone()
-                                            }
-                                        };
+                                        let numeric = settings
+                                            .member::<Self>(#field_name_lit)
+                                            .and_then(|member| member.numerics_i32.as_ref())
+                                            .unwrap_or_else(|| settings.numerics_i32());
                                         match numeric.widget {
                                             __NumKind::Input => {
                                                 let mut builder = ui.input_scalar(#label, __field);
-                                                if let Some(ref fmt) = numeric.format {
-                                                    builder = builder.display_format(fmt);
-                                                }
                                                 if let Some(step) = numeric.step {
                                                     builder = builder.step(step as _);
                                                 }
                                                 if let Some(step_fast) = numeric.step_fast {
                                                     builder = builder.step_fast(step_fast as _);
                                                 }
-                                                __changed |= builder.build();
+                                                __changed |= if let Some(ref fmt) = numeric.format {
+                                                    builder.display_format(fmt.borrowed()).build()
+                                                } else {
+                                                    builder.build()
+                                                };
                                             }
                                             __NumKind::Slider => {
                                                 let (min, max) = match numeric.range {
@@ -910,11 +965,12 @@ pub(crate) fn derive_for_struct(
                                                     }
                                                 };
                                                 let mut slider = ui.slider_config(#label, min, max);
-                                                if let Some(ref fmt) = numeric.format {
-                                                    slider = slider.display_format(fmt);
-                                                }
                                                 slider = slider.flags(numeric.slider_flags());
-                                                let mut local_changed = slider.build(__field);
+                                                let mut local_changed = if let Some(ref fmt) = numeric.format {
+                                                    slider.display_format(fmt.borrowed()).build(__field)
+                                                } else {
+                                                    slider.build(__field)
+                                                };
                                                 if numeric.clamp {
                                                     if *__field < min {
                                                         *__field = min;
@@ -939,11 +995,12 @@ pub(crate) fn derive_for_struct(
                                                     }
                                                     __NumRange::DefaultSlider | __NumRange::None => {}
                                                 }
-                                                if let Some(ref fmt) = numeric.format {
-                                                    drag = drag.display_format(fmt);
-                                                }
                                                 drag = drag.flags(numeric.drag_flags());
-                                                let local_changed = drag.build(ui, __field);
+                                                let local_changed = if let Some(ref fmt) = numeric.format {
+                                                    drag.display_format(fmt.borrowed()).build(ui, __field)
+                                                } else {
+                                                    drag.build(ui, __field)
+                                                };
                                                 __changed |= local_changed;
                                             }
                                         }
@@ -958,30 +1015,24 @@ pub(crate) fn derive_for_struct(
                                             NumericRange as __NumRange,
                                         };
                                         let settings = &#reflect_settings_ident;
-                                        let numeric: ::dear_imgui_reflect::NumericTypeSettings = {
-                                            if let Some(member) = settings.member::<Self>(#field_name_lit) {
-                                                if let Some(ref override_settings) = member.numerics_u32 {
-                                                    override_settings.clone()
-                                                } else {
-                                                    settings.numerics_u32().clone()
-                                                }
-                                            } else {
-                                                settings.numerics_u32().clone()
-                                            }
-                                        };
+                                        let numeric = settings
+                                            .member::<Self>(#field_name_lit)
+                                            .and_then(|member| member.numerics_u32.as_ref())
+                                            .unwrap_or_else(|| settings.numerics_u32());
                                         match numeric.widget {
                                             __NumKind::Input => {
                                                 let mut builder = ui.input_scalar(#label, __field);
-                                                if let Some(ref fmt) = numeric.format {
-                                                    builder = builder.display_format(fmt);
-                                                }
                                                 if let Some(step) = numeric.step {
                                                     builder = builder.step(step as _);
                                                 }
                                                 if let Some(step_fast) = numeric.step_fast {
                                                     builder = builder.step_fast(step_fast as _);
                                                 }
-                                                __changed |= builder.build();
+                                                __changed |= if let Some(ref fmt) = numeric.format {
+                                                    builder.display_format(fmt.borrowed()).build()
+                                                } else {
+                                                    builder.build()
+                                                };
                                             }
                                             __NumKind::Slider => {
                                                 let (min, max) = match numeric.range {
@@ -993,11 +1044,12 @@ pub(crate) fn derive_for_struct(
                                                     }
                                                 };
                                                 let mut slider = ui.slider_config(#label, min, max);
-                                                if let Some(ref fmt) = numeric.format {
-                                                    slider = slider.display_format(fmt);
-                                                }
                                                 slider = slider.flags(numeric.slider_flags());
-                                                let mut local_changed = slider.build(__field);
+                                                let mut local_changed = if let Some(ref fmt) = numeric.format {
+                                                    slider.display_format(fmt.borrowed()).build(__field)
+                                                } else {
+                                                    slider.build(__field)
+                                                };
                                                 if numeric.clamp {
                                                     if *__field < min {
                                                         *__field = min;
@@ -1021,11 +1073,12 @@ pub(crate) fn derive_for_struct(
                                                     }
                                                     __NumRange::DefaultSlider | __NumRange::None => {}
                                                 }
-                                                if let Some(ref fmt) = numeric.format {
-                                                    drag = drag.display_format(fmt);
-                                                }
                                                 drag = drag.flags(numeric.drag_flags());
-                                                let local_changed = drag.build(ui, __field);
+                                                let local_changed = if let Some(ref fmt) = numeric.format {
+                                                    drag.display_format(fmt.borrowed()).build(ui, __field)
+                                                } else {
+                                                    drag.build(ui, __field)
+                                                };
                                                 __changed |= local_changed;
                                             }
                                         }
@@ -1040,30 +1093,24 @@ pub(crate) fn derive_for_struct(
                                             NumericRange as __NumRange,
                                         };
                                         let settings = &#reflect_settings_ident;
-                                        let numeric: ::dear_imgui_reflect::NumericTypeSettings = {
-                                            if let Some(member) = settings.member::<Self>(#field_name_lit) {
-                                                if let Some(ref override_settings) = member.numerics_f32 {
-                                                    override_settings.clone()
-                                                } else {
-                                                    settings.numerics_f32().clone()
-                                                }
-                                            } else {
-                                                settings.numerics_f32().clone()
-                                            }
-                                        };
+                                        let numeric = settings
+                                            .member::<Self>(#field_name_lit)
+                                            .and_then(|member| member.numerics_f32.as_ref())
+                                            .unwrap_or_else(|| settings.numerics_f32());
                                         match numeric.widget {
                                             __NumKind::Input => {
                                                 let mut builder = ui.input_scalar(#label, __field);
-                                                if let Some(ref fmt) = numeric.format {
-                                                    builder = builder.display_format(fmt);
-                                                }
                                                 if let Some(step) = numeric.step {
                                                     builder = builder.step(step as _);
                                                 }
                                                 if let Some(step_fast) = numeric.step_fast {
                                                     builder = builder.step_fast(step_fast as _);
                                                 }
-                                                __changed |= builder.build();
+                                                __changed |= if let Some(ref fmt) = numeric.format {
+                                                    builder.display_format(fmt.borrowed()).build()
+                                                } else {
+                                                    builder.build()
+                                                };
                                             }
                                             __NumKind::Slider => {
                                                 let (min, max) = match numeric.range {
@@ -1075,11 +1122,12 @@ pub(crate) fn derive_for_struct(
                                                     }
                                                 };
                                                 let mut slider = ui.slider_config(#label, min, max);
-                                                if let Some(ref fmt) = numeric.format {
-                                                    slider = slider.display_format(fmt);
-                                                }
                                                 slider = slider.flags(numeric.slider_flags());
-                                                let mut local_changed = slider.build(__field);
+                                                let mut local_changed = if let Some(ref fmt) = numeric.format {
+                                                    slider.display_format(fmt.borrowed()).build(__field)
+                                                } else {
+                                                    slider.build(__field)
+                                                };
                                                 if numeric.clamp {
                                                     if *__field < min {
                                                         *__field = min;
@@ -1103,11 +1151,12 @@ pub(crate) fn derive_for_struct(
                                                     }
                                                     __NumRange::DefaultSlider | __NumRange::None => {}
                                                 }
-                                                if let Some(ref fmt) = numeric.format {
-                                                    drag = drag.display_format(fmt);
-                                                }
                                                 drag = drag.flags(numeric.drag_flags());
-                                                let local_changed = drag.build(ui, __field);
+                                                let local_changed = if let Some(ref fmt) = numeric.format {
+                                                    drag.display_format(fmt.borrowed()).build(ui, __field)
+                                                } else {
+                                                    drag.build(ui, __field)
+                                                };
                                                 __changed |= local_changed;
                                             }
                                         }
@@ -1122,30 +1171,24 @@ pub(crate) fn derive_for_struct(
                                             NumericRange as __NumRange,
                                         };
                                         let settings = &#reflect_settings_ident;
-                                        let numeric: ::dear_imgui_reflect::NumericTypeSettings = {
-                                            if let Some(member) = settings.member::<Self>(#field_name_lit) {
-                                                if let Some(ref override_settings) = member.numerics_f64 {
-                                                    override_settings.clone()
-                                                } else {
-                                                    settings.numerics_f64().clone()
-                                                }
-                                            } else {
-                                                settings.numerics_f64().clone()
-                                            }
-                                        };
+                                        let numeric = settings
+                                            .member::<Self>(#field_name_lit)
+                                            .and_then(|member| member.numerics_f64.as_ref())
+                                            .unwrap_or_else(|| settings.numerics_f64());
                                         match numeric.widget {
                                             __NumKind::Input => {
                                                 let mut builder = ui.input_scalar(#label, __field);
-                                                if let Some(ref fmt) = numeric.format {
-                                                    builder = builder.display_format(fmt);
-                                                }
                                                 if let Some(step) = numeric.step {
                                                     builder = builder.step(step as _);
                                                 }
                                                 if let Some(step_fast) = numeric.step_fast {
                                                     builder = builder.step_fast(step_fast as _);
                                                 }
-                                                __changed |= builder.build();
+                                                __changed |= if let Some(ref fmt) = numeric.format {
+                                                    builder.display_format(fmt.borrowed()).build()
+                                                } else {
+                                                    builder.build()
+                                                };
                                             }
                                             __NumKind::Slider => {
                                                 let (min, max) = match numeric.range {
@@ -1157,11 +1200,12 @@ pub(crate) fn derive_for_struct(
                                                     }
                                                 };
                                                 let mut slider = ui.slider_config(#label, min, max);
-                                                if let Some(ref fmt) = numeric.format {
-                                                    slider = slider.display_format(fmt);
-                                                }
                                                 slider = slider.flags(numeric.slider_flags());
-                                                let mut local_changed = slider.build(__field);
+                                                let mut local_changed = if let Some(ref fmt) = numeric.format {
+                                                    slider.display_format(fmt.borrowed()).build(__field)
+                                                } else {
+                                                    slider.build(__field)
+                                                };
                                                 if numeric.clamp {
                                                     if *__field < min {
                                                         *__field = min;
@@ -1185,11 +1229,12 @@ pub(crate) fn derive_for_struct(
                                                     }
                                                     __NumRange::DefaultSlider | __NumRange::None => {}
                                                 }
-                                                if let Some(ref fmt) = numeric.format {
-                                                    drag = drag.display_format(fmt);
-                                                }
                                                 drag = drag.flags(numeric.drag_flags());
-                                                let local_changed = drag.build(ui, __field);
+                                                let local_changed = if let Some(ref fmt) = numeric.format {
+                                                    drag.display_format(fmt.borrowed()).build(ui, __field)
+                                                } else {
+                                                    drag.build(ui, __field)
+                                                };
                                                 __changed |= local_changed;
                                             }
                                         }
@@ -1299,31 +1344,25 @@ pub(crate) fn derive_for_struct(
                                                 NumericRange as __NumRange,
                                             };
                                             let settings = &#reflect_settings_ident;
-                                            let numeric: ::dear_imgui_reflect::NumericTypeSettings = {
-                                                if let Some(member) = settings.member::<Self>(#element_member_name) {
-                                                    if let Some(ref override_settings) = member.numerics_i32 {
-                                                        override_settings.clone()
-                                                    } else {
-                                                        settings.numerics_i32().clone()
-                                                    }
-                                                } else {
-                                                    settings.numerics_i32().clone()
-                                                }
-                                            };
+                                            let numeric = settings
+                                                .member::<Self>(#element_member_name)
+                                                .and_then(|member| member.numerics_i32.as_ref())
+                                                .unwrap_or_else(|| settings.numerics_i32());
                                             match numeric.widget {
                                                 __NumKind::Input => {
                                                     let mut builder =
                                                         ui.input_scalar(#element_label, &mut __field.#idx);
-                                                    if let Some(ref fmt) = numeric.format {
-                                                        builder = builder.display_format(fmt);
-                                                    }
                                                     if let Some(step) = numeric.step {
                                                         builder = builder.step(step as _);
                                                     }
                                                     if let Some(step_fast) = numeric.step_fast {
                                                         builder = builder.step_fast(step_fast as _);
                                                     }
-                                                    builder.build()
+                                                    if let Some(ref fmt) = numeric.format {
+                                                        builder.display_format(fmt.borrowed()).build()
+                                                    } else {
+                                                        builder.build()
+                                                    }
                                                 }
                                                 __NumKind::Slider => {
                                                     let (min, max) = match numeric.range {
@@ -1335,12 +1374,14 @@ pub(crate) fn derive_for_struct(
                                                         }
                                                     };
                                                     let mut slider = ui.slider_config(#element_label, min, max);
-                                                    if let Some(ref fmt) = numeric.format {
-                                                        slider = slider.display_format(fmt);
-                                                    }
                                                     slider = slider.flags(numeric.slider_flags());
-                                                    let mut local_changed =
-                                                        slider.build(&mut __field.#idx);
+                                                    let mut local_changed = if let Some(ref fmt) = numeric.format {
+                                                        slider
+                                                            .display_format(fmt.borrowed())
+                                                            .build(&mut __field.#idx)
+                                                    } else {
+                                                        slider.build(&mut __field.#idx)
+                                                    };
                                                     if numeric.clamp {
                                                         if __field.#idx < min {
                                                             __field.#idx = min;
@@ -1364,11 +1405,14 @@ pub(crate) fn derive_for_struct(
                                                         }
                                                         __NumRange::DefaultSlider | __NumRange::None => {}
                                                     }
-                                                    if let Some(ref fmt) = numeric.format {
-                                                        drag = drag.display_format(fmt);
-                                                    }
                                                     drag = drag.flags(numeric.drag_flags());
-                                                    drag.build(ui, &mut __field.#idx)
+                                                    if let Some(ref fmt) = numeric.format {
+                                                        drag
+                                                            .display_format(fmt.borrowed())
+                                                            .build(ui, &mut __field.#idx)
+                                                    } else {
+                                                        drag.build(ui, &mut __field.#idx)
+                                                    }
                                                 }
                                             }
                                         }
@@ -1382,31 +1426,25 @@ pub(crate) fn derive_for_struct(
                                                 NumericRange as __NumRange,
                                             };
                                             let settings = &#reflect_settings_ident;
-                                            let numeric: ::dear_imgui_reflect::NumericTypeSettings = {
-                                                if let Some(member) = settings.member::<Self>(#element_member_name) {
-                                                    if let Some(ref override_settings) = member.numerics_u32 {
-                                                        override_settings.clone()
-                                                    } else {
-                                                        settings.numerics_u32().clone()
-                                                    }
-                                                } else {
-                                                    settings.numerics_u32().clone()
-                                                }
-                                            };
+                                            let numeric = settings
+                                                .member::<Self>(#element_member_name)
+                                                .and_then(|member| member.numerics_u32.as_ref())
+                                                .unwrap_or_else(|| settings.numerics_u32());
                                             match numeric.widget {
                                                 __NumKind::Input => {
                                                     let mut builder =
                                                         ui.input_scalar(#element_label, &mut __field.#idx);
-                                                    if let Some(ref fmt) = numeric.format {
-                                                        builder = builder.display_format(fmt);
-                                                    }
                                                     if let Some(step) = numeric.step {
                                                         builder = builder.step(step as _);
                                                     }
                                                     if let Some(step_fast) = numeric.step_fast {
                                                         builder = builder.step_fast(step_fast as _);
                                                     }
-                                                    builder.build()
+                                                    if let Some(ref fmt) = numeric.format {
+                                                        builder.display_format(fmt.borrowed()).build()
+                                                    } else {
+                                                        builder.build()
+                                                    }
                                                 }
                                                 __NumKind::Slider => {
                                                     let (min, max) = match numeric.range {
@@ -1418,12 +1456,14 @@ pub(crate) fn derive_for_struct(
                                                         }
                                                     };
                                                     let mut slider = ui.slider_config(#element_label, min, max);
-                                                    if let Some(ref fmt) = numeric.format {
-                                                        slider = slider.display_format(fmt);
-                                                    }
                                                     slider = slider.flags(numeric.slider_flags());
-                                                    let mut local_changed =
-                                                        slider.build(&mut __field.#idx);
+                                                    let mut local_changed = if let Some(ref fmt) = numeric.format {
+                                                        slider
+                                                            .display_format(fmt.borrowed())
+                                                            .build(&mut __field.#idx)
+                                                    } else {
+                                                        slider.build(&mut __field.#idx)
+                                                    };
                                                     if numeric.clamp {
                                                         if __field.#idx < min {
                                                             __field.#idx = min;
@@ -1447,11 +1487,14 @@ pub(crate) fn derive_for_struct(
                                                         }
                                                         __NumRange::DefaultSlider | __NumRange::None => {}
                                                     }
-                                                    if let Some(ref fmt) = numeric.format {
-                                                        drag = drag.display_format(fmt);
-                                                    }
                                                     drag = drag.flags(numeric.drag_flags());
-                                                    drag.build(ui, &mut __field.#idx)
+                                                    if let Some(ref fmt) = numeric.format {
+                                                        drag
+                                                            .display_format(fmt.borrowed())
+                                                            .build(ui, &mut __field.#idx)
+                                                    } else {
+                                                        drag.build(ui, &mut __field.#idx)
+                                                    }
                                                 }
                                             }
                                         }
@@ -1465,31 +1508,25 @@ pub(crate) fn derive_for_struct(
                                                 NumericRange as __NumRange,
                                             };
                                             let settings = &#reflect_settings_ident;
-                                            let numeric: ::dear_imgui_reflect::NumericTypeSettings = {
-                                                if let Some(member) = settings.member::<Self>(#element_member_name) {
-                                                    if let Some(ref override_settings) = member.numerics_f32 {
-                                                        override_settings.clone()
-                                                    } else {
-                                                        settings.numerics_f32().clone()
-                                                    }
-                                                } else {
-                                                    settings.numerics_f32().clone()
-                                                }
-                                            };
+                                            let numeric = settings
+                                                .member::<Self>(#element_member_name)
+                                                .and_then(|member| member.numerics_f32.as_ref())
+                                                .unwrap_or_else(|| settings.numerics_f32());
                                             match numeric.widget {
                                                 __NumKind::Input => {
                                                     let mut builder =
                                                         ui.input_scalar(#element_label, &mut __field.#idx);
-                                                    if let Some(ref fmt) = numeric.format {
-                                                        builder = builder.display_format(fmt);
-                                                    }
                                                     if let Some(step) = numeric.step {
                                                         builder = builder.step(step as _);
                                                     }
                                                     if let Some(step_fast) = numeric.step_fast {
                                                         builder = builder.step_fast(step_fast as _);
                                                     }
-                                                    builder.build()
+                                                    if let Some(ref fmt) = numeric.format {
+                                                        builder.display_format(fmt.borrowed()).build()
+                                                    } else {
+                                                        builder.build()
+                                                    }
                                                 }
                                                 __NumKind::Slider => {
                                                     let (min, max) = match numeric.range {
@@ -1501,12 +1538,14 @@ pub(crate) fn derive_for_struct(
                                                         }
                                                     };
                                                     let mut slider = ui.slider_config(#element_label, min, max);
-                                                    if let Some(ref fmt) = numeric.format {
-                                                        slider = slider.display_format(fmt);
-                                                    }
                                                     slider = slider.flags(numeric.slider_flags());
-                                                    let mut local_changed =
-                                                        slider.build(&mut __field.#idx);
+                                                    let mut local_changed = if let Some(ref fmt) = numeric.format {
+                                                        slider
+                                                            .display_format(fmt.borrowed())
+                                                            .build(&mut __field.#idx)
+                                                    } else {
+                                                        slider.build(&mut __field.#idx)
+                                                    };
                                                     if numeric.clamp {
                                                         if __field.#idx < min {
                                                             __field.#idx = min;
@@ -1530,11 +1569,14 @@ pub(crate) fn derive_for_struct(
                                                         }
                                                         __NumRange::DefaultSlider | __NumRange::None => {}
                                                     }
-                                                    if let Some(ref fmt) = numeric.format {
-                                                        drag = drag.display_format(fmt);
-                                                    }
                                                     drag = drag.flags(numeric.drag_flags());
-                                                    drag.build(ui, &mut __field.#idx)
+                                                    if let Some(ref fmt) = numeric.format {
+                                                        drag
+                                                            .display_format(fmt.borrowed())
+                                                            .build(ui, &mut __field.#idx)
+                                                    } else {
+                                                        drag.build(ui, &mut __field.#idx)
+                                                    }
                                                 }
                                             }
                                         }
@@ -1548,31 +1590,25 @@ pub(crate) fn derive_for_struct(
                                                 NumericRange as __NumRange,
                                             };
                                             let settings = &#reflect_settings_ident;
-                                            let numeric: ::dear_imgui_reflect::NumericTypeSettings = {
-                                                if let Some(member) = settings.member::<Self>(#element_member_name) {
-                                                    if let Some(ref override_settings) = member.numerics_f64 {
-                                                        override_settings.clone()
-                                                    } else {
-                                                        settings.numerics_f64().clone()
-                                                    }
-                                                } else {
-                                                    settings.numerics_f64().clone()
-                                                }
-                                            };
+                                            let numeric = settings
+                                                .member::<Self>(#element_member_name)
+                                                .and_then(|member| member.numerics_f64.as_ref())
+                                                .unwrap_or_else(|| settings.numerics_f64());
                                             match numeric.widget {
                                                 __NumKind::Input => {
                                                     let mut builder =
                                                         ui.input_scalar(#element_label, &mut __field.#idx);
-                                                    if let Some(ref fmt) = numeric.format {
-                                                        builder = builder.display_format(fmt);
-                                                    }
                                                     if let Some(step) = numeric.step {
                                                         builder = builder.step(step as _);
                                                     }
                                                     if let Some(step_fast) = numeric.step_fast {
                                                         builder = builder.step_fast(step_fast as _);
                                                     }
-                                                    builder.build()
+                                                    if let Some(ref fmt) = numeric.format {
+                                                        builder.display_format(fmt.borrowed()).build()
+                                                    } else {
+                                                        builder.build()
+                                                    }
                                                 }
                                                 __NumKind::Slider => {
                                                     let (min, max) = match numeric.range {
@@ -1584,12 +1620,14 @@ pub(crate) fn derive_for_struct(
                                                         }
                                                     };
                                                     let mut slider = ui.slider_config(#element_label, min, max);
-                                                    if let Some(ref fmt) = numeric.format {
-                                                        slider = slider.display_format(fmt);
-                                                    }
                                                     slider = slider.flags(numeric.slider_flags());
-                                                    let mut local_changed =
-                                                        slider.build(&mut __field.#idx);
+                                                    let mut local_changed = if let Some(ref fmt) = numeric.format {
+                                                        slider
+                                                            .display_format(fmt.borrowed())
+                                                            .build(&mut __field.#idx)
+                                                    } else {
+                                                        slider.build(&mut __field.#idx)
+                                                    };
                                                     if numeric.clamp {
                                                         if (__field.#idx as f64) < min {
                                                             __field.#idx = min as _;
@@ -1613,11 +1651,14 @@ pub(crate) fn derive_for_struct(
                                                         }
                                                         __NumRange::DefaultSlider | __NumRange::None => {}
                                                     }
-                                                    if let Some(ref fmt) = numeric.format {
-                                                        drag = drag.display_format(fmt);
-                                                    }
                                                     drag = drag.flags(numeric.drag_flags());
-                                                    drag.build(ui, &mut __field.#idx)
+                                                    if let Some(ref fmt) = numeric.format {
+                                                        drag
+                                                            .display_format(fmt.borrowed())
+                                                            .build(ui, &mut __field.#idx)
+                                                    } else {
+                                                        drag.build(ui, &mut __field.#idx)
+                                                    }
                                                 }
                                             }
                                         }

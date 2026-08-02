@@ -18,6 +18,8 @@ pub enum TestEngineStatus {
     NotFound,
     OutOfRange,
     Exception,
+    Unsupported,
+    CaptureFailed,
     Unknown(i32),
 }
 
@@ -29,6 +31,8 @@ impl TestEngineStatus {
             sys::ImGuiTestEngineStatus_NotFound => Self::NotFound,
             sys::ImGuiTestEngineStatus_OutOfRange => Self::OutOfRange,
             sys::ImGuiTestEngineStatus_Exception => Self::Exception,
+            sys::ImGuiTestEngineStatus_Unsupported => Self::Unsupported,
+            sys::ImGuiTestEngineStatus_CaptureFailed => Self::CaptureFailed,
             other => Self::Unknown(other),
         }
     }

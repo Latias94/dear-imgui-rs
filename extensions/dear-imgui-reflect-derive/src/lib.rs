@@ -6,6 +6,7 @@ mod diagnostics;
 mod enum_codegen;
 mod field_codegen;
 mod internal;
+mod numeric_format;
 mod settings_codegen;
 mod struct_codegen;
 #[cfg(test)]
@@ -29,7 +30,7 @@ mod tests;
 /// - `#[imgui(skip)]` — do not generate any UI for this field.
 /// - `#[imgui(name = "Custom Label")]` — override the label used for this field.
 /// - `#[imgui(slider, min = ..., max = ..., format = "...")]` — use a slider
-///   with the given range/format for numeric fields.
+///   with a format validated against the exact numeric field type.
 /// - `#[imgui(multiline, hint = "...", read_only)]` — use multiline text
 ///   widgets for String/ImString fields.
 #[proc_macro_derive(ImGuiReflect, attributes(imgui))]

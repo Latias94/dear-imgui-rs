@@ -1,5 +1,7 @@
 #include "../third-party/cimgui/imgui/imgui.h"
 
+#include <stddef.h>
+
 #ifdef IMGUI_HAS_DOCK
 
 struct DearImguiRsPlatformIoHookStorage
@@ -21,6 +23,62 @@ struct DearImguiRsPlatformIoAggregateProbeResult
     ImVec2 PlatformGetWindowFramebufferScale;
     ImVec4 PlatformGetWindowWorkAreaInsets;
 };
+
+#if defined(DEAR_IMGUI_RS_ABI_PROBE)
+struct DearImguiRsLayoutProbe
+{
+    size_t ImDrawDataSize;
+    size_t ImDrawDataAlign;
+    size_t ImDrawDataFrameCountOffset;
+    size_t ImDrawDataCmdListsOffset;
+    size_t ImDrawDataTexturesOffset;
+    size_t ImTextureDataSize;
+    size_t ImTextureDataAlign;
+    size_t ImTextureDataUniqueIDOffset;
+    size_t ImTextureDataQueueUserDataOffset;
+    size_t ImTextureDataTexIDOffset;
+    size_t ImTextureDataUpdatesOffset;
+    size_t ImTextureDataWantDestroyNextFrameOffset;
+    size_t ImGuiPlatformIOSize;
+    size_t ImGuiPlatformIOAlign;
+    size_t ImGuiPlatformIOSessionDateOffset;
+    size_t ImGuiPlatformIORenderStateOffset;
+    size_t ImGuiPlatformIOPlatformCreateWindowOffset;
+    size_t ImGuiPlatformIORendererCreateWindowOffset;
+    size_t ImGuiPlatformIOMonitorsOffset;
+    size_t ImGuiPlatformIOTexturesOffset;
+    size_t ImGuiPlatformIOViewportsOffset;
+};
+
+extern "C" int dear_imgui_rs_probe_public_aggregate_layouts(DearImguiRsLayoutProbe* out_probe)
+{
+    if (out_probe == nullptr)
+        return 0;
+    *out_probe = {};
+    out_probe->ImDrawDataSize = sizeof(ImDrawData);
+    out_probe->ImDrawDataAlign = alignof(ImDrawData);
+    out_probe->ImDrawDataFrameCountOffset = offsetof(ImDrawData, FrameCount);
+    out_probe->ImDrawDataCmdListsOffset = offsetof(ImDrawData, CmdLists);
+    out_probe->ImDrawDataTexturesOffset = offsetof(ImDrawData, Textures);
+    out_probe->ImTextureDataSize = sizeof(ImTextureData);
+    out_probe->ImTextureDataAlign = alignof(ImTextureData);
+    out_probe->ImTextureDataUniqueIDOffset = offsetof(ImTextureData, UniqueID);
+    out_probe->ImTextureDataQueueUserDataOffset = offsetof(ImTextureData, QueueUserData);
+    out_probe->ImTextureDataTexIDOffset = offsetof(ImTextureData, TexID);
+    out_probe->ImTextureDataUpdatesOffset = offsetof(ImTextureData, Updates);
+    out_probe->ImTextureDataWantDestroyNextFrameOffset = offsetof(ImTextureData, WantDestroyNextFrame);
+    out_probe->ImGuiPlatformIOSize = sizeof(ImGuiPlatformIO);
+    out_probe->ImGuiPlatformIOAlign = alignof(ImGuiPlatformIO);
+    out_probe->ImGuiPlatformIOSessionDateOffset = offsetof(ImGuiPlatformIO, Platform_SessionDate);
+    out_probe->ImGuiPlatformIORenderStateOffset = offsetof(ImGuiPlatformIO, Renderer_RenderState);
+    out_probe->ImGuiPlatformIOPlatformCreateWindowOffset = offsetof(ImGuiPlatformIO, Platform_CreateWindow);
+    out_probe->ImGuiPlatformIORendererCreateWindowOffset = offsetof(ImGuiPlatformIO, Renderer_CreateWindow);
+    out_probe->ImGuiPlatformIOMonitorsOffset = offsetof(ImGuiPlatformIO, Monitors);
+    out_probe->ImGuiPlatformIOTexturesOffset = offsetof(ImGuiPlatformIO, Textures);
+    out_probe->ImGuiPlatformIOViewportsOffset = offsetof(ImGuiPlatformIO, Viewports);
+    return 1;
+}
+#endif
 
 static ImVector<DearImguiRsPlatformIoHookStorage> G_DearImguiRsPlatformIoHookStorage;
 

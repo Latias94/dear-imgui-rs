@@ -24,7 +24,11 @@ fn basic_editor_smoke_test() {
     let frame = imgui.begin_frame();
 
     // Begin an editor scope and end it explicitly
-    let editor_ui = frame.ui().imnodes(&imnodes_ctx).editor(Some(&editor));
+    let editor_ui = frame
+        .ui()
+        .imnodes(&imnodes_ctx)
+        .editor(Some(&editor))
+        .begin_nodes();
 
     // Create a trivial node (no actual widgets, just exercise Begin/End)
     let node_id = imnodes::NodeId::new(1);
@@ -38,8 +42,11 @@ fn basic_editor_smoke_test() {
     // Exercise some post-editor helpers; we don't assert contents, just ensure
     // the calls don't panic and respect basic contracts.
     let _ini = post.save_state_to_ini_string();
-    post.save_state_to_ini_file("imnodes_test.ini");
-    post.load_state_from_ini_file("imnodes_test.ini");
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        post.save_state_to_ini_file("imnodes_test.ini");
+        post.load_state_from_ini_file("imnodes_test.ini");
+    }
 
     // Selection helpers: these are no-ops but should not crash.
     post.select_node(node_id);

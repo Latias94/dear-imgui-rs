@@ -1,6 +1,27 @@
 use super::*;
+use crate::ColorEditOptions;
+use crate::io::assert_positive_f32;
 
 impl Io {
+    /// Returns the default options used by color edit and picker widgets.
+    #[doc(alias = "ConfigColorEditFlags")]
+    pub fn color_edit_options(&self) -> ColorEditOptions {
+        ColorEditOptions::from_bits(
+            self.inner().ConfigColorEditFlags as u32,
+            "Io::color_edit_options()",
+        )
+    }
+
+    /// Sets the default options used by color edit and picker widgets.
+    ///
+    /// Unspecified display, data, picker, and input modes use Dear ImGui's defaults.
+    #[doc(alias = "ConfigColorEditFlags")]
+    pub fn set_color_edit_options(&mut self, options: impl Into<ColorEditOptions>) {
+        let options = options.into();
+        options.validate("Io::set_color_edit_options()");
+        self.inner_mut().ConfigColorEditFlags = options.with_default_choices().bits() as i32;
+    }
+
     /// Returns whether to use MacOSX-style behaviors.
     #[doc(alias = "ConfigMacOSXBehaviors")]
     pub fn config_macosx_behaviors(&self) -> bool {
@@ -139,7 +160,28 @@ impl Io {
     #[doc(alias = "MouseDoubleClickTime")]
     pub fn set_mouse_double_click_time(&mut self, seconds: f32) {
         assert_non_negative_f32("Io::set_mouse_double_click_time()", "seconds", seconds);
+        assert!(
+            seconds < self.mouse_single_click_delay(),
+            "Io::set_mouse_double_click_time() seconds must be less than MouseSingleClickDelay"
+        );
         self.inner_mut().MouseDoubleClickTime = seconds;
+    }
+
+    /// Returns the delay used to disambiguate a single click from repeated clicks (seconds).
+    #[doc(alias = "MouseSingleClickDelay")]
+    pub fn mouse_single_click_delay(&self) -> f32 {
+        self.inner().MouseSingleClickDelay
+    }
+
+    /// Sets the delay used to disambiguate a single click from repeated clicks (seconds).
+    #[doc(alias = "MouseSingleClickDelay")]
+    pub fn set_mouse_single_click_delay(&mut self, seconds: f32) {
+        assert_positive_f32("Io::set_mouse_single_click_delay()", "seconds", seconds);
+        assert!(
+            seconds > self.mouse_double_click_time(),
+            "Io::set_mouse_single_click_delay() seconds must be greater than MouseDoubleClickTime"
+        );
+        self.inner_mut().MouseSingleClickDelay = seconds;
     }
 
     /// Returns the maximum distance to qualify as a double-click (pixels).

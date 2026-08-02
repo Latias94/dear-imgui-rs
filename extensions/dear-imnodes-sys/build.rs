@@ -97,6 +97,16 @@ fn native_binding_spec() -> &'static build_support::binding::CrateBindingSpec {
         .expect("missing dear-imnodes-sys native binding spec")
 }
 
+fn maintained_source_paths(
+    cfg: &BuildConfig,
+) -> build_support::source_inventory::MaintainedSourcePaths {
+    build_support::source_inventory::MaintainedSourcePaths::for_crate(
+        env!("CARGO_PKG_NAME"),
+        cfg.manifest_dir.clone(),
+    )
+    .unwrap_or_else(|error| panic!("dear-imnodes-sys: {error}"))
+}
+
 #[cfg(feature = "bindgen")]
 fn apply_bindgen_defines(mut builder: bindgen::Builder) -> bindgen::Builder {
     for define in native_binding_spec().binding_defines() {
@@ -113,7 +123,7 @@ fn generate_bindings(
     cimgui_root: &Path,
 ) {
     // For wasm32 targets, rely on pregenerated import-style bindings that import
-    // from the shared imgui-sys-v0 provider instead of running bindgen here.
+    // from the shared imgui-sys-v1 provider instead of running bindgen here.
     if cfg.target_arch == "wasm32" {
         if !cfg!(feature = "wasm") {
             panic!(
@@ -255,7 +265,13 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
     false
 }
 
-fn build_with_cc(cfg: &BuildConfig, cimnodes_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
+fn build_with_cc(
+    cfg: &BuildConfig,
+    sources: &build_support::source_inventory::MaintainedSourcePaths,
+    cimnodes_root: &Path,
+    imgui_src: &Path,
+    cimgui_root: &Path,
+) {
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
     build_support::configure_cpp_runtime_linkage(&mut build, &cfg.target_os, &cfg.target_env);
@@ -266,9 +282,13 @@ fn build_with_cc(cfg: &BuildConfig, cimnodes_root: &Path, imgui_src: &Path, cimg
     build.include(cfg.manifest_dir.join("shim"));
     build.include(cimnodes_root.join("imnodes"));
     build.define("IMNODES_NAMESPACE", Some("imnodes"));
-    build.file(cimnodes_root.join("cimnodes.cpp"));
-    build.file(cimnodes_root.join("imnodes/imnodes.cpp"));
-    build.file(cfg.manifest_dir.join("shim/imnodes_extra.cpp"));
+    for file_id in ["wrapper", "core", "shim"] {
+        build.file(
+            sources
+                .file(file_id)
+                .unwrap_or_else(|error| panic!("dear-imnodes-sys: {error}")),
+        );
+    }
     if cfg.is_msvc() && cfg.is_windows() {
         build.flag("/EHsc");
         let use_static = cfg.use_static_crt();
@@ -291,15 +311,17 @@ fn build_with_cc(cfg: &BuildConfig, cimnodes_root: &Path, imgui_src: &Path, cimg
 
 fn main() {
     let cfg = BuildConfig::new();
+    let sources = maintained_source_paths(&cfg);
 
     // Rerun hints
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=third-party/cimnodes/cimnodes.h");
-    println!("cargo:rerun-if-changed=third-party/cimnodes/cimnodes.cpp");
     println!("cargo:rerun-if-changed=third-party/cimnodes/imnodes/imnodes.h");
-    println!("cargo:rerun-if-changed=third-party/cimnodes/imnodes/imnodes.cpp");
+    for path in sources.native_candidate_paths() {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
     println!("cargo:rerun-if-changed=../../dear-imgui-sys");
     println!("cargo:rerun-if-env-changed=IMNODES_SYS_LIB_DIR");
     println!("cargo:rerun-if-env-changed=IMNODES_SYS_SKIP_CC");
@@ -331,14 +353,16 @@ fn main() {
 
     // docs.rs builds: prefer pregenerated bindings and skip native build logic
     if cfg.docs_rs {
-        docsrs_build(&cfg);
+        docsrs_build(&cfg, &sources);
         return;
     }
 
     // Maintainer workflow: regenerate bindings via bindgen without requiring native compilation.
     if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
         let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
-        let cimnodes_root = cfg.manifest_dir.join("third-party/cimnodes");
+        let cimnodes_root = sources
+            .source_root()
+            .unwrap_or_else(|error| panic!("dear-imnodes-sys: {error}"));
         if !imgui_src.exists() {
             panic!("ImGui include not found at {:?}", imgui_src);
         }
@@ -374,7 +398,9 @@ fn main() {
     }
 
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
-    let cimnodes_root = cfg.manifest_dir.join("third-party/cimnodes");
+    let cimnodes_root = sources
+        .source_root()
+        .unwrap_or_else(|error| panic!("dear-imnodes-sys: {error}"));
     if !imgui_src.exists() {
         panic!("ImGui include not found at {:?}", imgui_src);
     }
@@ -411,7 +437,10 @@ fn main() {
     };
     if cfg.target_arch != "wasm32" {
         if !linked && env::var("IMNODES_SYS_SKIP_CC").is_err() {
-            build_with_cc(&cfg, &cimnodes_root, &imgui_src, &cimgui_root);
+            sources
+                .validate_native()
+                .unwrap_or_else(|error| panic!("dear-imnodes-sys: {error}"));
+            build_with_cc(&cfg, &sources, &cimnodes_root, &imgui_src, &cimgui_root);
         }
     } else {
         println!(
@@ -420,7 +449,10 @@ fn main() {
     }
 }
 
-fn docsrs_build(cfg: &BuildConfig) {
+fn docsrs_build(
+    cfg: &BuildConfig,
+    sources: &build_support::source_inventory::MaintainedSourcePaths,
+) {
     println!("cargo:warning=DOCS_RS detected: generating bindings, skipping native build");
     println!("cargo:rustc-cfg=docsrs");
     if use_pregenerated_bindings(&cfg.out_dir) {
@@ -429,7 +461,9 @@ fn docsrs_build(cfg: &BuildConfig) {
 
     // Fallback: try to generate bindings from headers if available
     let (imgui_src, cimgui_root) = resolve_imgui_includes(cfg);
-    let cimnodes_root = cfg.manifest_dir.join("third-party/cimnodes");
+    let cimnodes_root = sources
+        .source_root()
+        .unwrap_or_else(|error| panic!("dear-imnodes-sys: {error}"));
 
     if imgui_src.exists() && cimgui_root.exists() && cimnodes_root.exists() {
         generate_bindings(cfg, &cimnodes_root, &imgui_src, &cimgui_root);

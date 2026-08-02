@@ -49,7 +49,7 @@ pub mod tree;
 
 // Re-export important types
 pub use popup::{PopupContextFlags, PopupOpenFlags, PopupQueryFlags};
-pub use table::{TableBgTarget, TableBuilder, TableColumnSetup};
+pub use table::{TableBgTarget, TableBuilder, TableColumnSetup, TableColumnUserData};
 
 // Widget implementations
 pub use self::button::*;

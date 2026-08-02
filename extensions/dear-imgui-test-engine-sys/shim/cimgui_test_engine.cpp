@@ -1,4 +1,5 @@
 #include "cimgui_test_engine.h"
+#include "cimgui_test_engine_capture_bridge.h"
 #include "cimgui_test_engine_internal.h"
 
 #include "imgui_te_engine.h"
@@ -12,6 +13,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <unordered_map>
+#include <vector>
 
 namespace dear_imgui_test_engine_abi {
 namespace {
@@ -38,8 +40,36 @@ private:
 
 enum class EngineState { Live, Destroying };
 
+struct HiddenWindowState {
+    ImGuiID WindowId = 0;
+    ImS8 HiddenFramesForRenderOnly = 0;
+};
+
+struct EngineRecord {
+    EngineState State = EngineState::Live;
+    bool PresentationPending = false;
+    ImGuiTestEnginePresentationTraceCallback_c PresentationTrace = nullptr;
+    void* PresentationTraceUserData = nullptr;
+    bool CaptureAbortRequested = false;
+    bool CaptureWaitPending = false;
+    ImGuiTestEngineCaptureCallback_c CaptureProvider = nullptr;
+    void* CaptureProviderUserData = nullptr;
+    bool CaptureProviderFailed = false;
+    bool CaptureRollbackValid = false;
+    bool HiddenWindowBackupValid = false;
+    std::vector<HiddenWindowState> HiddenWindows;
+    bool ScreenshotConfigActive = false;
+    ImGuiTestRunSpeed ScreenshotRunSpeed = ImGuiTestRunSpeed_Normal;
+    bool WindowMoveConfigActive = false;
+    bool WindowMoveFromTitleBarOnly = false;
+    bool VideoConfigActive = false;
+    ImGuiTestRunSpeed VideoRunSpeed = ImGuiTestRunSpeed_Normal;
+    bool VideoNoThrottle = false;
+    float VideoFixedDeltaTime = 0.0f;
+};
+
 std::atomic_flag g_engine_lock = ATOMIC_FLAG_INIT;
-std::unordered_map<ImGuiTestEngine*, EngineState> g_engines;
+std::unordered_map<ImGuiTestEngine*, EngineRecord> g_engines;
 
 struct AtomicCounters {
     std::atomic<std::uint64_t> EnginesCreated{0};
@@ -53,6 +83,60 @@ struct AtomicCounters {
 };
 
 AtomicCounters g_counters;
+
+bool capture_active(ImGuiTestEngine* engine) noexcept {
+    return engine->CaptureCurrentArgs != nullptr || engine->CaptureContext.IsCapturing() ||
+           engine->CaptureTool._StateIsCapturing ||
+           engine->CaptureTool._StateIsPickingWindow;
+}
+
+bool screen_capture_trampoline(
+    ImGuiID viewport_id,
+    int x,
+    int y,
+    int width,
+    int height,
+    unsigned int* pixels,
+    void* engine_user_data
+) noexcept {
+    auto* engine = static_cast<ImGuiTestEngine*>(engine_user_data);
+    ImGuiTestEngineCaptureCallback_c callback = nullptr;
+    void* callback_user_data = nullptr;
+    {
+        SpinGuard guard(g_engine_lock);
+        const auto found = g_engines.find(engine);
+        if (found == g_engines.end()) {
+            return false;
+        }
+        callback = found->second.CaptureProvider;
+        callback_user_data = found->second.CaptureProviderUserData;
+    }
+
+    bool captured = false;
+    if (callback != nullptr) {
+        try {
+            captured = callback(
+                static_cast<std::uint32_t>(viewport_id),
+                x,
+                y,
+                width,
+                height,
+                reinterpret_cast<std::uint32_t*>(pixels),
+                callback_user_data
+            );
+        } catch (...) {
+            captured = false;
+        }
+    }
+    if (!captured) {
+        SpinGuard guard(g_engine_lock);
+        const auto found = g_engines.find(engine);
+        if (found != g_engines.end()) {
+            found->second.CaptureProviderFailed = true;
+        }
+    }
+    return captured;
+}
 
 std::atomic<std::uint64_t>& counter_ref(Counter counter) noexcept {
     switch (counter) {
@@ -121,7 +205,7 @@ ImGuiTestEngineStatus require_engine(ImGuiTestEngine* engine) noexcept {
     if (found == g_engines.end()) {
         return fail(ImGuiTestEngineStatus_InvalidState, "engine is not managed by this ABI");
     }
-    if (found->second != EngineState::Live) {
+    if (found->second.State != EngineState::Live) {
         return fail(ImGuiTestEngineStatus_InvalidState, "engine is not live");
     }
     return ImGuiTestEngineStatus_Success;
@@ -129,22 +213,22 @@ ImGuiTestEngineStatus require_engine(ImGuiTestEngine* engine) noexcept {
 
 void register_engine(ImGuiTestEngine* engine) {
     SpinGuard guard(g_engine_lock);
-    g_engines.insert_or_assign(engine, EngineState::Live);
+    g_engines.insert_or_assign(engine, EngineRecord{});
 }
 
 void begin_destroy_engine(ImGuiTestEngine* engine) noexcept {
     SpinGuard guard(g_engine_lock);
     const auto found = g_engines.find(engine);
     if (found != g_engines.end()) {
-        found->second = EngineState::Destroying;
+        found->second.State = EngineState::Destroying;
     }
 }
 
 void cancel_destroy_engine(ImGuiTestEngine* engine) noexcept {
     SpinGuard guard(g_engine_lock);
     const auto found = g_engines.find(engine);
-    if (found != g_engines.end() && found->second == EngineState::Destroying) {
-        found->second = EngineState::Live;
+    if (found != g_engines.end() && found->second.State == EngineState::Destroying) {
+        found->second.State = EngineState::Live;
     }
 }
 
@@ -276,6 +360,7 @@ ImGuiTestEngineStatus imgui_test_engine_destroy_context(ImGuiTestEngine* engine)
 
         abi::begin_destroy_engine(engine);
         try {
+            abi::clear_capture_provider(engine);
             abi::maybe_inject(ImGuiTestEngineExceptionPoint_UpstreamCall);
             ImGuiTestEngine_DestroyContext(engine);
             abi::cleanup_scripts(engine);
@@ -360,6 +445,7 @@ ImGuiTestEngineStatus imgui_test_engine_unbind(ImGuiTestEngine* engine) {
         }
         abi::maybe_inject(ImGuiTestEngineExceptionPoint_UpstreamCall);
         abi::ScopedCurrentContext current(target);
+        abi::clear_capture_provider(engine);
         abi::unregister_context_shutdown_observer(engine, target);
         ImGuiTestEngine_UnbindImGuiContext(engine, target);
         abi::increment(abi::Counter::EngineUnbound);
@@ -417,16 +503,506 @@ ImGuiTestEngineStatus imgui_test_engine_stop(ImGuiTestEngine* engine) {
             return abi::fail(ImGuiTestEngineStatus_InvalidState, "engine is not started and bound");
         }
         ImGuiContext* target = engine->UiContextTarget;
+        abi::request_capture_abort(engine);
         abi::maybe_inject(ImGuiTestEngineExceptionPoint_UpstreamCall);
         abi::ScopedCurrentContext current(target);
         ImGuiTestEngine_Stop(engine);
+        abi::clear_capture_provider(engine);
+        abi::clear_capture_abort(engine);
         abi::increment(abi::Counter::EngineStopped);
         return ImGuiTestEngineStatus_Success;
     });
 }
 
-ImGuiTestEngineStatus imgui_test_engine_post_swap(ImGuiTestEngine* engine) {
-    return abi::boundary("imgui_test_engine_post_swap", [&]() {
+} // extern "C"
+
+namespace dear_imgui_test_engine_abi {
+
+bool begin_presentation(ImGuiTestEngine* engine) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    if (found == g_engines.end() || found->second.PresentationPending) {
+        return false;
+    }
+    found->second.PresentationPending = true;
+    return true;
+}
+
+bool presentation_pending(ImGuiTestEngine* engine) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    return found != g_engines.end() && found->second.PresentationPending;
+}
+
+void finish_presentation(ImGuiTestEngine* engine) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    if (found != g_engines.end()) {
+        found->second.PresentationPending = false;
+        if (!capture_active(engine)) {
+            found->second.CaptureRollbackValid = false;
+            found->second.HiddenWindowBackupValid = false;
+            found->second.HiddenWindows.clear();
+        }
+    }
+}
+
+void trace_presentation(
+    ImGuiTestEngine* engine,
+    ImGuiTestEnginePresentationEvent event
+) {
+    ImGuiTestEnginePresentationTraceCallback_c callback = nullptr;
+    void* user_data = nullptr;
+    {
+        SpinGuard guard(g_engine_lock);
+        const auto found = g_engines.find(engine);
+        if (found == g_engines.end()) {
+            return;
+        }
+        callback = found->second.PresentationTrace;
+        user_data = found->second.PresentationTraceUserData;
+    }
+    if (callback != nullptr) {
+        callback(event, user_data);
+    }
+}
+
+bool set_presentation_trace(
+    ImGuiTestEngine* engine,
+    ImGuiTestEnginePresentationTraceCallback_c callback,
+    void* user_data
+) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    if (found == g_engines.end() || found->second.PresentationPending) {
+        return false;
+    }
+    found->second.PresentationTrace = callback;
+    found->second.PresentationTraceUserData = user_data;
+    return true;
+}
+
+bool get_capture_state(
+    ImGuiTestEngine* engine,
+    ImGuiTestEngineCaptureState_c* out_state
+) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    if (found == g_engines.end()) {
+        return false;
+    }
+    const EngineRecord& record = found->second;
+    *out_state = {};
+    out_state->PresentationPending = record.PresentationPending;
+    out_state->CaptureAbortRequested = record.CaptureAbortRequested;
+    out_state->CaptureWaitPending = record.CaptureWaitPending;
+    out_state->ProviderInstalled = record.CaptureProvider != nullptr;
+    out_state->ContextCapturing = engine->CaptureContext.IsCapturing();
+    out_state->ToolCapturing = engine->CaptureTool._StateIsCapturing;
+    out_state->ToolPicking = engine->CaptureTool._StateIsPickingWindow;
+    out_state->IoCapturing = engine->IO.IsCapturing;
+    out_state->EngineAbort = engine->Abort;
+    out_state->CaptureRollbackValid = record.CaptureRollbackValid;
+    out_state->HiddenWindowBackupValid = record.HiddenWindowBackupValid;
+    out_state->ScreenshotConfigActive = record.ScreenshotConfigActive;
+    out_state->WindowMoveConfigActive = record.WindowMoveConfigActive;
+    out_state->VideoConfigActive = record.VideoConfigActive;
+    return true;
+}
+
+bool set_interactive_capture_state(
+    ImGuiTestEngine* engine,
+    bool capturing,
+    bool picking
+) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    if (found == g_engines.end() || found->second.PresentationPending ||
+        found->second.CaptureWaitPending) {
+        return false;
+    }
+    engine->CaptureTool._StateIsCapturing = capturing;
+    engine->CaptureTool._StateIsPickingWindow = picking;
+    engine->IO.IsCapturing = capturing || picking;
+    return true;
+}
+
+void finish_capture_rollback(ImGuiTestEngine* engine) noexcept {
+    if (capture_active(engine)) {
+        return;
+    }
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    if (found == g_engines.end()) {
+        return;
+    }
+    found->second.CaptureRollbackValid = false;
+    found->second.HiddenWindowBackupValid = false;
+    found->second.HiddenWindows.clear();
+}
+
+void record_hidden_window_rollback(ImGuiTestEngine* engine) {
+    if (engine->UiContextTarget == nullptr) {
+        return;
+    }
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    if (found == g_engines.end()) {
+        return;
+    }
+    EngineRecord& record = found->second;
+    if (record.HiddenWindowBackupValid) {
+        return;
+    }
+    record.HiddenWindows.clear();
+    record.HiddenWindows.reserve(static_cast<std::size_t>(engine->UiContextTarget->Windows.Size));
+    for (ImGuiWindow* window : engine->UiContextTarget->Windows) {
+        record.HiddenWindows.push_back({window->ID, window->HiddenFramesForRenderOnly});
+    }
+    record.HiddenWindowBackupValid = true;
+}
+
+void record_capture_wait(ImGuiTestEngine* engine) {
+    {
+        SpinGuard guard(g_engine_lock);
+        const auto found = g_engines.find(engine);
+        if (found == g_engines.end()) {
+            return;
+        }
+        found->second.CaptureWaitPending = true;
+    }
+    record_hidden_window_rollback(engine);
+}
+
+void record_capture_rollback(ImGuiTestEngine* engine) {
+    if (capture_active(engine)) {
+        record_hidden_window_rollback(engine);
+    }
+}
+
+void commit_capture_rollback(ImGuiTestEngine* engine) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    if (found == g_engines.end()) {
+        return;
+    }
+    found->second.CaptureRollbackValid =
+        capture_active(engine) && engine->CaptureContext._FrameNo > 0;
+}
+
+bool capture_provider_failed(ImGuiTestEngine* engine) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    return found != g_engines.end() && found->second.CaptureProviderFailed;
+}
+
+bool take_capture_provider_failure(ImGuiTestEngine* engine) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    if (found == g_engines.end()) {
+        return false;
+    }
+    const bool failed = found->second.CaptureProviderFailed;
+    found->second.CaptureProviderFailed = false;
+    return failed;
+}
+
+void clear_capture_provider(ImGuiTestEngine* engine) noexcept {
+    if (engine == nullptr) {
+        return;
+    }
+    {
+        SpinGuard guard(g_engine_lock);
+        const auto found = g_engines.find(engine);
+        if (found == g_engines.end()) {
+            return;
+        }
+        found->second.CaptureProvider = nullptr;
+        found->second.CaptureProviderUserData = nullptr;
+        found->second.CaptureProviderFailed = false;
+    }
+    engine->IO.ScreenCaptureFunc = nullptr;
+    engine->IO.ScreenCaptureUserData = nullptr;
+    engine->CaptureContext.ScreenCaptureFunc = nullptr;
+    engine->CaptureContext.ScreenCaptureUserData = nullptr;
+}
+
+bool capture_abort_requested(ImGuiTestEngine* engine) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    return found != g_engines.end() && found->second.CaptureAbortRequested;
+}
+
+bool capture_wait_pending(ImGuiTestEngine* engine) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    return found != g_engines.end() && found->second.CaptureWaitPending;
+}
+
+void clear_capture_abort(ImGuiTestEngine* engine) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    if (found == g_engines.end()) {
+        return;
+    }
+    EngineRecord& record = found->second;
+    record.PresentationPending = false;
+    record.CaptureAbortRequested = false;
+    record.CaptureWaitPending = false;
+    record.CaptureProviderFailed = false;
+    record.CaptureRollbackValid = false;
+    record.HiddenWindowBackupValid = false;
+    record.HiddenWindows.clear();
+    record.ScreenshotConfigActive = false;
+    record.WindowMoveConfigActive = false;
+    record.VideoConfigActive = false;
+}
+
+void clear_settled_capture_abort(ImGuiTestEngine* engine) noexcept {
+    if (engine == nullptr || engine->Abort || capture_active(engine)) {
+        return;
+    }
+    bool settled = false;
+    {
+        SpinGuard guard(g_engine_lock);
+        const auto found = g_engines.find(engine);
+        settled = found != g_engines.end() &&
+                  found->second.CaptureAbortRequested &&
+                  !found->second.CaptureWaitPending &&
+                  !found->second.PresentationPending;
+    }
+    if (settled) {
+        clear_capture_abort(engine);
+    }
+}
+
+void begin_screenshot_config(
+    ImGuiTestEngine* engine,
+    ImGuiTestRunSpeed run_speed
+) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    if (found == g_engines.end() || found->second.ScreenshotConfigActive) {
+        return;
+    }
+    found->second.ScreenshotConfigActive = true;
+    found->second.ScreenshotRunSpeed = run_speed;
+}
+
+void restore_screenshot_config(ImGuiTestEngine* engine) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    if (found == g_engines.end() || !found->second.ScreenshotConfigActive) {
+        return;
+    }
+    engine->IO.ConfigRunSpeed = found->second.ScreenshotRunSpeed;
+    found->second.ScreenshotConfigActive = false;
+}
+
+void begin_window_move_config(ImGuiTestEngine* engine, bool value) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    if (found == g_engines.end() || found->second.WindowMoveConfigActive) {
+        return;
+    }
+    found->second.WindowMoveConfigActive = true;
+    found->second.WindowMoveFromTitleBarOnly = value;
+}
+
+void restore_window_move_config(ImGuiTestEngine* engine) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    if (found == g_engines.end() || !found->second.WindowMoveConfigActive ||
+        engine->UiContextTarget == nullptr) {
+        return;
+    }
+    engine->UiContextTarget->IO.ConfigWindowsMoveFromTitleBarOnly =
+        found->second.WindowMoveFromTitleBarOnly;
+    found->second.WindowMoveConfigActive = false;
+}
+
+void begin_video_config(ImGuiTestEngine* engine) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    if (found == g_engines.end() || found->second.VideoConfigActive) {
+        return;
+    }
+    EngineRecord& record = found->second;
+    record.VideoConfigActive = true;
+    record.VideoRunSpeed = engine->IO.ConfigRunSpeed;
+    record.VideoNoThrottle = engine->IO.ConfigNoThrottle;
+    record.VideoFixedDeltaTime = engine->IO.ConfigFixedDeltaTime;
+}
+
+void restore_video_config(ImGuiTestEngine* engine) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    if (found == g_engines.end() || !found->second.VideoConfigActive) {
+        return;
+    }
+    EngineRecord& record = found->second;
+    engine->IO.ConfigRunSpeed = record.VideoRunSpeed;
+    engine->IO.ConfigNoThrottle = record.VideoNoThrottle;
+    engine->IO.ConfigFixedDeltaTime = record.VideoFixedDeltaTime;
+    record.VideoConfigActive = false;
+}
+
+void cancel_capture(ImGuiTestEngine* engine) noexcept {
+    if (engine == nullptr) {
+        return;
+    }
+    ScopedCurrentContext current(engine->UiContextTarget);
+
+    bool capture_rollback_valid = false;
+    {
+        SpinGuard guard(g_engine_lock);
+        const auto found = g_engines.find(engine);
+        if (found == g_engines.end()) {
+            return;
+        }
+        EngineRecord& record = found->second;
+        record.CaptureAbortRequested = true;
+        capture_rollback_valid = record.CaptureRollbackValid;
+        if (record.HiddenWindowBackupValid && engine->UiContextTarget != nullptr) {
+            for (const HiddenWindowState& backup : record.HiddenWindows) {
+                if (ImGuiWindow* window = ImGui::FindWindowByID(backup.WindowId)) {
+                    window->HiddenFramesForRenderOnly = backup.HiddenFramesForRenderOnly;
+                }
+            }
+        }
+        record.CaptureRollbackValid = false;
+        record.HiddenWindowBackupValid = false;
+        record.HiddenWindows.clear();
+    }
+
+    ImGuiCaptureContext& capture = engine->CaptureContext;
+    if (capture_rollback_valid) {
+        capture.RestoreBackedUpData();
+    }
+    if (capture._VideoEncoderPipe != nullptr) {
+        FILE* encoder_pipe = capture._VideoEncoderPipe;
+        capture._VideoEncoderPipe = nullptr;
+        ImOsPClose(encoder_pipe);
+    }
+    capture._VideoRecording = false;
+    capture._CaptureBuf.Clear();
+    capture._WindowsData.clear();
+    capture.ClearState();
+    restore_screenshot_config(engine);
+    restore_window_move_config(engine);
+    restore_video_config(engine);
+
+    engine->CaptureCurrentArgs = nullptr;
+    engine->CaptureTool._StateIsCapturing = false;
+    engine->CaptureTool._StateIsPickingWindow = false;
+    engine->IO.IsCapturing = false;
+    engine->PreSwapCalled = false;
+    engine->PostSwapCalled = false;
+}
+
+void request_capture_abort(ImGuiTestEngine* engine) noexcept {
+    if (engine == nullptr) {
+        return;
+    }
+    {
+        ScopedCurrentContext current(engine->UiContextTarget);
+        ImGuiTestEngine_AbortCurrentTest(engine);
+    }
+    {
+        SpinGuard guard(g_engine_lock);
+        const auto found = g_engines.find(engine);
+        if (found != g_engines.end()) {
+            found->second.PresentationPending = false;
+        }
+    }
+    cancel_capture(engine);
+}
+
+void finish_capture_wait(ImGuiTestEngine* engine) noexcept {
+    if (engine == nullptr) {
+        return;
+    }
+    {
+        SpinGuard guard(g_engine_lock);
+        const auto found = g_engines.find(engine);
+        if (found == g_engines.end()) {
+            return;
+        }
+        found->second.CaptureWaitPending = false;
+        if (!engine->Abort) {
+            found->second.CaptureAbortRequested = false;
+        }
+    }
+    finish_capture_rollback(engine);
+}
+
+} // namespace dear_imgui_test_engine_abi
+
+bool dear_imgui_rs_test_engine_capture_should_abort(ImGuiTestEngine* engine) noexcept {
+    return engine == nullptr || engine->Abort || engine->TestQueueCoroutineShouldExit ||
+           abi::capture_abort_requested(engine);
+}
+
+void dear_imgui_rs_test_engine_request_capture_abort(ImGuiTestEngine* engine) noexcept {
+    abi::request_capture_abort(engine);
+}
+
+void dear_imgui_rs_test_engine_clear_capture_abort(ImGuiTestEngine* engine) noexcept {
+    abi::clear_capture_abort(engine);
+}
+
+bool dear_imgui_rs_test_engine_take_capture_provider_failure(
+    ImGuiTestEngine* engine
+) noexcept {
+    return abi::take_capture_provider_failure(engine);
+}
+
+void dear_imgui_rs_test_engine_begin_capture_wait(ImGuiTestEngine* engine) noexcept {
+    try {
+        abi::record_capture_wait(engine);
+    } catch (...) {
+        abi::request_capture_abort(engine);
+    }
+}
+
+void dear_imgui_rs_test_engine_end_capture_wait(ImGuiTestEngine* engine) noexcept {
+    abi::finish_capture_wait(engine);
+}
+
+void dear_imgui_rs_test_engine_begin_screenshot_config(
+    ImGuiTestEngine* engine,
+    ImGuiTestRunSpeed run_speed
+) noexcept {
+    abi::begin_screenshot_config(engine, run_speed);
+}
+
+void dear_imgui_rs_test_engine_restore_screenshot_config(ImGuiTestEngine* engine) noexcept {
+    abi::restore_screenshot_config(engine);
+}
+
+void dear_imgui_rs_test_engine_begin_window_move_config(
+    ImGuiTestEngine* engine,
+    bool move_from_title_bar_only
+) noexcept {
+    abi::begin_window_move_config(engine, move_from_title_bar_only);
+}
+
+void dear_imgui_rs_test_engine_restore_window_move_config(ImGuiTestEngine* engine) noexcept {
+    abi::restore_window_move_config(engine);
+}
+
+void dear_imgui_rs_test_engine_begin_video_config(ImGuiTestEngine* engine) noexcept {
+    abi::begin_video_config(engine);
+}
+
+void dear_imgui_rs_test_engine_restore_video_config(ImGuiTestEngine* engine) noexcept {
+    abi::restore_video_config(engine);
+}
+
+extern "C" {
+
+ImGuiTestEngineStatus imgui_test_engine_pre_swap(ImGuiTestEngine* engine) {
+    return abi::boundary("imgui_test_engine_pre_swap", [&]() {
         const ImGuiTestEngineStatus status = abi::require_engine(engine);
         if (status != ImGuiTestEngineStatus_Success) {
             return status;
@@ -434,9 +1010,225 @@ ImGuiTestEngineStatus imgui_test_engine_post_swap(ImGuiTestEngine* engine) {
         if (!engine->Started || engine->UiContextTarget == nullptr) {
             return abi::fail(ImGuiTestEngineStatus_InvalidState, "engine is not started and bound");
         }
+        if (abi::presentation_pending(engine)) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidState,
+                "a presentation cycle is already pending"
+            );
+        }
+        abi::clear_settled_capture_abort(engine);
         abi::maybe_inject(ImGuiTestEngineExceptionPoint_UpstreamCall);
         abi::ScopedCurrentContext current(engine->UiContextTarget);
+        ImGuiTestEngine_PreSwap(engine);
+        abi::trace_presentation(engine, ImGuiTestEnginePresentationEvent_PreSwap);
+        if (!abi::begin_presentation(engine)) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidState,
+                "presentation state changed during pre-swap"
+            );
+        }
+        return ImGuiTestEngineStatus_Success;
+    });
+}
+
+ImGuiTestEngineStatus imgui_test_engine_post_swap(
+    ImGuiTestEngine* engine,
+    bool* out_presentation_completed
+) {
+    return abi::boundary("imgui_test_engine_post_swap", [&]() {
+        if (out_presentation_completed == nullptr) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidArgument,
+                "out_presentation_completed must not be null"
+            );
+        }
+        *out_presentation_completed = false;
+        const ImGuiTestEngineStatus status = abi::require_engine(engine);
+        if (status != ImGuiTestEngineStatus_Success) {
+            return status;
+        }
+        if (!engine->Started || engine->UiContextTarget == nullptr) {
+            return abi::fail(ImGuiTestEngineStatus_InvalidState, "engine is not started and bound");
+        }
+        if (!abi::presentation_pending(engine)) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidState,
+                "post-swap requires a pending presentation cycle"
+            );
+        }
+        abi::maybe_inject(ImGuiTestEngineExceptionPoint_UpstreamCall);
+        abi::ScopedCurrentContext current(engine->UiContextTarget);
+        abi::record_capture_rollback(engine);
         ImGuiTestEngine_PostSwap(engine);
+        abi::commit_capture_rollback(engine);
+        abi::finish_presentation(engine);
+        abi::trace_presentation(engine, ImGuiTestEnginePresentationEvent_PostSwap);
+        *out_presentation_completed = true;
+        if (abi::capture_provider_failed(engine)) {
+            return abi::fail(
+                ImGuiTestEngineStatus_CaptureFailed,
+                "the framebuffer capture provider rejected a capture request"
+            );
+        }
+        return ImGuiTestEngineStatus_Success;
+    });
+}
+
+ImGuiTestEngineStatus imgui_test_engine_abort_presentation(ImGuiTestEngine* engine) {
+    return abi::boundary("imgui_test_engine_abort_presentation", [&]() {
+        const ImGuiTestEngineStatus status = abi::require_engine(engine);
+        if (status != ImGuiTestEngineStatus_Success) {
+            return status;
+        }
+        if (!engine->Started || engine->UiContextTarget == nullptr) {
+            return abi::fail(ImGuiTestEngineStatus_InvalidState, "engine is not started and bound");
+        }
+        if (!abi::presentation_pending(engine)) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidState,
+                "presentation abort requires a pending presentation cycle"
+            );
+        }
+        abi::request_capture_abort(engine);
+        return ImGuiTestEngineStatus_Success;
+    });
+}
+
+ImGuiTestEngineStatus imgui_test_engine_install_capture_provider(
+    ImGuiTestEngine* engine,
+    ImGuiTestEngineCaptureCallback_c callback,
+    void* user_data
+) {
+    return abi::boundary("imgui_test_engine_install_capture_provider", [&]() {
+        const ImGuiTestEngineStatus status = abi::require_engine(engine);
+        if (status != ImGuiTestEngineStatus_Success) {
+            return status;
+        }
+#if !IMGUI_TEST_ENGINE_ENABLE_CAPTURE
+        IM_UNUSED(callback);
+        IM_UNUSED(user_data);
+        return abi::fail(
+            ImGuiTestEngineStatus_Unsupported,
+            "capture support was not compiled into the Test Engine"
+        );
+#else
+        if (callback == nullptr) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidArgument,
+                "capture callback must not be null"
+            );
+        }
+        if (!engine->Started || engine->UiContextTarget == nullptr) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidState,
+                "capture provider installation requires a started engine"
+            );
+        }
+        if (abi::presentation_pending(engine) || abi::capture_active(engine)) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidState,
+                "capture provider cannot change during an active capture or presentation"
+            );
+        }
+        {
+            abi::SpinGuard guard(abi::g_engine_lock);
+            const auto found = abi::g_engines.find(engine);
+            if (found == abi::g_engines.end()) {
+                return abi::fail(
+                    ImGuiTestEngineStatus_InvalidState,
+                    "engine is not managed by this ABI"
+                );
+            }
+            if (found->second.CaptureProvider != nullptr) {
+                return abi::fail(
+                    ImGuiTestEngineStatus_InvalidState,
+                    "a capture provider is already installed"
+                );
+            }
+            found->second.CaptureProvider = callback;
+            found->second.CaptureProviderUserData = user_data;
+            found->second.CaptureProviderFailed = false;
+        }
+        // PostSwap copies the engine IO callbacks into CaptureContext every frame, so the IO
+        // fields are the source of truth. Set the context too for immediate interactive capture.
+        engine->IO.ScreenCaptureFunc = abi::screen_capture_trampoline;
+        engine->IO.ScreenCaptureUserData = engine;
+        engine->CaptureContext.ScreenCaptureFunc = abi::screen_capture_trampoline;
+        engine->CaptureContext.ScreenCaptureUserData = engine;
+        return ImGuiTestEngineStatus_Success;
+#endif
+    });
+}
+
+ImGuiTestEngineStatus imgui_test_engine_clear_capture_provider(
+    ImGuiTestEngine* engine,
+    void* user_data
+) {
+    return abi::boundary("imgui_test_engine_clear_capture_provider", [&]() {
+        const ImGuiTestEngineStatus status = abi::require_engine(engine);
+        if (status != ImGuiTestEngineStatus_Success) {
+            return status;
+        }
+        bool installed = false;
+        {
+            abi::SpinGuard guard(abi::g_engine_lock);
+            const auto found = abi::g_engines.find(engine);
+            if (found == abi::g_engines.end()) {
+                return abi::fail(
+                    ImGuiTestEngineStatus_InvalidState,
+                    "engine is not managed by this ABI"
+                );
+            }
+            installed = found->second.CaptureProvider != nullptr;
+            if (installed && found->second.CaptureProviderUserData != user_data) {
+                return abi::fail(
+                    ImGuiTestEngineStatus_InvalidArgument,
+                    "capture provider owner does not match the installed provider"
+                );
+            }
+        }
+        if (!installed) {
+            return ImGuiTestEngineStatus_Success;
+        }
+        if (abi::presentation_pending(engine)) {
+            abi::request_capture_abort(engine);
+        } else if (abi::capture_active(engine) || abi::capture_wait_pending(engine)) {
+            const bool wait_pending = abi::capture_wait_pending(engine);
+            abi::cancel_capture(engine);
+            if (!wait_pending) {
+                abi::clear_capture_abort(engine);
+            }
+        }
+        abi::clear_capture_provider(engine);
+        if (!abi::presentation_pending(engine) &&
+            !abi::capture_active(engine) &&
+            !abi::capture_wait_pending(engine)) {
+            abi::clear_capture_abort(engine);
+        }
+        return ImGuiTestEngineStatus_Success;
+    });
+}
+
+ImGuiTestEngineStatus imgui_test_engine_has_capture_provider(
+    ImGuiTestEngine* engine,
+    bool* out_installed
+) {
+    return abi::boundary("imgui_test_engine_has_capture_provider", [&]() {
+        if (out_installed == nullptr) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidArgument,
+                "out_installed must not be null"
+            );
+        }
+        *out_installed = false;
+        const ImGuiTestEngineStatus status = abi::require_engine(engine);
+        if (status != ImGuiTestEngineStatus_Success) {
+            return status;
+        }
+        abi::SpinGuard guard(abi::g_engine_lock);
+        const auto found = abi::g_engines.find(engine);
+        *out_installed = found != abi::g_engines.end() &&
+                         found->second.CaptureProvider != nullptr;
         return ImGuiTestEngineStatus_Success;
     });
 }
@@ -458,7 +1250,16 @@ ImGuiTestEngineStatus imgui_test_engine_show_windows(ImGuiTestEngine* engine, bo
         }
         abi::maybe_inject(ImGuiTestEngineExceptionPoint_UpstreamCall);
         abi::ScopedCurrentContext current(engine->UiContextTarget);
+        abi::record_capture_rollback(engine);
         ImGuiTestEngine_ShowTestEngineWindows(engine, p_open);
+        abi::finish_capture_rollback(engine);
+        if (abi::capture_provider_failed(engine)) {
+            abi::take_capture_provider_failure(engine);
+            return abi::fail(
+                ImGuiTestEngineStatus_CaptureFailed,
+                "the framebuffer capture provider rejected a capture request"
+            );
+        }
         return ImGuiTestEngineStatus_Success;
     });
 }
@@ -523,6 +1324,7 @@ ImGuiTestEngineStatus imgui_test_engine_is_test_queue_empty(
         if (status != ImGuiTestEngineStatus_Success) {
             return status;
         }
+        abi::maybe_inject(ImGuiTestEngineExceptionPoint_UpstreamCall);
         *out_empty = ImGuiTestEngine_IsTestQueueEmpty(engine);
         return ImGuiTestEngineStatus_Success;
     });
@@ -660,8 +1462,11 @@ ImGuiTestEngineStatus imgui_test_engine_set_log_to_tty(
     });
 }
 
-ImGuiTestEngineStatus imgui_test_engine_set_capture_enabled(ImGuiTestEngine* engine, bool enabled) {
-    return abi::boundary("imgui_test_engine_set_capture_enabled", [&]() {
+ImGuiTestEngineStatus imgui_test_engine_set_capture_output_enabled(
+    ImGuiTestEngine* engine,
+    bool enabled
+) {
+    return abi::boundary("imgui_test_engine_set_capture_output_enabled", [&]() {
         const ImGuiTestEngineStatus status = abi::require_engine(engine);
         if (status != ImGuiTestEngineStatus_Success) {
             return status;
@@ -684,6 +1489,7 @@ ImGuiTestEngineStatus imgui_test_engine_is_running_tests(
         if (status != ImGuiTestEngineStatus_Success) {
             return status;
         }
+        abi::maybe_inject(ImGuiTestEngineExceptionPoint_UpstreamCall);
         *out_running = ImGuiTestEngine_GetIO(engine).IsRunningTests;
         return ImGuiTestEngineStatus_Success;
     });
@@ -750,6 +1556,87 @@ ImGuiTestEngineStatus imgui_test_engine_test_reset_lifecycle_counters(void) {
         }
         abi::reset_counters();
         return ImGuiTestEngineStatus_Success;
+    });
+}
+
+ImGuiTestEngineStatus imgui_test_engine_test_set_presentation_trace(
+    ImGuiTestEngine* engine,
+    ImGuiTestEnginePresentationTraceCallback_c callback,
+    void* user_data
+) {
+    return abi::boundary("imgui_test_engine_test_set_presentation_trace", [&]() {
+        const ImGuiTestEngineStatus status = abi::require_engine(engine);
+        if (status != ImGuiTestEngineStatus_Success) {
+            return status;
+        }
+        if (callback == nullptr && user_data != nullptr) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidArgument,
+                "user_data requires a presentation trace callback"
+            );
+        }
+        if (!abi::set_presentation_trace(engine, callback, user_data)) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidState,
+                "presentation trace cannot change during a pending presentation"
+            );
+        }
+        return ImGuiTestEngineStatus_Success;
+    });
+}
+
+ImGuiTestEngineStatus imgui_test_engine_test_get_capture_state(
+    ImGuiTestEngine* engine,
+    ImGuiTestEngineCaptureState_c* out_state
+) {
+    return abi::boundary("imgui_test_engine_test_get_capture_state", [&]() {
+        if (out_state == nullptr) {
+            return abi::fail(ImGuiTestEngineStatus_InvalidArgument, "out_state must not be null");
+        }
+        *out_state = {};
+        const ImGuiTestEngineStatus status = abi::require_engine(engine);
+        if (status != ImGuiTestEngineStatus_Success) {
+            return status;
+        }
+        if (!abi::get_capture_state(engine, out_state)) {
+            return abi::fail(ImGuiTestEngineStatus_InvalidState, "capture state is unavailable");
+        }
+        return ImGuiTestEngineStatus_Success;
+    });
+}
+
+ImGuiTestEngineStatus imgui_test_engine_test_set_interactive_capture_state(
+    ImGuiTestEngine* engine,
+    bool capturing,
+    bool picking
+) {
+    return abi::boundary("imgui_test_engine_test_set_interactive_capture_state", [&]() {
+        const ImGuiTestEngineStatus status = abi::require_engine(engine);
+        if (status != ImGuiTestEngineStatus_Success) {
+            return status;
+        }
+#if !IMGUI_TEST_ENGINE_ENABLE_CAPTURE
+        IM_UNUSED(capturing);
+        IM_UNUSED(picking);
+        return abi::fail(
+            ImGuiTestEngineStatus_Unsupported,
+            "capture support was not compiled into the Test Engine"
+        );
+#else
+        if (!engine->Started || engine->UiContextTarget == nullptr) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidState,
+                "interactive capture state requires a started engine"
+            );
+        }
+        if (!abi::set_interactive_capture_state(engine, capturing, picking)) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidState,
+                "interactive capture state cannot change during presentation or capture wait"
+            );
+        }
+        return ImGuiTestEngineStatus_Success;
+#endif
     });
 }
 

@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
-    ContextAttachmentTeardownError, ContextBinding, ContextTeardown, FramePrepareOptions, sys,
+    ContextAttachmentTeardownError, ContextBinding, ContextTeardown, FramePrepareOptions, Id, sys,
 };
 
 use super::callbacks::{
@@ -904,4 +904,34 @@ fn owned_callback_table_is_complete_after_publish() {
             .backend_flags()
             .contains(BackendFlags::RENDERER_HAS_VIEWPORTS)
     );
+}
+
+#[test]
+fn frame_trace_is_instance_bound_non_nested_and_drop_abortable() {
+    let _guard = super::test_context_guard();
+    let mut context = Context::create();
+    let _platform = attach_test_platform(&mut context);
+    let mut runtime = OwningViewportRuntime::attach_for_test(&mut context).unwrap();
+    let control = runtime.control_for_test();
+
+    let trace = runtime.begin_frame_trace().unwrap();
+    assert!(matches!(
+        runtime.begin_frame_trace(),
+        Err(AshViewportError::FrameTraceAlreadyActive)
+    ));
+    let low = Id::from(3_u32);
+    let high = Id::from(7_u32);
+    control.record_viewport_render_submitted(high);
+    control.record_viewport_render_submitted(low);
+    control.record_viewport_present_submitted(high);
+    let report = trace.finish();
+    assert_eq!(report.render_submitted_viewport_ids(), &[low, high]);
+    assert_eq!(report.present_submitted_viewport_ids(), &[high]);
+
+    drop(runtime.begin_frame_trace().unwrap());
+    let report = runtime.begin_frame_trace().unwrap().finish();
+    assert!(report.render_submitted_viewport_ids().is_empty());
+    assert!(report.present_submitted_viewport_ids().is_empty());
+
+    runtime.shutdown(&mut context).unwrap();
 }

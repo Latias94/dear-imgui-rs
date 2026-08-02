@@ -16,10 +16,6 @@ fn color_options_reject_raw_option_bits_before_ffi() {
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas().build();
-    let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
-
-    let ui = ctx.frame();
     let unsupported_edit_flags = imgui::ColorEditFlags::from_bits_retain(
         imgui::sys::ImGuiColorEditFlags_NoSidePreview as u32,
     );
@@ -34,10 +30,29 @@ fn color_options_reject_raw_option_bits_before_ffi() {
 
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            ui.set_color_edit_options(imgui::ColorEditOptions::new().flags(unsupported_edit_flags));
+            ctx.io_mut().set_color_edit_options(
+                imgui::ColorEditOptions::new().flags(unsupported_edit_flags),
+            );
         }))
         .is_err()
     );
+
+    let defaults = imgui::ColorEditOptions::new()
+        .flags(
+            imgui::ColorEditFlags::NO_COLOR_MARKERS
+                | imgui::ColorEditFlags::ALPHA_OPAQUE
+                | imgui::ColorEditFlags::PICKER_NO_ROTATE,
+        )
+        .display_mode(imgui::ColorDisplayMode::Hsv)
+        .data_type(imgui::ColorDataType::Float)
+        .picker_mode(imgui::ColorPickerMode::HueWheel)
+        .input_mode(imgui::ColorInputMode::Rgb);
+    ctx.io_mut().set_color_edit_options(defaults);
+    assert_eq!(ctx.io().color_edit_options(), defaults);
+
+    let _ = ctx.font_atlas().build();
+    let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
+    let ui = ctx.frame();
 
     let _ = ui.window("Color flags").build(|| {
         assert!(
@@ -78,17 +93,6 @@ fn color_options_reject_raw_option_bits_before_ffi() {
                     .build();
             }))
             .is_err()
-        );
-
-        ui.set_color_edit_options(
-            imgui::ColorEditOptions::new()
-                .flags(
-                    imgui::ColorEditFlags::NO_COLOR_MARKERS | imgui::ColorEditFlags::ALPHA_OPAQUE,
-                )
-                .display_mode(imgui::ColorDisplayMode::Hsv)
-                .data_type(imgui::ColorDataType::Float)
-                .picker_mode(imgui::ColorPickerMode::HueWheel)
-                .input_mode(imgui::ColorInputMode::Rgb),
         );
 
         let mut edit_color = [0.1, 0.2, 0.3, 0.4];

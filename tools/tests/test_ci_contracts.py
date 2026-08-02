@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import tomllib
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
@@ -26,6 +27,7 @@ if str(CI_DIR) not in sys.path:
 CONTRACTS = importlib.import_module("run_contract")
 RUNTIME = importlib.import_module("_runtime_gate")
 PROCESS = importlib.import_module("_process")
+BUILD_GLSLANG = importlib.import_module("build_glslang")
 
 
 def bounded_result(
@@ -56,6 +58,74 @@ def bounded_result(
         ),
         stream_errors=(),
     )
+
+
+def dear_app_smoke_payload(**overrides):
+    payload = {
+        "schema_version": 1,
+        "mode": "DearAppGraphical",
+        "outcome": "Passed",
+        "engine_started": True,
+        "test_registered": True,
+        "test_queued": True,
+        "admitted_frames": 4,
+        "frame_budget": 256,
+        "test_engine_calls": 4,
+        "terminal_observed": True,
+        "tested": 1,
+        "success": 1,
+        "in_queue": 0,
+        "exit_requested": True,
+        "budget_exhausted": False,
+        "application_shutdown": True,
+        "engine_shutdown": True,
+        "runtime_teardown_complete": True,
+        "error": None,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def ash_vulkan_smoke_payload(**overrides):
+    payload = {
+        "schema_version": 2,
+        "adapter": {
+            "name": "llvmpipe (LLVM 20)",
+            "backend": "Vulkan",
+            "device_type": "Cpu",
+            "driver": "Mesa",
+            "driver_info": "Lavapipe",
+        },
+        "dynamic_rendering_enabled": True,
+        "validation_layer_enabled": True,
+        "secondary_viewport_created": True,
+        "secondary_viewport_resized": True,
+        "merge_observed": True,
+        "secondary_render_submitted_viewport_ids": [17],
+        "secondary_present_submitted_viewport_ids": [17],
+        "callback_only_frame_executed": True,
+        "raw_callback_typed_state_observed": True,
+        "nearest_sampler_descriptor_set_observed": True,
+        "linear_sampler_descriptor_set_observed": True,
+        "sampler_descriptor_sets_distinct": True,
+        "reset_render_state_recovered": True,
+        "render_state_cleared_after_callback": True,
+        "managed_texture_updated": True,
+        "managed_texture_removed": True,
+        "texture_retirement_null_fence_rejected": True,
+        "texture_retirement_fence_completion_count": 2,
+        "texture_retirement_queue_drained": True,
+        "main_present_completed": True,
+        "renderer_shutdown_complete": True,
+        "viewport_runtime_shutdown_complete": True,
+        "platform_shutdown_complete": True,
+        "gpu_idle_before_teardown": True,
+        "vulkan_resources_dropped": True,
+        "validation_warning_count": 0,
+        "validation_error_count": 0,
+    }
+    payload.update(overrides)
+    return payload
 
 
 class FakeBackground:
@@ -335,13 +405,16 @@ class ContractRunnerTests(unittest.TestCase):
         test_engine = parser.parse_args(("test-engine-runtime",))
         viewport = parser.parse_args(("multi-viewport-smoke",))
         sdl3_glow = parser.parse_args(("sdl3-glow-multi-viewport-smoke",))
+        ash_vulkan = parser.parse_args(("ash-vulkan-validation-smoke",))
 
         self.assertEqual(test_engine.child_timeout, 120.0)
         self.assertEqual(viewport.child_timeout, 180.0)
         self.assertEqual(sdl3_glow.child_timeout, 180.0)
+        self.assertEqual(ash_vulkan.child_timeout, 180.0)
         self.assertEqual(test_engine.build_timeout, 900.0)
         self.assertEqual(viewport.build_timeout, 900.0)
         self.assertEqual(sdl3_glow.build_timeout, 900.0)
+        self.assertEqual(ash_vulkan.build_timeout, 900.0)
 
     def test_runtime_disposition_only_defers_first_infrastructure_failure(self):
         with TemporaryDirectory() as temporary:
@@ -449,6 +522,11 @@ class RuntimeGateTests(unittest.TestCase):
                 patch.object(RUNTIME, "_run_example_build", return_value=build),
                 patch.object(RUNTIME, "_example_binary", return_value=binary),
                 patch.object(RUNTIME, "run_bounded", side_effect=run_scenario),
+                patch.object(
+                    RUNTIME,
+                    "_run_dear_app_graphical_smoke",
+                    return_value={"result": dear_app_smoke_payload()},
+                ) as graphical_smoke,
             ):
                 result = RUNTIME.run_test_engine_runtime(
                     workspace_root=root,
@@ -464,6 +542,16 @@ class RuntimeGateTests(unittest.TestCase):
             }
             self.assertEqual(categories["timeout"], "TestTimedOut")
             self.assertEqual(categories["ffi-failure"], "InfrastructureUnavailable")
+            graphical_smoke.assert_called_once_with(
+                workspace_root=root,
+                evidence_dir=evidence,
+                binary=binary,
+                child_timeout=120.0,
+            )
+            self.assertEqual(
+                result.details["dear_app_smoke"]["result"]["outcome"],
+                "Passed",
+            )
             aggregate = json.loads(
                 (evidence / "gate-result.json").read_text(encoding="utf-8")
             )
@@ -473,6 +561,106 @@ class RuntimeGateTests(unittest.TestCase):
                 (evidence / "gate-invocation.json").read_text(encoding="utf-8")
             )
             self.assertEqual(invocation["status"], "Complete")
+
+    def test_dear_app_smoke_schema_requires_wiring_terminal_and_teardown_proof(self):
+        valid = dear_app_smoke_payload()
+        self.assertEqual(RUNTIME._validate_dear_app_smoke_payload(valid), [])
+
+        invalid = dear_app_smoke_payload(
+            test_engine_calls=3,
+            terminal_observed=False,
+            tested=0,
+            success=0,
+            runtime_teardown_complete=False,
+            error="incomplete runtime",
+        )
+        errors = RUNTIME._validate_dear_app_smoke_payload(invalid)
+        self.assertIn("terminal_observed expected True, got False", errors)
+        self.assertIn("runtime_teardown_complete expected True, got False", errors)
+        self.assertIn(
+            "Application::test_engine must be called once per admitted frame", errors
+        )
+        self.assertIn(
+            "graphical smoke requires exactly one successful terminal test", errors
+        )
+        self.assertIn("a passed graphical smoke must not contain an error", errors)
+
+    def test_dear_app_graphical_smoke_uses_xvfb_openbox_and_lavapipe(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            evidence = root / "evidence"
+            evidence.mkdir()
+            binary = root / "imgui_test_engine_basic"
+            binary.touch()
+            icd = root / "lvp_icd.x86_64.json"
+            icd.write_text("{}", encoding="utf-8")
+            tools = {
+                name: root / name
+                for name in (
+                    "Xvfb",
+                    "openbox",
+                    "xdpyinfo",
+                    "xprop",
+                    "vulkaninfo",
+                    "dpkg-query",
+                )
+            }
+            child_environment = {}
+            child_arguments = []
+
+            def background(command, **kwargs):
+                return FakeBackground(
+                    command,
+                    stdout_log=kwargs["stdout_log"],
+                    stderr_log=kwargs["stderr_log"],
+                )
+
+            def stage(command, **kwargs):
+                result = bounded_result(
+                    stdout_log=kwargs["stdout_log"],
+                    stderr_log=kwargs["stderr_log"],
+                )
+                if result.stdout_log.name == "dear-app-adapter.stdout.log":
+                    result.stdout_log.write_text(
+                        "deviceName = llvmpipe (LLVM 20)\n", encoding="utf-8"
+                    )
+                elif result.stdout_log.name == "dear-app-window-manager.stdout.log":
+                    result.stdout_log.write_text(
+                        "_NET_SUPPORTING_WM_CHECK(WINDOW): window id # 0x200001\n",
+                        encoding="utf-8",
+                    )
+                elif result.stdout_log.name == "dear-app.stdout.log":
+                    child_environment.update(kwargs["env"])
+                    child_arguments.extend(os.fspath(argument) for argument in command)
+                    (evidence / "dear-app-result.json").write_text(
+                        json.dumps(dear_app_smoke_payload()), encoding="utf-8"
+                    )
+                return result
+
+            with (
+                patch.object(RUNTIME, "_require_linux_runtime_tools", return_value=tools),
+                patch.object(RUNTIME, "_find_lavapipe_icd", return_value=icd),
+                patch.object(RUNTIME, "managed_background", side_effect=background),
+                patch.object(RUNTIME, "_wait_for_xvfb"),
+                patch.object(RUNTIME, "run_bounded", side_effect=stage),
+                patch.object(RUNTIME.time, "sleep"),
+            ):
+                details = RUNTIME._run_dear_app_graphical_smoke(
+                    workspace_root=root,
+                    evidence_dir=evidence,
+                    binary=binary,
+                    child_timeout=120.0,
+                )
+
+            self.assertEqual(details["result"]["outcome"], "Passed")
+            self.assertTrue(details["xvfb"]["termination"]["attempted"])
+            self.assertTrue(details["openbox"]["termination"]["attempted"])
+            self.assertIn("--dear-app-smoke", child_arguments)
+            self.assertEqual(child_environment["WGPU_BACKEND"], "vulkan")
+            self.assertEqual(child_environment["WINIT_UNIX_BACKEND"], "x11")
+            self.assertEqual(child_environment["VK_DRIVER_FILES"], str(icd))
+            xdg_runtime = Path(details["environment"]["xdg_runtime_dir"])
+            self.assertFalse(xdg_runtime.exists())
 
     def test_child_deadline_is_harness_timeout_not_test_timeout(self):
         with TemporaryDirectory() as temporary:
@@ -625,8 +813,7 @@ class RuntimeGateTests(unittest.TestCase):
 
     def test_viewport_success_requires_lavapipe_and_full_lifecycle(self):
         valid = {
-            "schema_version": 1,
-            "outcome": "Passed",
+            "schema_version": 3,
             "adapter": {
                 "name": "llvmpipe (LLVM 20)",
                 "backend": "Vulkan",
@@ -634,10 +821,11 @@ class RuntimeGateTests(unittest.TestCase):
                 "driver": "llvmpipe",
                 "driver_info": "Mesa 25",
             },
-            "secondary_viewport_observed": True,
             "secondary_viewport_while_held_observed": True,
             "merge_observed": True,
-            "teardown_complete": True,
+            "secondary_render_submitted_before_main_acquire_viewport_ids": [42, 43],
+            "secondary_present_submitted_before_main_acquire_viewport_ids": [43],
+            "main_present_bracketed_by_test_engine": True,
         }
 
         self.assertEqual(RUNTIME._validate_viewport_payload(valid), [])
@@ -646,27 +834,33 @@ class RuntimeGateTests(unittest.TestCase):
             "\n".join(RUNTIME._validate_viewport_payload(valid)),
             "merge_observed",
         )
+        valid["merge_observed"] = True
+        valid["secondary_present_submitted_before_main_acquire_viewport_ids"] = [99]
+        self.assertRegex(
+            "\n".join(RUNTIME._validate_viewport_payload(valid)),
+            "must share a viewport ID",
+        )
 
     def test_viewport_common_validation_preserves_error_order(self):
         wgpu_errors = RUNTIME._validate_viewport_payload(
             {
                 "schema_version": 0,
-                "outcome": "Failed",
-                "secondary_viewport_observed": False,
                 "secondary_viewport_while_held_observed": False,
                 "merge_observed": False,
-                "teardown_complete": False,
+                "main_present_bracketed_by_test_engine": False,
+                "secondary_render_submitted_before_main_acquire_viewport_ids": [],
+                "secondary_present_submitted_before_main_acquire_viewport_ids": [-1],
             }
         )
         self.assertEqual(
             wgpu_errors,
             [
-                "schema_version expected 1, got 0",
-                "outcome expected 'Passed', got 'Failed'",
-                "secondary_viewport_observed expected True, got False",
+                "schema_version expected 3, got 0",
                 "secondary_viewport_while_held_observed expected True, got False",
                 "merge_observed expected True, got False",
-                "teardown_complete expected True, got False",
+                "main_present_bracketed_by_test_engine expected True, got False",
+                "secondary_render_submitted_before_main_acquire_viewport_ids must be a nonempty u32 array",
+                "secondary_present_submitted_before_main_acquire_viewport_ids must contain only u32 values",
                 "adapter must be a JSON object",
             ],
         )
@@ -674,47 +868,86 @@ class RuntimeGateTests(unittest.TestCase):
         sdl3_glow_errors = RUNTIME._validate_sdl3_glow_viewport_payload(
             {
                 "schema_version": 0,
-                "outcome": "Failed",
-                "secondary_viewport_observed": False,
-                "secondary_viewport_rendered": False,
                 "merge_observed": False,
-                "teardown_complete": False,
+                "main_present_bracketed_by_test_engine": False,
             }
         )
         self.assertEqual(
             sdl3_glow_errors,
             [
-                "schema_version expected 1, got 0",
-                "outcome expected 'Passed', got 'Failed'",
-                "secondary_viewport_observed expected True, got False",
-                "secondary_viewport_rendered expected True, got False",
+                "schema_version expected 5, got 0",
                 "merge_observed expected True, got False",
-                "teardown_complete expected True, got False",
+                "main_present_bracketed_by_test_engine expected True, got False",
+                "external_texture_filters_preserved expected True, got None",
+                "sampler_pixels_prove_isolation expected True, got None",
+                "raw_callback_typed_state_observed expected True, got None",
+                "reset_render_state_recovered expected True, got None",
+                "render_state_cleared_after_callback expected True, got None",
+                "application_gl_state_restored expected True, got None",
+                "sampler_strategy must be sampler_objects or texture_parameters, got None",
+                "secondary_context_ready_before_main_present_viewport_ids must be a nonempty u32 array",
+                "secondary_draw_issued_before_main_present_viewport_ids must be a nonempty u32 array",
+                "secondary_swap_succeeded_before_main_present_viewport_ids must be a nonempty u32 array",
                 "renderer must be a JSON object",
             ],
         )
 
+    def test_ash_vulkan_success_requires_validation_callbacks_and_teardown(self):
+        valid = ash_vulkan_smoke_payload()
+
+        self.assertEqual(RUNTIME._validate_ash_vulkan_viewport_payload(valid), [])
+        valid["validation_error_count"] = 1
+        self.assertRegex(
+            "\n".join(RUNTIME._validate_ash_vulkan_viewport_payload(valid)),
+            "validation_error_count expected 0",
+        )
+        valid["validation_error_count"] = 0
+        valid["validation_warning_count"] = 1
+        self.assertRegex(
+            "\n".join(RUNTIME._validate_ash_vulkan_viewport_payload(valid)),
+            "validation_warning_count expected 0",
+        )
+        valid["validation_warning_count"] = 0
+        valid["texture_retirement_fence_completion_count"] = 1
+        self.assertRegex(
+            "\n".join(RUNTIME._validate_ash_vulkan_viewport_payload(valid)),
+            "texture_retirement_fence_completion_count must be at least 2",
+        )
+        valid["texture_retirement_fence_completion_count"] = 2
+        valid["secondary_present_submitted_viewport_ids"] = [99]
+        self.assertRegex(
+            "\n".join(RUNTIME._validate_ash_vulkan_viewport_payload(valid)),
+            "must share a viewport ID",
+        )
+
     def test_sdl3_glow_success_requires_llvmpipe_rendering_and_full_lifecycle(self):
         valid = {
-            "schema_version": 1,
-            "outcome": "Passed",
+            "schema_version": 5,
             "renderer": {
                 "backend": "OpenGL",
                 "vendor": "Mesa",
                 "name": "llvmpipe (LLVM 20)",
                 "version": "4.5 Mesa 25",
             },
-            "secondary_viewport_observed": True,
-            "secondary_viewport_rendered": True,
             "merge_observed": True,
-            "teardown_complete": True,
+            "secondary_context_ready_before_main_present_viewport_ids": [7, 8],
+            "secondary_draw_issued_before_main_present_viewport_ids": [7, 9],
+            "secondary_swap_succeeded_before_main_present_viewport_ids": [7, 10],
+            "main_present_bracketed_by_test_engine": True,
+            "external_texture_filters_preserved": True,
+            "sampler_pixels_prove_isolation": True,
+            "raw_callback_typed_state_observed": True,
+            "reset_render_state_recovered": True,
+            "render_state_cleared_after_callback": True,
+            "application_gl_state_restored": True,
+            "sampler_strategy": "sampler_objects",
         }
 
         self.assertEqual(RUNTIME._validate_sdl3_glow_viewport_payload(valid), [])
-        valid["secondary_viewport_rendered"] = False
+        valid["secondary_swap_succeeded_before_main_present_viewport_ids"] = [99]
         self.assertRegex(
             "\n".join(RUNTIME._validate_sdl3_glow_viewport_payload(valid)),
-            "secondary_viewport_rendered",
+            "must share a viewport ID",
         )
 
     def test_viewport_gate_retains_display_adapter_and_teardown_evidence(self):
@@ -768,8 +1001,7 @@ class RuntimeGateTests(unittest.TestCase):
                     (evidence / "viewport-result.json").write_text(
                         json.dumps(
                             {
-                                "schema_version": 1,
-                                "outcome": "Passed",
+                                "schema_version": 3,
                                 "adapter": {
                                     "name": "llvmpipe (LLVM 20)",
                                     "backend": "Vulkan",
@@ -777,10 +1009,11 @@ class RuntimeGateTests(unittest.TestCase):
                                     "driver": "llvmpipe",
                                     "driver_info": "Mesa 25",
                                 },
-                                "secondary_viewport_observed": True,
                                 "secondary_viewport_while_held_observed": True,
                                 "merge_observed": True,
-                                "teardown_complete": True,
+                                "secondary_render_submitted_before_main_acquire_viewport_ids": [42],
+                                "secondary_present_submitted_before_main_acquire_viewport_ids": [42],
+                                "main_present_bracketed_by_test_engine": True,
                             }
                         ),
                         encoding="utf-8",
@@ -873,26 +1106,59 @@ class RuntimeGateTests(unittest.TestCase):
                         "_NET_SUPPORTING_WM_CHECK(WINDOW): window id # 0x200001\n",
                         encoding="utf-8",
                     )
-                elif result.stdout_log.name == "viewport.stdout.log":
+                elif result.stdout_log.name in (
+                    "viewport-texture-parameters.stdout.log",
+                    "viewport-sampler-objects.stdout.log",
+                ):
                     self.assertEqual(
                         kwargs["env"]["LD_LIBRARY_PATH"].split(os.pathsep)[0],
                         str(sdl3_library.parent.resolve()),
                     )
-                    (evidence / "viewport-result.json").write_text(
+                    fallback = (
+                        result.stdout_log.name
+                        == "viewport-texture-parameters.stdout.log"
+                    )
+                    expected_strategy = (
+                        "texture_parameters" if fallback else "sampler_objects"
+                    )
+                    self.assertEqual(
+                        kwargs["env"]["MESA_GL_VERSION_OVERRIDE"],
+                        "3.2" if fallback else "3.3",
+                    )
+                    if fallback:
+                        self.assertEqual(
+                            kwargs["env"]["MESA_EXTENSION_OVERRIDE"],
+                            "-GL_ARB_sampler_objects",
+                        )
+                    else:
+                        self.assertNotIn("MESA_EXTENSION_OVERRIDE", kwargs["env"])
+                    result_path = Path(
+                        kwargs["env"]["DEAR_IMGUI_VIEWPORT_SMOKE_JSON"]
+                    )
+                    result_path.write_text(
                         json.dumps(
                             {
-                                "schema_version": 1,
-                                "outcome": "Passed",
+                                "schema_version": 5,
                                 "renderer": {
                                     "backend": "OpenGL",
                                     "vendor": "Mesa",
                                     "name": "llvmpipe (LLVM 20)",
-                                    "version": "4.5 Mesa 25",
+                                    "version": "3.2 Mesa 25"
+                                    if fallback
+                                    else "3.3 Mesa 25",
                                 },
-                                "secondary_viewport_observed": True,
-                                "secondary_viewport_rendered": True,
+                                "sampler_strategy": expected_strategy,
                                 "merge_observed": True,
-                                "teardown_complete": True,
+                                "secondary_context_ready_before_main_present_viewport_ids": [7],
+                                "secondary_draw_issued_before_main_present_viewport_ids": [7],
+                                "secondary_swap_succeeded_before_main_present_viewport_ids": [7],
+                                "main_present_bracketed_by_test_engine": True,
+                                "external_texture_filters_preserved": True,
+                                "sampler_pixels_prove_isolation": True,
+                                "raw_callback_typed_state_observed": True,
+                                "reset_render_state_recovered": True,
+                                "render_state_cleared_after_callback": True,
+                                "application_gl_state_restored": True,
                             }
                         ),
                         encoding="utf-8",
@@ -918,11 +1184,101 @@ class RuntimeGateTests(unittest.TestCase):
             self.assertTrue(result.success)
             self.assertEqual(result.category, RUNTIME.GateCategory.PASSED)
             self.assertIn("renderer.stdout.log", result.evidence)
-            self.assertIn("viewport-result.json", result.evidence)
+            self.assertIn("viewport-texture-parameters-result.json", result.evidence)
+            self.assertIn("viewport-sampler-objects-result.json", result.evidence)
+            self.assertEqual(
+                set(result.details["results"]),
+                {"texture-parameters", "sampler-objects"},
+            )
             self.assertEqual(
                 result.details["environment"]["sdl3_library_dirs"],
                 [str(sdl3_library.parent.resolve())],
             )
+
+    def test_ash_vulkan_gate_requires_validation_and_retains_teardown_evidence(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            evidence = root / "evidence"
+            binary = root / "multi_viewport_ash"
+            binary.touch()
+            icd = root / "lvp_icd.x86_64.json"
+            icd.write_text("{}", encoding="utf-8")
+            tools = {
+                name: root / name
+                for name in (
+                    "Xvfb",
+                    "openbox",
+                    "xdpyinfo",
+                    "xprop",
+                    "vulkaninfo",
+                    "dpkg-query",
+                )
+            }
+            build = bounded_result(
+                stdout_log=evidence / "build.stdout.log",
+                stderr_log=evidence / "build.stderr.log",
+            )
+            viewport_environment = {}
+
+            def background(command, **kwargs):
+                return FakeBackground(
+                    command,
+                    stdout_log=kwargs["stdout_log"],
+                    stderr_log=kwargs["stderr_log"],
+                )
+
+            def stage(_command, **kwargs):
+                result = bounded_result(
+                    stdout_log=kwargs["stdout_log"],
+                    stderr_log=kwargs["stderr_log"],
+                )
+                if result.stdout_log.name == "adapter.stdout.log":
+                    result.stdout_log.write_text(
+                        "deviceName = llvmpipe (LLVM 20)\n"
+                        "VK_LAYER_KHRONOS_validation\n",
+                        encoding="utf-8",
+                    )
+                elif result.stdout_log.name == "window-manager.stdout.log":
+                    result.stdout_log.write_text(
+                        "_NET_SUPPORTING_WM_CHECK(WINDOW): window id # 0x200001\n",
+                        encoding="utf-8",
+                    )
+                elif result.stdout_log.name == "viewport.stdout.log":
+                    viewport_environment.update(kwargs["env"])
+                    payload = ash_vulkan_smoke_payload()
+                    (evidence / "viewport-result.json").write_text(
+                        json.dumps(payload), encoding="utf-8"
+                    )
+                return result
+
+            with (
+                patch.object(RUNTIME, "_require_linux_runtime_tools", return_value=tools),
+                patch.object(RUNTIME, "_find_lavapipe_icd", return_value=icd),
+                patch.object(RUNTIME, "_run_example_build", return_value=build) as builder,
+                patch.object(RUNTIME, "_example_binary", return_value=binary),
+                patch.object(RUNTIME, "managed_background", side_effect=background),
+                patch.object(RUNTIME, "_wait_for_xvfb"),
+                patch.object(RUNTIME, "run_bounded", side_effect=stage),
+                patch.object(RUNTIME.time, "sleep"),
+            ):
+                result = RUNTIME.run_ash_vulkan_validation_smoke(
+                    workspace_root=root,
+                    evidence_dir=evidence,
+                )
+
+            self.assertTrue(result.success)
+            self.assertEqual(result.category, RUNTIME.GateCategory.PASSED)
+            self.assertEqual(
+                builder.call_args.kwargs["features"],
+                "ash-winit-multi-viewport,ash-dynamic-rendering",
+            )
+            self.assertEqual(
+                viewport_environment["DEAR_IMGUI_REQUIRE_VULKAN_VALIDATION"], "1"
+            )
+            self.assertEqual(
+                viewport_environment["VK_ICD_FILENAMES"], str(icd)
+            )
+            self.assertIn("viewport-result.json", result.evidence)
 
     def test_new_invocation_invalidates_owned_stale_success_evidence(self):
         with TemporaryDirectory() as temporary:
@@ -1018,6 +1374,57 @@ class WorkflowPortabilityTests(unittest.TestCase):
             "WASM uses pregenerated bindings and must not install libclang",
         )
 
+    def test_checkout_and_packaged_wasm_providers_use_the_pinned_emsdk(self):
+        jobs = self._ci_jobs()
+        for job_id in ("publish-check", "wasm-check"):
+            setup = named_step(
+                jobs[job_id], "Set up pinned Emscripten provider toolchain"
+            )
+            inputs = require_mapping(setup.get("with"), f"jobs.{job_id}.emsdk.with")
+            with self.subTest(job=job_id):
+                self.assertEqual(setup.get("uses"), "emscripten-core/setup-emsdk@v16")
+                self.assertEqual(str(inputs.get("version")), "5.0.1")
+                self.assertEqual(str(inputs.get("emsdk-version")), "5.0.5")
+                self.assertNotIn("actions-cache-folder", inputs)
+
+        checkout_provider = str(
+            named_step(
+                jobs["wasm-check"],
+                "Build and structurally verify the Emscripten provider",
+            ).get("run", "")
+        )
+        packaged_provider = str(
+            named_step(
+                jobs["publish-check"], "Package, unpack, and consume core crates"
+            ).get("run", "")
+        )
+        self.assertIn("verify_wasm_provider.py", checkout_provider)
+        self.assertIn("verify_packaged_core.py", packaged_provider)
+
+    def test_ash_shader_contract_rebuilds_with_pinned_glslang(self):
+        job = self._ci_jobs()["ash-routes"]
+        install = named_step(job, "Build pinned glslangValidator")
+        install_command = str(install.get("run", ""))
+        self.assertEqual(
+            install.get("if"),
+            "matrix.platform == 'Winit' && matrix.rendering == 'classic'",
+        )
+        self.assertNotIn("shell", install)
+        self.assertIn("tools/ci/build_glslang.py", install_command)
+        self.assertIn("--work-root", install_command)
+        self.assertIn("--github-env", install_command)
+        self.assertEqual(
+            BUILD_GLSLANG.GLSLANG_COMMIT,
+            "1062752a891c95b2bfeed9e356562d88f9df84ac",
+        )
+
+        verify = named_step(job, "Verify checked-in Ash shaders")
+        verify_command = str(verify.get("run", ""))
+        self.assertIn("tools/generate_ash_shaders.py", verify_command)
+        self.assertIn("--check", verify_command)
+        self.assertIn("--recompile", verify_command)
+        self.assertIn('--compiler "$GLSLANG_VALIDATOR"', verify_command)
+
     def test_native_runtime_retry_chain_retains_release_evidence(self):
         ci = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
@@ -1030,13 +1437,19 @@ class WorkflowPortabilityTests(unittest.TestCase):
         self.assertIn("test-engine-runtime", workflow)
         self.assertIn("multi-viewport-smoke", workflow)
         self.assertIn("sdl3-glow-multi-viewport-smoke", workflow)
+        self.assertIn("ash-vulkan-validation-smoke", workflow)
+        self.assertIn("xvfb", runtime)
+        self.assertIn("openbox", runtime)
+        self.assertIn("mesa-vulkan-drivers", runtime)
+        self.assertIn("vulkan-tools", runtime)
+        self.assertIn("vulkan-validationlayers", runtime)
         self.assertIn("libxkbcommon-x11-dev", runtime)
         self.assertIn("mesa-utils", runtime)
         self.assertIn("retention-days: 30", workflow)
         self.assertRegex(workflow, r"(?m)^\s+if: always\(\)$")
         self.assertIn("--defer-infrastructure-retry", runtime)
         self.assertIn("gate_attempt: 2", ci)
-        self.assertEqual(ci.count("outputs.retry_eligible == 'true'"), 3)
+        self.assertEqual(ci.count("outputs.retry_eligible == 'true'"), 4)
 
     def test_bevy_software_gpu_contracts_run_serially(self):
         job = self._ci_jobs()["bevy-backend"]
@@ -1046,6 +1459,58 @@ class WorkflowPortabilityTests(unittest.TestCase):
         ):
             command = str(named_step(job, step_name).get("run", ""))
             self.assertIn("nextest run -j 1", command)
+
+    def test_safe_test_engine_contracts_cover_default_and_capture_serially(self):
+        job = self._ci_jobs()["build"]
+        default_command = str(
+            named_step(job, "Test safe Test Engine runner contracts").get("run", "")
+        )
+        capture_command = str(
+            named_step(job, "Test safe Test Engine capture contracts").get("run", "")
+        )
+
+        for command in (default_command, capture_command):
+            self.assertIn("nextest run -j 1", command)
+            self.assertIn("-p dear-imgui-test-engine", command)
+            self.assertIn("--no-default-features", command)
+        self.assertNotIn("--features capture", default_command)
+        self.assertIn("--features capture", capture_command)
+
+    def test_glow_runtime_contracts_have_native_and_wasm_ci_coverage(self):
+        jobs = self._ci_jobs()
+        native = str(
+            named_step(jobs["build"], "Run Glow renderer acceptance tests").get("run", "")
+        )
+        self.assertIn("cargo nextest run", native)
+        self.assertIn("-p dear-imgui-glow", native)
+        self.assertIn("--features multi-viewport", native)
+
+        wasm = str(
+            named_step(jobs["wasm-check"], "Check Glow renderer WASM provider").get(
+                "run", ""
+            )
+        )
+        self.assertIn("cargo check", wasm)
+        self.assertIn("-p dear-imgui-glow", wasm)
+        self.assertIn("--target wasm32-unknown-unknown", wasm)
+        self.assertIn("--no-default-features", wasm)
+        self.assertIn("--features wasm", wasm)
+
+
+class GlowFeatureManifestTests(unittest.TestCase):
+    def test_glow_manifest_exposes_only_runtime_truthful_capability_routes(self):
+        manifest = tomllib.loads(
+            (REPO_ROOT / "backends" / "dear-imgui-glow" / "Cargo.toml").read_text(
+                encoding="utf-8"
+            )
+        )
+        features = manifest["features"]
+        self.assertEqual(set(features), {"default", "wasm", "multi-viewport"})
+        self.assertEqual(features["default"], [])
+        self.assertEqual(features["wasm"], ["dear-imgui-rs/wasm"])
+        self.assertEqual(
+            features["multi-viewport"], ["dear-imgui-rs/multi-viewport"]
+        )
 
 
 if __name__ == "__main__":

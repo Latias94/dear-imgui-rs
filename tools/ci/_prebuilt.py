@@ -317,6 +317,7 @@ CORE_MANIFEST_FIELDS = frozenset(
         "cimgui_revision",
         "imgui_revision",
         "binding_spec_hash",
+        "source_contract_hash",
     )
 )
 
@@ -339,9 +340,13 @@ def core_artifact_profile_hash(fields: dict[str, str], archive: Path) -> str:
         raise VerificationError(
             f"prebuilt manifest in {archive} has invalid binding_spec_hash"
         )
+    if not STABLE_HASH_PATTERN.fullmatch(fields["source_contract_hash"]):
+        raise VerificationError(
+            f"prebuilt manifest in {archive} has invalid source_contract_hash"
+        )
 
     identity = _StableHash()
-    identity.field("schema", "core-artifact-profile-v2")
+    identity.field("schema", "core-artifact-profile-v3")
     for label, field in (
         ("crate_name", "crate_name"),
         ("version", "version"),
@@ -354,6 +359,7 @@ def core_artifact_profile_hash(fields: dict[str, str], archive: Path) -> str:
     identity.field("cimgui_revision", fields["cimgui_revision"])
     identity.field("imgui_revision", fields["imgui_revision"])
     identity.field("binding_spec_hash", fields["binding_spec_hash"])
+    identity.field("source_contract_hash", fields["source_contract_hash"])
     return identity.finish()
 
 

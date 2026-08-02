@@ -12,8 +12,9 @@ Read `references/workspace-upgrade-checklist.md` before making changes.
 ## Quick start
 
 1. Confirm the requested upstream targets and whether this is just an integration bump or a release cut.
-2. Use primary sources for upstream changes: Dear ImGui release notes / changelog, `cimgui`, `cimplot`, `cimplot3d`, and `imgui_test_engine` commits or changelogs.
-3. Prefer the repository scripts for submodule refresh, bindings generation, version bumps, pre-publish checks, and publishing.
+2. Confirm the repository's canonical binding generator, libclang major version, target profiles, and current clean verification hashes before moving any submodule. `tools/build-support/maintained_sources.json` is the canonical source inventory consumed by both Rust and Python tooling. Run `python tools/upstream_contract.py --check` and preserve the accepted facts/decision manifests as the review baseline. A different libclang version may produce a valid but non-canonical binding diff.
+3. Use primary sources for upstream changes: Dear ImGui release notes / changelog, `cimgui`, `cimplot`, `cimplot3d`, and `imgui_test_engine` commits or changelogs.
+4. Prefer the repository scripts for submodule refresh, bindings generation, version bumps, pre-publish checks, and publishing.
 
 ## Workflow
 
@@ -26,11 +27,19 @@ Read `references/workspace-upgrade-checklist.md` before making changes.
 2. Refresh submodules and pregenerated bindings.
    - Prefer `tools/update_submodule_and_bindings.py` over manual per-crate binding steps.
    - Regenerate both native pregenerated bindings and WASM pregenerated bindings when ABI or public header shape changes.
+   - Build the actual WASM provider after regeneration. Its compile definitions must come from the same canonical binding profiles as the Rust imports; import/export agreement alone does not prove that every provider translation unit is compatible with those definitions.
+   - Set `EMSDK` to a working Emscripten SDK and ensure `em++` is available, then run `python tools/ci/verify_wasm_provider.py --check-rust-route`. A Rust-only `cargo check --target wasm32-unknown-unknown` is not provider evidence.
+   - When one maintained source is incompatible with a required provider definition, preserve the canonical definition and model the source adaptation explicitly in the source inventory with an upstream-drift test. Do not silently drop the definition or add an untracked one-off patch.
    - Keep `imgui_test_engine` in sync when the new Dear ImGui version changes internal hooks or test-engine integration points.
+   - After regeneration, use `python tools/upstream_contract.py --write-review-template` to enumerate every live declaration, enum, field (including bitfield/array width), typedef (including declarations without generator locations), layout, and nested-source-pin delta. The command writes `tools/upstream_contract_decisions.pending.json` and refuses to overwrite existing review work. The inventory must give every source an API-contract provider; Test Engine is audited from its final checked-in Rust binding and unknown public syntax is a hard failure. Do not update the accepted snapshot until every item has a reviewed classification and safe items name compile/runtime evidence; then use `--update-snapshot` to validate and promote the pending review, followed by `--check`.
 
 3. Audit the sys layer and safe layer together.
    - Compare upstream release notes and generated binding diffs against current safe wrappers.
-   - Look for new functions, enums, flags, struct fields, renamed APIs, callback ABI changes, backend/platform hooks, and new style/spec fields.
+   - Look for added or removed functions, changed return types, enums, flags, struct fields, renamed APIs, callback ABI changes, backend/platform hooks, and new style/spec fields.
+   - Never treat equal structure size and alignment as proof that a handwritten FFI mirror is compatible. Audit field order, offsets, types, names, and semantics. Prefer a `repr(transparent)` wrapper around the generated type; if a mirror is unavoidable, add offset checks and behavior sentinels in addition to size checks.
+   - For changed public native aggregates, run the source-build-only `abi-probe` profile. It compares C++ `sizeof`, `alignof`, and selected field offsets with the Rust binding; it is a release/CI proof and must never become a prebuilt-consumer requirement.
+   - Audit lifecycle and ownership fields even when they should remain hidden from the safe API. A new queue pointer, status transition, or native auto-completion rule can change Rust-side ownership without changing the public ABI size.
+   - Inspect the implementation of zero-argument or non-variadic string wrappers such as `*_Str0`. They may still interpret the input as a `printf` format string; a safe Rust `&str` API must provide literal-text semantics through a `%s` shim or complete percent escaping.
    - For Dear ImGui core bumps, re-audit the local stack layout compatibility patch: the `imgui.cpp` `ItemSize()` / `ItemAdd()` hook markers, `dear-imgui-sys/src/stack_layout_shim.cpp`, the `stack_layout_imgui_*.cpp.inc` snippets, native prebuilt manifest feature detection, and the `node_editor_showcase` blueprints layout.
    - Do not stop at raw compatibility. If upstream semantics changed, prefer a coherent safe API refactor over thin shims.
    - When Dear ImGui backends move, audit `dear-imgui-sys::backend_shim`, backend crates, and any examples that expose the changed integration path.
@@ -47,7 +56,11 @@ Read `references/workspace-upgrade-checklist.md` before making changes.
    - Re-check publish order and packaging assumptions whenever a new published helper crate is introduced or repriced.
 
 6. Validate.
-   - Run formatting and workspace checks.
+   - Serialize Cargo builds and nextest execution on shared development machines, reusing the workspace target directory.
+   - Verify regenerated binding hashes before formatting and workspace checks.
+   - Run `python tools/ci/verify_wasm_provider.py --check-rust-route` with a working Emscripten SDK whenever the maintained WASM provider or its source inventory changes.
+   - Require a clean upstream-contract audit after the reviewed snapshot update; binding hashes alone cannot approve a changed API or ownership contract.
+   - Run the native aggregate ABI probe whenever core declarations or handwritten public mirrors changed.
    - Run the repository pre-publish checks.
    - Run targeted tests and example checks for the upgraded surface.
    - Dry-run the publish flow before considering the work done.

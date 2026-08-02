@@ -30,9 +30,9 @@ For native build/link options (source, system/prebuilt, remote prebuilt), see `e
 This crate has **experimental** support for `wasm32-unknown-unknown` targets via the same import-style design used by the core ImGui bindings:
 
 - `dear-implot` + `dear-implot-sys` expose a `wasm` feature which:
-  - Enables import-style FFI that links against the shared `imgui-sys-v0` provider module.
+  - Enables import-style FFI that links against the shared `imgui-sys-v1` provider module.
   - Avoids compiling C/C++ during the Rust build for wasm.
-- The provider module (`imgui-sys-v0`) is built once using Emscripten and contains:
+- The provider module (`imgui-sys-v1`) is built once using Emscripten and contains:
   - Dear ImGui + cimgui (from `dear-imgui-sys`)
   - ImPlot + cimplot (from `dear-implot-sys`)
 
@@ -46,7 +46,7 @@ cargo run -p xtask -- wasm-bindgen-implot
 # 2) Build the main wasm + JS (includes ImPlot demo window)
 cargo run -p xtask -- web-demo implot
 
-# 3) Build the provider (Emscripten imgui-sys-v0 with ImGui + ImPlot)
+# 3) Build the provider (Emscripten imgui-sys-v1 with ImGui + ImPlot)
 cargo run -p xtask -- build-cimgui-provider
 
 # 4) Serve and open in a browser
@@ -106,6 +106,20 @@ fn main() {
 Notes:
 - Base ImGui static library linking is handled by `dear-imgui-sys`; you do not need to link it here.
 - Refer to the `-sys` README for `IMPLOT_SYS_*` env vars when using prebuilt libraries.
+
+### Validated numeric formats
+
+ImPlot value labels use validated `FloatFormat` values instead of arbitrary C
+format strings. Axis formats additionally use `AxisFormat`, which enforces
+ImPlot's fixed 15-byte storage limit. These formats must be ASCII because
+ImPlot forwards the complete string to locale-sensitive native formatting
+paths. Use an axis formatter closure when labels need localized or arbitrary
+UTF-8 text.
+
+```rust
+let value_format = FloatFormat::new("%.2f ms")?;
+let axis_format = AxisFormat::new("%.1f")?;
+```
 
 ## Features
 
@@ -236,7 +250,8 @@ let data: Vec<f64> = (0..100).map(|i| (i as f64 * 0.1).sin()).collect();
 HeatmapPlot::new("Heat", &data, 10, 10)
     .with_scale(-1.0, 1.0)
     .with_bounds(0.0, 0.0, 1.0, 1.0)
-    .with_label_format(Some("%.2f"))
+    .try_label_format("%.2f")
+    .expect("static numeric format is valid")
     .plot(&plot_ui);
 ```
 
@@ -347,7 +362,8 @@ let tick_lbl = ["0s", "1s", "2s", "3s"];
 plot_ui.setup_x_axis_ticks_positions(XAxis::X1, &tick_pos, Some(&tick_lbl), true);
 
 // Format Y1 ticks
-plot_ui.setup_y_axis_format(YAxis::Y1, "%.2f");
+let y_axis_format = AxisFormat::new("%.2f").expect("static axis format is valid");
+plot_ui.setup_y_axis_format(YAxis::Y1, &y_axis_format);
 
 // Apply limits
 plot_ui.setup_axes_limits(0.0, 3.0, -1.0, 1.0, PlotCond::Once);

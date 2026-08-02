@@ -1,0 +1,16 @@
+{
+  "generator": "Glslang Version: 11:15.1.0",
+  "schema_version": 1,
+  "shaders": {
+    "shader.frag": {
+      "source_sha256": "aa4745f80047dd487865cd83fff94372c9eadaef4353f635ec1de65afee98069",
+      "spirv_sha256": "4c49b736899eda8ba46577f80f0a44e377c1d471a3210cfc1d7ccc9792d0a8dd"
+    },
+    "shader.vert": {
+      "source_sha256": "5bed47ea487b635ba837c5cde7c251bd1c6c58a4dcb7e9de9f8d6f2c60bb6bfc",
+      "spirv_sha256": "769a5ee2eacc6e35af679b1bccda4ec46cf1c3288583056804447a73914bedd0"
+    }
+  },
+  "source_embedding": "canonical glslang OpSource prefix, exact source, and relative OpString path",
+  "target_environment": "vulkan1.0"
+}

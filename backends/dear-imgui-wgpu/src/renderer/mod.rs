@@ -14,8 +14,6 @@ mod core;
 mod init;
 mod lifecycle;
 mod render;
-mod state;
-mod texture_api;
 
 mod draw;
 mod external_textures;
@@ -36,4 +34,20 @@ mod sdl3_raw_window_handle;
 
 use crate::{RendererError, RendererResult, Uniforms, WgpuBackendData, WgpuTextureManager};
 pub use core::WgpuRenderer;
-use state::{ActiveSampler, RendererRenderStateGuard};
+use dear_imgui_rs::render::{RendererRenderStateGuard, RendererRenderStateGuardError};
+
+pub(super) fn map_renderer_render_state_error(
+    error: RendererRenderStateGuardError,
+) -> RendererError {
+    match error {
+        RendererRenderStateGuardError::MissingPlatformIo => RendererError::InvalidRenderState(
+            "PlatformIO not available for renderer render state".to_owned(),
+        ),
+        RendererRenderStateGuardError::AlreadyOccupied => RendererError::InvalidRenderState(
+            "PlatformIO Renderer_RenderState is already occupied".to_owned(),
+        ),
+        RendererRenderStateGuardError::Drift => RendererError::RendererStateDrift {
+            field: "Renderer_RenderState",
+        },
+    }
+}

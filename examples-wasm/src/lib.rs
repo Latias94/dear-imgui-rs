@@ -348,13 +348,15 @@ impl AppWindow {
                 .size([480.0, 320.0], Condition::FirstUseEver)
                 .build(|| {
                     let nodes_ui = ui.imnodes(&self.imgui.imnodes_ctx);
-                    let editor = nodes_ui.editor(Some(&self.imgui.imnodes_editor));
+                    let editor = nodes_ui
+                        .editor(Some(&self.imgui.imnodes_editor))
+                        .begin_nodes();
 
                     {
                         let _node = editor.node(NodeId::from(1));
                         ui.text("Input Node");
                         {
-                            let _attr = editor.input_attr(PinId::from(2), PinShape::CircleFilled);
+                            let _attr = _node.input_attr(PinId::from(2), PinShape::CircleFilled);
                             ui.text("In");
                         }
                     }
@@ -363,12 +365,13 @@ impl AppWindow {
                         let _node = editor.node(NodeId::from(3));
                         ui.text("Output Node");
                         {
-                            let _attr = editor.output_attr(PinId::from(4), PinShape::CircleFilled);
+                            let _attr = _node.output_attr(PinId::from(4), PinShape::CircleFilled);
                             ui.text("Out");
                         }
                     }
 
                     editor.link(LinkId::from(5), PinId::from(2), PinId::from(4));
+                    let _ = editor.end();
                 });
         }
 

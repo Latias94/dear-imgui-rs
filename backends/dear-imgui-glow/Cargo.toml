@@ -17,32 +17,10 @@ glow.workspace = true
 thiserror.workspace = true
 
 [features]
-# Core (default): only what's needed for robust ImGui rendering
-default = [
-    "bind_vertex_array_support",
-    "vertex_offset_support",
-]
+default = []
 
-# Extra optional GL capabilities (opt-in as a group)
-extras = [
-    "gl_extensions_support",
-    "bind_sampler_support",
-    "clip_origin_support",
-    "polygon_mode_support",
-    "primitive_restart_support",
-]
-
-# Individual feature switches (used by `extras` or can be enabled ad-hoc)
-gl_extensions_support = []              # Optional extension queries
-bind_sampler_support = []               # `glBindSampler`
-clip_origin_support = []                # `GL_CLIP_ORIGIN`
-polygon_mode_support = []               # `glPolygonMode`
-primitive_restart_support = []          # `GL_PRIMITIVE_RESTART`
-bind_vertex_array_support = []          # `glBindVertexArray` (core)
-vertex_offset_support = []              # `glDrawElementsBaseVertex` (core)
-
-# Debug-only helper (no-op if disabled)
-debug_message_insert_support = []       # `gl.debug_message_insert`
+# Select the explicit import-style Dear ImGui provider on WebAssembly targets.
+wasm = ["dear-imgui-rs/wasm"]
 
 # Owning multi-viewport renderer runtime (off by default)
 multi-viewport = ["dear-imgui-rs/multi-viewport"]
@@ -50,4 +28,5 @@ multi-viewport = ["dear-imgui-rs/multi-viewport"]
 [dev-dependencies]
 env_logger.workspace = true
 pollster.workspace = true
+static_assertions = "1.1"
 winit.workspace = true

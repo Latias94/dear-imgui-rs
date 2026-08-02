@@ -7,7 +7,7 @@ use ash::{Device, vk};
 use std::ffi::CString;
 
 use super::allocator::{Allocate, Allocator, Memory};
-use super::shaders::{FRAG_SPV, VERT_SPV};
+use super::shaders::{fragment_spirv, vertex_spirv};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -49,6 +49,16 @@ pub(crate) fn clip_rect_to_scissor(
     fb_width: u32,
     fb_height: u32,
 ) -> Option<vk::Rect2D> {
+    if fb_width == 0
+        || fb_height == 0
+        || !clip_rect
+            .into_iter()
+            .chain(clip_off)
+            .chain(clip_scale)
+            .all(f32::is_finite)
+    {
+        return None;
+    }
     let clip_rect = [
         (clip_rect[0] - clip_off[0]) * clip_scale[0],
         (clip_rect[1] - clip_off[1]) * clip_scale[1],
@@ -56,7 +66,9 @@ pub(crate) fn clip_rect_to_scissor(
         (clip_rect[3] - clip_off[1]) * clip_scale[1],
     ];
 
-    if clip_rect[0] >= fb_width as f32
+    if clip_rect[2] <= clip_rect[0]
+        || clip_rect[3] <= clip_rect[1]
+        || clip_rect[0] >= fb_width as f32
         || clip_rect[1] >= fb_height as f32
         || clip_rect[2] <= 0.0
         || clip_rect[3] <= 0.0
@@ -84,13 +96,32 @@ pub(crate) fn clip_rect_to_scissor(
     })
 }
 
-/// Create a descriptor set layout compatible with the graphics pipeline.
+pub(super) const MIN_SAMPLED_IMAGE_DESCRIPTORS: u32 = 8;
+pub(super) const STANDARD_SAMPLER_DESCRIPTORS: u32 = 2;
+
+#[derive(Clone, Copy)]
+pub(crate) struct ImageUploadRegion {
+    pub(crate) x: u32,
+    pub(crate) y: u32,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+}
+
+#[derive(Clone, Copy)]
+struct ImageLayoutState {
+    layout: vk::ImageLayout,
+    stage: vk::PipelineStageFlags,
+    access: vk::AccessFlags,
+}
+
+/// Create one descriptor set layout compatible with the graphics pipeline.
 pub fn create_vulkan_descriptor_set_layout(
     device: &Device,
+    descriptor_type: vk::DescriptorType,
 ) -> RendererResult<vk::DescriptorSetLayout> {
     let bindings = [vk::DescriptorSetLayoutBinding::default()
         .binding(0)
-        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+        .descriptor_type(descriptor_type)
         .descriptor_count(1)
         .stage_flags(vk::ShaderStageFlags::FRAGMENT)];
 
@@ -100,7 +131,8 @@ pub fn create_vulkan_descriptor_set_layout(
 
 pub fn create_vulkan_pipeline_layout(
     device: &Device,
-    descriptor_set_layout: vk::DescriptorSetLayout,
+    sampled_image_set_layout: vk::DescriptorSetLayout,
+    sampler_set_layout: vk::DescriptorSetLayout,
 ) -> RendererResult<vk::PipelineLayout> {
     let push_const_range = [vk::PushConstantRange {
         stage_flags: vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
@@ -108,7 +140,7 @@ pub fn create_vulkan_pipeline_layout(
         size: std::mem::size_of::<PushConstants>() as u32,
     }];
 
-    let set_layouts = [descriptor_set_layout];
+    let set_layouts = [sampled_image_set_layout, sampler_set_layout];
     let layout_info = vk::PipelineLayoutCreateInfo::default()
         .set_layouts(&set_layouts)
         .push_constant_ranges(&push_const_range);
@@ -125,10 +157,12 @@ pub fn create_vulkan_pipeline(
 ) -> RendererResult<vk::Pipeline> {
     let entry_point_name = CString::new("main").unwrap();
 
-    let vertex_create_info = vk::ShaderModuleCreateInfo::default().code(VERT_SPV);
+    let vertex_spirv = vertex_spirv()?;
+    let fragment_spirv = fragment_spirv()?;
+    let vertex_create_info = vk::ShaderModuleCreateInfo::default().code(&vertex_spirv);
     let vertex_module = unsafe { device.create_shader_module(&vertex_create_info, None)? };
 
-    let fragment_create_info = vk::ShaderModuleCreateInfo::default().code(FRAG_SPV);
+    let fragment_create_info = vk::ShaderModuleCreateInfo::default().code(&fragment_spirv);
     let fragment_module = match unsafe { device.create_shader_module(&fragment_create_info, None) }
     {
         Ok(fragment_module) => fragment_module,
@@ -293,12 +327,9 @@ pub fn create_vulkan_pipeline(
 /// Create a descriptor pool of sets compatible with the graphics pipeline.
 pub fn create_vulkan_descriptor_pool(
     device: &Device,
-    max_sets: u32,
+    max_sampled_images: u32,
 ) -> RendererResult<vk::DescriptorPool> {
-    let sizes = [vk::DescriptorPoolSize {
-        ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-        descriptor_count: max_sets,
-    }];
+    let (max_sets, sizes) = descriptor_pool_plan(max_sampled_images)?;
     let create_info = vk::DescriptorPoolCreateInfo::default()
         .pool_sizes(&sizes)
         .max_sets(max_sets)
@@ -306,13 +337,41 @@ pub fn create_vulkan_descriptor_pool(
     unsafe { Ok(device.create_descriptor_pool(&create_info, None)?) }
 }
 
-/// Create a descriptor set compatible with the graphics pipeline from a texture.
-pub fn create_vulkan_descriptor_set(
+fn descriptor_pool_plan(
+    max_sampled_images: u32,
+) -> RendererResult<(u32, [vk::DescriptorPoolSize; 2])> {
+    if max_sampled_images < MIN_SAMPLED_IMAGE_DESCRIPTORS {
+        return Err(RendererError::InvalidRenderState(format!(
+            "Options::max_textures must be >= {MIN_SAMPLED_IMAGE_DESCRIPTORS}"
+        )));
+    }
+    let max_sets = max_sampled_images
+        .checked_add(STANDARD_SAMPLER_DESCRIPTORS)
+        .ok_or_else(|| {
+            RendererError::InvalidRenderState(
+                "Options::max_textures overflows Vulkan descriptor-pool accounting".to_owned(),
+            )
+        })?;
+    let sizes = [
+        vk::DescriptorPoolSize {
+            ty: vk::DescriptorType::SAMPLED_IMAGE,
+            descriptor_count: max_sampled_images,
+        },
+        vk::DescriptorPoolSize {
+            ty: vk::DescriptorType::SAMPLER,
+            descriptor_count: STANDARD_SAMPLER_DESCRIPTORS,
+        },
+    ];
+    Ok((max_sets, sizes))
+}
+
+/// Create a sampled-image descriptor set compatible with set 0.
+pub fn create_vulkan_sampled_image_descriptor_set(
     device: &Device,
     set_layout: vk::DescriptorSetLayout,
     descriptor_pool: vk::DescriptorPool,
     image_view: vk::ImageView,
-    sampler: vk::Sampler,
+    image_layout: vk::ImageLayout,
 ) -> RendererResult<vk::DescriptorSet> {
     let set = {
         let set_layouts = [set_layout];
@@ -327,19 +386,186 @@ pub fn create_vulkan_descriptor_set(
 
     unsafe {
         let image_info = [vk::DescriptorImageInfo {
-            sampler,
+            sampler: vk::Sampler::null(),
             image_view,
-            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            image_layout,
         }];
         let write_desc_sets = [vk::WriteDescriptorSet::default()
             .dst_set(set)
             .dst_binding(0)
-            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+            .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
             .image_info(&image_info)];
         device.update_descriptor_sets(&write_desc_sets, &[]);
     }
 
     Ok(set)
+}
+
+fn create_vulkan_sampler_descriptor_set(
+    device: &Device,
+    set_layout: vk::DescriptorSetLayout,
+    descriptor_pool: vk::DescriptorPool,
+    sampler: vk::Sampler,
+) -> RendererResult<vk::DescriptorSet> {
+    let set_layouts = [set_layout];
+    let allocate_info = vk::DescriptorSetAllocateInfo::default()
+        .descriptor_pool(descriptor_pool)
+        .set_layouts(&set_layouts);
+    let mut sets = unsafe { device.allocate_descriptor_sets(&allocate_info)? };
+    let set = sets.pop().ok_or_else(|| {
+        RendererError::Init("Vulkan sampler descriptor allocation returned no sets".into())
+    })?;
+    let image_info = [vk::DescriptorImageInfo {
+        sampler,
+        image_view: vk::ImageView::null(),
+        image_layout: vk::ImageLayout::UNDEFINED,
+    }];
+    let writes = [vk::WriteDescriptorSet::default()
+        .dst_set(set)
+        .dst_binding(0)
+        .descriptor_type(vk::DescriptorType::SAMPLER)
+        .image_info(&image_info)];
+    unsafe { device.update_descriptor_sets(&writes, &[]) };
+    Ok(set)
+}
+
+fn standard_sampler_create_info(filter: vk::Filter) -> vk::SamplerCreateInfo<'static> {
+    let mipmap_mode = if filter == vk::Filter::NEAREST {
+        vk::SamplerMipmapMode::NEAREST
+    } else {
+        vk::SamplerMipmapMode::LINEAR
+    };
+    vk::SamplerCreateInfo::default()
+        .mag_filter(filter)
+        .min_filter(filter)
+        .mipmap_mode(mipmap_mode)
+        .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+        .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+        .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+        .min_lod(-1000.0)
+        .max_lod(1000.0)
+        .max_anisotropy(1.0)
+}
+
+fn create_standard_sampler(device: &Device, filter: vk::Filter) -> RendererResult<vk::Sampler> {
+    let create_info = standard_sampler_create_info(filter);
+    unsafe { Ok(device.create_sampler(&create_info, None)?) }
+}
+
+pub(super) struct VulkanRendererResources {
+    pub(super) pipeline: vk::Pipeline,
+    pub(super) pipeline_layout: vk::PipelineLayout,
+    pub(super) sampled_image_set_layout: vk::DescriptorSetLayout,
+    pub(super) sampler_set_layout: vk::DescriptorSetLayout,
+    pub(super) descriptor_pool: vk::DescriptorPool,
+    pub(super) linear_sampler: vk::Sampler,
+    pub(super) nearest_sampler: vk::Sampler,
+    pub(super) linear_sampler_set: vk::DescriptorSet,
+    pub(super) nearest_sampler_set: vk::DescriptorSet,
+}
+
+impl VulkanRendererResources {
+    pub(super) fn create(
+        device: &Device,
+        #[cfg(not(feature = "dynamic-rendering"))] render_pass: vk::RenderPass,
+        #[cfg(feature = "dynamic-rendering")] dynamic_rendering: super::DynamicRendering,
+        options: Options,
+    ) -> RendererResult<Self> {
+        let mut resources = Self::empty();
+        let result = (|| {
+            resources.sampled_image_set_layout =
+                create_vulkan_descriptor_set_layout(device, vk::DescriptorType::SAMPLED_IMAGE)?;
+            resources.sampler_set_layout =
+                create_vulkan_descriptor_set_layout(device, vk::DescriptorType::SAMPLER)?;
+            resources.pipeline_layout = create_vulkan_pipeline_layout(
+                device,
+                resources.sampled_image_set_layout,
+                resources.sampler_set_layout,
+            )?;
+            resources.pipeline = create_vulkan_pipeline(
+                device,
+                resources.pipeline_layout,
+                #[cfg(not(feature = "dynamic-rendering"))]
+                render_pass,
+                #[cfg(feature = "dynamic-rendering")]
+                dynamic_rendering,
+                options,
+            )?;
+            resources.descriptor_pool =
+                create_vulkan_descriptor_pool(device, options.max_textures)?;
+            resources.linear_sampler = create_standard_sampler(device, vk::Filter::LINEAR)?;
+            resources.nearest_sampler = create_standard_sampler(device, vk::Filter::NEAREST)?;
+            resources.linear_sampler_set = create_vulkan_sampler_descriptor_set(
+                device,
+                resources.sampler_set_layout,
+                resources.descriptor_pool,
+                resources.linear_sampler,
+            )?;
+            resources.nearest_sampler_set = create_vulkan_sampler_descriptor_set(
+                device,
+                resources.sampler_set_layout,
+                resources.descriptor_pool,
+                resources.nearest_sampler,
+            )?;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            unsafe { resources.destroy_handles(device) };
+            return Err(error);
+        }
+        Ok(resources)
+    }
+
+    pub(super) fn empty() -> Self {
+        Self {
+            pipeline: vk::Pipeline::null(),
+            pipeline_layout: vk::PipelineLayout::null(),
+            sampled_image_set_layout: vk::DescriptorSetLayout::null(),
+            sampler_set_layout: vk::DescriptorSetLayout::null(),
+            descriptor_pool: vk::DescriptorPool::null(),
+            linear_sampler: vk::Sampler::null(),
+            nearest_sampler: vk::Sampler::null(),
+            linear_sampler_set: vk::DescriptorSet::null(),
+            nearest_sampler_set: vk::DescriptorSet::null(),
+        }
+    }
+
+    pub(super) fn destroy(mut self, device: &Device) {
+        unsafe { self.destroy_handles(device) };
+    }
+
+    unsafe fn destroy_handles(&mut self, device: &Device) {
+        unsafe {
+            if self.pipeline != vk::Pipeline::null() {
+                device.destroy_pipeline(self.pipeline, None);
+                self.pipeline = vk::Pipeline::null();
+            }
+            if self.linear_sampler != vk::Sampler::null() {
+                device.destroy_sampler(self.linear_sampler, None);
+                self.linear_sampler = vk::Sampler::null();
+            }
+            if self.nearest_sampler != vk::Sampler::null() {
+                device.destroy_sampler(self.nearest_sampler, None);
+                self.nearest_sampler = vk::Sampler::null();
+            }
+            if self.descriptor_pool != vk::DescriptorPool::null() {
+                device.destroy_descriptor_pool(self.descriptor_pool, None);
+                self.descriptor_pool = vk::DescriptorPool::null();
+            }
+            if self.pipeline_layout != vk::PipelineLayout::null() {
+                device.destroy_pipeline_layout(self.pipeline_layout, None);
+                self.pipeline_layout = vk::PipelineLayout::null();
+            }
+            if self.sampled_image_set_layout != vk::DescriptorSetLayout::null() {
+                device.destroy_descriptor_set_layout(self.sampled_image_set_layout, None);
+                self.sampled_image_set_layout = vk::DescriptorSetLayout::null();
+            }
+            if self.sampler_set_layout != vk::DescriptorSetLayout::null() {
+                device.destroy_descriptor_set_layout(self.sampler_set_layout, None);
+                self.sampler_set_layout = vk::DescriptorSetLayout::null();
+            }
+        }
+    }
 }
 
 pub(crate) fn create_and_fill_buffer<T: Copy>(
@@ -357,76 +583,21 @@ pub(crate) fn create_and_fill_buffer<T: Copy>(
     Ok((buffer, memory))
 }
 
-pub(crate) fn execute_one_time_commands<R, F: FnOnce(vk::CommandBuffer) -> R>(
-    device: &Device,
-    queue: vk::Queue,
-    pool: vk::CommandPool,
-    executor: F,
-) -> RendererResult<R> {
-    let command_buffer = {
-        let alloc_info = vk::CommandBufferAllocateInfo::default()
-            .level(vk::CommandBufferLevel::PRIMARY)
-            .command_pool(pool)
-            .command_buffer_count(1);
-        unsafe { device.allocate_command_buffers(&alloc_info)?[0] }
-    };
-    let command_buffers = [command_buffer];
-
-    let begin_info =
-        vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-    if let Err(err) = unsafe { device.begin_command_buffer(command_buffer, &begin_info) } {
-        unsafe { device.free_command_buffers(pool, &command_buffers) };
-        return Err(err.into());
-    }
-
-    let executor_result = executor(command_buffer);
-
-    if let Err(err) = unsafe { device.end_command_buffer(command_buffer) } {
-        unsafe { device.free_command_buffers(pool, &command_buffers) };
-        return Err(err.into());
-    }
-
-    let submit_info = vk::SubmitInfo::default().command_buffers(&command_buffers);
-    unsafe {
-        let fence = match device.create_fence(&vk::FenceCreateInfo::default(), None) {
-            Ok(fence) => fence,
-            Err(err) => {
-                device.free_command_buffers(pool, &command_buffers);
-                return Err(err.into());
-            }
-        };
-        if let Err(err) = device.queue_submit(queue, &[submit_info], fence) {
-            device.destroy_fence(fence, None);
-            device.free_command_buffers(pool, &command_buffers);
-            return Err(err.into());
-        }
-        if let Err(err) = device.wait_for_fences(&[fence], true, u64::MAX) {
-            device.destroy_fence(fence, None);
-            device.free_command_buffers(pool, &command_buffers);
-            return Err(err.into());
-        }
-        device.destroy_fence(fence, None);
-        device.free_command_buffers(pool, &command_buffers);
-    }
-
-    Ok(executor_result)
-}
-
 pub(crate) struct Texture {
     pub image: vk::Image,
     pub image_mem: Memory,
     pub image_view: vk::ImageView,
-    pub sampler: vk::Sampler,
 }
 
+pub(crate) const MANAGED_TEXTURE_FORMAT: vk::Format = vk::Format::R8G8B8A8_UNORM;
+
 impl Texture {
-    /// Create a GPU image, view, sampler, and a staging buffer filled with `pixels_rgba`.
+    /// Create a GPU image, view, and a staging buffer filled with `pixels_rgba`.
     pub fn create(
         device: &Device,
         allocator: &mut Allocator,
         width: u32,
         height: u32,
-        format: vk::Format,
         pixels_rgba: &[u8],
     ) -> RendererResult<(Self, vk::Buffer, Memory)> {
         let expected = (width as usize)
@@ -439,7 +610,8 @@ impl Texture {
             ));
         }
 
-        let (image, image_mem) = allocator.create_image(device, width, height, format)?;
+        let (image, image_mem) =
+            allocator.create_image(device, width, height, MANAGED_TEXTURE_FORMAT)?;
 
         let (buffer, buffer_mem) = match create_and_fill_buffer(
             device,
@@ -458,7 +630,7 @@ impl Texture {
             let create_info = vk::ImageViewCreateInfo::default()
                 .image(image)
                 .view_type(vk::ImageViewType::TYPE_2D)
-                .format(format)
+                .format(MANAGED_TEXTURE_FORMAT)
                 .subresource_range(vk::ImageSubresourceRange {
                     aspect_mask: vk::ImageAspectFlags::COLOR,
                     base_mip_level: 0,
@@ -476,40 +648,11 @@ impl Texture {
             }
         };
 
-        let sampler = {
-            let sampler_info = vk::SamplerCreateInfo::default()
-                .mag_filter(vk::Filter::LINEAR)
-                .min_filter(vk::Filter::LINEAR)
-                .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-                .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-                .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-                .anisotropy_enable(false)
-                .max_anisotropy(1.0)
-                .border_color(vk::BorderColor::INT_OPAQUE_BLACK)
-                .unnormalized_coordinates(false)
-                .compare_enable(false)
-                .compare_op(vk::CompareOp::ALWAYS)
-                .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
-                .mip_lod_bias(0.0)
-                .min_lod(0.0)
-                .max_lod(1.0);
-            match unsafe { device.create_sampler(&sampler_info, None) } {
-                Ok(sampler) => sampler,
-                Err(err) => {
-                    unsafe { device.destroy_image_view(image_view, None) };
-                    let _ = allocator.destroy_buffer(device, buffer, buffer_mem);
-                    let _ = allocator.destroy_image(device, image, image_mem);
-                    return Err(err.into());
-                }
-            }
-        };
-
         Ok((
             Self {
                 image,
                 image_mem,
                 image_view,
-                sampler,
             },
             buffer,
             buffer_mem,
@@ -518,7 +661,6 @@ impl Texture {
 
     pub fn destroy(self, device: &Device, allocator: &mut Allocator) -> RendererResult<()> {
         unsafe {
-            device.destroy_sampler(self.sampler, None);
             device.destroy_image_view(self.image_view, None);
         }
         allocator.destroy_image(device, self.image, self.image_mem)
@@ -537,13 +679,17 @@ impl Texture {
             command_buffer,
             buffer,
             self.image,
-            0,
-            0,
-            width,
-            height,
-            vk::ImageLayout::UNDEFINED,
-            vk::PipelineStageFlags::TOP_OF_PIPE,
-            vk::AccessFlags::empty(),
+            ImageUploadRegion {
+                x: 0,
+                y: 0,
+                width,
+                height,
+            },
+            ImageLayoutState {
+                layout: vk::ImageLayout::UNDEFINED,
+                stage: vk::PipelineStageFlags::TOP_OF_PIPE,
+                access: vk::AccessFlags::empty(),
+            },
         );
     }
 }
@@ -553,23 +699,19 @@ pub(crate) fn upload_rgba_subrect_to_image(
     command_buffer: vk::CommandBuffer,
     buffer: vk::Buffer,
     image: vk::Image,
-    x: u32,
-    y: u32,
-    width: u32,
-    height: u32,
+    region: ImageUploadRegion,
 ) {
     upload_buffer_to_image(
         device,
         command_buffer,
         buffer,
         image,
-        x,
-        y,
-        width,
-        height,
-        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-        vk::PipelineStageFlags::FRAGMENT_SHADER,
-        vk::AccessFlags::SHADER_READ,
+        region,
+        ImageLayoutState {
+            layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            stage: vk::PipelineStageFlags::FRAGMENT_SHADER,
+            access: vk::AccessFlags::SHADER_READ,
+        },
     );
 }
 
@@ -578,13 +720,8 @@ fn upload_buffer_to_image(
     command_buffer: vk::CommandBuffer,
     buffer: vk::Buffer,
     image: vk::Image,
-    x: u32,
-    y: u32,
-    width: u32,
-    height: u32,
-    old_layout: vk::ImageLayout,
-    src_stage: vk::PipelineStageFlags,
-    src_access: vk::AccessFlags,
+    region: ImageUploadRegion,
+    source_state: ImageLayoutState,
 ) {
     let mut barrier = vk::ImageMemoryBarrier::default()
         .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
@@ -599,14 +736,14 @@ fn upload_buffer_to_image(
         });
 
     unsafe {
-        barrier.old_layout = old_layout;
+        barrier.old_layout = source_state.layout;
         barrier.new_layout = vk::ImageLayout::TRANSFER_DST_OPTIMAL;
-        barrier.src_access_mask = src_access;
+        barrier.src_access_mask = source_state.access;
         barrier.dst_access_mask = vk::AccessFlags::TRANSFER_WRITE;
 
         device.cmd_pipeline_barrier(
             command_buffer,
-            src_stage,
+            source_state.stage,
             vk::PipelineStageFlags::TRANSFER,
             vk::DependencyFlags::empty(),
             &[],
@@ -625,13 +762,13 @@ fn upload_buffer_to_image(
                 layer_count: 1,
             })
             .image_offset(vk::Offset3D {
-                x: x as i32,
-                y: y as i32,
+                x: region.x as i32,
+                y: region.y as i32,
                 z: 0,
             })
             .image_extent(vk::Extent3D {
-                width,
-                height,
+                width: region.width,
+                height: region.height,
                 depth: 1,
             });
         device.cmd_copy_buffer_to_image(
@@ -655,6 +792,79 @@ fn upload_buffer_to_image(
             &[],
             &[],
             &[barrier],
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn descriptor_pool_reserves_images_and_two_renderer_owned_samplers() {
+        assert!(matches!(
+            descriptor_pool_plan(MIN_SAMPLED_IMAGE_DESCRIPTORS - 1),
+            Err(RendererError::InvalidRenderState(_))
+        ));
+        assert!(matches!(
+            descriptor_pool_plan(u32::MAX),
+            Err(RendererError::InvalidRenderState(_))
+        ));
+
+        let (max_sets, sizes) = descriptor_pool_plan(MIN_SAMPLED_IMAGE_DESCRIPTORS).unwrap();
+        assert_eq!(
+            max_sets,
+            MIN_SAMPLED_IMAGE_DESCRIPTORS + STANDARD_SAMPLER_DESCRIPTORS
+        );
+        assert_eq!(sizes[0].ty, vk::DescriptorType::SAMPLED_IMAGE);
+        assert_eq!(sizes[0].descriptor_count, MIN_SAMPLED_IMAGE_DESCRIPTORS);
+        assert_eq!(sizes[1].ty, vk::DescriptorType::SAMPLER);
+        assert_eq!(sizes[1].descriptor_count, STANDARD_SAMPLER_DESCRIPTORS);
+    }
+
+    #[test]
+    fn standard_samplers_match_upstream_filter_and_lod_contract() {
+        for (filter, mipmap_mode) in [
+            (vk::Filter::LINEAR, vk::SamplerMipmapMode::LINEAR),
+            (vk::Filter::NEAREST, vk::SamplerMipmapMode::NEAREST),
+        ] {
+            let info = standard_sampler_create_info(filter);
+            assert_eq!(info.mag_filter, filter);
+            assert_eq!(info.min_filter, filter);
+            assert_eq!(info.mipmap_mode, mipmap_mode);
+            assert_eq!(info.address_mode_u, vk::SamplerAddressMode::CLAMP_TO_EDGE);
+            assert_eq!(info.address_mode_v, vk::SamplerAddressMode::CLAMP_TO_EDGE);
+            assert_eq!(info.address_mode_w, vk::SamplerAddressMode::CLAMP_TO_EDGE);
+            assert_eq!(info.min_lod, -1000.0);
+            assert_eq!(info.max_lod, 1000.0);
+            assert_eq!(info.max_anisotropy, 1.0);
+            assert_eq!(info.anisotropy_enable, vk::FALSE);
+        }
+    }
+
+    #[test]
+    fn scissor_rejects_non_finite_empty_and_offscreen_clip_rectangles() {
+        let scissor = |clip_rect| clip_rect_to_scissor(clip_rect, [0.0, 0.0], [1.0, 1.0], 100, 80);
+        assert!(scissor([f32::NAN, 0.0, 10.0, 10.0]).is_none());
+        assert!(scissor([0.0, 0.0, f32::INFINITY, 10.0]).is_none());
+        assert!(scissor([10.0, 5.0, 10.0, 20.0]).is_none());
+        assert!(scissor([20.0, 20.0, 10.0, 30.0]).is_none());
+        assert!(scissor([100.0, 0.0, 120.0, 20.0]).is_none());
+        assert!(clip_rect_to_scissor([0.0; 4], [0.0; 2], [1.0; 2], 0, 80).is_none());
+    }
+
+    #[test]
+    fn scissor_clamps_fractional_clip_rectangles_to_the_framebuffer() {
+        let scissor =
+            clip_rect_to_scissor([-3.2, 2.2, 120.8, 81.0], [0.0, 0.0], [1.0, 1.0], 100, 80)
+                .unwrap();
+        assert_eq!(scissor.offset, vk::Offset2D { x: 0, y: 2 });
+        assert_eq!(
+            scissor.extent,
+            vk::Extent2D {
+                width: 100,
+                height: 78,
+            }
         );
     }
 }

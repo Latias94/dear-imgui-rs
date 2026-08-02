@@ -38,7 +38,7 @@ shim; they are not official Dear ImGui APIs.
 `dear-node-editor-sys` is native-only in this integration phase. This is not
 because `imgui-node-editor` can never be built for WebAssembly; it is because
 this workspace's WASM support uses an import-style provider module
-(`imgui-sys-v0`) with explicitly generated imports and provider exports.
+(`imgui-sys-v1`) with explicitly generated imports and provider exports.
 
 To support `dear-node-editor` on wasm, the workspace would need a complete
 provider integration for `cimnodes_editor` / `imgui-node-editor`: wasm

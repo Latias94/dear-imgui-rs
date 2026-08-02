@@ -183,6 +183,81 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  ash-vulkan-validation-attempt-1:
+    needs: validate-candidate-identity
+    uses: ./.github/workflows/native-runtime.yml
+    with:
+      candidate_sha: ${{ inputs.candidate_sha }}
+      contract: ash-vulkan-validation-smoke
+      gate_attempt: 1
+
+  ash-vulkan-validation-attempt-2:
+    needs: [validate-candidate-identity, ash-vulkan-validation-attempt-1]
+    if: always() && needs.validate-candidate-identity.result == 'success' && needs.ash-vulkan-validation-attempt-1.outputs.retry_eligible == 'true'
+    uses: ./.github/workflows/native-runtime.yml
+    with:
+      candidate_sha: ${{ inputs.candidate_sha }}
+      contract: ash-vulkan-validation-smoke
+      gate_attempt: 2
+
+  ash-vulkan-validation-cell:
+    needs: [validate-candidate-identity, ash-vulkan-validation-attempt-1, ash-vulkan-validation-attempt-2]
+    if: always() && needs.validate-candidate-identity.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+
+      - name: Download Ash Vulkan validation attempt 1
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: native-runtime-ash-vulkan-validation-smoke-${{ inputs.candidate_sha }}-run-${{ github.run_attempt }}-gate-1
+          path: target/runtime-attempts/ash-vulkan-validation/attempt1
+
+      - name: Download Ash Vulkan validation attempt 2
+        if: always() && needs.ash-vulkan-validation-attempt-2.result != 'skipped'
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: native-runtime-ash-vulkan-validation-smoke-${{ inputs.candidate_sha }}-run-${{ github.run_attempt }}-gate-2
+          path: target/runtime-attempts/ash-vulkan-validation/attempt2
+
+      - name: Finalize Ash Vulkan validation cell without retry
+        if: always() && needs.ash-vulkan-validation-attempt-2.result == 'skipped'
+        continue-on-error: true
+        run: >-
+          python3 tools/ci/release_cell.py finalize-runtime
+          --repo-root "${{ github.workspace }}"
+          --candidate-sha "${{ inputs.candidate_sha }}"
+          --cell-id linux-ash-vulkan-validation-smoke
+          --cell-root target/release-evidence/linux-ash-vulkan-validation-smoke
+          --attempt1 target/runtime-attempts/ash-vulkan-validation/attempt1
+
+      - name: Finalize Ash Vulkan validation cell with retry
+        if: always() && needs.ash-vulkan-validation-attempt-2.result != 'skipped'
+        continue-on-error: true
+        run: >-
+          python3 tools/ci/release_cell.py finalize-runtime
+          --repo-root "${{ github.workspace }}"
+          --candidate-sha "${{ inputs.candidate_sha }}"
+          --cell-id linux-ash-vulkan-validation-smoke
+          --cell-root target/release-evidence/linux-ash-vulkan-validation-smoke
+          --attempt1 target/runtime-attempts/ash-vulkan-validation/attempt1
+          --attempt2 target/runtime-attempts/ash-vulkan-validation/attempt2
+
+      - name: Retain Ash Vulkan validation release cell
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-cell-linux-ash-vulkan-validation-smoke-${{ inputs.candidate_sha }}
+          path: target/release-evidence
+          if-no-files-found: error
+          retention-days: 30
+
   sdl3-glow-viewport-attempt-1:
     needs: validate-candidate-identity
     uses: ./.github/workflows/native-runtime.yml
@@ -330,6 +405,13 @@ jobs:
         if: matrix.cell_id == 'linux-wasm'
         run: rustup target add wasm32-unknown-unknown
 
+      - name: Set up pinned Emscripten provider toolchain
+        if: matrix.cell_id == 'linux-wasm'
+        uses: emscripten-core/setup-emsdk@v16
+        with:
+          version: 5.0.1
+          emsdk-version: 5.0.5
+
       - name: Install macOS dependencies
         if: matrix.cell_id == 'macos-build'
         run: brew install cmake freetype pkg-config sdl3
@@ -374,7 +456,7 @@ jobs:
         if: matrix.cell_id == 'windows-gnu'
         run: rustup target add x86_64-pc-windows-gnu
 
-      - name: Capture WASM route
+      - name: Capture WASM route and provider contract
         if: matrix.cell_id == 'linux-wasm'
         continue-on-error: true
         run: >-
@@ -385,16 +467,8 @@ jobs:
           --stderr-log logs/stderr.log
           --timeout 2400
           --
-          cargo check
-          --target wasm32-unknown-unknown
-          --no-default-features
-          -p dear-imgui-rs
-          -p dear-implot
-          -p dear-implot3d
-          -p dear-imnodes
-          -p dear-imguizmo
-          -p dear-imguizmo-quat
-          --features dear-imgui-rs/wasm,dear-implot/wasm,dear-implot3d/wasm,dear-imnodes/wasm,dear-imguizmo/wasm,dear-imguizmo-quat/wasm
+          python3 -B tools/ci/verify_wasm_provider.py
+          --check-rust-route
 
       - name: Capture vcpkg consumer
         if: matrix.cell_id == 'windows-vcpkg'
@@ -584,7 +658,7 @@ jobs:
       candidate_sha: ${{ inputs.candidate_sha }}
 
   aggregate:
-    needs: [validate-candidate-identity, test-engine-cell, viewport-cell, sdl3-glow-viewport-cell, standard-cells, prebuilt]
+    needs: [validate-candidate-identity, test-engine-cell, viewport-cell, ash-vulkan-validation-cell, sdl3-glow-viewport-cell, standard-cells, prebuilt]
     if: always() && needs.validate-candidate-identity.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10

@@ -139,6 +139,19 @@ jobs:
       - name: Run dear-imgui-rs multi-viewport acceptance tests
         run: cargo nextest run -p dear-imgui-rs --features multi-viewport
 
+      - name: Compare public C++ aggregate layouts on non-Windows ABI
+        if: runner.os != 'Windows'
+        run: >-
+          cargo nextest run -j 1 -p dear-imgui-rs
+          --features multi-viewport,abi-probe
+          cpp_public_aggregate_layout_probe_matches_rust
+          public_aggregate_layout_probe_rejects_an_abi_mismatch
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+
+      - name: Run Glow renderer acceptance tests
+        run: cargo nextest run -p dear-imgui-glow --features multi-viewport
+
       - name: Run reflection acceptance tests
         run: cargo nextest run -p dear-imgui-reflect --features glam,mint
 
@@ -163,6 +176,9 @@ jobs:
       - name: Check Winit multi-viewport examples
         run: cargo check -p dear-imgui-examples --features "multi-viewport" --bin multi_viewport_wgpu --bin multi_viewport_ash
 
+      - name: Check Ash dynamic-rendering multi-viewport smoke harness
+        run: cargo check -p dear-imgui-examples --features "ash-winit-multi-viewport,ash-dynamic-rendering" --bin multi_viewport_ash
+
       - name: Check SDL3 Glow multi-viewport example
         run: cargo check -p dear-imgui-examples --features "sdl3-glow-multi-viewport" --bin sdl3_glow_multi_viewport
 
@@ -173,7 +189,10 @@ jobs:
         run: cargo check -p dear-imgui-examples --features "sdl3-wgpu-multi-viewport" --bin sdl3_wgpu_multi_viewport
 
       - name: Check SDL3 Ash multi-viewport example
-        run: cargo check -p dear-imgui-examples --features "sdl3-ash-multi-viewport" --bin sdl3_ash_multi_viewport
+        run: cargo check -p dear-imgui-examples --no-default-features --features "sdl3-ash-multi-viewport" --bin sdl3_ash_multi_viewport
+
+      - name: Check SDL3 Ash dynamic-rendering multi-viewport example
+        run: cargo check -p dear-imgui-examples --no-default-features --features "sdl3-ash-multi-viewport,ash-dynamic-rendering" --bin sdl3_ash_multi_viewport
 
       - name: Check SDL3 GPU multi-viewport example
         run: cargo check -p dear-imgui-examples --features "sdl3-gpu-multi-viewport" --bin sdl3_sdlgpu_multi_view
@@ -215,6 +234,12 @@ jobs:
 
       - name: Check test-engine (no capture)
         run: cargo check -p dear-imgui-test-engine --no-default-features
+
+      - name: Test safe Test Engine runner contracts
+        run: cargo nextest run -j 1 -p dear-imgui-test-engine --no-default-features
+
+      - name: Test safe Test Engine capture contracts
+        run: cargo nextest run -j 1 -p dear-imgui-test-engine --no-default-features --features capture
 
       - name: Check native stack-layout unified with the WASM feature
         env:
@@ -284,7 +309,29 @@ jobs:
             -Clink-arg=-fsanitize=undefined
             -Clink-arg=-lstdc++
           IMGUI_SYS_FORCE_BUILD: "1"
-        run: cargo nextest run -p dear-imgui-test-engine-sys --test ffi_boundary
+        run: >-
+          cargo nextest run -p dear-imgui-test-engine-sys
+          --features capture --test ffi_boundary
+
+      - name: Run Test Engine runner tests with ASan and UBSan
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          CC: clang
+          CXX: clang++
+          CFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
+          CXXFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
+          RUSTFLAGS: >-
+            -Cdebuginfo=1
+            -Cforce-frame-pointers=yes
+            -Clinker=clang++
+            -Clink-arg=-fsanitize=address
+            -Clink-arg=-fsanitize=undefined
+            -Clink-arg=-lstdc++
+          IMGUI_SYS_FORCE_BUILD: "1"
+        run: >-
+          cargo nextest run -p dear-imgui-test-engine
+          --features capture --test runner
 
   test-engine-runtime:
     name: Test Engine native runtime
@@ -320,6 +367,24 @@ jobs:
     with:
       candidate_sha: ${{ github.sha }}
       contract: multi-viewport-smoke
+      gate_attempt: 2
+
+  ash-vulkan-validation-runtime:
+    name: Winit/Ash Vulkan validation runtime
+    uses: ./.github/workflows/native-runtime.yml
+    with:
+      candidate_sha: ${{ github.sha }}
+      contract: ash-vulkan-validation-smoke
+      gate_attempt: 1
+
+  ash-vulkan-validation-runtime-retry:
+    name: Winit/Ash Vulkan validation runtime retry
+    needs: ash-vulkan-validation-runtime
+    if: ${{ always() && needs.ash-vulkan-validation-runtime.outputs.retry_eligible == 'true' }}
+    uses: ./.github/workflows/native-runtime.yml
+    with:
+      candidate_sha: ${{ github.sha }}
+      contract: ash-vulkan-validation-smoke
       gate_attempt: 2
 
   sdl3-glow-multi-viewport-runtime:
@@ -468,7 +533,7 @@ jobs:
           libasound2-dev
           libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev
           libxkbcommon-dev libwayland-dev libudev-dev
-          mesa-common-dev libgl1-mesa-dev
+          mesa-common-dev libgl1-mesa-dev mesa-vulkan-drivers
 
       - name: Check exact WGPU route
         run: cargo check -p dear-imgui-wgpu --lib --no-default-features --features "${{ matrix.features }}"
@@ -484,6 +549,16 @@ jobs:
       - name: Test exact WGPU route
         run: cargo nextest run -p dear-imgui-wgpu --lib --no-default-features --features "${{ matrix.features }}"
         env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+
+      - name: Test WGPU raw callback render contract
+        if: matrix.wgpu == '30' && matrix.platform == 'Winit'
+        run: >-
+          cargo nextest run -p dear-imgui-wgpu --test integration_test
+          --no-default-features --features "${{ matrix.features }}"
+          direct_and_explicit_render_paths_execute_raw_callbacks_with_scoped_state
+        env:
+          DEAR_IMGUI_REQUIRE_WGPU_ADAPTER: "1"
           IMGUI_SYS_FORCE_BUILD: "1"
 
       - name: Lint exact WGPU release route
@@ -542,12 +617,42 @@ jobs:
       - name: Install Linux deps
         run: >-
           sudo apt-get install -y
-          build-essential pkg-config
+          build-essential cmake ninja-build pkg-config
           libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev
           libxkbcommon-dev libwayland-dev libudev-dev
 
+      - name: Build pinned glslangValidator
+        if: matrix.platform == 'Winit' && matrix.rendering == 'classic'
+        timeout-minutes: 15
+        run: >-
+          python3 -B tools/ci/build_glslang.py
+          --work-root "$RUNNER_TEMP"
+          --github-env "$GITHUB_ENV"
+
+      - name: Verify checked-in Ash shaders
+        if: matrix.platform == 'Winit' && matrix.rendering == 'classic'
+        run: >-
+          python3 tools/generate_ash_shaders.py --check --recompile
+          --compiler "$GLSLANG_VALIDATOR" --compiler-timeout 60
+
       - name: Check exact Ash route
         run: cargo check -p dear-imgui-ash --lib --no-default-features --features "${{ matrix.features }}"
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+
+      - name: Check gpu-allocator constructor route
+        if: matrix.platform == 'Winit' && matrix.rendering == 'classic'
+        run: >-
+          cargo check -p dear-imgui-ash --lib --no-default-features
+          --features "gpu-allocator,dynamic-rendering"
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+
+      - name: Check vk-mem constructor route
+        if: matrix.platform == 'Winit' && matrix.rendering == 'classic'
+        run: >-
+          cargo check -p dear-imgui-ash --lib --no-default-features
+          --features "vk-mem"
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
 
@@ -966,6 +1071,12 @@ jobs:
           IMGUI_SYS_FORCE_BUILD: "1"
           RUSTFLAGS: ${{ matrix.rustflags }}
 
+      - name: Compare public C++ aggregate layouts with Rust
+        run: cargo +stable nextest run -j 1 -p dear-imgui-rs --features multi-viewport,abi-probe cpp_public_aggregate_layout_probe_matches_rust public_aggregate_layout_probe_rejects_an_abi_mismatch
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+          RUSTFLAGS: ${{ matrix.rustflags }}
+
       - name: Run exact aggregate callback lifecycle sentinel
         run: cargo +stable nextest run -p dear-imgui-rs --features multi-viewport context_drop_clears_aggregate_callback_storage
         env:
@@ -1045,6 +1156,22 @@ jobs:
           --contains 'regenerating bindings requires the `bindgen` feature'
           --contains='--features bindgen'
           -- cargo check -p dear-imgui-sys
+
+      - name: Reject packaging the source-only ABI probe
+        run: >-
+          python3 tools/ci/run_contract.py expect-failure
+          --label package-bin-abi-probe
+          --contains 'feature `abi-probe` is CI-only and cannot be packaged as a prebuilt core artifact'
+          -- cargo check -p dear-imgui-sys --no-default-features --features package-bin,abi-probe
+
+      - name: Reject the ABI probe when native compilation is disabled
+        env:
+          IMGUI_SYS_SKIP_CC: "1"
+        run: >-
+          python3 tools/ci/run_contract.py expect-failure
+          --label abi-probe-without-native-build
+          --contains 'feature `abi-probe` requires a native source build and cannot be combined with WASM or IMGUI_SYS_SKIP_CC'
+          -- cargo check -p dear-imgui-sys --no-default-features --features abi-probe
 
   windows-vcpkg-native-deps:
     name: Windows vcpkg native dependency discovery
@@ -1266,6 +1393,12 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Set up pinned Emscripten provider toolchain
+        uses: emscripten-core/setup-emsdk@v16
+        with:
+          version: 5.0.1
+          emsdk-version: 5.0.5
+
       - name: Refresh Linux package metadata
         run: sudo apt-get update
 
@@ -1328,11 +1461,23 @@ jobs:
       - name: Add wasm32 target
         run: rustup target add wasm32-unknown-unknown
 
+      - name: Set up pinned Emscripten provider toolchain
+        uses: emscripten-core/setup-emsdk@v16
+        with:
+          version: 5.0.1
+          emsdk-version: 5.0.5
+
       - name: Reject WASI and Emscripten in the pure target resolver
         run: cargo nextest run -p dear-imgui-build-support --features binding-spec wasm_target_requires_the_explicit_provider_feature
 
       - name: Check explicit core WASM feature
         run: cargo check -p dear-imgui-rs --target wasm32-unknown-unknown --no-default-features --features wasm
+
+      - name: Check Glow renderer WASM provider
+        run: cargo check -p dear-imgui-glow --target wasm32-unknown-unknown --no-default-features --features wasm
+
+      - name: Check ImNodes WASM safe API tests
+        run: cargo check -p dear-imnodes --tests --target wasm32-unknown-unknown --no-default-features --features wasm
 
       - name: Check file browser WASM scan policy branches
         run: cargo check -p dear-file-browser --target wasm32-unknown-unknown --tests --no-default-features --features "imgui,dear-imgui-rs/wasm"
@@ -1360,6 +1505,14 @@ jobs:
           -- cargo check -p dear-imgui-rs --target wasm32-unknown-unknown
           --no-default-features --features wasm,test-engine
 
+      - name: Reject the native ABI probe on WASM
+        run: >-
+          python3 tools/ci/run_contract.py expect-failure
+          --label wasm-abi-probe
+          --contains 'feature `abi-probe` requires a native source build and cannot be combined with WASM or IMGUI_SYS_SKIP_CC'
+          -- cargo check -p dear-imgui-sys --target wasm32-unknown-unknown
+          --no-default-features --features wasm,abi-probe
+
       - name: Reject native prebuilt artifacts on WASM
         run: >-
           python3 tools/ci/run_contract.py expect-failure
@@ -1384,3 +1537,6 @@ jobs:
 
       - name: Build web demo crate for wasm32-unknown-unknown (core + extensions)
         run: cargo build -p dear-imgui-web-demo --target wasm32-unknown-unknown --no-default-features --features "web-backends,implot,implot3d,imnodes,imguizmo,imguizmo-quat"
+
+      - name: Build and structurally verify the Emscripten provider
+        run: python3 -B tools/ci/verify_wasm_provider.py

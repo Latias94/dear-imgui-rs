@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -195,6 +196,22 @@ class ApiSurfaceReportTests(unittest.TestCase):
             set(),
         )
 
+    def test_check_propagates_upstream_contract_failure(self):
+        with mock.patch.object(
+            api_surface_report.upstream_contract,
+            "audit_repository_contract",
+            side_effect=api_surface_report.upstream_contract.ContractInputError(
+                "fixture live source drift"
+            ),
+        ):
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                result = api_surface_report.main(["--check", "--limit", "0"])
+
+        self.assertEqual(result, 1)
+        self.assertIn("fixture live source drift", stderr.getvalue())
+
     def test_alias_collector_accepts_only_public_safe_items(self):
         source = r'''
 // #[doc(alias = "LineComment")]
@@ -348,6 +365,11 @@ create_token!(
                 "",
             ),
             "safe-compat-ffi": ("mod compat_ffi {}\n", "fixture-safe", ""),
+            "safe-draw-callback-builder": (
+                "pub fn f() { add_callback_safe(); }\n",
+                "fixture-safe",
+                "",
+            ),
             "implot3d-validation-helpers": (
                 "pub fn validate_nonempty() {}\n",
                 "dear-implot3d",
@@ -389,6 +411,10 @@ create_token!(
             ),
             "context-frame-with": (
                 "pub fn r#frame_with() {}\n",
+                "fixture-safe",
+            ),
+            "safe-draw-callback-builder": (
+                "pub fn f() { r#add_callback_safe(); }\n",
                 "fixture-safe",
             ),
         }

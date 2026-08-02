@@ -30,6 +30,7 @@ Usage examples:
         --cimgui-branch docking_inter --cimplot-branch master \
         --cimplot3d-branch main \
         --cimnodes-branch master --cimguizmo-branch master \
+        --cimguizmo-quat-branch master \
         --cimnodes-editor-branch main --imgui-test-engine-branch main
 
   - Only regenerate pregenerated bindings without touching submodules:
@@ -95,6 +96,11 @@ def main() -> int:
     parser.add_argument("--cimnodes-editor-branch", default="main", help="Branch for cimnodes_editor submodule (dear-node-editor-sys)")
     parser.add_argument("--cimguizmo-branch", default="master", help="Branch for cimguizmo submodule (dear-imguizmo-sys)")
     parser.add_argument(
+        "--cimguizmo-quat-branch",
+        default="master",
+        help="Branch for cimguizmo_quat submodule (dear-imguizmo-quat-sys)",
+    )
+    parser.add_argument(
         "--imgui-test-engine-branch",
         default="main",
         help="Branch for imgui_test_engine submodule (dear-imgui-test-engine-sys)",
@@ -118,32 +124,28 @@ def main() -> int:
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parents[1]
-    # Known crate roots and submodules
-    crate_roots = {
-        "dear-imgui-sys": repo_root / "dear-imgui-sys",
-        "dear-implot-sys": repo_root / "extensions/dear-implot-sys",
-        "dear-implot3d-sys": repo_root / "extensions/dear-implot3d-sys",
-        "dear-imnodes-sys": repo_root / "extensions/dear-imnodes-sys",
-        "dear-node-editor-sys": repo_root / "extensions/dear-node-editor-sys",
-        "dear-imguizmo-sys": repo_root / "extensions/dear-imguizmo-sys",
-        "dear-imguizmo-quat-sys": repo_root / "extensions/dear-imguizmo-quat-sys",
-        "dear-imgui-test-engine-sys": repo_root / "extensions/dear-imgui-test-engine-sys",
+    branches = {
+        "core": args.cimgui_branch,
+        "test-engine": args.imgui_test_engine_branch,
+        "implot": args.cimplot_branch,
+        "implot3d": args.cimplot3d_branch,
+        "imnodes": args.cimnodes_branch,
+        "node-editor": args.cimnodes_editor_branch,
+        "imguizmo": args.cimguizmo_branch,
+        "imguizmo-quat": args.cimguizmo_quat_branch,
     }
     submodules = {
-        "dear-imgui-sys": (crate_roots["dear-imgui-sys"] / "third-party/cimgui", args.cimgui_branch),
-        "dear-implot-sys": (crate_roots["dear-implot-sys"] / "third-party/cimplot", args.cimplot_branch),
-        "dear-implot3d-sys": (crate_roots["dear-implot3d-sys"] / "third-party/cimplot3d", args.cimplot3d_branch),
-        "dear-imnodes-sys": (crate_roots["dear-imnodes-sys"] / "third-party/cimnodes", args.cimnodes_branch),
-        "dear-node-editor-sys": (
-            crate_roots["dear-node-editor-sys"] / "third-party/cimnodes_editor",
-            args.cimnodes_editor_branch,
-        ),
-        "dear-imguizmo-sys": (crate_roots["dear-imguizmo-sys"] / "third-party/cimguizmo", args.cimguizmo_branch),
-        "dear-imguizmo-quat-sys": (crate_roots["dear-imguizmo-quat-sys"] / "third-party/cimguizmo_quat", args.cimguizmo_branch),
-        "dear-imgui-test-engine-sys": (
-            crate_roots["dear-imgui-test-engine-sys"] / "third-party/imgui_test_engine",
-            args.imgui_test_engine_branch,
-        ),
+        source.crate_name: (
+            repo_root
+            / Path(source.crate_root.as_posix())
+            / Path(source.source_root.as_posix()),
+            branches[source.id],
+        )
+        for source in source_metadata.SOURCE_INVENTORY.sources
+    }
+    crate_roots = {
+        source.crate_name: repo_root / Path(source.crate_root.as_posix())
+        for source in source_metadata.SOURCE_INVENTORY.sources
     }
 
     # Parse crates list
@@ -234,10 +236,11 @@ def main() -> int:
     # Optionally compile-check the explicit core WASM provider contract.
     if args.wasm:
         wasm_preg = crate_roots["dear-imgui-sys"] / "src" / "wasm_bindings_pregenerated.rs"
-        if not wasm_preg.exists():
+        if not args.dry_run and not wasm_preg.exists():
             print(f"WASM pregenerated bindings not found: {wasm_preg}", file=sys.stderr)
             return 5
-        print(f"WASM pregenerated bindings ready: {wasm_preg}")
+        state = "would be generated at" if args.dry_run else "ready"
+        print(f"WASM pregenerated bindings {state}: {wasm_preg}")
 
         print("Running cargo check for the explicit wasm32 provider feature...")
         rc = run([

@@ -4,41 +4,8 @@ use crate::sys;
 use std::slice;
 
 /// All draw data to render a Dear ImGui frame.
-#[repr(C)]
-pub struct DrawData {
-    /// Only valid after render() is called and before the next new frame() is called.
-    pub(super) valid: bool,
-    /// Number of DrawList to render.
-    pub(super) cmd_lists_count: i32,
-    /// For convenience, sum of all draw list index buffer sizes.
-    pub(super) total_idx_count: i32,
-    /// For convenience, sum of all draw list vertex buffer sizes.
-    pub(super) total_vtx_count: i32,
-    // Array of DrawList.
-    pub(super) cmd_lists: crate::internal::ImVector<*mut sys::ImDrawList>,
-    /// Upper-left position of the viewport to render.
-    ///
-    /// (= upper-left corner of the orthogonal projection matrix to use)
-    pub display_pos: [f32; 2],
-    /// Size of the viewport to render.
-    ///
-    /// (= display_pos + display_size == lower-right corner of the orthogonal matrix to use)
-    pub display_size: [f32; 2],
-    /// Amount of pixels for each unit of display_size.
-    ///
-    /// Based on io.display_frame_buffer_scale. Typically [1.0, 1.0] on normal displays, and
-    /// [2.0, 2.0] on Retina displays, but fractional values are also possible.
-    pub framebuffer_scale: [f32; 2],
-
-    /// Viewport carrying the DrawData instance, might be of use to the renderer (generally not).
-    pub(super) owner_viewport: *mut sys::ImGuiViewport,
-    /// Texture data (internal use)
-    pub(super) textures: *mut crate::internal::ImVector<*mut sys::ImTextureData>,
-}
-
-// Keep this struct layout-compatible with the sys bindings (`ImDrawData`).
-const _: [(); std::mem::size_of::<sys::ImDrawData>()] = [(); std::mem::size_of::<DrawData>()];
-const _: [(); std::mem::align_of::<sys::ImDrawData>()] = [(); std::mem::align_of::<DrawData>()];
+#[repr(transparent)]
+pub struct DrawData(pub(super) sys::ImDrawData);
 
 unsafe impl RawCast<sys::ImDrawData> for DrawData {}
 
@@ -65,7 +32,15 @@ impl DrawData {
     /// the next `Context::new_frame()` is called.
     #[inline]
     pub fn valid(&self) -> bool {
-        self.valid
+        self.0.Valid
+    }
+
+    /// Returns the frame counter of the Context that emitted this draw data.
+    ///
+    /// This is primarily useful for diagnostics and correlating renderer work with a UI frame.
+    #[inline]
+    pub fn frame_count(&self) -> usize {
+        total_count_from_i32("DrawData::frame_count()", self.0.FrameCount)
     }
 
     /// Returns an iterator over the draw lists included in the draw data.
@@ -82,31 +57,31 @@ impl DrawData {
     /// Returns the total number of index-buffer elements across all draw lists.
     #[inline]
     pub fn total_idx_count(&self) -> usize {
-        total_count_from_i32("DrawData::total_idx_count()", self.total_idx_count)
+        total_count_from_i32("DrawData::total_idx_count()", self.0.TotalIdxCount)
     }
 
     /// Returns the total number of vertex-buffer elements across all draw lists.
     #[inline]
     pub fn total_vtx_count(&self) -> usize {
-        total_count_from_i32("DrawData::total_vtx_count()", self.total_vtx_count)
+        total_count_from_i32("DrawData::total_vtx_count()", self.0.TotalVtxCount)
     }
 
     /// Get the display position as an array
     #[inline]
     pub fn display_pos(&self) -> [f32; 2] {
-        self.display_pos
+        [self.0.DisplayPos.x, self.0.DisplayPos.y]
     }
 
     /// Get the display size as an array
     #[inline]
     pub fn display_size(&self) -> [f32; 2] {
-        self.display_size
+        [self.0.DisplaySize.x, self.0.DisplaySize.y]
     }
 
     /// Get the framebuffer scale as an array
     #[inline]
     pub fn framebuffer_scale(&self) -> [f32; 2] {
-        self.framebuffer_scale
+        [self.0.FramebufferScale.x, self.0.FramebufferScale.y]
     }
 
     /// Raw owner viewport pointer for this draw data.
@@ -116,20 +91,20 @@ impl DrawData {
     /// the draw data lifetime.
     #[inline]
     pub fn owner_viewport(&self) -> *mut sys::ImGuiViewport {
-        self.owner_viewport
+        self.0.OwnerViewport
     }
 
     #[inline]
     pub(crate) unsafe fn cmd_lists(&self) -> &[*mut sys::ImDrawList] {
         unsafe {
-            if self.cmd_lists_count <= 0 || self.cmd_lists.data.is_null() {
+            if self.0.CmdLists.Size <= 0 || self.0.CmdLists.Data.is_null() {
                 return &[];
             }
-            let len = match usize::try_from(self.cmd_lists_count) {
+            let len = match usize::try_from(self.0.CmdLists.Size) {
                 Ok(len) => len,
                 Err(_) => return &[],
             };
-            slice::from_raw_parts(self.cmd_lists.data, len)
+            slice::from_raw_parts(self.0.CmdLists.Data, len)
         }
     }
 

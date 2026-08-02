@@ -748,6 +748,7 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
         queue.submit(std::iter::once(encoder.finish()));
         data.pending_frame = Some(frame);
         data.pending_reconfigure = reconfigure_after_present;
+        control.record_viewport_render_submitted(viewport.id());
         Ok(())
     });
 }
@@ -776,6 +777,7 @@ pub(super) unsafe fn renderer_swap_buffers(control: &RuntimeControl, viewport: *
     data.queue.present(frame);
     #[cfg(not(feature = "wgpu-30"))]
     frame.present();
+    control.record_viewport_present_submitted(viewport.id());
     let refreshed_size = framebuffer_size_for_reconfigure(data.pending_reconfigure, || unsafe {
         platform_adapter::framebuffer_size(viewport)
     });

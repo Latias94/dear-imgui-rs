@@ -1,9 +1,15 @@
 use std::{
     ffi::{CStr, CString},
     ptr,
+    sync::Mutex,
 };
 
+#[cfg(feature = "capture")]
+use std::ffi::c_void;
+
 use dear_imgui_test_engine_sys as sys;
+
+static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 unsafe fn diagnostic() -> String {
     let mut required = 0usize;
@@ -47,6 +53,9 @@ unsafe fn create_script() -> *mut sys::ImGuiTestEngineScript {
 
 #[test]
 fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
+    let _guard = TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     unsafe {
         assert_eq!(
             sys::imgui_test_engine_test_reset_lifecycle_counters(),
@@ -267,6 +276,24 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
             sys::ImGuiTestEngineStatus_OutOfRange
         );
         assert_eq!(
+            sys::imgui_test_engine_script_table_resize_column_by_label(
+                script,
+                c"table".as_ptr(),
+                ptr::null(),
+                10.0,
+            ),
+            sys::ImGuiTestEngineStatus_InvalidArgument
+        );
+        assert_eq!(
+            sys::imgui_test_engine_script_table_resize_column_by_label(
+                script,
+                c"table".as_ptr(),
+                c"column".as_ptr(),
+                f32::INFINITY,
+            ),
+            sys::ImGuiTestEngineStatus_OutOfRange
+        );
+        assert_eq!(
             sys::imgui_test_engine_script_table_open_context_menu(script, c"table".as_ptr(), -2,),
             sys::ImGuiTestEngineStatus_OutOfRange
         );
@@ -404,11 +431,11 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
             sys::ImGuiTestEngineStatus_Success
         );
         assert_eq!(
-            sys::imgui_test_engine_script_table_set_column_enabled_by_label(
+            sys::imgui_test_engine_script_table_resize_column_by_label(
                 missing_label_script,
                 c"BoundaryTable".as_ptr(),
                 c"missing label".as_ptr(),
-                true,
+                10.0,
             ),
             sys::ImGuiTestEngineStatus_Success
         );
@@ -513,9 +540,15 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
             dear_imgui_sys::igEnd();
             dear_imgui_sys::igRender();
             assert_eq!(
-                sys::imgui_test_engine_post_swap(engine),
+                sys::imgui_test_engine_pre_swap(engine),
                 sys::ImGuiTestEngineStatus_Success
             );
+            let mut presentation_completed = false;
+            assert_eq!(
+                sys::imgui_test_engine_post_swap(engine, &mut presentation_completed),
+                sys::ImGuiTestEngineStatus_Success
+            );
+            assert!(presentation_completed);
 
             let mut queue_empty = false;
             let mut running = true;
@@ -624,6 +657,194 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
         assert_eq!(
             sys::imgui_test_engine_test_reset_lifecycle_counters(),
             sys::ImGuiTestEngineStatus_Success
+        );
+    }
+}
+
+#[cfg(feature = "capture")]
+unsafe extern "C" fn capture_probe(
+    _viewport_id: u32,
+    _x: i32,
+    _y: i32,
+    width: i32,
+    height: i32,
+    pixels: *mut u32,
+    user_data: *mut c_void,
+) -> bool {
+    if user_data.is_null() || width < 0 || height < 0 {
+        return false;
+    }
+    let calls = unsafe { &mut *user_data.cast::<usize>() };
+    *calls += 1;
+    let Some(pixel_count) = (width as usize).checked_mul(height as usize) else {
+        return false;
+    };
+    if pixel_count != 0 && pixels.is_null() {
+        return false;
+    }
+    if pixel_count != 0 {
+        unsafe { std::slice::from_raw_parts_mut(pixels, pixel_count) }.fill(0xff00_00ff);
+    }
+    true
+}
+
+#[test]
+fn presentation_cycle_rejects_missing_duplicate_and_aborted_boundaries() {
+    let _guard = TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    unsafe {
+        let engine = create_engine();
+        let ui_context = dear_imgui_sys::igCreateContext(ptr::null_mut());
+        assert!(!ui_context.is_null());
+        assert_eq!(
+            sys::imgui_test_engine_start(engine, ui_context),
+            sys::ImGuiTestEngineStatus_Success
+        );
+
+        let io = dear_imgui_sys::igGetIO_Nil();
+        (*io).BackendFlags |= dear_imgui_sys::ImGuiBackendFlags_RendererHasTextures;
+        (*io).DisplaySize = dear_imgui_sys::ImVec2_c { x: 64.0, y: 64.0 };
+        (*io).DisplayFramebufferScale = dear_imgui_sys::ImVec2_c { x: 1.0, y: 1.0 };
+        (*io).DeltaTime = 1.0 / 60.0;
+        dear_imgui_sys::igNewFrame();
+        dear_imgui_sys::igRender();
+
+        let mut completed = true;
+        assert_eq!(
+            sys::imgui_test_engine_post_swap(engine, &mut completed),
+            sys::ImGuiTestEngineStatus_InvalidState
+        );
+        assert!(!completed);
+        assert_eq!(
+            sys::imgui_test_engine_abort_presentation(engine),
+            sys::ImGuiTestEngineStatus_InvalidState
+        );
+
+        assert_eq!(
+            sys::imgui_test_engine_pre_swap(engine),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert_eq!(
+            sys::imgui_test_engine_pre_swap(engine),
+            sys::ImGuiTestEngineStatus_InvalidState
+        );
+        assert_eq!(
+            sys::imgui_test_engine_post_swap(engine, ptr::null_mut()),
+            sys::ImGuiTestEngineStatus_InvalidArgument
+        );
+        assert_eq!(
+            sys::imgui_test_engine_abort_presentation(engine),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        completed = true;
+        assert_eq!(
+            sys::imgui_test_engine_post_swap(engine, &mut completed),
+            sys::ImGuiTestEngineStatus_InvalidState
+        );
+        assert!(!completed);
+
+        assert_eq!(
+            sys::imgui_test_engine_stop(engine),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert_eq!(
+            sys::imgui_test_engine_unbind(engine),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        dear_imgui_sys::igDestroyContext(ui_context);
+        assert_eq!(
+            sys::imgui_test_engine_destroy_context(engine),
+            sys::ImGuiTestEngineStatus_Success
+        );
+    }
+}
+
+#[cfg(feature = "capture")]
+#[test]
+fn capture_provider_abort_and_stop_clear_every_borrowed_callback_state() {
+    let _guard = TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    unsafe {
+        let engine = create_engine();
+        let ui_context = dear_imgui_sys::igCreateContext(ptr::null_mut());
+        assert!(!ui_context.is_null());
+        assert_eq!(
+            sys::imgui_test_engine_start(engine, ui_context),
+            sys::ImGuiTestEngineStatus_Success
+        );
+
+        let io = dear_imgui_sys::igGetIO_Nil();
+        (*io).BackendFlags |= dear_imgui_sys::ImGuiBackendFlags_RendererHasTextures;
+        (*io).DisplaySize = dear_imgui_sys::ImVec2_c { x: 64.0, y: 64.0 };
+        (*io).DisplayFramebufferScale = dear_imgui_sys::ImVec2_c { x: 1.0, y: 1.0 };
+        (*io).DeltaTime = 1.0 / 60.0;
+        dear_imgui_sys::igNewFrame();
+        dear_imgui_sys::igRender();
+
+        let mut calls = 0usize;
+        let owner = (&mut calls as *mut usize).cast::<c_void>();
+        assert_eq!(
+            sys::imgui_test_engine_install_capture_provider(engine, Some(capture_probe), owner,),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert_eq!(
+            sys::imgui_test_engine_test_set_interactive_capture_state(engine, true, false),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert_eq!(
+            sys::imgui_test_engine_pre_swap(engine),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert_eq!(
+            sys::imgui_test_engine_abort_presentation(engine),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert_eq!(
+            sys::imgui_test_engine_clear_capture_provider(engine, owner),
+            sys::ImGuiTestEngineStatus_Success
+        );
+
+        let mut state = sys::ImGuiTestEngineCaptureState_c::default();
+        assert_eq!(
+            sys::imgui_test_engine_test_get_capture_state(engine, &mut state),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert!(!state.PresentationPending);
+        assert!(!state.CaptureAbortRequested);
+        assert!(!state.CaptureWaitPending);
+        assert!(!state.ProviderInstalled);
+        assert!(!state.ContextCapturing);
+        assert!(!state.ToolCapturing);
+        assert!(!state.IoCapturing);
+
+        assert_eq!(
+            sys::imgui_test_engine_install_capture_provider(engine, Some(capture_probe), owner,),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert_eq!(
+            sys::imgui_test_engine_stop(engine),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert_eq!(
+            sys::imgui_test_engine_test_get_capture_state(engine, &mut state),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert!(!state.CaptureAbortRequested);
+        assert!(!state.ProviderInstalled);
+        assert_eq!(
+            sys::imgui_test_engine_unbind(engine),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        dear_imgui_sys::igDestroyContext(ui_context);
+        assert_eq!(
+            sys::imgui_test_engine_destroy_context(engine),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert_eq!(
+            calls, 0,
+            "the fixture did not request a framebuffer readback"
         );
     }
 }

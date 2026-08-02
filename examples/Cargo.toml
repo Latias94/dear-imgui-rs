@@ -21,12 +21,11 @@ implot3d = ["dep:dear-implot3d", "dear-app/implot3d"]
 freetype = ["dear-imgui-rs/freetype"]
 file-browser = ["dep:dear-file-browser", "dear-file-browser/thumbnails-image"]
 reflect = ["dep:dear-imgui-reflect", "dear-imgui-reflect/glam"]
-test-engine = ["dep:dear-imgui-test-engine"]
+test-engine = ["dep:dear-imgui-test-engine", "dear-app/test-engine"]
 multi-viewport = [
     "glow-multi-viewport",
-    "dear-imgui-winit/multi-viewport",
     "dear-imgui-wgpu/multi-viewport-winit",
-    "dear-imgui-ash/multi-viewport-winit",
+    "ash-winit-multi-viewport",
     "dear-imgui-sdl3?/multi-viewport",
 ]
 
@@ -34,6 +33,16 @@ glow-multi-viewport = [
     "dear-imgui-rs/multi-viewport",
     "dear-imgui-glow/multi-viewport",
 ]
+
+# Enable only the Winit platform and Ash renderer multi-viewport route.
+ash-winit-multi-viewport = [
+    "dear-imgui-rs/multi-viewport",
+    "dear-imgui-winit/multi-viewport",
+    "dear-imgui-ash/multi-viewport-winit",
+]
+
+# Switch the Ash example and renderer to Vulkan dynamic rendering.
+ash-dynamic-rendering = ["dear-imgui-ash/dynamic-rendering"]
 
 # Enable the SDL3 platform and Glow renderer multi-viewport route without
 # activating the unrelated Winit/WGPU/Ash multi-viewport routes.
@@ -179,7 +188,7 @@ required-features = ["multi-viewport"]
 [[bin]]
 name = "multi_viewport_ash"
 path = "02-docking/multi_viewport_ash.rs"
-required-features = ["multi-viewport"]
+required-features = ["ash-winit-multi-viewport"]
 
 [[bin]]
 name = "sdl3_opengl_multi_viewport"
@@ -340,6 +349,7 @@ winit = { workspace = true }
 glam = { workspace = true }
 tracing.workspace = true
 tracing-subscriber.workspace = true
+serde_json = "1"
 env_logger = { workspace = true }
 pollster = { workspace = true }
 glow = { workspace = true }

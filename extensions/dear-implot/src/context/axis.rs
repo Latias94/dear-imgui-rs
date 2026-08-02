@@ -3,7 +3,7 @@ use super::validation::{
     assert_axis_constraint_range, assert_axis_limit_range, assert_axis_zoom_range,
     assert_finite_f64_slice, axis_tick_count_to_i32,
 };
-use crate::{Axis, AxisFlags, PlotCond, XAxis, YAxis, sys};
+use crate::{Axis, AxisFlags, AxisFormat, PlotCond, XAxis, YAxis, sys};
 use dear_imgui_rs::{with_scratch_txt, with_scratch_txt_slice, with_scratch_txt_two};
 use std::os::raw::c_char;
 
@@ -454,25 +454,19 @@ impl<'ui> PlotUi<'ui> {
         })
     }
 
-    /// Setup tick label format string for a specific X axis
-    pub fn setup_x_axis_format(&self, axis: XAxis, fmt: &str) {
-        if fmt.contains('\0') {
-            return;
-        }
+    /// Setup a validated tick label format for a specific X axis.
+    pub fn setup_x_axis_format(&self, axis: XAxis, format: &AxisFormat<'_>) {
         self.with_bound_context(|| {
-            with_scratch_txt(fmt, |ptr| unsafe {
+            with_scratch_txt(format.as_str(), |ptr| unsafe {
                 sys::ImPlot_SetupAxisFormat_Str(axis as sys::ImAxis, ptr)
             })
         })
     }
 
-    /// Setup tick label format string for a specific Y axis
-    pub fn setup_y_axis_format(&self, axis: YAxis, fmt: &str) {
-        if fmt.contains('\0') {
-            return;
-        }
+    /// Setup a validated tick label format for a specific Y axis.
+    pub fn setup_y_axis_format(&self, axis: YAxis, format: &AxisFormat<'_>) {
         self.with_bound_context(|| {
-            with_scratch_txt(fmt, |ptr| unsafe {
+            with_scratch_txt(format.as_str(), |ptr| unsafe {
                 sys::ImPlot_SetupAxisFormat_Str(axis as sys::ImAxis, ptr)
             })
         })

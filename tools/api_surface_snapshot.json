@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "source_revisions": {
-    "cimgui": "1261b231939fc210032f30c4ee8a8f0440372237",
-    "imgui": "b61e56346a92cfcaf1f43a545ca37b0b32239654"
+    "cimgui": "bf9b984ef74470996fc6c9a6963d9e988e310101",
+    "imgui": "b48d1afbe8ee8b238e2961dc363a949dd7304e23"
   },
   "declarations": [
     {
@@ -11028,6 +11028,31 @@
       }
     },
     {
+      "symbol": "igGetItemClickedCountWithSingleClickDelay",
+      "cimgui_name": "igGetItemClickedCountWithSingleClickDelay",
+      "namespace": "ImGui",
+      "struct": "",
+      "function": "GetItemClickedCountWithSingleClickDelay",
+      "c_arguments": "(ImGuiMouseButton mouse_button,float delay)",
+      "signature": "(ImGuiMouseButton,float)",
+      "return_type": "int",
+      "arguments": [
+        {
+          "name": "mouse_button",
+          "type": "ImGuiMouseButton"
+        },
+        {
+          "name": "delay",
+          "type": "float"
+        }
+      ],
+      "defaults": {
+        "delay": "-1.0f",
+        "mouse_button": "0"
+      },
+      "traits": {}
+    },
+    {
       "symbol": "igGetItemFlags",
       "cimgui_name": "igGetItemFlags",
       "namespace": "ImGui",
@@ -12707,7 +12732,9 @@
           "type": "float"
         }
       ],
-      "defaults": {},
+      "defaults": {
+        "delay": "-1.f"
+      },
       "traits": {}
     },
     {
@@ -13331,7 +13358,7 @@
       "function": "OpenPopupOnItemClick",
       "c_arguments": "(const char*str_id,ImGuiPopupFlags popup_flags)",
       "signature": "(const char*,ImGuiPopupFlags)",
-      "return_type": "void",
+      "return_type": "bool",
       "arguments": [
         {
           "name": "str_id",
@@ -13356,7 +13383,7 @@
       "function": "OpenPopup",
       "c_arguments": "(ImGuiID id,ImGuiPopupFlags popup_flags)",
       "signature": "(ImGuiID,ImGuiPopupFlags)",
-      "return_type": "void",
+      "return_type": "bool",
       "arguments": [
         {
           "name": "id",
@@ -13380,7 +13407,7 @@
       "function": "OpenPopup",
       "c_arguments": "(const char*str_id,ImGuiPopupFlags popup_flags)",
       "signature": "(const char*,ImGuiPopupFlags)",
-      "return_type": "void",
+      "return_type": "bool",
       "arguments": [
         {
           "name": "str_id",
@@ -14397,24 +14424,6 @@
         {
           "name": "text",
           "type": "const char*"
-        }
-      ],
-      "defaults": {},
-      "traits": {}
-    },
-    {
-      "symbol": "igSetColorEditOptions",
-      "cimgui_name": "igSetColorEditOptions",
-      "namespace": "ImGui",
-      "struct": "",
-      "function": "SetColorEditOptions",
-      "c_arguments": "(ImGuiColorEditFlags flags)",
-      "signature": "(ImGuiColorEditFlags)",
-      "return_type": "void",
-      "arguments": [
-        {
-          "name": "flags",
-          "type": "ImGuiColorEditFlags"
         }
       ],
       "defaults": {},
@@ -16534,7 +16543,7 @@
       "namespace": "ImGui",
       "struct": "",
       "function": "TableSetupColumn",
-      "c_arguments": "(const char*label,ImGuiTableColumnFlags flags,float init_width_or_weight,ImGuiID user_id)",
+      "c_arguments": "(const char*label,ImGuiTableColumnFlags flags,float init_width_or_weight,ImGuiID user_data)",
       "signature": "(const char*,ImGuiTableColumnFlags,float,ImGuiID)",
       "return_type": "void",
       "arguments": [
@@ -16551,14 +16560,14 @@
           "type": "float"
         },
         {
-          "name": "user_id",
+          "name": "user_data",
           "type": "ImGuiID"
         }
       ],
       "defaults": {
         "flags": "0",
         "init_width_or_weight": "0.0f",
-        "user_id": "0"
+        "user_data": "0"
       },
       "traits": {}
     },

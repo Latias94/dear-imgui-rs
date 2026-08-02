@@ -46,24 +46,29 @@ fn test_api_types_exist() {
 }
 
 #[test]
-fn test_builder_patterns() {
-    // Test that all our widgets follow the imgui-rs builder pattern
+fn numeric_builder_formats_compile_and_execute() {
+    let mut ctx = Context::create();
+    ctx.io_mut().set_display_size([800.0, 600.0]);
+    ctx.io_mut().set_delta_time(1.0 / 60.0);
+    let _ = ctx.font_atlas().build();
 
-    // These should compile without errors, demonstrating the builder pattern
+    let mut float_value = 1.25_f32;
+    let mut double_value = 2.5_f64;
+    let ui = ctx.frame();
 
-    // Button builder pattern
-    // ui.button_config("Click me").size([100.0, 30.0]).build();
+    ui.window("numeric formats").build(|| {
+        let float_format = NumericFormat::<f32>::new("%.2f").unwrap();
+        let _ = ui
+            .input_float_config("Float")
+            .display_format(float_format)
+            .step(0.1)
+            .build(&mut float_value);
 
-    // Input text builder pattern
-    // ui.input_text("Text", &mut text).hint("Enter text").password(true).build();
-
-    // Input number builder patterns
-    // ui.input_int_config("Integer").step(1).step_fast(10).build(&mut int_val);
-    // ui.input_float_config("Float").format("%.2f").step(0.1).build(&mut float_val);
-    // ui.input_double_config("Double").format("%.4f").step(0.01).build(&mut double_val);
-
-    // Progress bar builder pattern
-    // ui.progress_bar(0.5).size([200.0, 20.0]).overlay_text("Loading...").build();
-
-    println!("✅ All builder patterns compile correctly");
+        let _ = ui
+            .input_double_config("Double")
+            .try_display_format("%.4f")
+            .unwrap()
+            .step(0.01)
+            .build(&mut double_value);
+    });
 }

@@ -184,34 +184,10 @@ impl FrameResources {
     pub fn index_buffer(&self) -> Option<&Buffer> {
         self.index_buffer.as_ref()
     }
-
-    /// Check if buffers are ready for rendering
-    pub fn is_ready(&self) -> bool {
-        self.vertex_buffer.is_some() && self.index_buffer.is_some()
-    }
-
-    /// Get buffer statistics for debugging
-    pub fn stats(&self) -> FrameResourcesStats {
-        FrameResourcesStats {
-            vertex_buffer_size: self.vertex_buffer_size,
-            index_buffer_size: self.index_buffer_size,
-            vertex_buffer_bytes: self.vertex_buffer_size * std::mem::size_of::<DrawVert>(),
-            index_buffer_bytes: self.index_buffer_size * std::mem::size_of::<DrawIdx>(),
-        }
-    }
 }
 
 impl Default for FrameResources {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Statistics for frame resources
-#[derive(Debug, Clone)]
-pub struct FrameResourcesStats {
-    pub vertex_buffer_size: usize,
-    pub index_buffer_size: usize,
-    pub vertex_buffer_bytes: usize,
-    pub index_buffer_bytes: usize,
 }

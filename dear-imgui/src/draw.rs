@@ -22,7 +22,6 @@
     clippy::as_conversions,
     clippy::unnecessary_cast
 )]
-mod callback;
 mod channels;
 mod color;
 mod counts;
@@ -31,8 +30,6 @@ mod primitives;
 mod util;
 
 #[allow(unused_imports)]
-pub use callback::Callback;
-#[allow(unused_imports)]
 pub use channels::ChannelsSplit;
 pub use color::ImColor32;
 pub use counts::{
@@ -40,6 +37,6 @@ pub use counts::{
 };
 #[allow(unused_imports)]
 pub use list::DrawListClipRectToken;
-pub use list::{DrawListMut, DrawListTextureToken};
+pub use list::{DrawListMut, DrawListTextNoPixelSnapToken, DrawListTextureToken, RawDrawCallback};
 #[allow(unused_imports)]
 pub use primitives::{BezierCurve, Circle, Line, Polyline, Rect, Triangle};

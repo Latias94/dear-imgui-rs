@@ -145,16 +145,6 @@ impl Uniforms {
         }
     }
 
-    /// Update the MVP matrix
-    pub fn set_mvp(&mut self, mvp: [[f32; 4]; 4]) {
-        self.mvp = mvp;
-    }
-
-    /// Update the gamma value
-    pub fn set_gamma(&mut self, gamma: f32) {
-        self.gamma = gamma;
-    }
-
     /// Update both MVP and gamma
     pub fn update(&mut self, mvp: [[f32; 4]; 4], gamma: f32) {
         self.mvp = mvp;
@@ -251,5 +241,71 @@ impl UniformBuffer {
     /// Get the buffer
     pub fn buffer(&self) -> &Buffer {
         &self.buffer
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::mem::{align_of, size_of};
+
+    #[test]
+    fn uniform_layout_matches_the_shader_contract() {
+        assert_eq!(size_of::<Uniforms>(), 80);
+        assert_eq!(align_of::<Uniforms>(), 4);
+
+        let uniforms = Uniforms::new();
+        assert_eq!(uniforms.gamma, 1.0);
+        assert_eq!(
+            uniforms.mvp,
+            [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ]
+        );
+    }
+
+    #[test]
+    fn gamma_policy_distinguishes_srgb_and_linear_targets() {
+        for format in [
+            TextureFormat::Rgba8UnormSrgb,
+            TextureFormat::Bgra8UnormSrgb,
+            TextureFormat::Bc7RgbaUnormSrgb,
+            TextureFormat::Etc2Rgba8UnormSrgb,
+            TextureFormat::Astc {
+                block: AstcBlock::B12x12,
+                channel: AstcChannel::UnormSrgb,
+            },
+        ] {
+            assert_eq!(Uniforms::gamma_for_format(format), 2.2);
+        }
+        for format in [
+            TextureFormat::Rgba8Unorm,
+            TextureFormat::Bgra8Unorm,
+            TextureFormat::R8Unorm,
+            TextureFormat::Rg8Unorm,
+        ] {
+            assert_eq!(Uniforms::gamma_for_format(format), 1.0);
+        }
+    }
+
+    #[test]
+    fn orthographic_matrix_matches_imgui_wgpu_projection() {
+        let display_pos = [10.0, 20.0];
+        let display_size = [800.0, 600.0];
+        let matrix = Uniforms::create_orthographic_matrix(display_pos, display_size);
+        let [left, top] = display_pos;
+        let right = left + display_size[0];
+        let bottom = top + display_size[1];
+
+        assert_eq!(matrix[0][0], 2.0 / (right - left));
+        assert_eq!(matrix[1][1], 2.0 / (top - bottom));
+        assert_eq!(matrix[2][2], 0.5);
+        assert_eq!(matrix[3][0], (right + left) / (left - right));
+        assert_eq!(matrix[3][1], (top + bottom) / (bottom - top));
+        assert_eq!(matrix[3][2], 0.5);
+        assert_eq!(matrix[3][3], 1.0);
     }
 }

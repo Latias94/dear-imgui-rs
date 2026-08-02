@@ -142,10 +142,22 @@ use dear_implot as implot;
 #[cfg(feature = "implot3d")]
 use dear_implot3d as implot3d;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GpuFaultKind {
+    OutOfMemory,
+    Validation,
+    Internal,
+}
+
 #[derive(Debug)]
 pub(crate) enum RuntimeEvent {
     DeviceLost {
         generation: GpuGeneration,
+        message: String,
+    },
+    GpuFault {
+        generation: GpuGeneration,
+        kind: GpuFaultKind,
         message: String,
     },
 }
@@ -499,6 +511,19 @@ impl WgpuRuntimeFactory {
         let (device, queue) =
             block_on(adapter.request_device(&descriptor)).map_err(RunError::DeviceRequest)?;
 
+        let fault_proxy = event_proxy.clone();
+        device.on_uncaptured_error(std::sync::Arc::new(move |error| {
+            let kind = match &error {
+                wgpu::Error::OutOfMemory { .. } => GpuFaultKind::OutOfMemory,
+                wgpu::Error::Validation { .. } => GpuFaultKind::Validation,
+                wgpu::Error::Internal { .. } => GpuFaultKind::Internal,
+            };
+            let _ = fault_proxy.send_event(RuntimeEvent::GpuFault {
+                generation,
+                kind,
+                message: error.to_string(),
+            });
+        }));
         device.set_device_lost_callback(move |reason, message| {
             let _ = event_proxy.send_event(RuntimeEvent::DeviceLost {
                 generation,

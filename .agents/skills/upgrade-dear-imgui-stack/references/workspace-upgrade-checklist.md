@@ -12,7 +12,7 @@ Use this file for the repository-specific parts of an ImGui-stack upgrade.
 | `dear-imnodes-sys` | `cimnodes` + ImNodes | `master` | Usually independent, but scan for compatibility if core types changed. |
 | `dear-node-editor-sys` | `cimnodes_editor` + imgui-node-editor | `main` | Native only. Keep the local `dne_*` uintptr ID shim in sync with upstream ID and callback APIs. |
 | `dear-imguizmo-sys` | `cimguizmo` + ImGuizmo | `master` | Usually independent, but scan if cimgui/imgui integration changed. |
-| `dear-imguizmo-quat-sys` | `cimguizmo_quat` + ImGuIZMO.quat | script currently shares `cimguizmo` branch arg | Verify upstream default branch before changing tooling. |
+| `dear-imguizmo-quat-sys` | `cimguizmo_quat` + ImGuIZMO.quat | `master` | Independent from `cimguizmo`; select it with `--cimguizmo-quat-branch`. |
 | `dear-imgui-test-engine-sys` | `imgui_test_engine` | `main` | Re-audit whenever Dear ImGui internals or hooks changed. Native only, no wasm support. |
 
 ## Primary sources to inspect
@@ -30,22 +30,42 @@ Use primary sources only when determining what changed upstream.
 ### Refresh submodules and pregenerated bindings
 
 ```powershell
+$env:CARGO_BUILD_JOBS = '1'
+$env:LIBCLANG_PATH = '<canonical LLVM 14 bin directory>'
 python tools/update_submodule_and_bindings.py `
-  --crates all `
-  --submodules update `
+  --crates dear-imgui-sys,dear-imgui-test-engine-sys `
+  --submodules auto `
   --profile release `
   --cimgui-branch docking_inter `
-  --cimplot-branch master `
-  --cimplot3d-branch main `
-  --cimnodes-branch master `
-  --cimnodes-editor-branch main `
-  --cimguizmo-branch master `
   --imgui-test-engine-branch main `
-  --wasm `
-  --wasm-ext implot,implot3d,imnodes,imguizmo,imguizmo-quat
+  --wasm
 ```
 
-Narrow `--crates` / `--wasm-ext` if only part of the stack changed.
+Use the libclang major version selected by repository CI or binding-generation documentation; do not substitute a newer local install just because it is available. Expand `--crates` and the upstream branch arguments only when those independent libraries are part of the requested upgrade. Core WASM regeneration covers the supported ImGui-dependent extension profiles, so the legacy `--wasm-ext` compatibility argument is normally unnecessary.
+
+Verify that every generated file carries the expected source revision and deterministic hash before editing the safe layer:
+
+```powershell
+cargo run -p xtask -- verify-bindings --allow-dirty
+```
+
+Then make upstream change review explicit. This is deliberately separate from
+binding generation: facts describe what changed, while decisions describe why a
+safe Rust surface is valid.
+
+```powershell
+# After moving source pins and regenerating bindings:
+python tools/upstream_contract.py --write-review-template
+
+# Review each generated group, classify it, add evidence for every safe item,
+# then accept the reviewed facts and prove the checked-in state is clean:
+python tools/upstream_contract.py --update-snapshot
+python tools/upstream_contract.py --check
+```
+
+The snapshot includes maintained extension APIs and recursive submodule pins.
+Never replace the decision manifest with unreviewed generated output or treat a
+binding hash as approval for an ABI, ownership, or safe-API change.
 
 ### Bump unified release version
 
@@ -76,18 +96,27 @@ Run that in each standalone example workspace that carries its own `Cargo.lock`.
    - Compare new sys symbols against `dear-imgui-rs`, `dear-implot`, `dear-implot3d`, `dear-imnodes`, and `dear-imgui-test-engine`.
    - For `dear-node-editor`, audit the local `dne_*` C ABI shim first; do not expose upstream `NodeId*` / `PinId*` / `LinkId*` helper-pointer APIs directly.
    - Audit new enums, flags, struct fields, style/spec arrays, callback setters, and renamed upstream items.
+   - Audit removed functions and changed return types as source-breaking changes; generated code compiling does not prove the old safe wrapper still models upstream behavior.
+   - Inspect every zero-argument/non-variadic text wrapper before passing user strings to it. Names such as `Str0` describe the C ABI, not necessarily literal-text semantics; reject raw format strings in safe Rust unless every directive is escaped or a first-party `%s` shim is used.
+   - Prefer transparent wrappers over handwritten native structure mirrors. If a mirror is required, validate field offsets and a semantic sentinel that distinguishes count, frame, ID, and pointer fields; size/alignment assertions alone cannot catch same-sized substitutions.
+   - Trace hidden queue, ownership, and lifecycle fields through upstream implementation code. Check native auto-transitions against Rust sidecars, renderer feedback, abandoned work, retries, and teardown.
    - If the new sys surface makes the old safe shape awkward, refactor the safe layer instead of layering compatibility hacks.
+   - Run `python tools/upstream_contract.py --check` before and after the upgrade. For live drift, generate a review template, classify each declaration/constant/enum/field/layout/typedef/source-pin delta exactly once, and require compile evidence plus runtime evidence for every runtime-shaped safe change. Confirm every maintained source has an `api_contract` provider, generator field facts retain bitfield/array widths, unlocated typedefs remain visible, and Test Engine's final Rust binding parser still fails closed on unknown public syntax.
 
 2. Backend and platform impact
    - Audit `dear-imgui-sys/src/backend_shim/**` and `dear-imgui-sys/build.rs`.
    - Re-check the stack layout patch path in `dear-imgui-sys/build.rs`, `dear-imgui-sys/src/stack_layout_shim.cpp`, and `dear-imgui-sys/src/stack_layout_imgui_*.cpp.inc`. The marker patch must still match the new upstream `imgui.cpp`, and inactive `ItemSize()` / `ItemAdd()` hot paths should remain fast.
    - Check `dear-imgui-sdl3`, `dear-imgui-wgpu`, `dear-imgui-winit`, `dear-imgui-glow`, `dear-imgui-ash`.
    - If backend exposure changed, adapt public APIs and repository-local examples, including iOS / Android smoke examples when relevant.
+   - When core public aggregate layouts changed, run the `abi-probe` source-build profile. Check C++ size, alignment, and field offsets against Rust; keep that compiler-dependent proof out of normal prebuilt consumer builds.
+   - Build and inspect the real Emscripten provider after binding regeneration. Derive provider definitions from the canonical core/extension binding profiles, fail on conflicting definitions, and require any source adaptation to be a named inventory transform with an exact upstream-drift test.
+   - Treat `tools/build-support/maintained_sources.json` as the canonical source inventory shared by the Rust and Python resolvers; do not duplicate source-selection policy in a one-off script.
 
 3. Test engine
    - Update `extensions/dear-imgui-test-engine-sys/third-party/imgui_test_engine`.
    - Check `dear-imgui-sys` `test-engine` feature integration and hook files.
    - Validate `dear-imgui-test-engine` still links and its bindings remain pregenerated.
+   - Compare the complete presentation lifecycle with upstream: render, `pre_swap`, present/swap, then `post_swap`. Exercise both the bounded runner and at least one real presentation integration when those hooks change.
 
 4. Deprecated removals
    - Search `CHANGELOG.md` for deprecations that promised removal in the target release.
@@ -111,17 +140,35 @@ Run the smallest set that fully covers the upgraded surface.
 ### Baseline
 
 ```powershell
-cargo fmt --all
+$env:CARGO_BUILD_JOBS = '1'
+cargo run -p xtask -- verify-bindings --allow-dirty
+cargo fmt --all -- --check
 cargo check --workspace
+python tools/upstream_contract.py --check
+python tools/api_surface_report.py --check
+python tools/ci/verify_wasm_provider.py --check-rust-route
 python tools/pre_publish_check.py
 python tools/publish.py --dry-run
+```
+
+The WASM provider gate requires a working Emscripten SDK (`EMSDK`) with `em++` available. It builds
+the real C/C++ provider and checks its exports plus the Rust import route; a Rust-only target check
+does not replace it.
+
+For a core ABI or handwritten-public-mirror change, additionally run the native
+source-build probe (serially):
+
+```powershell
+cargo nextest run -j 1 -p dear-imgui-rs --features multi-viewport,abi-probe `
+  cpp_public_aggregate_layout_probe_matches_rust `
+  public_aggregate_layout_probe_rejects_an_abi_mismatch
 ```
 
 ### Recommended targeted tests
 
 ```powershell
-cargo nextest run -p dear-imgui-rs -p dear-implot -p dear-implot3d -p dear-imnodes
-cargo test -p dear-imgui-test-engine --lib
+cargo nextest run -p dear-imgui-rs -p dear-implot -p dear-implot3d -p dear-imnodes -p dear-imgui-test-engine -p dear-imgui-test-engine-sys --test-threads=1
+cargo check -p dear-imgui-rs --features wasm --target wasm32-unknown-unknown
 ```
 
 ### Package/publish smoke checks

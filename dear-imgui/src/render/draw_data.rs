@@ -12,7 +12,7 @@ mod tests;
 mod textures;
 mod vertex;
 
-pub use cmd::{DrawCmd, DrawCmdIterator, DrawCmdParams};
+pub use cmd::{DrawCmd, DrawCmdIterator, DrawCmdParams, RawCallbackCommand};
 pub use core::DrawData;
 pub use list::{DrawList, DrawListIterator};
 pub use vertex::{DrawIdx, DrawVert};

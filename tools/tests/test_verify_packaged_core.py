@@ -40,6 +40,7 @@ PROFILE_FEATURES = {
     ),
 }
 CANDIDATE_SHA = "cccccccccccccccccccccccccccccccccccccccc"
+SOURCE_CONTRACT_HASH = "fnv1a64:fedcba9876543210"
 
 
 def write_archive(path: Path, members: dict[str, bytes]) -> None:
@@ -93,6 +94,7 @@ def write_prebuilt_archive(
             "cimgui_revision=1261b231939fc210032f30c4ee8a8f0440372237",
             "imgui_revision=b61e56346a92cfcaf1f43a545ca37b0b32239654",
             "binding_spec_hash=fnv1a64:0123456789abcdef",
+            f"source_contract_hash={SOURCE_CONTRACT_HASH}",
             "",
         )
     ).encode()
@@ -233,6 +235,7 @@ class PrebuiltArchiveSelectionTests(unittest.TestCase):
                         b"cimgui_revision=1261b231939fc210032f30c4ee8a8f0440372237\n"
                         b"imgui_revision=b61e56346a92cfcaf1f43a545ca37b0b32239654\n"
                         b"binding_spec_hash=fnv1a64:0123456789abcdef\n"
+                        b"source_contract_hash=fnv1a64:fedcba9876543210\n"
                     )
                 },
             )
@@ -283,7 +286,7 @@ class PrebuiltArchiveSelectionTests(unittest.TestCase):
 
             self.assertEqual(
                 PREBUILT.core_artifact_profile_hash(fields, archive),
-                "fnv1a64:62d3ba35a0eee8a8",
+                "fnv1a64:81e611164024011c",
             )
 
     def test_core_identity_anchors_candidate_and_rejects_legacy_manifests(self):
@@ -317,6 +320,14 @@ class PrebuiltArchiveSelectionTests(unittest.TestCase):
                 PREBUILT.core_artifact_identity(
                     PREBUILT._read_prebuilt_manifest(legacy), legacy
                 )
+
+            old_contract = write_prebuilt_archive(package_dir, "freetype")
+            old_fields = PREBUILT._read_prebuilt_manifest(old_contract)
+            del old_fields["source_contract_hash"]
+            with self.assertRaisesRegex(
+                PREBUILT.VerificationError, "missing=source_contract_hash"
+            ):
+                PREBUILT.core_artifact_identity(old_fields, old_contract)
 
 
 class ExtensionArchiveSelectionTests(unittest.TestCase):
@@ -1244,6 +1255,58 @@ class PrebuiltWorkflowTests(unittest.TestCase):
 
 
 class PackageWorkspaceTests(unittest.TestCase):
+    def test_packaged_provider_sources_follow_inventory_crate_roots(self):
+        inventory_source = REPO_ROOT / "tools/build-support/maintained_sources.json"
+        inventory_data = json.loads(inventory_source.read_text(encoding="utf-8"))
+        provider_sources = [
+            source for source in inventory_data["sources"] if source["provider"] is not None
+        ]
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive_dir = root / "archives"
+            helper_path = root / "helper"
+            destination = root / "provider-sources"
+            archive_dir.mkdir()
+            helper_path.mkdir()
+            (helper_path / "maintained_sources.json").write_text(
+                inventory_source.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            packages = []
+            for source in provider_sources:
+                version = "0.16.0-alpha.1"
+                package = ARCHIVE.PackageRecord(
+                    source["crate_name"], Path(source["crate_root"]), version
+                )
+                packages.append(package)
+                archive_root = f"{package.name}-{version}"
+                write_archive(
+                    archive_dir / f"{package.name}-{version}.crate",
+                    {
+                        f"{archive_root}/Cargo.toml": b"[package]\n",
+                        f"{archive_root}/provider-marker": source["id"].encode(),
+                    },
+                )
+
+            staged_root, staged_inventory = (
+                SOURCE_PACKAGES.stage_packaged_wasm_provider_sources(
+                    archive_dir,
+                    packages,
+                    helper_path,
+                    destination,
+                )
+            )
+
+            self.assertEqual(staged_root, destination)
+            self.assertEqual(
+                staged_inventory,
+                helper_path / "maintained_sources.json",
+            )
+            for source in provider_sources:
+                marker = destination / source["crate_root"] / "provider-marker"
+                self.assertEqual(marker.read_text(encoding="utf-8"), source["id"])
+
     def test_lock_commit_keeps_commit_message_and_dirty_error_distinct(self):
         command_results = (
             subprocess.CompletedProcess(("git", "add"), 0),

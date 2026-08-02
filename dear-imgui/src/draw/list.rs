@@ -6,6 +6,7 @@ mod clip;
 mod geometry;
 mod image;
 mod raw;
+mod sampler;
 mod split;
 #[cfg(test)]
 mod tests;
@@ -13,6 +14,8 @@ mod text;
 mod texture;
 
 pub use clip::DrawListClipRectToken;
+pub use raw::RawDrawCallback;
+pub use text::DrawListTextNoPixelSnapToken;
 pub use texture::DrawListTextureToken;
 
 thread_local! {
@@ -23,7 +26,8 @@ thread_local! {
 ///
 /// Called from [`crate::Ui::get_window_draw_list`], [`crate::Ui::get_background_draw_list`] or [`crate::Ui::get_foreground_draw_list`].
 /// Only one mutable wrapper can exist for the same raw draw list on the same thread at a time.
-/// The program will panic when attempting to wrap the same draw list twice.
+/// Reuse the existing wrapper, or drop it before requesting the same draw list again. The program
+/// will panic when attempting to wrap the same draw list twice.
 pub struct DrawListMut<'ui> {
     pub(super) draw_list: *mut sys::ImDrawList,
     pub(super) ui: Option<&'ui crate::Ui>,
@@ -61,7 +65,9 @@ impl<'ui> DrawListMut<'ui> {
         BORROWED_DRAW_LISTS.with(|borrowed| {
             let mut borrowed = borrowed.borrow_mut();
             if borrowed.contains(&ptr) {
-                panic!("A DrawListMut is already in use for this draw list");
+                panic!(
+                    "A DrawListMut is already in use for this draw list; reuse the existing wrapper or drop it before acquiring another"
+                );
             }
             borrowed.push(ptr);
         });
@@ -109,6 +115,6 @@ impl<'ui> DrawListMut<'ui> {
 
     pub(super) fn ui(&self) -> &crate::Ui {
         self.ui
-            .expect("texture draw operations require a DrawListMut borrowed from Ui")
+            .expect("this draw-list operation requires a DrawListMut borrowed from Ui")
     }
 }

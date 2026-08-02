@@ -69,6 +69,27 @@ fn native_binding_spec() -> &'static build_support::binding::CrateBindingSpec {
         .expect("missing Test Engine native binding spec")
 }
 
+fn maintained_source_paths(
+    cfg: &BuildConfig,
+) -> build_support::source_inventory::MaintainedSourcePaths {
+    build_support::source_inventory::MaintainedSourcePaths::for_crate(
+        env!("CARGO_PKG_NAME"),
+        cfg.manifest_dir.clone(),
+    )
+    .unwrap_or_else(|error| panic!("dear-imgui-test-engine-sys: {error}"))
+}
+
+fn test_engine_source_root(
+    sources: &build_support::source_inventory::MaintainedSourcePaths,
+) -> PathBuf {
+    sources
+        .file("engine")
+        .unwrap_or_else(|error| panic!("dear-imgui-test-engine-sys: {error}"))
+        .parent()
+        .expect("Test Engine implementation must have a parent directory")
+        .to_path_buf()
+}
+
 #[cfg(feature = "bindgen")]
 fn apply_bindgen_defines(mut builder: bindgen::Builder) -> bindgen::Builder {
     for define in native_binding_spec().binding_defines() {
@@ -152,7 +173,13 @@ fn generate_bindings(_cfg: &BuildConfig) {
     );
 }
 
-fn build_with_cc(cfg: &BuildConfig, test_engine_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
+fn build_with_cc(
+    cfg: &BuildConfig,
+    sources: &build_support::source_inventory::MaintainedSourcePaths,
+    test_engine_root: &Path,
+    imgui_src: &Path,
+    cimgui_root: &Path,
+) {
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
     build_support::configure_cpp_runtime_linkage(&mut build, &cfg.target_os, &cfg.target_env);
@@ -193,21 +220,90 @@ fn build_with_cc(cfg: &BuildConfig, test_engine_root: &Path, imgui_src: &Path, c
     build.include(test_engine_root.join("thirdparty"));
     build.include(cfg.manifest_dir.join("shim"));
 
-    build.file(test_engine_root.join("imgui_capture_tool.cpp"));
-    build.file(test_engine_root.join("imgui_te_context.cpp"));
-    build.file(test_engine_root.join("imgui_te_coroutine.cpp"));
-    build.file(test_engine_root.join("imgui_te_engine.cpp"));
-    build.file(test_engine_root.join("imgui_te_exporters.cpp"));
-    build.file(test_engine_root.join("imgui_te_perftool.cpp"));
-    build.file(test_engine_root.join("imgui_te_ui.cpp"));
-    build.file(test_engine_root.join("imgui_te_utils.cpp"));
-    build.file(cfg.manifest_dir.join("shim/cimgui_test_engine.cpp"));
-    build.file(cfg.manifest_dir.join("shim/default_tests.cpp"));
+    let capture_source = sources
+        .file("capture-tool")
+        .unwrap_or_else(|error| panic!("dear-imgui-test-engine-sys: {error}"));
+    let patched_capture_source = cfg.out_dir.join("imgui_capture_tool_defined_geometry.cpp");
+    let source = std::fs::read_to_string(&capture_source).unwrap_or_else(|error| {
+        panic!(
+            "failed to read Test Engine capture source {}: {error}",
+            capture_source.display()
+        )
+    });
+    let patched = build_support::patch_test_engine_capture_cpp_for_defined_geometry(&source)
+        .unwrap_or_else(|error| {
+            panic!("failed to apply Test Engine capture geometry overlay: {error}")
+        });
+    std::fs::write(&patched_capture_source, patched).unwrap_or_else(|error| {
+        panic!(
+            "failed to write Test Engine capture geometry overlay {}: {error}",
+            patched_capture_source.display()
+        )
+    });
+    build.file(patched_capture_source);
+    let context_source = sources
+        .file("context")
+        .unwrap_or_else(|error| panic!("dear-imgui-test-engine-sys: {error}"));
+    let patched_context_source = cfg.out_dir.join("imgui_te_context_presentation_abort.cpp");
+    let source = std::fs::read_to_string(&context_source).unwrap_or_else(|error| {
+        panic!(
+            "failed to read Test Engine source {}: {error}",
+            context_source.display()
+        )
+    });
+    let patched = build_support::patch_test_engine_context_cpp_for_presentation_abort(&source)
+        .unwrap_or_else(|error| {
+            panic!("failed to apply Test Engine Context presentation overlay: {error}")
+        });
+    std::fs::write(&patched_context_source, patched).unwrap_or_else(|error| {
+        panic!(
+            "failed to write Test Engine Context presentation overlay {}: {error}",
+            patched_context_source.display()
+        )
+    });
+    build.file(patched_context_source);
     build.file(
-        cfg.manifest_dir
-            .join("shim/imgui_test_engine_hooks_register.cpp"),
+        sources
+            .file("coroutine")
+            .unwrap_or_else(|error| panic!("dear-imgui-test-engine-sys: {error}")),
     );
-    build.file(cfg.manifest_dir.join("shim/script_tests.cpp"));
+    let engine_source = sources
+        .file("engine")
+        .unwrap_or_else(|error| panic!("dear-imgui-test-engine-sys: {error}"));
+    let patched_engine_source = cfg.out_dir.join("imgui_te_engine_presentation_abort.cpp");
+    let source = std::fs::read_to_string(&engine_source).unwrap_or_else(|error| {
+        panic!(
+            "failed to read Test Engine source {}: {error}",
+            engine_source.display()
+        )
+    });
+    let patched = build_support::patch_test_engine_cpp_for_presentation_abort(&source)
+        .unwrap_or_else(|error| {
+            panic!("failed to apply Test Engine presentation overlay: {error}")
+        });
+    std::fs::write(&patched_engine_source, patched).unwrap_or_else(|error| {
+        panic!(
+            "failed to write Test Engine presentation overlay {}: {error}",
+            patched_engine_source.display()
+        )
+    });
+    build.file(patched_engine_source);
+    for file_id in [
+        "exporters",
+        "perftool",
+        "ui",
+        "utils",
+        "shim",
+        "default-tests",
+        "hooks-register",
+        "script-tests",
+    ] {
+        build.file(
+            sources
+                .file(file_id)
+                .unwrap_or_else(|error| panic!("dear-imgui-test-engine-sys: {error}")),
+        );
+    }
 
     if cfg.is_msvc() && cfg.is_windows() {
         build.flag("/EHsc");
@@ -266,7 +362,10 @@ fn use_pregenerated_bindings(manifest_dir: &Path, out_dir: &Path) -> bool {
     true
 }
 
-fn docsrs_build(cfg: &BuildConfig) {
+fn docsrs_build(
+    cfg: &BuildConfig,
+    sources: &build_support::source_inventory::MaintainedSourcePaths,
+) {
     println!("cargo:warning=DOCS_RS detected: generating bindings, skipping native build");
     println!("cargo:rustc-cfg=docsrs");
 
@@ -275,9 +374,7 @@ fn docsrs_build(cfg: &BuildConfig) {
     }
 
     let (imgui_src, cimgui_root) = resolve_imgui_includes(cfg);
-    let test_engine_root = cfg
-        .manifest_dir
-        .join("third-party/imgui_test_engine/imgui_test_engine");
+    let test_engine_root = test_engine_source_root(sources);
 
     if imgui_src.exists() && cimgui_root.exists() && test_engine_root.exists() {
         ensure_imgui_test_engine_enabled();
@@ -294,39 +391,16 @@ fn docsrs_build(cfg: &BuildConfig) {
 
 fn main() {
     let cfg = BuildConfig::new();
+    let sources = maintained_source_paths(&cfg);
 
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=shim/cimgui_test_engine.h");
     println!("cargo:rerun-if-changed=shim/cimgui_test_engine_internal.h");
-    println!("cargo:rerun-if-changed=shim/cimgui_test_engine.cpp");
-    println!("cargo:rerun-if-changed=shim/default_tests.cpp");
-    println!("cargo:rerun-if-changed=shim/imgui_test_engine_hooks_register.cpp");
-    println!("cargo:rerun-if-changed=shim/script_tests.cpp");
-    println!(
-        "cargo:rerun-if-changed=third-party/imgui_test_engine/imgui_test_engine/imgui_capture_tool.cpp"
-    );
-    println!(
-        "cargo:rerun-if-changed=third-party/imgui_test_engine/imgui_test_engine/imgui_te_context.cpp"
-    );
-    println!(
-        "cargo:rerun-if-changed=third-party/imgui_test_engine/imgui_test_engine/imgui_te_coroutine.cpp"
-    );
-    println!(
-        "cargo:rerun-if-changed=third-party/imgui_test_engine/imgui_test_engine/imgui_te_engine.cpp"
-    );
-    println!(
-        "cargo:rerun-if-changed=third-party/imgui_test_engine/imgui_test_engine/imgui_te_exporters.cpp"
-    );
-    println!(
-        "cargo:rerun-if-changed=third-party/imgui_test_engine/imgui_test_engine/imgui_te_perftool.cpp"
-    );
-    println!(
-        "cargo:rerun-if-changed=third-party/imgui_test_engine/imgui_test_engine/imgui_te_ui.cpp"
-    );
-    println!(
-        "cargo:rerun-if-changed=third-party/imgui_test_engine/imgui_test_engine/imgui_te_utils.cpp"
-    );
+    println!("cargo:rerun-if-changed=shim/cimgui_test_engine_capture_bridge.h");
+    for path in sources.native_candidate_paths() {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
     println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_DEFINE_IMGUI_ENABLE_TEST_ENGINE");
     println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_DEFINE_IMGUITEST");
     println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_REGEN_BINDINGS");
@@ -334,7 +408,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=IMGUI_TEST_ENGINE_SYS_SKIP_CC");
 
     if cfg.docs_rs {
-        docsrs_build(&cfg);
+        docsrs_build(&cfg, &sources);
         return;
     }
 
@@ -358,9 +432,10 @@ fn main() {
     }
 
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
-    let test_engine_root = cfg
-        .manifest_dir
-        .join("third-party/imgui_test_engine/imgui_test_engine");
+    sources
+        .source_root()
+        .unwrap_or_else(|error| panic!("dear-imgui-test-engine-sys: {error}"));
+    let test_engine_root = test_engine_source_root(&sources);
 
     if !imgui_src.exists() {
         panic!("ImGui source not found at {:?}", imgui_src);
@@ -382,5 +457,8 @@ fn main() {
     if !use_pregenerated_bindings(&cfg.manifest_dir, &cfg.out_dir) {
         generate_bindings(&cfg);
     }
-    build_with_cc(&cfg, &test_engine_root, &imgui_src, &cimgui_root);
+    sources
+        .validate_native()
+        .unwrap_or_else(|error| panic!("dear-imgui-test-engine-sys: {error}"));
+    build_with_cc(&cfg, &sources, &test_engine_root, &imgui_src, &cimgui_root);
 }

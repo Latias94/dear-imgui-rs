@@ -1,14 +1,16 @@
 // Style and theming for plots
 
 use crate::sys;
-use crate::{PlotContext, PlotContextBinding, PlotUi};
+use crate::{FloatFormat, PlotContext, PlotContextBinding, PlotUi};
 use dear_imgui_rs::{with_scratch_txt, with_scratch_txt_two};
 use std::borrow::Cow;
 use std::marker::PhantomData;
-use std::os::raw::c_char;
 use std::rc::Rc;
 
 use crate::Colormap;
+
+const DEFAULT_COLORMAP_SCALE_FORMAT: &str = "%g";
+const DEFAULT_COLORMAP_SLIDER_FORMAT: &str = "";
 
 /// Style variables that can be modified
 #[repr(i32)]
@@ -758,6 +760,45 @@ impl PlotUi<'_> {
         height: f32,
         cmap: impl Into<ColormapSelection>,
     ) {
+        self.colormap_scale_impl(
+            label,
+            scale_min,
+            scale_max,
+            height,
+            DEFAULT_COLORMAP_SCALE_FORMAT,
+            cmap.into(),
+        );
+    }
+
+    /// Draw a colormap scale with a validated tick format.
+    pub fn colormap_scale_with_format(
+        &self,
+        label: &str,
+        scale_min: f64,
+        scale_max: f64,
+        height: f32,
+        format: &FloatFormat<'_>,
+        cmap: impl Into<ColormapSelection>,
+    ) {
+        self.colormap_scale_impl(
+            label,
+            scale_min,
+            scale_max,
+            height,
+            format.as_str(),
+            cmap.into(),
+        );
+    }
+
+    fn colormap_scale_impl(
+        &self,
+        label: &str,
+        scale_min: f64,
+        scale_max: f64,
+        height: f32,
+        format: &str,
+        cmap: ColormapSelection,
+    ) {
         assert!(
             scale_min.is_finite(),
             "colormap_scale scale_min must be finite"
@@ -769,29 +810,57 @@ impl PlotUi<'_> {
         assert!(height.is_finite(), "colormap_scale height must be finite");
         let label = if label.contains('\0') { "" } else { label };
         let size = sys::ImVec2_c { x: 0.0, y: height };
-        let fmt_ptr: *const c_char = std::ptr::null();
         let flags = sys::ImPlotColormapScaleFlags_None as sys::ImPlotColormapScaleFlags;
-        let cmap = cmap.into().raw();
+        let cmap = cmap.raw();
         self.with_bound_context(|| {
-            with_scratch_txt(label, |ptr| unsafe {
-                sys::ImPlot_ColormapScale(ptr, scale_min, scale_max, size, fmt_ptr, flags, cmap)
+            with_scratch_txt_two(label, format, |label_ptr, format_ptr| unsafe {
+                sys::ImPlot_ColormapScale(
+                    label_ptr, scale_min, scale_max, size, format_ptr, flags, cmap,
+                )
             })
         })
     }
 
-    /// Draw a colormap slider; returns true if selection changed.
+    /// Draw a colormap slider with ImPlot's default value format.
     pub fn colormap_slider(
         &self,
         label: &str,
         t: &mut f32,
         out_color: Option<&mut [f32; 4]>,
-        format: Option<&str>,
         cmap: impl Into<ColormapSelection>,
+    ) -> bool {
+        self.colormap_slider_impl(
+            label,
+            t,
+            out_color,
+            DEFAULT_COLORMAP_SLIDER_FORMAT,
+            cmap.into(),
+        )
+    }
+
+    /// Draw a colormap slider with a validated value format.
+    pub fn colormap_slider_with_format(
+        &self,
+        label: &str,
+        t: &mut f32,
+        out_color: Option<&mut [f32; 4]>,
+        format: &FloatFormat<'_>,
+        cmap: impl Into<ColormapSelection>,
+    ) -> bool {
+        self.colormap_slider_impl(label, t, out_color, format.as_str(), cmap.into())
+    }
+
+    fn colormap_slider_impl(
+        &self,
+        label: &str,
+        t: &mut f32,
+        out_color: Option<&mut [f32; 4]>,
+        format: &str,
+        cmap: ColormapSelection,
     ) -> bool {
         assert!(t.is_finite(), "colormap_slider t must be finite");
         let label = if label.contains('\0') { "" } else { label };
-        let format = format.filter(|s| !s.contains('\0'));
-        let cmap = cmap.into().raw();
+        let cmap = cmap.raw();
         let mut out = sys::ImVec4 {
             x: 0.0,
             y: 0.0,
@@ -805,20 +874,9 @@ impl PlotUi<'_> {
         };
 
         self.with_bound_context(|| {
-            let changed = match format {
-                Some(fmt) => with_scratch_txt_two(label, fmt, |label_ptr, fmt_ptr| unsafe {
-                    sys::ImPlot_ColormapSlider(label_ptr, t as *mut f32, out_ptr, fmt_ptr, cmap)
-                }),
-                None => with_scratch_txt(label, |label_ptr| unsafe {
-                    sys::ImPlot_ColormapSlider(
-                        label_ptr,
-                        t as *mut f32,
-                        out_ptr,
-                        std::ptr::null(),
-                        cmap,
-                    )
-                }),
-            };
+            let changed = with_scratch_txt_two(label, format, |label_ptr, format_ptr| unsafe {
+                sys::ImPlot_ColormapSlider(label_ptr, t as *mut f32, out_ptr, format_ptr, cmap)
+            });
 
             if let Some(out_color) = out_color {
                 *out_color = [out.x, out.y, out.z, out.w];

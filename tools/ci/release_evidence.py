@@ -127,6 +127,25 @@ DEFAULT_EXPECTED_CELL_INVENTORY = (
         ),
     ),
     ExpectedCell(
+        "linux-ash-vulkan-validation-smoke",
+        "x86_64-unknown-linux-gnu",
+        requirements=_requirements(
+            artifacts=(
+                *_RUNTIME_GATE_REQUIREMENTS,
+                "runtime/runtime-environment.json",
+                "runtime/viewport-result.json",
+            ),
+            logs=(
+                "runtime/display.stdout.log",
+                "runtime/display.stderr.log",
+                "runtime/adapter.stdout.log",
+                "runtime/adapter.stderr.log",
+                "runtime/viewport.stdout.log",
+                "runtime/viewport.stderr.log",
+            ),
+        ),
+    ),
+    ExpectedCell(
         "linux-sdl3-glow-multi-viewport-smoke",
         "x86_64-unknown-linux-gnu",
         requirements=_requirements(

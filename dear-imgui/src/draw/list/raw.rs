@@ -1,58 +1,78 @@
 use crate::sys;
 
-use super::super::callback::Callback;
 use super::super::color::ImColor32;
 use super::super::util::{count_to_i32, finite_vec2};
 use super::DrawListMut;
+
+/// Non-null native callback accepted by [`DrawListMut::add_callback`].
+pub type RawDrawCallback =
+    unsafe extern "C" fn(parent_list: *const sys::ImDrawList, command: *const sys::ImDrawCmd);
 
 impl<'ui> DrawListMut<'ui> {
     /// Insert a raw draw callback.
     ///
     /// # Safety
     ///
-    /// - `callback` must be an `extern "C"` function compatible with `ImDrawCallback` and must not unwind
-    ///   across the FFI boundary.
-    /// - `userdata` must remain valid until the draw list is executed by the renderer.
-    /// - If you allocate memory and store its pointer in `userdata`, you are responsible for reclaiming it
-    ///   from within the callback or otherwise ensuring no leaks occur. Note that callbacks are only invoked
-    ///   if the draw list is actually rendered.
+    /// - `callback` must not unwind across the FFI boundary.
+    /// - When `userdata_size` is zero, Dear ImGui stores `userdata` verbatim. Any non-null pointer
+    ///   must remain valid until a renderer executes the draw command. A renderer may reject or
+    ///   discard callback-bearing data, so this mode must not rely on callback execution to reclaim
+    ///   uniquely owned Rust memory.
+    /// - When `userdata_size` is non-zero, `userdata` must point to that many readable bytes for
+    ///   this call. Dear ImGui copies the bytes synchronously and later supplies a pointer into its
+    ///   internal byte buffer. The callback must not free that pointer or assume it is aligned for
+    ///   the original Rust type; copy the bytes out or use unaligned reads.
+    /// - The callback and userdata interpretation must remain ABI-compatible with every renderer
+    ///   that may consume the draw list.
+    /// - Arbitrary Rust function pointers are not supported by the import-style WASM provider;
+    ///   only provider-native callbacks with a proven shared callback table may be used there.
+    ///
+    /// ```compile_fail
+    /// # use dear_imgui_rs::Context;
+    /// # let mut context = Context::create();
+    /// # let ui = context.frame();
+    /// unsafe extern "C" fn callback(
+    ///     _list: *const dear_imgui_rs::sys::ImDrawList,
+    ///     _command: *const dear_imgui_rs::sys::ImDrawCmd,
+    /// ) {}
+    /// let draw_list = ui.get_window_draw_list();
+    /// draw_list.add_callback(callback, std::ptr::null_mut(), 0);
+    /// ```
+    ///
+    /// Rust-owned closure callbacks are intentionally unavailable: a draw command may be dropped
+    /// without ever reaching a renderer, so the command stream cannot guarantee closure cleanup.
+    ///
+    /// ```compile_fail
+    /// # use dear_imgui_rs::Context;
+    /// # let mut context = Context::create();
+    /// # let ui = context.frame();
+    /// let draw_list = ui.get_window_draw_list();
+    /// draw_list.add_callback_safe(|| {}).build();
+    /// ```
     #[doc(alias = "AddCallback")]
     pub unsafe fn add_callback(
         &self,
-        callback: sys::ImDrawCallback,
+        callback: RawDrawCallback,
         userdata: *mut std::os::raw::c_void,
         userdata_size: usize,
     ) {
-        unsafe { sys::ImDrawList_AddCallback(self.draw_list, callback, userdata, userdata_size) }
+        assert!(
+            userdata_size < (1usize << 31),
+            "DrawListMut::add_callback() userdata_size must be smaller than 2^31 bytes"
+        );
+        assert!(
+            userdata_size == 0 || !userdata.is_null(),
+            "DrawListMut::add_callback() copied userdata must not be null"
+        );
+        unsafe {
+            sys::ImDrawList_AddCallback(self.draw_list, Some(callback), userdata, userdata_size)
+        }
     }
 
     /// Insert a new draw command (forces a new draw call boundary).
     #[doc(alias = "AddDrawCmd")]
     pub fn add_draw_cmd(&self) {
         unsafe { sys::ImDrawList_AddDrawCmd(self.draw_list) }
-    }
-}
-
-impl<'ui> DrawListMut<'ui> {
-    /// Safe variant: add a Rust callback (executed when the draw list is rendered).
-    /// Note: if the draw list is never rendered, the callback will not run and its resources won't be reclaimed.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn add_callback_safe<F: FnOnce() + 'static>(&'ui self, callback: F) -> Callback<'ui, F> {
-        Callback::new(self, callback)
-    }
-
-    /// Safe variant: add a Rust callback (executed when the draw list is rendered).
-    ///
-    /// On wasm32 targets using the import-style Dear ImGui provider, C code cannot
-    /// safely invoke Rust function pointers across module boundaries. For now this
-    /// API is disabled on wasm to avoid undefined behaviour; use other mechanisms
-    /// (e.g. higher-level rendering hooks) instead.
-    #[cfg(target_arch = "wasm32")]
-    pub fn add_callback_safe<F: FnOnce() + 'static>(&'ui self, _callback: F) -> Callback<'ui, F> {
-        panic!(
-            "DrawListMut::add_callback_safe is not supported on wasm32 targets; \
-             C->Rust callbacks are not available in the import-style web build."
-        );
     }
 }
 

@@ -13,13 +13,16 @@ mod removed_free_api_contracts {
     struct Shutdown;
 }
 
-use dear_imgui_rs::render::RenderedFrame;
-use dear_imgui_rs::{Context, TextureId};
+use dear_imgui_rs::Context;
+use dear_imgui_rs::render::{ReconciledFrame, RenderedFrame};
 
 use super::WgpuRenderer;
 use super::multi_viewport_runtime::OwningViewportRuntime;
-pub use super::multi_viewport_runtime::{WgpuViewportAttachError, WgpuViewportError};
-use crate::GammaMode;
+pub use super::multi_viewport_runtime::{
+    WgpuViewportAttachError, WgpuViewportError, WgpuViewportFrameTraceGuard,
+    WgpuViewportFrameTraceReport,
+};
+use crate::{ExternalTextureId, GammaMode};
 use dear_imgui_winit::multi_viewport::WinitPlatformRuntime;
 
 /// Owning WGPU renderer runtime for the Winit multi-viewport route.
@@ -82,9 +85,24 @@ impl WinitViewportRuntime {
         self.inner.poll_fault()
     }
 
+    /// Begins a non-nestable trace of real secondary-viewport GPU work.
+    ///
+    /// Finish the returned guard immediately after rendering platform windows and before
+    /// acquiring the application's main surface. The report then provides same-scope evidence
+    /// for secondary command submission and presentation. Dropping the guard discards its
+    /// partial observations.
+    pub fn begin_frame_trace(&self) -> Result<WgpuViewportFrameTraceGuard<'_>, WgpuViewportError> {
+        self.inner.begin_frame_trace()
+    }
+
     /// Prepares renderer device objects for a new frame.
     pub fn new_frame(&self) -> Result<(), WgpuViewportError> {
         self.inner.new_frame()
+    }
+
+    /// Applies managed-texture requests before platform-window rendering.
+    pub fn reconcile_frame(&self, frame: &mut RenderedFrame<'_>) -> Result<(), WgpuViewportError> {
+        self.inner.reconcile_frame(frame)
     }
 
     /// Consumes and renders one Context-owned frame.
@@ -94,6 +112,15 @@ impl WinitViewportRuntime {
         render_pass: &mut wgpu::RenderPass<'_>,
     ) -> Result<(), WgpuViewportError> {
         self.inner.render(frame, render_pass)
+    }
+
+    /// Renders one frame and returns its reconciliation proof to a presentation owner.
+    pub fn render_reconciled<'frame>(
+        &self,
+        frame: RenderedFrame<'frame>,
+        render_pass: &mut wgpu::RenderPass<'_>,
+    ) -> Result<ReconciledFrame<'frame>, WgpuViewportError> {
+        self.inner.render_reconciled(frame, render_pass)
     }
 
     /// Finalizes and renders the bound Context's current frame.
@@ -117,6 +144,18 @@ impl WinitViewportRuntime {
             .render_with_fb_size(frame, render_pass, width, height)
     }
 
+    /// Renders one frame at explicit dimensions and returns its reconciliation proof.
+    pub fn render_with_fb_size_reconciled<'frame>(
+        &self,
+        frame: RenderedFrame<'frame>,
+        render_pass: &mut wgpu::RenderPass<'_>,
+        width: u32,
+        height: u32,
+    ) -> Result<ReconciledFrame<'frame>, WgpuViewportError> {
+        self.inner
+            .render_with_fb_size_reconciled(frame, render_pass, width, height)
+    }
+
     /// Finalizes and renders the bound Context with explicit framebuffer dimensions.
     pub fn render_context_with_fb_size(
         &self,
@@ -129,7 +168,7 @@ impl WinitViewportRuntime {
             .render_context_with_fb_size(context, render_pass, width, height)
     }
 
-    /// Invalidates device objects and resets the bound Context's managed texture bindings.
+    /// Invalidates renderer-owned device objects while preserving external texture handles.
     pub fn invalidate_device_objects(
         &self,
         context: &mut Context,
@@ -158,44 +197,26 @@ impl WinitViewportRuntime {
     /// Registers an application-owned external WGPU texture.
     pub fn register_external_texture(
         &self,
-        texture: &wgpu::Texture,
         view: &wgpu::TextureView,
-    ) -> Result<TextureId, WgpuViewportError> {
-        self.inner.register_external_texture(texture, view)
-    }
-
-    /// Registers an application-owned external texture with a custom sampler.
-    pub fn register_external_texture_with_sampler(
-        &self,
-        texture: &wgpu::Texture,
-        view: &wgpu::TextureView,
-        sampler: &wgpu::Sampler,
-    ) -> Result<TextureId, WgpuViewportError> {
-        self.inner
-            .register_external_texture_with_sampler(texture, view, sampler)
+    ) -> Result<ExternalTextureId, WgpuViewportError> {
+        self.inner.register_external_texture(view)
     }
 
     /// Updates the view of a registered application-owned texture.
-    pub fn update_external_texture_view(
+    pub fn update_external_texture(
         &self,
-        texture: TextureId,
+        texture: ExternalTextureId,
         view: &wgpu::TextureView,
-    ) -> Result<bool, WgpuViewportError> {
-        self.inner.update_external_texture_view(texture, view)
-    }
-
-    /// Updates the sampler of a registered application-owned texture.
-    pub fn update_external_texture_sampler(
-        &self,
-        texture: TextureId,
-        sampler: &wgpu::Sampler,
-    ) -> Result<bool, WgpuViewportError> {
-        self.inner.update_external_texture_sampler(texture, sampler)
+    ) -> Result<(), WgpuViewportError> {
+        self.inner.update_external_texture(texture, view)
     }
 
     /// Unregisters an application-owned external texture.
-    pub fn unregister_texture(&self, texture: TextureId) -> Result<(), WgpuViewportError> {
-        self.inner.unregister_texture(texture)
+    pub fn unregister_external_texture(
+        &self,
+        texture: ExternalTextureId,
+    ) -> Result<(), WgpuViewportError> {
+        self.inner.unregister_external_texture(texture)
     }
 
     /// Explicitly releases renderer callbacks and WGPU resources.

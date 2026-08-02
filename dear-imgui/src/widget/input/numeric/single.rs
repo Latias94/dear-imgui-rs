@@ -1,6 +1,6 @@
 use super::super::validation::validate_input_scalar_flags;
 use crate::ui::Ui;
-use crate::{InputScalarFlags, sys};
+use crate::{InputScalarFlags, NumericFormat, NumericFormatError, sys};
 use std::borrow::Cow;
 
 /// Builder for integer input widget
@@ -63,12 +63,12 @@ impl<'ui> InputInt<'ui> {
 /// Builder for float input widget
 #[derive(Debug)]
 #[must_use]
-pub struct InputFloat<'ui> {
+pub struct InputFloat<'ui, F = &'static str> {
     ui: &'ui Ui,
     label: Cow<'ui, str>,
     step: f32,
     step_fast: f32,
-    format: Option<Cow<'ui, str>>,
+    display_format: Option<F>,
     flags: InputScalarFlags,
 }
 
@@ -80,11 +80,13 @@ impl<'ui> InputFloat<'ui> {
             label: label.into(),
             step: 0.0,
             step_fast: 0.0,
-            format: None,
+            display_format: None,
             flags: InputScalarFlags::NONE,
         }
     }
+}
 
+impl<'ui, F: AsRef<str>> InputFloat<'ui, F> {
     /// Sets the step value
     pub fn step(mut self, step: f32) -> Self {
         self.step = step;
@@ -97,10 +99,27 @@ impl<'ui> InputFloat<'ui> {
         self
     }
 
-    /// Sets the display format
-    pub fn format(mut self, format: impl Into<Cow<'ui, str>>) -> Self {
-        self.format = Some(format.into());
-        self
+    /// Sets the validated display format.
+    pub fn display_format<'fmt>(
+        self,
+        display_format: NumericFormat<'fmt, f32>,
+    ) -> InputFloat<'ui, NumericFormat<'fmt, f32>> {
+        InputFloat {
+            ui: self.ui,
+            label: self.label,
+            step: self.step,
+            step_fast: self.step_fast,
+            display_format: Some(display_format),
+            flags: self.flags,
+        }
+    }
+
+    /// Validates and sets a C-style display format.
+    pub fn try_display_format<'fmt>(
+        self,
+        display_format: impl Into<Cow<'fmt, str>>,
+    ) -> Result<InputFloat<'ui, NumericFormat<'fmt, f32>>, NumericFormatError> {
+        Ok(self.display_format(NumericFormat::new(display_format)?))
     }
 
     /// Sets the flags for the input
@@ -112,7 +131,11 @@ impl<'ui> InputFloat<'ui> {
     /// Builds the float input widget
     pub fn build(self, value: &mut f32) -> bool {
         validate_input_scalar_flags("InputFloat::build()", self.flags);
-        let format = self.format.as_deref().unwrap_or("%.3f");
+        let format = self
+            .display_format
+            .as_ref()
+            .map(AsRef::as_ref)
+            .unwrap_or("%.3f");
         let (label_ptr, format_ptr) = self.ui.scratch_txt_two(self.label.as_ref(), format);
 
         self.ui.run_with_bound_context(|| unsafe {
@@ -131,12 +154,12 @@ impl<'ui> InputFloat<'ui> {
 /// Builder for double input widget
 #[derive(Debug)]
 #[must_use]
-pub struct InputDouble<'ui> {
+pub struct InputDouble<'ui, F = &'static str> {
     ui: &'ui Ui,
     label: Cow<'ui, str>,
     step: f64,
     step_fast: f64,
-    format: Option<Cow<'ui, str>>,
+    display_format: Option<F>,
     flags: InputScalarFlags,
 }
 
@@ -148,11 +171,13 @@ impl<'ui> InputDouble<'ui> {
             label: label.into(),
             step: 0.0,
             step_fast: 0.0,
-            format: None,
+            display_format: None,
             flags: InputScalarFlags::NONE,
         }
     }
+}
 
+impl<'ui, F: AsRef<str>> InputDouble<'ui, F> {
     /// Sets the step value
     pub fn step(mut self, step: f64) -> Self {
         self.step = step;
@@ -165,10 +190,27 @@ impl<'ui> InputDouble<'ui> {
         self
     }
 
-    /// Sets the display format
-    pub fn format(mut self, format: impl Into<Cow<'ui, str>>) -> Self {
-        self.format = Some(format.into());
-        self
+    /// Sets the validated display format.
+    pub fn display_format<'fmt>(
+        self,
+        display_format: NumericFormat<'fmt, f64>,
+    ) -> InputDouble<'ui, NumericFormat<'fmt, f64>> {
+        InputDouble {
+            ui: self.ui,
+            label: self.label,
+            step: self.step,
+            step_fast: self.step_fast,
+            display_format: Some(display_format),
+            flags: self.flags,
+        }
+    }
+
+    /// Validates and sets a C-style display format.
+    pub fn try_display_format<'fmt>(
+        self,
+        display_format: impl Into<Cow<'fmt, str>>,
+    ) -> Result<InputDouble<'ui, NumericFormat<'fmt, f64>>, NumericFormatError> {
+        Ok(self.display_format(NumericFormat::new(display_format)?))
     }
 
     /// Sets the flags for the input
@@ -180,7 +222,11 @@ impl<'ui> InputDouble<'ui> {
     /// Builds the double input widget
     pub fn build(self, value: &mut f64) -> bool {
         validate_input_scalar_flags("InputDouble::build()", self.flags);
-        let format = self.format.as_deref().unwrap_or("%.6f");
+        let format = self
+            .display_format
+            .as_ref()
+            .map(AsRef::as_ref)
+            .unwrap_or("%.6f");
         let (label_ptr, format_ptr) = self.ui.scratch_txt_two(self.label.as_ref(), format);
 
         self.ui.run_with_bound_context(|| unsafe {

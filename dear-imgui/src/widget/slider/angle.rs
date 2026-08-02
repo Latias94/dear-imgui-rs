@@ -1,5 +1,7 @@
-use crate::Ui;
+use std::borrow::Cow;
+
 use crate::sys;
+use crate::{NumericFormat, NumericFormatError, Ui};
 
 use super::SliderFlags;
 use super::validation::{validate_slider_flags, validate_slider_range};
@@ -72,12 +74,12 @@ where
         self
     }
 
-    /// Sets the display format using *a C-style printf string*
+    /// Sets the validated display format.
     #[inline]
-    pub fn display_format<Format2: AsRef<str>>(
+    pub fn display_format<'fmt>(
         self,
-        display_format: Format2,
-    ) -> AngleSlider<Label, Format2> {
+        display_format: NumericFormat<'fmt, f32>,
+    ) -> AngleSlider<Label, NumericFormat<'fmt, f32>> {
         AngleSlider {
             label: self.label,
             min_degrees: self.min_degrees,
@@ -85,6 +87,14 @@ where
             display_format,
             flags: self.flags,
         }
+    }
+
+    /// Validates and sets a C-style display format.
+    pub fn try_display_format<'fmt>(
+        self,
+        display_format: impl Into<Cow<'fmt, str>>,
+    ) -> Result<AngleSlider<Label, NumericFormat<'fmt, f32>>, NumericFormatError> {
+        Ok(self.display_format(NumericFormat::new(display_format)?))
     }
 
     /// Replaces all current settings with the given flags

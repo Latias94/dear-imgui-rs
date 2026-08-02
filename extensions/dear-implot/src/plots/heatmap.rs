@@ -3,8 +3,9 @@
 use super::{
     Plot, PlotDataLayout, PlotError, PlotItemStyle, plot_spec_with_style, with_plot_str_or_empty,
 };
-use crate::{HeatmapFlags, ItemFlags, sys};
+use crate::{FloatFormat, FloatFormatError, HeatmapFlags, ItemFlags, sys};
 use dear_imgui_rs::with_scratch_txt_two;
+use std::borrow::Cow;
 
 fn validate_grid_counts(
     caller: &str,
@@ -40,7 +41,7 @@ fn heatmap_count_to_i32(caller: &str, name: &str, value: usize) -> Result<i32, P
 }
 
 /// Builder for heatmap plots with extensive customization options
-pub struct HeatmapPlot<'a> {
+pub struct HeatmapPlot<'a, F = &'static str> {
     label: &'a str,
     values: &'a [f64],
     style: PlotItemStyle,
@@ -48,14 +49,14 @@ pub struct HeatmapPlot<'a> {
     cols: usize,
     scale_min: f64,
     scale_max: f64,
-    label_fmt: Option<&'a str>,
+    label_fmt: Option<F>,
     bounds_min: sys::ImPlotPoint,
     bounds_max: sys::ImPlotPoint,
     flags: HeatmapFlags,
     item_flags: ItemFlags,
 }
 
-impl<'a> super::PlotItemStyled for HeatmapPlot<'a> {
+impl<F> super::PlotItemStyled for HeatmapPlot<'_, F> {
     fn style_mut(&mut self) -> &mut PlotItemStyle {
         &mut self.style
     }
@@ -85,7 +86,9 @@ impl<'a> HeatmapPlot<'a> {
             item_flags: ItemFlags::NONE,
         }
     }
+}
 
+impl<'a, F: AsRef<str>> HeatmapPlot<'a, F> {
     /// Set the color scale range (min, max)
     /// If both are 0.0, auto-scaling will be used
     pub fn with_scale(mut self, min: f64, max: f64) -> Self {
@@ -94,10 +97,38 @@ impl<'a> HeatmapPlot<'a> {
         self
     }
 
-    /// Set the label format for values (e.g., "%.2f", "%.1e")
-    /// Set to None to disable labels
-    pub fn with_label_format(mut self, fmt: Option<&'a str>) -> Self {
-        self.label_fmt = fmt;
+    /// Set the validated label format for values.
+    pub fn with_label_format<'fmt>(
+        self,
+        format: FloatFormat<'fmt>,
+    ) -> HeatmapPlot<'a, FloatFormat<'fmt>> {
+        HeatmapPlot {
+            label: self.label,
+            values: self.values,
+            style: self.style,
+            rows: self.rows,
+            cols: self.cols,
+            scale_min: self.scale_min,
+            scale_max: self.scale_max,
+            label_fmt: Some(format),
+            bounds_min: self.bounds_min,
+            bounds_max: self.bounds_max,
+            flags: self.flags,
+            item_flags: self.item_flags,
+        }
+    }
+
+    /// Validate and set a C-style label format for values.
+    pub fn try_label_format<'fmt>(
+        self,
+        format: impl Into<Cow<'fmt, str>>,
+    ) -> Result<HeatmapPlot<'a, FloatFormat<'fmt>>, FloatFormatError> {
+        Ok(self.with_label_format(FloatFormat::new(format)?))
+    }
+
+    /// Disable value labels.
+    pub fn without_value_labels(mut self) -> Self {
+        self.label_fmt = None;
         self
     }
 
@@ -148,7 +179,7 @@ impl<'a> HeatmapPlot<'a> {
     }
 }
 
-impl<'a> Plot for HeatmapPlot<'a> {
+impl<F: AsRef<str>> Plot for HeatmapPlot<'_, F> {
     fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.validate().is_err() {
             return; // Skip plotting if data is invalid
@@ -159,7 +190,7 @@ impl<'a> Plot for HeatmapPlot<'a> {
         let Ok(cols) = heatmap_count_to_i32("HeatmapPlot::plot()", "cols", self.cols) else {
             return;
         };
-        let label_fmt = self.label_fmt.filter(|s| !s.contains('\0'));
+        let label_fmt = self.label_fmt.as_ref().map(AsRef::as_ref);
         plot_ui.with_bound_context(|| match label_fmt {
             Some(label_fmt) => {
                 let label = if self.label.contains('\0') {
@@ -215,7 +246,7 @@ impl<'a> Plot for HeatmapPlot<'a> {
 }
 
 /// Float version of heatmap for better performance with f32 data
-pub struct HeatmapPlotF32<'a> {
+pub struct HeatmapPlotF32<'a, F = &'static str> {
     label: &'a str,
     values: &'a [f32],
     style: PlotItemStyle,
@@ -223,14 +254,14 @@ pub struct HeatmapPlotF32<'a> {
     cols: usize,
     scale_min: f64,
     scale_max: f64,
-    label_fmt: Option<&'a str>,
+    label_fmt: Option<F>,
     bounds_min: sys::ImPlotPoint,
     bounds_max: sys::ImPlotPoint,
     flags: HeatmapFlags,
     item_flags: ItemFlags,
 }
 
-impl<'a> super::PlotItemStyled for HeatmapPlotF32<'a> {
+impl<F> super::PlotItemStyled for HeatmapPlotF32<'_, F> {
     fn style_mut(&mut self) -> &mut PlotItemStyle {
         &mut self.style
     }
@@ -254,7 +285,9 @@ impl<'a> HeatmapPlotF32<'a> {
             item_flags: ItemFlags::NONE,
         }
     }
+}
 
+impl<'a, F: AsRef<str>> HeatmapPlotF32<'a, F> {
     /// Set the color scale range (min, max)
     pub fn with_scale(mut self, min: f64, max: f64) -> Self {
         self.scale_min = min;
@@ -262,9 +295,38 @@ impl<'a> HeatmapPlotF32<'a> {
         self
     }
 
-    /// Set the label format for values
-    pub fn with_label_format(mut self, fmt: Option<&'a str>) -> Self {
-        self.label_fmt = fmt;
+    /// Set the validated label format for values.
+    pub fn with_label_format<'fmt>(
+        self,
+        format: FloatFormat<'fmt>,
+    ) -> HeatmapPlotF32<'a, FloatFormat<'fmt>> {
+        HeatmapPlotF32 {
+            label: self.label,
+            values: self.values,
+            style: self.style,
+            rows: self.rows,
+            cols: self.cols,
+            scale_min: self.scale_min,
+            scale_max: self.scale_max,
+            label_fmt: Some(format),
+            bounds_min: self.bounds_min,
+            bounds_max: self.bounds_max,
+            flags: self.flags,
+            item_flags: self.item_flags,
+        }
+    }
+
+    /// Validate and set a C-style label format for values.
+    pub fn try_label_format<'fmt>(
+        self,
+        format: impl Into<Cow<'fmt, str>>,
+    ) -> Result<HeatmapPlotF32<'a, FloatFormat<'fmt>>, FloatFormatError> {
+        Ok(self.with_label_format(FloatFormat::new(format)?))
+    }
+
+    /// Disable value labels.
+    pub fn without_value_labels(mut self) -> Self {
+        self.label_fmt = None;
         self
     }
 
@@ -308,7 +370,7 @@ impl<'a> HeatmapPlotF32<'a> {
     }
 }
 
-impl<'a> Plot for HeatmapPlotF32<'a> {
+impl<F: AsRef<str>> Plot for HeatmapPlotF32<'_, F> {
     fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.validate().is_err() {
             return;
@@ -319,7 +381,7 @@ impl<'a> Plot for HeatmapPlotF32<'a> {
         let Ok(cols) = heatmap_count_to_i32("HeatmapPlotF32::plot()", "cols", self.cols) else {
             return;
         };
-        let label_fmt = self.label_fmt.filter(|s| !s.contains('\0'));
+        let label_fmt = self.label_fmt.as_ref().map(AsRef::as_ref);
         plot_ui.with_bound_context(|| match label_fmt {
             Some(label_fmt) => {
                 let label = if self.label.contains('\0') {

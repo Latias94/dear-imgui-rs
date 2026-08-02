@@ -1,6 +1,7 @@
 use super::*;
 
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+#[derive(Clone, Copy)]
 pub(super) struct ViewportPipeline {
     pub(super) pipeline: vk::Pipeline,
     #[cfg(not(feature = "dynamic-rendering"))]

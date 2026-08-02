@@ -15,6 +15,7 @@ readme = "README.md"
 dear-imgui-rs.workspace = true
 dear-imgui-winit.workspace = true
 dear-imgui-wgpu.workspace = true
+dear-imgui-test-engine = { workspace = true, optional = true }
 wgpu.workspace = true
 winit.workspace = true
 pollster.workspace = true
@@ -31,3 +32,4 @@ default = []
 implot = ["dep:dear-implot"]
 imnodes = ["dep:dear-imnodes"]
 implot3d = ["dep:dear-implot3d"]
+test-engine = ["dep:dear-imgui-test-engine"]

@@ -2504,6 +2504,7 @@ name = "dear-app"
 version = "0.16.0-alpha.1"
 dependencies = [
  "dear-imgui-rs",
+ "dear-imgui-test-engine",
  "dear-imgui-wgpu",
  "dear-imgui-winit",
  "dear-imnodes",
@@ -2592,7 +2593,10 @@ dependencies = [
  "cc",
  "flate2",
  "pkg-config",
+ "serde",
+ "serde_json",
  "tar",
+ "tempfile",
  "ureq",
  "vcpkg",
 ]
@@ -2632,6 +2636,7 @@ dependencies = [
  "raw-window-handle",
  "sdl3",
  "sdl3-main",
+ "serde_json",
  "tracing",
  "tracing-subscriber",
  "ttf-parser",
@@ -2647,6 +2652,7 @@ dependencies = [
  "env_logger",
  "glow 0.17.0",
  "pollster",
+ "static_assertions",
  "thiserror 2.0.18",
  "winit",
 ]
@@ -2684,6 +2690,8 @@ dependencies = [
  "parking_lot",
  "pretty_assertions",
  "serde",
+ "serde_json",
+ "serde_test",
  "static_assertions",
  "thiserror 2.0.18",
 ]
@@ -6039,6 +6047,15 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
+]
+
+[[package]]
+name = "serde_test"
+version = "1.0.177"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f901ee573cab6b3060453d2d5f0bae4e6d628c23c0a962ff9b5f1d7c8d4f1ed"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

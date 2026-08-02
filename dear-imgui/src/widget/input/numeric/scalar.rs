@@ -1,7 +1,10 @@
 use super::super::validation::validate_input_scalar_flags;
+use crate::NumericFormat;
+use crate::NumericFormatError;
 use crate::internal::{DataTypeKind, component_count_i32};
 use crate::ui::Ui;
 use crate::{InputScalarFlags, sys};
+use std::borrow::Cow;
 use std::ffi::c_void;
 use std::ptr;
 
@@ -34,11 +37,11 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind> InputScalar<'ui, 'p, T, L> {
 }
 
 impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalar<'ui, 'p, T, L, F> {
-    /// Sets the display format using *a C-style printf string*
-    pub fn display_format<F2: AsRef<str>>(
+    /// Sets the validated display format.
+    pub fn display_format<'fmt>(
         self,
-        display_format: F2,
-    ) -> InputScalar<'ui, 'p, T, L, F2> {
+        display_format: NumericFormat<'fmt, T>,
+    ) -> InputScalar<'ui, 'p, T, L, NumericFormat<'fmt, T>> {
         InputScalar {
             value: self.value,
             label: self.label,
@@ -48,6 +51,14 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalar<'ui, 'p
             flags: self.flags,
             ui: self.ui,
         }
+    }
+
+    /// Validates and sets a C-style display format.
+    pub fn try_display_format<'fmt>(
+        self,
+        display_format: impl Into<Cow<'fmt, str>>,
+    ) -> Result<InputScalar<'ui, 'p, T, L, NumericFormat<'fmt, T>>, NumericFormatError> {
+        Ok(self.display_format(NumericFormat::new(display_format)?))
     }
 
     /// Sets the step value for the input
@@ -129,11 +140,11 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind> InputScalarN<'ui, 'p, T, L> {
 }
 
 impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalarN<'ui, 'p, T, L, F> {
-    /// Sets the display format using *a C-style printf string*
-    pub fn display_format<F2: AsRef<str>>(
+    /// Sets the validated display format.
+    pub fn display_format<'fmt>(
         self,
-        display_format: F2,
-    ) -> InputScalarN<'ui, 'p, T, L, F2> {
+        display_format: NumericFormat<'fmt, T>,
+    ) -> InputScalarN<'ui, 'p, T, L, NumericFormat<'fmt, T>> {
         InputScalarN {
             values: self.values,
             label: self.label,
@@ -143,6 +154,14 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalarN<'ui, '
             flags: self.flags,
             ui: self.ui,
         }
+    }
+
+    /// Validates and sets a C-style display format.
+    pub fn try_display_format<'fmt>(
+        self,
+        display_format: impl Into<Cow<'fmt, str>>,
+    ) -> Result<InputScalarN<'ui, 'p, T, L, NumericFormat<'fmt, T>>, NumericFormatError> {
+        Ok(self.display_format(NumericFormat::new(display_format)?))
     }
 
     /// Sets the step value for the input

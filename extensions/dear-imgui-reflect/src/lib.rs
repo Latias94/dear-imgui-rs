@@ -73,7 +73,7 @@
 //! ImReflect, such as:
 //! - `#[imgui(skip)]` – do not generate any UI for this field;
 //! - `#[imgui(name = "Custom Label")]` – override the field label;
-//! - numeric helpers like
+//! - type-checked numeric helpers like
 //!   `#[imgui(slider, min = 0.0, max = 1.0, format = "%.2f")]`,
 //!   `#[imgui(as_drag, speed = 0.1)]`, `#[imgui(as_input, step = 1)]`;
 //! - text helpers like `#[imgui(multiline, lines = 4, hint = "Search...")]`,
@@ -93,16 +93,19 @@
 //! ```no_run
 //! use dear_imgui_reflect as reflect;
 //!
-//! fn configure_reflect(session: &mut reflect::ReflectSession) {
+//! fn configure_reflect(
+//!     session: &mut reflect::ReflectSession,
+//! ) -> Result<(), reflect::imgui::NumericFormatError> {
 //!     {
 //!         let s = session.settings_mut();
 //!         // Make all Vec<T> non-reorderable by default.
 //!         s.vec_mut().reorderable = false;
 //!
 //!         // Use a 0..1 slider for all f32 values by default.
-//!         let f32_settings = s.numerics_f32().clone().slider_0_to_1(2); // "%.2f"
+//!         let f32_settings = s.numerics_f32().clone().try_slider_0_to_1(2)?; // "%.2f"
 //!         *s.numerics_f32_mut() = f32_settings;
 //!     }
+//!     Ok(())
 //! }
 //! ```
 //!
@@ -117,14 +120,17 @@
 //!     weights: Vec<f32>,
 //! }
 //!
-//! fn configure_per_field(session: &mut reflect::ReflectSession) {
+//! fn configure_per_field(
+//!     session: &mut reflect::ReflectSession,
+//! ) -> Result<(), reflect::imgui::NumericFormatError> {
 //!     {
 //!         let s = session.settings_mut();
 //!         // For Settings::weights, allow reordering only.
 //!         s.for_member::<Settings>("weights")
 //!             .vec_reorder_only()
-//!             .numerics_f32_slider_0_to_1(3);
+//!             .try_numerics_f32_slider_0_to_1(3)?;
 //!     }
+//!     Ok(())
 //! }
 //! ```
 //!
@@ -296,9 +302,10 @@ pub use containers::{
 pub use response::{ReflectEvent, ReflectResponse};
 pub use session::{ImGuiReflectExt, Inspector, InspectorPathGuard, ReflectSession};
 pub use settings::{
-    ArraySettings, BoolSettings, BoolStyle, MapSettings, MemberSettings, NumericDefaultRange,
-    NumericRange, NumericTypeSettings, NumericWidgetKind, ReflectSettings, TupleRenderMode,
-    TupleSettings, VecSettings,
+    ArraySettings, BoolSettings, BoolStyle, F32NumericSettings, F64NumericSettings,
+    I32NumericSettings, MapSettings, MemberSettings, NumericDefaultRange, NumericRange,
+    NumericTypeSettings, NumericWidgetKind, ReflectSettings, TupleRenderMode, TupleSettings,
+    U32NumericSettings, VecSettings,
 };
 pub use values::imgui_tuple_body;
 

@@ -2,7 +2,7 @@
 name = "dear-imgui-sys"
 version.workspace = true
 edition.workspace = true
-description = "Low-level FFI bindings to Dear ImGui v1.92.8 (docking branch) via cimgui (C API)"
+description = "Low-level FFI bindings to Dear ImGui v1.92.9b (docking branch) via cimgui (C API)"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -31,8 +31,8 @@ exclude = [
 ]
 
 [package.metadata.dear-imgui-sources]
-cimgui-revision = "1261b231939fc210032f30c4ee8a8f0440372237"
-imgui-revision = "b61e56346a92cfcaf1f43a545ca37b0b32239654"
+cimgui-revision = "bf9b984ef74470996fc6c9a6963d9e988e310101"
+imgui-revision = "b48d1afbe8ee8b238e2961dc363a949dd7304e23"
 
 # docs.rs configuration for offline builds
 [package.metadata.docs.rs]
@@ -66,6 +66,9 @@ bindgen = ["dep:bindgen"]
 # Enable Dear ImGui test engine hooks (requires linking dear-imgui-test-engine-sys).
 # Test engine hooks alter the native core artifact and therefore require a source build.
 test-engine = ["build-from-source"]
+# Internal CI-only C++/Rust aggregate layout probe. This source-only feature is
+# intentionally not needed by normal or prebuilt consumers.
+abi-probe = ["build-from-source"]
 # Enable freetype font rasterizer
 freetype = ["pkg-config", "vcpkg"]
 pkg-config = ["build-support/pkg-config"]

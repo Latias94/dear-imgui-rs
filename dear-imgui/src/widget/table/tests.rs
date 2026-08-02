@@ -15,53 +15,67 @@ fn setup_context() -> crate::Context {
 }
 
 #[test]
-fn table_user_ids_hide_zero_sentinel() {
-    let id = crate::Id::from(7u32);
-    assert_eq!(optional_user_id_raw(None, "test"), 0);
-    assert_eq!(optional_user_id_raw(Some(id), "test"), id.raw());
-    assert_eq!(optional_user_id_from_raw(0), None);
-    assert_eq!(optional_user_id_from_raw(id.raw()), Some(id));
+fn table_column_user_data_preserves_every_raw_value() {
+    for raw in [0, 1, u32::MAX] {
+        let user_data = TableColumnUserData::new(raw);
+        assert_eq!(user_data.get(), raw);
+        assert_eq!(TableColumnUserData::from(raw), user_data);
+        assert_eq!(u32::from(user_data), raw);
 
-    assert!(
-        std::panic::catch_unwind(|| optional_user_id_raw(Some(crate::Id::default()), "test"))
-            .is_err(),
-        "explicit zero user ids must not cross the safe API boundary"
-    );
+        let mut raw_column = sys::ImGuiTableColumnSortSpecs {
+            ColumnUserID: raw,
+            ColumnIndex: 0,
+            SortOrder: 0,
+            SortDirection: sys::ImGuiSortDirection_Ascending,
+        };
+        let mut raw_specs = sys::ImGuiTableSortSpecs {
+            Specs: &mut raw_column,
+            SpecsCount: 1,
+            SpecsDirty: true,
+        };
+        let specs = unsafe { TableSortSpecs::from_raw(&mut raw_specs) };
+        let spec = specs.iter().next().expect("one sort specification");
+        assert_eq!(spec.column_user_data, user_data);
+    }
 }
 
 #[test]
-fn table_user_id_builders_accept_integer_ids() {
-    let setup_id = 7;
-    let setup = TableColumnSetup::new("column").user_id(setup_id);
-    assert_eq!(setup.user_id, Some(crate::Id::from(7u32)));
+fn table_user_data_builders_accept_integer_values() {
+    let setup_data = 7;
+    let setup = TableColumnSetup::new("column").user_data(setup_data);
+    assert_eq!(setup.user_data, TableColumnUserData::from(7));
 
     let mut ctx = setup_context();
     let ui = ctx.frame();
-    let setup_id = 8;
-    let builder_id = 9;
-    let _ = ui.window("table_integer_user_id").build(|| {
+    let setup_data = 0;
+    let builder_data = 9;
+    let _ = ui.window("table_integer_user_data").build(|| {
         {
             let _table = ui.begin_table("setup", 1).unwrap();
-            ui.table_setup_column(
+            ui.table_setup_column_with_user_data(
                 "column",
                 TableColumnFlags::NONE,
                 None,
-                Some(setup_id.into()),
+                setup_data,
             );
-            assert_eq!(unsafe { current_table_column_user_id(0) }, setup_id);
+            // New tables apply column metadata during the first layout reconciliation.
+            ui.table_next_row();
+            assert_eq!(unsafe { current_table_column_user_data(0) }, setup_data);
         }
 
         ui.table("table")
             .column("column")
-            .user_id(builder_id)
+            .user_data(builder_data)
             .done()
             .build(|_| {
-                assert_eq!(unsafe { current_table_column_user_id(0) }, builder_id);
+                // New tables apply column metadata during the first layout reconciliation.
+                ui.table_next_row();
+                assert_eq!(unsafe { current_table_column_user_data(0) }, builder_data);
             });
     });
 }
 
-unsafe fn current_table_column_user_id(column: usize) -> u32 {
+unsafe fn current_table_column_user_data(column: usize) -> u32 {
     let table = unsafe { sys::igGetCurrentTable() };
     assert!(!table.is_null());
     let columns = unsafe { (*table).Columns.Data };
@@ -70,7 +84,7 @@ unsafe fn current_table_column_user_id(column: usize) -> u32 {
     assert!(!columns_end.is_null());
     let column_count = unsafe { columns_end.offset_from(columns) as usize };
     assert!(column < column_count);
-    unsafe { (*columns.add(column)).UserID }
+    unsafe { (*columns.add(column)).UserData }
 }
 
 unsafe fn current_table_draw_channel() -> i32 {
@@ -235,11 +249,11 @@ fn table_setup_methods_reject_late_or_excess_calls_before_ffi() {
     let ui = ctx.frame();
     let _ = ui.window("table_setup_preconditions").build(|| {
         let _table = ui.begin_table("table", 1).unwrap();
-        ui.table_setup_column("one", TableColumnFlags::NONE, None, None);
+        ui.table_setup_column("one", TableColumnFlags::NONE, None);
 
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                ui.table_setup_column("two", TableColumnFlags::NONE, None, None);
+                ui.table_setup_column("two", TableColumnFlags::NONE, None);
             }))
             .is_err()
         );
@@ -352,8 +366,8 @@ fn table_angled_headers_validate_indices_before_ffi() {
     let ui = ctx.frame();
     let _ = ui.window("table_angled_header_invalid").build(|| {
         let _table = ui.begin_table("table", 2).unwrap();
-        ui.table_setup_column("one", TableColumnFlags::ANGLED_HEADER, None, None);
-        ui.table_setup_column("two", TableColumnFlags::ANGLED_HEADER, None, None);
+        ui.table_setup_column("one", TableColumnFlags::ANGLED_HEADER, None);
+        ui.table_setup_column("two", TableColumnFlags::ANGLED_HEADER, None);
 
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

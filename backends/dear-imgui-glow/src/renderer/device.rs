@@ -3,7 +3,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use dear_imgui_rs::Context as ImGuiContext;
 use glow::{Context, HasContext};
 
-use super::GlowRenderer;
+use super::{GlowRenderer, sampler::SamplerObjects};
 use crate::{
     GlBuffer,
     error::{InitError, InitResult, RenderError, RenderResult},
@@ -16,23 +16,32 @@ pub(super) struct PendingDeviceObjects<'a> {
     shaders: Option<Shaders>,
     vbo: Option<GlBuffer>,
     ebo: Option<GlBuffer>,
+    samplers: Option<SamplerObjects>,
 }
 
 impl<'a> PendingDeviceObjects<'a> {
-    pub(super) fn create_all(gl: &'a Context, gl_version: crate::GlVersion) -> InitResult<Self> {
+    pub(super) fn create_all(
+        gl: &'a Context,
+        gl_version: crate::GlVersion,
+        supports_sampler_objects: bool,
+    ) -> InitResult<Self> {
         let mut pending = Self {
             gl,
             shaders: None,
             vbo: None,
             ebo: None,
+            samplers: None,
         };
         pending.shaders = Some(Shaders::new(gl, gl_version)?);
         pending.vbo = Some(unsafe { gl.create_buffer() }.map_err(InitError::CreateBufferObject)?);
         pending.ebo = Some(unsafe { gl.create_buffer() }.map_err(InitError::CreateBufferObject)?);
+        if supports_sampler_objects {
+            pending.samplers = Some(SamplerObjects::create(gl)?);
+        }
         Ok(pending)
     }
 
-    pub(super) fn into_parts(mut self) -> (Shaders, GlBuffer, GlBuffer) {
+    pub(super) fn into_parts(mut self) -> (Shaders, GlBuffer, GlBuffer, Option<SamplerObjects>) {
         (
             self.shaders
                 .take()
@@ -43,6 +52,7 @@ impl<'a> PendingDeviceObjects<'a> {
             self.ebo
                 .take()
                 .expect("pending device objects must own an EBO"),
+            self.samplers.take(),
         )
     }
 
@@ -59,6 +69,7 @@ impl<'a> PendingDeviceObjects<'a> {
             .ebo
             .take()
             .expect("pending device objects must own an EBO");
+        let samplers = self.samplers.take();
 
         let previous_shaders = std::mem::replace(&mut renderer.shaders, shaders);
         if let Some(program) = previous_shaders.program {
@@ -70,12 +81,18 @@ impl<'a> PendingDeviceObjects<'a> {
         if let Some(previous) = renderer.ebo_handle.replace(ebo) {
             unsafe { self.gl.delete_buffer(previous) };
         }
+        if let Some(previous) = std::mem::replace(&mut renderer.samplers, samplers) {
+            previous.destroy(self.gl);
+        }
         renderer.is_destroyed = false;
     }
 }
 
 impl Drop for PendingDeviceObjects<'_> {
     fn drop(&mut self) {
+        if let Some(samplers) = self.samplers.take() {
+            samplers.destroy(self.gl);
+        }
         if let Some(ebo) = self.ebo.take() {
             unsafe { self.gl.delete_buffer(ebo) };
         }
@@ -205,8 +222,12 @@ impl GlowRenderer {
 
     /// Enable/disable GL_FRAMEBUFFER_SRGB around ImGui rendering
     /// Default is disabled; prefer application-level control of sRGB.
-    pub fn set_framebuffer_srgb_enabled(&mut self, enabled: bool) {
+    pub fn set_framebuffer_srgb_enabled(&mut self, enabled: bool) -> RenderResult<()> {
+        if enabled && !self.supports_framebuffer_srgb_control() {
+            return Err(RenderError::FramebufferSrgbUnsupported);
+        }
         self.framebuffer_srgb = enabled;
+        Ok(())
     }
 
     /// Override the color gamma applied to ImGui vertex colors.
@@ -227,14 +248,19 @@ impl GlowRenderer {
     /// Create OpenGL device objects (buffers, shaders, etc.)
     pub fn create_device_objects(&mut self, gl: &Context) -> RenderResult<()> {
         self.ensure_operational()?;
-        if self.shaders.program.is_some() && self.vbo_handle.is_some() && self.ebo_handle.is_some()
+        let samplers_ready = !self.has_sampler_object_support || self.samplers.is_some();
+        if self.shaders.program.is_some()
+            && self.vbo_handle.is_some()
+            && self.ebo_handle.is_some()
+            && samplers_ready
         {
             self.is_destroyed = false;
             return Ok(());
         }
 
-        let pending = PendingDeviceObjects::create_all(gl, self.gl_version)
-            .map_err(RenderError::DeviceObjectInit)?;
+        let pending =
+            PendingDeviceObjects::create_all(gl, self.gl_version, self.has_sampler_object_support)
+                .map_err(RenderError::DeviceObjectInit)?;
         pending.commit(self);
         self.is_destroyed = false;
         Ok(())
@@ -297,6 +323,9 @@ impl GlowRenderer {
         if let Some(program) = self.shaders.program.take() {
             unsafe { gl.delete_program(program) };
         }
+        if let Some(samplers) = self.samplers.take() {
+            samplers.destroy(gl);
+        }
         for texture in self.owned_textures.drain(..) {
             unsafe { gl.delete_texture(texture) };
         }
@@ -306,10 +335,6 @@ impl GlowRenderer {
 
     pub(super) fn destroy_gpu_resources_only(&mut self, gl: &Context) -> RenderResult<()> {
         self.destroy_device_objects_only(gl)?;
-        #[cfg(feature = "bind_vertex_array_support")]
-        if let Some(vao) = self.vertex_array_object.take() {
-            unsafe { gl.delete_vertex_array(vao) };
-        }
         Ok(())
     }
 
@@ -350,7 +375,7 @@ mod tests {
 
     use dear_imgui_rs::{BackendFlags, Context as ImGuiContext, TextureFormat, TextureId, sys};
 
-    use super::GlowRenderer;
+    use super::{GlowRenderer, PendingDeviceObjects};
     use crate::error::InitResult;
     use crate::shaders::test_support::{
         FakeFailure, FakeSnapshot, TEST_LOCK, fake_gl, reset, snapshot,
@@ -439,14 +464,15 @@ mod tests {
             vbo_handle: Some(glow::NativeBuffer(NonZeroU32::new(71).unwrap())),
             ebo_handle: Some(glow::NativeBuffer(NonZeroU32::new(72).unwrap())),
             owned_textures: Vec::new(),
-            #[cfg(feature = "bind_vertex_array_support")]
-            vertex_array_object: None,
+            samplers: None,
             gl_version: GlVersion {
                 major: 3,
                 minor: 3,
                 is_es: false,
             },
             has_clip_origin_support: false,
+            has_separate_polygon_modes: false,
+            has_sampler_object_support: true,
             is_destroyed: true,
             gl_context: None,
             context_binding: None,
@@ -484,6 +510,28 @@ mod tests {
                     deleted_programs: 1,
                     deleted_buffers: 1,
                     generated_buffers: 1,
+                    ..FakeSnapshot::default()
+                },
+            ),
+            (
+                FakeFailure::SamplerCreate(1),
+                FakeSnapshot {
+                    deleted_shaders: 2,
+                    deleted_programs: 1,
+                    deleted_buffers: 2,
+                    generated_buffers: 2,
+                    ..FakeSnapshot::default()
+                },
+            ),
+            (
+                FakeFailure::SamplerCreate(2),
+                FakeSnapshot {
+                    deleted_shaders: 2,
+                    deleted_programs: 1,
+                    deleted_buffers: 2,
+                    generated_buffers: 2,
+                    deleted_samplers: 1,
+                    generated_samplers: 1,
                 },
             ),
         ] {
@@ -493,18 +541,76 @@ mod tests {
             let original_vbo = renderer.vbo_handle;
             let original_ebo = renderer.ebo_handle;
 
-            assert!(matches!(
-                renderer.create_device_objects(&gl),
-                Err(RenderError::DeviceObjectInit(
-                    InitError::CreateBufferObject(_)
-                ))
-            ));
+            let result = renderer.create_device_objects(&gl);
+            match failure {
+                FakeFailure::BufferCreate(_) => assert!(matches!(
+                    result,
+                    Err(RenderError::DeviceObjectInit(
+                        InitError::CreateBufferObject(_)
+                    ))
+                )),
+                FakeFailure::SamplerCreate(_) => assert!(matches!(
+                    result,
+                    Err(RenderError::DeviceObjectInit(InitError::CreateSampler(_)))
+                )),
+                _ => unreachable!("this table only covers device-object allocation failures"),
+            }
             assert!(renderer.shaders.program.is_none());
             assert_eq!(renderer.vbo_handle, original_vbo);
             assert_eq!(renderer.ebo_handle, original_ebo);
             assert!(renderer.is_destroyed);
             assert_eq!(snapshot(), expected);
         }
+    }
+
+    #[test]
+    fn successful_device_recreation_retires_each_sampler_generation_once() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset(FakeFailure::None);
+        let gl = fake_gl();
+        let mut renderer = renderer_with_existing_buffers();
+
+        PendingDeviceObjects::create_all(
+            &gl,
+            renderer.gl_version,
+            renderer.has_sampler_object_support,
+        )
+        .unwrap()
+        .commit(&mut renderer);
+        assert_eq!(snapshot().generated_samplers, 2);
+        assert_eq!(snapshot().deleted_samplers, 0);
+
+        PendingDeviceObjects::create_all(
+            &gl,
+            renderer.gl_version,
+            renderer.has_sampler_object_support,
+        )
+        .unwrap()
+        .commit(&mut renderer);
+        assert_eq!(snapshot().generated_samplers, 4);
+        assert_eq!(snapshot().deleted_samplers, 2);
+
+        renderer.destroy_device_objects_after_texture_map_clear(&gl);
+        assert_eq!(snapshot().generated_samplers, 4);
+        assert_eq!(snapshot().deleted_samplers, 4);
+        assert!(renderer.samplers.is_none());
+    }
+
+    #[test]
+    fn framebuffer_srgb_is_an_explicitly_fallible_desktop_capability() {
+        let mut renderer = renderer_with_existing_buffers();
+        renderer.gl_version.is_es = true;
+
+        assert!(matches!(
+            renderer.set_framebuffer_srgb_enabled(true),
+            Err(RenderError::FramebufferSrgbUnsupported)
+        ));
+        assert!(!renderer.framebuffer_srgb);
+        renderer.set_framebuffer_srgb_enabled(false).unwrap();
+
+        renderer.gl_version.is_es = false;
+        renderer.set_framebuffer_srgb_enabled(true).unwrap();
+        assert!(renderer.framebuffer_srgb);
     }
 
     #[test]

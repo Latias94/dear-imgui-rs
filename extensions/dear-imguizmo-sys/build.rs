@@ -94,6 +94,16 @@ fn native_binding_spec() -> &'static build_support::binding::CrateBindingSpec {
         .expect("missing dear-imguizmo-sys native binding spec")
 }
 
+fn maintained_source_paths(
+    cfg: &BuildConfig,
+) -> build_support::source_inventory::MaintainedSourcePaths {
+    build_support::source_inventory::MaintainedSourcePaths::for_crate(
+        env!("CARGO_PKG_NAME"),
+        cfg.manifest_dir.clone(),
+    )
+    .unwrap_or_else(|error| panic!("dear-imguizmo-sys: {error}"))
+}
+
 #[cfg(feature = "bindgen")]
 fn apply_bindgen_defines(mut builder: bindgen::Builder) -> bindgen::Builder {
     for define in native_binding_spec().binding_defines() {
@@ -172,7 +182,7 @@ fn generate_bindings(
     cimgui_root: &Path,
 ) {
     // For wasm32 targets, rely on pregenerated import-style bindings that import
-    // from the shared imgui-sys-v0 provider instead of running bindgen here.
+    // from the shared imgui-sys-v1 provider instead of running bindgen here.
     if cfg.target_arch == "wasm32" {
         if !cfg!(feature = "wasm") {
             panic!(
@@ -265,23 +275,6 @@ fn docsrs_build(cfg: &BuildConfig, cimguizmo_root: &Path, imgui_src: &Path, cimg
     generate_bindings(cfg, cimguizmo_root, imgui_src, cimgui_root);
 }
 
-fn resolve_imguizmo_cpp(cimguizmo_root: &Path) -> PathBuf {
-    let current = cimguizmo_root.join("ImGuizmo/src/ImGuizmo.cpp");
-    if current.exists() {
-        return current;
-    }
-
-    let legacy = cimguizmo_root.join("ImGuizmo/ImGuizmo.cpp");
-    if legacy.exists() {
-        return legacy;
-    }
-
-    panic!(
-        "ImGuizmo.cpp not found under {:?}. Expected either {:?} or {:?}. Did you init submodules?",
-        cimguizmo_root, current, legacy
-    );
-}
-
 fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
     let target_env = &cfg.target_env;
     if let Ok(dir) = env::var("IMGUIZMO_SYS_LIB_DIR") {
@@ -343,7 +336,13 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
     false
 }
 
-fn build_with_cc(cfg: &BuildConfig, cimguizmo_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
+fn build_with_cc(
+    cfg: &BuildConfig,
+    sources: &build_support::source_inventory::MaintainedSourcePaths,
+    cimguizmo_root: &Path,
+    imgui_src: &Path,
+    cimgui_root: &Path,
+) {
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
     build_support::configure_cpp_runtime_linkage(&mut build, &cfg.target_os, &cfg.target_env);
@@ -353,8 +352,16 @@ fn build_with_cc(cfg: &BuildConfig, cimguizmo_root: &Path, imgui_src: &Path, cim
     build.include(cimguizmo_root);
     build.include(cimguizmo_root.join("ImGuizmo"));
     build.include(cimguizmo_root.join("ImGuizmo/src"));
-    build.file(cimguizmo_root.join("cimguizmo.cpp"));
-    build.file(resolve_imguizmo_cpp(cimguizmo_root));
+    build.file(
+        sources
+            .file("wrapper")
+            .unwrap_or_else(|error| panic!("dear-imguizmo-sys: {error}")),
+    );
+    build.file(
+        sources
+            .file("implementation")
+            .unwrap_or_else(|error| panic!("dear-imguizmo-sys: {error}")),
+    );
 
     if cfg.is_msvc() && cfg.is_windows() {
         build.flag("/EHsc");
@@ -378,15 +385,16 @@ fn build_with_cc(cfg: &BuildConfig, cimguizmo_root: &Path, imgui_src: &Path, cim
 
 fn main() {
     let cfg = BuildConfig::new();
+    let sources = maintained_source_paths(&cfg);
 
     // Rerun hints
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=third-party/cimguizmo/cimguizmo.h");
-    println!("cargo:rerun-if-changed=third-party/cimguizmo/cimguizmo.cpp");
-    println!("cargo:rerun-if-changed=third-party/cimguizmo/ImGuizmo/src/ImGuizmo.cpp");
-    println!("cargo:rerun-if-changed=third-party/cimguizmo/ImGuizmo/ImGuizmo.cpp");
+    for path in sources.native_candidate_paths() {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
     println!("cargo:rerun-if-changed=../../dear-imgui-sys");
     println!("cargo:rerun-if-env-changed=IMGUIZMO_SYS_LIB_DIR");
     println!("cargo:rerun-if-env-changed=IMGUIZMO_SYS_SKIP_CC");
@@ -417,7 +425,9 @@ fn main() {
     }
 
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
-    let cimguizmo_root = cfg.manifest_dir.join("third-party/cimguizmo");
+    let cimguizmo_root = sources
+        .source_root()
+        .unwrap_or_else(|error| panic!("dear-imguizmo-sys: {error}"));
     if cfg.docs_rs {
         docsrs_build(&cfg, &cimguizmo_root, &imgui_src, &cimgui_root);
         return;
@@ -495,7 +505,10 @@ fn main() {
     };
     if cfg.target_arch != "wasm32" {
         if !cfg.docs_rs && !linked_prebuilt && env::var("IMGUIZMO_SYS_SKIP_CC").is_err() {
-            build_with_cc(&cfg, &cimguizmo_root, &imgui_src, &cimgui_root);
+            sources
+                .validate_native()
+                .unwrap_or_else(|error| panic!("dear-imguizmo-sys: {error}"));
+            build_with_cc(&cfg, &sources, &cimguizmo_root, &imgui_src, &cimgui_root);
         }
     } else {
         println!(

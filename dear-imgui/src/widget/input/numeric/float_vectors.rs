@@ -1,6 +1,7 @@
 use super::super::validation::validate_input_scalar_flags;
 use crate::ui::Ui;
-use crate::{InputScalarFlags, sys};
+use crate::{InputScalarFlags, NumericFormat, NumericFormatError, sys};
+use std::borrow::Cow;
 
 /// Builder for a 2-component float input widget.
 #[must_use]
@@ -27,8 +28,11 @@ impl<'ui, 'p, L: AsRef<str>> InputFloat2<'ui, 'p, L> {
 }
 
 impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat2<'ui, 'p, L, F> {
-    /// Sets the display format using *a C-style printf string*
-    pub fn display_format<F2: AsRef<str>>(self, display_format: F2) -> InputFloat2<'ui, 'p, L, F2> {
+    /// Sets the validated display format.
+    pub fn display_format<'fmt>(
+        self,
+        display_format: NumericFormat<'fmt, f32>,
+    ) -> InputFloat2<'ui, 'p, L, NumericFormat<'fmt, f32>> {
         InputFloat2 {
             label: self.label,
             value: self.value,
@@ -36,6 +40,14 @@ impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat2<'ui, 'p, L, F> {
             flags: self.flags,
             ui: self.ui,
         }
+    }
+
+    /// Validates and sets a C-style display format.
+    pub fn try_display_format<'fmt>(
+        self,
+        display_format: impl Into<Cow<'fmt, str>>,
+    ) -> Result<InputFloat2<'ui, 'p, L, NumericFormat<'fmt, f32>>, NumericFormatError> {
+        Ok(self.display_format(NumericFormat::new(display_format)?))
     }
 
     /// Sets the input text flags
@@ -85,8 +97,11 @@ impl<'ui, 'p, L: AsRef<str>> InputFloat3<'ui, 'p, L> {
 }
 
 impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat3<'ui, 'p, L, F> {
-    /// Sets the display format using *a C-style printf string*
-    pub fn display_format<F2: AsRef<str>>(self, display_format: F2) -> InputFloat3<'ui, 'p, L, F2> {
+    /// Sets the validated display format.
+    pub fn display_format<'fmt>(
+        self,
+        display_format: NumericFormat<'fmt, f32>,
+    ) -> InputFloat3<'ui, 'p, L, NumericFormat<'fmt, f32>> {
         InputFloat3 {
             label: self.label,
             value: self.value,
@@ -94,6 +109,14 @@ impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat3<'ui, 'p, L, F> {
             flags: self.flags,
             ui: self.ui,
         }
+    }
+
+    /// Validates and sets a C-style display format.
+    pub fn try_display_format<'fmt>(
+        self,
+        display_format: impl Into<Cow<'fmt, str>>,
+    ) -> Result<InputFloat3<'ui, 'p, L, NumericFormat<'fmt, f32>>, NumericFormatError> {
+        Ok(self.display_format(NumericFormat::new(display_format)?))
     }
 
     /// Sets the input text flags
@@ -143,8 +166,11 @@ impl<'ui, 'p, L: AsRef<str>> InputFloat4<'ui, 'p, L> {
 }
 
 impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat4<'ui, 'p, L, F> {
-    /// Sets the display format using *a C-style printf string*
-    pub fn display_format<F2: AsRef<str>>(self, display_format: F2) -> InputFloat4<'ui, 'p, L, F2> {
+    /// Sets the validated display format.
+    pub fn display_format<'fmt>(
+        self,
+        display_format: NumericFormat<'fmt, f32>,
+    ) -> InputFloat4<'ui, 'p, L, NumericFormat<'fmt, f32>> {
         InputFloat4 {
             label: self.label,
             value: self.value,
@@ -152,6 +178,14 @@ impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat4<'ui, 'p, L, F> {
             flags: self.flags,
             ui: self.ui,
         }
+    }
+
+    /// Validates and sets a C-style display format.
+    pub fn try_display_format<'fmt>(
+        self,
+        display_format: impl Into<Cow<'fmt, str>>,
+    ) -> Result<InputFloat4<'ui, 'p, L, NumericFormat<'fmt, f32>>, NumericFormatError> {
+        Ok(self.display_format(NumericFormat::new(display_format)?))
     }
 
     /// Sets the input text flags

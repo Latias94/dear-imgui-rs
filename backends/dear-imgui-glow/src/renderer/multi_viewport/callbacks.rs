@@ -231,6 +231,8 @@ fn render_viewport(control: &RuntimeControl, viewport: *mut sys::ImGuiViewport) 
         #[cfg(test)]
         control.maybe_panic_callback_for_test();
 
+        let main_viewport = unsafe { sys::igGetMainViewport() };
+        let is_secondary = !main_viewport.is_null() && main_viewport != viewport;
         // SAFETY: Dear ImGui supplied this live viewport for the current callback.
         let viewport = unsafe { &*viewport };
         let flags = ViewportFlags::from_bits_truncate(viewport.Flags);
@@ -243,7 +245,11 @@ fn render_viewport(control: &RuntimeControl, viewport: *mut sys::ImGuiViewport) 
             gl,
             draw_data,
             !flags.contains(ViewportFlags::NO_RENDERER_CLEAR),
-        )
+        )?;
+        if is_secondary {
+            control.record_rendered_viewport(viewport.ID);
+        }
+        Ok(())
     });
 }
 
