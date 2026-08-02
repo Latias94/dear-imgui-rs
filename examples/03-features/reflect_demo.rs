@@ -92,7 +92,7 @@ struct PrimitivesDemo {
 
     /// Integer displayed in hexadecimal form to demonstrate numeric formatting.
     #[imgui(name = "Hex Counter", as_input, hex)]
-    hex_counter: i32,
+    hex_counter: u32,
 
     /// Floating-point value displayed as a percentage.
     #[imgui(name = "Percent", as_drag, percentage, speed = 0.5)]
