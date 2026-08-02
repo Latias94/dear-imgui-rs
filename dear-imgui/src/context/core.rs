@@ -14,8 +14,9 @@ use super::attachment::{
     run_pre_destroy_phase,
 };
 use super::binding::{
-    CTX_MUTEX, ContextAliveToken, ContextBinding, ContextId, ContextState, RawBoundContextGuard,
-    no_current_context, set_current_context, with_bound_context,
+    CTX_MUTEX, ContextAliveToken, ContextBinding, ContextId, ContextState, ContextThreadLease,
+    RawBoundContextGuard, bound_context_scope_active, no_current_context, set_current_context,
+    with_bound_context,
 };
 use super::snapshot_hub::SnapshotHub;
 use super::texture_registry::{ManagedTextureRegistry, SharedTextureRegistry};
@@ -67,6 +68,8 @@ pub struct Context {
     // Interior mutability and reentrancy guarding live inside ClipboardContext.
     pub(in crate::context) clipboard_ctx: Box<ClipboardContext>,
     pub(in crate::context) ui: crate::ui::Ui,
+    // Keep process-global GImGui ownership until every Context-owned Rust field is gone.
+    pub(super) _thread_lease: ContextThreadLease,
 }
 
 impl Context {
@@ -198,6 +201,10 @@ impl Context {
     fn try_create_internal(
         shared_font_atlas: Option<SharedFontAtlas>,
     ) -> crate::error::ImGuiResult<Context> {
+        if bound_context_scope_active() {
+            return Err(crate::error::ImGuiError::ContextBindingScopeActive);
+        }
+        let thread_lease = ContextThreadLease::acquire()?;
         let _guard = CTX_MUTEX.lock();
 
         if !no_current_context() {
@@ -242,6 +249,7 @@ impl Context {
         Ok(Context {
             raw,
             state,
+            _thread_lease: thread_lease,
             attachments: AttachmentRegistry::default(),
             snapshot_hub: SnapshotHub::new(id),
             texture_registry,

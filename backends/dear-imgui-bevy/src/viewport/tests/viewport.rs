@@ -539,7 +539,7 @@ fn create_callback_viewport(
                 viewport.set_pos(snapshot.pos);
                 viewport.set_size(snapshot.size);
                 viewport.set_dpi_scale(snapshot.dpi_scale);
-                viewport.set_flags(snapshot.flags);
+                viewport.set_raw_flags_unchecked(snapshot.flags.bits());
                 let platform_io = context.platform_io().as_raw();
                 (*platform_io)
                     .Platform_CreateWindow
@@ -1011,7 +1011,7 @@ fn viewport_platform_io_callbacks_capture_commands_and_bevy_system_applies_them(
         viewport.set_pos([10.0, 20.0]);
         viewport.set_size([400.0, 240.0]);
         viewport.set_dpi_scale(1.0);
-        viewport.set_flags(imgui::ViewportFlags::IS_PLATFORM_WINDOW);
+        viewport.set_raw_flags_unchecked(imgui::ViewportFlags::IS_PLATFORM_WINDOW.bits());
     }
 
     with_primary_context(&mut app, |context| {
@@ -1044,12 +1044,13 @@ fn viewport_platform_io_callbacks_capture_commands_and_bevy_system_applies_them(
 
     with_primary_context(&mut app, |context| unsafe {
         let platform_io = context.platform_io().as_raw();
-        imgui::Viewport::from_raw_mut(raw_viewport).set_flags(
-            imgui::ViewportFlags::IS_PLATFORM_WINDOW
+        imgui::Viewport::from_raw_mut(raw_viewport).set_raw_flags_unchecked(
+            (imgui::ViewportFlags::IS_PLATFORM_WINDOW
                 | imgui::ViewportFlags::NO_DECORATION
                 | imgui::ViewportFlags::NO_TASK_BAR_ICON
                 | imgui::ViewportFlags::TOP_MOST
-                | imgui::ViewportFlags::NO_INPUTS,
+                | imgui::ViewportFlags::NO_INPUTS)
+                .bits(),
         );
         (*platform_io)
             .Platform_UpdateWindow
@@ -1087,7 +1088,7 @@ fn viewport_platform_io_callbacks_capture_commands_and_bevy_system_applies_them(
     with_primary_context(&mut app, |context| unsafe {
         let platform_io = context.platform_io().as_raw();
         imgui::Viewport::from_raw_mut(raw_viewport)
-            .set_flags(imgui::ViewportFlags::IS_PLATFORM_WINDOW);
+            .set_raw_flags_unchecked(imgui::ViewportFlags::IS_PLATFORM_WINDOW.bits());
         (*platform_io)
             .Platform_UpdateWindow
             .expect("bridge should install Platform_UpdateWindow")(raw_viewport);
@@ -2476,8 +2477,9 @@ fn viewport_update_synchronizes_existing_camera_clear_policy() {
         .expect("the callback-created viewport should own a camera");
 
     with_primary_context(&mut app, |context| unsafe {
-        imgui::Viewport::from_raw_mut(raw_viewport).set_flags(
-            imgui::ViewportFlags::IS_PLATFORM_WINDOW | imgui::ViewportFlags::NO_RENDERER_CLEAR,
+        imgui::Viewport::from_raw_mut(raw_viewport).set_raw_flags_unchecked(
+            (imgui::ViewportFlags::IS_PLATFORM_WINDOW | imgui::ViewportFlags::NO_RENDERER_CLEAR)
+                .bits(),
         );
         (*context.platform_io().as_raw())
             .Platform_UpdateWindow
@@ -2497,7 +2499,7 @@ fn viewport_update_synchronizes_existing_camera_clear_policy() {
 
     with_primary_context(&mut app, |context| unsafe {
         imgui::Viewport::from_raw_mut(raw_viewport)
-            .set_flags(imgui::ViewportFlags::IS_PLATFORM_WINDOW);
+            .set_raw_flags_unchecked(imgui::ViewportFlags::IS_PLATFORM_WINDOW.bits());
         (*context.platform_io().as_raw())
             .Platform_UpdateWindow
             .expect("the Context should own Platform_UpdateWindow")(raw_viewport);

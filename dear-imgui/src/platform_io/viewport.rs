@@ -18,13 +18,6 @@ fn assert_non_negative_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
 }
 
 #[cfg(feature = "multi-viewport")]
-fn nonzero_id_raw(caller: &str, name: &str, id: Id) -> sys::ImGuiID {
-    let raw = id.raw();
-    assert!(raw != 0, "{caller} {name} must be non-zero");
-    raw
-}
-
-#[cfg(feature = "multi-viewport")]
 fn assert_dpi_scale(caller: &str, value: f32) {
     assert!(value.is_finite(), "{caller} scale must be finite");
     assert!(
@@ -165,15 +158,18 @@ impl Viewport {
         }
     }
 
-    /// Get the viewport debug name used by Dear ImGui tooling.
+    /// Return an owned copy of the viewport debug name used by Dear ImGui tooling.
+    ///
+    /// Dear ImGui may replace or rewrite its internal name buffer when a window is renamed, so a
+    /// borrowed string cannot safely outlive this call.
     #[doc(alias = "GetDebugName")]
-    pub fn debug_name(&self) -> &str {
+    pub fn debug_name(&self) -> String {
         unsafe {
             let ptr = sys::ImGuiViewport_GetDebugName(self.as_raw().cast_mut());
             if ptr.is_null() {
-                ""
+                String::new()
             } else {
-                CStr::from_ptr(ptr).to_str().unwrap_or("")
+                CStr::from_ptr(ptr).to_string_lossy().into_owned()
             }
         }
     }
@@ -324,12 +320,6 @@ impl Viewport {
         crate::ViewportFlags::from_bits_retain(self.inner().Flags)
     }
 
-    /// Set the viewport flags
-    pub fn set_flags(&mut self, flags: crate::ViewportFlags) {
-        crate::io::validate_viewport_flags("Viewport::set_flags()", flags);
-        self.inner_mut().Flags = flags.bits();
-    }
-
     /// Get the raw viewport flag bits.
     pub fn raw_flags(&self) -> sys::ImGuiViewportFlags {
         self.inner().Flags
@@ -363,14 +353,6 @@ impl Viewport {
     pub fn parent_viewport_id(&self) -> Option<Id> {
         let raw = self.inner().ParentViewportId;
         (raw != 0).then(|| Id::from(raw))
-    }
-
-    /// Set the parent viewport ID
-    #[cfg(feature = "multi-viewport")]
-    pub fn set_parent_viewport_id(&mut self, id: Option<Id>) {
-        self.inner_mut().ParentViewportId = id
-            .map(|id| nonzero_id_raw("Viewport::set_parent_viewport_id()", "id", id))
-            .unwrap_or(0);
     }
 
     /// Get the draw data pointer
@@ -547,53 +529,32 @@ mod tests {
 
     #[cfg(feature = "multi-viewport")]
     #[test]
-    fn parent_viewport_id_uses_typed_optional_id() {
+    fn parent_viewport_id_is_a_read_only_typed_view() {
         let raw = new_viewport();
         unsafe {
             let viewport = Viewport::from_raw_mut(raw);
             assert_eq!(viewport.parent_viewport_id(), None);
 
             let parent = crate::Id::from(100u32);
-            viewport.set_parent_viewport_id(Some(parent));
+            (*raw).ParentViewportId = parent.raw();
             assert_eq!(viewport.parent_viewport_id(), Some(parent));
-            assert_eq!((*raw).ParentViewportId, parent.raw());
-
-            viewport.set_parent_viewport_id(None);
-            assert_eq!(viewport.parent_viewport_id(), None);
-            assert_eq!((*raw).ParentViewportId, 0);
-
-            assert!(
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    viewport.set_parent_viewport_id(Some(crate::Id::default()));
-                }))
-                .is_err()
-            );
-            assert_eq!(viewport.parent_viewport_id(), None);
 
             sys::ImGuiViewport_destroy(raw);
         }
     }
 
     #[test]
-    fn viewport_flags_are_typed_and_checked_before_storage() {
+    fn viewport_flags_are_read_only_without_an_explicit_unsafe_write() {
         let raw = new_viewport();
         unsafe {
             let viewport = Viewport::from_raw_mut(raw);
 
             let flags = crate::ViewportFlags::OWNED_BY_APP | crate::ViewportFlags::NO_DECORATION;
-            viewport.set_flags(flags);
+            viewport.set_raw_flags_unchecked(flags.bits());
             assert_eq!(viewport.flags(), flags);
             assert_eq!(viewport.raw_flags(), flags.bits());
 
             let unsupported = crate::ViewportFlags::from_bits_retain(1 << 14);
-            assert!(
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    viewport.set_flags(unsupported);
-                }))
-                .is_err()
-            );
-            assert_eq!(viewport.flags(), flags);
-
             viewport.set_raw_flags_unchecked(unsupported.bits());
             assert_eq!(viewport.raw_flags(), unsupported.bits());
 
@@ -661,6 +622,7 @@ mod tests {
         let _guard = crate::test_support::imgui_context_guard();
         let mut ctx = Context::create();
         let viewport = ctx.main_viewport();
-        assert!(!viewport.debug_name().is_empty());
+        let debug_name: String = viewport.debug_name();
+        assert!(!debug_name.is_empty());
     }
 }

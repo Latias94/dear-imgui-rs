@@ -17,6 +17,18 @@ struct RendererMarker;
 struct ExtensionMarker;
 struct PanickingExtensionMarker;
 struct PanickingRendererExtensionMarker;
+struct PanickingDropPlatformMarker;
+struct PanickingDropRendererMarker;
+
+struct PanickingDropAttachment;
+
+impl ContextAttachment for PanickingDropAttachment {}
+
+impl Drop for PanickingDropAttachment {
+    fn drop(&mut self) {
+        panic!("attachment destructor panic");
+    }
+}
 
 #[cfg(feature = "multi-viewport")]
 struct TestViewportPlatformMarker;
@@ -1105,6 +1117,50 @@ fn nested_suspended_context_activation_restores_each_owner() {
 }
 
 #[test]
+fn suspended_context_rejects_owner_swaps_without_corrupting_type_state() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut active = Context::create();
+    let original_active_id = active.id();
+    let original_active_raw = active.as_raw();
+    let mut suspended = super::SuspendedContext::create();
+    let original_suspended_id = suspended.id();
+    let original_suspended_raw = suspended.0.as_raw();
+
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = suspended.try_with_active::<(), ()>(|context| {
+            std::mem::swap(context, &mut active);
+            Ok(())
+        });
+    }));
+    assert!(panic.is_err());
+
+    assert_eq!(active.id(), original_suspended_id);
+    assert_eq!(active.as_raw(), original_suspended_raw);
+    assert_eq!(suspended.id(), original_active_id);
+    assert_eq!(suspended.0.as_raw(), original_active_raw);
+    assert_eq!(
+        unsafe { crate::sys::igGetCurrentContext() },
+        original_suspended_raw
+    );
+    assert_eq!(
+        active.frame_lifecycle_state(),
+        super::FrameLifecycleState::Idle
+    );
+
+    let swapped_out = active.suspend();
+    let restored = suspended
+        .activate()
+        .expect("the original active Context must now be safely suspended");
+    assert_eq!(restored.id(), original_active_id);
+    assert_eq!(
+        unsafe { crate::sys::igGetCurrentContext() },
+        original_active_raw
+    );
+    drop(restored);
+    drop(swapped_out);
+}
+
+#[test]
 fn suspended_context_can_be_entered_repeatedly() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut suspended = super::SuspendedContext::create();
@@ -1182,12 +1238,44 @@ fn binding_does_not_restore_a_previous_context_destroyed_inside_the_scope() {
     let suspended = super::SuspendedContext::create();
     let binding = suspended.0.binding();
 
-    binding.with_bound_context(|| drop(active));
+    let error = binding.with_bound_context(|| {
+        drop(active);
+        Context::try_create().expect_err("binding scopes must reject replacement Contexts")
+    });
+    assert!(matches!(
+        error,
+        crate::error::ImGuiError::ContextBindingScopeActive
+    ));
 
     assert!(unsafe { crate::sys::igGetCurrentContext() }.is_null());
     let replacement = Context::create();
     drop(replacement);
     drop(suspended);
+}
+
+#[test]
+fn live_contexts_confine_process_global_imgui_state_to_one_thread() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let suspended = super::SuspendedContext::create();
+
+    let error = std::thread::spawn(|| {
+        Context::try_create().expect_err("another thread must not share process-global GImGui")
+    })
+    .join()
+    .expect("thread-conflict probe must not panic");
+    assert!(matches!(
+        error,
+        crate::error::ImGuiError::ContextThreadConflict
+    ));
+
+    drop(suspended);
+    std::thread::spawn(|| {
+        let context = Context::try_create()
+            .expect("ownership may migrate after the last Context is destroyed");
+        drop(context);
+    })
+    .join()
+    .expect("post-release Context creation must not panic");
 }
 
 #[test]
@@ -1294,6 +1382,62 @@ fn platform_release_is_generation_bound_and_rejects_active_renderer_dependencies
     assert!(!platform.is_attached());
     assert!(!platform_lease.is_attached());
     assert!(log.borrow().is_empty());
+}
+
+#[test]
+fn renderer_detach_commits_role_state_before_dropping_user_attachment() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut ctx = Context::create();
+    let mut platform_lease = ctx
+        .register_attachment::<PlatformMarker>(
+            ContextAttachmentRole::Platform,
+            Rc::new(RecordingAttachment::new(Rc::new(RefCell::new(Vec::new())))),
+        )
+        .unwrap();
+    let renderer = Rc::new(PanickingDropAttachment);
+    let mut renderer_lease = ctx
+        .register_attachment::<PanickingDropRendererMarker>(
+            ContextAttachmentRole::Renderer,
+            renderer.clone(),
+        )
+        .unwrap();
+    drop(renderer);
+
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = renderer_lease.detach();
+    }));
+    assert!(panic.is_err());
+    assert!(!renderer_lease.is_attached());
+    assert_eq!(platform_lease.detach(), Ok(true));
+}
+
+#[test]
+fn platform_release_commits_before_dropping_user_attachment() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut ctx = Context::create();
+    let platform = Rc::new(PanickingDropAttachment);
+    let platform_lease = ctx
+        .register_attachment::<PanickingDropPlatformMarker>(
+            ContextAttachmentRole::Platform,
+            platform.clone(),
+        )
+        .unwrap();
+    let handle = platform_lease.handle();
+    drop(platform);
+
+    let permit = ctx
+        .prepare_platform_attachment_release(&handle)
+        .expect("platform release should be available without a renderer");
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| permit.commit()));
+    assert!(panic.is_err());
+    assert!(!handle.is_attached());
+    assert!(matches!(
+        ctx.register_attachment::<PlatformMarker>(
+            ContextAttachmentRole::Platform,
+            Rc::new(RecordingAttachment::new(Rc::new(RefCell::new(Vec::new())))),
+        ),
+        Ok(_)
+    ));
 }
 
 #[test]

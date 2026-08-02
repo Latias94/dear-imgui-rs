@@ -8,8 +8,8 @@ use crate::sys;
 use super::Context;
 use super::attachment::AttachmentRegistry;
 use super::binding::{
-    CTX_MUTEX, ContextBinding, ContextId, ContextState, clear_current_context, no_current_context,
-    set_current_context,
+    CTX_MUTEX, ContextBinding, ContextId, ContextState, ContextThreadLease,
+    bound_context_scope_active, clear_current_context, no_current_context, set_current_context,
 };
 use super::frame::FrameLifecycleState;
 use super::snapshot_hub::SnapshotHub;
@@ -58,32 +58,51 @@ impl SuspendedContext {
         &mut self,
         f: impl FnOnce(&mut Context) -> Result<T, E>,
     ) -> Result<T, E> {
+        let expected_id = self.0.id();
+        let expected_raw = self.0.raw;
         let binding = self.0.binding();
-        binding.with_bound_context(|| {
-            let result = panic::catch_unwind(AssertUnwindSafe(|| f(&mut self.0)));
+        binding
+            .try_with_bound_context_guarded(|bound| {
+                let result = panic::catch_unwind(AssertUnwindSafe(|| f(&mut self.0)));
 
-            match result {
-                Ok(Ok(value)) => {
-                    if self.0.end_frame_for_teardown_unlocked() {
-                        panic!(
-                            "SuspendedContext::try_with_active(): closure returned Ok while a Dear ImGui frame was still open"
-                        );
+                if self.0.id() != expected_id || self.0.raw != expected_raw {
+                    if !bound.previous_context().is_null()
+                        && self.0.raw == bound.previous_context()
+                        && bound.previous_context() != expected_raw
+                    {
+                        bound.restore_bound_target_or_clear();
                     }
-                    Ok(value)
+                    if let Err(payload) = result {
+                        panic::resume_unwind(payload);
+                    }
+                    panic!(
+                        "SuspendedContext::try_with_active(): closure moved or replaced the Context owner"
+                    );
                 }
-                Ok(Err(error)) => {
-                    self.0.end_frame_for_teardown_unlocked();
-                    Err(error)
-                }
-                Err(payload) => {
-                    // Cleanup must not replace the closure's panic payload.
-                    let _ = panic::catch_unwind(AssertUnwindSafe(|| {
+
+                match result {
+                    Ok(Ok(value)) => {
+                        if self.0.end_frame_for_teardown_unlocked() {
+                            panic!(
+                                "SuspendedContext::try_with_active(): closure returned Ok while a Dear ImGui frame was still open"
+                            );
+                        }
+                        Ok(value)
+                    }
+                    Ok(Err(error)) => {
                         self.0.end_frame_for_teardown_unlocked();
-                    }));
-                    panic::resume_unwind(payload)
+                        Err(error)
+                    }
+                    Err(payload) => {
+                        // Cleanup must not replace the closure's panic payload.
+                        let _ = panic::catch_unwind(AssertUnwindSafe(|| {
+                            self.0.end_frame_for_teardown_unlocked();
+                        }));
+                        panic::resume_unwind(payload)
+                    }
                 }
-            }
-        })
+            })
+            .unwrap_or_else(|error| panic!("SuspendedContext::try_with_active(): {error}"))
     }
 
     /// Tries to create a new suspended Dear ImGui context
@@ -124,6 +143,10 @@ impl SuspendedContext {
     fn try_create_internal(
         shared_font_atlas: Option<SharedFontAtlas>,
     ) -> crate::error::ImGuiResult<Self> {
+        if bound_context_scope_active() {
+            return Err(crate::error::ImGuiError::ContextBindingScopeActive);
+        }
+        let thread_lease = ContextThreadLease::acquire()?;
         let _guard = CTX_MUTEX.lock();
         let previous_context = unsafe { sys::igGetCurrentContext() };
 
@@ -162,6 +185,7 @@ impl SuspendedContext {
         let ctx = Context {
             raw,
             state,
+            _thread_lease: thread_lease,
             attachments: AttachmentRegistry::default(),
             snapshot_hub: SnapshotHub::new(id),
             texture_registry,

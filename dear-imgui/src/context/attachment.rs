@@ -445,10 +445,11 @@ impl AttachmentControl {
             return Err(ContextAttachmentDetachError::RendererActive);
         }
         self.state.set(AttachmentState::Detached);
-        self.attachment.borrow_mut().take();
         if self.role == ContextAttachmentRole::Renderer {
             self.roles.renderer_active.set(false);
         }
+        let attachment = self.attachment.borrow_mut().take();
+        drop(attachment);
         Ok(true)
     }
 
@@ -464,12 +465,12 @@ impl AttachmentControl {
         }
     }
 
-    fn commit_platform_release(&self) {
+    fn commit_platform_release(&self) -> Option<Rc<dyn ContextAttachment>> {
         debug_assert_eq!(self.role, ContextAttachmentRole::Platform);
         debug_assert_eq!(self.state.get(), AttachmentState::ReleasePrepared);
         debug_assert!(!self.roles.renderer_active.get());
         self.state.set(AttachmentState::Detached);
-        self.attachment.borrow_mut().take();
+        self.attachment.borrow_mut().take()
     }
 }
 
@@ -623,11 +624,14 @@ impl<'a> ContextPlatformAttachmentRelease<'a> {
 
     /// Commits detachment of the exact platform attachment generation.
     ///
-    /// This operation is infallible because the permit exclusively borrows the Context and keeps
-    /// the attachment control reserved against ordinary lease detachment.
+    /// The state transition is infallible because the permit exclusively borrows the Context and
+    /// keeps the attachment control reserved against ordinary lease detachment. If the final
+    /// user-owned attachment destructor panics, the committed detached state is retained while
+    /// that panic resumes.
     pub fn commit(mut self) {
-        self.control.commit_platform_release();
+        let attachment = self.control.commit_platform_release();
         self.committed = true;
+        drop(attachment);
     }
 }
 

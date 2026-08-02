@@ -284,7 +284,7 @@ impl PlatformIo {
             )
         };
         if cleared {
-            self.clear_current_context_cb(&trampolines::RENDERER_SET_WINDOW_SIZE_CB);
+            self.clear_platform_io_cb(&trampolines::RENDERER_SET_WINDOW_SIZE_CB);
         }
         cleared
     }

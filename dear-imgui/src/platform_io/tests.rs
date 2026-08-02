@@ -24,10 +24,10 @@ fn platform_io_from_raw_matches_mut_wrapper() {
     let mut raw: sys::ImGuiPlatformIO = new_platform_io();
     let raw_ptr = (&mut raw) as *mut sys::ImGuiPlatformIO;
 
-    let shared = unsafe { PlatformIo::from_raw(raw_ptr.cast_const()) };
-    let mutable = unsafe { PlatformIo::from_raw_mut(raw_ptr) };
+    let shared_ptr = unsafe { PlatformIo::from_raw(raw_ptr.cast_const()) }.as_raw();
+    let mutable_ptr = unsafe { PlatformIo::from_raw_mut(raw_ptr) }.as_raw();
 
-    assert_eq!(shared.as_raw(), mutable.as_raw());
+    assert_eq!(shared_ptr, mutable_ptr);
 }
 
 #[test]
@@ -322,6 +322,58 @@ fn conditional_platform_aggregate_clear_preserves_same_thunk_replacements() {
         unsafe { sys::ImGuiPlatformIO_AggregateCallbackStorageCount() },
         storage_count_before
     );
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn conditional_aggregate_setter_clear_targets_its_receiver_context() {
+    let _guard = crate::test_support::imgui_context_guard();
+    unsafe extern "C" fn platform_set(
+        _viewport: *mut sys::ImGuiViewport,
+        _value: *const sys::ImVec2,
+    ) {
+    }
+    unsafe extern "C" fn renderer_set(
+        _viewport: *mut sys::ImGuiViewport,
+        _value: *const sys::ImVec2,
+    ) {
+    }
+
+    let storage_count_before = unsafe { sys::ImGuiPlatformIO_AggregateCallbackStorageCount() };
+    let mut first = crate::Context::create();
+    let first_platform_io = {
+        let platform_io = first.platform_io_mut();
+        unsafe {
+            platform_io.set_platform_set_window_pos_raw(Some(platform_set));
+            platform_io.set_platform_set_window_size_raw(Some(platform_set));
+            platform_io.set_renderer_set_window_size_raw(Some(renderer_set));
+        }
+        platform_io.as_raw_mut()
+    };
+    let first = first.suspend();
+    let second = crate::Context::create();
+    let second_platform_io = second.platform_io().as_raw();
+
+    let first_platform_io = unsafe { PlatformIo::from_raw_mut(first_platform_io) };
+    unsafe {
+        assert!(first_platform_io.clear_platform_set_window_pos_if_pointer_callback(platform_set));
+        assert!(first_platform_io.clear_platform_set_window_size_if_pointer_callback(platform_set));
+        assert!(first_platform_io.clear_renderer_set_window_size_if_pointer_callback(renderer_set));
+    }
+
+    assert!(unsafe { (*first_platform_io.as_raw()).Platform_SetWindowPos }.is_none());
+    assert!(unsafe { (*first_platform_io.as_raw()).Platform_SetWindowSize }.is_none());
+    assert!(unsafe { (*first_platform_io.as_raw()).Renderer_SetWindowSize }.is_none());
+    assert!(unsafe { (*second_platform_io).Platform_SetWindowPos }.is_none());
+    assert!(unsafe { (*second_platform_io).Platform_SetWindowSize }.is_none());
+    assert!(unsafe { (*second_platform_io).Renderer_SetWindowSize }.is_none());
+    assert_eq!(
+        unsafe { sys::ImGuiPlatformIO_AggregateCallbackStorageCount() },
+        storage_count_before
+    );
+
+    drop(second);
+    drop(first);
 }
 
 #[cfg(feature = "multi-viewport")]
