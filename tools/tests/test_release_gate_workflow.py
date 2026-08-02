@@ -246,6 +246,13 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
         self.assertIn("run-id: ${{ inputs.gate_run_id }}", release)
         self.assertIn("release_evidence.py verify", release)
         self.assertIn("pattern: release-cell-*-${{ inputs.candidate_sha }}", release)
+        self.assertIn("--output recomputed-gate-result.json", release)
+        self.assertNotIn(
+            "--output target/release-cells/recomputed-gate-result.json", release
+        )
+        self.assertIn(
+            "--gate-result target/release-cells/recomputed-gate-result.json", release
+        )
         self.assertIn("files: target/release-cells/prebuilt-*/packages/*.tar.gz", release)
         self.assertIn("prerelease: ${{ contains(steps.tag.outputs.version, '-') }}", release)
         self.assertIn(

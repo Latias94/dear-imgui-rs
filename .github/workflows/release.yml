@@ -63,7 +63,7 @@ jobs:
           --repo-root "${{ github.workspace }}"
           --candidate-sha "${{ inputs.candidate_sha }}"
           --evidence-root target/release-cells
-          --output target/release-cells/recomputed-gate-result.json
+          --output recomputed-gate-result.json
 
       - name: Verify recomputed same-SHA Go result
         run: >-
