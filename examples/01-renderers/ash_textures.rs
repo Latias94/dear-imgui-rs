@@ -12,10 +12,16 @@ use dear_imgui_ash::DynamicRendering;
 use dear_imgui_ash::{
     AshRenderer, AshRendererConfig, Options as AshOptions, TextureRetirementBatch,
 };
+use dear_imgui_examples::animated_texture::animated_rgba_pixels;
 use dear_imgui_rs::*;
 use dear_imgui_winit::WinitPlatform;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
-use std::{ffi::CString, path::PathBuf, sync::Arc, time::Instant};
+use std::{
+    ffi::CString,
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tracing::{error, info};
 use winit::{
     application::ApplicationHandler,
@@ -372,12 +378,12 @@ struct ImguiState {
     platform: WinitPlatform,
     renderer: AshRenderer,
     last_frame: Instant,
+    animation_started: Instant,
     clear_color: [f32; 4],
     // Texture demo state (managed by ImGui modern texture system)
     img_tex: dear_imgui_rs::ManagedTextureId,
     photo_tex: Option<(dear_imgui_rs::ManagedTextureId, (u32, u32))>,
     tex_size: (u32, u32),
-    frame: u32,
 }
 
 struct AppWindow {
@@ -464,16 +470,7 @@ impl AppWindow {
         let tex_h: u32 = 128;
         let mut img_tex = dear_imgui_rs::texture::OwnedTextureData::new();
         img_tex.create(dear_imgui_rs::texture::TextureFormat::RGBA32, tex_w, tex_h);
-        let mut pixels = vec![0u8; (tex_w * tex_h * 4) as usize];
-        for y in 0..tex_h {
-            for x in 0..tex_w {
-                let i = ((y * tex_w + x) * 4) as usize;
-                pixels[i + 0] = (x as f32 / tex_w as f32 * 255.0) as u8;
-                pixels[i + 1] = (y as f32 / tex_h as f32 * 255.0) as u8;
-                pixels[i + 2] = 128;
-                pixels[i + 3] = 255;
-            }
-        }
+        let pixels = animated_rgba_pixels(tex_w, tex_h, Duration::ZERO);
         img_tex.set_data(&pixels);
 
         let photo_tex = Self::maybe_load_photo_texture();
@@ -487,6 +484,7 @@ impl AppWindow {
         // Frame sync objects
         let frames = create_frame_syncs(&ctx.device, ctx.command_pool, FRAMES_IN_FLIGHT)?;
         let images_in_flight = vec![vk::Fence::null(); swapchain.images.len()];
+        let now = Instant::now();
 
         Ok(Self {
             window,
@@ -494,12 +492,12 @@ impl AppWindow {
                 context,
                 platform,
                 renderer,
-                last_frame: Instant::now(),
+                last_frame: now,
+                animation_started: now,
                 clear_color: [0.1, 0.2, 0.3, 1.0],
                 img_tex,
                 photo_tex,
                 tex_size: (tex_w, tex_h),
-                frame: 0,
             },
             vk: VulkanState {
                 ctx,
@@ -579,24 +577,11 @@ impl AppWindow {
 
     fn update_texture(&mut self) {
         let (w, h) = self.imgui.tex_size;
-        let mut pixels = vec![0u8; (w * h * 4) as usize];
-        let t = self.imgui.frame as f32 * 0.08;
-        for y in 0..h {
-            for x in 0..w {
-                let i = ((y * w + x) * 4) as usize;
-                let fx = x as f32 / w as f32;
-                let fy = y as f32 / h as f32;
-                pixels[i + 0] = ((fx * 255.0 + t.sin() * 128.0).clamp(0.0, 255.0)) as u8;
-                pixels[i + 1] = ((fy * 255.0 + (t * 1.7).cos() * 128.0).clamp(0.0, 255.0)) as u8;
-                pixels[i + 2] = (((fx + fy + t * 0.1).sin().abs()) * 255.0) as u8;
-                pixels[i + 3] = 255;
-            }
-        }
+        let pixels = animated_rgba_pixels(w, h, self.imgui.animation_started.elapsed());
         self.imgui
             .context
             .with_texture_mut(self.imgui.img_tex, |mut texture| texture.set_data(&pixels))
             .expect("animated texture should remain active");
-        self.imgui.frame = self.imgui.frame.wrapping_add(1);
     }
 
     fn render(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -627,7 +612,7 @@ impl AppWindow {
         ui.window("Ash Texture Demo (ImGui-managed)")
             .size([560.0, 520.0], Condition::FirstUseEver)
             .build(|| {
-                ui.text("This texture is updated every frame (CPU → ImGui → backend → GPU)");
+                ui.text("Wall-clock animation; pixels upload every rendered frame");
                 ui.separator();
 
                 ui.color_edit4("Clear color", &mut self.imgui.clear_color);

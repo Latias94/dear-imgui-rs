@@ -5,8 +5,14 @@
 //! application-owned texture metadata.
 
 use ::image::ImageReader;
-use std::{num::NonZeroU32, path::PathBuf, sync::Arc, time::Instant};
+use std::{
+    num::NonZeroU32,
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
+use dear_imgui_examples::animated_texture::animated_rgba_pixels;
 use dear_imgui_glow::GlowRenderer;
 use dear_imgui_rs::*;
 use dear_imgui_winit::WinitPlatform;
@@ -34,6 +40,7 @@ struct TextureDemo {
     user_image_texture: Option<TextureId>,
     user_image_size: Option<(u32, u32)>,
     frame_count: u32,
+    animation_started: Instant,
 }
 
 impl TextureDemo {
@@ -45,6 +52,7 @@ impl TextureDemo {
             user_image_texture: None,
             user_image_size: None,
             frame_count: 0,
+            animation_started: Instant::now(),
         }
     }
 
@@ -185,16 +193,7 @@ impl TextureDemo {
         const WIDTH: u32 = 64;
         const HEIGHT: u32 = 64;
 
-        let mut data = Vec::with_capacity((WIDTH * HEIGHT * 4) as usize);
-        for y in 0..HEIGHT {
-            for x in 0..WIDTH {
-                // Initial pattern
-                let r = ((x + y) % 256) as u8;
-                let g = (x % 256) as u8;
-                let b = (y % 256) as u8;
-                data.extend_from_slice(&[r, g, b, 255]);
-            }
-        }
+        let data = animated_rgba_pixels(WIDTH, HEIGHT, Duration::ZERO);
 
         renderer
             .register_texture(WIDTH, HEIGHT, TextureFormat::RGBA32, &data)
@@ -209,24 +208,7 @@ impl TextureDemo {
             const WIDTH: u32 = 64;
             const HEIGHT: u32 = 64;
 
-            let mut data = Vec::with_capacity((WIDTH * HEIGHT * 4) as usize);
-            let time = self.frame_count as f32 * 0.1;
-
-            for y in 0..HEIGHT {
-                for x in 0..WIDTH {
-                    let fx = x as f32 / WIDTH as f32;
-                    let fy = y as f32 / HEIGHT as f32;
-
-                    // Create animated pattern
-                    let r = ((fx * 255.0 + time.sin() * 128.0).max(0.0).min(255.0)) as u8;
-                    let g = ((fy * 255.0 + (time * 1.5).cos() * 128.0)
-                        .max(0.0)
-                        .min(255.0)) as u8;
-                    let b = (((fx + fy) * 255.0 + time * 50.0).sin().abs() * 255.0) as u8;
-
-                    data.extend_from_slice(&[r, g, b, 255]);
-                }
-            }
+            let data = animated_rgba_pixels(WIDTH, HEIGHT, self.animation_started.elapsed());
 
             renderer.update_texture(texture_id, WIDTH, HEIGHT, &data)?;
         }
@@ -263,7 +245,7 @@ impl TextureDemo {
                 ui.separator();
 
                 if let Some(texture_id) = self.animated_texture {
-                    ui.text("Animated Texture (updates each frame):");
+                    ui.text("Animated Texture (wall-clock motion, uploaded each frame):");
                     Image::new(ui, texture_id, [128.0, 128.0]).build();
 
                     ui.text(&format!("Frame: {}", self.frame_count));

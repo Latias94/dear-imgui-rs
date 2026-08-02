@@ -27,6 +27,11 @@ impl TestDrawList {
         }
     }
 
+    fn borrowed_draw_list(&self) -> DrawListMut<'static> {
+        DrawListMut::borrow_draw_list(self.raw);
+        self.draw_list()
+    }
+
     fn path_size(&self) -> i32 {
         unsafe { (*self.raw)._Path.Size }
     }
@@ -54,6 +59,25 @@ fn assert_panics_without_buffer_change(
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&draw_list)));
     assert!(result.is_err());
     assert_eq!(draw_list_counts(fixture.raw), before);
+}
+
+#[test]
+#[should_panic(
+    expected = "A DrawListMut is already in use for this draw list; reuse the existing wrapper or drop it before acquiring another"
+)]
+fn draw_list_exclusive_use_guard_rejects_duplicate_wrapper() {
+    let fixture = TestDrawList::new();
+    let _first = fixture.borrowed_draw_list();
+    let _duplicate = fixture.borrowed_draw_list();
+}
+
+#[test]
+fn draw_list_exclusive_use_guard_allows_reacquisition_after_drop() {
+    let fixture = TestDrawList::new();
+    let first = fixture.borrowed_draw_list();
+    drop(first);
+    let reacquired = fixture.borrowed_draw_list();
+    drop(reacquired);
 }
 
 #[test]

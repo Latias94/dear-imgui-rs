@@ -29,7 +29,7 @@ use dear_imgui_ash::{
 use dear_imgui_examples::sdl3_callbacks::{
     Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
 };
-use dear_imgui_rs::{Condition, ConfigFlags, Context, RawDrawCallback, render::RenderedFrame};
+use dear_imgui_rs::{Condition, ConfigFlags, Context, render::RenderedFrame};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
 use sdl3::video::{SwapInterval, WindowPos};
 use sdl3_main::{AppResult, AppResultWithState, MainThreadData, app_impl};
@@ -1058,8 +1058,6 @@ struct ImguiState {
     frame: u32,
     show_demo: bool,
     external: Option<ExternalTexture>,
-    sampler_linear_callback: RawDrawCallback,
-    sampler_nearest_callback: RawDrawCallback,
 }
 
 struct VulkanState {
@@ -1234,14 +1232,6 @@ impl App {
             )?
         };
         renderer.set_viewport_clear_color([0.1, 0.12, 0.15, 1.0]);
-        let sampler_linear_callback = context
-            .platform_io()
-            .draw_callback_set_sampler_linear_raw()
-            .ok_or("Ash did not publish its linear sampler callback")?;
-        let sampler_nearest_callback = context
-            .platform_io()
-            .draw_callback_set_sampler_nearest_raw()
-            .ok_or("Ash did not publish its nearest sampler callback")?;
         let renderer = if ENABLE_VIEWPORTS {
             // SAFETY: the application serializes all host access to ctx.queue and ctx.device while
             // this runtime can submit, present, rebuild swapchains, or wait for device idle.
@@ -1289,8 +1279,6 @@ impl App {
                 frame: 0,
                 show_demo: true,
                 external: None,
-                sampler_linear_callback,
-                sampler_nearest_callback,
             },
             vk: VulkanState {
                 ctx,
@@ -1447,8 +1435,6 @@ impl App {
 
         ui.dockspace_over_main_viewport();
 
-        let sampler_linear_callback = self.imgui.sampler_linear_callback;
-        let sampler_nearest_callback = self.imgui.sampler_nearest_callback;
         ui.window("SDL3 + Ash (multi-viewport)")
             .size([460.0, 280.0], Condition::FirstUseEver)
             .build(|| {
@@ -1468,20 +1454,14 @@ impl App {
                     ui.checkbox("Use linear sampler", &mut use_linear);
                     external.use_linear_sampler = use_linear;
 
-                    let selected_callback = if use_linear {
-                        sampler_linear_callback
-                    } else {
-                        sampler_nearest_callback
-                    };
                     let draw_list = ui.get_window_draw_list();
-                    unsafe {
-                        draw_list.add_callback(selected_callback, std::ptr::null_mut(), 0);
+                    if use_linear {
+                        draw_list.set_sampler_linear();
+                    } else {
+                        draw_list.set_sampler_nearest();
                     }
                     ui.image(external.tex_id, [256.0, 256.0]);
-                    let draw_list = ui.get_window_draw_list();
-                    unsafe {
-                        draw_list.add_callback(sampler_linear_callback, std::ptr::null_mut(), 0);
-                    }
+                    draw_list.set_sampler_linear();
                 } else {
                     ui.separator();
                     ui.text("External texture not available.");

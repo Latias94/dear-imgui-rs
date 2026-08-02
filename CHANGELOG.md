@@ -98,6 +98,8 @@ app.add_systems(ImguiPrimaryContextPass, draw_ui);
 
 ### Fixed
 
+- SDL3 Glow and Ash examples now reuse one draw-list lease around sampler changes, avoiding a duplicate `DrawListMut` panic; the SDL3/Glow runtime smoke also exercises this normal user-facing path.
+- Renderer texture demos now use one wall-clock animation across Glow, WGPU, and Ash instead of changing speed with present mode and frame rate.
 - Preserved Rust-managed texture create, update, and destroy requests across detached or abandoned render work under Dear ImGui v1.92.9 instead of allowing the native queue to complete them before renderer feedback arrives.
 - Fixed dynamic font-size atlas replacement, stale managed texture feedback, SDL3 callback lifetime, the Windows MSVC aggregate callback ABI, and close-time viewport teardown. This resolves [#49](https://github.com/Latias94/dear-imgui-rs/issues/49), reported by [@TheDaChicken](https://github.com/TheDaChicken).
 - Kept SDL3 applications rendering during native Windows move/resize loops; the SDLGPU multi-viewport example now remains responsive while dragging and shuts down only after GPU work is idle. [PR #53](https://github.com/Latias94/dear-imgui-rs/pull/53)

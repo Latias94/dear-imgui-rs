@@ -37,12 +37,12 @@ use dear_imgui_glow::{
     GlTexture, GlowRenderer, SimpleTextureMap, TextureMap, create_texture_from_rgba,
     multi_viewport::GlowViewportRuntime,
 };
-#[cfg(feature = "test-engine")]
-use dear_imgui_rs::Id;
 use dear_imgui_rs::{
-    Condition, ConfigFlags, Context, RawDrawCallback, TextureId,
+    Condition, ConfigFlags, Context, TextureId,
     render::{ReconciledFrame, RenderedFrame},
 };
+#[cfg(feature = "test-engine")]
+use dear_imgui_rs::{Id, RawDrawCallback};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, Sdl3PlatformBackend};
 #[cfg(feature = "test-engine")]
 use dear_imgui_test_engine::{
@@ -793,7 +793,9 @@ struct MainData {
     external_texture: ExternalTexture,
     #[cfg(feature = "test-engine")]
     reset_render_state_callback: RawDrawCallback,
+    #[cfg(feature = "test-engine")]
     sampler_linear_callback: RawDrawCallback,
+    #[cfg(feature = "test-engine")]
     sampler_nearest_callback: RawDrawCallback,
     _video: sdl3::VideoSubsystem,
     _sdl: sdl3::Sdl,
@@ -1204,10 +1206,12 @@ impl MainData {
             .platform_io()
             .draw_callback_reset_render_state_raw()
             .ok_or("Glow did not publish its reset-render-state callback")?;
+        #[cfg(feature = "test-engine")]
         let sampler_linear_callback = imgui
             .platform_io()
             .draw_callback_set_sampler_linear_raw()
             .ok_or("Glow did not publish its linear sampler callback")?;
+        #[cfg(feature = "test-engine")]
         let sampler_nearest_callback = imgui
             .platform_io()
             .draw_callback_set_sampler_nearest_raw()
@@ -1273,7 +1277,9 @@ impl MainData {
             external_texture,
             #[cfg(feature = "test-engine")]
             reset_render_state_callback,
+            #[cfg(feature = "test-engine")]
             sampler_linear_callback,
+            #[cfg(feature = "test-engine")]
             sampler_nearest_callback,
             _video: video,
             _sdl: sdl,
@@ -1314,12 +1320,12 @@ impl MainData {
         let external_texture_id = self.external_texture.id;
         #[cfg(feature = "test-engine")]
         let reset_render_state_callback = self.reset_render_state_callback;
+        #[cfg(feature = "test-engine")]
         let sampler_linear_callback = self.sampler_linear_callback;
+        #[cfg(feature = "test-engine")]
         let sampler_nearest_callback = self.sampler_nearest_callback;
         #[cfg(feature = "test-engine")]
         let run_contract_probe = self.test_engine.is_some();
-        #[cfg(not(feature = "test-engine"))]
-        let run_contract_probe = false;
         ui.window("Main")
             .size([420.0, 260.0], Condition::FirstUseEver)
             .build(|| {
@@ -1332,17 +1338,10 @@ impl MainData {
                         .flags(dear_imgui_rs::InputScalarFlags::READ_ONLY)
                         .build(&mut viewport_count);
                 }
-                if !run_contract_probe {
-                    let draw_list = ui.get_window_draw_list();
-                    unsafe {
-                        draw_list.add_callback(sampler_nearest_callback, std::ptr::null_mut(), 0);
-                    }
-                    ui.image(external_texture_id, [64.0, 64.0]);
-                    let draw_list = ui.get_window_draw_list();
-                    unsafe {
-                        draw_list.add_callback(sampler_linear_callback, std::ptr::null_mut(), 0);
-                    }
-                }
+                let draw_list = ui.get_window_draw_list();
+                draw_list.set_sampler_nearest();
+                ui.image(external_texture_id, [64.0, 64.0]);
+                draw_list.set_sampler_linear();
             });
 
         #[cfg(feature = "test-engine")]
