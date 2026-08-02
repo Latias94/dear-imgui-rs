@@ -1,0 +1,5 @@
+# Checked-in Ash SPIR-V embeds and hashes the exact GLSL source bytes.
+backends/dear-imgui-ash/src/shaders/*.vert text eol=lf
+backends/dear-imgui-ash/src/shaders/*.frag text eol=lf
+backends/dear-imgui-ash/src/shaders/manifest.json text eol=lf
+backends/dear-imgui-ash/src/shaders/*.spv binary

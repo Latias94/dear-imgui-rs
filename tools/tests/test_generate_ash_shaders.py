@@ -17,6 +17,20 @@ import generate_ash_shaders  # noqa: E402
 
 
 class EmbeddedShaderSourceTests(unittest.TestCase):
+    def test_shader_sources_use_canonical_lf_checkouts(self) -> None:
+        for name in generate_ash_shaders.SHADERS:
+            source = generate_ash_shaders.SHADER_ROOT / name
+            relative_source = source.relative_to(REPO_ROOT).as_posix()
+            result = subprocess.run(
+                ["git", "check-attr", "eol", "--", relative_source],
+                cwd=REPO_ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.stdout.strip().rsplit(": ", 1)[-1], "lf")
+
     def test_relative_explicit_compiler_is_resolved_before_shader_cwd_changes(
         self,
     ) -> None:
