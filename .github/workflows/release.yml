@@ -25,6 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      actions: read
       contents: read
     steps:
       - name: Checkout exact candidate
@@ -39,6 +40,15 @@ jobs:
           --tag "$RELEASE_TAG_INPUT"
           --candidate-sha "$RELEASE_CANDIDATE_SHA"
           --actual-ref "$GITHUB_REF"
+
+      - name: Require successful exact-SHA CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh api
+          -H "Accept: application/vnd.github+json"
+          "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?branch=main&head_sha=${RELEASE_CANDIDATE_SHA}&event=push&status=completed&per_page=100"
+          --jq '.workflow_runs | map(select(.conclusion == "success")) | sort_by(.updated_at) | last | .id // error("no successful exact-SHA CI run")'
 
       - name: Validate changelog release notes
         env:

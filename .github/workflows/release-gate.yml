@@ -678,7 +678,7 @@ jobs:
     needs: validate-candidate-identity
     name: linux-source-packages
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
     steps:
       - name: Checkout exact candidate
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -691,6 +691,20 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: '1.95.0'
+          components: rustfmt
+
+      - name: Install declared MSRV toolchain
+        run: rustup toolchain install 1.92.0 --profile minimal
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
+
+      - name: Install fixed LLVM toolchain
+        run: >-
+          python3 tools/ci/install_llvm.py
+          --destination "${{ runner.temp }}/llvm"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
@@ -716,14 +730,149 @@ jobs:
           libxkbcommon-dev libwayland-dev libudev-dev
           mesa-common-dev libgl1-mesa-dev cmake
 
+      - name: Capture binding specification tests
+        continue-on-error: true
+        run: >-
+          python3 tools/ci/release_cell.py capture
+          --cell-root target/release-evidence/linux-source-packages
+          --execution executions/binding-models.json
+          --stdout-log logs/binding-models.stdout.log
+          --stderr-log logs/binding-models.stderr.log
+          --timeout 1200
+          --
+          cargo +1.95.0 nextest run
+          -p dear-imgui-build-support
+          --features binding-spec
+
+      - name: Capture vendored source provenance
+        continue-on-error: true
+        run: >-
+          python3 tools/ci/release_cell.py capture
+          --cell-root target/release-evidence/linux-source-packages
+          --execution executions/source-provenance.json
+          --stdout-log logs/source-provenance.stdout.log
+          --stderr-log logs/source-provenance.stderr.log
+          --timeout 300
+          --
+          python3 -B tools/source_metadata.py verify
+
+      - name: Capture binding provenance
+        continue-on-error: true
+        run: >-
+          python3 tools/ci/release_cell.py capture
+          --cell-root target/release-evidence/linux-source-packages
+          --execution executions/binding-provenance.json
+          --stdout-log logs/binding-provenance.stdout.log
+          --stderr-log logs/binding-provenance.stderr.log
+          --timeout 300
+          --
+          python3 -B tools/source_metadata.py verify-bindings
+
+      - name: Capture high-level API coverage
+        continue-on-error: true
+        run: >-
+          python3 tools/ci/release_cell.py capture
+          --cell-root target/release-evidence/linux-source-packages
+          --execution executions/api-coverage.json
+          --stdout-log logs/api-coverage.stdout.log
+          --stderr-log logs/api-coverage.stderr.log
+          --timeout 300
+          --
+          python3 -B tools/api_surface_report.py --check
+
+      - name: Capture canonical binding regeneration
+        continue-on-error: true
+        env:
+          LIBCLANG_PATH: ${{ runner.temp }}/llvm/lib
+        run: >-
+          python3 tools/ci/release_cell.py capture
+          --cell-root target/release-evidence/linux-source-packages
+          --execution executions/binding-regeneration.json
+          --stdout-log logs/binding-regeneration.stdout.log
+          --stderr-log logs/binding-regeneration.stderr.log
+          --timeout 2400
+          --
+          cargo +1.95.0 run -p xtask -- verify-bindings --allow-dirty
+
+      - name: Capture checked-in binding drift
+        continue-on-error: true
+        run: >-
+          python3 tools/ci/release_cell.py capture
+          --cell-root target/release-evidence/linux-source-packages
+          --execution executions/binding-diff.json
+          --stdout-log logs/binding-diff.stdout.log
+          --stderr-log logs/binding-diff.stderr.log
+          --timeout 300
+          --
+          git diff --exit-code --
+          dear-imgui-sys/src/bindings_pregenerated.rs
+          dear-imgui-sys/src/bindings_pregenerated_windows.rs
+          dear-imgui-sys/src/wasm_bindings_pregenerated.rs
+          extensions/dear-imgui-test-engine-sys/src/bindings_pregenerated.rs
+          extensions/dear-implot-sys/src/bindings_pregenerated.rs
+          extensions/dear-implot-sys/src/wasm_bindings_pregenerated.rs
+          extensions/dear-implot3d-sys/src/bindings_pregenerated.rs
+          extensions/dear-implot3d-sys/src/wasm_bindings_pregenerated.rs
+          extensions/dear-imnodes-sys/src/bindings_pregenerated.rs
+          extensions/dear-imnodes-sys/src/wasm_bindings_pregenerated.rs
+          extensions/dear-node-editor-sys/src/bindings_pregenerated.rs
+          extensions/dear-imguizmo-sys/src/bindings_pregenerated.rs
+          extensions/dear-imguizmo-sys/src/wasm_bindings_pregenerated.rs
+          extensions/dear-imguizmo-quat-sys/src/bindings_pregenerated.rs
+          extensions/dear-imguizmo-quat-sys/src/wasm_bindings_pregenerated.rs
+
+      - name: Capture declared MSRV contract
+        continue-on-error: true
+        run: >-
+          python3 tools/ci/release_cell.py capture
+          --cell-root target/release-evidence/linux-source-packages
+          --execution executions/msrv.json
+          --stdout-log logs/msrv.stdout.log
+          --stderr-log logs/msrv.stderr.log
+          --timeout 2400
+          --
+          cargo +1.92.0 check --workspace
+          --exclude dear-imgui-bevy
+          --exclude dear-imgui-examples
+          --exclude dear-imgui-web-demo
+          --exclude xtask
+
+      - name: Capture core tests
+        continue-on-error: true
+        run: >-
+          python3 tools/ci/release_cell.py capture
+          --cell-root target/release-evidence/linux-source-packages
+          --execution executions/core-tests.json
+          --stdout-log logs/core-tests.stdout.log
+          --stderr-log logs/core-tests.stderr.log
+          --timeout 2400
+          --
+          cargo +1.95.0 nextest run
+          -p dear-imgui-rs
+          --features multi-viewport
+
+      - name: Capture core public API doctests
+        continue-on-error: true
+        run: >-
+          python3 tools/ci/release_cell.py capture
+          --cell-root target/release-evidence/linux-source-packages
+          --execution executions/core-docs.json
+          --stdout-log logs/core-docs.stdout.log
+          --stderr-log logs/core-docs.stderr.log
+          --timeout 1200
+          --
+          cargo +1.95.0 test --doc
+          -p dear-imgui-rs
+          --features multi-viewport
+
       - name: Capture publishable source-package contract
         continue-on-error: true
         run: >-
           python3 tools/ci/release_cell.py capture
           --cell-root target/release-evidence/linux-source-packages
-          --execution executions/run.json
-          --stdout-log logs/stdout.log
-          --stderr-log logs/stderr.log
+          --execution executions/packages.json
+          --stdout-log logs/packages.stdout.log
+          --stderr-log logs/packages.stderr.log
           --timeout 4800
           --
           python3 -B tools/ci/verify_packaged_core.py source
@@ -747,7 +896,16 @@ jobs:
           --candidate-sha "$RELEASE_CANDIDATE_SHA"
           --cell-id linux-source-packages
           --cell-root target/release-evidence/linux-source-packages
-          --execution executions/run.json
+          --execution executions/binding-models.json
+          --execution executions/source-provenance.json
+          --execution executions/binding-provenance.json
+          --execution executions/api-coverage.json
+          --execution executions/binding-regeneration.json
+          --execution executions/binding-diff.json
+          --execution executions/msrv.json
+          --execution executions/core-tests.json
+          --execution executions/core-docs.json
+          --execution executions/packages.json
 
       - name: Retain source-package release cell
         if: always()

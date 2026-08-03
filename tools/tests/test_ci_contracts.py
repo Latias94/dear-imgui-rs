@@ -1555,6 +1555,28 @@ class WorkflowPortabilityTests(unittest.TestCase):
             "WASM uses pregenerated bindings and must not install libclang",
         )
 
+    def test_source_contracts_gate_msrv_and_public_doctests(self):
+        job = self._ci_jobs()["source-contracts"]
+
+        msrv = named_step(
+            job, "Check publishable non-Bevy crates at the declared MSRV"
+        )
+        self.assertIn("cargo +1.92.0 check --workspace", msrv.get("run", ""))
+        self.assertIn("--exclude dear-imgui-bevy", msrv.get("run", ""))
+
+        expected_doctest_steps = (
+            "Test core public API documentation",
+            "Test Winit public API documentation",
+            "Test WGPU public API documentation",
+            "Test Glow public API documentation",
+            "Test Ash public API documentation",
+            "Test SDL3 public API documentation",
+        )
+        for step_name in expected_doctest_steps:
+            with self.subTest(step=step_name):
+                command = str(named_step(job, step_name).get("run", ""))
+                self.assertIn("cargo +1.95.0 test --doc", command)
+
     def test_checkout_and_packaged_wasm_providers_use_the_pinned_emsdk(self):
         jobs = self._ci_jobs()
         for job_id in ("publish-check", "wasm-check"):
@@ -1563,7 +1585,10 @@ class WorkflowPortabilityTests(unittest.TestCase):
             )
             inputs = require_mapping(setup.get("with"), f"jobs.{job_id}.emsdk.with")
             with self.subTest(job=job_id):
-                self.assertEqual(setup.get("uses"), "emscripten-core/setup-emsdk@v16")
+                self.assertEqual(
+                    setup.get("uses"),
+                    "emscripten-core/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984",
+                )
                 self.assertEqual(str(inputs.get("version")), "5.0.1")
                 self.assertEqual(str(inputs.get("emsdk-version")), "5.0.5")
                 self.assertNotIn("actions-cache-folder", inputs)

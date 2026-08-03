@@ -119,7 +119,7 @@ artifact profile.
 
 A release requires `python3 tools/tasks.py release-check` from a clean commit and a remote `Go` decision for the same commit. The end-to-end `.github/workflows/release.yml` calls the gate directly; `.github/workflows/release-gate.yml` remains independently dispatchable for diagnostics.
 
-The remote aggregate has a fixed 16-cell inventory: Linux Test Engine runtime, real Winit/WGPU and SDL3/Glow viewport smokes, Linux WASM, all 27 publishable source packages, Windows vcpkg, Windows MSVC `/MD` and `/MT`, Windows GNU imports, macOS, and five prebuilt producer/consumer targets (Linux x86_64, macOS x86_64/aarch64, and Windows MSVC `/MD`/`/MT`). A missing, failed, skipped, cancelled, timed-out, malformed, duplicate, or wrong-SHA cell is `No-Go`; callers cannot narrow the production inventory.
+The remote aggregate has a fixed 16-cell inventory: Linux Test Engine runtime, real Winit/WGPU and SDL3/Glow viewport smokes, Linux WASM, all 27 publishable source packages, Windows vcpkg, Windows MSVC `/MD` and `/MT`, Windows GNU imports, macOS, and five prebuilt producer/consumer targets (Linux x86_64, macOS x86_64/aarch64, and Windows MSVC `/MD`/`/MT`). The source-package cell also proves canonical binding regeneration and checked-in drift, source/binding provenance, high-level API coverage, the Rust 1.92 non-Bevy MSRV, core tests, and core public API doctests. A missing, failed, skipped, cancelled, timed-out, malformed, duplicate, or wrong-SHA cell is `No-Go`; callers cannot narrow the production inventory.
 
 The run retains `gate-result.json`, stdout/stderr, runtime invocation/results, Xvfb/Mesa display and renderer data, target/CRT/vcpkg/MinGW metadata, binding hashes, manifests, candidate SHA, source-package results, and SHA256 evidence for approximately 30 days. Verify a downloaded aggregate locally with:
 
@@ -179,7 +179,7 @@ After the candidate is merged to `main` and normal CI is green, run the single r
 gh workflow run release.yml --ref main -f tag=v0.16.0-alpha.1
 ```
 
-`release.yml` binds the tag, workspace version, `main` ref, and exact candidate; runs the 16-cell gate; stages only checksummed recorded archives; publishes the complete 27-package train with crates.io Trusted Publishing; verifies every exact version; then creates the tag and GitHub Release. See [PUBLISHING.md](./PUBLISHING.md) for setup and recovery.
+`release.yml` binds the tag, workspace version, `main` ref, and exact candidate; requires a successful `main` push CI run for that SHA; runs the 16-cell gate; stages only checksummed recorded archives; publishes the complete 27-package train with crates.io Trusted Publishing; verifies every exact version; then creates the tag and GitHub Release. See [PUBLISHING.md](./PUBLISHING.md) for setup and recovery.
 
 ## Pre-release checklist
 

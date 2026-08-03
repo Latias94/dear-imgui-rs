@@ -206,6 +206,46 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
         self.assertIn("tools/ci/verify_wasm_provider.py", command)
         self.assertIn("--check-rust-route", command)
 
+    def test_source_package_cell_proves_release_critical_source_contracts(self):
+        jobs = workflow_jobs(parsed_workflow("release-gate.yml"))
+        job = jobs["source-packages"]
+
+        binding = named_step(job, "Capture canonical binding regeneration")
+        self.assertEqual(
+            require_mapping(binding.get("env"), "source binding env").get(
+                "LIBCLANG_PATH"
+            ),
+            "${{ runner.temp }}/llvm/lib",
+        )
+        self.assertIn("verify-bindings --allow-dirty", binding.get("run", ""))
+
+        msrv = named_step(job, "Capture declared MSRV contract")
+        self.assertIn("cargo +1.92.0 check --workspace", msrv.get("run", ""))
+        self.assertIn("--exclude dear-imgui-bevy", msrv.get("run", ""))
+
+        core = named_step(job, "Capture core tests")
+        self.assertIn("cargo +1.95.0 nextest run", core.get("run", ""))
+        docs = named_step(job, "Capture core public API doctests")
+        self.assertIn("cargo +1.95.0 test --doc", docs.get("run", ""))
+
+        finalize = named_step(job, "Finalize source-package release cell").get(
+            "run", ""
+        )
+        for execution in (
+            "binding-models",
+            "source-provenance",
+            "binding-provenance",
+            "api-coverage",
+            "binding-regeneration",
+            "binding-diff",
+            "msrv",
+            "core-tests",
+            "core-docs",
+            "packages",
+        ):
+            with self.subTest(execution=execution):
+                self.assertIn(f"executions/{execution}.json", finalize)
+
     def test_aggregate_output_is_relative_to_the_evidence_root(self):
         jobs = workflow_jobs(parsed_workflow("release-gate.yml"))
         aggregate = jobs["aggregate"]
@@ -348,6 +388,16 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
             job_dependencies(jobs["github-release"]), ("publish-crates",)
         )
 
+        validate = jobs["validate"]
+        self.assertEqual(
+            require_mapping(validate.get("permissions"), "validate permissions"),
+            {"actions": "read", "contents": "read"},
+        )
+        exact_sha_ci = named_step(validate, "Require successful exact-SHA CI")
+        self.assertIn("actions/workflows/ci.yml/runs", exact_sha_ci.get("run", ""))
+        self.assertIn("head_sha=${RELEASE_CANDIDATE_SHA}", exact_sha_ci.get("run", ""))
+        self.assertIn(".conclusion == \"success\"", exact_sha_ci.get("run", ""))
+
         publish = jobs["publish-crates"]
         self.assertEqual(publish.get("environment"), "release")
         self.assertEqual(
@@ -415,17 +465,12 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
         self.assertGreater(upload_count, 0)
         self.assertEqual(source.count("overwrite: true"), upload_count)
 
-    def test_release_supply_chain_actions_are_pinned_to_commits(self):
-        release_workflows = (
-            "release.yml",
-            "release-gate.yml",
-            "native-runtime.yml",
-            "prebuilt-binaries.yml",
-        )
+    def test_all_workflow_supply_chain_actions_are_pinned_to_commits(self):
         use_pattern = re.compile(r"^\s*uses:\s+([^\s#]+)", re.MULTILINE)
         pinned_action = re.compile(r"^[^@]+@[0-9a-f]{40}$")
 
-        for name in release_workflows:
+        for path in sorted(WORKFLOWS.glob("*.yml")):
+            name = path.name
             for action in use_pattern.findall(workflow(name)):
                 if action.startswith("./"):
                     continue

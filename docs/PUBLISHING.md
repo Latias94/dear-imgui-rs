@@ -39,13 +39,14 @@ gh workflow run release.yml --ref main -f tag=v0.16.0-alpha.1
 
 The workflow binds the tag to the workspace version and the exact `main` commit before doing any irreversible work. It then:
 
-1. Runs the fixed 16-cell Release Gate for that commit, including native runtime tests, Winit/WGPU and SDL3/Glow viewport smokes, WASM, Windows ABI/native dependency routes, macOS, all source packages, and five prebuilt producer/consumer targets.
-2. Recomputes the authoritative decision from retained cell payloads and stages only the prebuilt archives recorded by successful cells.
-3. Generates `SHA256SUMS` and a release manifest for the exact staged assets.
-4. Enters the protected `release` environment and obtains a short-lived crates.io OIDC token.
-5. Publishes the complete 27-crate dependency train, automatically skipping an exact version only when its published Cargo archive records the same clean candidate commit.
-6. Confirms that all 27 exact versions are available through crates.io and Cargo and carry that candidate provenance.
-7. Creates the tag and GitHub Release for the same commit, rejecting pre-existing unexpected assets and verifying that the final download inventory contains exactly the staged archives and checksums.
+1. Requires a successful `main` push CI run for the exact candidate SHA.
+2. Runs the fixed 16-cell Release Gate for that commit, including native runtime tests, Winit/WGPU and SDL3/Glow viewport smokes, WASM, Windows ABI/native dependency routes, macOS, all source packages, and five prebuilt producer/consumer targets. The source-package cell also regenerates every maintained binding, checks high-level API coverage, tests core public documentation, and verifies non-Bevy packages against Rust 1.92.
+3. Recomputes the authoritative decision from retained cell payloads and stages only the prebuilt archives recorded by successful cells.
+4. Generates `SHA256SUMS` and a release manifest for the exact staged assets.
+5. Enters the protected `release` environment and obtains a short-lived crates.io OIDC token.
+6. Publishes the complete 27-crate dependency train, automatically skipping an exact version only when its published Cargo archive records the same clean candidate commit.
+7. Confirms that all 27 exact versions are available through crates.io and Cargo and carry that candidate provenance.
+8. Creates the tag and GitHub Release for the same commit, rejecting pre-existing unexpected assets and verifying that the final download inventory contains exactly the staged archives and checksums.
 
 Pushing a tag does not trigger publication. Do not create the tag manually before this workflow; an existing tag is accepted only when it already points to the candidate commit.
 

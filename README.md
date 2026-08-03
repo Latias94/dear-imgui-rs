@@ -423,7 +423,7 @@ Maintenance rules
 
 ### CI and Releases
 
-- Dispatch `.github/workflows/release.yml` from `main` with the tag matching `workspace.package.version`; it binds the exact candidate SHA, runs the Release Gate, publishes all crates, and creates the tag and GitHub Release as one resumable workflow. `release-gate.yml` remains available for non-publishing diagnostics.
+- Dispatch `.github/workflows/release.yml` from `main` with the tag matching `workspace.package.version`; it requires successful CI for the exact candidate SHA, runs the Release Gate, publishes all crates, and creates the tag and GitHub Release as one resumable workflow. `release-gate.yml` remains available for non-publishing diagnostics.
 - Its reusable `.github/workflows/prebuilt-binaries.yml` job builds and then
   consumes the complete core plus six-safe-extension package set for Linux
   x86_64, macOS x86_64/aarch64, and Windows MSVC `/MD`/`/MT`. There is no
