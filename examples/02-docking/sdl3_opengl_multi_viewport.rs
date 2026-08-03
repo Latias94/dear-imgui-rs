@@ -126,7 +126,9 @@ impl OpenGlApp {
         let main = &mut *main_guard;
         while let Some(event) = events.pop() {
             let backend_result = event.with_imgui_event(|raw| match raw {
-                Some(raw) => main.sdl3_backend.process_event(&mut main.imgui, raw),
+                // SAFETY: the callback handoff reconstructs the active union variant and owns
+                // every pointer payload for the duration of this closure.
+                Some(raw) => unsafe { main.sdl3_backend.process_raw_event(&mut main.imgui, raw) },
                 None => Ok(false),
             });
             if let Err(error) = backend_result {

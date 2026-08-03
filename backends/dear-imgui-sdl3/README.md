@@ -89,15 +89,14 @@ Minimal SDL3 + OpenGL3 flow (single window):
 
 ```rust,no_run
 use dear_imgui_rs::{Context, Condition};
-use dear_imgui_sdl3::{
-    enable_native_ime_ui, sdl3_poll_event_ll, Sdl3OpenGl3Backend,
-};
+use dear_imgui_sdl3::{enable_native_ime_ui, Sdl3OpenGl3Backend};
 use sdl3::video::GLProfile;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // SDL3 initialization (simplified)
     let sdl = sdl3::init()?;
     let video = sdl.video()?;
+    let mut event_pump = sdl.event_pump()?;
 
     // Recommended on IME-heavy platforms (Windows/Asia locales)
     enable_native_ime_ui();
@@ -128,7 +127,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     'main: loop {
         // 1) Poll SDL3 events and feed ImGui
-        while let Some(event) = sdl3_poll_event_ll() {
+        for event in event_pump.poll_iter() {
             if sdl3_backend.process_event(&mut imgui, &event)? {
                 // ImGui consumed the event; continue if you do not need it.
             }
@@ -203,9 +202,12 @@ APIs of interest (see `src/lib.rs` for full docs):
 - `poll_fault()`:
   returns deferred platform callback failures without unwinding through native code. Ordinary
   owner methods also surface the oldest pending fault before entering SDL.
-- `sdl3_poll_event_ll() -> Option<SDL_Event>`:
-  low-level SDL event polling. Feed returned events through the owning backend's
-  `process_event(&mut Context, &SDL_Event)` method.
+- `process_event(&mut Context, &sdl3::event::Event)`:
+  the safe event path for normal `EventPump` loops. Pointer-bearing SDL payloads such as text input
+  remain owned while the official backend consumes them.
+- `unsafe process_raw_event(&mut Context, &SDL_Event)`:
+  the low-level escape hatch for SDL callbacks and foreign event loops. The caller must prove the
+  active union variant, payload pointer lifetime, SDL thread, and backend provenance contracts.
 The free renderer initialization, render, texture-update, and device-object functions were
 removed. They allowed callers to bypass the Context-owned renderer epoch and write directly into
 native texture state. Call the owning backend's `shutdown(...)` method when shutdown errors need to

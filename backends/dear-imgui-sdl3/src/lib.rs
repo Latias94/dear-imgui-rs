@@ -5,7 +5,7 @@
 //! `sdlrenderer3-renderer`, or `sdlgpu3-renderer` features are enabled, this
 //! crate compiles the matching official renderer backend and local C shim.
 //!
-//! The intent is to provide a simple, safe-ish API that:
+//! The intent is to provide a simple, ownership-aware API that:
 //! - plugs into an existing `dear-imgui-rs::Context`
 //! - integrates with an SDL3 window and OpenGL context
 //! - supports Dear ImGui multi-viewport via the official backend behavior.
@@ -25,6 +25,11 @@ mod removed_free_api_contracts {
     /// use dear_imgui_sdl3::process_sys_event_for_context;
     /// ```
     struct ProcessSysEventForContext;
+
+    /// ```compile_fail
+    /// use dear_imgui_sdl3::sdl3_poll_event_ll;
+    /// ```
+    struct Sdl3PollEventLl;
 
     /// ```compile_fail
     /// use dear_imgui_sdl3::set_gamepad_mode;
@@ -117,8 +122,7 @@ use self::core::{ffi, sdl3_new_frame_impl, with_context};
 use self::core::{init_opengl3_impl, new_frame_opengl3_impl, shutdown_opengl3_renderer_impl};
 #[cfg(feature = "sdlrenderer3-renderer")]
 use self::core::{new_frame_sdlrenderer3_impl, shutdown_sdlrenderer3_renderer_impl};
-use self::events::process_sys_event;
-pub use self::events::sdl3_poll_event_ll;
+use self::events::{process_owned_event, process_raw_sys_event};
 pub use self::gamepad::GamepadMode;
 use self::gamepad::{set_gamepad_mode, set_gamepad_mode_manual};
 #[cfg(feature = "multi-viewport")]

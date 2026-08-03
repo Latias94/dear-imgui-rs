@@ -209,6 +209,8 @@ pub enum Sdl3BackendError {
         expected: dear_imgui_rs::ContextId,
         actual: dear_imgui_rs::ContextId,
     },
+    #[error("SDL3 text input contains an interior NUL byte")]
+    TextInputContainsNul,
     #[error(transparent)]
     Attachment(#[from] dear_imgui_rs::ContextAttachmentError),
     #[error(transparent)]

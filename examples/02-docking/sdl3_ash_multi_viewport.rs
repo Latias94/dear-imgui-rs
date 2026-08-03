@@ -1399,7 +1399,9 @@ impl App {
                     .sdl3_backend
                     .as_mut()
                     .expect("SDL3 backend must be active while the app is running");
-                let _ = backend.process_event(&mut self.imgui.context, raw)?;
+                // SAFETY: the callback handoff reconstructs the active union variant and owns
+                // every pointer payload for the duration of this closure.
+                let _ = unsafe { backend.process_raw_event(&mut self.imgui.context, raw)? };
             }
             Ok(())
         })?;

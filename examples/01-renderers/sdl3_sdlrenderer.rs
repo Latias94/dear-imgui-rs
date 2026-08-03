@@ -89,7 +89,9 @@ impl SdlRendererApp {
         while let Some(event) = events.pop() {
             event.with_imgui_event(|raw| -> Result<(), Box<dyn Error>> {
                 if let Some(raw) = raw {
-                    let _ = main.sdl3_backend.process_event(&mut main.imgui, raw)?;
+                    // SAFETY: the callback handoff reconstructs the active union variant and owns
+                    // every pointer payload for the duration of this closure.
+                    let _ = unsafe { main.sdl3_backend.process_raw_event(&mut main.imgui, raw)? };
                 }
                 Ok(())
             })?;

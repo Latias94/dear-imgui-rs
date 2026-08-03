@@ -17,6 +17,7 @@ use dear_imgui_rs::render::RendererConsumer;
     feature = "sdlgpu3-renderer"
 ))]
 use dear_imgui_rs::sys;
+use sdl3::event::Event;
 
 #[cfg(any(
     feature = "opengl3-renderer",
@@ -410,13 +411,30 @@ impl Sdl3PlatformBackend {
         })
     }
 
-    /// Process a single low-level SDL3 event with the captured ImGui context.
+    /// Process an owned SDL3 event with the captured ImGui context.
     pub fn process_event(
+        &mut self,
+        imgui: &mut Context,
+        event: &Event,
+    ) -> Result<bool, Sdl3BackendError> {
+        self.entry(imgui, || process_owned_event(event))?
+    }
+
+    /// Process a raw SDL3 event with the captured ImGui context.
+    ///
+    /// Prefer [`Self::process_event`] for normal SDL event loops.
+    ///
+    /// # Safety
+    ///
+    /// `event` must contain the active SDL union variant named by its type. Every pointer reachable
+    /// from that variant must remain valid for the duration of this call. The call must execute on
+    /// the SDL thread, and `event` must belong to the SDL runtime used by this backend.
+    pub unsafe fn process_raw_event(
         &mut self,
         imgui: &mut Context,
         event: &SDL_Event,
     ) -> Result<bool, Sdl3BackendError> {
-        self.entry(imgui, || process_sys_event(event))
+        self.entry(imgui, || unsafe { process_raw_sys_event(event) })
     }
 
     /// Configure how the SDL3 backend handles gamepads for the captured context.
@@ -606,13 +624,32 @@ impl Sdl3OpenGl3Backend {
         })
     }
 
-    /// Process a single low-level SDL3 event with the captured ImGui context.
+    /// Process an owned SDL3 event with the captured ImGui context.
     pub fn process_event(
+        &mut self,
+        imgui: &mut Context,
+        event: &Event,
+    ) -> Result<bool, Sdl3BackendError> {
+        run_renderer_entry(&self.runtime, imgui, || process_owned_event(event))?
+    }
+
+    /// Process a raw SDL3 event with the captured ImGui context.
+    ///
+    /// Prefer [`Self::process_event`] for normal SDL event loops.
+    ///
+    /// # Safety
+    ///
+    /// `event` must contain the active SDL union variant named by its type. Every pointer reachable
+    /// from that variant must remain valid for the duration of this call. The call must execute on
+    /// the SDL thread, and `event` must belong to the SDL runtime used by this backend.
+    pub unsafe fn process_raw_event(
         &mut self,
         imgui: &mut Context,
         event: &SDL_Event,
     ) -> Result<bool, Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, || process_sys_event(event))
+        run_renderer_entry(&self.runtime, imgui, || unsafe {
+            process_raw_sys_event(event)
+        })
     }
 
     /// Consume and render one synchronous frame using the official OpenGL3 renderer.
@@ -771,13 +808,32 @@ impl SdlGpu3RendererBackend {
         Ok(Self::from_initialized_context(runtime))
     }
 
-    /// Process a single low-level SDL3 event with the captured ImGui context.
+    /// Process an owned SDL3 event with the captured ImGui context.
     pub fn process_event(
+        &mut self,
+        imgui: &mut Context,
+        event: &Event,
+    ) -> Result<bool, Sdl3BackendError> {
+        run_renderer_entry(&self.runtime, imgui, || process_owned_event(event))?
+    }
+
+    /// Process a raw SDL3 event with the captured ImGui context.
+    ///
+    /// Prefer [`Self::process_event`] for normal SDL event loops.
+    ///
+    /// # Safety
+    ///
+    /// `event` must contain the active SDL union variant named by its type. Every pointer reachable
+    /// from that variant must remain valid for the duration of this call. The call must execute on
+    /// the SDL thread, and `event` must belong to the SDL runtime used by this backend.
+    pub unsafe fn process_raw_event(
         &mut self,
         imgui: &mut Context,
         event: &SDL_Event,
     ) -> Result<bool, Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, || process_sys_event(event))
+        run_renderer_entry(&self.runtime, imgui, || unsafe {
+            process_raw_sys_event(event)
+        })
     }
 
     /// Begin a new SDL3 + SDLGPU3 frame.
@@ -957,13 +1013,32 @@ impl Sdl3RendererBackend {
         })
     }
 
-    /// Process a single low-level SDL3 event with the captured ImGui context.
+    /// Process an owned SDL3 event with the captured ImGui context.
     pub fn process_event(
+        &mut self,
+        imgui: &mut Context,
+        event: &Event,
+    ) -> Result<bool, Sdl3BackendError> {
+        run_renderer_entry(&self.runtime, imgui, || process_owned_event(event))?
+    }
+
+    /// Process a raw SDL3 event with the captured ImGui context.
+    ///
+    /// Prefer [`Self::process_event`] for normal SDL event loops.
+    ///
+    /// # Safety
+    ///
+    /// `event` must contain the active SDL union variant named by its type. Every pointer reachable
+    /// from that variant must remain valid for the duration of this call. The call must execute on
+    /// the SDL thread, and `event` must belong to the SDL runtime used by this backend.
+    pub unsafe fn process_raw_event(
         &mut self,
         imgui: &mut Context,
         event: &SDL_Event,
     ) -> Result<bool, Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, || process_sys_event(event))
+        run_renderer_entry(&self.runtime, imgui, || unsafe {
+            process_raw_sys_event(event)
+        })
     }
 
     /// Consume and render one synchronous frame using the official SDLRenderer3 renderer.
