@@ -88,6 +88,12 @@ impl OpenGlApp {
         let game_tex = unsafe { create_game_texture(&gl) };
 
         let mut imgui = Context::create();
+        let main_scale = window.display_scale();
+        let main_scale = if main_scale.is_finite() && main_scale > 0.0 {
+            main_scale
+        } else {
+            1.0
+        };
         {
             let io = imgui.io_mut();
             let mut flags = io.config_flags();
@@ -96,13 +102,19 @@ impl OpenGlApp {
                 flags.insert(ConfigFlags::VIEWPORTS_ENABLE);
             }
             io.set_config_flags(flags);
+            io.set_config_dpi_scale_fonts(true);
+            io.set_config_dpi_scale_viewports(true);
+        }
+        {
+            let style = imgui.style_mut();
+            style.scale_all_sizes(main_scale);
+            style.set_font_scale_dpi(main_scale);
         }
 
         // SAFETY: the window and GL context are retained until explicit backend shutdown.
         let mut sdl3_backend =
             unsafe { Sdl3OpenGl3Backend::init(&mut imgui, &window, &gl_context, "#version 150")? };
         sdl3_backend.set_gamepad_mode(&mut imgui, GamepadMode::AutoAll)?;
-        imgui.style_mut().set_font_scale_dpi(window.display_scale());
 
         Ok(Self {
             events: Sdl3CallbackEventHandoff::default(),
@@ -236,7 +248,8 @@ impl OpenGlApp {
     }
 
     fn app_event(&self, raw: &sdl3::sys::events::SDL_Event) -> AppResult {
-        self.events.push(raw);
+        // SAFETY: SDL supplies a valid event whose transient payload remains live for this call.
+        unsafe { self.events.push_from_callback(raw) };
         AppResult::Continue
     }
 

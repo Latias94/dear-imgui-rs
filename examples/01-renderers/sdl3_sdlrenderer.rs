@@ -163,7 +163,8 @@ impl SdlRendererApp {
     }
 
     fn app_event(&self, raw: &sdl3::sys::events::SDL_Event) -> AppResult {
-        self.events.push(raw);
+        // SAFETY: SDL supplies a valid event whose transient payload remains live for this call.
+        unsafe { self.events.push_from_callback(raw) };
         AppResult::Continue
     }
 

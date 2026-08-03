@@ -1131,6 +1131,11 @@ impl App {
             .get_primary_display()?
             .get_content_scale()
             .unwrap_or(1.0);
+        let main_scale = if main_scale.is_finite() && main_scale > 0.0 {
+            main_scale
+        } else {
+            1.0
+        };
 
         let mut window = video
             .window(
@@ -1163,8 +1168,12 @@ impl App {
             let mut flags = io.config_flags();
             flags.insert(ConfigFlags::DOCKING_ENABLE);
             io.set_config_flags(flags);
-
+            io.set_config_dpi_scale_fonts(true);
+            io.set_config_dpi_scale_viewports(true);
+        }
+        {
             let style = context.style_mut();
+            style.scale_all_sizes(main_scale);
             style.set_font_scale_dpi(main_scale);
         }
 
@@ -1792,7 +1801,8 @@ impl Sdl3AshApp {
     }
 
     fn app_event(&self, raw: &sdl3::sys::events::SDL_Event) -> AppResult {
-        self.events.push(raw);
+        // SAFETY: SDL supplies a valid event whose transient payload remains live for this call.
+        unsafe { self.events.push_from_callback(raw) };
         AppResult::Continue
     }
 

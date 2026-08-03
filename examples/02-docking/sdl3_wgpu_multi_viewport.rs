@@ -60,6 +60,11 @@ impl WgpuMultiViewportApp {
             .get_primary_display()?
             .get_content_scale()
             .unwrap_or(1.0);
+        let main_scale = if main_scale.is_finite() && main_scale > 0.0 {
+            main_scale
+        } else {
+            1.0
+        };
         let mut window = video
             .window(
                 "Dear ImGui SDL3 + WGPU (multi-viewport)",
@@ -125,7 +130,13 @@ impl WgpuMultiViewportApp {
             let mut flags = io.config_flags();
             flags.insert(ConfigFlags::DOCKING_ENABLE);
             io.set_config_flags(flags);
-            imgui.style_mut().set_font_scale_dpi(main_scale);
+            io.set_config_dpi_scale_fonts(true);
+            io.set_config_dpi_scale_viewports(true);
+        }
+        {
+            let style = imgui.style_mut();
+            style.scale_all_sizes(main_scale);
+            style.set_font_scale_dpi(main_scale);
         }
         if ENABLE_VIEWPORTS {
             imgui.enable_multi_viewport();
@@ -225,7 +236,22 @@ impl WgpuMultiViewportApp {
         if main.show_demo {
             ui.show_demo_window(&mut main.show_demo);
         }
-        let draw_data = main.imgui.render();
+        let viewports_enabled = ENABLE_VIEWPORTS
+            && main
+                .imgui
+                .io()
+                .config_flags()
+                .contains(ConfigFlags::VIEWPORTS_ENABLE);
+        let mut draw_data = main.imgui.render();
+
+        // Reconcile independently of the main surface. Secondary native windows must continue to
+        // render while the main surface is occluded, minimized, lost, or being reconfigured.
+        main.renderer.reconcile_frame(&mut draw_data)?;
+        if viewports_enabled {
+            draw_data.update_and_render_platform_windows_default();
+            main.renderer.poll_fault()?;
+            main.sdl3_backend.poll_fault()?;
+        }
 
         let (frame, reconfigure_after_present) = match main.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
@@ -285,16 +311,6 @@ impl WgpuMultiViewportApp {
         if reconfigure_after_present {
             Self::reconfigure_surface(main);
         }
-        if ENABLE_VIEWPORTS
-            && main
-                .imgui
-                .io()
-                .config_flags()
-                .contains(ConfigFlags::VIEWPORTS_ENABLE)
-        {
-            main.imgui.update_platform_windows();
-            main.imgui.render_platform_windows_default();
-        }
         Ok(())
     }
 
@@ -337,7 +353,8 @@ impl WgpuMultiViewportApp {
     }
 
     fn app_event(&self, raw: &sdl3::sys::events::SDL_Event) -> AppResult {
-        self.events.push(raw);
+        // SAFETY: SDL supplies a valid event whose transient payload remains live for this call.
+        unsafe { self.events.push_from_callback(raw) };
         AppResult::Continue
     }
 

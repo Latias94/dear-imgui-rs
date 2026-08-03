@@ -90,6 +90,12 @@ impl SdlGpuApp {
         .with_window(&window)?;
 
         let mut imgui = Context::create();
+        let window_scale = window.display_scale();
+        let window_scale = if window_scale.is_finite() && window_scale > 0.0 {
+            window_scale
+        } else {
+            1.0
+        };
 
         {
             let io = imgui.io_mut();
@@ -97,11 +103,13 @@ impl SdlGpuApp {
             flags.insert(ConfigFlags::DOCKING_ENABLE);
             flags.insert(ConfigFlags::VIEWPORTS_ENABLE);
             io.set_config_flags(flags);
+            io.set_config_dpi_scale_fonts(true);
+            io.set_config_dpi_scale_viewports(true);
         }
 
-        // Basic style scaling using the window's display scale.
-        let window_scale = window.display_scale();
-        imgui.style_mut().set_font_scale_dpi(window_scale);
+        let style = imgui.style_mut();
+        style.scale_all_sizes(window_scale);
+        style.set_font_scale_dpi(window_scale);
 
         let present_mode = low_latency_present_mode(&gpu, &window);
         gpu.set_swapchain_parameters(&window, present_mode, SwapchainComposition::Sdr)?;
@@ -145,11 +153,6 @@ impl SdlGpuApp {
             }
         }
 
-        if main.window.is_minimized() {
-            sdl3::timer::delay(10);
-            return Ok(AppResult::Continue);
-        }
-
         main.sdl3_backend.new_frame(&mut main.imgui)?;
         let ui = main.imgui.frame();
 
@@ -173,12 +176,33 @@ impl SdlGpuApp {
             ui.show_about_window(&mut main.show_about);
         }
 
-        let frame = main.imgui.render();
+        let viewports_enabled = main
+            .imgui
+            .io()
+            .config_flags()
+            .contains(ConfigFlags::VIEWPORTS_ENABLE);
+        let main_window_minimized = main.window.is_minimized();
+        let mut frame = main.imgui.render();
         let is_minimized = frame
             .draw_data()
             .display_size()
             .into_iter()
             .any(|size| size <= 0.0);
+
+        // Texture reconciliation and the secondary-window pump cannot depend on the main
+        // swapchain. Detached viewports remain interactive while the main window is minimized or
+        // temporarily lacks a presentable image.
+        main.sdl3_backend.reconcile_frame(&mut frame)?;
+        if viewports_enabled {
+            frame.update_and_render_platform_windows_default();
+            main.sdl3_backend.poll_fault()?;
+        }
+        if main_window_minimized || is_minimized {
+            drop(frame);
+            sdl3::timer::delay(10);
+            return Ok(AppResult::Continue);
+        }
+
         let mut draw_cmd = main.gpu.acquire_command_buffer()?;
         // Win32 invokes AppIterate from its modal move/resize timer. A blocking acquire here
         // stalls window messages, so callback-driven applications must use the nonblocking path.
@@ -223,12 +247,6 @@ impl SdlGpuApp {
                 );
             }
             return Err(error);
-        }
-
-        let io_flags = main.imgui.io().config_flags();
-        if io_flags.contains(ConfigFlags::VIEWPORTS_ENABLE) {
-            main.imgui.update_platform_windows();
-            main.imgui.render_platform_windows_default();
         }
 
         draw_cmd.submit()?;
@@ -281,7 +299,8 @@ impl SdlGpuApp {
     }
 
     fn app_event(&self, raw: &sdl3::sys::events::SDL_Event) -> AppResult {
-        self.events.push(raw);
+        // SAFETY: SDL supplies a valid event whose transient payload remains live for this call.
+        unsafe { self.events.push_from_callback(raw) };
         AppResult::Continue
     }
 
