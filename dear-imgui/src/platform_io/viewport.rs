@@ -355,20 +355,15 @@ impl Viewport {
         (raw != 0).then(|| Id::from(raw))
     }
 
-    /// Get the draw data pointer
+    /// Get the transient draw data pointer for this viewport.
+    ///
+    /// The pointer may be null and is invalidated by later Dear ImGui frame or viewport work.
+    /// Custom renderers must dereference it only inside the render operation that obtained this
+    /// viewport. Prefer a renderer-owned [`crate::render::RenderedFrame`] or
+    /// [`crate::render::FrameSnapshot`] in application code.
     #[cfg(feature = "multi-viewport")]
     pub fn draw_data(&self) -> *mut sys::ImDrawData {
         self.inner().DrawData
-    }
-
-    /// Get the draw data as a reference (if available)
-    #[cfg(feature = "multi-viewport")]
-    pub fn draw_data_ref(&self) -> Option<&sys::ImDrawData> {
-        if self.inner().DrawData.is_null() {
-            None
-        } else {
-            Some(unsafe { &*self.inner().DrawData })
-        }
     }
 
     /// Get the framebuffer scale

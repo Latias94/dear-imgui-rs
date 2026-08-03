@@ -70,7 +70,10 @@ impl SuspendedContext {
                         && self.0.raw == bound.previous_context()
                         && bound.previous_context() != expected_raw
                     {
-                        bound.restore_bound_target_or_clear();
+                        // The closure moved the previous active owner into this suspended wrapper.
+                        // Its final native current Context now describes the owners it left behind;
+                        // restoring either captured pointer could reactivate a suspended owner.
+                        bound.preserve_current_context();
                     }
                     if let Err(payload) = result {
                         panic::resume_unwind(payload);

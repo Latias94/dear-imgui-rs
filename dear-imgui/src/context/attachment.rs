@@ -810,7 +810,10 @@ impl AttachmentRegistry {
         controls
             .into_iter()
             .filter(|control| {
-                if control.state.get() != AttachmentState::Active {
+                if !matches!(
+                    control.state.get(),
+                    AttachmentState::Active | AttachmentState::ReleasePrepared
+                ) {
                     return false;
                 }
                 control.state.set(AttachmentState::Teardown);

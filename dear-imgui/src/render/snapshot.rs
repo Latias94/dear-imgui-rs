@@ -844,17 +844,25 @@ pub(crate) fn capture_draw_data(
 }
 
 #[cfg(feature = "multi-viewport")]
-pub(crate) fn capture_platform_io(
+/// Copies every live viewport draw list into pointer-free Rust-owned storage.
+///
+/// # Safety
+///
+/// Every non-null `Viewport::draw_data()` pointer in `platform_io` must remain valid for the
+/// entire call. The function never retains those pointers or references after returning.
+pub(crate) unsafe fn capture_platform_io(
     platform_io: &crate::platform_io::PlatformIo,
     resolve: &mut impl FnMut(
         *const sys::ImTextureData,
     ) -> Result<ResolvedSnapshotTexture, SnapshotError>,
 ) -> Result<PendingSnapshot, SnapshotError> {
     for viewport in platform_io.viewports_iter() {
-        let Some(raw_draw_data) = viewport.draw_data_ref() else {
+        let raw_draw_data = viewport.draw_data();
+        if raw_draw_data.is_null() {
             continue;
-        };
-        let draw_data = draw_data_from_sys(raw_draw_data);
+        }
+        // SAFETY: required by this function's contract and copied before the call returns.
+        let draw_data = draw_data_from_sys(unsafe { &*raw_draw_data });
         if draw_data.valid() {
             preflight_detached_callbacks(draw_data)?;
         }
@@ -864,10 +872,12 @@ pub(crate) fn capture_platform_io(
     let mut main_draw_index = None;
     let mut main_draw_data = None;
     for viewport in platform_io.viewports_iter() {
-        let Some(raw_draw_data) = viewport.draw_data_ref() else {
+        let raw_draw_data = viewport.draw_data();
+        if raw_draw_data.is_null() {
             continue;
-        };
-        let draw_data = draw_data_from_sys(raw_draw_data);
+        }
+        // SAFETY: required by this function's contract and copied before the call returns.
+        let draw_data = draw_data_from_sys(unsafe { &*raw_draw_data });
         if !draw_data.valid() {
             continue;
         }
@@ -1463,9 +1473,11 @@ mod tests {
                 (&mut raw as *mut sys::ImGuiPlatformIO).cast_const(),
             )
         };
-        let pending = capture_platform_io(&platform_io, &mut |_| {
-            Err(SnapshotError::UnknownManagedTexture)
-        })
+        let pending = unsafe {
+            capture_platform_io(&platform_io, &mut |_| {
+                Err(SnapshotError::UnknownManagedTexture)
+            })
+        }
         .expect("empty draw data should capture");
         assert_eq!(pending.draw_data().display_size, [640.0, 360.0]);
         assert_eq!(pending.viewports[0].draw.display_size, [320.0, 200.0]);
@@ -1574,10 +1586,12 @@ mod tests {
         };
         let platform_io = unsafe { crate::platform_io::PlatformIo::from_raw(&raw) };
         let mut resolve_calls = 0usize;
-        let result = capture_platform_io(platform_io, &mut |_| {
-            resolve_calls += 1;
-            Err(SnapshotError::UnknownManagedTexture)
-        });
+        let result = unsafe {
+            capture_platform_io(platform_io, &mut |_| {
+                resolve_calls += 1;
+                Err(SnapshotError::UnknownManagedTexture)
+            })
+        };
 
         assert!(matches!(
             result,

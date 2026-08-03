@@ -42,6 +42,20 @@ struct OutstandingEpoch {
     completion: Option<SnapshotCompletionOutcome>,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum SynchronousFrameStatus {
+    Pending,
+    Reconciled,
+    Abandoned,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct SynchronousFrameState {
+    native_frame_count: i32,
+    epoch: Option<SnapshotEpoch>,
+    status: SynchronousFrameStatus,
+}
+
 #[derive(Debug)]
 pub(super) struct SnapshotHub {
     context: ContextId,
@@ -53,6 +67,7 @@ pub(super) struct SnapshotHub {
     completion_watermark: u64,
     outstanding: BTreeMap<u64, OutstandingEpoch>,
     pending_errors: VecDeque<RendererConsumerError>,
+    synchronous_frame: Option<SynchronousFrameState>,
 }
 
 impl SnapshotHub {
@@ -68,11 +83,29 @@ impl SnapshotHub {
             completion_watermark: 0,
             outstanding: BTreeMap::new(),
             pending_errors: VecDeque::new(),
+            synchronous_frame: None,
         }
     }
 
     pub(super) const fn completion_watermark(&self) -> u64 {
         self.completion_watermark
+    }
+
+    pub(super) fn begin_synchronous_native_frame(&mut self, native_frame_count: i32) {
+        self.synchronous_frame = Some(SynchronousFrameState {
+            native_frame_count,
+            epoch: None,
+            status: SynchronousFrameStatus::Pending,
+        });
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    pub(super) fn is_synchronous_frame_reconciled(&self, native_frame_count: i32) -> bool {
+        self.synchronous_frame.is_some_and(|frame| {
+            frame.native_frame_count == native_frame_count
+                && frame.epoch.is_some()
+                && frame.status == SynchronousFrameStatus::Reconciled
+        })
     }
 
     pub(super) fn validate_consumer_admission(&self) -> Result<NonZeroU64, RendererConsumerError> {
@@ -153,6 +186,9 @@ impl SnapshotHub {
         }
         let sequence = self.allocate_epoch()?;
         let epoch = SnapshotEpoch::new(self.context, generation, sequence);
+        if let Some(frame) = self.synchronous_frame.as_mut() {
+            frame.epoch = Some(epoch);
+        }
         for request in &pending {
             if matches!(request.texture, SnapshotTextureId::FontAtlas { .. }) {
                 atlas.record_request_reference(request.texture, sequence.get());
@@ -177,8 +213,11 @@ impl SnapshotHub {
         registry: &mut ManagedTextureRegistry,
         atlas: FontAtlasSnapshotTarget,
     ) -> Result<SnapshotCompletionProgress, RendererConsumerError> {
-        self.set_direct_completion(epoch, SnapshotCompletionOutcome::Committed(feedback))?;
-        self.advance(registry, &atlas)
+        let result = self
+            .set_direct_completion(epoch, SnapshotCompletionOutcome::Committed(feedback))
+            .and_then(|()| self.advance(registry, &atlas));
+        self.finish_synchronous_frame(epoch, result.is_ok());
+        result
     }
 
     pub(super) fn abandon_synchronous(
@@ -193,6 +232,21 @@ impl SnapshotHub {
         {
             let _ = self.advance(registry, &atlas);
         }
+        self.finish_synchronous_frame(epoch, false);
+    }
+
+    fn finish_synchronous_frame(&mut self, epoch: SnapshotEpoch, reconciled: bool) {
+        let Some(frame) = self.synchronous_frame.as_mut() else {
+            return;
+        };
+        if frame.epoch != Some(epoch) {
+            return;
+        }
+        frame.status = if reconciled {
+            SynchronousFrameStatus::Reconciled
+        } else {
+            SynchronousFrameStatus::Abandoned
+        };
     }
 
     fn set_direct_completion(
@@ -464,6 +518,7 @@ impl SnapshotHub {
     pub(super) fn close(&mut self) {
         self.outstanding.clear();
         self.phase = ConsumerPhase::Unbound;
+        self.synchronous_frame = None;
     }
 }
 
@@ -728,6 +783,9 @@ impl Context {
         &mut self,
         draw_data: *const crate::render::DrawData,
     ) -> Result<(SnapshotEpoch, Vec<TextureRequest>), SnapshotError> {
+        let native_frame_count = unsafe { (*self.raw).FrameCount };
+        self.snapshot_hub
+            .begin_synchronous_native_frame(native_frame_count);
         let atlas = self.font_atlas_snapshot_target();
         let _ = self.poll_snapshot_completions_with_target(&atlas)?;
         let mut pending = {
@@ -777,7 +835,9 @@ impl Context {
         let mut pending = {
             let registry = self.texture_registry.borrow();
             let mut resolve = |native| registry.resolve_snapshot_texture(native, &atlas);
-            capture_platform_io(platform_io, &mut resolve)?
+            // SAFETY: this Context owns the live rendered frame and PlatformIO draw pointers;
+            // capture copies all data before either can be advanced or destroyed.
+            unsafe { capture_platform_io(platform_io, &mut resolve)? }
         };
         self.texture_registry
             .borrow_mut()

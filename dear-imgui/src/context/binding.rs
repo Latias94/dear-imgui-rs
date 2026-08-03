@@ -443,8 +443,6 @@ impl ContextAliveToken {
 }
 
 pub(crate) struct RawBoundContextGuard {
-    target: *mut sys::ImGuiContext,
-    target_state: Option<ManagedContextEntry>,
     previous: *mut sys::ImGuiContext,
     previous_state: Option<ManagedContextEntry>,
     restore: bool,
@@ -463,10 +461,6 @@ impl RawBoundContextGuard {
         unsafe {
             let previous = sys::igGetCurrentContext();
             let restore = previous != target;
-            let target_state = MANAGED_CONTEXTS
-                .try_with(|contexts| contexts.borrow().get(&(target as usize)).cloned())
-                .ok()
-                .flatten();
             let previous_state = if restore {
                 MANAGED_CONTEXTS
                     .try_with(|contexts| contexts.borrow().get(&(previous as usize)).cloned())
@@ -479,8 +473,6 @@ impl RawBoundContextGuard {
                 sys::igSetCurrentContext(target);
             }
             Self {
-                target,
-                target_state,
                 previous,
                 previous_state,
                 restore,
@@ -492,10 +484,8 @@ impl RawBoundContextGuard {
         self.previous
     }
 
-    pub(crate) fn restore_bound_target_or_clear(&mut self) {
-        self.previous = self.target;
-        self.previous_state = self.target_state.clone();
-        self.restore = true;
+    pub(crate) fn preserve_current_context(&mut self) {
+        self.restore = false;
     }
 }
 

@@ -1161,6 +1161,60 @@ fn suspended_context_rejects_owner_swaps_without_corrupting_type_state() {
 }
 
 #[test]
+fn suspended_context_owner_swap_preserves_a_suspended_native_target() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let active = Context::create();
+    let original_active_id = active.id();
+    let original_active_raw = active.as_raw();
+    let mut active = Some(active);
+    let mut suspended = super::SuspendedContext::create();
+    let original_suspended_id = suspended.id();
+    let original_suspended_raw = suspended.0.as_raw();
+    let mut swapped_out = None;
+
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = suspended.try_with_active::<(), ()>(|context| {
+            std::mem::swap(
+                context,
+                active
+                    .as_mut()
+                    .expect("the previous active Context must still be owned"),
+            );
+            swapped_out = Some(
+                active
+                    .take()
+                    .expect("the target Context must move out exactly once")
+                    .suspend(),
+            );
+            Ok(())
+        });
+    }));
+    assert!(panic.is_err());
+    assert!(active.is_none());
+    assert!(unsafe { crate::sys::igGetCurrentContext() }.is_null());
+    assert_eq!(suspended.id(), original_active_id);
+    assert_eq!(suspended.0.as_raw(), original_active_raw);
+
+    let restored_active = suspended
+        .activate()
+        .expect("the previous active Context must remain suspended");
+    assert_eq!(restored_active.id(), original_active_id);
+    let suspended_active = restored_active.suspend();
+
+    let restored_target = swapped_out
+        .take()
+        .expect("the swapped target must remain owned")
+        .activate()
+        .expect("the target Context must remain suspended");
+    assert_eq!(restored_target.id(), original_suspended_id);
+    assert_eq!(restored_target.as_raw(), original_suspended_raw);
+    let suspended_target = restored_target.suspend();
+
+    drop(suspended_target);
+    drop(suspended_active);
+}
+
+#[test]
 fn suspended_context_can_be_entered_repeatedly() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut suspended = super::SuspendedContext::create();
@@ -1382,6 +1436,33 @@ fn platform_release_is_generation_bound_and_rejects_active_renderer_dependencies
     assert!(!platform.is_attached());
     assert!(!platform_lease.is_attached());
     assert!(log.borrow().is_empty());
+}
+
+#[test]
+fn context_teardown_reclaims_a_forgotten_platform_release_permit() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut ctx = Context::create();
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let platform_lease = ctx
+        .register_attachment::<PlatformMarker>(
+            ContextAttachmentRole::Platform,
+            Rc::new(RecordingAttachment::new(Rc::clone(&log))),
+        )
+        .unwrap();
+    let handle = platform_lease.handle();
+
+    let permit = ctx
+        .prepare_platform_attachment_release(&handle)
+        .expect("a platform without renderer dependencies must be releasable");
+    std::mem::forget(permit);
+    drop(ctx);
+
+    assert_eq!(
+        log.borrow().as_slice(),
+        ["quiesce", "renderer", "platform", "post"]
+    );
+    assert!(!handle.is_attached());
+    assert!(!platform_lease.is_attached());
 }
 
 #[test]

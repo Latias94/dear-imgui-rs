@@ -107,6 +107,72 @@ fn reconciled_frame_proof_requires_consuming_a_completed_render_lease() {
     drop(reconciled);
 }
 
+#[cfg(feature = "multi-viewport")]
+unsafe extern "C" fn test_platform_renderer_callback(
+    _viewport: *mut imgui::sys::ImGuiViewport,
+    _argument: *mut std::ffi::c_void,
+) {
+}
+
+#[cfg(feature = "multi-viewport")]
+fn reconcile_test_frame(frame: &mut imgui::render::RenderedFrame<'_>) {
+    let feedback = frame
+        .texture_requests()
+        .iter()
+        .map(|request| match request.kind() {
+            imgui::render::TextureRequestKind::Create
+            | imgui::render::TextureRequestKind::Update => {
+                request.uploaded(imgui::TextureId::new(191))
+            }
+            imgui::render::TextureRequestKind::Destroy => request.destroyed(),
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    frame.reconcile_texture_feedback(feedback).unwrap();
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn managed_platform_pump_requires_current_frame_reconciliation_before_update() {
+    let _guard = test_guard();
+    let mut context = imgui::Context::create();
+    prepare_context(&mut context);
+    let _consumer = context.create_renderer_consumer().unwrap();
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_renderer_render_window_raw(Some(test_platform_renderer_callback));
+    }
+
+    let mut frame = context.begin_frame().render();
+    assert_panics!({
+        frame.update_and_render_platform_windows_default();
+    });
+
+    reconcile_test_frame(&mut frame);
+    frame.update_and_render_platform_windows_default();
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn abandoned_managed_frame_cannot_enter_default_platform_renderer_callbacks() {
+    let _guard = test_guard();
+    let mut context = imgui::Context::create();
+    prepare_context(&mut context);
+    let _consumer = context.create_renderer_consumer().unwrap();
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_renderer_render_window_raw(Some(test_platform_renderer_callback));
+    }
+
+    drop(context.begin_frame().render());
+    context.update_platform_windows();
+    assert_panics!({
+        context.render_platform_windows_default();
+    });
+}
+
 #[test]
 fn context_can_snapshot_an_engine_owned_main_viewport_frame() {
     let _guard = test_guard();
