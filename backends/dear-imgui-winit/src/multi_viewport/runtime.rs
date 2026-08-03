@@ -220,7 +220,11 @@ impl InputOwnership {
         }
     }
 
-    pub(super) fn release_window(&mut self, window_id: WindowId) -> ReleasedInput {
+    pub(super) fn retire_window(
+        &mut self,
+        window_id: WindowId,
+        mouse_handoff: Option<WindowId>,
+    ) -> ReleasedInput {
         let mut released = ReleasedInput::default();
         self.keys.retain(|key, owner| {
             if *owner == window_id {
@@ -232,8 +236,13 @@ impl InputOwnership {
         });
         self.mouse_buttons.retain(|button, owner| {
             if *owner == window_id {
-                released.mouse_buttons.push(*button);
-                false
+                if let Some(mouse_handoff) = mouse_handoff {
+                    *owner = mouse_handoff;
+                    true
+                } else {
+                    released.mouse_buttons.push(*button);
+                    false
+                }
             } else {
                 true
             }
@@ -716,9 +725,10 @@ impl RuntimeControl {
         self.mouse_leave.set(state);
     }
 
-    pub(crate) fn release_window_input(
+    pub(crate) fn retire_window_input(
         &self,
         window_id: WindowId,
+        mouse_handoff: Option<WindowId>,
     ) -> Result<(), WinitPlatformError> {
         if unsafe { dear_imgui_rs::sys::igGetCurrentContext() } != self.context_raw {
             return Err(WinitPlatformError::ContextMismatch);
@@ -728,7 +738,10 @@ impl RuntimeControl {
             return Err(WinitPlatformError::ContextMismatch);
         }
 
-        let released = self.input_ownership.borrow_mut().release_window(window_id);
+        let released = self
+            .input_ownership
+            .borrow_mut()
+            .retire_window(window_id, mouse_handoff);
         let mut mouse_leave = self.mouse_leave.get();
         for key in released.keys {
             unsafe { dear_imgui_rs::sys::ImGuiIO_AddKeyEvent(io, key.into(), false) };

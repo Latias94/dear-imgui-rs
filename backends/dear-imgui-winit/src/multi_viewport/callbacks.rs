@@ -2,7 +2,8 @@ use super::coordinates::{
     desktop_position_from_physical, monitor_from_physical, outer_position_from_client,
 };
 use super::native_cursor_hittest::{
-    focus_and_raise_window, raise_window_without_activation, transfer_mouse_capture,
+    MouseCaptureTransfer, focus_and_raise_window, raise_window_without_activation,
+    transfer_mouse_capture,
 };
 use super::registry::{
     insert_viewport_data, preflight_viewport_ownership, remove_viewport_data, with_current_runtime,
@@ -1259,11 +1260,22 @@ pub(super) unsafe extern "C" fn winit_destroy_window(vp: *mut dear_imgui_rs::sys
             if data.is_main() {
                 return Ok(());
             }
-            control.release_window_input(data.window().id())?;
+            let source_window = data.window();
+            let source_id = source_window.id();
             let Some(main_window) = control.main_window() else {
-                return Ok(());
+                return control.retire_window_input(source_id, None);
             };
-            transfer_mouse_capture(data.window(), &main_window)
+            let main_id = main_window.id();
+            match transfer_mouse_capture(source_window, &main_window) {
+                Ok(MouseCaptureTransfer::Transferred) => {
+                    control.retire_window_input(source_id, Some(main_id))
+                }
+                Ok(MouseCaptureTransfer::NotOwned) => control.retire_window_input(source_id, None),
+                Err(error) => {
+                    control.retire_window_input(source_id, None)?;
+                    Err(error)
+                }
+            }
         }) {
             control.record_fault(error);
         }
