@@ -37,9 +37,9 @@ mod tests;
 mod validation;
 
 pub use core::Io;
-pub use flags::{BackendFlags, ConfigFlags, ViewportFlags};
+pub use flags::{BackendFlags, ConfigFlags, ViewportFlags, WindowClassViewportFlags};
 
-pub(crate) use flags::{validate_backend_flags, validate_config_flags, validate_viewport_flags};
+pub(crate) use flags::{validate_backend_flags, validate_config_flags};
 pub(crate) use validation::{
     assert_display_framebuffer_scale, assert_display_size, assert_finite_f32, assert_finite_vec2,
     assert_memory_compact_timer, assert_non_negative_f32, assert_positive_f32,

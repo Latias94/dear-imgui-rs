@@ -6183,7 +6183,7 @@ mod binding_contract_tests {
 
     #[test]
     fn core_source_contract_hash_covers_versioned_maintained_transforms() {
-        assert_eq!(core_source_contract_hash(), "fnv1a64:6df8ef22a7fcf770");
+        assert_eq!(core_source_contract_hash(), "fnv1a64:3448d57eeb50c869");
     }
 
     #[test]

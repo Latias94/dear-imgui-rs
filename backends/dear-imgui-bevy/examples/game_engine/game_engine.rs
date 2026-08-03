@@ -16,7 +16,7 @@ use bevy::{
 use dear_imgui_bevy::prelude::*;
 use dear_imgui_bevy::{ImguiNativeViewportStatus, ImguiNativeViewportSupport};
 use dear_imgui_rs::{
-    Condition, DockLayout, DockLayoutApply, DockSplit, DockspaceTarget, WindowFlags,
+    Condition, DockLayout, DockLayoutApply, DockSplit, DockspaceOptions, WindowFlags,
 };
 
 const SCENE_SIZE: [u32; 2] = [960, 540];
@@ -220,16 +220,15 @@ fn editor_ui(
     let native_viewport_status = native_viewports.get(context_id);
 
     let root_id = ui.get_id("DearImguiBevyGameEngineDockspace");
-    let viewport = ui.main_viewport();
-    let target = match DockspaceTarget::new(root_id, viewport.work_pos(), viewport.work_size()) {
-        Ok(target) => target,
+    let options = match DockspaceOptions::new(root_id) {
+        Ok(options) => options,
         Err(error) => {
-            error!("invalid game-engine dockspace target: {error}");
+            error!("invalid game-engine dockspace options: {error}");
             return Ok(());
         }
     };
     let dockspace_id = match ui.dockspace_over_main_viewport_with_layout(
-        &target,
+        &options,
         &game_engine_dock_layout(),
         DockLayoutApply::IfMissing,
     ) {

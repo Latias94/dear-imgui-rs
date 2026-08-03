@@ -1,5 +1,5 @@
 use dear_imgui_rs as imgui;
-use dear_imgui_rs::{DockFlags, TextureId};
+use dear_imgui_rs::{DockNodeFlags, TextureId};
 use thiserror::Error;
 use winit::{event::WindowEvent, window::Window};
 
@@ -296,7 +296,7 @@ impl ShutdownContext<'_> {
 }
 
 pub struct DockingController {
-    pub(crate) flags: DockFlags,
+    pub(crate) flags: DockNodeFlags,
 }
 
 pub struct DockingApi<'a> {
@@ -305,11 +305,11 @@ pub struct DockingApi<'a> {
 
 impl DockingApi<'_> {
     #[must_use]
-    pub fn flags(&self) -> DockFlags {
-        DockFlags::from_bits_retain(self.controller.flags.bits())
+    pub fn flags(&self) -> DockNodeFlags {
+        DockNodeFlags::from_bits_retain(self.controller.flags.bits())
     }
 
-    pub fn set_flags(&mut self, flags: DockFlags) {
+    pub fn set_flags(&mut self, flags: DockNodeFlags) {
         self.controller.flags = flags;
     }
 }

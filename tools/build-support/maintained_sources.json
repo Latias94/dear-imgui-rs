@@ -16,13 +16,14 @@
         { "id": "imgui-tables", "canonical": "third-party/cimgui/imgui/imgui_tables.cpp", "alternates": [], "provider_transform": "direct" },
         { "id": "imgui-demo", "canonical": "third-party/cimgui/imgui/imgui_demo.cpp", "alternates": [], "provider_transform": "patch-imgui-demo" },
         { "id": "demo-window-shim", "canonical": "src/demo_window_shim.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "dock-builder-shim", "canonical": "src/dock_builder_shim.cpp", "alternates": [], "provider_transform": "direct" },
         { "id": "platform-io-hooks", "canonical": "src/platform_io_hooks.cpp", "alternates": [], "provider_transform": null },
         { "id": "test-engine-hooks", "canonical": "src/imgui_test_engine_hooks.cpp", "alternates": [], "provider_transform": null },
         { "id": "stack-layout-shim", "canonical": "src/stack_layout_shim.cpp", "alternates": [], "provider_transform": null },
         { "id": "freetype", "canonical": "third-party/cimgui/imgui/misc/freetype/imgui_freetype.cpp", "alternates": [], "provider_transform": null }
       ],
-      "native_required_files": ["cimgui-wrapper", "imgui-core", "imgui-draw", "imgui-widgets", "imgui-tables", "imgui-demo", "demo-window-shim", "platform-io-hooks"],
-      "archive_sentinels": ["cimgui-wrapper", "imgui-core", "demo-window-shim", "platform-io-hooks"],
+      "native_required_files": ["cimgui-wrapper", "imgui-core", "imgui-draw", "imgui-widgets", "imgui-tables", "imgui-demo", "demo-window-shim", "dock-builder-shim", "platform-io-hooks"],
+      "archive_sentinels": ["cimgui-wrapper", "imgui-core", "demo-window-shim", "dock-builder-shim", "platform-io-hooks"],
       "provider": {
         "wasm_bindings": "src/wasm_bindings_pregenerated.rs",
         "symbol_prefixes": ["ig", "Im"],
@@ -30,10 +31,13 @@
           "dear_imgui_rs_show_demo_window_without_font_atlas",
           "dear_imgui_rs_show_font_atlas_debug_panel",
           "dear_imgui_rs_show_metrics_window_without_font_atlas",
-          "dear_imgui_rs_show_style_editor_without_font_atlas"
+          "dear_imgui_rs_show_style_editor_without_font_atlas",
+          "dear_imgui_rs_dock_builder_keep_root_alive",
+          "dear_imgui_rs_dock_builder_root_has_active_content_window",
+          "dear_imgui_rs_dock_builder_copy_node"
         ],
         "include_dirs": ["third-party/cimgui", "third-party/cimgui/imgui"],
-        "source_files": ["cimgui-wrapper", "imgui-core", "imgui-draw", "imgui-widgets", "imgui-tables", "imgui-demo", "demo-window-shim"]
+        "source_files": ["cimgui-wrapper", "imgui-core", "imgui-draw", "imgui-widgets", "imgui-tables", "imgui-demo", "demo-window-shim", "dock-builder-shim"]
       }
     },
     {

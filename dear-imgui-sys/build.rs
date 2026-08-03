@@ -251,6 +251,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/imgui_test_engine_hooks.cpp");
     println!("cargo:rerun-if-changed=src/demo_window_shim.cpp");
+    println!("cargo:rerun-if-changed=src/dock_builder_shim.cpp");
     println!("cargo:rerun-if-changed=src/platform_io_hooks.cpp");
     println!("cargo:rerun-if-changed=src/stack_layout_shim.cpp");
     println!("cargo:rerun-if-changed=src/stack_layout_imgui_externs.cpp.inc");
@@ -670,6 +671,7 @@ fn build_with_cc_cfg(
         "imgui-draw",
         "imgui-tables",
         "demo-window-shim",
+        "dock-builder-shim",
         "platform-io-hooks",
     ] {
         build.file(

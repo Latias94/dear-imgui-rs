@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use dear_imgui_rs::render::{ReconciledFrame, RenderedFrame};
-use dear_imgui_rs::{DockFlags, Id, WindowFlags};
+use dear_imgui_rs::{DockNodeFlags, Id, WindowFlags};
 #[cfg(feature = "test-engine")]
 use dear_imgui_test_engine::TestFrameDriver;
 use tracing::{error, info, warn};
@@ -803,14 +803,14 @@ impl<A: Application> RuntimeFactory<RuntimeRecovery<'_, A>> for WgpuRuntimeFacto
     }
 }
 
-fn draw_dockspace(ui: &dear_imgui_rs::Ui, flags: DockFlags, config: &AppConfig) {
+fn draw_dockspace(ui: &dear_imgui_rs::Ui, flags: DockNodeFlags, config: &AppConfig) {
     let Some((host_window_name, mut window_flags)) = config.docking.full_viewport_host() else {
         return;
     };
 
     let viewport = ui.main_viewport();
     ui.set_next_window_viewport(viewport.id());
-    if flags.contains(DockFlags::PASSTHRU_CENTRAL_NODE) {
+    if flags.contains(DockNodeFlags::PASSTHRU_CENTRAL_NODE) {
         window_flags |= WindowFlags::NO_BACKGROUND;
     }
     ui.window(host_window_name)

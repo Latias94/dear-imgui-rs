@@ -1,12 +1,14 @@
-use super::flags::{DockNodeFlags, validate_dock_node_flags};
-use super::validation::{assert_nonzero_id, optional_nonzero_id_raw};
+use super::flags::WindowClassDockNodeFlags;
+use super::validation::assert_nonzero_id;
 use crate::{Id, sys};
 use std::ptr;
+use thiserror::Error;
 
 /// Parent viewport policy for a docking window class.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WindowClassParentViewport {
     /// Use Dear ImGui's default parent viewport behavior.
+    #[default]
     Default,
     /// Request the platform backend to avoid parent-child platform windows.
     NoParent,
@@ -14,23 +16,31 @@ pub enum WindowClassParentViewport {
     Parent(Id),
 }
 
-impl Default for WindowClassParentViewport {
-    fn default() -> Self {
-        Self::Default
+impl WindowClassParentViewport {
+    fn try_raw(self) -> Result<sys::ImGuiID, WindowClassError> {
+        match self {
+            Self::Default => Ok(!0),
+            Self::NoParent => Ok(0),
+            Self::Parent(id) if id.raw() != 0 => Ok(id.raw()),
+            Self::Parent(_) => Err(WindowClassError::ZeroParentViewportId),
+        }
     }
 }
 
-impl WindowClassParentViewport {
-    pub(super) fn raw(self, caller: &str) -> sys::ImGuiID {
-        match self {
-            Self::Default => !0,
-            Self::NoParent => 0,
-            Self::Parent(id) => {
-                assert_nonzero_id(caller, "parent_viewport_id", id);
-                id.raw()
-            }
-        }
-    }
+/// Validation failure for a [`WindowClass`].
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum WindowClassError {
+    #[error("parent viewport ID must be non-zero")]
+    ZeroParentViewportId,
+    #[error("viewport overrides contain unsupported ImGuiViewportFlags bits: 0x{bits:X}")]
+    UnsupportedViewportFlags { bits: i32 },
+    #[error("viewport overrides set and clear the same ImGuiViewportFlags bits: 0x{bits:X}")]
+    OverlappingViewportFlags { bits: i32 },
+    #[error("tab overrides contain unsupported ImGuiTabItemFlags bits: 0x{bits:X}")]
+    UnsupportedTabItemFlags { bits: i32 },
+    #[error("dock-node overrides contain unsupported ImGuiDockNodeFlags bits: 0x{bits:X}")]
+    UnsupportedDockNodeFlags { bits: i32 },
 }
 
 /// Window class for docking configuration.
@@ -52,13 +62,13 @@ pub struct WindowClass {
     /// ID of parent window for shortcut focus route evaluation
     focus_route_parent_window_id: Option<Id>,
     /// Viewport flags to set when a window of this class owns a viewport.
-    viewport_flags_override_set: crate::ViewportFlags,
+    viewport_flags_override_set: crate::WindowClassViewportFlags,
     /// Viewport flags to clear when a window of this class owns a viewport.
-    viewport_flags_override_clear: crate::ViewportFlags,
+    viewport_flags_override_clear: crate::WindowClassViewportFlags,
     /// Tab item flags to set when a window of this class is submitted into a dock node tab bar.
     tab_item_flags_override_set: crate::widget::TabItemOptions,
     /// Dock node flags to set when a window of this class is hosted by a dock node.
-    dock_node_flags_override_set: DockNodeFlags,
+    dock_node_flags_override_set: WindowClassDockNodeFlags,
     /// Set to true to enforce single floating windows of this class always having their own docking node
     docking_always_tab_bar: bool,
     /// Set to true to allow windows of this class to be docked/merged with an unclassed window
@@ -76,10 +86,10 @@ impl Default for WindowClass {
             class_id: None,
             parent_viewport: WindowClassParentViewport::Default,
             focus_route_parent_window_id: None,
-            viewport_flags_override_set: crate::ViewportFlags::NONE,
-            viewport_flags_override_clear: crate::ViewportFlags::NONE,
+            viewport_flags_override_set: crate::WindowClassViewportFlags::empty(),
+            viewport_flags_override_clear: crate::WindowClassViewportFlags::empty(),
             tab_item_flags_override_set: crate::widget::TabItemOptions::new(),
-            dock_node_flags_override_set: DockNodeFlags::NONE,
+            dock_node_flags_override_set: WindowClassDockNodeFlags::NONE,
             docking_always_tab_bar: false,
             docking_allow_unclassed: true,
             platform_icon_data: None,
@@ -113,12 +123,12 @@ impl WindowClass {
     }
 
     /// Returns the viewport flags this class sets.
-    pub fn viewport_flags_to_set(&self) -> crate::ViewportFlags {
+    pub fn viewport_flags_to_set(&self) -> crate::WindowClassViewportFlags {
         self.viewport_flags_override_set
     }
 
     /// Returns the viewport flags this class clears.
-    pub fn viewport_flags_to_clear(&self) -> crate::ViewportFlags {
+    pub fn viewport_flags_to_clear(&self) -> crate::WindowClassViewportFlags {
         self.viewport_flags_override_clear
     }
 
@@ -128,7 +138,7 @@ impl WindowClass {
     }
 
     /// Returns the dock node flags this class applies.
-    pub fn dock_node_flags(&self) -> DockNodeFlags {
+    pub fn dock_node_flags_to_set(&self) -> WindowClassDockNodeFlags {
         self.dock_node_flags_override_set
     }
 
@@ -142,8 +152,15 @@ impl WindowClass {
         self.docking_allow_unclassed
     }
 
-    /// Sets the parent viewport policy.
-    pub fn parent_viewport(mut self, parent: WindowClassParentViewport) -> Self {
+    /// Sets the raw parent viewport policy.
+    ///
+    /// # Safety
+    ///
+    /// For [`WindowClassParentViewport::Parent`], the target viewport must be live when the
+    /// window begins, belong to the same Context, and the resulting parent graph must contain no
+    /// self-edge or cycle. Dear ImGui stores a raw parent pointer and traverses it without cycle
+    /// detection. The `Default` and `NoParent` policies satisfy these requirements inherently.
+    pub unsafe fn parent_viewport(mut self, parent: WindowClassParentViewport) -> Self {
         self.parent_viewport = parent;
         self
     }
@@ -154,8 +171,19 @@ impl WindowClass {
         self
     }
 
-    /// Requests a specific parent viewport ID.
-    pub fn parent_viewport_id(mut self, id: Id) -> Self {
+    /// Requests a specific raw parent viewport ID.
+    ///
+    /// # Safety
+    ///
+    /// The target viewport must be live when the window begins, belong to the same Context, and
+    /// the resulting parent graph must contain no self-edge or cycle.
+    ///
+    /// ```compile_fail
+    /// # use dear_imgui_rs::{Id, WindowClass};
+    /// let class = WindowClass::default().parent_viewport_id(Id::from(1u32));
+    /// # let _ = class;
+    /// ```
+    pub unsafe fn parent_viewport_id(mut self, id: Id) -> Self {
         assert_nonzero_id("WindowClass::parent_viewport_id()", "id", id);
         self.parent_viewport = WindowClassParentViewport::Parent(id);
         self
@@ -182,13 +210,13 @@ impl WindowClass {
     }
 
     /// Sets viewport flags when a window of this class owns a viewport.
-    pub fn viewport_flags_override_set(mut self, flags: crate::ViewportFlags) -> Self {
+    pub fn viewport_flags_override_set(mut self, flags: crate::WindowClassViewportFlags) -> Self {
         self.viewport_flags_override_set = flags;
         self
     }
 
     /// Clears viewport flags when a window of this class owns a viewport.
-    pub fn viewport_flags_override_clear(mut self, flags: crate::ViewportFlags) -> Self {
+    pub fn viewport_flags_override_clear(mut self, flags: crate::WindowClassViewportFlags) -> Self {
         self.viewport_flags_override_clear = flags;
         self
     }
@@ -196,8 +224,8 @@ impl WindowClass {
     /// Sets and clears viewport flags when a window of this class owns a viewport.
     pub fn viewport_flags_overrides(
         mut self,
-        set: crate::ViewportFlags,
-        clear: crate::ViewportFlags,
+        set: crate::WindowClassViewportFlags,
+        clear: crate::WindowClassViewportFlags,
     ) -> Self {
         self.viewport_flags_override_set = set;
         self.viewport_flags_override_clear = clear;
@@ -214,7 +242,7 @@ impl WindowClass {
     }
 
     /// Sets dock node flags when a window of this class is hosted by a dock node.
-    pub fn dock_node_flags_override_set(mut self, flags: DockNodeFlags) -> Self {
+    pub fn dock_node_flags_override_set(mut self, flags: WindowClassDockNodeFlags) -> Self {
         self.dock_node_flags_override_set = flags;
         self
     }
@@ -242,33 +270,45 @@ impl WindowClass {
         self
     }
 
-    fn validate(&self, caller: &str) {
-        crate::io::validate_viewport_flags(
-            caller,
-            self.viewport_flags_override_set | self.viewport_flags_override_clear,
-        );
+    /// Validate every typed override without touching Dear ImGui state.
+    pub fn validate(&self) -> Result<(), WindowClassError> {
+        let viewport_bits =
+            (self.viewport_flags_override_set | self.viewport_flags_override_clear).bits();
+        let unsupported_viewport = viewport_bits & !crate::WindowClassViewportFlags::all().bits();
+        if unsupported_viewport != 0 {
+            return Err(WindowClassError::UnsupportedViewportFlags {
+                bits: unsupported_viewport,
+            });
+        }
         let overlap =
             self.viewport_flags_override_set.bits() & self.viewport_flags_override_clear.bits();
-        assert!(
-            overlap == 0,
-            "{caller} cannot set and clear the same ImGuiViewportFlags bits: 0x{overlap:X}"
-        );
-        self.tab_item_flags_override_set
-            .validate_for_tab_item(caller);
-        validate_dock_node_flags(caller, self.dock_node_flags_override_set);
+        if overlap != 0 {
+            return Err(WindowClassError::OverlappingViewportFlags { bits: overlap });
+        }
+        let unsupported_tab =
+            self.tab_item_flags_override_set.flags.bits() & !crate::TabItemFlags::all().bits();
+        if unsupported_tab != 0 {
+            return Err(WindowClassError::UnsupportedTabItemFlags {
+                bits: unsupported_tab,
+            });
+        }
+        let unsupported_dock =
+            self.dock_node_flags_override_set.bits() & !WindowClassDockNodeFlags::all().bits();
+        if unsupported_dock != 0 {
+            return Err(WindowClassError::UnsupportedDockNodeFlags {
+                bits: unsupported_dock,
+            });
+        }
+        self.parent_viewport.try_raw()?;
+        Ok(())
     }
 
-    /// Converts to ImGui's internal representation
-    pub(crate) fn to_imgui(&self, caller: &str) -> sys::ImGuiWindowClass {
-        self.validate(caller);
-        sys::ImGuiWindowClass {
-            ClassId: optional_nonzero_id_raw(caller, "class_id", self.class_id),
-            ParentViewportId: self.parent_viewport.raw(caller),
-            FocusRouteParentWindowId: optional_nonzero_id_raw(
-                caller,
-                "focus_route_parent_window_id",
-                self.focus_route_parent_window_id,
-            ),
+    pub(crate) fn try_to_imgui(&self) -> Result<sys::ImGuiWindowClass, WindowClassError> {
+        self.validate()?;
+        Ok(sys::ImGuiWindowClass {
+            ClassId: self.class_id.map_or(0, Id::raw),
+            ParentViewportId: self.parent_viewport.try_raw()?,
+            FocusRouteParentWindowId: self.focus_route_parent_window_id.map_or(0, Id::raw),
             ViewportFlagsOverrideSet: self.viewport_flags_override_set.bits(),
             ViewportFlagsOverrideClear: self.viewport_flags_override_clear.bits(),
             TabItemFlagsOverrideSet: self.tab_item_flags_override_set.bits(),
@@ -278,6 +318,12 @@ impl WindowClass {
             PlatformIconData: self
                 .platform_icon_data
                 .map_or(ptr::null_mut(), ptr::NonNull::as_ptr),
-        }
+        })
+    }
+
+    /// Convert to Dear ImGui's internal representation for infallible direct APIs.
+    pub(crate) fn to_imgui(&self, caller: &str) -> sys::ImGuiWindowClass {
+        self.try_to_imgui()
+            .unwrap_or_else(|error| panic!("{caller}: {error}"))
     }
 }

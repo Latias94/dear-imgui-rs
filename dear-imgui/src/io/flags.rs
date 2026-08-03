@@ -66,6 +66,27 @@ impl<'de> Deserialize<'de> for ViewportFlags {
     }
 }
 
+#[cfg(feature = "serde")]
+impl Serialize for WindowClassViewportFlags {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_i32(self.bits())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for WindowClassViewportFlags {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bits = i32::deserialize(deserializer)?;
+        Ok(WindowClassViewportFlags::from_bits_retain(bits))
+    }
+}
+
 bitflags! {
     /// Configuration flags
     #[repr(transparent)]
@@ -89,6 +110,33 @@ bitflags! {
         const DOCKING_ENABLE = sys::ImGuiConfigFlags_DockingEnable as i32;
 
         const VIEWPORTS_ENABLE = sys::ImGuiConfigFlags_ViewportsEnable as i32;
+    }
+}
+
+bitflags! {
+    /// Viewport policy bits that an application may override through [`crate::WindowClass`].
+    ///
+    /// Identity, topology, host capability, and platform output status remain owned by Dear
+    /// ImGui and its backends, so they are intentionally absent from this type.
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct WindowClassViewportFlags: i32 {
+        /// Disable platform decorations such as title bars and borders.
+        const NO_DECORATION = sys::ImGuiViewportFlags_NoDecoration as i32;
+        /// Omit the platform task bar icon.
+        const NO_TASK_BAR_ICON = sys::ImGuiViewportFlags_NoTaskBarIcon as i32;
+        /// Do not activate the platform window when it appears.
+        const NO_FOCUS_ON_APPEARING = sys::ImGuiViewportFlags_NoFocusOnAppearing as i32;
+        /// Do not activate the platform window when it is clicked.
+        const NO_FOCUS_ON_CLICK = sys::ImGuiViewportFlags_NoFocusOnClick as i32;
+        /// Make pointer input pass through the platform window.
+        const NO_INPUTS = sys::ImGuiViewportFlags_NoInputs as i32;
+        /// Tell the renderer that the viewport framebuffer does not need to be cleared.
+        const NO_RENDERER_CLEAR = sys::ImGuiViewportFlags_NoRendererClear as i32;
+        /// Prevent this viewport from automatically merging into another host viewport.
+        const NO_AUTO_MERGE = sys::ImGuiViewportFlags_NoAutoMerge as i32;
+        /// Keep the platform window above ordinary windows.
+        const TOP_MOST = sys::ImGuiViewportFlags_TopMost as i32;
     }
 }
 
@@ -173,13 +221,5 @@ pub(crate) fn validate_backend_flags(caller: &str, flags: BackendFlags) {
     assert!(
         unsupported == 0,
         "{caller} received unsupported ImGuiBackendFlags bits: 0x{unsupported:X}"
-    );
-}
-
-pub(crate) fn validate_viewport_flags(caller: &str, flags: ViewportFlags) {
-    let unsupported = flags.bits() & !ViewportFlags::all().bits();
-    assert!(
-        unsupported == 0,
-        "{caller} received unsupported ImGuiViewportFlags bits: 0x{unsupported:X}"
     );
 }

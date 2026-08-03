@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use dear_imgui_rs::{ConfigFlags, DockFlags, WindowFlags};
+use dear_imgui_rs::{ConfigFlags, DockNodeFlags, WindowFlags};
 
 /// Optional extension contexts created with the application UI state.
 #[derive(Clone, Copy, Debug, Default)]
@@ -138,10 +138,10 @@ pub enum DockingConfig {
     #[default]
     Disabled,
     /// Enable docking without drawing a dockspace host window.
-    ApplicationManaged { dockspace_flags: DockFlags },
+    ApplicationManaged { dockspace_flags: DockNodeFlags },
     /// Enable docking and draw a full-viewport dockspace host window every frame.
     FullViewport {
-        dockspace_flags: DockFlags,
+        dockspace_flags: DockNodeFlags,
         host_window_flags: WindowFlags,
         host_window_name: String,
     },
@@ -152,7 +152,7 @@ impl DockingConfig {
     #[must_use]
     pub fn application_managed() -> Self {
         Self::ApplicationManaged {
-            dockspace_flags: DockFlags::PASSTHRU_CENTRAL_NODE,
+            dockspace_flags: DockNodeFlags::PASSTHRU_CENTRAL_NODE,
         }
     }
 
@@ -160,7 +160,7 @@ impl DockingConfig {
     #[must_use]
     pub fn full_viewport() -> Self {
         Self::FullViewport {
-            dockspace_flags: DockFlags::PASSTHRU_CENTRAL_NODE,
+            dockspace_flags: DockNodeFlags::PASSTHRU_CENTRAL_NODE,
             host_window_flags: WindowFlags::NO_TITLE_BAR
                 | WindowFlags::NO_RESIZE
                 | WindowFlags::NO_MOVE
@@ -176,13 +176,13 @@ impl DockingConfig {
         !matches!(self, Self::Disabled)
     }
 
-    pub(crate) fn dockspace_flags(&self) -> DockFlags {
+    pub(crate) fn dockspace_flags(&self) -> DockNodeFlags {
         match self {
-            Self::Disabled => DockFlags::empty(),
+            Self::Disabled => DockNodeFlags::empty(),
             Self::ApplicationManaged { dockspace_flags }
             | Self::FullViewport {
                 dockspace_flags, ..
-            } => DockFlags::from_bits_retain(dockspace_flags.bits()),
+            } => DockNodeFlags::from_bits_retain(dockspace_flags.bits()),
         }
     }
 

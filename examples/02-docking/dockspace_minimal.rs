@@ -145,7 +145,7 @@ impl AppWindow {
 
         // 1) Host a fullscreen window for the DockSpace (mirrors minimal C++ docking example)
         use dear_imgui_rs::{
-            DockLayout, DockLayoutApply, DockSplit, DockspaceTarget, StyleColor, StyleVar,
+            DockLayout, DockLayoutApply, DockSplit, DockspaceOptions, StyleColor, StyleVar,
             WindowFlags,
         };
 
@@ -168,7 +168,7 @@ impl AppWindow {
         let border = ui.push_style_var(StyleVar::WindowBorderSize(0.0));
         let padding = ui.push_style_var(StyleVar::WindowPadding([0.0, 0.0]));
         let dockspace_id = ui.get_id("MyDockspace");
-        let dockspace_target = DockspaceTarget::new(dockspace_id, pos, size)?;
+        let dockspace_options = DockspaceOptions::new(dockspace_id)?;
         let dockspace_layout = DockLayout::split(
             DockSplit::Left,
             0.20,
@@ -200,7 +200,8 @@ impl AppWindow {
                 // Render DockSpace inside the host window
                 let color = ui.push_style_color(StyleColor::DockingEmptyBg, [1.0, 0.0, 0.0, 1.0]);
                 dockspace_result = ui.dock_space_with_layout(
-                    &dockspace_target,
+                    &dockspace_options,
+                    ui.content_region_avail(),
                     &dockspace_layout,
                     DockLayoutApply::IfMissing,
                 );

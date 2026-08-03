@@ -113,6 +113,16 @@ unsafe extern "C" {
     pub fn dear_imgui_rs_show_metrics_window_without_font_atlas(p_open: *mut bool);
     pub fn dear_imgui_rs_show_style_editor_without_font_atlas(ref_: *mut ImGuiStyle);
     pub fn dear_imgui_rs_show_font_atlas_debug_panel();
+    pub fn dear_imgui_rs_dock_builder_keep_root_alive(root_id: ImGuiID) -> ::std::os::raw::c_int;
+    pub fn dear_imgui_rs_dock_builder_root_has_active_content_window(
+        root_id: ImGuiID,
+    ) -> ::std::os::raw::c_int;
+    pub fn dear_imgui_rs_dock_builder_copy_node(
+        source_root_id: ImGuiID,
+        destination_root_id: ImGuiID,
+        remap_data: *mut ImGuiID,
+        remap_capacity: ::std::os::raw::c_int,
+    ) -> ::std::os::raw::c_int;
 }
 
 /// Optional backend shim entry points for downstream integrations.

@@ -1184,13 +1184,7 @@ impl AppWindow {
         // Submit the stable dockspace and let the declarative compiler own its lifecycle.
         let dock_id_struct = ui.get_id("MainDockSpace");
         imgui.dockspace_id = dock_id_struct.into();
-        let viewport = ui.main_viewport();
-        let target = dear_imgui_rs::DockspaceTarget::new(
-            dock_id_struct,
-            viewport.work_pos(),
-            viewport.work_size(),
-        )?
-        .flags(
+        let options = dear_imgui_rs::DockspaceOptions::new(dock_id_struct)?.flags(
             dear_imgui_rs::DockNodeFlags::PASSTHRU_CENTRAL_NODE
                 | dear_imgui_rs::DockNodeFlags::AUTO_HIDE_TAB_BAR,
         );
@@ -1199,7 +1193,7 @@ impl AppWindow {
         } else {
             dear_imgui_rs::DockLayoutApply::IfMissing
         };
-        ui.dockspace_over_main_viewport_with_layout(&target, &initial_docking_layout(), apply)?;
+        ui.dockspace_over_main_viewport_with_layout(&options, &initial_docking_layout(), apply)?;
         imgui.first_frame = false;
 
         let actions = render_main_menu_bar(ui, &mut imgui.game_state);

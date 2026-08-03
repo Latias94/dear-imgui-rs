@@ -9,7 +9,7 @@ use bevy::{
     window::{PresentMode, WindowPlugin, WindowTheme},
 };
 use dear_imgui_bevy::prelude::*;
-use dear_imgui_rs::{Condition, DockLayout, DockLayoutApply, DockSplit, DockspaceTarget};
+use dear_imgui_rs::{Condition, DockLayout, DockLayoutApply, DockSplit, DockspaceOptions};
 use dear_imguizmo::{DrawListTarget, GuizmoExt, Mat4Like};
 use dear_imnodes::ImNodesExt;
 use dear_implot::ImPlotExt;
@@ -114,16 +114,15 @@ fn ecosystem_ui(
     state.frame_index = frame_index;
 
     let root_id = ui.get_id("DearImguiBevyEcosystemDockspace");
-    let viewport = ui.main_viewport();
-    let target = match DockspaceTarget::new(root_id, viewport.work_pos(), viewport.work_size()) {
-        Ok(target) => target,
+    let options = match DockspaceOptions::new(root_id) {
+        Ok(options) => options,
         Err(error) => {
-            error!("invalid ecosystem dockspace target: {error}");
+            error!("invalid ecosystem dockspace options: {error}");
             return Ok(());
         }
     };
     let dockspace_id = match ui.dockspace_over_main_viewport_with_layout(
-        &target,
+        &options,
         &ecosystem_dock_layout(),
         DockLayoutApply::IfMissing,
     ) {

@@ -121,7 +121,7 @@ impl Application for DockDemoState {
             | WindowFlags::MENU_BAR;
 
         let dock_flags = addons.docking().flags();
-        if dock_flags.contains(DockFlags::PASSTHRU_CENTRAL_NODE) {
+        if dock_flags.contains(DockNodeFlags::PASSTHRU_CENTRAL_NODE) {
             host_flags |= WindowFlags::NO_BACKGROUND;
         }
 
@@ -152,41 +152,40 @@ impl Application for DockDemoState {
                 rounding.pop();
                 let dockspace_id = ui.get_id("MainDockSpace");
                 let avail = ui.content_region_avail();
-                dockspace_result =
-                    DockspaceTarget::new(dockspace_id, ui.cursor_screen_pos(), avail)
-                        .map(|target| target.flags(dock_flags))
-                        .and_then(|target| ui.dock_space_with_layout(&target, &layout, apply));
+                dockspace_result = DockspaceOptions::new(dockspace_id)
+                    .map(|options| options.flags(dock_flags))
+                    .and_then(|options| ui.dock_space_with_layout(&options, avail, &layout, apply));
 
                 // Optional: a small toolbar of docking flags toggles (update dear-app runtime flags)
                 if let Some(_bar) = ui.begin_menu_bar() {
                     if let Some(_menu) = ui.begin_menu("Docking Flags") {
                         let mut new_flags = addons.docking().flags();
                         // Build flags from simple toggles (demo purpose)
-                        let mut no_split = new_flags.contains(DockFlags::NO_DOCKING_SPLIT);
-                        let mut no_resize = new_flags.contains(DockFlags::NO_RESIZE);
-                        let mut auto_hide = new_flags.contains(DockFlags::AUTO_HIDE_TAB_BAR);
+                        let mut no_split = new_flags.contains(DockNodeFlags::NO_DOCKING_SPLIT);
+                        let mut no_resize = new_flags.contains(DockNodeFlags::NO_RESIZE);
+                        let mut auto_hide = new_flags.contains(DockNodeFlags::AUTO_HIDE_TAB_BAR);
                         let mut no_central =
-                            new_flags.contains(DockFlags::NO_DOCKING_OVER_CENTRAL_NODE);
+                            new_flags.contains(DockNodeFlags::NO_DOCKING_OVER_CENTRAL_NODE);
 
                         if ui.menu_item_toggle_no_shortcut("NoSplit", &mut no_split, true) {
                             if no_split {
-                                new_flags |= DockFlags::NO_DOCKING_SPLIT;
+                                new_flags |= DockNodeFlags::NO_DOCKING_SPLIT;
                             } else {
-                                new_flags.remove(DockFlags::NO_DOCKING_SPLIT);
+                                new_flags.remove(DockNodeFlags::NO_DOCKING_SPLIT);
                             }
                         }
                         if ui.menu_item_toggle_no_shortcut("NoResize", &mut no_resize, true) {
                             if no_resize {
-                                new_flags |= DockFlags::NO_RESIZE;
+                                new_flags |= DockNodeFlags::NO_RESIZE;
                             } else {
-                                new_flags.remove(DockFlags::NO_RESIZE);
+                                new_flags.remove(DockNodeFlags::NO_RESIZE);
                             }
                         }
                         if ui.menu_item_toggle_no_shortcut("AutoHideTabBar", &mut auto_hide, true) {
                             if auto_hide {
-                                new_flags |= DockFlags::AUTO_HIDE_TAB_BAR;
+                                new_flags |= DockNodeFlags::AUTO_HIDE_TAB_BAR;
                             } else {
-                                new_flags.remove(DockFlags::AUTO_HIDE_TAB_BAR);
+                                new_flags.remove(DockNodeFlags::AUTO_HIDE_TAB_BAR);
                             }
                         }
                         if ui.menu_item_toggle_no_shortcut(
@@ -195,9 +194,9 @@ impl Application for DockDemoState {
                             true,
                         ) {
                             if no_central {
-                                new_flags |= DockFlags::NO_DOCKING_OVER_CENTRAL_NODE;
+                                new_flags |= DockNodeFlags::NO_DOCKING_OVER_CENTRAL_NODE;
                             } else {
-                                new_flags.remove(DockFlags::NO_DOCKING_OVER_CENTRAL_NODE);
+                                new_flags.remove(DockNodeFlags::NO_DOCKING_OVER_CENTRAL_NODE);
                             }
                         }
                         // Apply runtime flags
