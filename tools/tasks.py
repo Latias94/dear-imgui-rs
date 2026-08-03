@@ -179,18 +179,26 @@ def task_publish(args, repo_root: Path) -> int:
     
     if getattr(args, "dry_run", False):
         cmd.append("--dry-run")
+    if getattr(args, "cargo_dry_run", False):
+        cmd.append("--cargo-dry-run")
     if getattr(args, "no_verify", False):
         cmd.append("--no-verify")
     if getattr(args, "crates", None):
         cmd.extend(["--crates", args.crates])
-    if getattr(args, "start_from", None):
-        cmd.extend(["--start-from", args.start_from])
-    if getattr(args, "wait", None):
-        cmd.extend(["--wait", str(args.wait)])
     if getattr(args, "release_gate_result", None):
         cmd.extend(["--release-gate-result", str(args.release_gate_result)])
-    if getattr(args, "dangerously_skip_release_check", False):
-        cmd.append("--dangerously-skip-release-check")
+    if getattr(args, "yes", False):
+        cmd.append("--yes")
+    if getattr(args, "verify_published", False):
+        cmd.append("--verify-published")
+    if getattr(args, "index_timeout", None) is not None:
+        cmd.extend(["--index-timeout", str(args.index_timeout)])
+    if getattr(args, "publish_timeout", None) is not None:
+        cmd.extend(["--publish-timeout", str(args.publish_timeout)])
+    if getattr(args, "poll_interval", None) is not None:
+        cmd.extend(["--poll-interval", str(args.poll_interval)])
+    if getattr(args, "journal", None):
+        cmd.extend(["--journal", str(args.journal)])
     
     return run_command(cmd, cwd=repo_root)
 
@@ -485,21 +493,43 @@ def main() -> int:
         "publish", help="Publish crates with authoritative release evidence"
     )
     publish_parser.add_argument("--crates", help="Comma-separated list of crates")
-    publish_parser.add_argument("--start-from", help="Start from specific crate")
-    publish_parser.add_argument("--wait", type=int, help="Wait time between publishes")
     publish_parser.add_argument("--dry-run", action="store_true", help="Dry run")
+    publish_parser.add_argument(
+        "--cargo-dry-run",
+        action="store_true",
+        help="Run cargo publish --dry-run",
+    )
     publish_parser.add_argument("--no-verify", action="store_true", help="Skip verification")
     publish_parser.add_argument(
         "--release-gate-result",
         type=Path,
         help="Authoritative same-SHA gate-result.json required for uploads",
     )
+    publish_parser.add_argument("--yes", action="store_true", help="Confirm upload")
     publish_parser.add_argument(
-        "--dangerously-skip-release-check",
+        "--verify-published",
         action="store_true",
-        help=(
-            "Emergency-only upload without release evidence or the strict local gate"
-        ),
+        help="Verify the complete release train without uploading",
+    )
+    publish_parser.add_argument(
+        "--index-timeout",
+        type=float,
+        help="Maximum seconds to wait for each exact version",
+    )
+    publish_parser.add_argument(
+        "--publish-timeout",
+        type=float,
+        help="Maximum seconds for one cargo publish process",
+    )
+    publish_parser.add_argument(
+        "--poll-interval",
+        type=float,
+        help="Initial registry polling interval in seconds",
+    )
+    publish_parser.add_argument(
+        "--journal",
+        type=Path,
+        help="Write an atomic publication journal",
     )
     
     # test task

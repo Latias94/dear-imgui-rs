@@ -421,10 +421,9 @@ Maintenance rules
 - dear-imgui-rs upgrades may require minor changes in backends/extensions if public APIs changed.
 - Backend external deps (wgpu/winit/glow) have their own breaking cycles and may trigger a coordinated bump of the unified publishable release train.
 
-### CI (Prebuilt Binaries)
+### CI and Releases
 
-- Dispatch `.github/workflows/release-gate.yml` with the exact full
-  `candidate_sha`; a branch or movable tag is not artifact identity.
+- Dispatch `.github/workflows/release.yml` from `main` with the tag matching `workspace.package.version`; it binds the exact candidate SHA, runs the Release Gate, publishes all crates, and creates the tag and GitHub Release as one resumable workflow. `release-gate.yml` remains available for non-publishing diagnostics.
 - Its reusable `.github/workflows/prebuilt-binaries.yml` job builds and then
   consumes the complete core plus six-safe-extension package set for Linux
   x86_64, macOS x86_64/aarch64, and Windows MSVC `/MD`/`/MT`. There is no
@@ -432,11 +431,8 @@ Maintenance rules
 - Packages use names such as
   `dear-<name>-prebuilt-<version>-<target>-static[-stack-layout][-freetype][-mt|-md].tar.gz`
   and embed the same candidate SHA in their manifests.
-- Prebuilt results are five of the fixed 14 release cells. The aggregate and
-  supporting logs, manifests, binding hashes, candidate SHA, and SHA256
-  evidence are retained for approximately 30 days. A missing or failed
-  producer/consumer cell makes the release `No-Go`; archives are uploaded to a
-  GitHub Release only after the same-SHA aggregate is verified.
+- Prebuilt results are five of the fixed 16 release cells; a separate cell packages and consumes all 27 publishable crates before any publishing credential is issued. The aggregate and supporting logs, manifests, binding hashes, candidate SHA, and SHA256 evidence are retained for approximately 30 days. A missing or failed cell makes the release `No-Go`.
+- crates.io publication uses short-lived Trusted Publishing credentials from the protected `release` environment and binds every published archive back to the clean candidate commit. The final GitHub Release is checked before and after upload so its asset inventory contains exactly the archives recorded by successful cells plus `SHA256SUMS`.
 - Release download URLs default to the owner/repository configured in
   `tools/build-support/src/lib.rs`. Override them with
   `BUILD_SUPPORT_GH_OWNER` and `BUILD_SUPPORT_GH_REPO`.

@@ -1,6 +1,7 @@
 import importlib.util
 import io
 import subprocess
+import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -9,6 +10,7 @@ from unittest.mock import patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT / "tools"))
 SPEC = importlib.util.spec_from_file_location("dear_imgui_tasks", REPO_ROOT / "tools/tasks.py")
 TASKS = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -339,12 +341,16 @@ class ReleaseTaskTests(unittest.TestCase):
     def test_publish_forwards_authoritative_gate_result(self):
         args = SimpleNamespace(
             dry_run=False,
+            cargo_dry_run=False,
             no_verify=False,
             crates="dear-imgui-sys",
-            start_from=None,
-            wait=7,
             release_gate_result=Path("artifacts/gate-result.json"),
-            dangerously_skip_release_check=False,
+            yes=True,
+            verify_published=False,
+            index_timeout=300.0,
+            publish_timeout=240.0,
+            poll_interval=2.0,
+            journal=Path("artifacts/publication.json"),
         )
         with patch.object(TASKS, "run_command", return_value=0) as run_command:
             self.assertEqual(TASKS.task_publish(args, REPO_ROOT), 0)
@@ -356,22 +362,42 @@ class ReleaseTaskTests(unittest.TestCase):
                 "tools/publish.py",
                 "--crates",
                 "dear-imgui-sys",
-                "--wait",
-                "7",
                 "--release-gate-result",
                 str(Path("artifacts/gate-result.json")),
+                "--yes",
+                "--index-timeout",
+                "300.0",
+                "--publish-timeout",
+                "240.0",
+                "--poll-interval",
+                "2.0",
+                "--journal",
+                str(Path("artifacts/publication.json")),
             ],
         )
+        forwarded = run_command.call_args.args[0][2:]
+        parser_check = subprocess.run(
+            [TASKS.sys.executable, "tools/publish.py", *forwarded, "--help"],
+            cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(parser_check.returncode, 0, parser_check.stderr)
 
-    def test_publish_forwards_explicit_dangerous_bypass(self):
+    def test_publish_forwards_non_upload_modes(self):
         args = SimpleNamespace(
             dry_run=False,
+            cargo_dry_run=False,
             no_verify=False,
             crates=None,
-            start_from=None,
-            wait=None,
             release_gate_result=None,
-            dangerously_skip_release_check=True,
+            yes=False,
+            verify_published=True,
+            index_timeout=None,
+            publish_timeout=None,
+            poll_interval=None,
+            journal=None,
         )
         with patch.object(TASKS, "run_command", return_value=0) as run_command:
             self.assertEqual(TASKS.task_publish(args, REPO_ROOT), 0)
@@ -381,7 +407,7 @@ class ReleaseTaskTests(unittest.TestCase):
             [
                 TASKS.sys.executable,
                 "tools/publish.py",
-                "--dangerously-skip-release-check",
+                "--verify-published",
             ],
         )
 

@@ -277,20 +277,15 @@ class ContractRunnerTests(unittest.TestCase):
 
         self.assertEqual(runner.call_count, len(CONTRACTS.SYS_CRATES) * 2)
 
-    def test_release_notes_publish_validated_tag_outputs(self):
+    def test_release_notes_extract_the_validated_workspace_version(self):
         with TemporaryDirectory() as temporary:
             output = Path(temporary) / "release-notes.md"
-            github_output = Path(temporary) / "github-output.txt"
             with patch.object(CONTRACTS, "run") as runner:
-                CONTRACTS.prepare_release_notes(
-                    "v0.16.0-alpha.1", output, github_output
-                )
+                CONTRACTS.prepare_release_notes("v0.16.0-alpha.1", output)
 
-            self.assertEqual(
-                github_output.read_text(encoding="utf-8"),
-                "tag=v0.16.0-alpha.1\nversion=0.16.0-alpha.1\n",
-            )
             self.assertEqual(runner.call_count, 2)
+            validate_command = tuple(runner.call_args_list[0].args[0])
+            self.assertEqual(validate_command[-2:], ("--version", "0.16.0-alpha.1"))
             extract_command = tuple(runner.call_args_list[1].args[0])
             self.assertEqual(extract_command[-2:], ("--output", output))
 
@@ -302,8 +297,64 @@ class ContractRunnerTests(unittest.TestCase):
                 CONTRACTS.prepare_release_notes(
                     "v0.16.0-alpha.1;echo",
                     Path(temporary) / "notes",
-                    Path(temporary) / "out",
                 )
+
+    def test_release_notes_require_the_workspace_release_version(self):
+        with TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(
+                CONTRACTS.VerificationError, "workspace release tag"
+            ):
+                CONTRACTS.prepare_release_notes(
+                    "v0.15.0",
+                    Path(temporary) / "notes",
+                )
+
+    def test_release_identity_accepts_an_uncreated_tag_on_exact_main_candidate(self):
+        candidate = "a" * 40
+        head = subprocess.CompletedProcess([], 0, stdout=f"{candidate}\n")
+        missing_tag = subprocess.CompletedProcess([], 1, stdout="")
+        with patch.object(CONTRACTS, "run", side_effect=[head, missing_tag]) as runner:
+            version = CONTRACTS.validate_release_identity(
+                tag="v0.16.0-alpha.1",
+                candidate_sha=candidate,
+                expected_ref="refs/heads/main",
+                actual_ref="refs/heads/main",
+            )
+
+        self.assertEqual(version, "0.16.0-alpha.1")
+        self.assertEqual(runner.call_count, 2)
+
+    def test_release_identity_rejects_an_existing_tag_on_another_commit(self):
+        candidate = "a" * 40
+        results = [
+            subprocess.CompletedProcess([], 0, stdout=f"{candidate}\n"),
+            subprocess.CompletedProcess([], 0, stdout=""),
+            subprocess.CompletedProcess([], 0, stdout=f"{'b' * 40}\n"),
+        ]
+        with (
+            patch.object(CONTRACTS, "run", side_effect=results),
+            self.assertRaisesRegex(CONTRACTS.VerificationError, "points to"),
+        ):
+            CONTRACTS.validate_release_identity(
+                tag="v0.16.0-alpha.1",
+                candidate_sha=candidate,
+                expected_ref="refs/heads/main",
+                actual_ref="refs/heads/main",
+            )
+
+    def test_release_identity_rejects_non_main_dispatch(self):
+        with (
+            patch.object(CONTRACTS, "run") as runner,
+            self.assertRaisesRegex(CONTRACTS.VerificationError, "refs/heads/main"),
+        ):
+            CONTRACTS.validate_release_identity(
+                tag="v0.16.0-alpha.1",
+                candidate_sha="a" * 40,
+                expected_ref="refs/heads/main",
+                actual_ref="refs/heads/topic",
+            )
+
+        runner.assert_not_called()
 
     def test_windows_vcpkg_uses_resolved_executable_and_publishes_environment(self):
         triplet = CONTRACTS.VcpkgTriplet.from_target(
@@ -469,6 +520,35 @@ class ContractRunnerTests(unittest.TestCase):
             outputs = github_output.read_text(encoding="utf-8")
             self.assertIn("retry_eligible=true\n", outputs)
             self.assertIn("gate_category=ProductFailure\n", outputs)
+
+    def test_runtime_preparation_failure_is_structured_and_retryable_once(self):
+        with TemporaryDirectory() as temporary:
+            evidence = Path(temporary) / "evidence"
+            github_output = Path(temporary) / "github-output"
+            with patch.dict(os.environ, {"GITHUB_OUTPUT": str(github_output)}):
+                exit_code = CONTRACTS.main(
+                    (
+                        "runtime-preparation-failure",
+                        "--gate",
+                        "multi-viewport-smoke",
+                        "--evidence-dir",
+                        str(evidence),
+                        "--attempt",
+                        "1",
+                    )
+                )
+
+            self.assertEqual(exit_code, 0)
+            result = json.loads(
+                (evidence / "gate-result.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(result["category"], "InfrastructureUnavailable")
+            self.assertEqual(result["details"], {"phase": "preparation"})
+            self.assertTrue(result["retry"]["eligible"])
+            self.assertIn(
+                "retry_eligible=true\n",
+                github_output.read_text(encoding="utf-8"),
+            )
 
 
 class RuntimeGateTests(unittest.TestCase):
@@ -1448,6 +1528,8 @@ class WorkflowPortabilityTests(unittest.TestCase):
         self.assertIn("retention-days: 30", workflow)
         self.assertRegex(workflow, r"(?m)^\s+if: always\(\)$")
         self.assertIn("--defer-infrastructure-retry", runtime)
+        self.assertIn("runtime-preparation-failure", runtime)
+        self.assertIn("steps.preparation.outputs.retry_eligible", runtime)
         self.assertIn("gate_attempt: 2", ci)
         self.assertEqual(ci.count("outputs.retry_eligible == 'true'"), 4)
 

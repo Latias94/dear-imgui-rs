@@ -1,6 +1,12 @@
 name: Release Gate
 
 on:
+  workflow_call:
+    inputs:
+      candidate_sha:
+        description: Full 40-character release candidate SHA
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       candidate_sha:
@@ -14,6 +20,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: '0'
+  RELEASE_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
   RUSTFLAGS: -Cdebuginfo=0
 
 jobs:
@@ -23,15 +30,15 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout workflow revision
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ github.sha }}
 
       - name: Validate candidate identity
         run: >-
           python3 tools/ci/release_evidence.py verify-candidate
-          --repo-root "${{ github.workspace }}"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --repo-root "$GITHUB_WORKSPACE"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
 
   test-engine-attempt-1:
     needs: validate-candidate-identity
@@ -57,23 +64,23 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.candidate_sha }}
 
       - name: Download Test Engine attempt 1
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: native-runtime-test-engine-runtime-${{ inputs.candidate_sha }}-run-${{ github.run_attempt }}-gate-1
+          name: native-runtime-test-engine-runtime-${{ inputs.candidate_sha }}-gate-1
           path: target/runtime-attempts/test-engine/attempt1
 
       - name: Download Test Engine attempt 2
         if: always() && needs.test-engine-attempt-2.result != 'skipped'
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: native-runtime-test-engine-runtime-${{ inputs.candidate_sha }}-run-${{ github.run_attempt }}-gate-2
+          name: native-runtime-test-engine-runtime-${{ inputs.candidate_sha }}-gate-2
           path: target/runtime-attempts/test-engine/attempt2
 
       - name: Finalize Test Engine cell without retry
@@ -81,8 +88,8 @@ jobs:
         continue-on-error: true
         run: >-
           python3 tools/ci/release_cell.py finalize-runtime
-          --repo-root "${{ github.workspace }}"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --repo-root "$GITHUB_WORKSPACE"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
           --cell-id linux-test-engine-runtime
           --cell-root target/release-evidence/linux-test-engine-runtime
           --attempt1 target/runtime-attempts/test-engine/attempt1
@@ -92,8 +99,8 @@ jobs:
         continue-on-error: true
         run: >-
           python3 tools/ci/release_cell.py finalize-runtime
-          --repo-root "${{ github.workspace }}"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --repo-root "$GITHUB_WORKSPACE"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
           --cell-id linux-test-engine-runtime
           --cell-root target/release-evidence/linux-test-engine-runtime
           --attempt1 target/runtime-attempts/test-engine/attempt1
@@ -101,12 +108,13 @@ jobs:
 
       - name: Retain Test Engine release cell
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-cell-linux-test-engine-runtime-${{ inputs.candidate_sha }}
           path: target/release-evidence
           if-no-files-found: error
           retention-days: 30
+          overwrite: true
 
   viewport-attempt-1:
     needs: validate-candidate-identity
@@ -132,23 +140,23 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.candidate_sha }}
 
       - name: Download viewport attempt 1
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: native-runtime-multi-viewport-smoke-${{ inputs.candidate_sha }}-run-${{ github.run_attempt }}-gate-1
+          name: native-runtime-multi-viewport-smoke-${{ inputs.candidate_sha }}-gate-1
           path: target/runtime-attempts/viewport/attempt1
 
       - name: Download viewport attempt 2
         if: always() && needs.viewport-attempt-2.result != 'skipped'
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: native-runtime-multi-viewport-smoke-${{ inputs.candidate_sha }}-run-${{ github.run_attempt }}-gate-2
+          name: native-runtime-multi-viewport-smoke-${{ inputs.candidate_sha }}-gate-2
           path: target/runtime-attempts/viewport/attempt2
 
       - name: Finalize viewport cell without retry
@@ -156,8 +164,8 @@ jobs:
         continue-on-error: true
         run: >-
           python3 tools/ci/release_cell.py finalize-runtime
-          --repo-root "${{ github.workspace }}"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --repo-root "$GITHUB_WORKSPACE"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
           --cell-id linux-multi-viewport-smoke
           --cell-root target/release-evidence/linux-multi-viewport-smoke
           --attempt1 target/runtime-attempts/viewport/attempt1
@@ -167,8 +175,8 @@ jobs:
         continue-on-error: true
         run: >-
           python3 tools/ci/release_cell.py finalize-runtime
-          --repo-root "${{ github.workspace }}"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --repo-root "$GITHUB_WORKSPACE"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
           --cell-id linux-multi-viewport-smoke
           --cell-root target/release-evidence/linux-multi-viewport-smoke
           --attempt1 target/runtime-attempts/viewport/attempt1
@@ -176,12 +184,13 @@ jobs:
 
       - name: Retain viewport release cell
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-cell-linux-multi-viewport-smoke-${{ inputs.candidate_sha }}
           path: target/release-evidence
           if-no-files-found: error
           retention-days: 30
+          overwrite: true
 
   ash-vulkan-validation-attempt-1:
     needs: validate-candidate-identity
@@ -207,23 +216,23 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.candidate_sha }}
 
       - name: Download Ash Vulkan validation attempt 1
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: native-runtime-ash-vulkan-validation-smoke-${{ inputs.candidate_sha }}-run-${{ github.run_attempt }}-gate-1
+          name: native-runtime-ash-vulkan-validation-smoke-${{ inputs.candidate_sha }}-gate-1
           path: target/runtime-attempts/ash-vulkan-validation/attempt1
 
       - name: Download Ash Vulkan validation attempt 2
         if: always() && needs.ash-vulkan-validation-attempt-2.result != 'skipped'
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: native-runtime-ash-vulkan-validation-smoke-${{ inputs.candidate_sha }}-run-${{ github.run_attempt }}-gate-2
+          name: native-runtime-ash-vulkan-validation-smoke-${{ inputs.candidate_sha }}-gate-2
           path: target/runtime-attempts/ash-vulkan-validation/attempt2
 
       - name: Finalize Ash Vulkan validation cell without retry
@@ -231,8 +240,8 @@ jobs:
         continue-on-error: true
         run: >-
           python3 tools/ci/release_cell.py finalize-runtime
-          --repo-root "${{ github.workspace }}"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --repo-root "$GITHUB_WORKSPACE"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
           --cell-id linux-ash-vulkan-validation-smoke
           --cell-root target/release-evidence/linux-ash-vulkan-validation-smoke
           --attempt1 target/runtime-attempts/ash-vulkan-validation/attempt1
@@ -242,8 +251,8 @@ jobs:
         continue-on-error: true
         run: >-
           python3 tools/ci/release_cell.py finalize-runtime
-          --repo-root "${{ github.workspace }}"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --repo-root "$GITHUB_WORKSPACE"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
           --cell-id linux-ash-vulkan-validation-smoke
           --cell-root target/release-evidence/linux-ash-vulkan-validation-smoke
           --attempt1 target/runtime-attempts/ash-vulkan-validation/attempt1
@@ -251,12 +260,13 @@ jobs:
 
       - name: Retain Ash Vulkan validation release cell
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-cell-linux-ash-vulkan-validation-smoke-${{ inputs.candidate_sha }}
           path: target/release-evidence
           if-no-files-found: error
           retention-days: 30
+          overwrite: true
 
   sdl3-glow-viewport-attempt-1:
     needs: validate-candidate-identity
@@ -282,23 +292,23 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.candidate_sha }}
 
       - name: Download SDL3/Glow viewport attempt 1
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: native-runtime-sdl3-glow-multi-viewport-smoke-${{ inputs.candidate_sha }}-run-${{ github.run_attempt }}-gate-1
+          name: native-runtime-sdl3-glow-multi-viewport-smoke-${{ inputs.candidate_sha }}-gate-1
           path: target/runtime-attempts/sdl3-glow-viewport/attempt1
 
       - name: Download SDL3/Glow viewport attempt 2
         if: always() && needs.sdl3-glow-viewport-attempt-2.result != 'skipped'
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: native-runtime-sdl3-glow-multi-viewport-smoke-${{ inputs.candidate_sha }}-run-${{ github.run_attempt }}-gate-2
+          name: native-runtime-sdl3-glow-multi-viewport-smoke-${{ inputs.candidate_sha }}-gate-2
           path: target/runtime-attempts/sdl3-glow-viewport/attempt2
 
       - name: Finalize SDL3/Glow viewport cell without retry
@@ -306,8 +316,8 @@ jobs:
         continue-on-error: true
         run: >-
           python3 tools/ci/release_cell.py finalize-runtime
-          --repo-root "${{ github.workspace }}"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --repo-root "$GITHUB_WORKSPACE"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
           --cell-id linux-sdl3-glow-multi-viewport-smoke
           --cell-root target/release-evidence/linux-sdl3-glow-multi-viewport-smoke
           --attempt1 target/runtime-attempts/sdl3-glow-viewport/attempt1
@@ -317,8 +327,8 @@ jobs:
         continue-on-error: true
         run: >-
           python3 tools/ci/release_cell.py finalize-runtime
-          --repo-root "${{ github.workspace }}"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --repo-root "$GITHUB_WORKSPACE"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
           --cell-id linux-sdl3-glow-multi-viewport-smoke
           --cell-root target/release-evidence/linux-sdl3-glow-multi-viewport-smoke
           --attempt1 target/runtime-attempts/sdl3-glow-viewport/attempt1
@@ -326,12 +336,13 @@ jobs:
 
       - name: Retain SDL3/Glow viewport release cell
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-cell-linux-sdl3-glow-multi-viewport-smoke-${{ inputs.candidate_sha }}
           path: target/release-evidence
           if-no-files-found: error
           retention-days: 30
+          overwrite: true
 
   standard-cells:
     needs: validate-candidate-identity
@@ -380,7 +391,7 @@ jobs:
             rustflags: -Cdebuginfo=0
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           submodules: true
           ref: ${{ inputs.candidate_sha }}
@@ -389,14 +400,14 @@ jobs:
         run: ${{ matrix.python }} tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       - name: Install cargo-nextest
         if: startsWith(matrix.cell_id, 'windows-platform-')
-        uses: taiki-e/install-action@nextest
+        uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           cache-bin: 'false'
           key: release-${{ matrix.cell_id }}
@@ -407,7 +418,7 @@ jobs:
 
       - name: Set up pinned Emscripten provider toolchain
         if: matrix.cell_id == 'linux-wasm'
-        uses: emscripten-core/setup-emsdk@v16
+        uses: emscripten-core/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984 # v16
         with:
           version: 5.0.1
           emsdk-version: 5.0.5
@@ -418,7 +429,7 @@ jobs:
 
       - name: Set up vcpkg
         if: matrix.cell_id == 'windows-vcpkg'
-        uses: lukka/run-vcpkg@v11
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11.6
         with:
           vcpkgGitCommitId: 9a98f93671f984351377044210854900bfd73171
           runVcpkgInstall: false
@@ -437,7 +448,7 @@ jobs:
       - name: Set up MSYS2
         if: matrix.cell_id == 'windows-gnu'
         id: msys2
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
         with:
           msystem: MINGW64
           path-type: inherit
@@ -569,8 +580,8 @@ jobs:
         if: always() && matrix.cell_id == 'linux-wasm'
         run: >-
           python3 tools/ci/release_cell.py metadata
-          --repo-root "${{ github.workspace }}"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --repo-root "$GITHUB_WORKSPACE"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
           --cell-id linux-wasm
           --cell-root target/release-evidence/linux-wasm
           --target wasm32-unknown-unknown
@@ -580,7 +591,7 @@ jobs:
         run: >-
           python tools/ci/release_cell.py metadata
           --repo-root "$env:GITHUB_WORKSPACE"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --candidate-sha "$env:RELEASE_CANDIDATE_SHA"
           --cell-id windows-vcpkg
           --cell-root target/release-evidence/windows-vcpkg
           --target x86_64-pc-windows-msvc
@@ -592,7 +603,7 @@ jobs:
         run: >-
           python tools/ci/release_cell.py metadata
           --repo-root "$env:GITHUB_WORKSPACE"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --candidate-sha "$env:RELEASE_CANDIDATE_SHA"
           --cell-id "${{ matrix.cell_id }}"
           --cell-root "target/release-evidence/${{ matrix.cell_id }}"
           --target x86_64-pc-windows-msvc
@@ -603,7 +614,7 @@ jobs:
         run: >-
           python tools/ci/release_cell.py metadata
           --repo-root "$env:GITHUB_WORKSPACE"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --candidate-sha "$env:RELEASE_CANDIDATE_SHA"
           --cell-id windows-gnu
           --cell-root target/release-evidence/windows-gnu
           --target x86_64-pc-windows-gnu
@@ -613,19 +624,30 @@ jobs:
         if: always() && matrix.cell_id == 'macos-build'
         run: >-
           python3 tools/ci/release_cell.py metadata
-          --repo-root "${{ github.workspace }}"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --repo-root "$GITHUB_WORKSPACE"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
           --cell-id macos-build
           --cell-root target/release-evidence/macos-build
           --target x86_64-apple-darwin
 
       - name: Finalize standard release cell
-        if: always() && matrix.cell_id != 'windows-gnu'
+        if: always() && runner.os != 'Windows'
         continue-on-error: true
         run: >-
           ${{ matrix.python }} tools/ci/release_cell.py finalize
-          --repo-root "${{ github.workspace }}"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --repo-root "$GITHUB_WORKSPACE"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
+          --cell-id "${{ matrix.cell_id }}"
+          --cell-root "target/release-evidence/${{ matrix.cell_id }}"
+          --execution executions/run.json
+
+      - name: Finalize Windows standard release cell
+        if: always() && runner.os == 'Windows' && matrix.cell_id != 'windows-gnu'
+        continue-on-error: true
+        run: >-
+          python tools/ci/release_cell.py finalize
+          --repo-root "$env:GITHUB_WORKSPACE"
+          --candidate-sha "$env:RELEASE_CANDIDATE_SHA"
           --cell-id "${{ matrix.cell_id }}"
           --cell-root "target/release-evidence/${{ matrix.cell_id }}"
           --execution executions/run.json
@@ -636,7 +658,7 @@ jobs:
         run: >-
           python tools/ci/release_cell.py finalize
           --repo-root "$env:GITHUB_WORKSPACE"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --candidate-sha "$env:RELEASE_CANDIDATE_SHA"
           --cell-id windows-gnu
           --cell-root target/release-evidence/windows-gnu
           --execution executions/run.json
@@ -644,12 +666,98 @@ jobs:
 
       - name: Retain standard release cell
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-cell-${{ matrix.cell_id }}-${{ inputs.candidate_sha }}
           path: target/release-evidence
           if-no-files-found: error
           retention-days: 30
+          overwrite: true
+
+  source-packages:
+    needs: validate-candidate-identity
+    name: linux-source-packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          submodules: true
+          ref: ${{ inputs.candidate_sha }}
+
+      - name: Initialize required nested submodules
+        run: python3 tools/ci/update_submodules.py
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          cache-bin: 'false'
+          key: release-linux-source-packages
+
+      - name: Set up pinned Emscripten provider toolchain
+        uses: emscripten-core/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984 # v16
+        with:
+          version: 5.0.1
+          emsdk-version: 5.0.5
+
+      - name: Refresh Linux package metadata
+        run: sudo apt-get update
+
+      - name: Install Linux dependencies
+        run: >-
+          sudo apt-get install -y
+          build-essential pkg-config
+          libasound2-dev
+          libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev
+          libxkbcommon-dev libwayland-dev libudev-dev
+          mesa-common-dev libgl1-mesa-dev cmake
+
+      - name: Capture publishable source-package contract
+        continue-on-error: true
+        run: >-
+          python3 tools/ci/release_cell.py capture
+          --cell-root target/release-evidence/linux-source-packages
+          --execution executions/run.json
+          --stdout-log logs/stdout.log
+          --stderr-log logs/stderr.log
+          --timeout 4800
+          --
+          python3 -B tools/ci/verify_packaged_core.py source
+
+      - name: Materialize source-package metadata
+        if: always()
+        run: >-
+          python3 tools/ci/release_cell.py metadata
+          --repo-root "$GITHUB_WORKSPACE"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
+          --cell-id linux-source-packages
+          --cell-root target/release-evidence/linux-source-packages
+          --target x86_64-unknown-linux-gnu
+
+      - name: Finalize source-package release cell
+        if: always()
+        continue-on-error: true
+        run: >-
+          python3 tools/ci/release_cell.py finalize
+          --repo-root "$GITHUB_WORKSPACE"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
+          --cell-id linux-source-packages
+          --cell-root target/release-evidence/linux-source-packages
+          --execution executions/run.json
+
+      - name: Retain source-package release cell
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-cell-linux-source-packages-${{ inputs.candidate_sha }}
+          path: target/release-evidence
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: true
 
   prebuilt:
     needs: validate-candidate-identity
@@ -658,19 +766,19 @@ jobs:
       candidate_sha: ${{ inputs.candidate_sha }}
 
   aggregate:
-    needs: [validate-candidate-identity, test-engine-cell, viewport-cell, ash-vulkan-validation-cell, sdl3-glow-viewport-cell, standard-cells, prebuilt]
+    needs: [validate-candidate-identity, test-engine-cell, viewport-cell, ash-vulkan-validation-cell, sdl3-glow-viewport-cell, standard-cells, source-packages, prebuilt]
     if: always() && needs.validate-candidate-identity.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.candidate_sha }}
 
       - name: Download every release cell
         continue-on-error: true
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: release-cell-*-${{ inputs.candidate_sha }}
           path: target/release-evidence/cells
@@ -684,16 +792,17 @@ jobs:
         if: always()
         run: >-
           python3 tools/ci/release_cell.py aggregate
-          --repo-root "${{ github.workspace }}"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --repo-root "$GITHUB_WORKSPACE"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
           --evidence-root target/release-evidence/cells
           --output gate-result.json
 
       - name: Retain authoritative release decision
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-gate-${{ inputs.candidate_sha }}
           path: target/release-evidence/cells/gate-result.json
           if-no-files-found: error
           retention-days: 30
+          overwrite: true

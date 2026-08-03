@@ -1,6 +1,7 @@
-from pathlib import Path
+import re
 import shlex
 import unittest
+from pathlib import Path
 
 from tools.tests.workflow_semantics import (
     job_dependencies,
@@ -14,6 +15,13 @@ from tools.tests.workflow_semantics import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
+CHECKOUT_ACTION = "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803"
+EMSDK_ACTION = (
+    "emscripten-core/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984"
+)
+UPLOAD_ARTIFACT_ACTION = (
+    "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+)
 
 
 def workflow(name: str) -> str:
@@ -25,6 +33,15 @@ def parsed_workflow(name: str):
 
 
 class ReleaseGateWorkflowTests(unittest.TestCase):
+    def test_ci_and_reusable_runtime_default_to_read_only_contents(self):
+        for name in ("ci.yml", "native-runtime.yml", "release-gate.yml"):
+            document = parsed_workflow(name)
+            with self.subTest(workflow=name):
+                self.assertEqual(
+                    require_mapping(document.get("permissions"), f"{name}.permissions"),
+                    {"contents": "read"},
+                )
+
     def test_every_native_runtime_call_satisfies_the_required_input_contract(self):
         runtime = parsed_workflow("native-runtime.yml")
         declared_inputs = workflow_call_inputs(runtime)
@@ -75,7 +92,7 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
         guard = jobs[guard_id]
 
         checkout = named_step(guard, "Checkout workflow revision")
-        self.assertEqual(checkout.get("uses"), "actions/checkout@v6")
+        self.assertEqual(checkout.get("uses"), CHECKOUT_ACTION)
         checkout_inputs = require_mapping(
             checkout.get("with"), f"jobs.{guard_id}.steps.checkout.with"
         )
@@ -89,9 +106,9 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
                 "tools/ci/release_evidence.py",
                 "verify-candidate",
                 "--repo-root",
-                "${{ github.workspace }}",
+                "$GITHUB_WORKSPACE",
                 "--candidate-sha",
-                "${{ inputs.candidate_sha }}",
+                "$RELEASE_CANDIDATE_SHA",
             ),
         )
 
@@ -109,6 +126,7 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
             "sdl3-glow-viewport-attempt-2",
             "sdl3-glow-viewport-cell",
             "standard-cells",
+            "source-packages",
             "prebuilt",
             "aggregate",
         )
@@ -138,7 +156,7 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
                 self.assertIn("always()", terms)
                 self.assertIn(guard_success, terms)
 
-    def test_release_gate_owns_the_authoritative_fifteen_cell_inventory(self):
+    def test_release_gate_owns_the_authoritative_sixteen_cell_inventory(self):
         gate = workflow("release-gate.yml")
         prebuilt = workflow("prebuilt-binaries.yml")
         source = f"{gate}\n{prebuilt}"
@@ -148,6 +166,7 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
             "linux-ash-vulkan-validation-smoke",
             "linux-sdl3-glow-multi-viewport-smoke",
             "linux-wasm",
+            "linux-source-packages",
             "windows-vcpkg",
             "windows-platform-md",
             "windows-platform-mt",
@@ -176,7 +195,7 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
             setup.get("with"), "jobs.standard-cells.emsdk.with"
         )
         self.assertEqual(setup.get("if"), "matrix.cell_id == 'linux-wasm'")
-        self.assertEqual(setup.get("uses"), "emscripten-core/setup-emsdk@v16")
+        self.assertEqual(setup.get("uses"), EMSDK_ACTION)
         self.assertEqual(str(setup_inputs.get("version")), "5.0.1")
         self.assertEqual(str(setup_inputs.get("emsdk-version")), "5.0.5")
         self.assertNotIn("actions-cache-folder", setup_inputs)
@@ -225,44 +244,193 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
     def test_runtime_and_prebuilt_evidence_is_bounded_and_retained(self):
         native = workflow("native-runtime.yml")
         prebuilt = workflow("prebuilt-binaries.yml")
+        prebuilt_job = workflow_jobs(parsed_workflow("prebuilt-binaries.yml"))[
+            "build-prebuilt"
+        ]
 
         self.assertIn("timeout-minutes: 30", native)
         self.assertIn("--defer-infrastructure-retry", native)
         self.assertIn("retention-days: 30", native)
-        self.assertIn("timeout-minutes: 90", prebuilt)
+        self.assertIn("timeout-minutes: 160", prebuilt)
+        command_timeouts = []
+        for step_name in (
+            "Build complete core and extension profile matrix",
+            "Consume every safe prebuilt profile",
+        ):
+            command = str(named_step(prebuilt_job, step_name).get("run", ""))
+            match = re.search(r"--timeout\s+(\d+)", command)
+            self.assertIsNotNone(match, command)
+            command_timeouts.append(int(match.group(1)))
+        self.assertGreaterEqual(
+            int(prebuilt_job["timeout-minutes"]) * 60,
+            sum(command_timeouts) + 1200,
+        )
         self.assertIn("release_cell.py capture", prebuilt)
         self.assertIn("release_cell.py finalize", prebuilt)
         self.assertIn("retention-days: 30", prebuilt)
         self.assertNotIn("softprops/action-gh-release", prebuilt)
 
-    def test_release_requires_the_same_run_gate_before_uploading(self):
-        release = workflow("release.yml")
+    def test_runtime_preparation_failure_drives_the_retry_output(self):
+        runtime_job = workflow_jobs(parsed_workflow("native-runtime.yml"))["runtime"]
+        preparation = named_step(runtime_job, "Classify runtime preparation failure")
 
-        self.assertNotIn("push:\n    tags:", release)
-        self.assertIn("candidate_sha:", release)
-        self.assertIn("gate_run_id:", release)
-        self.assertIn("ref: ${{ inputs.tag }}", release)
-        self.assertIn("actions/download-artifact@v8", release)
-        self.assertIn("run-id: ${{ inputs.gate_run_id }}", release)
-        self.assertIn("release_evidence.py verify", release)
-        self.assertIn("pattern: release-cell-*-${{ inputs.candidate_sha }}", release)
-        self.assertIn("--output recomputed-gate-result.json", release)
-        self.assertNotIn(
-            "--output target/release-cells/recomputed-gate-result.json", release
+        self.assertEqual(preparation.get("id"), "preparation")
+        self.assertEqual(
+            preparation.get("if"),
+            "always() && steps.gate.outcome == 'skipped' && "
+            "hashFiles('tools/ci/run_contract.py') != ''",
+        )
+        self.assertIn("runtime-preparation-failure", preparation.get("run", ""))
+        outputs = require_mapping(runtime_job.get("outputs"), "runtime.outputs")
+        self.assertIn(
+            "steps.preparation.outputs.retry_eligible",
+            outputs["retry_eligible"],
         )
         self.assertIn(
-            "--gate-result target/release-cells/recomputed-gate-result.json", release
+            "inputs.gate_attempt == 1",
+            outputs["retry_eligible"],
         )
-        self.assertIn("files: target/release-cells/prebuilt-*/packages/*.tar.gz", release)
-        self.assertIn("prerelease: ${{ contains(steps.tag.outputs.version, '-') }}", release)
         self.assertIn(
-            "make_latest: ${{ contains(steps.tag.outputs.version, '-') && 'false' || 'true' }}",
-            release,
+            "steps.preparation.outputs.gate_success",
+            outputs["gate_success"],
+        )
+
+    def test_untrusted_workflow_inputs_never_enter_shell_source(self):
+        unsafe_expression = re.compile(
+            r"\$\{\{\s*(?:inputs\.|github\.event\.)"
+        )
+        for name in (
+            "release.yml",
+            "release-gate.yml",
+            "native-runtime.yml",
+            "prebuilt-binaries.yml",
+        ):
+            jobs = workflow_jobs(parsed_workflow(name))
+            for job_id, job in jobs.items():
+                steps = job.get("steps", [])
+                if not isinstance(steps, list):
+                    continue
+                for index, step in enumerate(steps):
+                    run = step.get("run") if isinstance(step, dict) else None
+                    if not isinstance(run, str):
+                        continue
+                    with self.subTest(workflow=name, job=job_id, step=index):
+                        self.assertIsNone(unsafe_expression.search(run), run)
+
+    def test_release_is_one_same_run_resumable_transaction(self):
+        document = parsed_workflow("release.yml")
+        source = workflow("release.yml")
+        triggers = require_mapping(document.get("on"), "release.on")
+        dispatch = require_mapping(
+            triggers.get("workflow_dispatch"), "release.on.workflow_dispatch"
+        )
+        inputs = require_mapping(dispatch.get("inputs"), "release dispatch inputs")
+        self.assertEqual(set(inputs), {"tag"})
+        self.assertNotIn("push:\n    tags:", source)
+        self.assertEqual(document.get("permissions"), {})
+
+        jobs = workflow_jobs(document)
+        self.assertEqual(
+            tuple(jobs),
+            ("validate", "gate", "prepare", "publish-crates", "github-release"),
+        )
+        self.assertEqual(job_dependencies(jobs["gate"]), ("validate",))
+        self.assertEqual(jobs["gate"].get("uses"), "./.github/workflows/release-gate.yml")
+        self.assertEqual(
+            require_mapping(jobs["gate"].get("with"), "release.gate.with").get(
+                "candidate_sha"
+            ),
+            "${{ github.sha }}",
+        )
+        self.assertEqual(job_dependencies(jobs["prepare"]), ("gate",))
+        self.assertEqual(job_dependencies(jobs["publish-crates"]), ("prepare",))
+        self.assertEqual(
+            job_dependencies(jobs["github-release"]), ("publish-crates",)
+        )
+
+        publish = jobs["publish-crates"]
+        self.assertEqual(publish.get("environment"), "release")
+        self.assertEqual(
+            require_mapping(publish.get("permissions"), "publish permissions"),
+            {"actions": "read", "contents": "read", "id-token": "write"},
+        )
+        auth = named_step(publish, "Acquire short-lived crates.io token")
+        self.assertEqual(
+            auth.get("uses"),
+            "rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18",
+        )
+        upload = named_step(publish, "Publish complete crates.io release train")
+        self.assertIn("--release-gate-result", upload.get("run", ""))
+        self.assertIn("--yes", upload.get("run", ""))
+        self.assertIn("--no-verify", upload.get("run", ""))
+
+        prepare = named_step(jobs["prepare"], "Prepare exact release bundle")
+        self.assertIn("release_cell.py prepare-release", prepare.get("run", ""))
+        self.assertNotIn("run-id:", source)
+        github_release = named_step(jobs["github-release"], "Create GitHub release")
+        self.assertEqual(
+            github_release.get("uses"),
+            "softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228",
+        )
+        release_inputs = require_mapping(
+            github_release.get("with"), "github release inputs"
+        )
+        self.assertEqual(
+            release_inputs.get("files"),
+            "${{ runner.temp }}/release-ready/assets/*",
+        )
+        self.assertTrue(release_inputs.get("overwrite_files"))
+        self.assertLess(
+            source.index("--verify-published"),
+            source.index("action-gh-release"),
+        )
+        compatible_assets = named_step(
+            jobs["github-release"],
+            "Reject unexpected assets on an existing release",
+        )
+        exact_assets = named_step(
+            jobs["github-release"],
+            "Verify exact GitHub release asset inventory",
+        )
+        self.assertIn("verify_github_release.py", compatible_assets.get("run", ""))
+        self.assertNotIn("--require-exact", compatible_assets.get("run", ""))
+        self.assertIn("--require-exact", exact_assets.get("run", ""))
+        self.assertLess(
+            source.index("Reject unexpected assets on an existing release"),
+            source.index("action-gh-release"),
         )
         self.assertLess(
-            release.index("release_evidence.py verify"),
-            release.index("softprops/action-gh-release"),
+            source.index("action-gh-release"),
+            source.index("Verify exact GitHub release asset inventory"),
         )
+
+    def test_release_gate_artifacts_survive_failed_job_reruns(self):
+        gate = workflow("release-gate.yml")
+        runtime = workflow("native-runtime.yml")
+        prebuilt = workflow("prebuilt-binaries.yml")
+        source = f"{gate}\n{runtime}\n{prebuilt}"
+
+        self.assertNotIn("github.run_attempt", source)
+        upload_count = source.count(f"uses: {UPLOAD_ARTIFACT_ACTION}")
+        self.assertGreater(upload_count, 0)
+        self.assertEqual(source.count("overwrite: true"), upload_count)
+
+    def test_release_supply_chain_actions_are_pinned_to_commits(self):
+        release_workflows = (
+            "release.yml",
+            "release-gate.yml",
+            "native-runtime.yml",
+            "prebuilt-binaries.yml",
+        )
+        use_pattern = re.compile(r"^\s*uses:\s+([^\s#]+)", re.MULTILINE)
+        pinned_action = re.compile(r"^[^@]+@[0-9a-f]{40}$")
+
+        for name in release_workflows:
+            for action in use_pattern.findall(workflow(name)):
+                if action.startswith("./"):
+                    continue
+                with self.subTest(workflow=name, action=action):
+                    self.assertRegex(action, pinned_action)
 
 
 if __name__ == "__main__":

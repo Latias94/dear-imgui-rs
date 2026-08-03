@@ -9,6 +9,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tomllib
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -22,6 +23,7 @@ if str(CI_DIR) not in sys.path:
 from _process import CommandError, environment, github_group, run  # noqa: E402
 from _runtime_gate import (  # noqa: E402
     GateResult,
+    record_runtime_preparation_failure,
     run_ash_vulkan_validation_smoke,
     run_multi_viewport_smoke,
     run_sdl3_glow_viewport_smoke,
@@ -228,11 +230,93 @@ def run_clippy(cargo_arguments: Sequence[str]) -> None:
     )
 
 
-def prepare_release_notes(tag: str, output: Path, github_output: Path) -> None:
-    """Validate a release tag, extract its notes, and publish step outputs."""
+def workspace_release_version(repo_root: Path = WORKSPACE_ROOT) -> str:
+    """Read the single release version owned by the workspace manifest."""
+    manifest = repo_root / "Cargo.toml"
+    try:
+        document = tomllib.loads(manifest.read_text(encoding="utf-8"))
+        version = document["workspace"]["package"]["version"]
+    except (KeyError, OSError, TypeError, tomllib.TOMLDecodeError) as error:
+        raise VerificationError(
+            f"could not read workspace.package.version from {manifest}: {error}"
+        ) from error
+    if not isinstance(version, str) or not version:
+        raise VerificationError("workspace.package.version must be a non-empty string")
+    return version
+
+
+def _validate_workspace_release_tag(tag: str, repo_root: Path) -> str:
     if not re.fullmatch(r"v[0-9A-Za-z][0-9A-Za-z.+-]*", tag):
         raise VerificationError(f"invalid release tag: {tag!r}")
-    version = tag[1:]
+    version = workspace_release_version(repo_root)
+    expected_tag = f"v{version}"
+    if tag != expected_tag:
+        raise VerificationError(
+            f"workspace release tag must be {expected_tag!r}, found {tag!r}"
+        )
+    return version
+
+
+def validate_release_identity(
+    *,
+    tag: str,
+    candidate_sha: str,
+    repo_root: Path = WORKSPACE_ROOT,
+    expected_ref: str | None = None,
+    actual_ref: str | None = None,
+) -> str:
+    """Bind a release tag, workspace version, protected ref, and exact commit."""
+    version = _validate_workspace_release_tag(tag, repo_root)
+    if re.fullmatch(r"[0-9a-f]{40}", candidate_sha) is None:
+        raise VerificationError(
+            "release candidate SHA must be 40 lowercase hexadecimal characters"
+        )
+    if (expected_ref is None) != (actual_ref is None):
+        raise VerificationError("expected and actual release refs must be provided together")
+    if expected_ref is not None and actual_ref != expected_ref:
+        raise VerificationError(
+            f"release workflow must run from {expected_ref}, found {actual_ref}"
+        )
+
+    head = run(
+        ("git", "rev-parse", "--verify", "HEAD^{commit}"),
+        cwd=repo_root,
+        capture_output=True,
+    )
+    resolved_head = (head.stdout or "").strip()
+    if resolved_head != candidate_sha:
+        raise VerificationError(
+            f"checked-out release candidate is {resolved_head}, expected {candidate_sha}"
+        )
+
+    tag_ref = f"refs/tags/{tag}"
+    existing = run(
+        ("git", "show-ref", "--verify", "--quiet", tag_ref),
+        cwd=repo_root,
+        accepted_returncodes=(0, 1),
+    )
+    if existing.returncode == 0:
+        target = run(
+            ("git", "rev-list", "-n", "1", tag_ref),
+            cwd=repo_root,
+            capture_output=True,
+        )
+        resolved_target = (target.stdout or "").strip()
+        if resolved_target != candidate_sha:
+            raise VerificationError(
+                f"existing tag {tag!r} points to {resolved_target}, expected {candidate_sha}"
+            )
+    return version
+
+
+def prepare_release_notes(
+    tag: str,
+    output: Path,
+    *,
+    repo_root: Path = WORKSPACE_ROOT,
+) -> None:
+    """Validate a release tag and extract its changelog notes."""
+    version = _validate_workspace_release_tag(tag, repo_root)
     run(
         (
             sys.executable,
@@ -255,8 +339,6 @@ def prepare_release_notes(tag: str, output: Path, github_output: Path) -> None:
         ),
         cwd=WORKSPACE_ROOT,
     )
-    with github_output.open("a", encoding="utf-8", newline="\n") as destination:
-        destination.write(f"tag={tag}\nversion={version}\n")
 
 
 def configure_windows_vcpkg(
@@ -430,6 +512,28 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     release.add_argument("--output", type=Path, default=Path("release-notes.md"))
 
+    preparation_failure = commands.add_parser(
+        "runtime-preparation-failure",
+        help="Record a native runtime gate skipped during runner preparation",
+    )
+    preparation_failure.add_argument("--gate", required=True)
+    preparation_failure.add_argument("--evidence-dir", required=True, type=Path)
+    preparation_failure.add_argument("--attempt", required=True, type=_positive_int)
+    preparation_failure.add_argument(
+        "--summary",
+        default="native runtime preparation failed before contract execution",
+    )
+
+    identity = commands.add_parser(
+        "release-identity",
+        help="Bind a release tag and protected ref to the checked-out candidate",
+    )
+    identity.add_argument("--tag", required=True)
+    identity.add_argument("--candidate-sha", required=True)
+    identity.add_argument("--repo-root", type=Path, default=WORKSPACE_ROOT)
+    identity.add_argument("--expected-ref", default="refs/heads/main")
+    identity.add_argument("--actual-ref", required=True)
+
     vcpkg = commands.add_parser(
         "windows-vcpkg", help="Install and validate one Windows vcpkg profile"
     )
@@ -534,10 +638,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             check_no_default_bindgen()
         elif args.contract == "release-notes":
             release_tag = os.environ.get("RELEASE_TAG", "")
-            github_output = os.environ.get("GITHUB_OUTPUT")
-            if not github_output:
-                raise VerificationError("GITHUB_OUTPUT is required for release-notes")
-            prepare_release_notes(release_tag, args.output, Path(github_output))
+            prepare_release_notes(release_tag, args.output)
+        elif args.contract == "runtime-preparation-failure":
+            result = record_runtime_preparation_failure(
+                gate=args.gate,
+                attempt=args.attempt,
+                evidence_dir=args.evidence_dir,
+                summary=args.summary,
+            )
+            exit_code = _runtime_exit_code(
+                result,
+                defer_infrastructure_retry=True,
+            )
+        elif args.contract == "release-identity":
+            validate_release_identity(
+                tag=args.tag,
+                candidate_sha=args.candidate_sha,
+                repo_root=args.repo_root,
+                expected_ref=args.expected_ref,
+                actual_ref=args.actual_ref,
+            )
         elif args.contract == "windows-vcpkg":
             configure_windows_vcpkg(
                 target=args.target,

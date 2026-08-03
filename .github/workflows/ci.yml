@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   # Reduce disk usage in CI (helps avoid "No space left on device" from LLVM/rustc).

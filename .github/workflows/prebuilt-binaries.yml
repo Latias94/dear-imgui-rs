@@ -19,37 +19,43 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  RELEASE_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
 
 jobs:
   build-prebuilt:
     name: Build ${{ matrix.target }}${{ matrix.crt && format(' ({0})', matrix.crt) || '' }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    timeout-minutes: 160
     strategy:
       fail-fast: false
       matrix:
         include:
           - cell_id: prebuilt-x86_64-unknown-linux-gnu
+            candidate_arg: '"$RELEASE_CANDIDATE_SHA"'
             target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             python: python3
             crt: ''
           - cell_id: prebuilt-x86_64-apple-darwin
+            candidate_arg: '"$RELEASE_CANDIDATE_SHA"'
             target: x86_64-apple-darwin
             os: macos-15-intel
             python: python3
             crt: ''
           - cell_id: prebuilt-aarch64-apple-darwin
+            candidate_arg: '"$RELEASE_CANDIDATE_SHA"'
             target: aarch64-apple-darwin
             os: macos-latest
             python: python3
             crt: ''
           - cell_id: prebuilt-x86_64-pc-windows-msvc-md
+            candidate_arg: '"$env:RELEASE_CANDIDATE_SHA"'
             target: x86_64-pc-windows-msvc
             os: windows-latest
             python: python
             crt: md
           - cell_id: prebuilt-x86_64-pc-windows-msvc-mt
+            candidate_arg: '"$env:RELEASE_CANDIDATE_SHA"'
             target: x86_64-pc-windows-msvc
             os: windows-latest
             python: python
@@ -57,21 +63,26 @@ jobs:
 
     steps:
       - name: Checkout exact candidate
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           submodules: true
           ref: ${{ inputs.candidate_sha }}
+
+      - name: Validate candidate identity
+        run: >-
+          ${{ matrix.python }} tools/ci/release_evidence.py verify-candidate
+          --candidate-sha ${{ matrix.candidate_arg }}
 
       - name: Initialize required nested submodules
         run: ${{ matrix.python }} tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           targets: ${{ matrix.target }}
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           cache-bin: 'false'
           key: ${{ format('{0}-{1}', matrix.target, matrix.crt || 'none') }}
@@ -94,7 +105,7 @@ jobs:
 
       - name: Set up vcpkg (Windows)
         if: runner.os == 'Windows'
-        uses: lukka/run-vcpkg@v11
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11.6
         with:
           vcpkgGitCommitId: 9a98f93671f984351377044210854900bfd73171
           runVcpkgInstall: false
@@ -123,7 +134,7 @@ jobs:
           ${{ matrix.python }} tools/ci/verify_packaged_core.py build-prebuilt
           "${{ github.workspace }}/packages"
           "${{ matrix.target }}"
-          "${{ inputs.candidate_sha }}"
+          ${{ matrix.candidate_arg }}
           "${{ matrix.crt }}"
           --target-dir "${{ runner.temp }}/dear-imgui-prebuilt-target"
 
@@ -142,15 +153,15 @@ jobs:
           ${{ matrix.python }} tools/ci/verify_packaged_core.py prebuilt
           "${{ github.workspace }}/packages"
           "${{ matrix.target }}"
-          "${{ inputs.candidate_sha }}"
+          ${{ matrix.candidate_arg }}
           "${{ matrix.crt }}"
 
       - name: Materialize prebuilt metadata (non-Windows)
         if: always() && matrix.crt == ''
         run: >-
           ${{ matrix.python }} tools/ci/release_cell.py metadata
-          --repo-root "${{ github.workspace }}"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --repo-root "$GITHUB_WORKSPACE"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
           --cell-id "${{ matrix.cell_id }}"
           --cell-root "target/release-evidence/${{ matrix.cell_id }}"
           --target "${{ matrix.target }}"
@@ -160,8 +171,8 @@ jobs:
         if: always() && matrix.crt != ''
         run: >-
           python tools/ci/release_cell.py metadata
-          --repo-root "${{ github.workspace }}"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --repo-root "$env:GITHUB_WORKSPACE"
+          --candidate-sha "$env:RELEASE_CANDIDATE_SHA"
           --cell-id "${{ matrix.cell_id }}"
           --cell-root "target/release-evidence/${{ matrix.cell_id }}"
           --target "${{ matrix.target }}"
@@ -172,8 +183,8 @@ jobs:
         if: always() && matrix.crt == ''
         run: >-
           ${{ matrix.python }} tools/ci/release_cell.py finalize
-          --repo-root "${{ github.workspace }}"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --repo-root "$GITHUB_WORKSPACE"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
           --cell-id "${{ matrix.cell_id }}"
           --cell-root "target/release-evidence/${{ matrix.cell_id }}"
           --execution executions/build.json
@@ -184,8 +195,8 @@ jobs:
         if: always() && matrix.crt != ''
         run: >-
           python tools/ci/release_cell.py finalize
-          --repo-root "${{ github.workspace }}"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --repo-root "$env:GITHUB_WORKSPACE"
+          --candidate-sha "$env:RELEASE_CANDIDATE_SHA"
           --cell-id "${{ matrix.cell_id }}"
           --cell-root "target/release-evidence/${{ matrix.cell_id }}"
           --execution executions/build.json
@@ -195,9 +206,10 @@ jobs:
 
       - name: Retain prebuilt release cell
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: release-cell-${{ matrix.cell_id }}-${{ inputs.candidate_sha }}
           path: target/release-evidence
           if-no-files-found: error
           retention-days: 30
+          overwrite: true

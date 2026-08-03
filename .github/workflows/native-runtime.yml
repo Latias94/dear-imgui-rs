@@ -21,17 +21,24 @@ on:
         description: Whether the runtime gate passed
         value: ${{ jobs.runtime.outputs.gate_success }}
 
+permissions:
+  contents: read
+
+env:
+  RUNTIME_CONTRACT: ${{ inputs.contract }}
+  RUNTIME_GATE_ATTEMPT: ${{ inputs.gate_attempt }}
+
 jobs:
   runtime:
     name: ${{ inputs.contract }} (attempt ${{ inputs.gate_attempt }})
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:
-      retry_eligible: ${{ steps.gate.outputs.retry_eligible }}
-      gate_success: ${{ steps.gate.outputs.gate_success }}
+      retry_eligible: ${{ steps.gate.outputs.retry_eligible || steps.preparation.outputs.retry_eligible || (inputs.gate_attempt == 1 && 'true') || 'false' }}
+      gate_success: ${{ steps.gate.outputs.gate_success || steps.preparation.outputs.gate_success || 'false' }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           submodules: true
           ref: ${{ inputs.candidate_sha }}
@@ -40,10 +47,10 @@ jobs:
         run: python3 tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           cache-bin: "false"
           key: native-runtime-${{ inputs.contract }}
@@ -58,13 +65,27 @@ jobs:
         id: gate
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
-        run: python3 tools/ci/run_contract.py ${{ inputs.contract }} --evidence-dir target/runtime-evidence/${{ inputs.contract }} --attempt ${{ inputs.gate_attempt }} --defer-infrastructure-retry
+        run: >-
+          python3 tools/ci/run_contract.py "$RUNTIME_CONTRACT"
+          --evidence-dir "target/runtime-evidence/$RUNTIME_CONTRACT"
+          --attempt "$RUNTIME_GATE_ATTEMPT"
+          --defer-infrastructure-retry
+
+      - name: Classify runtime preparation failure
+        id: preparation
+        if: always() && steps.gate.outcome == 'skipped' && hashFiles('tools/ci/run_contract.py') != ''
+        run: >-
+          python3 tools/ci/run_contract.py runtime-preparation-failure
+          --gate "$RUNTIME_CONTRACT"
+          --evidence-dir "target/runtime-evidence/$RUNTIME_CONTRACT"
+          --attempt "$RUNTIME_GATE_ATTEMPT"
 
       - name: Retain native runtime evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: native-runtime-${{ inputs.contract }}-${{ inputs.candidate_sha }}-run-${{ github.run_attempt }}-gate-${{ inputs.gate_attempt }}
+          name: native-runtime-${{ inputs.contract }}-${{ inputs.candidate_sha }}-gate-${{ inputs.gate_attempt }}
           path: target/runtime-evidence/${{ inputs.contract }}
           if-no-files-found: error
           retention-days: 30
+          overwrite: true
