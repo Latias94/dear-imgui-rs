@@ -288,7 +288,7 @@ pub(super) struct RuntimeControl {
         reason = "native viewport callbacks retain sidecar addresses"
     )]
     retained_viewports: RefCell<Vec<Box<super::ViewportAshData>>>,
-    faults: RefCell<Option<AshViewportError>>,
+    faults: RefCell<RuntimeFaults>,
     frame_trace: RefCell<FrameTraceState>,
     #[cfg(test)]
     panic_next_callback: Cell<bool>,
@@ -298,6 +298,34 @@ pub(super) struct RuntimeControl {
     transitions: RefCell<Vec<&'static str>>,
     #[cfg(test)]
     renderer_contract_fault: Cell<Option<&'static str>>,
+}
+
+#[derive(Default)]
+struct RuntimeFaults {
+    terminal: Option<AshViewportError>,
+    non_terminal: Option<AshViewportError>,
+}
+
+impl RuntimeFaults {
+    fn record_terminal(&mut self, fault: AshViewportError) {
+        if self.terminal.is_none() {
+            self.terminal = Some(fault);
+        }
+    }
+
+    fn record_non_terminal(&mut self, fault: AshViewportError) {
+        if self.non_terminal.is_none() {
+            self.non_terminal = Some(fault);
+        }
+    }
+
+    fn has_pending(&self) -> bool {
+        self.terminal.is_some() || self.non_terminal.is_some()
+    }
+
+    fn take_next(&mut self) -> Option<AshViewportError> {
+        self.terminal.take().or_else(|| self.non_terminal.take())
+    }
 }
 
 impl fmt::Debug for RuntimeControl {
@@ -336,7 +364,7 @@ impl RuntimeControl {
             callback_state: Cell::new(CallbackState::Unclaimed),
             failed_viewports: RefCell::new(HashSet::new()),
             retained_viewports: RefCell::new(Vec::new()),
-            faults: RefCell::new(None),
+            faults: RefCell::new(RuntimeFaults::default()),
             frame_trace: RefCell::new(FrameTraceState::default()),
             #[cfg(test)]
             panic_next_callback: Cell::new(false),
@@ -367,7 +395,7 @@ impl RuntimeControl {
             && self
                 .faults
                 .try_borrow()
-                .is_ok_and(|faults| faults.is_none())
+                .is_ok_and(|faults| !faults.has_pending())
     }
 
     pub(super) fn should_validate_runtime_contract(&self) -> bool {
@@ -426,10 +454,7 @@ impl RuntimeControl {
     }
 
     pub(super) fn record_fault(&self, fault: AshViewportError) {
-        let mut faults = self.faults.borrow_mut();
-        if faults.is_none() {
-            *faults = Some(fault);
-        }
+        self.faults.borrow_mut().record_non_terminal(fault);
     }
 
     fn begin_frame_trace(&self) -> Result<(), AshViewportError> {
@@ -462,7 +487,7 @@ impl RuntimeControl {
     }
 
     pub(super) fn record_runtime_contract_fault(&self, fault: AshViewportError) {
-        self.record_fault(fault);
+        self.faults.borrow_mut().record_terminal(fault);
         self.begin_shutdown();
     }
 
@@ -539,7 +564,7 @@ impl RuntimeControl {
 
     fn detect_and_take_fault(&self) -> Option<AshViewportError> {
         detect_runtime_contract_drift(self);
-        self.faults.borrow_mut().take()
+        self.faults.borrow_mut().take_next()
     }
 
     fn ensure_context(&self, context: &Context) -> Result<(), AshViewportError> {

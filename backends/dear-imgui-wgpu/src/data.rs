@@ -3,7 +3,7 @@
 //! This module contains the main backend data structure and initialization info,
 //! following the pattern from imgui_impl_wgpu.cpp
 
-use std::{cell::Cell, ffi::c_void, marker::PhantomData, num::NonZeroU32, ptr::NonNull, rc::Rc};
+use std::{cell::Cell, ffi::c_void, marker::PhantomData, ptr::NonNull, rc::Rc};
 
 use crate::{FrameResourceArena, FrameResources, RenderResources, RendererError, RendererResult};
 use dear_imgui_rs::sys;
@@ -179,12 +179,6 @@ pub struct WgpuInitInfo {
     pub device: Device,
     /// WGPU queue
     pub queue: Queue,
-    /// Number of submitted frames whose upload resources may remain in flight (default: 3).
-    ///
-    /// Submit each frame's command buffers before recording more than this many later ImGui
-    /// frames. This renderer cannot observe when an application-owned encoder is submitted, so a
-    /// command buffer retained beyond the configured window may reference a reused upload buffer.
-    pub num_frames_in_flight: NonZeroU32,
     /// Render target format
     pub render_target_format: TextureFormat,
     /// Presentation policy for secondary viewport surfaces.
@@ -203,7 +197,6 @@ impl WgpuInitInfo {
             adapter: None,
             device,
             queue,
-            num_frames_in_flight: NonZeroU32::new(3).expect("three is non-zero"),
             render_target_format,
             viewport_surface_config: WgpuViewportSurfaceConfig::default(),
             depth_stencil_format: None,
@@ -213,15 +206,6 @@ impl WgpuInitInfo {
                 alpha_to_coverage_enabled: false,
             },
         }
-    }
-
-    /// Set the maximum number of submitted frames kept in flight.
-    ///
-    /// Increase this only when the application intentionally queues more frames before GPU
-    /// completion. It is not a license to retain unsubmitted command buffers across the ring.
-    pub fn with_frames_in_flight(mut self, count: NonZeroU32) -> Self {
-        self.num_frames_in_flight = count;
-        self
     }
 
     /// Set the depth stencil format
@@ -273,24 +257,21 @@ pub(crate) struct WgpuBackendData {
     pub(crate) pipeline_state: Option<RenderPipeline>,
     /// Render resources (samplers, uniforms, bind groups)
     pub(crate) render_resources: RenderResources,
-    /// Frame resources (per-frame buffers)
-    pub(crate) frame_resources: Vec<FrameResourceArena>,
-    /// Number of frames in flight
-    pub(crate) num_frames_in_flight: NonZeroU32,
-    /// Exact Context epoch and in-flight slot currently open for rendering.
+    /// Upload resources owned by the active Context render epoch.
+    pub(crate) frame_resources: FrameResourceArena,
+    /// Exact Context epoch and native frame currently open for rendering.
     pub(crate) frame_cursor: FrameEpochCursor,
 }
 
 #[derive(Default)]
 pub(crate) struct FrameEpochCursor {
-    ring_index: Option<u32>,
     epoch: Option<u64>,
     native_frame_count: Option<i32>,
 }
 
 enum FrameEpochTransition {
     Reuse,
-    Advance(u32),
+    Advance,
 }
 
 impl FrameEpochCursor {
@@ -317,19 +298,13 @@ impl FrameEpochCursor {
             }
         }
 
-        let ring_index = self.ring_index.map_or(0, |index| index.wrapping_add(1));
-        self.ring_index = Some(ring_index);
         self.epoch = Some(epoch);
         self.native_frame_count = Some(native_frame_count);
-        Ok(FrameEpochTransition::Advance(ring_index))
+        Ok(FrameEpochTransition::Advance)
     }
 
     pub(crate) fn is_native_frame(&self, native_frame_count: i32) -> bool {
         self.native_frame_count == Some(native_frame_count)
-    }
-
-    fn ring_index(&self) -> Option<u32> {
-        self.ring_index
     }
 }
 
@@ -337,13 +312,6 @@ impl WgpuBackendData {
     /// Create new backend data from initialization info
     pub(crate) fn new(init_info: WgpuInitInfo) -> Self {
         let queue = init_info.queue.clone();
-        let num_frames = init_info.num_frames_in_flight;
-
-        // Create frame resources for each frame in flight
-        let frame_resources = (0..num_frames.get())
-            .map(|_| FrameResourceArena::new())
-            .collect();
-
         Self {
             device: init_info.device.clone(),
             queue,
@@ -351,8 +319,7 @@ impl WgpuBackendData {
             depth_stencil_format: init_info.depth_stencil_format,
             pipeline_state: None,
             render_resources: RenderResources::new(),
-            frame_resources,
-            num_frames_in_flight: num_frames,
+            frame_resources: FrameResourceArena::new(),
             frame_cursor: FrameEpochCursor::default(),
             init_info,
         }
@@ -364,29 +331,17 @@ impl WgpuBackendData {
         epoch: u64,
         native_frame_count: i32,
     ) -> RendererResult<()> {
-        if let FrameEpochTransition::Advance(frame_index) =
-            self.frame_cursor.enter(epoch, native_frame_count)?
-        {
-            self.frame_resources[(frame_index % self.num_frames_in_flight.get()) as usize]
-                .begin_frame();
+        if let FrameEpochTransition::Advance = self.frame_cursor.enter(epoch, native_frame_count)? {
+            self.frame_resources.begin_epoch();
         }
         Ok(())
     }
 
     pub(crate) fn acquire_frame_resources(&mut self) -> RendererResult<&mut FrameResources> {
-        let frame_index = self
-            .frame_cursor
-            .ring_index()
-            .ok_or(RendererError::FrameNotPrepared)?;
-        let arena = self
-            .frame_resources
-            .get_mut((frame_index % self.num_frames_in_flight.get()) as usize)
-            .ok_or_else(|| {
-                RendererError::InvalidRenderState(
-                    "WGPU frame resource index is out of bounds".to_owned(),
-                )
-            })?;
-        let frame = arena.acquire();
+        if self.frame_cursor.epoch.is_none() {
+            return Err(RendererError::FrameNotPrepared);
+        }
+        let frame = self.frame_resources.acquire();
         frame.ensure_render_bindings(&self.device, &self.render_resources)?;
         Ok(frame)
     }
@@ -406,7 +361,7 @@ mod tests {
         let mut cursor = FrameEpochCursor::default();
         assert!(matches!(
             cursor.enter(4, 12).unwrap(),
-            FrameEpochTransition::Advance(0)
+            FrameEpochTransition::Advance
         ));
         assert!(matches!(
             cursor.enter(4, 12).unwrap(),
@@ -414,7 +369,7 @@ mod tests {
         ));
         assert!(matches!(
             cursor.enter(5, 13).unwrap(),
-            FrameEpochTransition::Advance(1)
+            FrameEpochTransition::Advance
         ));
         assert!(matches!(
             cursor.enter(4, 12),

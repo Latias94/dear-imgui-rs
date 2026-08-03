@@ -232,12 +232,36 @@ pub(super) struct RuntimeControl {
     gl: RefCell<Option<Rc<glow::Context>>>,
     attachment: RefCell<Option<ContextAttachmentLease>>,
     callback_state: Cell<CallbackState>,
-    faults: RefCell<Option<GlowViewportError>>,
+    faults: RefCell<RuntimeFaults>,
     frame_trace: RefCell<FrameTraceState>,
     #[cfg(test)]
     panic_next_callback: Cell<bool>,
     #[cfg(test)]
     transitions: RefCell<Vec<&'static str>>,
+}
+
+#[derive(Default)]
+struct RuntimeFaults {
+    terminal: Option<GlowViewportError>,
+    non_terminal: Option<GlowViewportError>,
+}
+
+impl RuntimeFaults {
+    fn record_terminal(&mut self, fault: GlowViewportError) {
+        if self.terminal.is_none() {
+            self.terminal = Some(fault);
+        }
+    }
+
+    fn record_non_terminal(&mut self, fault: GlowViewportError) {
+        if self.non_terminal.is_none() {
+            self.non_terminal = Some(fault);
+        }
+    }
+
+    fn take_next(&mut self) -> Option<GlowViewportError> {
+        self.terminal.take().or_else(|| self.non_terminal.take())
+    }
 }
 
 impl fmt::Debug for RuntimeControl {
@@ -262,7 +286,7 @@ impl RuntimeControl {
             gl: RefCell::new(Some(gl)),
             attachment: RefCell::new(None),
             callback_state: Cell::new(CallbackState::Unclaimed),
-            faults: RefCell::new(None),
+            faults: RefCell::new(RuntimeFaults::default()),
             frame_trace: RefCell::new(FrameTraceState::default()),
             #[cfg(test)]
             panic_next_callback: Cell::new(false),
@@ -345,14 +369,11 @@ impl RuntimeControl {
     }
 
     pub(super) fn record_fault(&self, fault: GlowViewportError) {
-        let mut faults = self.faults.borrow_mut();
-        if faults.is_none() {
-            *faults = Some(fault);
-        }
+        self.faults.borrow_mut().record_non_terminal(fault);
     }
 
     pub(super) fn record_dependency_fault(&self, fault: GlowViewportError) {
-        self.record_fault(fault);
+        self.faults.borrow_mut().record_terminal(fault);
         self.begin_shutdown();
     }
 
@@ -416,7 +437,7 @@ impl RuntimeControl {
 
     fn detect_and_take_fault(&self) -> Option<GlowViewportError> {
         detect_callback_drift(self);
-        self.faults.borrow_mut().take()
+        self.faults.borrow_mut().take_next()
     }
 
     fn ensure_context(&self, context: &Context) -> Result<(), GlowViewportError> {

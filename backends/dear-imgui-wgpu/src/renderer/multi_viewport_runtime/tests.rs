@@ -25,8 +25,8 @@ use super::runtime::{RuntimeControl, RuntimeState};
 use super::surface::supports_surface_format;
 use super::surface::{
     SurfaceAction, SurfaceEvent, ViewportWgpuData, release_surface_bundle_parts,
-    resolve_alpha_mode, resolve_present_mode, should_clear_viewport, surface_action,
-    surface_config_from_capabilities,
+    request_close_after_surface_creation_failure, resolve_alpha_mode, resolve_present_mode,
+    should_clear_viewport, surface_action, surface_config_from_capabilities,
 };
 use super::{OwningViewportRuntime, WgpuViewportError};
 use crate::{WgpuViewportSurfaceConfig, renderer::WgpuRenderer};
@@ -1548,7 +1548,7 @@ fn callback_panic_is_contained_and_deferred() {
 }
 
 #[test]
-fn terminal_surface_fault_revokes_capability_and_stays_shutdown() {
+fn terminal_surface_rejection_revokes_capability_and_stays_shutdown() {
     let _guard = lock_context();
     let mut context = Context::create();
     let _platform = attach_test_platform(&mut context);
@@ -1556,11 +1556,15 @@ fn terminal_surface_fault_revokes_capability_and_stays_shutdown() {
         OwningViewportRuntime::attach_for_test(&mut context, WgpuRenderer::empty()).unwrap();
     let control = runtime.control_for_test();
 
-    control.record_entry_fault(WgpuViewportError::SurfaceLost);
+    control.record_entry_fault(WgpuViewportError::SurfaceRejected {
+        event: "validation error",
+    });
 
     assert!(matches!(
         runtime.poll_fault(),
-        Err(WgpuViewportError::SurfaceLost)
+        Err(WgpuViewportError::SurfaceRejected {
+            event: "validation error"
+        })
     ));
     assert_eq!(runtime.state_for_test(), RuntimeState::ShuttingDown);
     assert!(
@@ -1962,7 +1966,7 @@ fn surface_events_have_explicit_recovery_actions() {
         surface_action(SurfaceEvent::Outdated),
         SurfaceAction::Reconfigure
     );
-    assert_eq!(surface_action(SurfaceEvent::Lost), SurfaceAction::Reject);
+    assert_eq!(surface_action(SurfaceEvent::Lost), SurfaceAction::Recreate);
     assert_eq!(surface_action(SurfaceEvent::Timeout), SurfaceAction::Skip);
     assert_eq!(surface_action(SurfaceEvent::Occluded), SurfaceAction::Skip);
     assert_eq!(
@@ -1978,6 +1982,18 @@ fn surface_events_have_explicit_recovery_actions() {
     assert!(!should_clear_viewport(
         dear_imgui_rs::ViewportFlags::NO_RENDERER_CLEAR
     ));
+}
+
+#[test]
+fn failed_surface_recreation_requests_only_the_affected_viewport_close() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let viewport = context.main_viewport();
+    assert!(!viewport.platform_request_close());
+
+    request_close_after_surface_creation_failure(viewport);
+
+    assert!(viewport.platform_request_close());
 }
 
 #[test]

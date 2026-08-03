@@ -16,7 +16,7 @@ fn align_size(size: usize, alignment: usize) -> usize {
 /// Per-frame resources
 ///
 /// This corresponds to the FrameResources struct in the C++ implementation.
-/// Each frame in flight has its own set of vertex and index buffers.
+/// Each render pass in the active Context epoch has its own upload buffers and bindings.
 pub struct FrameResources {
     /// GPU vertex buffer
     pub vertex_buffer: Option<Buffer>,
@@ -225,28 +225,22 @@ impl Default for FrameResources {
 
 pub(crate) struct FrameResourceArena {
     passes: Vec<FrameResources>,
-    next_pass: usize,
 }
 
 impl FrameResourceArena {
     pub(crate) const fn new() -> Self {
-        Self {
-            passes: Vec::new(),
-            next_pass: 0,
-        }
+        Self { passes: Vec::new() }
     }
 
-    pub(crate) fn begin_frame(&mut self) {
-        self.next_pass = 0;
+    pub(crate) fn begin_epoch(&mut self) {
+        self.passes.clear();
     }
 
     pub(crate) fn acquire(&mut self) -> &mut FrameResources {
-        let index = self.next_pass;
-        self.next_pass += 1;
-        if index == self.passes.len() {
-            self.passes.push(FrameResources::new());
-        }
-        &mut self.passes[index]
+        self.passes.push(FrameResources::new());
+        self.passes
+            .last_mut()
+            .expect("a frame-resource slot was just inserted")
     }
 }
 
@@ -255,17 +249,16 @@ mod arena_tests {
     use super::FrameResourceArena;
 
     #[test]
-    fn frame_arena_gives_each_pass_a_slot_and_reuses_it_only_after_reset() {
+    fn frame_arena_never_reuses_upload_resources_across_epochs() {
         let mut arena = FrameResourceArena::new();
-        arena.begin_frame();
         let _ = arena.acquire();
         let _ = arena.acquire();
         assert_eq!(arena.passes.len(), 2);
-        assert_eq!(arena.next_pass, 2);
 
-        arena.begin_frame();
+        arena.begin_epoch();
+        assert!(arena.passes.is_empty());
+
         let _ = arena.acquire();
-        assert_eq!(arena.passes.len(), 2);
-        assert_eq!(arena.next_pass, 1);
+        assert_eq!(arena.passes.len(), 1);
     }
 }

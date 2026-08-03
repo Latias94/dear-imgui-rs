@@ -249,9 +249,7 @@ impl WgpuRenderer {
             backend_data.render_resources = RenderResources::new();
 
             // Clear frame resources
-            for frame_resources in &mut backend_data.frame_resources {
-                *frame_resources = FrameResourceArena::new();
-            }
+            backend_data.frame_resources = FrameResourceArena::new();
             backend_data.frame_cursor = Default::default();
         }
 

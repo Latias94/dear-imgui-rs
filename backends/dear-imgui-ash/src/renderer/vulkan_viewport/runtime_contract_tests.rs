@@ -365,6 +365,36 @@ fn callback_panic_and_reentry_are_deferred_to_rust_entry() {
 }
 
 #[test]
+fn terminal_fault_preempts_and_preserves_pending_non_terminal_fault() {
+    let _guard = super::test_context_guard();
+    let mut context = Context::create();
+    let _platform = attach_test_platform(&mut context);
+    let mut runtime = OwningViewportRuntime::attach_for_test(&mut context).unwrap();
+    let control = runtime.control_for_test();
+
+    control.record_fault(AshViewportError::CallbackReentered {
+        callback: "earlier recoverable fault",
+    });
+    control.record_runtime_contract_fault(AshViewportError::RendererCallbackReplaced {
+        callback: "terminal contract fault",
+    });
+
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(AshViewportError::RendererCallbackReplaced {
+            callback: "terminal contract fault"
+        })
+    ));
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(AshViewportError::CallbackReentered {
+            callback: "earlier recoverable fault"
+        })
+    ));
+    runtime.shutdown(&mut context).unwrap();
+}
+
+#[test]
 fn direct_trampoline_skips_remaining_callback_after_another_slot_drifts() {
     let _guard = super::test_context_guard();
     let mut context = Context::create();

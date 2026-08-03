@@ -266,6 +266,24 @@ pub(super) fn reconfigure_surface(
     Ok(())
 }
 
+unsafe fn recreate_surface(
+    viewport: &Viewport,
+    data: &mut ViewportWgpuData,
+    globals: &GlobalHandles,
+) -> Result<(), WgpuViewportError> {
+    data.release_surface_bundle();
+    let (surface, size) = unsafe { platform_adapter::create_surface(&globals.instance, viewport) }?;
+    let targets = configure_surface(globals, &surface, size)?;
+    #[cfg(feature = "wgpu-30")]
+    {
+        data.queue = globals.queue.clone();
+    }
+    data.surface = Some(surface);
+    data.targets = targets;
+    data.size = size;
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SurfaceEvent {
     Success,
@@ -288,6 +306,7 @@ pub(super) enum SurfaceAction {
     Render,
     RenderThenReconfigure,
     Reconfigure,
+    Recreate,
     Skip,
     Reject,
 }
@@ -297,7 +316,7 @@ pub(super) const fn surface_action(event: SurfaceEvent) -> SurfaceAction {
         SurfaceEvent::Success => SurfaceAction::Render,
         SurfaceEvent::Suboptimal => SurfaceAction::RenderThenReconfigure,
         SurfaceEvent::Outdated => SurfaceAction::Reconfigure,
-        SurfaceEvent::Lost => SurfaceAction::Reject,
+        SurfaceEvent::Lost => SurfaceAction::Recreate,
         SurfaceEvent::Timeout => SurfaceAction::Skip,
         #[cfg(any(feature = "wgpu-29", feature = "wgpu-30", test))]
         SurfaceEvent::Occluded => SurfaceAction::Skip,
@@ -339,17 +358,17 @@ pub(super) unsafe fn handle_non_renderable_surface_event(
             let size = unsafe { platform_adapter::framebuffer_size(viewport) }?;
             reconfigure_surface(data, globals, size)
         }
-        SurfaceAction::Skip => Ok(()),
-        SurfaceAction::Reject => {
-            if event == SurfaceEvent::Lost {
-                data.release_surface_bundle();
-                Err(WgpuViewportError::SurfaceLost)
-            } else {
-                Err(WgpuViewportError::SurfaceRejected {
-                    event: event.name(),
-                })
+        SurfaceAction::Recreate => {
+            let result = unsafe { recreate_surface(viewport, data, globals) };
+            if result.is_err() {
+                request_close_after_surface_creation_failure(viewport);
             }
+            result
         }
+        SurfaceAction::Skip => Ok(()),
+        SurfaceAction::Reject => Err(WgpuViewportError::SurfaceRejected {
+            event: event.name(),
+        }),
         SurfaceAction::Render | SurfaceAction::RenderThenReconfigure => {
             debug_assert!(false, "renderable surface event reached recovery path");
             Ok(())

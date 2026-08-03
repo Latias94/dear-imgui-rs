@@ -14,7 +14,8 @@
 //! - **Managed textures**: pointer-free create/update/destroy requests owned by rendered frames
 //! - **External textures**: Register application-owned `wgpu::TextureView` handles for UI display
 //! - **Gamma correction**: Automatic sRGB format detection and gamma correction
-//! - **Multi-frame buffering**: Support for multiple frames in flight
+//! - **Epoch-isolated uploads**: Vertex, index, and uniform buffers are never reused across
+//!   render epochs
 //! - **Device object management**: Helpers to recreate device objects (pipelines/buffers/textures) after loss
 //! - **Multi-viewport support**: Support for multiple windows (feature-gated via `multi-viewport-winit` for winit or `multi-viewport-sdl3` for SDL3 on native targets)
 //!
