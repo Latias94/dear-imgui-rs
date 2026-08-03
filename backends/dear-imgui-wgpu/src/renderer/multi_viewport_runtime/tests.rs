@@ -24,8 +24,9 @@ use super::runtime::{RuntimeControl, RuntimeState};
 #[cfg(feature = "wgpu-30")]
 use super::surface::supports_surface_format;
 use super::surface::{
-    SurfaceAction, SurfaceEvent, ViewportWgpuData, resolve_alpha_mode, resolve_present_mode,
-    should_clear_viewport, surface_action, surface_config_from_capabilities,
+    SurfaceAction, SurfaceEvent, ViewportWgpuData, release_surface_bundle_parts,
+    resolve_alpha_mode, resolve_present_mode, should_clear_viewport, surface_action,
+    surface_config_from_capabilities,
 };
 use super::{OwningViewportRuntime, WgpuViewportError};
 use crate::{WgpuViewportSurfaceConfig, renderer::WgpuRenderer};
@@ -112,6 +113,17 @@ struct DropProbe(Rc<Cell<u32>>);
 impl Drop for DropProbe {
     fn drop(&mut self) {
         self.0.set(self.0.get() + 1);
+    }
+}
+
+struct OrderedDropProbe {
+    name: &'static str,
+    drops: Rc<RefCell<Vec<&'static str>>>,
+}
+
+impl Drop for OrderedDropProbe {
+    fn drop(&mut self) {
+        self.drops.borrow_mut().push(self.name);
     }
 }
 
@@ -1570,6 +1582,43 @@ fn terminal_surface_fault_revokes_capability_and_stays_shutdown() {
 }
 
 #[test]
+fn terminal_fault_is_sticky_and_preempts_pending_non_terminal_fault() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let _platform = attach_test_platform(&mut context);
+    let mut runtime =
+        OwningViewportRuntime::attach_for_test(&mut context, WgpuRenderer::empty()).unwrap();
+    let control = runtime.control_for_test();
+
+    control.record_fault(WgpuViewportError::SurfaceOperationFailed {
+        operation: "earlier recoverable fault",
+    });
+    control.record_entry_fault(WgpuViewportError::SurfaceRejected {
+        event: "first terminal fault",
+    });
+    control.record_entry_fault(WgpuViewportError::CallbackPanicked {
+        callback: "later terminal fault",
+    });
+
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(WgpuViewportError::SurfaceRejected {
+            event: "first terminal fault"
+        })
+    ));
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(WgpuViewportError::SurfaceOperationFailed {
+            operation: "earlier recoverable fault"
+        })
+    ));
+    assert!(runtime.poll_fault().is_ok());
+    assert_eq!(runtime.state_for_test(), RuntimeState::ShuttingDown);
+
+    runtime.shutdown(&mut context).unwrap();
+}
+
+#[test]
 fn context_first_shutdown_releases_renderer_before_platform_phase_once() {
     let _guard = lock_context();
     let mut context = Context::create();
@@ -1933,4 +1982,28 @@ fn surface_events_have_explicit_recovery_actions() {
     assert!(!should_clear_viewport(
         dear_imgui_rs::ViewportFlags::NO_RENDERER_CLEAR
     ));
+}
+
+#[test]
+fn surface_bundle_release_drops_frame_before_targets_and_surface() {
+    let drops = Rc::new(RefCell::new(Vec::new()));
+    let probe = |name| {
+        Some(OrderedDropProbe {
+            name,
+            drops: Rc::clone(&drops),
+        })
+    };
+    let mut pending_frame = probe("pending_frame");
+    let mut targets = probe("targets");
+    let mut surface = probe("surface");
+
+    release_surface_bundle_parts(&mut pending_frame, &mut targets, &mut surface);
+
+    assert_eq!(
+        drops.borrow().as_slice(),
+        &["pending_frame", "targets", "surface"]
+    );
+    assert!(pending_frame.is_none());
+    assert!(targets.is_none());
+    assert!(surface.is_none());
 }
