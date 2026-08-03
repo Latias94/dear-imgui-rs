@@ -46,10 +46,12 @@ fn primary_context(app: &App) -> dear_imgui_bevy::ContextId {
 }
 
 fn add_secondary_context(app: &mut App) -> dear_imgui_bevy::ContextId {
-    app.init_schedule(SecondaryUi);
+    app.init_schedule(crate::ImguiContextPass::new(SecondaryUi));
     app.world_mut()
         .non_send_mut::<ImguiContexts>()
-        .create(ImguiContextConfig::new(SecondaryUi))
+        .create(ImguiContextConfig::new(crate::ImguiContextPass::new(
+            SecondaryUi,
+        )))
         .expect("secondary Context admission must succeed")
 }
 

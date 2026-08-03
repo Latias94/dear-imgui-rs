@@ -348,7 +348,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(bevy_render::extract_plugin::ExtractPlugin::default());
         app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
-        app.init_schedule(RecoveryContextPass);
+        app.init_schedule(crate::ImguiContextPass::new(RecoveryContextPass));
         app.add_plugins(crate::ImguiPlugin::default());
         app.world_mut().spawn((Window::default(), PrimaryWindow));
 
@@ -359,7 +359,9 @@ mod tests {
                 .unwrap();
             let context_a = contexts.primary_id().unwrap();
             let context_b = contexts
-                .create(crate::ImguiContextConfig::new(RecoveryContextPass))
+                .create(crate::ImguiContextConfig::new(
+                    crate::ImguiContextPass::new(RecoveryContextPass),
+                ))
                 .unwrap();
             for context_id in [context_a, context_b] {
                 contexts
@@ -429,6 +431,30 @@ mod tests {
             2,
             "Context B must remain live after Context A finishes removal"
         );
+    }
+
+    #[test]
+    fn explicit_shutdown_drains_render_world_acknowledgements_without_update() {
+        use crate::ImguiAppExt as _;
+
+        let mut app = App::new();
+        app.add_plugins(bevy_render::extract_plugin::ExtractPlugin::default());
+        app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
+        app.add_plugins(crate::ImguiPlugin::default());
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+
+        let context_id = app
+            .world()
+            .get_non_send::<crate::ImguiContexts>()
+            .unwrap()
+            .primary_id()
+            .unwrap();
+        let releases = app.world().resource::<ImguiRendererReleases>().clone();
+
+        app.shutdown_imgui().unwrap();
+
+        assert!(app.world().get_non_send::<crate::ImguiContexts>().is_none());
+        assert!(!releases.release_requested(context_id));
     }
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]

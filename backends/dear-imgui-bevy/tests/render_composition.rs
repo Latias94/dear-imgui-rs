@@ -1,5 +1,7 @@
 #![cfg(feature = "render")]
 
+#[cfg(feature = "bevy-ui")]
+use bevy::ecs::schedule::{NodeId, ScheduleGraph};
 use bevy::{
     app::App,
     asset::{Assets, Handle},
@@ -252,6 +254,49 @@ fn bevy_ui_order_modes_control_overlap_pixels() {
     );
 }
 
+#[cfg(feature = "bevy-ui")]
+#[test]
+fn bevy_ui_order_modes_define_complete_overlay_topology() {
+    for (order, expected) in [
+        (
+            ImguiUiRenderOrder::ImguiAboveBevyUi,
+            [
+                RenderTopologyNode::BeforeOverlay,
+                RenderTopologyNode::BevyUi,
+                RenderTopologyNode::Overlay,
+                RenderTopologyNode::AfterOverlay,
+            ],
+        ),
+        (
+            ImguiUiRenderOrder::BevyUiAboveImgui,
+            [
+                RenderTopologyNode::BeforeOverlay,
+                RenderTopologyNode::Overlay,
+                RenderTopologyNode::BevyUi,
+                RenderTopologyNode::AfterOverlay,
+            ],
+        ),
+    ] {
+        let mut app = App::new();
+        app.add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: None,
+                    exit_condition: ExitCondition::DontExit,
+                    ..Default::default()
+                })
+                .disable::<WinitPlugin>(),
+        )
+        .add_plugins(
+            ImguiPlugin::new(ImguiPluginConfig::default().with_docking(false))
+                .with_ui_render_order(order),
+        );
+
+        assert_render_dependency_chain(&app, Core2d, expected);
+        assert_render_dependency_chain(&app, Core3d, expected);
+    }
+}
+
 #[test]
 fn multiple_contexts_compose_in_route_order_on_one_camera() {
     if std::env::var("DEAR_IMGUI_BEVY_GPU_TESTS").as_deref() != Ok("1") {
@@ -279,7 +324,10 @@ fn multiple_contexts_compose_in_route_order_on_one_camera() {
     .init_resource::<CompositionReadbacks>()
     .add_observer(collect_readback)
     .add_systems(ImguiPrimaryContextPass, draw_primary_context_fixture)
-    .add_systems(SameCameraSecondaryPass, draw_secondary_context_fixture);
+    .add_systems(
+        dear_imgui_bevy::ImguiContextPass::new(SameCameraSecondaryPass),
+        draw_secondary_context_fixture,
+    );
 
     app.world_mut().spawn((
         Window {
@@ -299,7 +347,12 @@ fn multiple_contexts_compose_in_route_order_on_one_camera() {
             .expect("primary Context configuration must succeed");
 
         let secondary = contexts
-            .create(ImguiContextConfig::new(SameCameraSecondaryPass).with_docking(false))
+            .create(
+                ImguiContextConfig::new(dear_imgui_bevy::ImguiContextPass::new(
+                    SameCameraSecondaryPass,
+                ))
+                .with_docking(false),
+            )
             .expect("secondary Context creation must succeed");
         contexts
             .configure(secondary, |context| {
@@ -445,6 +498,58 @@ fn render_ui_order(order: ImguiUiRenderOrder, expectation: CompositionExpectatio
     rgba8_pixel(pixels, 12, 12)
 }
 
+#[cfg(feature = "bevy-ui")]
+#[derive(Clone, Copy, Debug)]
+enum RenderTopologyNode {
+    BeforeOverlay,
+    BevyUi,
+    Overlay,
+    AfterOverlay,
+}
+
+#[cfg(feature = "bevy-ui")]
+fn assert_render_dependency_chain(
+    app: &App,
+    schedule_label: impl ScheduleLabel,
+    expected: [RenderTopologyNode; 4],
+) {
+    let render_world = app.sub_app(RenderApp).world();
+    let schedules = render_world.resource::<Schedules>();
+    let schedule = schedules
+        .get(schedule_label)
+        .expect("the core render schedule must be installed");
+    let graph = schedule.graph();
+    let dependencies = graph.dependency().graph();
+
+    for pair in expected.windows(2) {
+        let before = render_topology_node(graph, pair[0]);
+        let after = render_topology_node(graph, pair[1]);
+        assert!(
+            dependencies.contains_edge(before, after),
+            "missing direct render dependency {:?} -> {:?}",
+            pair[0],
+            pair[1]
+        );
+    }
+}
+
+#[cfg(feature = "bevy-ui")]
+fn render_topology_node(graph: &ScheduleGraph, node: RenderTopologyNode) -> NodeId {
+    let set = match node {
+        RenderTopologyNode::BeforeOverlay => ImguiRenderSystems::BeforeOverlay.intern(),
+        RenderTopologyNode::BevyUi => {
+            IntoSystemSet::into_system_set(bevy_ui_render::ui_pass).intern()
+        }
+        RenderTopologyNode::Overlay => ImguiRenderSystems::Overlay.intern(),
+        RenderTopologyNode::AfterOverlay => ImguiRenderSystems::AfterOverlay.intern(),
+    };
+    let key = graph
+        .system_sets
+        .get_key(set)
+        .expect("every topology node must be registered as a system set");
+    NodeId::Set(key)
+}
+
 fn spawn_case(app: &mut App, kind: CameraKind, msaa: Msaa, hdr: bool) {
     let name = match (kind, msaa, hdr) {
         (CameraKind::Core2d, Msaa::Off, false) => "core2d-1x-ldr",
@@ -475,7 +580,7 @@ fn spawn_case(app: &mut App, kind: CameraKind, msaa: Msaa, hdr: bool) {
         }
         entity.id()
     };
-    let pass = CompositionPass(name);
+    let pass = dear_imgui_bevy::ImguiContextPass::new(CompositionPass(name));
     app.add_systems(pass.clone(), draw_composition_fixture);
     let context_id = {
         let mut contexts = app.world_mut().non_send_mut::<ImguiContexts>();

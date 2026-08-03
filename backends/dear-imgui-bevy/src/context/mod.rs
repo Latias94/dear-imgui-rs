@@ -6,6 +6,7 @@ mod mailbox;
 pub(crate) mod ownership;
 mod platform;
 mod registry;
+mod shutdown;
 
 pub use active::ImguiUi;
 pub(crate) use active::{ActiveUiCapability, ImguiActiveUi};
@@ -16,6 +17,7 @@ pub(crate) use ownership::ImguiActiveRendererContextError;
 pub use registry::{
     ImguiContextAdmissionError, ImguiContextConfig, ImguiContextError, ImguiContexts,
 };
+pub use shutdown::{ImguiAppExt, ImguiShutdownError};
 
 #[cfg(test)]
 #[path = "tests/lifecycle.rs"]

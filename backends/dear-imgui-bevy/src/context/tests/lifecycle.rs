@@ -14,7 +14,7 @@ use bevy_window::{PrimaryWindow, Window, WindowResolution};
 #[cfg(feature = "render")]
 use dear_imgui_bevy::ImguiContextRemovalPendingReason;
 use dear_imgui_bevy::{
-    ContextId, ImguiContextConfig, ImguiContextError, ImguiContexts, ImguiPlugin,
+    ContextId, ImguiAppExt, ImguiContextConfig, ImguiContextError, ImguiContexts, ImguiPlugin,
     ImguiPrimaryContextPass, ImguiUi,
 };
 use std::time::Duration;
@@ -39,6 +39,12 @@ struct LifecycleTrace {
     wrong_current_context: bool,
     delta_times: Vec<f32>,
     display_metrics: Vec<([f32; 2], [f32; 2])>,
+}
+
+#[derive(Resource, Default)]
+struct ScheduleNamespaceTrace {
+    update_runs: u32,
+    ui_runs: u32,
 }
 
 #[cfg(feature = "render")]
@@ -132,7 +138,9 @@ fn reject_raw_mutation_during_ui(
         Err(ImguiContextError::RawMutationWhileFrameOpen { .. })
     );
     let create_rejected = matches!(
-        contexts.create(ImguiContextConfig::new(MissingContextPass)),
+        contexts.create(ImguiContextConfig::new(crate::ImguiContextPass::new(
+            MissingContextPass,
+        ))),
         Err(ImguiContextError::RawMutationWhileFrameOpen { .. })
     );
     let removal_rejected = matches!(
@@ -150,24 +158,75 @@ fn observe_ui_outside_context_schedule(ui: ImguiUi, mut trace: ResMut<LifecycleT
     trace.outside_frame = matches!(ui.ui(), Err(ImguiContextError::NoOpenFrame));
 }
 
+fn record_update_schedule(mut trace: ResMut<ScheduleNamespaceTrace>) {
+    trace.update_runs += 1;
+}
+
+fn record_update_named_ui_pass(ui: ImguiUi, mut trace: ResMut<ScheduleNamespaceTrace>) {
+    assert!(ui.ui().is_ok());
+    trace.ui_runs += 1;
+}
+
+#[test]
+fn additional_context_pass_cannot_recursively_execute_a_bevy_schedule() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+    app.init_resource::<ScheduleNamespaceTrace>()
+        .add_systems(Update, record_update_schedule)
+        .add_systems(
+            crate::ImguiContextPass::new(Update),
+            record_update_named_ui_pass,
+        )
+        .add_plugins(ImguiPlugin::default());
+
+    app.world_mut()
+        .non_send_mut::<ImguiContexts>()
+        .create(ImguiContextConfig::new(crate::ImguiContextPass::new(
+            Update,
+        )))
+        .unwrap();
+
+    app.update();
+
+    let trace = app.world().resource::<ScheduleNamespaceTrace>();
+    assert_eq!(trace.update_runs, 1);
+    assert_eq!(trace.ui_runs, 1);
+}
+
+#[test]
+fn explicit_headless_shutdown_is_terminal_and_idempotent() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+    app.add_plugins(ImguiPlugin::default());
+
+    app.shutdown_imgui().unwrap();
+
+    assert!(app.world().get_non_send::<ImguiContexts>().is_none());
+    app.shutdown_imgui().unwrap();
+}
+
 #[test]
 fn primary_and_two_additional_contexts_run_in_stable_order_with_independent_frames() {
     let _guard = imgui_context_guard();
     let mut app = app_with_primary_window();
     app.init_resource::<LifecycleTrace>()
         .add_systems(ImguiPrimaryContextPass, record_ui)
-        .add_systems(ContextPassA, record_ui)
-        .add_systems(ContextPassB, record_ui)
+        .add_systems(crate::ImguiContextPass::new(ContextPassA), record_ui)
+        .add_systems(crate::ImguiContextPass::new(ContextPassB), record_ui)
         .add_plugins(ImguiPlugin::default());
 
     let (primary, context_a, context_b, expected_raw) = {
         let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
         let primary = contexts.primary_id().unwrap();
         let context_a = contexts
-            .create(ImguiContextConfig::new(ContextPassA))
+            .create(ImguiContextConfig::new(crate::ImguiContextPass::new(
+                ContextPassA,
+            )))
             .unwrap();
         let context_b = contexts
-            .create(ImguiContextConfig::new(ContextPassB))
+            .create(ImguiContextConfig::new(crate::ImguiContextPass::new(
+                ContextPassB,
+            )))
             .unwrap();
         let mut expected_raw = Vec::new();
         for context_id in [primary, context_a, context_b, primary] {
@@ -276,7 +335,7 @@ fn ui_access_reports_wrong_schedule_and_is_revoked_outside_the_context_pass() {
     let mut app = app_with_primary_window();
     app.init_resource::<LifecycleTrace>()
         .add_systems(ImguiPrimaryContextPass, reject_cross_context_access)
-        .add_systems(ContextPassA, record_ui)
+        .add_systems(crate::ImguiContextPass::new(ContextPassA), record_ui)
         .add_systems(Update, observe_ui_outside_context_schedule)
         .add_plugins(ImguiPlugin::default());
 
@@ -284,7 +343,9 @@ fn ui_access_reports_wrong_schedule_and_is_revoked_outside_the_context_pass() {
         let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
         let primary = contexts.primary_id().unwrap();
         let context_a = contexts
-            .create(ImguiContextConfig::new(ContextPassA))
+            .create(ImguiContextConfig::new(crate::ImguiContextPass::new(
+                ContextPassA,
+            )))
             .unwrap();
         (primary, context_a)
     };
@@ -303,14 +364,16 @@ fn any_live_ui_blocks_raw_mutation_of_every_registered_context() {
     let mut app = app_with_primary_window();
     app.init_resource::<LifecycleTrace>()
         .add_systems(ImguiPrimaryContextPass, reject_raw_mutation_during_ui)
-        .add_systems(ContextPassA, record_ui)
+        .add_systems(crate::ImguiContextPass::new(ContextPassA), record_ui)
         .add_plugins(ImguiPlugin::default());
 
     let (primary, context_a) = {
         let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
         let primary = contexts.primary_id().unwrap();
         let context_a = contexts
-            .create(ImguiContextConfig::new(ContextPassA))
+            .create(ImguiContextConfig::new(crate::ImguiContextPass::new(
+                ContextPassA,
+            )))
             .unwrap();
         (primary, context_a)
     };
@@ -333,13 +396,18 @@ fn duplicate_schedule_and_stale_context_errors_are_typed_and_recover_ownership()
     let _guard = imgui_context_guard();
     let mut contexts = ImguiContexts::with_primary(dear_imgui_rs::SuspendedContext::create());
     let context_a = contexts
-        .create(ImguiContextConfig::new(ContextPassA))
+        .create(ImguiContextConfig::new(crate::ImguiContextPass::new(
+            ContextPassA,
+        )))
         .unwrap();
     let rejected = dear_imgui_rs::SuspendedContext::create();
     let rejected_id = rejected.id();
 
     let error = contexts
-        .insert_suspended(rejected, ImguiContextConfig::new(ContextPassA))
+        .insert_suspended(
+            rejected,
+            ImguiContextConfig::new(crate::ImguiContextPass::new(ContextPassA)),
+        )
         .expect_err("duplicate schedule ownership must be rejected");
     assert!(matches!(
         error.error(),
@@ -366,7 +434,8 @@ fn additional_multi_viewport_config_can_be_registered_before_backend_attachment(
     let admitted = contexts
         .insert_suspended(
             additional,
-            ImguiContextConfig::new(ContextPassA).with_multi_viewport(true),
+            ImguiContextConfig::new(crate::ImguiContextPass::new(ContextPassA))
+                .with_multi_viewport(true),
         )
         .expect("multi-viewport configuration should be retained until backend attachment");
 
@@ -395,7 +464,8 @@ fn attached_backend_rejects_unavailable_native_multi_viewport_without_consuming_
         .non_send_mut::<ImguiContexts>()
         .insert_suspended(
             additional,
-            ImguiContextConfig::new(ContextPassA).with_multi_viewport(true),
+            ImguiContextConfig::new(crate::ImguiContextPass::new(ContextPassA))
+                .with_multi_viewport(true),
         )
         .expect_err("a build without native viewport support must reject the request");
 
@@ -418,17 +488,21 @@ fn missing_schedule_is_context_local_and_does_not_stop_later_contexts() {
     let mut app = app_with_primary_window();
     app.init_resource::<LifecycleTrace>()
         .add_systems(ImguiPrimaryContextPass, record_ui)
-        .add_systems(ContextPassB, record_ui)
+        .add_systems(crate::ImguiContextPass::new(ContextPassB), record_ui)
         .add_plugins(ImguiPlugin::default());
 
     let (primary, missing, healthy) = {
         let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
         let primary = contexts.primary_id().unwrap();
         let missing = contexts
-            .create(ImguiContextConfig::new(MissingContextPass))
+            .create(ImguiContextConfig::new(crate::ImguiContextPass::new(
+                MissingContextPass,
+            )))
             .unwrap();
         let healthy = contexts
-            .create(ImguiContextConfig::new(ContextPassB))
+            .create(ImguiContextConfig::new(crate::ImguiContextPass::new(
+                ContextPassB,
+            )))
             .unwrap();
         (primary, missing, healthy)
     };
@@ -540,14 +614,16 @@ fn removing_the_primary_context_does_not_stop_an_additional_context() {
     let _guard = imgui_context_guard();
     let mut app = app_with_primary_window();
     app.init_resource::<LifecycleTrace>()
-        .add_systems(ContextPassA, record_ui)
+        .add_systems(crate::ImguiContextPass::new(ContextPassA), record_ui)
         .add_plugins(ImguiPlugin::default());
 
     let (primary, additional) = {
         let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
         let primary = contexts.primary_id().unwrap();
         let additional = contexts
-            .create(ImguiContextConfig::new(ContextPassA))
+            .create(ImguiContextConfig::new(crate::ImguiContextPass::new(
+                ContextPassA,
+            )))
             .unwrap();
         (primary, additional)
     };
@@ -577,7 +653,7 @@ fn context_removal_abandons_unextracted_snapshot_without_pausing_another_context
     app.add_plugins(ExtractPlugin::default())
         .init_resource::<LifecycleTrace>()
         .add_systems(ImguiPrimaryContextPass, record_ui)
-        .add_systems(ContextPassA, record_ui)
+        .add_systems(crate::ImguiContextPass::new(ContextPassA), record_ui)
         .add_plugins(ImguiPlugin::default());
     app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
 
@@ -585,7 +661,9 @@ fn context_removal_abandons_unextracted_snapshot_without_pausing_another_context
         let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
         let context_a = contexts.primary_id().unwrap();
         let context_b = contexts
-            .create(ImguiContextConfig::new(ContextPassA))
+            .create(ImguiContextConfig::new(crate::ImguiContextPass::new(
+                ContextPassA,
+            )))
             .unwrap();
         (context_a, context_b)
     };

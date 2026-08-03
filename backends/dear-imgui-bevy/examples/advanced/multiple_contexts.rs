@@ -60,7 +60,7 @@ fn main() {
             ),
         )
         .add_systems(ImguiPrimaryContextPass, primary_ui)
-        .add_systems(SecondaryContextPass, secondary_ui)
+        .add_systems(ImguiContextPass::new(SecondaryContextPass), secondary_ui)
         .run();
 }
 
@@ -68,8 +68,9 @@ fn setup(mut commands: Commands, mut contexts: NonSendMut<ImguiContexts>) -> Res
     let primary_context = contexts
         .primary_id()
         .ok_or("ImguiPlugin should install a primary Context before Startup")?;
-    let secondary_context =
-        contexts.create(ImguiContextConfig::new(SecondaryContextPass).with_docking(false))?;
+    let secondary_context = contexts.create(
+        ImguiContextConfig::new(ImguiContextPass::new(SecondaryContextPass)).with_docking(false),
+    )?;
 
     let primary_camera = commands
         .spawn((

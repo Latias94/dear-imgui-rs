@@ -4,7 +4,7 @@ use std::fmt;
 use bevy_ecs::schedule::{InternedScheduleLabel, ScheduleLabel};
 use dear_imgui_rs::{Context, ContextId, SuspendedContext};
 
-use crate::ImguiPrimaryContextPass;
+use crate::{ImguiContextPass, ImguiPrimaryContextPass};
 
 use super::ownership::{ContextOwner, ImguiContextRetirementSink};
 
@@ -23,7 +23,10 @@ pub struct ImguiContextConfig {
 impl ImguiContextConfig {
     /// Create an additional-Context configuration bound to a unique UI schedule.
     #[must_use]
-    pub fn new(schedule: impl ScheduleLabel) -> Self {
+    pub fn new<L>(schedule: ImguiContextPass<L>) -> Self
+    where
+        L: ScheduleLabel + Clone + Eq + std::hash::Hash,
+    {
         Self {
             schedule: schedule.intern(),
             docking: true,
@@ -64,7 +67,11 @@ impl ImguiContextConfig {
     }
 
     pub(crate) fn primary() -> Self {
-        Self::new(ImguiPrimaryContextPass)
+        Self {
+            schedule: ImguiPrimaryContextPass.intern(),
+            docking: true,
+            multi_viewport: false,
+        }
     }
 }
 

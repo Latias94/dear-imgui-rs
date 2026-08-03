@@ -70,12 +70,17 @@ fn configure_primary<T>(app: &mut App, configure: impl FnOnce(&mut imgui::Contex
 }
 
 fn add_secondary_context(app: &mut App) -> imgui::ContextId {
-    app.init_schedule(SecondaryContextPass);
-    app.add_systems(SecondaryContextPass, draw_secondary_legacy_texture);
+    app.init_schedule(crate::ImguiContextPass::new(SecondaryContextPass));
+    app.add_systems(
+        crate::ImguiContextPass::new(SecondaryContextPass),
+        draw_secondary_legacy_texture,
+    );
     let secondary_id = app
         .world_mut()
         .non_send_mut::<ImguiContexts>()
-        .create(ImguiContextConfig::new(SecondaryContextPass))
+        .create(ImguiContextConfig::new(crate::ImguiContextPass::new(
+            SecondaryContextPass,
+        )))
         .expect("the secondary Context should be admitted");
     app.world_mut()
         .non_send_mut::<ImguiContexts>()

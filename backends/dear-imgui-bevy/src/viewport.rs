@@ -2415,6 +2415,14 @@ pub(crate) fn viewport_ecs_release_pending(keepalive: &ImguiViewportBridgeKeepal
     keepalive.has_tracked_ecs_entities()
 }
 
+#[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
+pub(crate) fn track_viewport_ecs_despawn_for_test(
+    keepalive: &ImguiViewportBridgeKeepalive,
+    entity: Entity,
+) {
+    keepalive.track_ecs_despawn(entity);
+}
+
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(crate) fn finish_viewport_ecs_release(keepalive: &ImguiViewportBridgeKeepalive) {
     keepalive.finish_ecs_release();

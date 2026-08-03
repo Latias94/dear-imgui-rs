@@ -553,6 +553,10 @@ impl ImguiContextRetirements {
             queue: Rc::downgrade(&self.queue),
         }
     }
+
+    pub(crate) fn pending_len(&self) -> usize {
+        self.sink().pending_len()
+    }
 }
 
 struct ContextRetirement {
@@ -1356,6 +1360,9 @@ impl Drop for ContextOwner {
         if self.retirement_sink.is_none() && self.is_unattached() {
             return;
         }
+        if self.try_detach_backend().is_ok() {
+            return;
+        }
         let sink = self.retirement_sink.clone().unwrap_or_default();
         let owner = self.take_for_retirement();
         drop(ContextRetirement::new(owner, sink));
@@ -2029,30 +2036,82 @@ mod retirement_tests {
         }
     }
 
-    #[test]
-    fn vanished_retirement_sink_leaks_the_complete_context_without_destroying_it() {
-        let _guard = context_guard();
-        let destroyed = Rc::new(Cell::new(false));
+    fn context_with_retirement_probe(destroyed: &Rc<Cell<bool>>) -> dear_imgui_rs::Context {
         let mut context = dear_imgui_rs::Context::create();
         context
             .register_attachment::<RetirementProbeMarker>(
                 dear_imgui_rs::ContextAttachmentRole::Extension,
                 Rc::new(RetirementProbe {
-                    destroyed: Rc::clone(&destroyed),
+                    destroyed: Rc::clone(destroyed),
                 }),
             )
             .unwrap()
             .defer_to_context();
+        context
+    }
+
+    fn headless_backend_attachment() -> BackendAttachment {
+        BackendAttachment {
+            render_integration_installed: false,
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            viewport_bridge_registration: None,
+            #[cfg(feature = "render")]
+            renderer_releases: None,
+        }
+    }
+
+    #[test]
+    fn drop_releases_a_synchronously_detachable_context_after_retirement_sink_vanishes() {
+        let _guard = context_guard();
+        let destroyed = Rc::new(Cell::new(false));
+        let context = context_with_retirement_probe(&destroyed);
 
         let retirements = ImguiContextRetirements::default();
         let mut owner = ContextOwner::new(context.suspend());
+        owner
+            .attach_backend(
+                &headless_backend_attachment(),
+                &ImguiContextConfig::primary(),
+            )
+            .unwrap();
+        assert!(!owner.is_unattached());
+        owner.set_retirement_sink(retirements.sink());
+        drop(retirements);
+        drop(owner);
+
+        assert!(
+            destroyed.get(),
+            "a synchronously detachable Context must not depend on its retirement queue"
+        );
+    }
+
+    #[cfg(feature = "render")]
+    #[test]
+    fn vanished_retirement_sink_leaks_renderer_ownership_awaiting_acknowledgement() {
+        let _guard = context_guard();
+        let destroyed = Rc::new(Cell::new(false));
+        let context = context_with_retirement_probe(&destroyed);
+
+        let retirements = ImguiContextRetirements::default();
+        let mut owner = ContextOwner::new(context.suspend());
+        owner
+            .attach_backend(
+                &BackendAttachment {
+                    render_integration_installed: true,
+                    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+                    viewport_bridge_registration: None,
+                    renderer_releases: Some(render::ImguiRendererReleases::default()),
+                },
+                &ImguiContextConfig::primary(),
+            )
+            .unwrap();
         owner.set_retirement_sink(retirements.sink());
         drop(retirements);
         drop(owner);
 
         assert!(
             !destroyed.get(),
-            "a vanished sink must leak ownership instead of partially destroying the Context"
+            "a vanished sink must leak ownership awaiting render-world acknowledgement"
         );
     }
 }
@@ -2119,6 +2178,8 @@ mod tests {
                 .expect("the viewport fixture must retain its bridge owner")
                 .keepalive,
         );
+        let pending_entity = World::new().spawn_empty().id();
+        viewport::track_viewport_ecs_despawn_for_test(&keepalive, pending_entity);
         let strong_count = Rc::strong_count(&keepalive);
 
         drop(owner);

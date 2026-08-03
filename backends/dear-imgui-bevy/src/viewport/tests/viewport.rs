@@ -227,13 +227,16 @@ fn additional_context_can_enable_native_viewports_when_primary_does_not() {
     let _guard = imgui_context_guard();
     let mut app = App::new();
     app.add_plugins(ImguiPlugin::new(ImguiPluginConfig::default()));
-    app.add_systems(SecondaryViewportPass, || {});
+    app.add_systems(crate::ImguiContextPass::new(SecondaryViewportPass), || {});
 
     let (primary_id, secondary_id) = {
         let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
         let primary_id = contexts.primary_id().unwrap();
         let secondary_id = contexts
-            .create(ImguiContextConfig::new(SecondaryViewportPass).with_multi_viewport(true))
+            .create(
+                ImguiContextConfig::new(crate::ImguiContextPass::new(SecondaryViewportPass))
+                    .with_multi_viewport(true),
+            )
             .expect("native viewport infrastructure should be available per Context");
         (primary_id, secondary_id)
     };
@@ -276,13 +279,16 @@ fn additional_context_can_enable_native_viewports_when_primary_does_not() {
 fn native_viewport_support_is_scoped_by_context_and_drive_state() {
     let _guard = imgui_context_guard();
     let mut app = app_with_multi_viewport_bridge();
-    app.add_systems(SecondaryViewportPass, || {});
+    app.add_systems(crate::ImguiContextPass::new(SecondaryViewportPass), || {});
     let primary_id = primary_context_id(&app);
     let secondary_id = app
         .world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .unwrap()
-        .create(ImguiContextConfig::new(SecondaryViewportPass).with_multi_viewport(true))
+        .create(
+            ImguiContextConfig::new(crate::ImguiContextPass::new(SecondaryViewportPass))
+                .with_multi_viewport(true),
+        )
         .expect("the secondary Context should accept native viewport infrastructure");
     ensure_primary_window(&mut app);
 
@@ -1123,14 +1129,17 @@ fn viewport_platform_io_callbacks_capture_commands_and_bevy_system_applies_them(
 fn native_viewport_bridge_isolates_equal_ids_across_two_contexts() {
     let _guard = imgui_context_guard();
     let mut app = app_with_multi_viewport_bridge();
-    app.add_systems(SecondaryViewportPass, || {});
+    app.add_systems(crate::ImguiContextPass::new(SecondaryViewportPass), || {});
     ensure_primary_window(&mut app);
     let primary_id = primary_context_id(&app);
     let secondary_id = app
         .world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .expect("plugin should install the Context registry")
-        .create(ImguiContextConfig::new(SecondaryViewportPass).with_multi_viewport(true))
+        .create(
+            ImguiContextConfig::new(crate::ImguiContextPass::new(SecondaryViewportPass))
+                .with_multi_viewport(true),
+        )
         .expect("an additional Context should receive its own viewport bridge");
     app.world_mut()
         .get_non_send_mut::<ImguiContexts>()
@@ -1614,7 +1623,7 @@ fn viewport_and_render_release_converge_without_pausing_another_context() {
         ),
     );
     app.add_plugins(ExtractPlugin::default())
-        .add_systems(SecondaryViewportPass, || {})
+        .add_systems(crate::ImguiContextPass::new(SecondaryViewportPass), || {})
         .add_plugins(ImguiPlugin::new(
             ImguiPluginConfig::default().with_multi_viewport(true),
         ));
@@ -1626,7 +1635,10 @@ fn viewport_and_render_release_converge_without_pausing_another_context() {
         .world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .unwrap()
-        .create(ImguiContextConfig::new(SecondaryViewportPass).with_multi_viewport(true))
+        .create(
+            ImguiContextConfig::new(crate::ImguiContextPass::new(SecondaryViewportPass))
+                .with_multi_viewport(true),
+        )
         .unwrap();
     app.world_mut()
         .get_non_send_mut::<ImguiContexts>()

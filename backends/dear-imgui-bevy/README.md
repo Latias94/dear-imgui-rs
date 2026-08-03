@@ -92,6 +92,7 @@ The plugin opens and closes each frame around its Context schedule. UI systems b
 | Public `ImguiInputState`, input systems/mappers, or writable `ImguiInputCapture` fields | Let `ImguiPlugin` translate messages; read `ImguiInputCapture` through aggregate/scoped queries or public run conditions. Call `aggregate()` when a copyable snapshot is needed. |
 | `ImguiViewportWindow { viewport_id }`, `ImguiViewportCamera { viewport_id }`, direct field access, or `.copied()` marker queries | Query markers by reference and call `context_id()` / `viewport_id()`. The backend exclusively creates and repairs these identity projections. |
 | Public begin/end schedules, renderer resources, or viewport queue access | Let the plugin drive frames; order custom passes through `ImguiRenderSystems` and observe only public route, diagnostic, capture, texture, and viewport identity/configuration types. |
+| Reusing an application schedule for an additional Context | Wrap the label in `ImguiContextPass`; this keeps nested UI execution separate from Bevy's application schedules. |
 | Wrapper extraction through `into_inner()` | Call `ImguiContexts::remove`, continue updating while it returns `RemovalPending`, and take the returned `SuspendedContext` after both worlds acknowledge release. |
 
 ## Integration Model
@@ -104,10 +105,12 @@ The plugin opens and closes each frame around its Context schedule. UI systems b
 #[derive(ScheduleLabel, Clone, Debug, Eq, PartialEq, Hash)]
 struct InspectorPass;
 
-let inspector = contexts.create(ImguiContextConfig::new(InspectorPass))?;
+let inspector_pass = ImguiContextPass::new(InspectorPass);
+app.add_systems(inspector_pass.clone(), inspector_ui);
+let inspector = contexts.create(ImguiContextConfig::new(inspector_pass))?;
 ```
 
-Register UI systems directly in that schedule. Use `contexts.configure(context_id, |context| ...)` only outside an active frame for font, ini, style, or other Context configuration. A live UI schedule cannot mutate or remove any registered Context through the safe API.
+`ImguiContextPass` gives additional UI schedules their own namespace. Even an inner label such as Bevy's `Update` cannot recursively execute or duplicate that application schedule. Use `contexts.configure(context_id, |context| ...)` only outside an active frame for font, ini, style, or other Context configuration. A live UI schedule cannot mutate or remove any registered Context through the safe API.
 
 ### Fonts
 
@@ -189,7 +192,9 @@ A strong lease retains the image asset. The final lease drop withdraws the mappi
 
 `ImguiContexts::remove` starts Context-local retirement. It returns `ImguiContextError::RemovalPending` while native window entities or render-world resources are still releasing; keep updating the app and retry. Other Contexts continue framing during that wait.
 
-Drop paths never reach into ECS or the render world. Removing the registry queues complete owners for app-local retirement. Long-running hosts that require deterministic cleanup should explicitly remove Contexts and drive updates until removal succeeds before destroying the Bevy `App`.
+For terminal app teardown, call `app.shutdown_imgui()` through `ImguiAppExt`. It removes the registry and pumps only the private ImGui driver and Bevy render sub-app until renderer and viewport acknowledgements converge; it does not run user `Update` systems. The call is idempotent and the app must not run Dear ImGui systems after it succeeds.
+
+Ordinary `Drop` synchronously releases Contexts whose backend state is already detachable. If another Bevy world still owns renderer or viewport resources, the complete Context owner is retained fail-closed instead of invalidating native callback pointers. Embedded hosts, tests, and hot-reload integrations should therefore use explicit shutdown before dropping the `App`.
 
 ### Docking and Native Multi-Viewport
 

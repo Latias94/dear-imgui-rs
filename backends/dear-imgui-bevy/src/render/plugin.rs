@@ -16,15 +16,17 @@ use super::*;
 /// Stable render-world ordering points for passes that compose with Dear ImGui.
 ///
 /// The sets are installed in both the [`Core2d`] and [`Core3d`] schedules after Bevy scene
-/// post-processing and before upscaling. Passes in [`Self::AfterOverlay`] must preserve the
-/// current single-sample result: resolving an older MSAA attachment can overwrite the UI.
+/// post-processing and before upscaling. When the `bevy-ui` feature is enabled,
+/// [`Self::BeforeOverlay`] precedes both UI passes and [`Self::AfterOverlay`] follows both UI
+/// passes. Passes in [`Self::AfterOverlay`] must preserve the current single-sample result:
+/// resolving an older MSAA attachment can overwrite the UI.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ImguiRenderSystems {
-    /// Runs after Bevy scene post-processing and before the Dear ImGui overlay.
+    /// Runs after Bevy scene post-processing and before all UI overlays.
     BeforeOverlay,
     /// Contains the Dear ImGui overlay pass.
     Overlay,
-    /// Runs after Dear ImGui and before Bevy upscaling.
+    /// Runs after all UI overlays and before Bevy upscaling.
     AfterOverlay,
 }
 
@@ -34,9 +36,13 @@ pub enum ImguiRenderSystems {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ImguiUiRenderOrder {
     /// Draw Bevy UI first and Dear ImGui above it.
+    ///
+    /// The complete order is `BeforeOverlay -> Bevy UI -> Overlay -> AfterOverlay`.
     #[default]
     ImguiAboveBevyUi,
     /// Draw Dear ImGui first and Bevy UI above it.
+    ///
+    /// The complete order is `BeforeOverlay -> Overlay -> Bevy UI -> AfterOverlay`.
     #[cfg(feature = "bevy-ui")]
     BevyUiAboveImgui,
 }
@@ -160,32 +166,52 @@ pub(crate) fn install_render_extraction(
     match ui_render_order {
         ImguiUiRenderOrder::ImguiAboveBevyUi => {
             render_app
+                .configure_sets(
+                    Core2d,
+                    (
+                        ImguiRenderSystems::BeforeOverlay.before(bevy_ui_render::ui_pass),
+                        ImguiRenderSystems::Overlay.after(bevy_ui_render::ui_pass),
+                    ),
+                )
+                .configure_sets(
+                    Core3d,
+                    (
+                        ImguiRenderSystems::BeforeOverlay.before(bevy_ui_render::ui_pass),
+                        ImguiRenderSystems::Overlay.after(bevy_ui_render::ui_pass),
+                    ),
+                )
                 .add_systems(
                     Core2d,
-                    render_imgui_overlay
-                        .in_set(ImguiRenderSystems::Overlay)
-                        .after(bevy_ui_render::ui_pass),
+                    render_imgui_overlay.in_set(ImguiRenderSystems::Overlay),
                 )
                 .add_systems(
                     Core3d,
-                    render_imgui_overlay
-                        .in_set(ImguiRenderSystems::Overlay)
-                        .after(bevy_ui_render::ui_pass),
+                    render_imgui_overlay.in_set(ImguiRenderSystems::Overlay),
                 );
         }
         ImguiUiRenderOrder::BevyUiAboveImgui => {
             render_app
+                .configure_sets(
+                    Core2d,
+                    (
+                        ImguiRenderSystems::Overlay.before(bevy_ui_render::ui_pass),
+                        ImguiRenderSystems::AfterOverlay.after(bevy_ui_render::ui_pass),
+                    ),
+                )
+                .configure_sets(
+                    Core3d,
+                    (
+                        ImguiRenderSystems::Overlay.before(bevy_ui_render::ui_pass),
+                        ImguiRenderSystems::AfterOverlay.after(bevy_ui_render::ui_pass),
+                    ),
+                )
                 .add_systems(
                     Core2d,
-                    render_imgui_overlay
-                        .in_set(ImguiRenderSystems::Overlay)
-                        .before(bevy_ui_render::ui_pass),
+                    render_imgui_overlay.in_set(ImguiRenderSystems::Overlay),
                 )
                 .add_systems(
                     Core3d,
-                    render_imgui_overlay
-                        .in_set(ImguiRenderSystems::Overlay)
-                        .before(bevy_ui_render::ui_pass),
+                    render_imgui_overlay.in_set(ImguiRenderSystems::Overlay),
                 );
         }
     }

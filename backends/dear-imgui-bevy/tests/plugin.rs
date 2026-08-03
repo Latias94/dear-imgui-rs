@@ -88,7 +88,9 @@ fn plugin_adopts_a_preinserted_registry_without_replacing_its_primary_context() 
     let primary_id = primary.id();
     let mut contexts = ImguiContexts::with_primary(primary);
     let additional_id = contexts
-        .create(ImguiContextConfig::new(AdditionalPass))
+        .create(ImguiContextConfig::new(
+            dear_imgui_bevy::ImguiContextPass::new(AdditionalPass),
+        ))
         .unwrap();
 
     let config = ImguiPluginConfig::default().with_docking(false);
@@ -210,7 +212,10 @@ fn managed_shared_font_atlas_admission_fails_before_backend_fields_are_mutated()
         .unwrap();
     let mut contexts = ImguiContexts::with_primary(primary);
     contexts
-        .insert_suspended(additional, ImguiContextConfig::new(AdditionalPass))
+        .insert_suspended(
+            additional,
+            ImguiContextConfig::new(dear_imgui_bevy::ImguiContextPass::new(AdditionalPass)),
+        )
         .unwrap();
 
     let mut app = app_with_render_schedule();
@@ -268,7 +273,10 @@ fn later_renderer_admission_failure_leaves_earlier_font_atlas_unclaimed() {
     let additional_id = additional.id();
     let mut contexts = ImguiContexts::with_primary(primary);
     contexts
-        .insert_suspended(additional, ImguiContextConfig::new(AdditionalPass))
+        .insert_suspended(
+            additional,
+            ImguiContextConfig::new(dear_imgui_bevy::ImguiContextPass::new(AdditionalPass)),
+        )
         .unwrap();
 
     let mut app = app_with_render_schedule();
@@ -320,8 +328,10 @@ fn renderer_ownership_drift_fails_closed_and_removal_can_be_repaired() {
     let _guard = imgui_context_guard();
     let mut app = app_with_render_schedule();
     app.world_mut().spawn((Window::default(), PrimaryWindow));
-    app.init_resource::<UiErrorTrace>()
-        .add_systems(AdditionalPass, observe_ui_error_kinds);
+    app.init_resource::<UiErrorTrace>().add_systems(
+        dear_imgui_bevy::ImguiContextPass::new(AdditionalPass),
+        observe_ui_error_kinds,
+    );
     app.add_plugins(ImguiPlugin::default());
     let stale = dear_imgui_rs::SuspendedContext::create();
     let stale_id = stale.id();
@@ -330,7 +340,9 @@ fn renderer_ownership_drift_fails_closed_and_removal_can_be_repaired() {
         let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
         let primary_id = contexts.primary_id().unwrap();
         let additional_id = contexts
-            .create(ImguiContextConfig::new(AdditionalPass))
+            .create(ImguiContextConfig::new(
+                dear_imgui_bevy::ImguiContextPass::new(AdditionalPass),
+            ))
             .unwrap();
         (primary_id, additional_id)
     };

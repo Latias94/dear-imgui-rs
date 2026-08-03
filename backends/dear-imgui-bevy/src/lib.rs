@@ -113,13 +113,14 @@ pub use self::context::ownership::{
     ImguiContextRemovalPendingReason, ImguiPlugin, ImguiPluginConfig,
 };
 pub use self::context::{
-    ImguiContextAdmissionError, ImguiContextConfig, ImguiContextError, ImguiContexts, ImguiUi,
+    ImguiAppExt, ImguiContextAdmissionError, ImguiContextConfig, ImguiContextError, ImguiContexts,
+    ImguiShutdownError, ImguiUi,
 };
 #[cfg(feature = "render")]
 pub use self::render::ImguiRenderSystems;
 #[cfg(feature = "bevy-ui")]
 pub use self::render::ImguiUiRenderOrder;
-pub use self::schedule::ImguiPrimaryContextPass;
+pub use self::schedule::{ImguiContextPass, ImguiPrimaryContextPass};
 #[cfg(feature = "render")]
 pub use self::texture::{ImguiBevyTextures, ImguiTexture, ImguiTextureRegistrationError};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]

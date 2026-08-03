@@ -280,7 +280,7 @@ fn managed_texture_create_request_repeats_without_gpu_feedback() {
 fn managed_texture_requests_and_lifecycles_are_isolated_by_context() {
     let _guard = imgui_context_guard();
     let mut app = app_with_render_world();
-    app.init_schedule(SecondaryUi);
+    app.init_schedule(crate::ImguiContextPass::new(SecondaryUi));
 
     let primary_id = app
         .world()
@@ -292,7 +292,9 @@ fn managed_texture_requests_and_lifecycles_are_isolated_by_context() {
         .world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .unwrap()
-        .create(ImguiContextConfig::new(SecondaryUi))
+        .create(ImguiContextConfig::new(crate::ImguiContextPass::new(
+            SecondaryUi,
+        )))
         .expect("secondary Context admission should succeed");
 
     let register = |app: &mut App, context_id: imgui::ContextId, pixel: [u8; 4]| {
@@ -325,7 +327,10 @@ fn managed_texture_requests_and_lifecycles_are_isolated_by_context() {
         (secondary_id, secondary_texture),
     ])));
     app.add_systems(ImguiPrimaryContextPass, draw_context_managed_texture);
-    app.add_systems(SecondaryUi, draw_context_managed_texture);
+    app.add_systems(
+        crate::ImguiContextPass::new(SecondaryUi),
+        draw_context_managed_texture,
+    );
 
     let camera = {
         let world = app.world_mut();
@@ -526,7 +531,7 @@ fn bevy_image_leases_register_as_stable_imgui_texture_ids_and_extract() {
 fn one_bevy_image_lease_can_draw_from_two_contexts() {
     let _guard = imgui_context_guard();
     let mut app = app_with_render_world();
-    app.init_schedule(SecondaryUi);
+    app.init_schedule(crate::ImguiContextPass::new(SecondaryUi));
 
     let primary_id = app
         .world()
@@ -538,7 +543,9 @@ fn one_bevy_image_lease_can_draw_from_two_contexts() {
         .world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .expect("ImguiPlugin should retain its Context registry")
-        .create(ImguiContextConfig::new(SecondaryUi))
+        .create(ImguiContextConfig::new(crate::ImguiContextPass::new(
+            SecondaryUi,
+        )))
         .expect("secondary Context admission should succeed");
     app.world_mut()
         .get_non_send_mut::<ImguiContexts>()
@@ -558,7 +565,7 @@ fn one_bevy_image_lease_can_draw_from_two_contexts() {
     let texture_id = texture.id();
     app.insert_resource(BevyImageTexture { texture });
     app.add_systems(ImguiPrimaryContextPass, draw_bevy_image);
-    app.add_systems(SecondaryUi, draw_bevy_image);
+    app.add_systems(crate::ImguiContextPass::new(SecondaryUi), draw_bevy_image);
 
     let camera = {
         let world = app.world_mut();

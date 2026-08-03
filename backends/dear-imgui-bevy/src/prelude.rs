@@ -1,7 +1,8 @@
 //! Common imports for applications using the Bevy backend.
 
 pub use crate::context::{
-    ImguiContextAdmissionError, ImguiContextConfig, ImguiContextError, ImguiContexts, ImguiUi,
+    ImguiAppExt, ImguiContextAdmissionError, ImguiContextConfig, ImguiContextError, ImguiContexts,
+    ImguiShutdownError, ImguiUi,
 };
 pub use crate::input::{
     ImguiInputCapture, ImguiInputCaptureState, ImguiInputSystems,
@@ -11,7 +12,7 @@ pub use crate::input::{
     imgui_window_wants_keyboard_input, imgui_window_wants_pointer_input,
     imgui_window_wants_text_input,
 };
-pub use crate::schedule::ImguiPrimaryContextPass;
+pub use crate::schedule::{ImguiContextPass, ImguiPrimaryContextPass};
 pub use crate::viewport::{
     ImguiViewportCamera, ImguiViewportId, ImguiViewportWindow, ImguiViewportWindowConfig,
     ImguiViewportWindowConfigError,

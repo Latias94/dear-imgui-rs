@@ -305,11 +305,13 @@ fn routed_input_app() -> (App, ContextId, Entity, Entity) {
 
 #[cfg(feature = "render")]
 fn add_routed_input_context(app: &mut App) -> ContextId {
-    app.init_schedule(RoutedInputSecondaryUi);
+    app.init_schedule(crate::ImguiContextPass::new(RoutedInputSecondaryUi));
     let context_id = app
         .world_mut()
         .non_send_mut::<ImguiContexts>()
-        .create(ImguiContextConfig::new(RoutedInputSecondaryUi))
+        .create(ImguiContextConfig::new(crate::ImguiContextPass::new(
+            RoutedInputSecondaryUi,
+        )))
         .expect("secondary Context admission must succeed");
     prepare_context(app, context_id);
     context_id
@@ -935,7 +937,10 @@ fn input_platform_feedback_enables_ime_for_a_focused_secondary_context_route() {
         secondary_region,
     ));
     resolve_routed_input(&mut app);
-    app.add_systems(RoutedInputSecondaryUi, request_text_cursor_and_ime);
+    app.add_systems(
+        crate::ImguiContextPass::new(RoutedInputSecondaryUi),
+        request_text_cursor_and_ime,
+    );
 
     app.world_mut()
         .resource_mut::<Messages<WindowFocused>>()
@@ -1007,7 +1012,10 @@ fn input_platform_feedback_follows_the_current_exclusive_pointer_owner() {
     ));
     resolve_routed_input(&mut app);
     app.add_systems(ImguiPrimaryContextPass, request_hidden_cursor);
-    app.add_systems(RoutedInputSecondaryUi, request_text_cursor_only);
+    app.add_systems(
+        crate::ImguiContextPass::new(RoutedInputSecondaryUi),
+        request_text_cursor_only,
+    );
 
     app.world_mut()
         .resource_mut::<Messages<CursorMoved>>()
@@ -1899,11 +1907,14 @@ fn input_equal_viewport_ids_remain_scoped_to_their_context_windows() {
     let _guard = imgui_context_guard();
     let (mut app, primary_host) = app_with_primary_window_and_native_viewports();
     let primary_context = primary_context_id(&app);
-    app.init_schedule(RoutedInputSecondaryUi);
+    app.init_schedule(crate::ImguiContextPass::new(RoutedInputSecondaryUi));
     let secondary_context = app
         .world_mut()
         .non_send_mut::<ImguiContexts>()
-        .create(ImguiContextConfig::new(RoutedInputSecondaryUi).with_multi_viewport(true))
+        .create(
+            ImguiContextConfig::new(crate::ImguiContextPass::new(RoutedInputSecondaryUi))
+                .with_multi_viewport(true),
+        )
         .expect("the secondary Context should receive its own native viewport bridge");
     prepare_context(&mut app, secondary_context);
     let secondary_host = app.world_mut().spawn(Window::default()).id();

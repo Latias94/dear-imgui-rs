@@ -53,7 +53,7 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(Update, (close_on_escape, resize_render_target))
         .add_systems(ImguiPrimaryContextPass, primary_ui)
-        .add_systems(OffscreenContextPass, offscreen_ui)
+        .add_systems(ImguiContextPass::new(OffscreenContextPass), offscreen_ui)
         .run();
 }
 
@@ -64,8 +64,9 @@ fn setup(
     mut textures: ResMut<ImguiBevyTextures>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
 ) -> Result {
-    let offscreen_context =
-        contexts.create(ImguiContextConfig::new(OffscreenContextPass).with_docking(false))?;
+    let offscreen_context = contexts.create(
+        ImguiContextConfig::new(ImguiContextPass::new(OffscreenContextPass)).with_docking(false),
+    )?;
 
     let mut image = Image::new_target_texture(
         INITIAL_TARGET_SIZE.x,
