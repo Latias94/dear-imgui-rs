@@ -256,6 +256,12 @@ mod removed_public_contracts {
     struct TwoPhaseRendererInitialization;
 
     /// ```compile_fail
+    /// use dear_imgui_wgpu::WgpuRenderer;
+    /// let _ = WgpuRenderer::new_frame;
+    /// ```
+    struct ManualFramePreparation;
+
+    /// ```compile_fail
     /// use dear_imgui_wgpu::FrameResources;
     /// ```
     ///
@@ -314,7 +320,7 @@ pub use renderer::WgpuRenderer;
 pub use texture::ExternalTextureId;
 
 pub(crate) use data::{WgpuBackendData, WgpuRenderStateStorage};
-pub(crate) use frame_resources::FrameResources;
+pub(crate) use frame_resources::{FrameResourceArena, FrameResources};
 pub(crate) use render_resources::RenderResources;
 pub(crate) use shaders::ShaderManager;
 pub(crate) use texture::{OwnedWgpuTexture, WgpuTextureManager};

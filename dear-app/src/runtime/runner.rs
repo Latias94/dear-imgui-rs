@@ -323,7 +323,6 @@ impl<'a> AdmittedWgpuFrameDriver<'a> {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            self.renderer.new_frame().map_err(RunError::FramePrepare)?;
             self.renderer
                 .render_reconciled(frame, &mut render_pass)
                 .map_err(RunError::Render)?

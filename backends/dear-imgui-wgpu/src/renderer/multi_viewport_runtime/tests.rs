@@ -1468,7 +1468,7 @@ fn rust_runtime_entry_records_core_drift_and_enters_shutdown() {
     context.io_mut().set_backend_flags(flags);
 
     assert!(matches!(
-        runtime.new_frame(),
+        runtime.with_renderer(|_| ()),
         Err(WgpuViewportError::Renderer(
             crate::RendererError::RendererStateDrift {
                 field: "RENDERER_HAS_TEXTURES"
@@ -1556,15 +1556,11 @@ fn terminal_surface_fault_revokes_capability_and_stays_shutdown() {
         OwningViewportRuntime::attach_for_test(&mut context, WgpuRenderer::empty()).unwrap();
     let control = runtime.control_for_test();
 
-    control.record_entry_fault(WgpuViewportError::SurfaceRejected {
-        event: "validation error",
-    });
+    control.record_entry_fault(WgpuViewportError::SurfaceLost);
 
     assert!(matches!(
         runtime.poll_fault(),
-        Err(WgpuViewportError::SurfaceRejected {
-            event: "validation error"
-        })
+        Err(WgpuViewportError::SurfaceLost)
     ));
     assert_eq!(runtime.state_for_test(), RuntimeState::ShuttingDown);
     assert!(
@@ -1574,7 +1570,7 @@ fn terminal_surface_fault_revokes_capability_and_stays_shutdown() {
             .contains(BackendFlags::RENDERER_HAS_VIEWPORTS)
     );
     assert!(matches!(
-        runtime.new_frame(),
+        runtime.with_renderer(|_| ()),
         Err(WgpuViewportError::RuntimeDetached)
     ));
 
@@ -1966,7 +1962,7 @@ fn surface_events_have_explicit_recovery_actions() {
         surface_action(SurfaceEvent::Outdated),
         SurfaceAction::Reconfigure
     );
-    assert_eq!(surface_action(SurfaceEvent::Lost), SurfaceAction::Recreate);
+    assert_eq!(surface_action(SurfaceEvent::Lost), SurfaceAction::Reject);
     assert_eq!(surface_action(SurfaceEvent::Timeout), SurfaceAction::Skip);
     assert_eq!(surface_action(SurfaceEvent::Occluded), SurfaceAction::Skip);
     assert_eq!(

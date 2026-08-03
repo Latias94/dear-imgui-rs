@@ -464,7 +464,6 @@ impl AppWindow {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            renderer.new_frame()?;
             renderer.render(draw_data, &mut rpass)?;
         }
 

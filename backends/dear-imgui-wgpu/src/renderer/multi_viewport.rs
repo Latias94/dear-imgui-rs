@@ -95,12 +95,7 @@ impl WinitViewportRuntime {
         self.inner.begin_frame_trace()
     }
 
-    /// Prepares renderer device objects for a new frame.
-    pub fn new_frame(&self) -> Result<(), WgpuViewportError> {
-        self.inner.new_frame()
-    }
-
-    /// Applies managed-texture requests before platform-window rendering.
+    /// Prepares frame resources and applies managed-texture requests before platform-window rendering.
     pub fn reconcile_frame(&self, frame: &mut RenderedFrame<'_>) -> Result<(), WgpuViewportError> {
         self.inner.reconcile_frame(frame)
     }

@@ -362,7 +362,6 @@ impl AppWindow {
                 multiview_mask: None,
             });
 
-            self.imgui.renderer.new_frame()?;
             let draw_data = self.imgui.context.render();
             self.imgui.renderer.render_with_fb_size(
                 draw_data,

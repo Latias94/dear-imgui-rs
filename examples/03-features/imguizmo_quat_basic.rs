@@ -865,7 +865,6 @@ impl AppWindow {
                 multiview_mask: None,
             });
 
-            self.imgui.renderer.new_frame()?;
             self.imgui.renderer.render(draw_data, &mut rpass)?;
         }
 

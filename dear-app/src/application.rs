@@ -105,8 +105,6 @@ pub enum RunError {
     ImGuiContext(#[source] imgui::ImGuiError),
     #[error("WGPU renderer initialization failed: {0}")]
     RendererInit(#[source] dear_imgui_wgpu::RendererError),
-    #[error("WGPU renderer frame preparation failed: {0}")]
-    FramePrepare(#[source] dear_imgui_wgpu::RendererError),
     #[error("WGPU renderer draw failed: {0}")]
     Render(#[source] dear_imgui_wgpu::RendererError),
     #[error("WGPU resource invalidation failed: {0}")]

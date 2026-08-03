@@ -124,9 +124,28 @@ conversion pass rather than a different secondary-surface setting.
 
 Secondary viewports inherit the renderer pipeline's multisample and depth-stencil contract. The
 runtime owns matching per-window MSAA resolve and depth-stencil attachments, suspends acquisition
-while a native framebuffer has a zero dimension, and rebuilds the complete surface bundle from
-the platform owner's current physical size after resize, DPI changes, or surface loss. Attachment
-fails transactionally when the adapter cannot support the configured formats and sample count.
+while a native framebuffer has a zero dimension, and rebuilds attachments from the platform
+owner's current physical size after resize or DPI changes. Attachment fails transactionally when
+the adapter cannot support the configured formats and sample count.
+
+A lost secondary surface is terminal for the owning viewport runtime. WGPU exposes Device loss
+through an application-owned, single-slot callback, so this backend neither replaces that callback
+nor guesses that the Device remains usable. On `WgpuViewportError::SurfaceLost`, shut down and
+rebuild the viewport runtime; if the application's Device-lost callback fired, recreate the Device,
+Queue, renderer, and all GPU resources first.
+
+The renderer opens its in-flight resource arena from the `RenderedFrame` epoch. Every viewport
+draw then uses a separate pass slot with its own vertex, index, uniform, and sampler bindings, so
+command buffers cannot observe data uploaded for another viewport. Before invoking default
+multi-viewport callbacks, call `runtime.reconcile_frame(&mut frame)`; this both prepares the exact
+frame epoch and applies managed-texture feedback. A callback reached without that preparation
+fails with `RendererError::FrameNotPrepared` instead of reusing the preceding frame's resources.
+
+`num_frames_in_flight` is the submitted-frame resource window, not an unbounded encoder queue.
+Submit a frame's command buffers before recording more than that many later ImGui frames. Because
+the renderer records into an application-owned render pass, it cannot observe when its encoder is
+submitted; retaining an unsubmitted command buffer past the configured ring can make it reference
+a reused upload buffer. Normal acquire-record-submit-present loops satisfy this contract.
 
 For SDL3, initialize `Sdl3PlatformBackend` first and then call
 `dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRuntime::attach(imgui, &platform, renderer)`.

@@ -350,12 +350,6 @@ impl AppWindow {
                 multiview_mask: None,
             });
 
-            // Call new_frame before rendering
-            self.imgui
-                .renderer
-                .new_frame()
-                .expect("Failed to prepare new frame");
-
             self.imgui
                 .renderer
                 .render_context(&mut self.imgui.context, &mut rpass)?;

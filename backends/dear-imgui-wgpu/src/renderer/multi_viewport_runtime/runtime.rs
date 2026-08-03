@@ -152,6 +152,11 @@ pub enum WgpuViewportError {
     /// Surface acquisition returned a terminal result.
     #[error("WGPU viewport surface acquisition was rejected: {event}")]
     SurfaceRejected { event: &'static str },
+    /// A viewport surface was lost and its Device state is owned by the application.
+    #[error(
+        "WGPU viewport surface was lost; rebuild the viewport runtime, rebuilding the Device first if the application's device-lost callback fired"
+    )]
+    SurfaceLost,
     /// Native multi-viewport surfaces are unavailable on this target.
     #[error("WGPU native multi-viewport rendering is unavailable on this target")]
     UnsupportedTarget,
@@ -454,6 +459,7 @@ impl RuntimeControl {
             WgpuViewportError::Renderer(RendererError::RendererStateDrift { .. })
                 | WgpuViewportError::RendererUserDataOwnershipLost { .. }
                 | WgpuViewportError::CallbackPanicked { .. }
+                | WgpuViewportError::SurfaceLost
                 | WgpuViewportError::SurfaceRejected { .. }
         ) {
             self.record_runtime_contract_fault(fault);
@@ -1025,11 +1031,6 @@ impl OwningViewportRuntime {
 
     pub(crate) fn poll_fault(&self) -> Result<(), WgpuViewportError> {
         self.control.detect_and_take_fault().map_or(Ok(()), Err)
-    }
-
-    pub(crate) fn new_frame(&self) -> Result<(), WgpuViewportError> {
-        self.control
-            .with_renderer_mut(|renderer| renderer.new_frame().map_err(Into::into))
     }
 
     pub(crate) fn reconcile_frame(

@@ -214,15 +214,6 @@ enum ImguiRenderer {
 }
 
 impl ImguiRenderer {
-    fn new_frame(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        match self {
-            Self::Single(renderer) => renderer.new_frame()?,
-            #[cfg(feature = "multi-viewport")]
-            Self::Multi(runtime) => runtime.new_frame()?,
-        }
-        Ok(())
-    }
-
     fn render_with_fb_size(
         &mut self,
         frame: dear_imgui_rs::render::RenderedFrame<'_>,
@@ -1281,7 +1272,6 @@ impl AppWindow {
                 multiview_mask: None,
             });
 
-            imgui.renderer.new_frame()?;
             imgui.renderer.render_with_fb_size(
                 draw_data,
                 &mut render_pass,

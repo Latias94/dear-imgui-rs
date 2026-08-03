@@ -3,7 +3,7 @@
 use std::ops::Range;
 
 use super::*;
-use crate::wgpu;
+use crate::{FrameResources, wgpu};
 use dear_imgui_rs::{
     TextureId,
     render::{DrawData, DrawIdx, RawCallbackCommand},
@@ -111,13 +111,18 @@ pub(super) enum PreparedDrawCommand<'draw> {
         base_vertex: i32,
     },
     ResetRenderState,
-    SetSampler(wgpu::BindGroup),
+    SetSampler(PreparedSampler),
     RawCallback(RawCallbackCommand<'draw>),
+}
+
+#[derive(Copy, Clone)]
+pub(super) enum PreparedSampler {
+    Linear,
+    Nearest,
 }
 
 pub(super) struct PreparedDrawData<'draw> {
     commands: Vec<PreparedDrawCommand<'draw>>,
-    linear_common_bind_group: wgpu::BindGroup,
     has_elements: bool,
 }
 
@@ -135,6 +140,8 @@ pub(super) struct PreparedRenderState {
     pipeline: wgpu::RenderPipeline,
     vertex_buffer: Option<wgpu::Buffer>,
     index_buffer: Option<wgpu::Buffer>,
+    linear_common_bind_group: wgpu::BindGroup,
+    nearest_common_bind_group: wgpu::BindGroup,
 }
 
 impl WgpuRenderer {
@@ -157,7 +164,9 @@ impl WgpuRenderer {
     /// Uploads the frame's vertex and index buffers after command preflight succeeds.
     pub(super) fn prepare_frame_resources_static(
         draw_data: &DrawData,
-        backend_data: &mut WgpuBackendData,
+        frame_resources: &mut FrameResources,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
     ) -> RendererResult<()> {
         let mut total_vtx_count = 0usize;
         let mut total_idx_count = 0usize;
@@ -180,23 +189,13 @@ impl WgpuRenderer {
             indices.extend_from_slice(draw_list.idx_buffer());
         }
 
-        let frame_index = backend_data.frame_index % backend_data.num_frames_in_flight.get();
-        let frame_resources = backend_data
-            .frame_resources
-            .get_mut(frame_index as usize)
-            .ok_or_else(|| {
-                RendererError::InvalidRenderState(
-                    "WGPU frame resource index is out of bounds".to_owned(),
-                )
-            })?;
-
         if total_vtx_count != 0 {
-            frame_resources.ensure_vertex_buffer_capacity(&backend_data.device, total_vtx_count)?;
-            frame_resources.upload_vertex_data(&backend_data.queue, &vertices)?;
+            frame_resources.ensure_vertex_buffer_capacity(device, total_vtx_count)?;
+            frame_resources.upload_vertex_data(queue, &vertices)?;
         }
         if total_idx_count != 0 {
-            frame_resources.ensure_index_buffer_capacity(&backend_data.device, total_idx_count)?;
-            frame_resources.upload_index_data(&backend_data.queue, &indices)?;
+            frame_resources.ensure_index_buffer_capacity(device, total_idx_count)?;
+            frame_resources.upload_index_data(queue, &indices)?;
         }
         Ok(())
     }
@@ -209,24 +208,6 @@ impl WgpuRenderer {
         backend_data: &mut WgpuBackendData,
     ) -> RendererResult<PreparedDrawData<'draw>> {
         Self::preflight_draw_callback_support(draw_data)?;
-
-        let (linear_common_bind_group, nearest_common_bind_group) = {
-            let uniform = backend_data
-                .render_resources
-                .uniform_buffer()
-                .ok_or_else(|| {
-                    RendererError::InvalidRenderState("Uniform buffer not initialized".to_owned())
-                })?;
-            let nearest = backend_data
-                .render_resources
-                .nearest_common_bind_group()
-                .ok_or_else(|| {
-                    RendererError::InvalidRenderState(
-                        "Nearest sampler bind group not initialized".to_owned(),
-                    )
-                })?;
-            (uniform.bind_group().clone(), nearest.clone())
-        };
 
         let mut commands = Vec::new();
         let mut global_idx_offset = 0u32;
@@ -355,14 +336,10 @@ impl WgpuRenderer {
                         commands.push(PreparedDrawCommand::ResetRenderState);
                     }
                     dear_imgui_rs::render::DrawCmd::SetSamplerLinear => {
-                        commands.push(PreparedDrawCommand::SetSampler(
-                            linear_common_bind_group.clone(),
-                        ));
+                        commands.push(PreparedDrawCommand::SetSampler(PreparedSampler::Linear));
                     }
                     dear_imgui_rs::render::DrawCmd::SetSamplerNearest => {
-                        commands.push(PreparedDrawCommand::SetSampler(
-                            nearest_common_bind_group.clone(),
-                        ));
+                        commands.push(PreparedDrawCommand::SetSampler(PreparedSampler::Nearest));
                     }
                     dear_imgui_rs::render::DrawCmd::RawCallback(callback) => {
                         commands.push(PreparedDrawCommand::RawCallback(callback));
@@ -384,14 +361,13 @@ impl WgpuRenderer {
 
         Ok(PreparedDrawData {
             commands,
-            linear_common_bind_group,
             has_elements,
         })
     }
 
     pub(super) fn prepare_render_state_static(
         draw_data: &DrawData,
-        backend_data: &WgpuBackendData,
+        backend_data: &mut WgpuBackendData,
         gamma: f32,
         has_elements: bool,
     ) -> RendererResult<PreparedRenderState> {
@@ -400,21 +376,10 @@ impl WgpuRenderer {
             .as_ref()
             .ok_or_else(|| RendererError::InvalidRenderState("Pipeline not created".to_owned()))?
             .clone();
-        let uniform = backend_data
-            .render_resources
-            .uniform_buffer()
-            .ok_or_else(|| {
-                RendererError::InvalidRenderState("Uniform buffer not initialized".to_owned())
-            })?;
-
-        let frame_resources = backend_data
-            .frame_resources
-            .get((backend_data.frame_index % backend_data.num_frames_in_flight.get()) as usize)
-            .ok_or_else(|| {
-                RendererError::InvalidRenderState(
-                    "WGPU frame resource index is out of bounds".to_owned(),
-                )
-            })?;
+        let device = backend_data.device.clone();
+        let queue = backend_data.queue.clone();
+        let frame_resources = backend_data.acquire_frame_resources()?;
+        Self::prepare_frame_resources_static(draw_data, frame_resources, &device, &queue)?;
         let vertex_buffer = frame_resources.vertex_buffer().cloned();
         let index_buffer = frame_resources.index_buffer().cloned();
         if has_elements && (vertex_buffer.is_none() || index_buffer.is_none()) {
@@ -427,12 +392,15 @@ impl WgpuRenderer {
             Uniforms::create_orthographic_matrix(draw_data.display_pos(), draw_data.display_size());
         let mut uniforms = Uniforms::new();
         uniforms.update(matrix, gamma);
-        uniform.update(&backend_data.queue, &uniforms);
+        let uniform = frame_resources.uniform_buffer()?;
+        uniform.update(&queue, &uniforms);
 
         Ok(PreparedRenderState {
             pipeline,
             vertex_buffer,
             index_buffer,
+            linear_common_bind_group: uniform.bind_group().clone(),
+            nearest_common_bind_group: frame_resources.nearest_common_bind_group()?.clone(),
         })
     }
 
@@ -440,11 +408,10 @@ impl WgpuRenderer {
         render_pass: &mut wgpu::RenderPass<'_>,
         extent: FramebufferExtent,
         state: &PreparedRenderState,
-        linear_common_bind_group: &wgpu::BindGroup,
     ) {
         render_pass.set_viewport(0.0, 0.0, extent.width_f32(), extent.height_f32(), 0.0, 1.0);
         render_pass.set_pipeline(&state.pipeline);
-        render_pass.set_bind_group(0, linear_common_bind_group, &[]);
+        render_pass.set_bind_group(0, &state.linear_common_bind_group, &[]);
         if let (Some(vertex_buffer), Some(index_buffer)) =
             (&state.vertex_buffer, &state.index_buffer)
         {
@@ -465,12 +432,7 @@ impl WgpuRenderer {
             RendererRenderStateGuard::<crate::WgpuRenderStateStorage>::preflight(platform_io)
         }
         .map_err(super::map_renderer_render_state_error)?;
-        Self::setup_prepared_render_state(
-            render_pass,
-            extent,
-            state,
-            &prepared.linear_common_bind_group,
-        );
+        Self::setup_prepared_render_state(render_pass, extent, state);
 
         let mut callback_state = crate::WgpuRenderStateStorage::new(device, render_pass);
         let guard = unsafe { RendererRenderStateGuard::install(platform_io, &mut callback_state) }
@@ -488,14 +450,15 @@ impl WgpuRenderer {
                     render_pass.set_scissor_rect(scissor[0], scissor[1], scissor[2], scissor[3]);
                     render_pass.draw_indexed(indices, base_vertex, 0..1);
                 }
-                PreparedDrawCommand::ResetRenderState => Self::setup_prepared_render_state(
-                    render_pass,
-                    extent,
-                    state,
-                    &prepared.linear_common_bind_group,
-                ),
-                PreparedDrawCommand::SetSampler(bind_group) => {
-                    render_pass.set_bind_group(0, &bind_group, &[]);
+                PreparedDrawCommand::ResetRenderState => {
+                    Self::setup_prepared_render_state(render_pass, extent, state)
+                }
+                PreparedDrawCommand::SetSampler(sampler) => {
+                    let bind_group = match sampler {
+                        PreparedSampler::Linear => &state.linear_common_bind_group,
+                        PreparedSampler::Nearest => &state.nearest_common_bind_group,
+                    };
+                    render_pass.set_bind_group(0, bind_group, &[]);
                 }
                 PreparedDrawCommand::RawCallback(callback) => {
                     unsafe { callback.invoke() };

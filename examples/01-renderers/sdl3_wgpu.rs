@@ -263,7 +263,6 @@ impl WgpuApp {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            main.renderer.new_frame()?;
             main.renderer.render_with_fb_size(
                 draw_data,
                 &mut render_pass,

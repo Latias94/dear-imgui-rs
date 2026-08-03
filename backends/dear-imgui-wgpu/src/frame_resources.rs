@@ -3,7 +3,7 @@
 //! This module handles per-frame resources like vertex and index buffers,
 //! corresponding to the FrameResources struct in imgui_impl_wgpu.cpp
 
-use crate::{RendererError, RendererResult};
+use crate::{RenderResources, RendererError, RendererResult, UniformBuffer};
 use dear_imgui_rs::render::{DrawIdx, DrawVert};
 use wgpu::*;
 
@@ -30,6 +30,8 @@ pub struct FrameResources {
     pub vertex_buffer_size: usize,
     /// Current index buffer size in indices
     pub index_buffer_size: usize,
+    uniform_buffer: Option<UniformBuffer>,
+    nearest_common_bind_group: Option<BindGroup>,
 }
 
 impl FrameResources {
@@ -42,7 +44,22 @@ impl FrameResources {
             index_buffer_host: None,
             vertex_buffer_size: 0,
             index_buffer_size: 0,
+            uniform_buffer: None,
+            nearest_common_bind_group: None,
         }
+    }
+
+    pub(crate) fn ensure_render_bindings(
+        &mut self,
+        device: &Device,
+        render_resources: &RenderResources,
+    ) -> RendererResult<()> {
+        if self.uniform_buffer.is_none() || self.nearest_common_bind_group.is_none() {
+            let (uniform, nearest) = render_resources.create_frame_bindings(device)?;
+            self.uniform_buffer = Some(uniform);
+            self.nearest_common_bind_group = Some(nearest);
+        }
+        Ok(())
     }
 
     /// Ensure vertex buffer can hold the required number of vertices
@@ -184,10 +201,71 @@ impl FrameResources {
     pub fn index_buffer(&self) -> Option<&Buffer> {
         self.index_buffer.as_ref()
     }
+
+    pub(crate) fn uniform_buffer(&self) -> RendererResult<&UniformBuffer> {
+        self.uniform_buffer.as_ref().ok_or_else(|| {
+            RendererError::InvalidRenderState("Frame uniform buffer not initialized".to_owned())
+        })
+    }
+
+    pub(crate) fn nearest_common_bind_group(&self) -> RendererResult<&BindGroup> {
+        self.nearest_common_bind_group.as_ref().ok_or_else(|| {
+            RendererError::InvalidRenderState(
+                "Frame nearest sampler bind group not initialized".to_owned(),
+            )
+        })
+    }
 }
 
 impl Default for FrameResources {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+pub(crate) struct FrameResourceArena {
+    passes: Vec<FrameResources>,
+    next_pass: usize,
+}
+
+impl FrameResourceArena {
+    pub(crate) const fn new() -> Self {
+        Self {
+            passes: Vec::new(),
+            next_pass: 0,
+        }
+    }
+
+    pub(crate) fn begin_frame(&mut self) {
+        self.next_pass = 0;
+    }
+
+    pub(crate) fn acquire(&mut self) -> &mut FrameResources {
+        let index = self.next_pass;
+        self.next_pass += 1;
+        if index == self.passes.len() {
+            self.passes.push(FrameResources::new());
+        }
+        &mut self.passes[index]
+    }
+}
+
+#[cfg(test)]
+mod arena_tests {
+    use super::FrameResourceArena;
+
+    #[test]
+    fn frame_arena_gives_each_pass_a_slot_and_reuses_it_only_after_reset() {
+        let mut arena = FrameResourceArena::new();
+        arena.begin_frame();
+        let _ = arena.acquire();
+        let _ = arena.acquire();
+        assert_eq!(arena.passes.len(), 2);
+        assert_eq!(arena.next_pass, 2);
+
+        arena.begin_frame();
+        let _ = arena.acquire();
+        assert_eq!(arena.passes.len(), 2);
+        assert_eq!(arena.next_pass, 1);
     }
 }
