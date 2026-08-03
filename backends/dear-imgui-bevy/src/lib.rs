@@ -1,7 +1,7 @@
 //! Bevy-native integration for `dear-imgui-rs`.
 //!
-//! Dear ImGui Contexts remain main-thread owned and are driven serially through explicit Bevy
-//! schedules. Rendering, input, and native viewport support build on those Context identities.
+//! Dear ImGui Contexts remain main-thread owned and are driven serially through private typed
+//! passes. Rendering, input, and native viewport support build on those Context identities.
 //!
 //! The default features provide the renderer and deterministic ordering with Bevy UI. A normal
 //! primary-window application needs only a camera, the plugin, and a UI system:
@@ -10,20 +10,19 @@
 //! use bevy::prelude::*;
 //! use dear_imgui_bevy::prelude::*;
 //!
-//! fn draw_ui(imgui: ImguiUi) {
-//!     let Ok(ui) = imgui.ui() else {
-//!         return;
-//!     };
+//! fn draw_ui(frame: ImguiFrame<'_>) {
+//!     let ui = frame.ui();
 //!     ui.window("Hello").build(|| ui.text("Dear ImGui in Bevy"));
 //! }
 //!
-//! App::new()
+//! let mut app = App::new();
+//! app
 //!     .add_plugins((DefaultPlugins, ImguiPlugin::default()))
 //!     .add_systems(Startup, |mut commands: Commands| {
 //!         commands.spawn(Camera2d);
-//!     })
-//!     .add_systems(ImguiPrimaryContextPass, draw_ui)
-//!     .run();
+//!     });
+//! let primary_pass = app.imgui_primary_pass();
+//! app.add_imgui_system(&primary_pass, draw_ui).run();
 //! ```
 //!
 //! Advanced targets use explicit render and input route entities:
@@ -98,9 +97,10 @@ extern crate self as dear_imgui_bevy;
 pub mod context;
 pub mod input;
 pub mod prelude;
-pub mod schedule;
 pub mod texture;
 pub mod viewport;
+
+mod schedule;
 
 #[cfg(feature = "render")]
 pub mod route;
@@ -114,13 +114,12 @@ pub use self::context::ownership::{
 };
 pub use self::context::{
     ImguiAppExt, ImguiContextAdmissionError, ImguiContextConfig, ImguiContextError, ImguiContexts,
-    ImguiShutdownError, ImguiUi,
+    ImguiFrame, ImguiPass, ImguiPrimaryPass, ImguiShutdownError,
 };
 #[cfg(feature = "render")]
 pub use self::render::ImguiRenderSystems;
 #[cfg(feature = "bevy-ui")]
 pub use self::render::ImguiUiRenderOrder;
-pub use self::schedule::{ImguiContextPass, ImguiPrimaryContextPass};
 #[cfg(feature = "render")]
 pub use self::texture::{ImguiBevyTextures, ImguiTexture, ImguiTextureRegistrationError};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]

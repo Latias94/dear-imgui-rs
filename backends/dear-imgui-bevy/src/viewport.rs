@@ -26,7 +26,7 @@ use bevy_camera::{
 ))]
 use bevy_core_pipeline::Core2d;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-use bevy_ecs::message::MessageReader;
+use bevy_ecs::message::{MessageReader, Messages};
 use bevy_ecs::prelude::*;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_ecs::schedule::{ApplyDeferred, IntoScheduleConfigs};
@@ -49,7 +49,8 @@ use bevy_window::WindowRef;
 use bevy_window::{CompositeAlphaMode, PresentMode, Window, WindowTheme};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_window::{
-    CursorOptions, ExitSystems, Monitor, PrimaryWindow, WindowCloseRequested, WindowOccluded,
+    CursorOptions, ExitSystems, Monitor, PrimaryWindow, WindowCloseRequested, WindowClosing,
+    WindowOccluded,
 };
 #[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
 use bevy_window::{WindowLevel, WindowPosition, WindowResolution};
@@ -1754,6 +1755,16 @@ impl ImguiViewportBridgeContext {
             .collect()
     }
 
+    fn mapped_window_entities(&self) -> HashSet<Entity> {
+        self.inner
+            .state
+            .borrow()
+            .viewport_windows
+            .values()
+            .copied()
+            .collect()
+    }
+
     fn track_ecs_despawn(&self, entity: Entity) {
         self.inner.track_ecs_despawn(entity);
     }
@@ -2413,6 +2424,39 @@ pub(crate) fn detach_owned_bridge(
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(crate) fn viewport_ecs_release_pending(keepalive: &ImguiViewportBridgeKeepalive) -> bool {
     keepalive.has_tracked_ecs_entities()
+}
+
+/// Detach every plugin-owned secondary native window before terminal Context teardown.
+///
+/// Bevy normally performs this operation from its private `Last` system. Explicit Dear ImGui
+/// shutdown deliberately cannot run arbitrary user schedules, so it must perform the equivalent
+/// ownership transition itself while the viewport bridge still identifies its windows.
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+pub(crate) fn retire_native_viewport_windows(
+    world: &mut World,
+) -> native_window::NativeWindowRetirements {
+    let mut entities = world
+        .get_non_send::<ImguiViewportBridge>()
+        .map(|bridge| {
+            bridge
+                .contexts()
+                .into_iter()
+                .flat_map(|context| context.mapped_window_entities())
+                .collect::<HashSet<_>>()
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .collect::<Vec<_>>();
+    entities.sort_unstable();
+
+    for &entity in &entities {
+        native_window::release_pointer_capture_for(entity);
+        if let Some(mut messages) = world.get_resource_mut::<Messages<WindowClosing>>() {
+            messages.write(WindowClosing { window: entity });
+        }
+    }
+
+    native_window::retire_windows(entities)
 }
 
 #[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]

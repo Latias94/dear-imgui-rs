@@ -120,10 +120,23 @@ impl Plugin for ImguiPlugin {
             .viewport_window()
             .validate()
             .unwrap_or_else(|error| panic!("invalid Dear ImGui viewport window policy: {error}"));
+        super::pass::install_pass_registry(app);
+        let primary_pass = super::pass::primary_pass(app);
         if app.world().get_non_send::<ImguiContexts>().is_none() {
             app.insert_non_send(ImguiContexts::with_primary(
                 dear_imgui_rs::SuspendedContext::create(),
+                primary_pass,
             ));
+        } else {
+            let registry_id = super::pass::registry_id(app.world());
+            assert_eq!(
+                app.world()
+                    .get_non_send::<ImguiContexts>()
+                    .expect("the Context registry was just checked")
+                    .pass_registry_id(),
+                registry_id,
+                "ImguiContexts was created with pass handles from another App"
+            );
         }
         schedule::install_imgui_schedules(app);
         #[cfg(feature = "render")]
@@ -2021,6 +2034,8 @@ mod renderer_contract_tests {
 mod retirement_tests {
     use std::{cell::Cell, rc::Rc};
 
+    use bevy_app::App;
+
     use super::*;
     use crate::test_util::imgui_context_guard as context_guard;
 
@@ -2060,6 +2075,11 @@ mod retirement_tests {
         }
     }
 
+    fn primary_config() -> ImguiContextConfig {
+        let mut app = App::new();
+        ImguiContextConfig::primary(crate::context::pass::primary_pass(&mut app))
+    }
+
     #[test]
     fn drop_releases_a_synchronously_detachable_context_after_retirement_sink_vanishes() {
         let _guard = context_guard();
@@ -2069,10 +2089,7 @@ mod retirement_tests {
         let retirements = ImguiContextRetirements::default();
         let mut owner = ContextOwner::new(context.suspend());
         owner
-            .attach_backend(
-                &headless_backend_attachment(),
-                &ImguiContextConfig::primary(),
-            )
+            .attach_backend(&headless_backend_attachment(), &primary_config())
             .unwrap();
         assert!(!owner.is_unattached());
         owner.set_retirement_sink(retirements.sink());
@@ -2102,7 +2119,7 @@ mod retirement_tests {
                     viewport_bridge_registration: None,
                     renderer_releases: Some(render::ImguiRendererReleases::default()),
                 },
-                &ImguiContextConfig::primary(),
+                &primary_config(),
             )
             .unwrap();
         owner.set_retirement_sink(retirements.sink());

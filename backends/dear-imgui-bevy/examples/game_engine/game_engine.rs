@@ -54,27 +54,27 @@ impl Default for EditorState {
 }
 
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "dear-imgui-bevy game engine".to_owned(),
-                resolution: (1440, 900).into(),
-                present_mode: PresentMode::AutoVsync,
-                window_theme: Some(WindowTheme::Dark),
-                ..Default::default()
-            }),
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: "dear-imgui-bevy game engine".to_owned(),
+            resolution: (1440, 900).into(),
+            present_mode: PresentMode::AutoVsync,
+            window_theme: Some(WindowTheme::Dark),
             ..Default::default()
-        }))
-        .add_plugins(ImguiPlugin::new(
-            ImguiPluginConfig::default()
-                .with_docking(true)
-                .with_multi_viewport(cfg!(feature = "multi-viewport")),
-        ))
-        .init_resource::<EditorState>()
-        .add_systems(Startup, setup)
-        .add_systems(Update, (close_on_escape, animate_scene))
-        .add_systems(ImguiPrimaryContextPass, editor_ui)
-        .run();
+        }),
+        ..Default::default()
+    }))
+    .add_plugins(ImguiPlugin::new(
+        ImguiPluginConfig::default()
+            .with_docking(true)
+            .with_multi_viewport(cfg!(feature = "multi-viewport")),
+    ))
+    .init_resource::<EditorState>()
+    .add_systems(Startup, setup)
+    .add_systems(Update, (close_on_escape, animate_scene));
+    let primary_pass = app.imgui_primary_pass();
+    app.add_imgui_system(&primary_pass, editor_ui).run();
 }
 
 fn setup(
@@ -207,16 +207,16 @@ fn animate_scene(
 }
 
 fn editor_ui(
-    imgui: ImguiUi,
+    frame: ImguiFrame<'_>,
     native_viewports: Res<ImguiNativeViewportSupport>,
     preview: Res<ScenePreview>,
     mut editor: ResMut<EditorState>,
     objects: Query<(Entity, &Name, &Transform), With<SceneObject>>,
     frame_count: Res<FrameCount>,
 ) -> Result {
-    let context_id = imgui.context_id()?;
-    let frame_index = imgui.frame_index()?;
-    let ui = imgui.ui()?;
+    let context_id = frame.context_id();
+    let frame_index = frame.frame_index();
+    let ui = frame.ui();
     let native_viewport_status = native_viewports.get(context_id);
 
     let root_id = ui.get_id("DearImguiBevyGameEngineDockspace");

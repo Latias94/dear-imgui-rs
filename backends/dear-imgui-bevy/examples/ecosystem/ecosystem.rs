@@ -63,8 +63,9 @@ fn main() {
     .add_plugins(ImguiPlugin::default())
     .init_resource::<EcosystemState>()
     .add_systems(Startup, setup_scene)
-    .add_systems(Update, close_on_escape)
-    .add_systems(ImguiPrimaryContextPass, ecosystem_ui);
+    .add_systems(Update, close_on_escape);
+    let primary_pass = app.imgui_primary_pass();
+    app.add_imgui_system(&primary_pass, ecosystem_ui);
     install_ecosystem_contexts(&mut app);
     app.run();
 }
@@ -105,12 +106,12 @@ fn install_ecosystem_contexts(app: &mut App) {
 }
 
 fn ecosystem_ui(
-    imgui: ImguiUi,
+    frame: ImguiFrame<'_>,
     extensions: NonSend<EcosystemContexts>,
     mut state: ResMut<EcosystemState>,
 ) -> Result {
-    let frame_index = imgui.frame_index()?;
-    let ui = imgui.ui()?;
+    let frame_index = frame.frame_index();
+    let ui = frame.ui();
     state.frame_index = frame_index;
 
     let root_id = ui.get_id("DearImguiBevyEcosystemDockspace");
@@ -181,7 +182,7 @@ fn render_profiler_plot(
     plot_context: &dear_implot::PlotContext,
     state: &EcosystemState,
 ) {
-    ui.text("ImPlot uses the same Ui exposed by ImguiPrimaryContextPass.");
+    ui.text("ImPlot uses the same Ui borrowed from the primary ImguiFrame.");
     let plot_ui = ui.implot(plot_context);
     if let Some(plot) = plot_ui.begin_plot_with_size("Frame timing", [-1.0, 230.0]) {
         plot_ui.plot_line("cpu ms", &state.sample_time, &state.cpu_ms);

@@ -3,10 +3,7 @@ use std::collections::HashMap;
 use std::panic::{self, AssertUnwindSafe};
 
 use bevy_app::App;
-use bevy_ecs::{
-    prelude::{Entity, With, World},
-    schedule::{InternedScheduleLabel, Schedules},
-};
+use bevy_ecs::prelude::{Entity, With, World};
 use bevy_time::{Real, Time};
 use bevy_window::{PrimaryWindow, Window};
 use dear_imgui_rs as imgui;
@@ -14,15 +11,11 @@ use dear_imgui_rs as imgui;
 #[cfg(feature = "render")]
 use super::ImguiFrameMailbox;
 use super::platform;
-use super::{
-    ActiveUiCapability, ImguiActiveRendererContextError, ImguiActiveUi, ImguiContextError,
-    ImguiContexts,
-};
+use super::{ImguiActiveRendererContextError, ImguiContextError, ImguiContexts};
 #[cfg(feature = "render")]
 use crate::input::{ImguiContextInputMetrics, ImguiInputFrameMetrics};
 
 pub(crate) fn install_context_lifecycle(app: &mut App) {
-    app.insert_non_send(ImguiActiveUi::default());
     #[cfg(feature = "render")]
     app.init_resource::<ImguiFrameMailbox>()
         .init_resource::<platform::ImguiPlatformFeedback>();
@@ -58,13 +51,8 @@ enum PendingFrameOutput {
     Rendered,
 }
 
-/// Serially activate, frame, schedule, render, and suspend every registered Context.
+/// Serially activate, frame, run, render, and suspend every registered Context.
 pub(crate) fn drive_imgui_contexts(world: &mut World) {
-    world
-        .get_non_send::<ImguiActiveUi>()
-        .expect("ImguiPlugin must install the active UI capability")
-        .capability()
-        .revoke();
     let order = world
         .get_non_send::<ImguiContexts>()
         .map(ImguiContexts::drive_order)
@@ -138,10 +126,6 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
             .collect::<HashMap<_, _>>();
         (metrics, hosts)
     };
-    let active = world
-        .get_non_send::<ImguiActiveUi>()
-        .expect("ImguiPlugin must install the active UI capability")
-        .capability();
     #[cfg(feature = "render")]
     platform::begin_platform_feedback(world);
 
@@ -324,11 +308,7 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                     let context_raw = context.as_raw();
                     let ui = context.frame();
 
-                    let schedule_capability =
-                        active_for_frame(&active, context_id, config.schedule(), frame_index, ui);
-
-                    let schedule_found = try_run_context_schedule(world, config.schedule());
-                    drop(schedule_capability);
+                    super::run_pass(world, config.pass(), context_id, frame_index, ui);
                     #[cfg(feature = "render")]
                     platform::record_context_platform_ime_feedback(
                         world,
@@ -348,14 +328,6 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                         );
                         platform::sync_primary_window_ime_feedback(world, context_id, context_raw);
                     }
-                    if !schedule_found {
-                        let _ = context.end_frame();
-                        return Err(ImguiContextError::MissingSchedule {
-                            context_id,
-                            schedule: config.schedule(),
-                        });
-                    }
-
                     #[cfg(feature = "render")]
                     {
                         if let Some(consumer) = renderer_consumer {
@@ -388,8 +360,6 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                 },
             )
         }));
-
-        active.revoke();
 
         let (completed_frame, context_error, panic_payload) = match result {
             Ok(Ok(output)) => {
@@ -447,28 +417,6 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
     }
     #[cfg(feature = "render")]
     platform::finish_platform_feedback(world);
-}
-
-fn try_run_context_schedule(world: &mut World, label: InternedScheduleLabel) -> bool {
-    let Some(mut schedule) = world
-        .get_resource_mut::<Schedules>()
-        .and_then(|mut schedules| schedules.remove_temporarily(label))
-    else {
-        return false;
-    };
-
-    // Bevy's schedule scope only reinserts after a normal return, so preserve this nested
-    // Context schedule before propagating a user-system panic.
-    let result = panic::catch_unwind(AssertUnwindSafe(|| schedule.run(world)));
-    let displaced = world.resource_mut::<Schedules>().reinsert(schedule);
-    debug_assert!(
-        displaced.is_none(),
-        "a Context UI schedule was replaced while it was running"
-    );
-    if let Err(payload) = result {
-        panic::resume_unwind(payload);
-    }
-    true
 }
 
 #[cfg(feature = "render")]
@@ -538,18 +486,6 @@ fn finish_frame_output(
         }
         PendingFrameOutput::Rendered => {}
     }
-}
-
-fn active_for_frame(
-    active: &ActiveUiCapability,
-    context_id: imgui::ContextId,
-    schedule: bevy_ecs::schedule::InternedScheduleLabel,
-    frame_index: u64,
-    ui: &imgui::Ui,
-) -> ActiveUiCapability {
-    let scoped = active.clone();
-    scoped.install(context_id, schedule, frame_index, ui);
-    scoped
 }
 
 fn primary_frame_metrics(world: &mut World) -> Option<PrimaryFrameMetrics> {

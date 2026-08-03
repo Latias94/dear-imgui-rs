@@ -73,8 +73,9 @@ fn main() {
     .add_plugins(ImguiPlugin::default())
     .init_resource::<PlotDemoState>()
     .add_systems(Startup, setup_scene)
-    .add_systems(Update, (close_on_escape, animate_marker))
-    .add_systems(ImguiPrimaryContextPass, plot_demo_ui);
+    .add_systems(Update, (close_on_escape, animate_marker));
+    let primary_pass = app.imgui_primary_pass();
+    app.add_imgui_system(&primary_pass, plot_demo_ui);
 
     install_plot_context(&mut app);
     app.run();
@@ -156,13 +157,13 @@ fn animate_marker(
 }
 
 fn plot_demo_ui(
-    imgui: ImguiUi,
+    frame: ImguiFrame<'_>,
     plot_contexts: NonSend<PlotDemoContexts>,
     mut state: ResMut<PlotDemoState>,
     frame_count: Res<bevy::diagnostic::FrameCount>,
 ) -> Result {
-    let imgui_frame_index = imgui.frame_index()?;
-    let ui = imgui.ui()?;
+    let imgui_frame_index = frame.frame_index();
+    let ui = frame.ui();
 
     let frame_time_ms = state.current_frame_time_ms;
     let fps = state.current_fps;

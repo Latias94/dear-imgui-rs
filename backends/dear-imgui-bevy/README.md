@@ -34,7 +34,7 @@ dear-imgui-bevy = "=0.16.0-alpha.1"
 dear-imgui-rs = "=0.16.0-alpha.1"
 ```
 
-For a headless integration that drives UI schedules without installing the Bevy renderer:
+For a headless integration that drives private UI passes without installing the Bevy renderer:
 
 ```toml
 dear-imgui-bevy = { version = "=0.16.0-alpha.1", default-features = false }
@@ -49,31 +49,31 @@ use bevy::prelude::*;
 use dear_imgui_bevy::prelude::*;
 
 fn main() {
-    App::new()
+    let mut app = App::new();
+    app
         .add_plugins((DefaultPlugins, ImguiPlugin::default()))
         .add_systems(Startup, |mut commands: Commands| {
             commands.spawn(Camera2d);
-        })
-        .add_systems(ImguiPrimaryContextPass, tools_ui)
-        .run();
+        });
+    let primary_pass = app.imgui_primary_pass();
+    app.add_imgui_system(&primary_pass, tools_ui).run();
 }
 
-fn tools_ui(imgui: ImguiUi) -> Result {
-    let ui = imgui.ui()?;
+fn tools_ui(frame: ImguiFrame<'_>) {
+    let ui = frame.ui();
     ui.window("Tools")
         .build(|| ui.text("Dear ImGui is drawing in Bevy."));
-    Ok(())
 }
 ```
 
-The plugin opens and closes each frame around its Context schedule. UI systems borrow the active frame through `ImguiUi`; they must not call `Context::frame()` or `Context::render()` themselves.
+The plugin opens and closes each frame around a private, runner-owned pass. UI systems borrow the active frame through `ImguiFrame<'_, P>` and can only be registered through `ImguiAppExt::add_imgui_system`; they must not call `Context::frame()` or `Context::render()` themselves.
 
 ## Feature Modes
 
 | Mode | Cargo selection | Contract |
 | --- | --- | --- |
 | Default | default features | Renderer plus `bevy-ui`; Dear ImGui draws above Bevy UI by default. |
-| Headless | `default-features = false` | All Context schedules and lifecycle; primary-Context input/capture only, without `RenderApp` extraction. |
+| Headless | `default-features = false` | All Context passes and lifecycle; primary-Context input/capture only, without `RenderApp` extraction. |
 | Render only | `default-features = false, features = ["render"]` | Renderer without a dependency on Bevy UI rendering. |
 | Native multi-viewport | `features = ["multi-viewport"]` | Implies `render` and `bevy_winit`; runtime opt-in is still required. |
 | WASM default | `features = ["wasm"]` | Default renderer/UI feature set using the explicit WASM core route. |
@@ -87,30 +87,42 @@ The plugin opens and closes each frame around its Context schedule. UI systems b
 | --- | --- |
 | `configure_example_context` and `ImguiOverlayCamera` | Spawn a normal camera and add `ImguiPlugin::default()`; the unique primary-window camera is automatic. |
 | `ImguiBackendConfig` / `ImguiBackendStatus` | Configure startup through private-field `ImguiPluginConfig`; observe route and runtime failures through `ImguiDiagnostics` and `ImguiContexts::last_error`. |
-| UI-only `ImguiContexts` system parameter | Use `ImguiUi` inside a Context schedule; use the non-send `ImguiContexts` registry only for creation, configuration, inspection, and removal. |
+| UI-only `ImguiContexts` system parameter | Use `ImguiFrame<'_, P>` inside a private Context pass; use the non-send `ImguiContexts` registry only for creation, configuration, inspection, and removal. |
 | `ImguiBevyTextures::register` / `unregister` and retained raw IDs | Hold a cloneable strong or weak `ImguiTexture` lease from `register_strong` / `register_weak`. |
 | Public `ImguiInputState`, input systems/mappers, or writable `ImguiInputCapture` fields | Let `ImguiPlugin` translate messages; read `ImguiInputCapture` through aggregate/scoped queries or public run conditions. Call `aggregate()` when a copyable snapshot is needed. |
 | `ImguiViewportWindow { viewport_id }`, `ImguiViewportCamera { viewport_id }`, direct field access, or `.copied()` marker queries | Query markers by reference and call `context_id()` / `viewport_id()`. The backend exclusively creates and repairs these identity projections. |
 | Public begin/end schedules, renderer resources, or viewport queue access | Let the plugin drive frames; order custom passes through `ImguiRenderSystems` and observe only public route, diagnostic, capture, texture, and viewport identity/configuration types. |
-| Reusing an application schedule for an additional Context | Wrap the label in `ImguiContextPass`; this keeps nested UI execution separate from Bevy's application schedules. |
+| Reusing an application schedule for an additional Context | Declare an `ImguiPass<P>` and register typed frame systems through `ImguiAppExt`; the private runner cannot be invoked as an application schedule. |
 | Wrapper extraction through `into_inner()` | Call `ImguiContexts::remove`, continue updating while it returns `RemovalPending`, and take the returned `SuspendedContext` after both worlds acknowledge release. |
 
 ## Integration Model
 
-### Contexts and Schedules
+### Contexts and Passes
 
-`ImguiContexts` owns every Dear ImGui Context in deterministic order. The primary Context runs `ImguiPrimaryContextPass`. Create an independent Context with a unique Bevy schedule:
+`ImguiContexts` owns every Dear ImGui Context in deterministic order. `imgui_primary_pass()` returns the stable pass handle owned by the primary Context. Create an independent Context with a private typed pass:
 
 ```rust
-#[derive(ScheduleLabel, Clone, Debug, Eq, PartialEq, Hash)]
 struct InspectorPass;
 
-let inspector_pass = ImguiContextPass::new(InspectorPass);
-app.add_systems(inspector_pass.clone(), inspector_ui);
-let inspector = contexts.create(ImguiContextConfig::new(inspector_pass))?;
+fn create_inspector(
+    pass: Res<ImguiPass<InspectorPass>>,
+    mut contexts: NonSendMut<ImguiContexts>,
+) -> Result {
+    contexts.create(ImguiContextConfig::new(*pass))?;
+    Ok(())
+}
+
+fn inspector_ui(frame: ImguiFrame<'_, InspectorPass>) {
+    frame.ui().text("Independent inspector Context");
+}
+
+let inspector_pass = app.declare_imgui_pass::<InspectorPass>();
+app.insert_resource(inspector_pass)
+    .add_systems(Startup, create_inspector)
+    .add_imgui_system(&inspector_pass, inspector_ui);
 ```
 
-`ImguiContextPass` gives additional UI schedules their own namespace. Even an inner label such as Bevy's `Update` cannot recursively execute or duplicate that application schedule. Use `contexts.configure(context_id, |context| ...)` only outside an active frame for font, ini, style, or other Context configuration. A live UI schedule cannot mutate or remove any registered Context through the safe API.
+Each `declare_imgui_pass::<P>()` call creates a distinct runtime pass, even when `P` is the same type. Keep and reuse the exact handle for both `ImguiContextConfig::new` and `add_imgui_system`. The type parameter prevents accidental cross-brand registration, while the private runtime identity prevents two Contexts of one brand from sharing a runner. A normal Bevy schedule such as `Update`, or a standalone `Schedule`, cannot accept `ImguiFrame`; only the private driver can construct it. Use `frame.context_id()` when a system needs its active Context identity, and use `contexts.configure(context_id, |context| ...)` only outside an active frame for font, ini, style, or other Context configuration.
 
 ### Fonts
 
@@ -180,7 +192,7 @@ fn gameplay_enabled(capture: Res<ImguiInputCapture>) -> bool {
 
 Use `primary()`, `context(context_id)`, or `window(entity)` according to the ownership scope. Focus, sticky key/button release, cursor, IME, camera viewports, and native platform windows are tracked per Context and host window.
 
-With `default-features = false`, the primary Context still receives primary-window input and capture updates. Additional headless Context schedules run normally but remain non-interactive; explicit multi-Context input routing requires the `render` feature.
+With `default-features = false`, the primary Context still receives primary-window input and capture updates. Additional headless Context passes run normally but remain non-interactive; explicit multi-Context input routing requires the `render` feature.
 
 ### Bevy Images
 
@@ -227,11 +239,11 @@ Start with the first five examples for copy-runnable integration patterns:
 | [`simple`](examples/basic/simple.rs) | `cargo run -p dear-imgui-bevy --example simple` | Minimal default overlay with no marker or helper setup. |
 | [`custom_font`](examples/basic/custom_font.rs) | `cargo run -p dear-imgui-bevy --example custom_font` | Outside-frame atlas configuration and non-send `FontId` storage. |
 | [`custom_post_process`](examples/advanced/custom_post_process.rs) | `cargo run -p dear-imgui-bevy --example custom_post_process` | Public overlay ordering with post-processing, MSAA, HDR, and Bevy UI composition. |
-| [`multiple_contexts`](examples/advanced/multiple_contexts.rs) | `cargo run -p dear-imgui-bevy --example multiple_contexts` | Independent Context schedules, windows, cameras, input routes, capture, and retryable teardown. |
+| [`multiple_contexts`](examples/advanced/multiple_contexts.rs) | `cargo run -p dear-imgui-bevy --example multiple_contexts` | Independent Context passes, windows, cameras, input routes, capture, and retryable teardown. |
 | [`render_to_image`](examples/advanced/render_to_image.rs) | `cargo run -p dear-imgui-bevy --example render_to_image` | Offscreen Context, Bevy image lease, and explicit logical input mapping. |
 | [`app_integration`](examples/app/app_integration.rs) | `cargo run -p dear-imgui-bevy --example app_integration` | Gameplay/editor integration using capture policy. |
 | [`game_engine`](examples/game_engine/game_engine.rs) | `cargo run -p dear-imgui-bevy --example game_engine` | Docked editor surface and scene texture interop; add `--features multi-viewport` for native windows. |
-| [`ecosystem`](examples/ecosystem/ecosystem.rs) | `cargo run -p dear-imgui-bevy --example ecosystem` | ImPlot, ImNodes, and ImGuizmo in one Context schedule. |
+| [`ecosystem`](examples/ecosystem/ecosystem.rs) | `cargo run -p dear-imgui-bevy --example ecosystem` | ImPlot, ImNodes, and ImGuizmo in one Context pass. |
 | [`bevy_plot_controls`](examples/ecosystem/bevy_plot_controls.rs) | `cargo run -p dear-imgui-bevy --example bevy_plot_controls` | Bevy scene controlled through ImPlot UI. |
 
 ## Current Boundaries

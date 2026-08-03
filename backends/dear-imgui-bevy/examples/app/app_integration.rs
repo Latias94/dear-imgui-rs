@@ -62,8 +62,9 @@ struct DebugUiPlugin;
 impl Plugin for DebugUiPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(ImguiPlugin::default())
-            .add_systems(Startup, setup_imgui)
-            .add_systems(ImguiPrimaryContextPass, tools_ui);
+            .add_systems(Startup, setup_imgui);
+        let primary_pass = app.imgui_primary_pass();
+        app.add_imgui_system(&primary_pass, tools_ui);
     }
 }
 
@@ -138,12 +139,12 @@ fn apply_player_tint(state: Res<AppState>, mut player: Query<&mut Sprite, With<P
 }
 
 fn tools_ui(
-    imgui: ImguiUi,
+    frame: ImguiFrame<'_>,
     capture: Res<ImguiInputCapture>,
     mut state: ResMut<AppState>,
     player: Query<&Transform, With<Player>>,
 ) -> Result {
-    let ui = imgui.ui()?;
+    let ui = frame.ui();
 
     ui.window("App Tools")
         .position([48.0, 48.0], Condition::FirstUseEver)

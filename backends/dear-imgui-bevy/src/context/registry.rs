@@ -1,34 +1,29 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use bevy_ecs::schedule::{InternedScheduleLabel, ScheduleLabel};
 use dear_imgui_rs::{Context, ContextId, SuspendedContext};
 
-use crate::{ImguiContextPass, ImguiPrimaryContextPass};
-
 use super::ownership::{ContextOwner, ImguiContextRetirementSink};
+use super::{ImguiPass, ImguiPrimaryPass, PassIdentity};
 
-/// Per-Context lifecycle and UI schedule configuration.
+/// Per-Context lifecycle and private UI pass configuration.
 ///
-/// In headless builds without the `render` feature, every configured Context schedule is driven,
+/// In headless builds without the `render` feature, every configured Context pass is driven,
 /// but only the primary Context receives implicit primary-window input and capture updates.
 /// Explicit input routing for additional Contexts requires `render`.
 #[derive(Clone, Debug)]
 pub struct ImguiContextConfig {
-    schedule: InternedScheduleLabel,
+    pass: PassIdentity,
     docking: bool,
     multi_viewport: bool,
 }
 
 impl ImguiContextConfig {
-    /// Create an additional-Context configuration bound to a unique UI schedule.
+    /// Create an additional-Context configuration bound to an application-owned pass.
     #[must_use]
-    pub fn new<L>(schedule: ImguiContextPass<L>) -> Self
-    where
-        L: ScheduleLabel + Clone + Eq + std::hash::Hash,
-    {
+    pub fn new<P: 'static>(pass: ImguiPass<P>) -> Self {
         Self {
-            schedule: schedule.intern(),
+            pass: pass.identity(),
             docking: true,
             multi_viewport: false,
         }
@@ -48,10 +43,10 @@ impl ImguiContextConfig {
         self
     }
 
-    /// Return the interned UI schedule owned by this Context.
+    /// Return the Rust type name used to brand this Context pass.
     #[must_use]
-    pub fn schedule(&self) -> InternedScheduleLabel {
-        self.schedule
+    pub const fn pass_name(&self) -> &'static str {
+        self.pass.brand_name()
     }
 
     /// Return whether docking is enabled.
@@ -66,16 +61,20 @@ impl ImguiContextConfig {
         self.multi_viewport
     }
 
-    pub(crate) fn primary() -> Self {
+    pub(crate) fn primary(pass: ImguiPass<ImguiPrimaryPass>) -> Self {
         Self {
-            schedule: ImguiPrimaryContextPass.intern(),
+            pass: pass.identity(),
             docking: true,
             multi_viewport: false,
         }
     }
+
+    pub(crate) const fn pass(&self) -> PassIdentity {
+        self.pass
+    }
 }
 
-/// Typed failure from Context lookup, schedule access, configuration, or teardown.
+/// Typed failure from Context lookup, pass admission, configuration, or teardown.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ImguiContextError {
@@ -83,28 +82,17 @@ pub enum ImguiContextError {
     UnknownContext { context_id: ContextId },
     /// This exact core Context identity is already registered.
     AlreadyRegistered { context_id: ContextId },
-    /// Another Context already owns the requested UI schedule.
-    DuplicateSchedule {
-        schedule: InternedScheduleLabel,
+    /// Another Context already owns the requested UI pass.
+    DuplicatePass {
+        pass: &'static str,
         owner: ContextId,
     },
-    /// A system requested a Context other than the one bound to its current schedule.
-    WrongSchedule {
-        requested: ContextId,
-        active: ContextId,
-        active_schedule: InternedScheduleLabel,
-    },
-    /// No Context frame is currently exposed to this system.
-    NoOpenFrame,
+    /// The requested pass belongs to a different Bevy App.
+    ForeignPass { pass: &'static str },
     /// The requested Context is being removed.
     TeardownInProgress { context_id: ContextId },
     /// Raw Context mutation was requested while its UI frame was live.
     RawMutationWhileFrameOpen { context_id: ContextId },
-    /// The configured Bevy schedule is not installed.
-    MissingSchedule {
-        context_id: ContextId,
-        schedule: InternedScheduleLabel,
-    },
     /// The legacy/headless font atlas could not be built before opening a frame.
     FontAtlasBuildFailed { context_id: ContextId },
     /// Managed renderer admission failed before backend fields were mutated.
@@ -174,35 +162,24 @@ impl fmt::Display for ImguiContextError {
                     "Dear ImGui Context {context_id:?} is already registered"
                 )
             }
-            Self::DuplicateSchedule { schedule, owner } => {
+            Self::DuplicatePass { pass, owner } => {
                 write!(
                     formatter,
-                    "Dear ImGui UI schedule {schedule:?} is already owned by Context {owner:?}"
+                    "Dear ImGui pass {pass} is already owned by Context {owner:?}"
                 )
             }
-            Self::WrongSchedule {
-                requested,
-                active,
-                active_schedule,
-            } => write!(
-                formatter,
-                "Context {requested:?} was requested while schedule {active_schedule:?} drives Context {active:?}"
-            ),
-            Self::NoOpenFrame => formatter
-                .write_str("ImguiUi is available only while a Context UI schedule is running"),
+            Self::ForeignPass { pass } => {
+                write!(
+                    formatter,
+                    "Dear ImGui pass {pass} belongs to another Bevy App"
+                )
+            }
             Self::TeardownInProgress { context_id } => {
                 write!(formatter, "Context {context_id:?} teardown is in progress")
             }
             Self::RawMutationWhileFrameOpen { context_id } => write!(
                 formatter,
                 "Context {context_id:?} cannot be configured while its Ui is live"
-            ),
-            Self::MissingSchedule {
-                context_id,
-                schedule,
-            } => write!(
-                formatter,
-                "Context {context_id:?} UI schedule {schedule:?} is not installed"
             ),
             Self::FontAtlasBuildFailed { context_id } => {
                 write!(
@@ -363,13 +340,14 @@ pub(crate) struct ContextSlot {
 /// Main-thread registry that owns all Bevy-managed Dear ImGui Contexts.
 ///
 /// Slots retain Contexts as [`SuspendedContext`] owners. The private driver removes one owner at a
-/// time before activating it, so running a nested Bevy schedule never overlaps a registry borrow
-/// with a live Dear ImGui `Ui`.
+/// time before activating it, so running a private pass never overlaps a registry borrow with a
+/// live Dear ImGui `Ui`.
 pub struct ImguiContexts {
+    pass_registry_id: u64,
     primary: Option<ContextId>,
     slots: HashMap<ContextId, ContextSlot>,
     order: Vec<ContextId>,
-    schedule_owners: HashMap<InternedScheduleLabel, ContextId>,
+    pass_owners: HashMap<super::pass::PassKey, ContextId>,
     backend: Option<super::ownership::BackendAttachment>,
     retirement_sink: Option<ImguiContextRetirementSink>,
 }
@@ -377,10 +355,10 @@ pub struct ImguiContexts {
 impl ImguiContexts {
     /// Create a registry adopting `primary` as the primary Context.
     #[must_use]
-    pub fn with_primary(primary: SuspendedContext) -> Self {
+    pub fn with_primary(primary: SuspendedContext, pass: ImguiPass<ImguiPrimaryPass>) -> Self {
         let primary_id = primary.id();
-        let config = ImguiContextConfig::primary();
-        let schedule = config.schedule;
+        let config = ImguiContextConfig::primary(pass);
+        let pass = config.pass;
         let mut slots = HashMap::new();
         slots.insert(
             primary_id,
@@ -393,10 +371,11 @@ impl ImguiContexts {
             },
         );
         Self {
+            pass_registry_id: pass.registry_id(),
             primary: Some(primary_id),
             slots,
             order: vec![primary_id],
-            schedule_owners: HashMap::from([(schedule, primary_id)]),
+            pass_owners: HashMap::from([(pass.key(), primary_id)]),
             backend: None,
             retirement_sink: None,
         }
@@ -460,10 +439,18 @@ impl ImguiContexts {
                 context,
             ));
         }
-        if let Some(owner) = self.schedule_owners.get(&config.schedule).copied() {
+        if config.pass.registry_id() != self.pass_registry_id {
             return Err(ImguiContextAdmissionError::new(
-                ImguiContextError::DuplicateSchedule {
-                    schedule: config.schedule,
+                ImguiContextError::ForeignPass {
+                    pass: config.pass.brand_name(),
+                },
+                context,
+            ));
+        }
+        if let Some(owner) = self.pass_owners.get(&config.pass.key()).copied() {
+            return Err(ImguiContextAdmissionError::new(
+                ImguiContextError::DuplicatePass {
+                    pass: config.pass.brand_name(),
                     owner,
                 },
                 context,
@@ -493,7 +480,7 @@ impl ImguiContexts {
             return Err(ImguiContextAdmissionError::new(error, context));
         }
 
-        self.schedule_owners.insert(config.schedule, context_id);
+        self.pass_owners.insert(config.pass.key(), context_id);
         self.order.push(context_id);
         self.slots.insert(
             context_id,
@@ -569,7 +556,7 @@ impl ImguiContexts {
             .remove(&context_id)
             .expect("the validated Context slot must still exist");
         self.order.retain(|candidate| *candidate != context_id);
-        self.schedule_owners.remove(&slot.config.schedule);
+        self.pass_owners.remove(&slot.config.pass.key());
         if self.primary == Some(context_id) {
             self.primary = None;
         }
@@ -579,6 +566,7 @@ impl ImguiContexts {
             .into_suspended())
     }
 
+    #[cfg(feature = "render")]
     pub(crate) fn is_tearing_down(&self, context_id: ContextId) -> bool {
         self.slots
             .get(&context_id)
@@ -587,6 +575,10 @@ impl ImguiContexts {
 
     pub(crate) fn drive_order(&self) -> Vec<ContextId> {
         self.order.clone()
+    }
+
+    pub(crate) const fn pass_registry_id(&self) -> u64 {
+        self.pass_registry_id
     }
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]

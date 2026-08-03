@@ -27,7 +27,7 @@ use bevy_window::{PrimaryWindow, Window, WindowRef, WindowResolution};
 #[cfg(feature = "multi-viewport")]
 use dear_imgui_bevy::ImguiPluginConfig;
 use dear_imgui_bevy::{
-    ImguiContextConfig, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, ImguiUi,
+    ImguiAppExt, ImguiContextConfig, ImguiContexts, ImguiFrame, ImguiPlugin,
     render::{
         IMGUI_FRAGMENT_ENTRY_POINT, IMGUI_SHADER_HANDLE, IMGUI_SHADER_SOURCE,
         IMGUI_VERTEX_ENTRY_POINT, ImguiExtractedRenderFrame, ImguiPipelineKey,
@@ -46,7 +46,6 @@ struct ManagedTexture(imgui::ManagedTextureId);
 const LEGACY_RENDER_TEXTURE_ID: imgui::TextureId = imgui::TextureId::new(0xD1A6);
 const SECONDARY_RENDER_TEXTURE_ID: imgui::TextureId = imgui::TextureId::new(0x5EC0);
 
-#[derive(ScheduleLabel, Clone, Debug, Eq, Hash, PartialEq)]
 struct SecondaryContextPass;
 
 fn primary_context_id(app: &App) -> imgui::ContextId {
@@ -70,17 +69,12 @@ fn configure_primary<T>(app: &mut App, configure: impl FnOnce(&mut imgui::Contex
 }
 
 fn add_secondary_context(app: &mut App) -> imgui::ContextId {
-    app.init_schedule(crate::ImguiContextPass::new(SecondaryContextPass));
-    app.add_systems(
-        crate::ImguiContextPass::new(SecondaryContextPass),
-        draw_secondary_legacy_texture,
-    );
+    let secondary_pass = app.declare_imgui_pass::<SecondaryContextPass>();
+    app.add_imgui_system(&secondary_pass, draw_secondary_legacy_texture);
     let secondary_id = app
         .world_mut()
         .non_send_mut::<ImguiContexts>()
-        .create(ImguiContextConfig::new(crate::ImguiContextPass::new(
-            SecondaryContextPass,
-        )))
+        .create(ImguiContextConfig::new(secondary_pass))
         .expect("the secondary Context should be admitted");
     app.world_mut()
         .non_send_mut::<ImguiContexts>()
@@ -248,17 +242,13 @@ fn render_entity_for_camera(app: &mut App, camera: Entity) -> Entity {
         .expect("the camera should have an installed render view")
 }
 
-fn draw_managed_texture(imgui: ImguiUi, texture: NonSend<ManagedTexture>) {
-    let ui = imgui
-        .ui()
-        .expect("render extraction test should run inside an open ImGui frame");
+fn draw_managed_texture(frame: ImguiFrame<'_>, texture: NonSend<ManagedTexture>) {
+    let ui = frame.ui();
     ui.image(texture.0, [16.0, 16.0]);
 }
 
-fn draw_legacy_texture(imgui: ImguiUi) {
-    let Ok(ui) = imgui.ui() else {
-        return;
-    };
+fn draw_legacy_texture(frame: ImguiFrame<'_>) {
+    let ui = frame.ui();
     ui.get_foreground_draw_list().add_image(
         LEGACY_RENDER_TEXTURE_ID,
         [0.0, 0.0],
@@ -269,10 +259,8 @@ fn draw_legacy_texture(imgui: ImguiUi) {
     );
 }
 
-fn draw_secondary_legacy_texture(imgui: ImguiUi) {
-    let ui = imgui
-        .ui()
-        .expect("the secondary render extraction schedule should expose a live Ui");
+fn draw_secondary_legacy_texture(frame: ImguiFrame<'_, SecondaryContextPass>) {
+    let ui = frame.ui();
     ui.get_foreground_draw_list().add_image(
         SECONDARY_RENDER_TEXTURE_ID,
         [24.0, 24.0],
@@ -283,12 +271,18 @@ fn draw_secondary_legacy_texture(imgui: ImguiUi) {
     );
 }
 
+fn add_primary_legacy_draw_system(app: &mut App) {
+    let primary_pass = app.imgui_primary_pass();
+    app.add_imgui_system(&primary_pass, draw_legacy_texture);
+}
+
 #[test]
 fn render_extract_moves_context_owned_managed_frame_and_commits_once() {
     let _guard = imgui_context_guard();
     let (mut app, primary_window, camera, texture_id) = app_with_primary_window();
     let context_id = primary_context_id(&app);
-    app.add_systems(ImguiPrimaryContextPass, draw_managed_texture);
+    let primary_pass = app.imgui_primary_pass();
+    app.add_imgui_system(&primary_pass, draw_managed_texture);
 
     app.update();
 
@@ -338,7 +332,7 @@ fn render_extract_batches_independent_contexts_without_aliasing_shared_resources
     let secondary_id = add_secondary_context(&mut app);
     app.world_mut()
         .spawn(ImguiRenderRoute::new(secondary_id, camera));
-    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
+    add_primary_legacy_draw_system(&mut app);
 
     app.update();
 
@@ -445,7 +439,7 @@ fn render_extract_clears_stale_snapshot_after_primary_window_is_removed() {
     let _guard = imgui_context_guard();
     let (mut app, primary_window, _camera, _texture_id) = app_with_primary_window();
     let context_id = primary_context_id(&app);
-    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
+    add_primary_legacy_draw_system(&mut app);
 
     app.update();
     assert!(
@@ -514,7 +508,7 @@ fn render_extract_materializes_the_unique_auto_primary_camera() {
         CameraMainTextureUsages::default().0,
         Msaa::Off,
     );
-    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
+    add_primary_legacy_draw_system(&mut app);
 
     app.update();
 
@@ -540,7 +534,7 @@ fn render_route_epoch_rejects_same_frame_camera_changes_until_the_next_snapshot(
     let (mut app, _primary_window, camera, _texture_id) = app_with_primary_window();
     let context_id = primary_context_id(&app);
     let render_entity = render_entity_for_camera(&mut app, camera);
-    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
+    add_primary_legacy_draw_system(&mut app);
 
     // Resolve the initial camera topology. The next frame must keep using this epoch even when
     // Update and extraction publish a newer camera configuration later in that same frame.
@@ -643,7 +637,7 @@ fn render_route_epoch_keeps_same_frame_context_route_swaps_with_their_snapshots(
         .world_mut()
         .spawn(ImguiRenderRoute::new(secondary_context, secondary_camera))
         .id();
-    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
+    add_primary_legacy_draw_system(&mut app);
 
     app.update();
 
@@ -745,7 +739,7 @@ fn render_extract_prefers_an_explicit_route_over_auto_primary() {
         CameraMainTextureUsages::default().0,
         Msaa::Off,
     );
-    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
+    add_primary_legacy_draw_system(&mut app);
 
     app.update();
 
@@ -812,7 +806,7 @@ fn render_extract_preserves_explicit_route_viewport_for_render_pass() {
         CameraMainTextureUsages::default().0,
         Msaa::Off,
     );
-    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
+    add_primary_legacy_draw_system(&mut app);
 
     app.update();
 
@@ -870,7 +864,7 @@ fn render_extract_does_not_broadcast_one_context_to_unrouted_windows() {
             CameraRenderGraph::new(Core2d),
         ))
         .id();
-    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
+    add_primary_legacy_draw_system(&mut app);
 
     app.update();
 
@@ -946,7 +940,7 @@ fn render_extract_keeps_same_target_context_views_with_different_render_identity
         secondary_usages,
         Msaa::Sample4,
     );
-    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
+    add_primary_legacy_draw_system(&mut app);
 
     app.update();
 
@@ -1009,7 +1003,7 @@ fn render_extract_reports_a_stale_render_view_without_retargeting() {
         CameraMainTextureUsages::default().0,
         Msaa::Off,
     );
-    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
+    add_primary_legacy_draw_system(&mut app);
 
     app.update();
 
@@ -1074,7 +1068,7 @@ fn render_extract_rejects_output_mode_and_schedule_drift_after_route_resolution(
         CameraMainTextureUsages::default().0,
         Msaa::Off,
     );
-    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
+    add_primary_legacy_draw_system(&mut app);
 
     app.sub_app_mut(RenderApp)
         .world_mut()
@@ -1136,7 +1130,7 @@ fn render_extract_reports_a_missing_render_view_without_replaying_an_old_target(
         .id();
     app.world_mut()
         .spawn(ImguiRenderRoute::new(context_id, missing_camera));
-    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
+    add_primary_legacy_draw_system(&mut app);
 
     app.update();
 
@@ -1214,12 +1208,11 @@ fn renderer_prepare_routes_secondary_viewport_and_rejects_relocated_camera_marke
     });
 
     app.init_resource::<SecondaryViewportRouteState>();
-    app.add_systems(
-        ImguiPrimaryContextPass,
-        move |imgui: ImguiUi, mut route: ResMut<SecondaryViewportRouteState>| {
-            let ui = imgui
-                .ui()
-                .expect("render extraction test should run inside an open ImGui frame");
+    let primary_pass = app.imgui_primary_pass();
+    app.add_imgui_system(
+        &primary_pass,
+        move |frame: ImguiFrame<'_>, mut route: ResMut<SecondaryViewportRouteState>| {
+            let ui = frame.ui();
             let main_viewport_id = ui.main_viewport().id();
             ui.set_next_window_viewport(main_viewport_id);
             ui.window("Primary route proof")
@@ -1420,7 +1413,7 @@ fn renderer_prepare_flattens_extracted_snapshot_for_pipeline_consumption() {
     let _guard = imgui_context_guard();
     let (mut app, primary_window, _camera, _texture_id) = app_with_primary_window();
     let context_id = primary_context_id(&app);
-    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
+    add_primary_legacy_draw_system(&mut app);
 
     app.update();
 

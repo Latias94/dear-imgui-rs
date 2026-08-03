@@ -1,19 +1,19 @@
 //! Main-thread ownership and serial scheduling of Dear ImGui Contexts.
 
-mod active;
 mod driver;
 mod mailbox;
 pub(crate) mod ownership;
+mod pass;
 mod platform;
 mod registry;
 mod shutdown;
 
-pub use active::ImguiUi;
-pub(crate) use active::{ActiveUiCapability, ImguiActiveUi};
 pub(crate) use driver::{drive_imgui_contexts, install_context_lifecycle};
 #[cfg(feature = "render")]
 pub(crate) use mailbox::{ImguiFrameMailbox, PendingFrame};
 pub(crate) use ownership::ImguiActiveRendererContextError;
+pub use pass::{ImguiFrame, ImguiPass, ImguiPrimaryPass};
+pub(crate) use pass::{PassIdentity, run_pass};
 pub use registry::{
     ImguiContextAdmissionError, ImguiContextConfig, ImguiContextError, ImguiContexts,
 };

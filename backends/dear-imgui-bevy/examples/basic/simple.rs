@@ -18,23 +18,23 @@ struct SimpleUiState {
 }
 
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "dear-imgui-bevy simple".to_owned(),
-                resolution: (1024, 640).into(),
-                present_mode: PresentMode::AutoVsync,
-                window_theme: Some(WindowTheme::Dark),
-                ..Default::default()
-            }),
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: "dear-imgui-bevy simple".to_owned(),
+            resolution: (1024, 640).into(),
+            present_mode: PresentMode::AutoVsync,
+            window_theme: Some(WindowTheme::Dark),
             ..Default::default()
-        }))
-        .add_plugins(ImguiPlugin::default())
-        .init_resource::<SimpleUiState>()
-        .add_systems(Startup, setup)
-        .add_systems(Update, close_on_escape)
-        .add_systems(ImguiPrimaryContextPass, simple_ui)
-        .run();
+        }),
+        ..Default::default()
+    }))
+    .add_plugins(ImguiPlugin::default())
+    .init_resource::<SimpleUiState>()
+    .add_systems(Startup, setup)
+    .add_systems(Update, close_on_escape);
+    let primary_pass = app.imgui_primary_pass();
+    app.add_imgui_system(&primary_pass, simple_ui).run();
 }
 
 fn setup(mut commands: Commands) {
@@ -47,9 +47,9 @@ fn close_on_escape(input: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<App
     }
 }
 
-fn simple_ui(imgui: ImguiUi, mut state: ResMut<SimpleUiState>) -> Result {
-    let frame_index = imgui.frame_index()?;
-    let ui = imgui.ui()?;
+fn simple_ui(frame: ImguiFrame<'_>, mut state: ResMut<SimpleUiState>) {
+    let frame_index = frame.frame_index();
+    let ui = frame.ui();
 
     ui.window("Tools")
         .size([320.0, 180.0], Condition::FirstUseEver)
@@ -69,6 +69,4 @@ fn simple_ui(imgui: ImguiUi, mut state: ResMut<SimpleUiState>) -> Result {
     if state.show_demo_window {
         ui.show_demo_window(&mut state.show_demo_window);
     }
-
-    Ok(())
 }

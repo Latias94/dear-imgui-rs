@@ -1,6 +1,8 @@
 #![cfg(feature = "render")]
 
 #[cfg(feature = "bevy-ui")]
+use bevy::ecs::schedule::ScheduleLabel;
+#[cfg(feature = "bevy-ui")]
 use bevy::ecs::schedule::{NodeId, ScheduleGraph};
 use bevy::{
     app::App,
@@ -9,7 +11,6 @@ use bevy::{
     color::LinearRgba,
     core_pipeline::{Core2d, Core3d, tonemapping::Tonemapping},
     ecs::prelude::*,
-    ecs::schedule::ScheduleLabel,
     image::Image,
     prelude::{Camera2d, Camera3d, DefaultPlugins, PluginGroup, Window},
     render::{
@@ -30,13 +31,13 @@ use bevy::{
     color::Color as BevyColor,
     prelude::{BackgroundColor, Node, UiTargetCamera, percent},
 };
-#[cfg(feature = "bevy-ui")]
-use dear_imgui_bevy::ImguiUiRenderOrder;
 use dear_imgui_bevy::{
-    ImguiContextConfig, ImguiContexts, ImguiPlugin, ImguiPluginConfig, ImguiPrimaryContextPass,
-    ImguiRenderSystems, ImguiUi,
+    ImguiAppExt, ImguiContextConfig, ImguiContexts, ImguiFrame, ImguiPlugin, ImguiPluginConfig,
+    ImguiRenderSystems,
     route::{ImguiInputPolicy, ImguiInputRoute, ImguiInputSource, ImguiRenderRoute},
 };
+#[cfg(feature = "bevy-ui")]
+use dear_imgui_bevy::{ImguiPrimaryPass, ImguiUiRenderOrder};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Mutex, MutexGuard, OnceLock},
@@ -67,8 +68,14 @@ struct CompositionReadbackTarget {
 #[derive(Clone, Copy)]
 enum CompositionExpectation {
     PostProcessAndImgui,
-    DominantRed { at: [u32; 2] },
-    DominantBlue { at: [u32; 2] },
+    #[cfg(feature = "bevy-ui")]
+    DominantRed {
+        at: [u32; 2],
+    },
+    #[cfg(feature = "bevy-ui")]
+    DominantBlue {
+        at: [u32; 2],
+    },
     OrderedContexts,
 }
 
@@ -82,7 +89,9 @@ impl CompositionExpectation {
                 is_post_process_blue(rgba8_pixel(data, 48, 48))
                     && is_dominant_red(rgba8_pixel(data, 12, 12))
             }
+            #[cfg(feature = "bevy-ui")]
             Self::DominantRed { at } => is_dominant_red(rgba8_pixel(data, at[0], at[1])),
+            #[cfg(feature = "bevy-ui")]
             Self::DominantBlue { at } => is_dominant_blue(rgba8_pixel(data, at[0], at[1])),
             Self::OrderedContexts => {
                 is_dominant_red(rgba8_pixel(data, 12, 12))
@@ -93,10 +102,8 @@ impl CompositionExpectation {
     }
 }
 
-#[derive(ScheduleLabel, Clone, Debug, Eq, Hash, PartialEq)]
-struct CompositionPass(&'static str);
+struct CompositionPass;
 
-#[derive(ScheduleLabel, Clone, Debug, Eq, Hash, PartialEq)]
 struct SameCameraSecondaryPass;
 
 #[derive(Resource, Default)]
@@ -322,12 +329,12 @@ fn multiple_contexts_compose_in_route_order_on_one_camera() {
         ImguiPluginConfig::default().with_docking(false),
     ))
     .init_resource::<CompositionReadbacks>()
-    .add_observer(collect_readback)
-    .add_systems(ImguiPrimaryContextPass, draw_primary_context_fixture)
-    .add_systems(
-        dear_imgui_bevy::ImguiContextPass::new(SameCameraSecondaryPass),
-        draw_secondary_context_fixture,
-    );
+    .add_observer(collect_readback);
+
+    let primary_pass = app.imgui_primary_pass();
+    let secondary_pass = app.declare_imgui_pass::<SameCameraSecondaryPass>();
+    app.add_imgui_system(&primary_pass, draw_primary_context_fixture)
+        .add_imgui_system(&secondary_pass, draw_secondary_context_fixture);
 
     app.world_mut().spawn((
         Window {
@@ -347,12 +354,7 @@ fn multiple_contexts_compose_in_route_order_on_one_camera() {
             .expect("primary Context configuration must succeed");
 
         let secondary = contexts
-            .create(
-                ImguiContextConfig::new(dear_imgui_bevy::ImguiContextPass::new(
-                    SameCameraSecondaryPass,
-                ))
-                .with_docking(false),
-            )
+            .create(ImguiContextConfig::new(secondary_pass).with_docking(false))
             .expect("secondary Context creation must succeed");
         contexts
             .configure(secondary, |context| {
@@ -433,8 +435,10 @@ fn render_ui_order(order: ImguiUiRenderOrder, expectation: CompositionExpectatio
             .with_ui_render_order(order),
     )
     .init_resource::<CompositionReadbacks>()
-    .add_observer(collect_readback)
-    .add_systems(ImguiPrimaryContextPass, draw_composition_fixture);
+    .add_observer(collect_readback);
+
+    let primary_pass = app.imgui_primary_pass();
+    app.add_imgui_system(&primary_pass, draw_composition_fixture::<ImguiPrimaryPass>);
 
     app.world_mut().spawn((
         Window {
@@ -580,8 +584,8 @@ fn spawn_case(app: &mut App, kind: CameraKind, msaa: Msaa, hdr: bool) {
         }
         entity.id()
     };
-    let pass = dear_imgui_bevy::ImguiContextPass::new(CompositionPass(name));
-    app.add_systems(pass.clone(), draw_composition_fixture);
+    let pass = app.declare_imgui_pass::<CompositionPass>();
+    app.add_imgui_system(&pass, draw_composition_fixture::<CompositionPass>);
     let context_id = {
         let mut contexts = app.world_mut().non_send_mut::<ImguiContexts>();
         let context_id = contexts
@@ -605,30 +609,24 @@ fn spawn_case(app: &mut App, kind: CameraKind, msaa: Msaa, hdr: bool) {
     ));
 }
 
-fn draw_composition_fixture(imgui: ImguiUi) {
-    let Ok(ui) = imgui.ui() else {
-        return;
-    };
+fn draw_composition_fixture<P: 'static>(frame: ImguiFrame<'_, P>) {
+    let ui = frame.ui();
     ui.get_background_draw_list()
         .add_rect([8.0, 8.0], [24.0, 24.0], [1.0, 0.0, 0.0, 1.0])
         .filled(true)
         .build();
 }
 
-fn draw_primary_context_fixture(imgui: ImguiUi) {
-    let Ok(ui) = imgui.ui() else {
-        return;
-    };
+fn draw_primary_context_fixture(frame: ImguiFrame<'_>) {
+    let ui = frame.ui();
     ui.get_background_draw_list()
         .add_rect([8.0, 8.0], [32.0, 32.0], [1.0, 0.0, 0.0, 1.0])
         .filled(true)
         .build();
 }
 
-fn draw_secondary_context_fixture(imgui: ImguiUi) {
-    let Ok(ui) = imgui.ui() else {
-        return;
-    };
+fn draw_secondary_context_fixture(frame: ImguiFrame<'_, SameCameraSecondaryPass>) {
+    let ui = frame.ui();
     ui.get_background_draw_list()
         .add_rect([20.0, 20.0], [48.0, 48.0], [0.0, 0.0, 1.0, 1.0])
         .filled(true)

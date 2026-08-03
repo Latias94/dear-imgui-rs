@@ -5,7 +5,7 @@ use crate::test_util::imgui_context_guard;
 #[cfg(feature = "multi-viewport")]
 use bevy_app::App;
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
-use bevy_app::Main;
+use bevy_app::{Last, Main};
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
 use bevy_camera::{
     Camera, Camera2d, CameraOutputMode, ClearColorConfig, RenderTarget, visibility::RenderLayers,
@@ -13,7 +13,7 @@ use bevy_camera::{
 #[cfg(feature = "multi-viewport")]
 use bevy_ecs::message::Messages;
 #[cfg(feature = "multi-viewport")]
-use bevy_ecs::prelude::{Entity, Res, Resource, With};
+use bevy_ecs::prelude::{Entity, Res, ResMut, Resource, With};
 #[cfg(feature = "multi-viewport")]
 use bevy_ecs::schedule::ScheduleLabel;
 #[cfg(feature = "multi-viewport")]
@@ -30,6 +30,8 @@ use bevy_window::CompositeAlphaMode;
 use bevy_window::Monitor;
 #[cfg(feature = "multi-viewport")]
 use bevy_window::WindowCloseRequested;
+#[cfg(feature = "multi-viewport")]
+use bevy_window::WindowClosing;
 use bevy_window::WindowLevel;
 #[cfg(feature = "multi-viewport")]
 use bevy_window::WindowOccluded;
@@ -47,8 +49,8 @@ use dear_imgui_bevy::ImguiViewportSnapshot;
 use dear_imgui_bevy::route::ImguiInputRoute;
 #[cfg(feature = "multi-viewport")]
 use dear_imgui_bevy::{
-    ImguiContextError, ImguiContexts, ImguiNativeViewportStatus, ImguiNativeViewportSupport,
-    ImguiPlugin, ImguiPluginConfig, ImguiPrimaryContextPass, ImguiUi, ImguiViewportBridge,
+    ImguiAppExt, ImguiContextError, ImguiContexts, ImguiFrame, ImguiNativeViewportStatus,
+    ImguiNativeViewportSupport, ImguiPass, ImguiPlugin, ImguiPluginConfig, ImguiViewportBridge,
     ImguiViewportFeedback, ImguiViewportWindow, ImguiViewportWindowConfig,
 };
 use dear_imgui_rs as imgui;
@@ -88,8 +90,18 @@ static FOREIGN_DROP_FIELDS_PRESERVED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(feature = "multi-viewport")]
-#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct SecondaryViewportPass;
+
+#[cfg(feature = "multi-viewport")]
+fn empty_secondary_viewport_ui(_frame: ImguiFrame<'_, SecondaryViewportPass>) {}
+
+#[cfg(feature = "multi-viewport")]
+fn declare_secondary_viewport_pass(app: &mut App) -> ImguiPass<SecondaryViewportPass> {
+    let pass = app.declare_imgui_pass::<SecondaryViewportPass>();
+    app.add_imgui_system(&pass, empty_secondary_viewport_ui);
+    pass
+}
 
 #[cfg(feature = "multi-viewport")]
 struct ForeignDropObserver;
@@ -103,6 +115,15 @@ struct RetirementDropProbeMarker;
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
 struct RetirementDropProbe {
     destroyed: Rc<Cell<bool>>,
+}
+
+#[cfg(all(feature = "multi-viewport", feature = "render"))]
+#[derive(Resource, Default)]
+struct ExplicitShutdownLastRuns(u32);
+
+#[cfg(all(feature = "multi-viewport", feature = "render"))]
+fn count_explicit_shutdown_last_runs(mut runs: ResMut<ExplicitShutdownLastRuns>) {
+    runs.0 += 1;
 }
 
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
@@ -227,16 +248,13 @@ fn additional_context_can_enable_native_viewports_when_primary_does_not() {
     let _guard = imgui_context_guard();
     let mut app = App::new();
     app.add_plugins(ImguiPlugin::new(ImguiPluginConfig::default()));
-    app.add_systems(crate::ImguiContextPass::new(SecondaryViewportPass), || {});
+    let secondary_pass = declare_secondary_viewport_pass(&mut app);
 
     let (primary_id, secondary_id) = {
         let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
         let primary_id = contexts.primary_id().unwrap();
         let secondary_id = contexts
-            .create(
-                ImguiContextConfig::new(crate::ImguiContextPass::new(SecondaryViewportPass))
-                    .with_multi_viewport(true),
-            )
+            .create(ImguiContextConfig::new(secondary_pass).with_multi_viewport(true))
             .expect("native viewport infrastructure should be available per Context");
         (primary_id, secondary_id)
     };
@@ -279,16 +297,13 @@ fn additional_context_can_enable_native_viewports_when_primary_does_not() {
 fn native_viewport_support_is_scoped_by_context_and_drive_state() {
     let _guard = imgui_context_guard();
     let mut app = app_with_multi_viewport_bridge();
-    app.add_systems(crate::ImguiContextPass::new(SecondaryViewportPass), || {});
+    let secondary_pass = declare_secondary_viewport_pass(&mut app);
     let primary_id = primary_context_id(&app);
     let secondary_id = app
         .world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .unwrap()
-        .create(
-            ImguiContextConfig::new(crate::ImguiContextPass::new(SecondaryViewportPass))
-                .with_multi_viewport(true),
-        )
+        .create(ImguiContextConfig::new(secondary_pass).with_multi_viewport(true))
         .expect("the secondary Context should accept native viewport infrastructure");
     ensure_primary_window(&mut app);
 
@@ -381,11 +396,11 @@ fn pending_native_window_defers_the_first_context_frame_until_viewports_are_avai
 struct SubmitLiveSecondaryViewport(bool);
 
 #[cfg(feature = "multi-viewport")]
-fn submit_live_secondary_viewport(imgui: ImguiUi, submit: Res<SubmitLiveSecondaryViewport>) {
+fn submit_live_secondary_viewport(frame: ImguiFrame<'_>, submit: Res<SubmitLiveSecondaryViewport>) {
     if !submit.0 {
         return;
     }
-    let ui = imgui.ui().expect("the primary ImGui frame should be open");
+    let ui = frame.ui();
     ui.window("viewport-event-source")
         .size([320.0, 240.0], imgui::Condition::Always)
         .build(|| ui.text("secondary viewport event source"));
@@ -442,7 +457,8 @@ fn create_live_secondary_viewport(app: &mut App) -> (imgui::Id, Entity) {
         context.io_mut().set_config_viewports_no_auto_merge(true);
     });
     app.insert_resource(SubmitLiveSecondaryViewport(true));
-    app.add_systems(ImguiPrimaryContextPass, submit_live_secondary_viewport);
+    let primary_pass = app.imgui_primary_pass();
+    app.add_imgui_system(&primary_pass, submit_live_secondary_viewport);
     // NoAutoMerge makes the UI window deterministically request its own native viewport. The
     // first frame creates it; the second lets Dear ImGui publish the platform window mapping.
     app.update();
@@ -1129,17 +1145,14 @@ fn viewport_platform_io_callbacks_capture_commands_and_bevy_system_applies_them(
 fn native_viewport_bridge_isolates_equal_ids_across_two_contexts() {
     let _guard = imgui_context_guard();
     let mut app = app_with_multi_viewport_bridge();
-    app.add_systems(crate::ImguiContextPass::new(SecondaryViewportPass), || {});
+    let secondary_pass = declare_secondary_viewport_pass(&mut app);
     ensure_primary_window(&mut app);
     let primary_id = primary_context_id(&app);
     let secondary_id = app
         .world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .expect("plugin should install the Context registry")
-        .create(
-            ImguiContextConfig::new(crate::ImguiContextPass::new(SecondaryViewportPass))
-                .with_multi_viewport(true),
-        )
+        .create(ImguiContextConfig::new(secondary_pass).with_multi_viewport(true))
         .expect("an additional Context should receive its own viewport bridge");
     app.world_mut()
         .get_non_send_mut::<ImguiContexts>()
@@ -1623,22 +1636,19 @@ fn viewport_and_render_release_converge_without_pausing_another_context() {
         ),
     );
     app.add_plugins(ExtractPlugin::default())
-        .add_systems(crate::ImguiContextPass::new(SecondaryViewportPass), || {})
         .add_plugins(ImguiPlugin::new(
             ImguiPluginConfig::default().with_multi_viewport(true),
         ));
     app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
     ensure_primary_window(&mut app);
+    let secondary_pass = declare_secondary_viewport_pass(&mut app);
 
     let context_a = primary_context_id(&app);
     let context_b = app
         .world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .unwrap()
-        .create(
-            ImguiContextConfig::new(crate::ImguiContextPass::new(SecondaryViewportPass))
-                .with_multi_viewport(true),
-        )
+        .create(ImguiContextConfig::new(secondary_pass).with_multi_viewport(true))
         .unwrap();
     app.world_mut()
         .get_non_send_mut::<ImguiContexts>()
@@ -1818,6 +1828,56 @@ fn registry_drop_drains_native_viewports_while_renderer_release_is_pending() {
             .expect("the global viewport bridge should remain installed")
             .viewport_window(context_id, viewport_id)
             .is_none()
+    );
+}
+
+#[cfg(all(feature = "multi-viewport", feature = "render"))]
+#[test]
+fn explicit_shutdown_retires_native_viewport_mappings_without_running_last() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_multi_viewport_bridge();
+    app.add_message::<WindowClosing>()
+        .init_resource::<ExplicitShutdownLastRuns>()
+        .add_systems(Last, count_explicit_shutdown_last_runs);
+
+    let (_, viewport_window, _) = spawn_secondary_viewport(&mut app);
+    let native_id = winit::window::WindowId::dummy();
+    bevy_winit::WINIT_WINDOWS.with_borrow_mut(|windows| {
+        assert!(
+            windows
+                .entity_to_winit
+                .insert(viewport_window, native_id)
+                .is_none()
+        );
+        assert!(
+            windows
+                .winit_to_entity
+                .insert(native_id, viewport_window)
+                .is_none()
+        );
+    });
+    let mut closing_messages = app
+        .world()
+        .resource::<Messages<WindowClosing>>()
+        .get_cursor();
+    let last_runs_before_shutdown = app.world().resource::<ExplicitShutdownLastRuns>().0;
+
+    app.shutdown_imgui().unwrap();
+
+    bevy_winit::WINIT_WINDOWS.with_borrow(|windows| {
+        assert_eq!(windows.entity_to_winit.get(&viewport_window), None);
+        assert_eq!(windows.winit_to_entity.get(&native_id), None);
+    });
+    assert!(
+        closing_messages
+            .read(app.world().resource::<Messages<WindowClosing>>())
+            .any(|message| message.window == viewport_window),
+        "the render world must observe secondary native windows closing"
+    );
+    assert_eq!(
+        app.world().resource::<ExplicitShutdownLastRuns>().0,
+        last_runs_before_shutdown,
+        "terminal Dear ImGui shutdown must not execute arbitrary user Last systems"
     );
 }
 

@@ -4,8 +4,46 @@ use std::cell::Cell;
 use bevy_ecs::prelude::Entity;
 #[cfg(test)]
 use bevy_ecs::prelude::Resource;
+use bevy_window::WindowWrapper;
 use bevy_winit::WINIT_WINDOWS;
 use raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
+
+/// Native windows removed from Bevy's thread-local registry during terminal shutdown.
+///
+/// Keeping the wrappers alive until the render world has observed `WindowClosing` guarantees
+/// that their final drop happens on the caller thread instead of a render worker. This mirrors
+/// Bevy's own deferred native-window destruction contract, including its macOS requirement.
+pub(crate) struct NativeWindowRetirements {
+    _windows: Vec<WindowWrapper<winit::window::Window>>,
+    mappings_removed: usize,
+}
+
+impl NativeWindowRetirements {
+    pub(crate) fn requires_render_drain(&self) -> bool {
+        self.mappings_removed != 0
+    }
+}
+
+pub(crate) fn retire_windows(
+    entities: impl IntoIterator<Item = Entity>,
+) -> NativeWindowRetirements {
+    let mut windows = Vec::new();
+    let mut mappings_removed = 0;
+    WINIT_WINDOWS.with_borrow_mut(|winit_windows| {
+        for entity in entities {
+            if winit_windows.entity_to_winit.contains_key(&entity) {
+                mappings_removed += 1;
+            }
+            if let Some(window) = winit_windows.remove_window(entity) {
+                windows.push(window);
+            }
+        }
+    });
+    NativeWindowRetirements {
+        _windows: windows,
+        mappings_removed,
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum DesktopPositionSupport {
