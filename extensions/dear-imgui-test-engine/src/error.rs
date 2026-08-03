@@ -66,6 +66,21 @@ pub enum TestEngineError {
         operation: &'static str,
         detail: &'static str,
     },
+    /// A built-in suite did not match the manifest pinned to this upstream revision.
+    UnexpectedTestSuiteManifest {
+        category: &'static str,
+        expected: &'static [&'static str],
+        actual: Vec<String>,
+    },
+    /// A controlled suite gate did not leave every registered test successful.
+    UnexpectedTestSuiteResult {
+        category: &'static str,
+        expected: usize,
+        tested: usize,
+        succeeded: usize,
+        in_queue: usize,
+        non_successful: Vec<String>,
+    },
     /// A `Ui` belongs to a Context other than the attached Context.
     ContextMismatch {
         operation: &'static str,
@@ -165,6 +180,25 @@ impl fmt::Display for TestEngineError {
             Self::InvalidNativeData { operation, detail } => {
                 write!(f, "{operation} received invalid native data: {detail}")
             }
+            Self::UnexpectedTestSuiteManifest {
+                category,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "built-in test category {category:?} did not match its pinned manifest: expected {expected:?}, found {actual:?}"
+            ),
+            Self::UnexpectedTestSuiteResult {
+                category,
+                expected,
+                tested,
+                succeeded,
+                in_queue,
+                non_successful,
+            } => write!(
+                f,
+                "built-in test category {category:?} expected {expected} successful terminal tests, found tested={tested}, success={succeeded}, in_queue={in_queue}, non_successful={non_successful:?}"
+            ),
             Self::ContextMismatch {
                 operation,
                 expected,

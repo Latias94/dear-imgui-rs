@@ -213,10 +213,68 @@ fn build_with_cc(
         "ImGuiTestEngine_FindItemDebugLabel",
         Some("DearImGuiRs_ImGuiTestEngine_FindItemDebugLabel_Impl"),
     );
+    build.define(
+        "RegisterTests_Docking",
+        Some("DearImGuiRsTestEngine_RegisterTests_Docking"),
+    );
+    build.define(
+        "RegisterTests_Viewports",
+        Some("DearImGuiRsTestEngine_RegisterTests_Viewports"),
+    );
+    for (function, renamed) in [
+        (
+            "ImGui_ImplNull_Init",
+            "DearImGuiRsTestEngine_ImGui_ImplNull_Init",
+        ),
+        (
+            "ImGui_ImplNull_Shutdown",
+            "DearImGuiRsTestEngine_ImGui_ImplNull_Shutdown",
+        ),
+        (
+            "ImGui_ImplNull_NewFrame",
+            "DearImGuiRsTestEngine_ImGui_ImplNull_NewFrame",
+        ),
+        (
+            "ImGui_ImplNullPlatform_Init",
+            "DearImGuiRsTestEngine_ImGui_ImplNullPlatform_Init",
+        ),
+        (
+            "ImGui_ImplNullPlatform_Shutdown",
+            "DearImGuiRsTestEngine_ImGui_ImplNullPlatform_Shutdown",
+        ),
+        (
+            "ImGui_ImplNullPlatform_NewFrame",
+            "DearImGuiRsTestEngine_ImGui_ImplNullPlatform_NewFrame",
+        ),
+        (
+            "ImGui_ImplNullRender_Init",
+            "DearImGuiRsTestEngine_ImGui_ImplNullRender_Init",
+        ),
+        (
+            "ImGui_ImplNullRender_Shutdown",
+            "DearImGuiRsTestEngine_ImGui_ImplNullRender_Shutdown",
+        ),
+        (
+            "ImGui_ImplNullRender_NewFrame",
+            "DearImGuiRsTestEngine_ImGui_ImplNullRender_NewFrame",
+        ),
+        (
+            "ImGui_ImplNullRender_RenderDrawData",
+            "DearImGuiRsTestEngine_ImGui_ImplNullRender_RenderDrawData",
+        ),
+    ] {
+        build.define(function, Some(renamed));
+    }
 
     build.include(imgui_src);
+    build.include(imgui_src.join("backends"));
     build.include(cimgui_root);
     build.include(test_engine_root);
+    build.include(
+        test_engine_root
+            .parent()
+            .expect("Test Engine source root must have a parent directory"),
+    );
     build.include(test_engine_root.join("thirdparty"));
     build.include(cfg.manifest_dir.join("shim"));
 
@@ -297,6 +355,9 @@ fn build_with_cc(
         "default-tests",
         "hooks-register",
         "script-tests",
+        "upstream-suite-bridge",
+        "upstream-docking-tests",
+        "upstream-viewport-tests",
     ] {
         build.file(
             sources
@@ -304,6 +365,7 @@ fn build_with_cc(
                 .unwrap_or_else(|error| panic!("dear-imgui-test-engine-sys: {error}")),
         );
     }
+    build.file(imgui_src.join("backends/imgui_impl_null.cpp"));
 
     if cfg.is_msvc() && cfg.is_windows() {
         build.flag("/EHsc");
@@ -398,6 +460,11 @@ fn main() {
     println!("cargo:rerun-if-changed=shim/cimgui_test_engine.h");
     println!("cargo:rerun-if-changed=shim/cimgui_test_engine_internal.h");
     println!("cargo:rerun-if-changed=shim/cimgui_test_engine_capture_bridge.h");
+    let (imgui_src, _) = resolve_imgui_includes(&cfg);
+    println!(
+        "cargo:rerun-if-changed={}",
+        imgui_src.join("backends/imgui_impl_null.cpp").display()
+    );
     for path in sources.native_candidate_paths() {
         println!("cargo:rerun-if-changed={}", path.display());
     }

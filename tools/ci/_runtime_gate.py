@@ -100,6 +100,7 @@ class ScenarioExpectation:
     outcome: str
     infrastructure: bool
     category: GateCategory
+    expected_test_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -144,6 +145,37 @@ TEST_ENGINE_SCENARIOS = (
         True,
         GateCategory.INFRASTRUCTURE_UNAVAILABLE,
     ),
+    ScenarioExpectation(
+        "native-defaults",
+        0,
+        "Passed",
+        False,
+        GateCategory.PASSED,
+        expected_test_count=2,
+    ),
+    ScenarioExpectation(
+        "upstream-docking",
+        0,
+        "Passed",
+        False,
+        GateCategory.PASSED,
+        expected_test_count=39,
+    ),
+)
+
+
+UPSTREAM_VIEWPORT_TESTS = (
+    "viewport_basic_1",
+    "viewport_translate",
+    "viewport_parent_id",
+    "viewport_platform_focus",
+    "viewport_platform_focus_2",
+    "viewport_platform_focus_3",
+    "viewport_platform_focus_4",
+    "viewport_platform_close",
+    "viewport_platform_close_2",
+    "viewport_owner_change_1",
+    "viewport_owner_change_2",
 )
 
 
@@ -456,6 +488,15 @@ def _validate_test_engine_payload(
         errors.append("Failed requires at least one executed, unsuccessful test")
     elif expectation.outcome == "NoMatch" and (tested != 0 or succeeded != 0):
         errors.append("NoMatch requires zero tested and zero successful tests")
+    if expectation.expected_test_count is not None and (
+        tested != expectation.expected_test_count
+        or succeeded != expectation.expected_test_count
+        or payload.get("in_queue") != 0
+    ):
+        errors.append(
+            f"{expectation.name} requires exactly "
+            f"{expectation.expected_test_count} successful terminal tests"
+        )
     error = payload.get("error")
     if expectation.infrastructure and (not isinstance(error, str) or not error):
         errors.append("an infrastructure result requires a nonempty error diagnostic")
@@ -671,6 +712,7 @@ def run_test_engine_runtime(
                     "expected_outcome": expectation.outcome,
                     "expected_infrastructure": expectation.infrastructure,
                     "expected_category": expectation.category.value,
+                    "expected_test_count": expectation.expected_test_count,
                 }
             )
             if result.timed_out:
@@ -1021,6 +1063,52 @@ def _validate_viewport_payload(payload: Mapping[str, object]) -> list[str]:
     return errors
 
 
+def _validate_upstream_viewport_suite_payload(
+    payload: Mapping[str, object],
+) -> list[str]:
+    errors: list[str] = []
+    schema_version = payload.get("schema_version")
+    if type(schema_version) is not int or schema_version != 1:
+        errors.append(f"schema_version expected 1, got {schema_version!r}")
+    expected_fields = {
+        "suite": "upstream-viewports",
+        "category": "viewport",
+        "platform_backend": "Winit",
+        "renderer_backend": "WGPU",
+    }
+    for field_name, expected in expected_fields.items():
+        if payload.get(field_name) != expected:
+            errors.append(
+                f"{field_name} expected {expected!r}, got {payload.get(field_name)!r}"
+            )
+    for field_name in ("real_platform_backend", "runtime_teardown_complete"):
+        if payload.get(field_name) is not True:
+            errors.append(f"{field_name} expected True, got {payload.get(field_name)!r}")
+    expected_count = len(UPSTREAM_VIEWPORT_TESTS)
+    if payload.get("registered_count") != expected_count:
+        errors.append(
+            f"registered_count expected {expected_count}, "
+            f"got {payload.get('registered_count')!r}"
+        )
+    if payload.get("registered_tests") != list(UPSTREAM_VIEWPORT_TESTS):
+        errors.append("registered_tests did not match the pinned upstream viewport manifest")
+    for field_name in ("registered_count", "tested", "success", "in_queue"):
+        value = payload.get(field_name)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            errors.append(f"{field_name} must be a nonnegative integer")
+    if (
+        payload.get("tested") != expected_count
+        or payload.get("success") != expected_count
+        or payload.get("in_queue") != 0
+    ):
+        errors.append(
+            f"upstream viewport suite requires exactly {expected_count} successful "
+            "terminal tests"
+        )
+    _validate_software_vulkan_adapter(payload, errors)
+    return errors
+
+
 def _validate_sdl3_glow_viewport_payload(
     payload: Mapping[str, object],
 ) -> list[str]:
@@ -1174,7 +1262,10 @@ _WGPU_VIEWPORT_SMOKE = ViewportSmokeSpec(
     probe_required_fragments=(),
     build_label="WGPU multi-viewport example build",
     child_label="WGPU multi-viewport child",
-    success_summary="secondary Winit/WGPU viewport create, render, merge, and teardown passed",
+    success_summary=(
+        "secondary Winit/WGPU viewport lifecycle and all 11 official upstream "
+        "viewport tests passed"
+    ),
     payload_validator=_validate_viewport_payload,
 )
 
@@ -1498,6 +1589,9 @@ def _run_viewport_smoke(
             "viewport.stdout.log",
             "viewport.stderr.log",
             "viewport-result.json",
+            "upstream-viewports.stdout.log",
+            "upstream-viewports.stderr.log",
+            "upstream-viewports-result.json",
             "viewport-texture-parameters.stdout.log",
             "viewport-texture-parameters.stderr.log",
             "viewport-texture-parameters-result.json",
@@ -1603,6 +1697,7 @@ def _run_viewport_smoke(
                 **route_environment,
             }
         )
+        child_environment.pop("DEAR_IMGUI_UPSTREAM_VIEWPORT_SUITE", None)
         child_environment["XDG_RUNTIME_DIR"] = str(xdg_runtime)
 
         build = _run_example_build(
@@ -1793,6 +1888,39 @@ def _run_viewport_smoke(
                                 label=spec.child_label,
                                 nonzero_category=GateCategory.PRODUCT_FAILURE,
                             )
+                            if spec.profile is ViewportSmokeProfile.WGPU_VULKAN:
+                                upstream_environment = dict(child_environment)
+                                upstream_environment.pop(
+                                    "DEAR_IMGUI_VIEWPORT_DRAG_SMOKE", None
+                                )
+                                upstream_environment[
+                                    "DEAR_IMGUI_UPSTREAM_VIEWPORT_SUITE"
+                                ] = "1"
+                                upstream_result = (
+                                    evidence_dir / "upstream-viewports-result.json"
+                                )
+                                upstream_result.unlink(missing_ok=True)
+                                upstream_environment[
+                                    "DEAR_IMGUI_VIEWPORT_SMOKE_JSON"
+                                ] = str(upstream_result)
+                                upstream_child = run_bounded(
+                                    (binary,),
+                                    cwd=workspace_root,
+                                    env=upstream_environment,
+                                    timeout=child_timeout,
+                                    stdout_log=evidence_dir
+                                    / "upstream-viewports.stdout.log",
+                                    stderr_log=evidence_dir
+                                    / "upstream-viewports.stderr.log",
+                                )
+                                details["upstream_viewports"] = _process_json(
+                                    upstream_child, evidence_dir
+                                )
+                                _check_stage(
+                                    upstream_child,
+                                    label="official upstream viewport Test Engine child",
+                                    nonzero_category=GateCategory.PRODUCT_FAILURE,
+                                )
                         if xvfb.poll() is not None:
                             raise RuntimeContractError(
                                 GateCategory.INFRASTRUCTURE_UNAVAILABLE,
@@ -1840,6 +1968,19 @@ def _run_viewport_smoke(
                     GateCategory.PRODUCT_FAILURE,
                     "; ".join(errors),
                 )
+            if spec.profile is ViewportSmokeProfile.WGPU_VULKAN:
+                upstream_payload = _read_object(
+                    evidence_dir / "upstream-viewports-result.json"
+                )
+                upstream_errors = _validate_upstream_viewport_suite_payload(
+                    upstream_payload
+                )
+                details["upstream_viewport_suite"] = upstream_payload
+                if upstream_errors:
+                    raise RuntimeContractError(
+                        GateCategory.PRODUCT_FAILURE,
+                        "; ".join(upstream_errors),
+                    )
         result = GateResult(
             gate,
             True,

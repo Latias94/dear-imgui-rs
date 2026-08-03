@@ -13,6 +13,7 @@ mod results;
 mod runner;
 mod script;
 mod state;
+mod suite;
 
 #[cfg(test)]
 mod tests;
@@ -36,6 +37,7 @@ pub use runner::{
 };
 pub use script::ScriptTest;
 pub use state::{AttachmentState, RunState};
+pub use suite::{BuiltInTestSuite, RegisteredTestSuite};
 
 pub use dear_imgui_test_engine_sys as raw;
 

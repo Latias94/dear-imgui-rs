@@ -57,6 +57,12 @@ typedef enum ImGuiTestEngineGroup {
     ImGuiTestEngineGroup_Perfs = 1,
 } ImGuiTestEngineGroup;
 
+typedef enum ImGuiTestEngineBuiltinTestSuite {
+    ImGuiTestEngineBuiltinTestSuite_NativeDefaults = 0,
+    ImGuiTestEngineBuiltinTestSuite_UpstreamDocking = 1,
+    ImGuiTestEngineBuiltinTestSuite_UpstreamViewports = 2,
+} ImGuiTestEngineBuiltinTestSuite;
+
 typedef enum ImGuiTestEngineRunFlags {
     ImGuiTestEngineRunFlags_None = 0,
     ImGuiTestEngineRunFlags_GuiFuncDisable = 1 << 0,
@@ -176,6 +182,32 @@ ImGuiTestEngineStatus imgui_test_engine_is_requesting_max_app_speed(
 );
 ImGuiTestEngineStatus imgui_test_engine_install_default_crash_handler(void);
 ImGuiTestEngineStatus imgui_test_engine_register_default_tests(ImGuiTestEngine* engine);
+ImGuiTestEngineStatus imgui_test_engine_register_builtin_test_suite(
+    ImGuiTestEngine* engine,
+    int suite,
+    int* out_registered_count
+);
+ImGuiTestEngineStatus imgui_test_engine_get_registered_test_count(
+    ImGuiTestEngine* engine,
+    const char* category,
+    int* out_count
+);
+// The required size includes the trailing NUL. Query with a null buffer and
+// zero capacity. Tests are returned in upstream registration order.
+ImGuiTestEngineStatus imgui_test_engine_get_registered_test_name(
+    ImGuiTestEngine* engine,
+    const char* category,
+    int index,
+    char* buffer,
+    size_t buffer_size,
+    size_t* out_required_size
+);
+ImGuiTestEngineStatus imgui_test_engine_get_registered_test_succeeded(
+    ImGuiTestEngine* engine,
+    const char* category,
+    int index,
+    bool* out_succeeded
+);
 
 ImGuiTestEngineStatus imgui_test_engine_script_create(ImGuiTestEngineScript** out_script);
 ImGuiTestEngineStatus imgui_test_engine_script_destroy(ImGuiTestEngineScript* script);

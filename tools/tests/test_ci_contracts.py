@@ -573,8 +573,14 @@ class RuntimeGateTests(unittest.TestCase):
                 name = arguments[arguments.index("--scenario") + 1]
                 result_path = Path(arguments[arguments.index("--json-output") + 1])
                 expectation = expectations[name]
-                tested = 1 if name in {"pass", "failure"} else 0
-                succeeded = 1 if name == "pass" else 0
+                tested = expectation.expected_test_count
+                if tested is None:
+                    tested = 1 if name in {"pass", "failure"} else 0
+                succeeded = (
+                    expectation.expected_test_count
+                    if expectation.expected_test_count is not None
+                    else 1 if name == "pass" else 0
+                )
                 error = "injected infrastructure error" if expectation.infrastructure else None
                 result_path.write_text(
                     json.dumps(
@@ -921,6 +927,51 @@ class RuntimeGateTests(unittest.TestCase):
             "must share a viewport ID",
         )
 
+    def test_upstream_viewport_suite_requires_the_exact_official_manifest(self):
+        valid = {
+            "schema_version": 1,
+            "suite": "upstream-viewports",
+            "category": "viewport",
+            "platform_backend": "Winit",
+            "renderer_backend": "WGPU",
+            "real_platform_backend": True,
+            "runtime_teardown_complete": True,
+            "registered_count": len(RUNTIME.UPSTREAM_VIEWPORT_TESTS),
+            "registered_tests": list(RUNTIME.UPSTREAM_VIEWPORT_TESTS),
+            "tested": len(RUNTIME.UPSTREAM_VIEWPORT_TESTS),
+            "success": len(RUNTIME.UPSTREAM_VIEWPORT_TESTS),
+            "in_queue": 0,
+            "adapter": {
+                "name": "llvmpipe (LLVM 20)",
+                "backend": "Vulkan",
+                "device_type": "Cpu",
+                "driver": "llvmpipe",
+                "driver_info": "Mesa 25",
+            },
+        }
+        self.assertEqual(
+            RUNTIME._validate_upstream_viewport_suite_payload(valid), []
+        )
+
+        invalid_bool = dict(valid)
+        invalid_bool["in_queue"] = False
+        self.assertIn(
+            "in_queue must be a nonnegative integer",
+            RUNTIME._validate_upstream_viewport_suite_payload(invalid_bool),
+        )
+
+        valid["registered_tests"] = valid["registered_tests"][:-1]
+        valid["success"] = len(RUNTIME.UPSTREAM_VIEWPORT_TESTS) - 1
+        errors = RUNTIME._validate_upstream_viewport_suite_payload(valid)
+        self.assertIn(
+            "registered_tests did not match the pinned upstream viewport manifest",
+            errors,
+        )
+        self.assertIn(
+            "upstream viewport suite requires exactly 11 successful terminal tests",
+            errors,
+        )
+
     def test_viewport_common_validation_preserves_error_order(self):
         wgpu_errors = RUNTIME._validate_viewport_payload(
             {
@@ -1054,6 +1105,7 @@ class RuntimeGateTests(unittest.TestCase):
                 stderr_log=evidence / "build.stderr.log",
             )
             viewport_environment = {}
+            upstream_viewport_environment = {}
 
             def background(command, **kwargs):
                 return FakeBackground(
@@ -1098,6 +1150,38 @@ class RuntimeGateTests(unittest.TestCase):
                         ),
                         encoding="utf-8",
                     )
+                elif result.stdout_log.name == "upstream-viewports.stdout.log":
+                    upstream_viewport_environment.update(kwargs["env"])
+                    (evidence / "upstream-viewports-result.json").write_text(
+                        json.dumps(
+                            {
+                                "schema_version": 1,
+                                "suite": "upstream-viewports",
+                                "category": "viewport",
+                                "platform_backend": "Winit",
+                                "renderer_backend": "WGPU",
+                                "real_platform_backend": True,
+                                "runtime_teardown_complete": True,
+                                "registered_count": len(
+                                    RUNTIME.UPSTREAM_VIEWPORT_TESTS
+                                ),
+                                "registered_tests": list(
+                                    RUNTIME.UPSTREAM_VIEWPORT_TESTS
+                                ),
+                                "tested": len(RUNTIME.UPSTREAM_VIEWPORT_TESTS),
+                                "success": len(RUNTIME.UPSTREAM_VIEWPORT_TESTS),
+                                "in_queue": 0,
+                                "adapter": {
+                                    "name": "llvmpipe (LLVM 20)",
+                                    "backend": "Vulkan",
+                                    "device_type": "Cpu",
+                                    "driver": "llvmpipe",
+                                    "driver_info": "Mesa 25",
+                                },
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
                 return result
 
             with (
@@ -1109,6 +1193,10 @@ class RuntimeGateTests(unittest.TestCase):
                 patch.object(RUNTIME, "_wait_for_xvfb"),
                 patch.object(RUNTIME, "run_bounded", side_effect=stage),
                 patch.object(RUNTIME.time, "sleep"),
+                patch.dict(
+                    os.environ,
+                    {"DEAR_IMGUI_UPSTREAM_VIEWPORT_SUITE": "1"},
+                ),
             ):
                 result = RUNTIME.run_multi_viewport_smoke(
                     workspace_root=root,
@@ -1125,8 +1213,21 @@ class RuntimeGateTests(unittest.TestCase):
             self.assertFalse(xdg_runtime.exists())
             self.assertIn("adapter.stdout.log", result.evidence)
             self.assertIn("viewport-result.json", result.evidence)
+            self.assertIn("upstream-viewports-result.json", result.evidence)
             self.assertEqual(
                 viewport_environment["DEAR_IMGUI_VIEWPORT_DRAG_SMOKE"],
+                "1",
+            )
+            self.assertNotIn(
+                "DEAR_IMGUI_UPSTREAM_VIEWPORT_SUITE", viewport_environment
+            )
+            self.assertNotIn(
+                "DEAR_IMGUI_VIEWPORT_DRAG_SMOKE", upstream_viewport_environment
+            )
+            self.assertEqual(
+                upstream_viewport_environment[
+                    "DEAR_IMGUI_UPSTREAM_VIEWPORT_SUITE"
+                ],
                 "1",
             )
 

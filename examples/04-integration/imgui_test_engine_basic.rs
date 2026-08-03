@@ -11,8 +11,9 @@ use dear_app::{
     WgpuPreset, run,
 };
 use dear_imgui_test_engine::{
-    AttachmentState, HeadlessRunnerError, ResultSummary, RunFlags, RunOutcome, RunReport, RunSpeed,
-    RunnerControl, ScriptCount, TestEngine, TestGroup, TestRunner, VerboseLevel, raw,
+    AttachmentState, BuiltInTestSuite, HeadlessRunnerError, RegisteredTestSuite, ResultSummary,
+    RunFlags, RunOutcome, RunReport, RunSpeed, RunnerControl, ScriptCount, TestEngine, TestGroup,
+    TestRunner, VerboseLevel, raw,
 };
 
 #[derive(Debug, Default)]
@@ -38,6 +39,8 @@ enum Scenario {
     Abort,
     FfiFailure,
     CallbackError,
+    NativeDefaults,
+    UpstreamDocking,
 }
 
 impl Scenario {
@@ -50,8 +53,10 @@ impl Scenario {
             "abort" => Ok(Self::Abort),
             "ffi-failure" => Ok(Self::FfiFailure),
             "callback-error" => Ok(Self::CallbackError),
+            "native-defaults" => Ok(Self::NativeDefaults),
+            "upstream-docking" => Ok(Self::UpstreamDocking),
             _ => Err(format!(
-                "Unknown scenario '{value}' (expected: pass|failure|no-match|timeout|abort|ffi-failure|callback-error)"
+                "Unknown scenario '{value}' (expected: pass|failure|no-match|timeout|abort|ffi-failure|callback-error|native-defaults|upstream-docking)"
             )),
         }
     }
@@ -140,7 +145,7 @@ fn parse_cli() -> Result<Cli, String> {
                 return Err(
                     "Usage: imgui_test_engine_basic [options]\n\n\
 Options:\n\
-  --scenario <NAME>      Run headlessly: pass|failure|no-match|timeout|abort|ffi-failure|callback-error.\n\
+  --scenario <NAME>      Run headlessly: pass|failure|no-match|timeout|abort|ffi-failure|callback-error|native-defaults|upstream-docking.\n\
   --dear-app-smoke       Run one bounded graphical test through dear_app::run.\n\
   --json-output <PATH>   Atomically write the machine-readable automated result.\n\
   --max-frames <N>       Set the non-zero primary frame budget for automated runs.\n\
@@ -315,10 +320,16 @@ fn write_json_atomic(path: &Path, contents: &str) -> Result<(), Box<dyn std::err
     result
 }
 
+struct RegisteredAutomatedScenario {
+    filter: &'static str,
+    suite: Option<RegisteredTestSuite>,
+}
+
 fn register_automated_scenario(
     engine: &mut TestEngine,
     scenario: Scenario,
-) -> Result<&'static str, Box<dyn std::error::Error>> {
+) -> Result<RegisteredAutomatedScenario, Box<dyn std::error::Error>> {
+    let mut suite = None;
     let filter = match scenario {
         Scenario::Pass | Scenario::NoMatch | Scenario::FfiFailure => {
             engine.add_script_test("runtime", "pass", |script| {
@@ -343,8 +354,16 @@ fn register_automated_scenario(
             })?;
             "long-running"
         }
+        Scenario::NativeDefaults => {
+            suite = Some(engine.register_builtin_test_suite(BuiltInTestSuite::NativeDefaults)?);
+            BuiltInTestSuite::NativeDefaults.category()
+        }
+        Scenario::UpstreamDocking => {
+            suite = Some(engine.register_builtin_test_suite(BuiltInTestSuite::UpstreamDocking)?);
+            BuiltInTestSuite::UpstreamDocking.category()
+        }
     };
-    Ok(filter)
+    Ok(RegisteredAutomatedScenario { filter, suite })
 }
 
 fn run_automated(cli: &Cli, scenario: Scenario) -> AutomatedResult {
@@ -356,6 +375,14 @@ fn run_automated(cli: &Cli, scenario: Scenario) -> AutomatedResult {
 
 fn try_run_automated(cli: &Cli, scenario: Scenario) -> Result<RunReport, String> {
     let mut context = dear_imgui_rs::Context::create();
+    if scenario == Scenario::UpstreamDocking {
+        let mut flags = context.io().config_flags();
+        flags.insert(dear_imgui_rs::ConfigFlags::DOCKING_ENABLE);
+        context.io_mut().set_config_flags(flags);
+        context
+            .set_ini_filename(None::<String>)
+            .map_err(|error| error.to_string())?;
+    }
     if !context.font_atlas().build() {
         return Err("failed to build the default font atlas".to_owned());
     }
@@ -372,7 +399,7 @@ fn try_run_automated(cli: &Cli, scenario: Scenario) -> Result<RunReport, String>
     engine
         .set_run_speed(cli.speed.unwrap_or(RunSpeed::Fast))
         .map_err(|error| error.to_string())?;
-    let default_filter =
+    let registered =
         register_automated_scenario(&mut engine, scenario).map_err(|error| error.to_string())?;
 
     if scenario == Scenario::FfiFailure {
@@ -388,16 +415,17 @@ fn try_run_automated(cli: &Cli, scenario: Scenario) -> Result<RunReport, String>
         }
     }
 
-    let default_budget = if scenario == Scenario::Timeout {
-        NonZeroU64::new(2).expect("two is non-zero")
-    } else {
-        NonZeroU64::new(512).expect("512 is non-zero")
+    let default_budget = match scenario {
+        Scenario::Timeout => NonZeroU64::new(2).expect("two is non-zero"),
+        Scenario::NativeDefaults => NonZeroU64::new(2_048).expect("2,048 is non-zero"),
+        Scenario::UpstreamDocking => NonZeroU64::new(20_000).expect("20,000 is non-zero"),
+        _ => NonZeroU64::new(512).expect("512 is non-zero"),
     };
     let group = match cli.group {
         GroupSel::Tests => TestGroup::Tests,
         GroupSel::Perfs => TestGroup::Perfs,
     };
-    let filter = cli.filter.as_deref().unwrap_or(default_filter);
+    let filter = cli.filter.as_deref().unwrap_or(registered.filter);
     let runner = TestRunner::new(&mut engine)
         .group(group)
         .filter(filter)
@@ -421,7 +449,16 @@ fn try_run_automated(cli: &Cli, scenario: Scenario) -> Result<RunReport, String>
                 RunnerControl::Continue
             })
         });
-    let result = result.map_err(|error| error.to_string());
+    let result = result
+        .map_err(|error| error.to_string())
+        .and_then(|report| {
+            if let Some(suite) = registered.suite.as_ref() {
+                engine
+                    .validate_registered_test_suite(suite, report.summary())
+                    .map_err(|error| error.to_string())?;
+            }
+            Ok(report)
+        });
     let shutdown = engine.shutdown().map_err(|error| error.to_string());
     drop(context);
     match (result, shutdown) {

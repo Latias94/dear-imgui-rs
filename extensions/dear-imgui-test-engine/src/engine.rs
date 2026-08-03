@@ -1,3 +1,4 @@
+use std::ffi::CStr;
 #[cfg(feature = "capture")]
 use std::ffi::c_void;
 use std::marker::PhantomData;
@@ -13,9 +14,9 @@ use dear_imgui_test_engine_sys as sys;
 use crate::attachment::{AttachmentControl, TestEngineAttachmentMarker};
 use crate::error::ffi_status;
 use crate::{
-    AttachmentState, CaptureOutput, FrameDriverError, ResultSummary, RunFlags, RunSpeed, RunState,
-    Script, ScriptTest, TestEngineError, TestEngineResult, TestFrameDriver, TestGroup,
-    VerboseLevel,
+    AttachmentState, BuiltInTestSuite, CaptureOutput, FrameDriverError, RegisteredTestSuite,
+    ResultSummary, RunFlags, RunSpeed, RunState, Script, ScriptTest, TestEngineError,
+    TestEngineResult, TestFrameDriver, TestGroup, VerboseLevel,
 };
 
 /// Dear ImGui Test Engine context with one transactional Context attachment.
@@ -454,12 +455,126 @@ impl TestEngine {
         ffi_status("imgui_test_engine_show_windows", status)
     }
 
+    /// Registers one maintained built-in suite and validates its exact upstream manifest.
+    pub fn register_builtin_test_suite(
+        &mut self,
+        suite: BuiltInTestSuite,
+    ) -> TestEngineResult<RegisteredTestSuite> {
+        const OPERATION: &str = "TestEngine::register_builtin_test_suite";
+        self.require_ready(OPERATION)?;
+
+        let mut registered_count = 0;
+        self.call_attached(
+            "imgui_test_engine_register_builtin_test_suite",
+            |raw| unsafe {
+                sys::imgui_test_engine_register_builtin_test_suite(
+                    raw,
+                    suite.as_raw(),
+                    &mut registered_count,
+                )
+            },
+        )?;
+        let registered_count =
+            usize::try_from(registered_count).map_err(|_| TestEngineError::InvalidNativeData {
+                operation: "imgui_test_engine_register_builtin_test_suite",
+                detail: "registered test count was negative",
+            })?;
+        let actual = self.registered_test_names(suite.category())?;
+        let expected = suite.expected_test_names();
+        let manifest_matches = registered_count == expected.len()
+            && actual.len() == expected.len()
+            && actual
+                .iter()
+                .map(String::as_str)
+                .eq(expected.iter().copied());
+        if !manifest_matches {
+            return Err(TestEngineError::UnexpectedTestSuiteManifest {
+                category: suite.category(),
+                expected,
+                actual,
+            });
+        }
+        Ok(RegisteredTestSuite::new(
+            suite,
+            actual,
+            self.control.raw() as usize,
+        ))
+    }
+
+    /// Validates the exact manifest, per-test success state, and terminal counters for a suite gate.
+    ///
+    /// Test Engine summaries are global to an engine. A gate should therefore register and queue
+    /// only this suite before calling this method; per-test status checks prevent another category
+    /// with matching aggregate counts from being mistaken for this suite.
+    pub fn validate_registered_test_suite(
+        &mut self,
+        suite: &RegisteredTestSuite,
+        summary: ResultSummary,
+    ) -> TestEngineResult<()> {
+        const OPERATION: &str = "TestEngine::validate_registered_test_suite";
+        self.require_ready(OPERATION)?;
+        if suite.engine_identity() != self.control.raw() as usize {
+            return Err(TestEngineError::invalid_input(
+                OPERATION,
+                "suite",
+                "the suite was registered by a different Test Engine",
+            ));
+        }
+
+        let actual = self.registered_test_names(suite.suite().category())?;
+        if actual.as_slice() != suite.test_names() {
+            return Err(TestEngineError::UnexpectedTestSuiteManifest {
+                category: suite.suite().category(),
+                expected: suite.suite().expected_test_names(),
+                actual,
+            });
+        }
+
+        let mut non_successful = Vec::new();
+        for (index, test_name) in suite.test_names().iter().enumerate() {
+            let index = i32::try_from(index).map_err(|_| TestEngineError::InvalidNativeData {
+                operation: "imgui_test_engine_get_registered_test_succeeded",
+                detail: "registered test index exceeded the native integer domain",
+            })?;
+            let mut succeeded = false;
+            let status = with_scratch_txt(suite.suite().category(), |category_ptr| {
+                self.call_attached_raw(OPERATION, |raw| unsafe {
+                    sys::imgui_test_engine_get_registered_test_succeeded(
+                        raw,
+                        category_ptr,
+                        index,
+                        &mut succeeded,
+                    )
+                })
+            })?;
+            ffi_status("imgui_test_engine_get_registered_test_succeeded", status)?;
+            if !succeeded {
+                non_successful.push(test_name.clone());
+            }
+        }
+
+        let expected = suite.test_count();
+        if summary.count_tested == expected
+            && summary.count_success == expected
+            && summary.count_in_queue == 0
+            && non_successful.is_empty()
+        {
+            return Ok(());
+        }
+        Err(TestEngineError::UnexpectedTestSuiteResult {
+            category: suite.suite().category(),
+            expected,
+            tested: summary.count_tested,
+            succeeded: summary.count_success,
+            in_queue: summary.count_in_queue,
+            non_successful,
+        })
+    }
+
     /// Registers the native built-in integration tests.
     pub fn register_default_tests(&mut self) -> TestEngineResult<()> {
-        self.require_ready("TestEngine::register_default_tests")?;
-        self.call_attached("imgui_test_engine_register_default_tests", |raw| unsafe {
-            sys::imgui_test_engine_register_default_tests(raw)
-        })
+        self.register_builtin_test_suite(BuiltInTestSuite::NativeDefaults)
+            .map(|_| ())
     }
 
     /// Registers a script test after all script commands have been validated.
@@ -797,6 +912,86 @@ impl TestEngine {
             raw_summary.CountSuccess,
             raw_summary.CountInQueue,
         )
+    }
+
+    fn registered_test_names(&self, category: &'static str) -> TestEngineResult<Vec<String>> {
+        const OPERATION: &str = "TestEngine::register_builtin_test_suite";
+        const MAX_TEST_NAME_BYTES: usize = 64 * 1024;
+
+        let mut raw_count = 0;
+        let status = with_scratch_txt(category, |category_ptr| {
+            self.call_attached_raw(OPERATION, |raw| unsafe {
+                sys::imgui_test_engine_get_registered_test_count(raw, category_ptr, &mut raw_count)
+            })
+        })?;
+        ffi_status("imgui_test_engine_get_registered_test_count", status)?;
+        let count = usize::try_from(raw_count).map_err(|_| TestEngineError::InvalidNativeData {
+            operation: "imgui_test_engine_get_registered_test_count",
+            detail: "registered test count was negative",
+        })?;
+
+        let mut names = Vec::with_capacity(count);
+        for index in 0..count {
+            let index = i32::try_from(index).map_err(|_| TestEngineError::InvalidNativeData {
+                operation: "imgui_test_engine_get_registered_test_name",
+                detail: "registered test index exceeded the native integer domain",
+            })?;
+            let mut required = 0usize;
+            let status = with_scratch_txt(category, |category_ptr| {
+                self.call_attached_raw(OPERATION, |raw| unsafe {
+                    sys::imgui_test_engine_get_registered_test_name(
+                        raw,
+                        category_ptr,
+                        index,
+                        std::ptr::null_mut(),
+                        0,
+                        &mut required,
+                    )
+                })
+            })?;
+            ffi_status("imgui_test_engine_get_registered_test_name", status)?;
+            if required == 0 || required > MAX_TEST_NAME_BYTES {
+                return Err(TestEngineError::InvalidNativeData {
+                    operation: "imgui_test_engine_get_registered_test_name",
+                    detail: "registered test name size was zero or exceeded the safety limit",
+                });
+            }
+
+            let mut buffer = vec![0u8; required];
+            let mut copied_required = 0usize;
+            let status = with_scratch_txt(category, |category_ptr| {
+                self.call_attached_raw(OPERATION, |raw| unsafe {
+                    sys::imgui_test_engine_get_registered_test_name(
+                        raw,
+                        category_ptr,
+                        index,
+                        buffer.as_mut_ptr().cast(),
+                        buffer.len(),
+                        &mut copied_required,
+                    )
+                })
+            })?;
+            ffi_status("imgui_test_engine_get_registered_test_name", status)?;
+            if copied_required != required {
+                return Err(TestEngineError::InvalidNativeData {
+                    operation: "imgui_test_engine_get_registered_test_name",
+                    detail: "registered test name size changed while it was copied",
+                });
+            }
+            let name = CStr::from_bytes_with_nul(&buffer)
+                .map_err(|_| TestEngineError::InvalidNativeData {
+                    operation: "imgui_test_engine_get_registered_test_name",
+                    detail: "registered test name was not a single NUL-terminated string",
+                })?
+                .to_str()
+                .map_err(|_| TestEngineError::InvalidNativeData {
+                    operation: "imgui_test_engine_get_registered_test_name",
+                    detail: "registered test name was not valid UTF-8",
+                })?
+                .to_owned();
+            names.push(name);
+        }
+        Ok(names)
     }
 
     fn require_ready(&self, operation: &'static str) -> TestEngineResult<()> {

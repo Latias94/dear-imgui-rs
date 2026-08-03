@@ -9,9 +9,9 @@ use dear_imgui_rs::{
     render::{ReconciledFrame, RenderedFrame},
 };
 use dear_imgui_test_engine::{
-    AttachmentState, CaptureOutput, FrameDriverError, RunFlags, RunSpeed, RunState, ScriptCount,
-    TestEngine, TestEngineError, TestEngineResult, TestEngineStatus, TestFrameDriver, TestGroup,
-    VerboseLevel, raw,
+    AttachmentState, BuiltInTestSuite, CaptureOutput, FrameDriverError, ResultSummary, RunFlags,
+    RunSpeed, RunState, ScriptCount, TestEngine, TestEngineError, TestEngineResult,
+    TestEngineStatus, TestFrameDriver, TestGroup, VerboseLevel, raw,
 };
 
 static TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -760,6 +760,77 @@ fn public_engine_methods_enforce_the_attachment_and_run_state_matrix() {
     assert_frame_driver_invalid_state(&mut terminal, destroyed_probe.render());
     drop(destroyed_probe);
     terminal.shutdown().expect("ContextDestroyed shutdown");
+}
+
+#[test]
+fn built_in_suite_registration_validates_manifests_and_per_test_results() {
+    let _guard = test_lock();
+    let mut context = context();
+    let mut engine = TestEngine::create().expect("engine");
+    engine.start(&mut context).expect("start engine");
+
+    let defaults = engine
+        .register_builtin_test_suite(BuiltInTestSuite::NativeDefaults)
+        .expect("register native defaults");
+    assert_eq!(defaults.test_count(), 2);
+    assert_eq!(
+        defaults
+            .test_names()
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        BuiltInTestSuite::NativeDefaults.expected_test_names()
+    );
+    let unexecuted = engine.validate_registered_test_suite(
+        &defaults,
+        ResultSummary {
+            count_tested: 2,
+            count_success: 2,
+            count_in_queue: 0,
+        },
+    );
+    assert!(matches!(
+        unexecuted,
+        Err(TestEngineError::UnexpectedTestSuiteResult {
+            non_successful,
+            ..
+        }) if non_successful
+            == ["basic_interaction".to_owned(), "input_value".to_owned()]
+    ));
+
+    let docking = engine
+        .register_builtin_test_suite(BuiltInTestSuite::UpstreamDocking)
+        .expect("register upstream docking suite");
+    assert_eq!(docking.test_count(), 39);
+    assert_eq!(
+        docking.test_names().first().map(String::as_str),
+        Some("docking_move_does_not_dock")
+    );
+    assert_eq!(
+        docking.test_names().last().map(String::as_str),
+        Some("docking_settings_invalid_1")
+    );
+
+    let duplicate = engine.register_builtin_test_suite(BuiltInTestSuite::NativeDefaults);
+    assert!(matches!(
+        duplicate,
+        Err(TestEngineError::Ffi {
+            status: TestEngineStatus::InvalidState,
+            ..
+        })
+    ));
+
+    let viewport = engine.register_builtin_test_suite(BuiltInTestSuite::UpstreamViewports);
+    assert!(matches!(
+        viewport,
+        Err(TestEngineError::Ffi {
+            status: TestEngineStatus::Unsupported,
+            ..
+        })
+    ));
+
+    engine.shutdown().expect("shutdown engine");
+    drop(context);
 }
 
 #[test]

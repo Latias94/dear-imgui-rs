@@ -58,9 +58,12 @@
         { "id": "shim", "canonical": "shim/cimgui_test_engine.cpp", "alternates": [], "provider_transform": null },
         { "id": "default-tests", "canonical": "shim/default_tests.cpp", "alternates": [], "provider_transform": null },
         { "id": "hooks-register", "canonical": "shim/imgui_test_engine_hooks_register.cpp", "alternates": [], "provider_transform": null },
-        { "id": "script-tests", "canonical": "shim/script_tests.cpp", "alternates": [], "provider_transform": null }
+        { "id": "script-tests", "canonical": "shim/script_tests.cpp", "alternates": [], "provider_transform": null },
+        { "id": "upstream-suite-bridge", "canonical": "shim/upstream_test_suites.cpp", "alternates": [], "provider_transform": null },
+        { "id": "upstream-docking-tests", "canonical": "third-party/imgui_test_engine/imgui_test_suite/imgui_tests_docking.cpp", "alternates": [], "provider_transform": null },
+        { "id": "upstream-viewport-tests", "canonical": "third-party/imgui_test_engine/imgui_test_suite/imgui_tests_viewports.cpp", "alternates": [], "provider_transform": null }
       ],
-      "native_required_files": ["capture-tool", "context", "coroutine", "engine", "exporters", "perftool", "ui", "utils", "shim", "default-tests", "hooks-register", "script-tests"],
+      "native_required_files": ["capture-tool", "context", "coroutine", "engine", "exporters", "perftool", "ui", "utils", "shim", "default-tests", "hooks-register", "script-tests", "upstream-suite-bridge", "upstream-docking-tests", "upstream-viewport-tests"],
       "archive_sentinels": ["engine", "shim"],
       "provider": null
     },

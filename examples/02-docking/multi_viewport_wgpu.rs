@@ -33,7 +33,8 @@ use dear_imgui_rs::render::{ReconciledFrame, RenderedFrame};
 use dear_imgui_rs::{Condition, Context, TextureId};
 #[cfg(feature = "test-engine")]
 use dear_imgui_test_engine::{
-    RunFlags, RunSpeed, ScriptCount, TestEngine, TestFrameDriver, TestGroup, VerboseLevel,
+    BuiltInTestSuite, RegisteredTestSuite, ResultSummary, RunFlags, RunSpeed, ScriptCount,
+    TestEngine, TestFrameDriver, TestGroup, VerboseLevel,
 };
 use dear_imgui_wgpu::{GammaMode, WgpuInitInfo, WgpuRenderer, multi_viewport as wgpu_mvp};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform, multi_viewport as winit_mvp};
@@ -124,6 +125,21 @@ impl SecondarySubmissionEvidence {
 struct ViewportSmokeState {
     result_path: Option<PathBuf>,
     adapter: wgpu::AdapterInfo,
+    mode: ViewportSmokeMode,
+    complete: bool,
+}
+
+#[cfg(feature = "test-engine")]
+enum ViewportSmokeMode {
+    Lifecycle(LifecycleSmokeState),
+    UpstreamSuite {
+        suite: RegisteredTestSuite,
+        terminal_summary: Option<ResultSummary>,
+    },
+}
+
+#[cfg(feature = "test-engine")]
+struct LifecycleSmokeState {
     require_secondary_while_held: bool,
     held_probe_armed: bool,
     held_probe_pressed: bool,
@@ -133,69 +149,128 @@ struct ViewportSmokeState {
     saw_merged_viewport: bool,
     secondary_submission_before_main_acquire: Option<SecondarySubmissionEvidence>,
     main_present_bracketed_by_test_engine: bool,
-    complete: bool,
 }
 
 #[cfg(feature = "test-engine")]
-struct CompletedViewportSmoke {
-    result_path: Option<PathBuf>,
-    adapter: wgpu::AdapterInfo,
-    saw_secondary_while_held: bool,
-    saw_merged_viewport: bool,
-    secondary_submission_before_main_acquire: SecondarySubmissionEvidence,
-    main_present_bracketed_by_test_engine: bool,
+enum CompletedViewportSmoke {
+    Lifecycle {
+        result_path: Option<PathBuf>,
+        adapter: wgpu::AdapterInfo,
+        saw_secondary_while_held: bool,
+        saw_merged_viewport: bool,
+        secondary_submission_before_main_acquire: SecondarySubmissionEvidence,
+        main_present_bracketed_by_test_engine: bool,
+    },
+    UpstreamSuite {
+        result_path: Option<PathBuf>,
+        adapter: wgpu::AdapterInfo,
+        suite: RegisteredTestSuite,
+        summary: ResultSummary,
+    },
 }
 
 #[cfg(feature = "test-engine")]
 impl ViewportSmokeState {
     fn completed_result(&self) -> Option<CompletedViewportSmoke> {
-        let secondary_submission_before_main_acquire = self
-            .secondary_submission_before_main_acquire
-            .as_ref()?
-            .clone();
-        self.complete.then(|| CompletedViewportSmoke {
-            result_path: self.result_path.clone(),
-            adapter: self.adapter.clone(),
-            saw_secondary_while_held: self.saw_secondary_while_held,
-            saw_merged_viewport: self.saw_merged_viewport,
-            secondary_submission_before_main_acquire,
-            main_present_bracketed_by_test_engine: self.main_present_bracketed_by_test_engine,
-        })
+        if !self.complete {
+            return None;
+        }
+        match &self.mode {
+            ViewportSmokeMode::UpstreamSuite {
+                suite,
+                terminal_summary,
+            } => Some(CompletedViewportSmoke::UpstreamSuite {
+                result_path: self.result_path.clone(),
+                adapter: self.adapter.clone(),
+                suite: suite.clone(),
+                summary: (*terminal_summary)?,
+            }),
+            ViewportSmokeMode::Lifecycle(lifecycle) => {
+                let secondary_submission_before_main_acquire = lifecycle
+                    .secondary_submission_before_main_acquire
+                    .as_ref()?
+                    .clone();
+                Some(CompletedViewportSmoke::Lifecycle {
+                    result_path: self.result_path.clone(),
+                    adapter: self.adapter.clone(),
+                    saw_secondary_while_held: lifecycle.saw_secondary_while_held,
+                    saw_merged_viewport: lifecycle.saw_merged_viewport,
+                    secondary_submission_before_main_acquire,
+                    main_present_bracketed_by_test_engine: lifecycle
+                        .main_present_bracketed_by_test_engine,
+                })
+            }
+        }
     }
 }
 
 #[cfg(feature = "test-engine")]
 impl CompletedViewportSmoke {
     fn write_after_teardown(self) -> Result<(), Box<dyn std::error::Error>> {
-        let Some(path) = self.result_path else {
-            return Ok(());
-        };
-        let render_submitted_viewport_ids = json_u32_array(
-            &self
-                .secondary_submission_before_main_acquire
-                .render_submitted_viewport_ids,
-        );
-        let present_submitted_viewport_ids = json_u32_array(
-            &self
-                .secondary_submission_before_main_acquire
-                .present_submitted_viewport_ids,
-        );
-        let json = format!(
-            "{{\"schema_version\":3,\"adapter\":{{\"name\":\"{}\",\"backend\":\"{:?}\",\"device_type\":\"{:?}\",\"driver\":\"{}\",\"driver_info\":\"{}\",\"vendor\":{},\"device\":{}}},\"secondary_viewport_while_held_observed\":{},\"merge_observed\":{},\"secondary_render_submitted_before_main_acquire_viewport_ids\":{},\"secondary_present_submitted_before_main_acquire_viewport_ids\":{},\"main_present_bracketed_by_test_engine\":{}}}",
-            json_escape(&self.adapter.name),
-            self.adapter.backend,
-            self.adapter.device_type,
-            json_escape(&self.adapter.driver),
-            json_escape(&self.adapter.driver_info),
-            self.adapter.vendor,
-            self.adapter.device,
-            self.saw_secondary_while_held,
-            self.saw_merged_viewport,
-            render_submitted_viewport_ids,
-            present_submitted_viewport_ids,
-            self.main_present_bracketed_by_test_engine,
-        );
-        write_json_atomic(&path, &json)
+        match self {
+            Self::Lifecycle {
+                result_path,
+                adapter,
+                saw_secondary_while_held,
+                saw_merged_viewport,
+                secondary_submission_before_main_acquire,
+                main_present_bracketed_by_test_engine,
+            } => {
+                let Some(path) = result_path else {
+                    return Ok(());
+                };
+                let render_submitted_viewport_ids = json_u32_array(
+                    &secondary_submission_before_main_acquire.render_submitted_viewport_ids,
+                );
+                let present_submitted_viewport_ids = json_u32_array(
+                    &secondary_submission_before_main_acquire.present_submitted_viewport_ids,
+                );
+                let json = format!(
+                    "{{\"schema_version\":3,\"adapter\":{{\"name\":\"{}\",\"backend\":\"{:?}\",\"device_type\":\"{:?}\",\"driver\":\"{}\",\"driver_info\":\"{}\",\"vendor\":{},\"device\":{}}},\"secondary_viewport_while_held_observed\":{},\"merge_observed\":{},\"secondary_render_submitted_before_main_acquire_viewport_ids\":{},\"secondary_present_submitted_before_main_acquire_viewport_ids\":{},\"main_present_bracketed_by_test_engine\":{}}}",
+                    json_escape(&adapter.name),
+                    adapter.backend,
+                    adapter.device_type,
+                    json_escape(&adapter.driver),
+                    json_escape(&adapter.driver_info),
+                    adapter.vendor,
+                    adapter.device,
+                    saw_secondary_while_held,
+                    saw_merged_viewport,
+                    render_submitted_viewport_ids,
+                    present_submitted_viewport_ids,
+                    main_present_bracketed_by_test_engine,
+                );
+                write_json_atomic(&path, &json)
+            }
+            Self::UpstreamSuite {
+                result_path,
+                adapter,
+                suite,
+                summary,
+            } => {
+                let Some(path) = result_path else {
+                    return Ok(());
+                };
+                let registered_tests = json_string_array(suite.test_names());
+                let json = format!(
+                    "{{\"schema_version\":1,\"suite\":\"upstream-viewports\",\"category\":\"{}\",\"platform_backend\":\"Winit\",\"renderer_backend\":\"WGPU\",\"real_platform_backend\":true,\"runtime_teardown_complete\":true,\"registered_count\":{},\"registered_tests\":{},\"tested\":{},\"success\":{},\"in_queue\":{},\"adapter\":{{\"name\":\"{}\",\"backend\":\"{:?}\",\"device_type\":\"{:?}\",\"driver\":\"{}\",\"driver_info\":\"{}\",\"vendor\":{},\"device\":{}}}}}",
+                    suite.suite().category(),
+                    suite.test_count(),
+                    registered_tests,
+                    summary.count_tested,
+                    summary.count_success,
+                    summary.count_in_queue,
+                    json_escape(&adapter.name),
+                    adapter.backend,
+                    adapter.device_type,
+                    json_escape(&adapter.driver),
+                    json_escape(&adapter.driver_info),
+                    adapter.vendor,
+                    adapter.device,
+                );
+                write_json_atomic(&path, &json)
+            }
+        }
     }
 }
 
@@ -254,6 +329,16 @@ fn json_u32_array(values: &[u32]) -> String {
 }
 
 #[cfg(feature = "test-engine")]
+fn json_string_array(values: &[String]) -> String {
+    let values = values
+        .iter()
+        .map(|value| format!("\"{}\"", json_escape(value)))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("[{values}]")
+}
+
+#[cfg(feature = "test-engine")]
 fn write_json_atomic(path: &Path, contents: &str) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(parent) = path
         .parent()
@@ -284,14 +369,6 @@ fn write_json_atomic(path: &Path, contents: &str) -> Result<(), Box<dyn std::err
 }
 
 impl AppRenderer {
-    fn new_frame(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        match self {
-            Self::Single(renderer) => renderer.new_frame()?,
-            Self::Multi(runtime) => runtime.new_frame()?,
-        }
-        Ok(())
-    }
-
     fn reconcile_frame(
         &mut self,
         frame: &mut RenderedFrame<'_>,
@@ -541,7 +618,18 @@ impl AppWindow {
         let run_viewport_drag_smoke =
             std::env::var("DEAR_IMGUI_VIEWPORT_DRAG_SMOKE").is_ok_and(|value| value == "1");
         #[cfg(feature = "test-engine")]
+        let run_upstream_viewport_suite =
+            std::env::var("DEAR_IMGUI_UPSTREAM_VIEWPORT_SUITE").is_ok_and(|value| value == "1");
+        #[cfg(feature = "test-engine")]
+        if run_viewport_drag_smoke && run_upstream_viewport_suite {
+            return Err(
+                "DEAR_IMGUI_VIEWPORT_DRAG_SMOKE and DEAR_IMGUI_UPSTREAM_VIEWPORT_SUITE are mutually exclusive"
+                    .into(),
+            );
+        }
+        #[cfg(feature = "test-engine")]
         let run_viewport_smoke = run_viewport_drag_smoke
+            || run_upstream_viewport_suite
             || std::env::var("DEAR_IMGUI_VIEWPORT_SMOKE").is_ok_and(|value| value == "1");
 
         // Create WGPU instance first (also used by renderer for per-viewport surfaces)
@@ -718,7 +806,11 @@ impl AppWindow {
         let app = {
             let mut app = app;
             if run_viewport_smoke {
-                app.configure_viewport_smoke(adapter_info, run_viewport_drag_smoke)?;
+                app.configure_viewport_smoke(
+                    adapter_info,
+                    run_viewport_drag_smoke,
+                    run_upstream_viewport_suite,
+                )?;
             }
             app
         };
@@ -731,6 +823,7 @@ impl AppWindow {
         &mut self,
         adapter: wgpu::AdapterInfo,
         drag_while_held: bool,
+        upstream_suite: bool,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let main_pos = self
             .window
@@ -755,12 +848,6 @@ impl AppWindow {
             main_pos.x + main_size.width * 0.5,
             main_pos.y + main_size.height * 0.5,
         ];
-        let test_name = if drag_while_held {
-            "multi_viewport_held_undock_smoke"
-        } else {
-            "multi_viewport_surface_smoke"
-        };
-
         let mut engine = TestEngine::create()?;
         engine.start(&mut self.imgui)?;
         engine.set_run_speed(if drag_while_held {
@@ -771,50 +858,71 @@ impl AppWindow {
         engine.set_verbose_level(VerboseLevel::Info)?;
         engine.set_verbose_level_on_error(VerboseLevel::Debug)?;
         engine.set_log_to_tty(true)?;
-        engine.add_script_test("wgpu", test_name, move |test| {
-            test.wait_for_item("Main/Viewport Count", ScriptCount::new(240)?)?;
-            if drag_while_held {
-                test.dock_into("Game View", "Main")?;
-                test.yield_frames(ScriptCount::new(10)?)?;
-                test.item_click("Main/Begin Held Drag Probe")?;
-                test.mouse_move("Game View/#TAB")?;
-                test.mouse_down(MouseButton::Left)?;
-                test.mouse_lift_drag_threshold(MouseButton::Left)?;
-                test.mouse_move_to_pos(external_pos[0], external_pos[1])?;
-                test.yield_frames(ScriptCount::new(120)?)?;
-                test.mouse_move_to_pos(redock_pos[0], redock_pos[1])?;
-                test.yield_frames(ScriptCount::new(60)?)?;
-                test.mouse_up(MouseButton::Left)?;
-                test.yield_frames(ScriptCount::new(30)?)?;
-                test.assert_item_read_int_eq("Main/Viewport Count", 1)?;
-            } else {
-                test.window_move("Game View", external_pos[0], external_pos[1])?;
-                test.yield_frames(ScriptCount::new(30)?)?;
-                test.assert_item_read_int_eq("Main/Viewport Count", 2)?;
-                test.dock_into("Game View", "Main")?;
-                test.yield_frames(ScriptCount::new(30)?)?;
+        let mode = if upstream_suite {
+            let suite = engine.register_builtin_test_suite(BuiltInTestSuite::UpstreamViewports)?;
+            engine.queue_tests(
+                TestGroup::Tests,
+                Some(suite.suite().category()),
+                RunFlags::RUN_FROM_COMMAND_LINE,
+            )?;
+            ViewportSmokeMode::UpstreamSuite {
+                suite,
+                terminal_summary: None,
             }
-            Ok(())
-        })?;
-        engine.queue_tests(
-            TestGroup::Tests,
-            Some(test_name),
-            RunFlags::RUN_FROM_COMMAND_LINE,
-        )?;
+        } else {
+            let test_name = if drag_while_held {
+                "multi_viewport_held_undock_smoke"
+            } else {
+                "multi_viewport_surface_smoke"
+            };
+            engine.add_script_test("wgpu", test_name, move |test| {
+                test.wait_for_item("Main/Viewport Count", ScriptCount::new(240)?)?;
+                if drag_while_held {
+                    test.dock_into("Game View", "Main")?;
+                    test.yield_frames(ScriptCount::new(10)?)?;
+                    test.item_click("Main/Begin Held Drag Probe")?;
+                    test.mouse_move("Game View/#TAB")?;
+                    test.mouse_down(MouseButton::Left)?;
+                    test.mouse_lift_drag_threshold(MouseButton::Left)?;
+                    test.mouse_move_to_pos(external_pos[0], external_pos[1])?;
+                    test.yield_frames(ScriptCount::new(120)?)?;
+                    test.mouse_move_to_pos(redock_pos[0], redock_pos[1])?;
+                    test.yield_frames(ScriptCount::new(60)?)?;
+                    test.mouse_up(MouseButton::Left)?;
+                    test.yield_frames(ScriptCount::new(30)?)?;
+                    test.assert_item_read_int_eq("Main/Viewport Count", 1)?;
+                } else {
+                    test.window_move("Game View", external_pos[0], external_pos[1])?;
+                    test.yield_frames(ScriptCount::new(30)?)?;
+                    test.assert_item_read_int_eq("Main/Viewport Count", 2)?;
+                    test.dock_into("Game View", "Main")?;
+                    test.yield_frames(ScriptCount::new(30)?)?;
+                }
+                Ok(())
+            })?;
+            engine.queue_tests(
+                TestGroup::Tests,
+                Some(test_name),
+                RunFlags::RUN_FROM_COMMAND_LINE,
+            )?;
+            ViewportSmokeMode::Lifecycle(LifecycleSmokeState {
+                require_secondary_while_held: drag_while_held,
+                held_probe_armed: false,
+                held_probe_pressed: false,
+                held_probe_complete: false,
+                saw_secondary_viewport: false,
+                saw_secondary_while_held: false,
+                saw_merged_viewport: false,
+                secondary_submission_before_main_acquire: None,
+                main_present_bracketed_by_test_engine: false,
+            })
+        };
 
         self.test_engine = Some(engine);
         self.viewport_smoke = Some(ViewportSmokeState {
             result_path: std::env::var_os("DEAR_IMGUI_VIEWPORT_SMOKE_JSON").map(PathBuf::from),
             adapter,
-            require_secondary_while_held: drag_while_held,
-            held_probe_armed: false,
-            held_probe_pressed: false,
-            held_probe_complete: false,
-            saw_secondary_viewport: false,
-            saw_secondary_while_held: false,
-            saw_merged_viewport: false,
-            secondary_submission_before_main_acquire: None,
-            main_present_bracketed_by_test_engine: false,
+            mode,
             complete: false,
         });
         Ok(())
@@ -880,78 +988,95 @@ impl AppWindow {
             i32::try_from(self.imgui.platform_io().viewports_iter().count()).unwrap_or(i32::MAX);
         let ui = self.imgui.frame();
         #[cfg(feature = "test-engine")]
-        let show_held_drag_probe = self
+        let running_upstream_suite = self
             .viewport_smoke
             .as_ref()
-            .is_some_and(|smoke| smoke.require_secondary_while_held);
+            .is_some_and(|smoke| matches!(&smoke.mode, ViewportSmokeMode::UpstreamSuite { .. }));
+        #[cfg(not(feature = "test-engine"))]
+        let running_upstream_suite = false;
+        #[cfg(feature = "test-engine")]
+        let show_held_drag_probe =
+            self.viewport_smoke
+                .as_ref()
+                .is_some_and(|smoke| match &smoke.mode {
+                    ViewportSmokeMode::Lifecycle(lifecycle) => {
+                        lifecycle.require_secondary_while_held
+                    }
+                    ViewportSmokeMode::UpstreamSuite { .. } => false,
+                });
         #[cfg(feature = "test-engine")]
         let mut arm_held_drag_probe = false;
         #[cfg(feature = "test-engine")]
         if let Some(smoke) = self.viewport_smoke.as_mut() {
-            if viewport_count > 1 {
-                smoke.saw_secondary_viewport = true;
-            } else if smoke.saw_secondary_viewport {
-                smoke.saw_merged_viewport = true;
+            if let ViewportSmokeMode::Lifecycle(lifecycle) = &mut smoke.mode {
+                if viewport_count > 1 {
+                    lifecycle.saw_secondary_viewport = true;
+                } else if lifecycle.saw_secondary_viewport {
+                    lifecycle.saw_merged_viewport = true;
+                }
             }
         }
 
-        // Keep a dockspace in the main viewport so it always has content
-        ui.dockspace_over_main_viewport();
+        if !running_upstream_suite {
+            // Keep a dockspace in the main viewport so it always has content
+            ui.dockspace_over_main_viewport();
 
-        // Simple UI that can be torn out into another viewport (when enabled)
-        ui.window("Main")
-            .size([420.0, 260.0], Condition::FirstUseEver)
-            .build(|| {
-                if self.enable_viewports {
-                    ui.text("Drag this window outside to create a new OS window.");
-                    ui.separator();
-                    ui.text("Multi-viewport is enabled (experimental).");
-                } else {
-                    ui.text("Multi-viewport is disabled on this platform (winit + WGPU).");
-                    ui.separator();
-                    ui.text("Use the SDL3 + OpenGL example for a stable multi-viewport demo:");
-                    ui.text("  cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features \"multi-viewport sdl3-opengl3\"");
-                }
-                #[cfg(feature = "test-engine")]
-                if self.test_engine.is_some() {
-                    ui.input_int_config("Viewport Count")
-                        .flags(dear_imgui_rs::InputScalarFlags::READ_ONLY)
-                        .build(&mut viewport_count);
-                    if show_held_drag_probe && ui.button("Begin Held Drag Probe") {
-                        arm_held_drag_probe = true;
+            // Simple UI that can be torn out into another viewport (when enabled)
+            ui.window("Main")
+                .size([420.0, 260.0], Condition::FirstUseEver)
+                .build(|| {
+                    if self.enable_viewports {
+                        ui.text("Drag this window outside to create a new OS window.");
+                        ui.separator();
+                        ui.text("Multi-viewport is enabled (experimental).");
+                    } else {
+                        ui.text("Multi-viewport is disabled on this platform (winit + WGPU).");
+                        ui.separator();
+                        ui.text("Use the SDL3 + OpenGL example for a stable multi-viewport demo:");
+                        ui.text("  cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features \"multi-viewport sdl3-opengl3\"");
                     }
-                }
-            });
+                    #[cfg(feature = "test-engine")]
+                    if self.test_engine.is_some() {
+                        ui.input_int_config("Viewport Count")
+                            .flags(dear_imgui_rs::InputScalarFlags::READ_ONLY)
+                            .build(&mut viewport_count);
+                        if show_held_drag_probe && ui.button("Begin Held Drag Probe") {
+                            arm_held_drag_probe = true;
+                        }
+                    }
+                });
 
-        // "Game View" window showing the offscreen texture; you can drag this window
-        // to any viewport (including secondary OS windows) and the texture will render
-        // via the WGPU backend automatically.
-        ui.window("Game View")
-            .size([520.0, 540.0], Condition::FirstUseEver)
-            .build(|| {
-                // Fit the game view into the available region while keeping it square.
-                let avail = ui.content_region_avail();
-                let side = avail[0].min(avail[1]).max(64.0);
-                let size = [side, side];
-                ui.text("Offscreen WGPU texture rendered each frame:");
-                ui.image(self.game_tex_id, size);
-            });
+            // "Game View" window showing the offscreen texture; you can drag this window
+            // to any viewport (including secondary OS windows) and the texture will render
+            // via the WGPU backend automatically.
+            ui.window("Game View")
+                .size([520.0, 540.0], Condition::FirstUseEver)
+                .build(|| {
+                    // Fit the game view into the available region while keeping it square.
+                    let avail = ui.content_region_avail();
+                    let side = avail[0].min(avail[1]).max(64.0);
+                    let size = [side, side];
+                    ui.text("Offscreen WGPU texture rendered each frame:");
+                    ui.image(self.game_tex_id, size);
+                });
+        }
 
         #[cfg(feature = "test-engine")]
         if let Some(smoke) = self.viewport_smoke.as_mut()
-            && smoke.require_secondary_while_held
+            && let ViewportSmokeMode::Lifecycle(lifecycle) = &mut smoke.mode
+            && lifecycle.require_secondary_while_held
         {
             if arm_held_drag_probe {
-                smoke.held_probe_armed = true;
+                lifecycle.held_probe_armed = true;
             }
-            if smoke.held_probe_armed && !smoke.held_probe_complete {
+            if lifecycle.held_probe_armed && !lifecycle.held_probe_complete {
                 if ui.is_mouse_down(MouseButton::Left) {
-                    smoke.held_probe_pressed = true;
+                    lifecycle.held_probe_pressed = true;
                     if viewport_count > 1 {
-                        smoke.saw_secondary_while_held = true;
+                        lifecycle.saw_secondary_while_held = true;
                     }
-                } else if smoke.held_probe_pressed {
-                    smoke.held_probe_complete = true;
+                } else if lifecycle.held_probe_pressed {
+                    lifecycle.held_probe_complete = true;
                 }
             }
         }
@@ -963,18 +1088,15 @@ impl AppWindow {
         self.platform.prepare_render(ui, &self.window)?;
 
         let mut rendered = self.imgui.render();
-        self.renderer.new_frame()?;
         self.renderer.reconcile_frame(&mut rendered)?;
 
         // Secondary surfaces must be acquired, rendered, and presented before the main surface is
         // acquired. This avoids overlapping WSI acquisition semaphores across viewport surfaces.
         {
             #[cfg(feature = "test-engine")]
-            let secondary_trace = if self
-                .viewport_smoke
-                .as_ref()
-                .is_some_and(|smoke| !smoke.complete)
-            {
+            let secondary_trace = if self.viewport_smoke.as_ref().is_some_and(|smoke| {
+                !smoke.complete && matches!(&smoke.mode, ViewportSmokeMode::Lifecycle(_))
+            }) {
                 match &self.renderer {
                     AppRenderer::Multi(runtime) => Some(runtime.begin_frame_trace()?),
                     AppRenderer::Single(_) => None,
@@ -989,9 +1111,10 @@ impl AppWindow {
             if let Some(trace) = secondary_trace {
                 let report = trace.finish();
                 if let Some(smoke) = self.viewport_smoke.as_mut()
-                    && smoke.secondary_submission_before_main_acquire.is_none()
+                    && let ViewportSmokeMode::Lifecycle(lifecycle) = &mut smoke.mode
+                    && lifecycle.secondary_submission_before_main_acquire.is_none()
                 {
-                    smoke.secondary_submission_before_main_acquire =
+                    lifecycle.secondary_submission_before_main_acquire =
                         SecondarySubmissionEvidence::from_report(&report);
                 }
             }
@@ -1019,6 +1142,13 @@ impl AppWindow {
                 .test_engine_frame_index
                 .checked_add(1)
                 .ok_or("Test Engine frame index exhausted")?;
+            if self.test_engine_frame_index > 20_000
+                && self.viewport_smoke.as_ref().is_some_and(|smoke| {
+                    matches!(&smoke.mode, ViewportSmokeMode::UpstreamSuite { .. })
+                })
+            {
+                return Err("upstream viewport suite exceeded its 20,000-frame budget".into());
+            }
             self.test_engine_frame_index
         };
 
@@ -1064,43 +1194,58 @@ impl AppWindow {
         #[cfg(feature = "test-engine")]
         if let Some(engine) = self.test_engine.as_mut() {
             if let Some(smoke) = self.viewport_smoke.as_mut() {
-                smoke.main_present_bracketed_by_test_engine = was_presented;
+                if let ViewportSmokeMode::Lifecycle(lifecycle) = &mut smoke.mode {
+                    lifecycle.main_present_bracketed_by_test_engine = was_presented;
+                }
             }
             let smoke_pending = self
                 .viewport_smoke
                 .as_ref()
                 .is_some_and(|smoke| !smoke.complete);
             if smoke_pending && let Some(summary) = engine.take_terminal_summary()? {
-                if summary.count_tested != 1 || summary.count_success != 1 {
-                    return Err(format!(
-                        "viewport smoke failed: tested={}, success={}",
-                        summary.count_tested, summary.count_success
-                    )
-                    .into());
-                }
                 let smoke = self
                     .viewport_smoke
                     .as_mut()
                     .expect("a pending viewport smoke state must exist");
-                if !smoke.saw_secondary_viewport
-                    || smoke.require_secondary_while_held
-                        && (!smoke.held_probe_complete || !smoke.saw_secondary_while_held)
-                    || !smoke.saw_merged_viewport
-                    || smoke.secondary_submission_before_main_acquire.is_none()
-                    || !smoke.main_present_bracketed_by_test_engine
-                {
-                    return Err(format!(
-                        "viewport smoke did not observe the complete lifecycle and presentation order: secondary={}, secondary_while_held={}, held_probe_complete={}, merged={}, secondary_submission_before_main_acquire={:?}, main_present_bracketed={}",
-                        smoke.saw_secondary_viewport,
-                        smoke.saw_secondary_while_held,
-                        smoke.held_probe_complete,
-                        smoke.saw_merged_viewport,
-                        smoke.secondary_submission_before_main_acquire,
-                        smoke.main_present_bracketed_by_test_engine,
-                    )
-                    .into());
+                match &mut smoke.mode {
+                    ViewportSmokeMode::UpstreamSuite {
+                        suite,
+                        terminal_summary,
+                    } => {
+                        engine.validate_registered_test_suite(suite, summary)?;
+                        *terminal_summary = Some(summary);
+                        println!("official upstream viewport Test Engine suite passed");
+                    }
+                    ViewportSmokeMode::Lifecycle(lifecycle) => {
+                        if summary.count_tested != 1 || summary.count_success != 1 {
+                            return Err(format!(
+                                "viewport smoke failed: tested={}, success={}",
+                                summary.count_tested, summary.count_success
+                            )
+                            .into());
+                        }
+                        if !lifecycle.saw_secondary_viewport
+                            || lifecycle.require_secondary_while_held
+                                && (!lifecycle.held_probe_complete
+                                    || !lifecycle.saw_secondary_while_held)
+                            || !lifecycle.saw_merged_viewport
+                            || lifecycle.secondary_submission_before_main_acquire.is_none()
+                            || !lifecycle.main_present_bracketed_by_test_engine
+                        {
+                            return Err(format!(
+                                "viewport smoke did not observe the complete lifecycle and presentation order: secondary={}, secondary_while_held={}, held_probe_complete={}, merged={}, secondary_submission_before_main_acquire={:?}, main_present_bracketed={}",
+                                lifecycle.saw_secondary_viewport,
+                                lifecycle.saw_secondary_while_held,
+                                lifecycle.held_probe_complete,
+                                lifecycle.saw_merged_viewport,
+                                lifecycle.secondary_submission_before_main_acquire,
+                                lifecycle.main_present_bracketed_by_test_engine,
+                            )
+                            .into());
+                        }
+                        println!("WGPU multi-viewport Test Engine smoke passed");
+                    }
                 }
-                println!("WGPU multi-viewport Test Engine smoke passed");
                 smoke.complete = true;
             }
         }
