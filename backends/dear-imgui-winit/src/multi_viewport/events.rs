@@ -42,7 +42,7 @@ pub(super) fn route_secondary_event<T>(
                         WindowEvent::KeyboardInput { event, .. } => {
                             if let Some(key) = crate::input::winit_key_to_imgui_key(
                                 &event.logical_key,
-                                event.location,
+                                event.physical_key,
                             ) {
                                 control.note_key(*window_id, key, event.state.is_pressed());
                             }
@@ -55,8 +55,13 @@ pub(super) fn route_secondary_event<T>(
                             crate::events::handle_modifiers_changed(modifiers, context);
                             context.io().want_capture_keyboard()
                         }
-                        WindowEvent::MouseWheel { delta, .. } => {
-                            crate::events::handle_mouse_wheel(*delta, context)
+                        WindowEvent::MouseWheel { delta, phase, .. } => {
+                            crate::events::handle_mouse_wheel(
+                                *delta,
+                                *phase,
+                                window.scale_factor(),
+                                context,
+                            )
                         }
                         WindowEvent::MouseInput { state, button, .. } => {
                             if let Some(button) = crate::input::to_imgui_mouse_button(*button) {
@@ -98,12 +103,24 @@ pub(super) fn route_secondary_event<T>(
                                 window,
                                 [touch.location.x, touch.location.y],
                             );
-                            let _ = crate::events::handle_touch_event_at(
-                                touch,
-                                position,
-                                Some(dear_imgui_rs::Id::from(unsafe { (*viewport).ID })),
-                                context,
-                            );
+                            if position.is_some()
+                                || !matches!(
+                                    touch.phase,
+                                    winit::event::TouchPhase::Started
+                                        | winit::event::TouchPhase::Moved
+                                )
+                            {
+                                if let Some(action) =
+                                    control.note_touch(*window_id, touch.id, touch.phase)
+                                {
+                                    let _ = crate::events::handle_touch_event_at(
+                                        action,
+                                        position,
+                                        Some(dear_imgui_rs::Id::from(unsafe { (*viewport).ID })),
+                                        context,
+                                    );
+                                }
+                            }
                             context.io().want_capture_mouse()
                         }
                         _ => false,

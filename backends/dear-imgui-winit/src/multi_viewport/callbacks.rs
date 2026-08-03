@@ -115,12 +115,24 @@ fn supports_inactive_window_creation() -> bool {
     cfg!(any(target_os = "windows", target_os = "macos"))
 }
 
-fn supports_skip_taskbar_at_creation() -> bool {
-    cfg!(any(target_os = "windows", target_os = "linux"))
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SkipTaskbarCapability {
+    Inherent,
+    CreateOnly,
+    Dynamic,
+    Unsupported,
 }
 
-fn supports_dynamic_skip_taskbar() -> bool {
-    cfg!(target_os = "windows")
+fn skip_taskbar_capability() -> SkipTaskbarCapability {
+    if cfg!(target_os = "macos") {
+        SkipTaskbarCapability::Inherent
+    } else if cfg!(target_os = "windows") {
+        SkipTaskbarCapability::Dynamic
+    } else if cfg!(target_os = "linux") {
+        SkipTaskbarCapability::CreateOnly
+    } else {
+        SkipTaskbarCapability::Unsupported
+    }
 }
 
 fn unsupported_viewport_flag(flag: &'static str, operation: &'static str) -> WinitPlatformError {
@@ -129,9 +141,9 @@ fn unsupported_viewport_flag(flag: &'static str, operation: &'static str) -> Win
 
 fn validate_policy_for_creation(
     policy: ViewportWindowPolicy,
-    supports_skip_taskbar: bool,
+    capability: SkipTaskbarCapability,
 ) -> Result<(), WinitPlatformError> {
-    if policy.skip_taskbar && !supports_skip_taskbar {
+    if policy.skip_taskbar && capability == SkipTaskbarCapability::Unsupported {
         return Err(unsupported_viewport_flag(
             "NoTaskBarIcon",
             "window creation",
@@ -143,9 +155,14 @@ fn validate_policy_for_creation(
 fn validate_policy_transition(
     current: ViewportWindowPolicy,
     next: ViewportWindowPolicy,
-    supports_dynamic_taskbar: bool,
+    capability: SkipTaskbarCapability,
 ) -> Result<(), WinitPlatformError> {
-    if current.skip_taskbar != next.skip_taskbar && !supports_dynamic_taskbar {
+    if current.skip_taskbar != next.skip_taskbar
+        && matches!(
+            capability,
+            SkipTaskbarCapability::CreateOnly | SkipTaskbarCapability::Unsupported
+        )
+    {
         return Err(unsupported_viewport_flag("NoTaskBarIcon", "window update"));
     }
     Ok(())
@@ -168,7 +185,8 @@ fn sync_window_policy(
     next: ViewportWindowPolicy,
 ) -> Result<(), WinitPlatformError> {
     let current = data.window_policy.get();
-    validate_policy_transition(current, next, supports_dynamic_skip_taskbar())?;
+    let taskbar_capability = skip_taskbar_capability();
+    validate_policy_transition(current, next, taskbar_capability)?;
 
     let window = data.window();
     if current.cursor_hittest != next.cursor_hittest {
@@ -185,7 +203,6 @@ fn sync_window_policy(
     }
     if current.decorations != next.decorations {
         window.set_decorations(next.decorations);
-        data.request_geometry_refresh(true, true);
     }
     if current.top_most != next.top_most {
         window.set_window_level(if next.top_most {
@@ -194,8 +211,10 @@ fn sync_window_policy(
             WindowLevel::Normal
         });
     }
-    #[cfg(target_os = "windows")]
-    if current.skip_taskbar != next.skip_taskbar {
+    if current.skip_taskbar != next.skip_taskbar
+        && taskbar_capability == SkipTaskbarCapability::Dynamic
+    {
+        #[cfg(target_os = "windows")]
         window.set_skip_taskbar(next.skip_taskbar);
     }
 
@@ -1133,7 +1152,7 @@ pub(super) unsafe extern "C" fn winit_create_window(vp: *mut dear_imgui_rs::sys:
             let viewport_flags = vp_ref.Flags;
             let window_policy = ViewportWindowPolicy::from_flags(viewport_flags);
             if let Err(error) =
-                validate_policy_for_creation(window_policy, supports_skip_taskbar_at_creation())
+                validate_policy_for_creation(window_policy, skip_taskbar_capability())
             {
                 record_viewport_failure(control, vp, error);
                 return;
@@ -1270,9 +1289,11 @@ pub(super) unsafe extern "C" fn winit_destroy_window(vp: *mut dear_imgui_rs::sys
                 Ok(MouseCaptureTransfer::Transferred) => {
                     control.retire_window_input(source_id, Some(main_id))
                 }
-                Ok(MouseCaptureTransfer::NotOwned) => control.retire_window_input(source_id, None),
+                Ok(MouseCaptureTransfer::NotOwned) => {
+                    control.retire_window_input(source_id, Some(main_id))
+                }
                 Err(error) => {
-                    control.retire_window_input(source_id, None)?;
+                    control.retire_window_input(source_id, Some(main_id))?;
                     Err(error)
                 }
             }
@@ -1472,7 +1493,6 @@ pub(super) unsafe extern "C" fn winit_set_window_pos(
             let desired_client = [x, y];
             let outer_target = outer_position_from_client(window, desired_client, dpi_scale);
             window.set_outer_position(window_position_from_desktop(outer_target));
-            data.request_geometry_refresh(true, false);
         });
     });
 }
@@ -1522,8 +1542,12 @@ pub(super) unsafe extern "C" fn winit_set_window_size(
 
         with_viewport_data(control, vp, |data| {
             let window = data.window();
-            let _ = window.request_inner_size(window_size_from_desktop(size));
-            data.request_geometry_refresh(false, true);
+            if window
+                .request_inner_size(window_size_from_desktop(size))
+                .is_some()
+            {
+                data.request_geometry_refresh(false, true);
+            }
         });
     });
 }
@@ -1732,25 +1756,31 @@ mod policy_tests {
             no_focus_on_click: true,
             ..ViewportWindowPolicy::default()
         };
-        assert!(validate_policy_for_creation(no_focus_on_click, true).is_ok());
+        assert!(
+            validate_policy_for_creation(no_focus_on_click, SkipTaskbarCapability::Dynamic).is_ok()
+        );
 
         let no_focus_on_appearing = ViewportWindowPolicy {
             no_focus_on_appearing: true,
             ..ViewportWindowPolicy::default()
         };
-        assert!(validate_policy_for_creation(no_focus_on_appearing, true).is_ok());
+        assert!(
+            validate_policy_for_creation(no_focus_on_appearing, SkipTaskbarCapability::Dynamic)
+                .is_ok()
+        );
 
         let no_taskbar = ViewportWindowPolicy {
             skip_taskbar: true,
             ..ViewportWindowPolicy::default()
         };
         assert!(matches!(
-            validate_policy_for_creation(no_taskbar, false),
+            validate_policy_for_creation(no_taskbar, SkipTaskbarCapability::Unsupported),
             Err(WinitPlatformError::UnsupportedViewportFlag {
                 flag: "NoTaskBarIcon",
                 ..
             })
         ));
+        assert!(validate_policy_for_creation(no_taskbar, SkipTaskbarCapability::Inherent).is_ok());
     }
 
     #[test]
@@ -1760,19 +1790,26 @@ mod policy_tests {
             no_focus_on_click: true,
             ..current
         };
-        assert!(validate_policy_transition(current, late_no_focus, true).is_ok());
+        assert!(
+            validate_policy_transition(current, late_no_focus, SkipTaskbarCapability::Dynamic)
+                .is_ok()
+        );
 
         let taskbar_change = ViewportWindowPolicy {
             skip_taskbar: true,
             ..current
         };
         assert!(matches!(
-            validate_policy_transition(current, taskbar_change, false),
+            validate_policy_transition(current, taskbar_change, SkipTaskbarCapability::CreateOnly),
             Err(WinitPlatformError::UnsupportedViewportFlag {
                 flag: "NoTaskBarIcon",
                 ..
             })
         ));
+        assert!(
+            validate_policy_transition(current, taskbar_change, SkipTaskbarCapability::Inherent)
+                .is_ok()
+        );
     }
 
     #[test]

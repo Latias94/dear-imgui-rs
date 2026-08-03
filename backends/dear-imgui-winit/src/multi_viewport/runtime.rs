@@ -190,12 +190,14 @@ impl MouseLeaveState {
 pub(super) struct InputOwnership {
     keys: HashMap<dear_imgui_rs::Key, WindowId>,
     mouse_buttons: HashMap<dear_imgui_rs::input::MouseButton, WindowId>,
+    touch: Option<(u64, WindowId)>,
 }
 
 #[derive(Debug, Default, Eq, PartialEq)]
 pub(super) struct ReleasedInput {
     pub(super) keys: Vec<dear_imgui_rs::Key>,
     pub(super) mouse_buttons: Vec<dear_imgui_rs::input::MouseButton>,
+    pub(super) touch: bool,
 }
 
 impl InputOwnership {
@@ -218,6 +220,24 @@ impl InputOwnership {
         } else {
             self.mouse_buttons.remove(&button);
         }
+    }
+
+    pub(super) fn note_touch(
+        &mut self,
+        window_id: WindowId,
+        touch_id: u64,
+        phase: winit::event::TouchPhase,
+    ) -> Option<crate::events::TouchAction> {
+        let active_id = self.touch.map(|(touch_id, _)| touch_id);
+        let (next_active, action) = crate::events::touch_transition(active_id, touch_id, phase);
+        match action {
+            Some(crate::events::TouchAction::Press) => {
+                self.touch = next_active.map(|touch_id| (touch_id, window_id));
+            }
+            Some(crate::events::TouchAction::Release) => self.touch = None,
+            Some(crate::events::TouchAction::Move) | None => {}
+        }
+        action
     }
 
     pub(super) fn retire_window(
@@ -247,12 +267,23 @@ impl InputOwnership {
                 true
             }
         });
+        if self.touch.is_some_and(|(_, owner)| owner == window_id) {
+            if let Some(mouse_handoff) = mouse_handoff {
+                if let Some((_, owner)) = self.touch.as_mut() {
+                    *owner = mouse_handoff;
+                }
+            } else {
+                self.touch = None;
+                released.touch = true;
+            }
+        }
         released
     }
 
     fn clear(&mut self) {
         self.keys.clear();
         self.mouse_buttons.clear();
+        self.touch = None;
     }
 }
 
@@ -607,11 +638,16 @@ impl RuntimeControl {
         // `PlatformIO.Viewports` snapshot or have since been deleted, so release only their Rust
         // sidecars here and never dereference their retained addresses.
         self.discard_all_viewports_without_touching_native();
+        let input_error = self
+            .main_window()
+            .map(|window| self.retire_window_input(window.id(), None))
+            .unwrap_or(Ok(()));
         let monitor_error = self.restore_monitors_in_current_context();
         let io_error = self.restore_single_window_io_in_current_context();
         self.finish_shutdown();
         deferred_fault
             .and(callback_error)
+            .and(input_error)
             .and(monitor_error)
             .and(io_error)
     }
@@ -725,6 +761,17 @@ impl RuntimeControl {
         self.mouse_leave.set(state);
     }
 
+    pub(crate) fn note_touch(
+        &self,
+        window_id: WindowId,
+        touch_id: u64,
+        phase: winit::event::TouchPhase,
+    ) -> Option<crate::events::TouchAction> {
+        self.input_ownership
+            .borrow_mut()
+            .note_touch(window_id, touch_id, phase)
+    }
+
     pub(crate) fn retire_window_input(
         &self,
         window_id: WindowId,
@@ -754,6 +801,19 @@ impl RuntimeControl {
                     dear_imgui_rs::input::MouseSource::Mouse.into(),
                 );
                 dear_imgui_rs::sys::ImGuiIO_AddMouseButtonEvent(io, button.into(), false);
+            }
+        }
+        if released.touch {
+            unsafe {
+                dear_imgui_rs::sys::ImGuiIO_AddMouseSourceEvent(
+                    io,
+                    dear_imgui_rs::input::MouseSource::TouchScreen.into(),
+                );
+                dear_imgui_rs::sys::ImGuiIO_AddMouseButtonEvent(
+                    io,
+                    dear_imgui_rs::input::MouseButton::Left.into(),
+                    false,
+                );
             }
         }
         self.mouse_leave.set(mouse_leave);

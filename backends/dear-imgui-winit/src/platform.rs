@@ -341,6 +341,7 @@ pub(crate) struct WinitPlatformControl {
     baseline_ime_user_data: Cell<*mut c_void>,
     attached_window: RefCell<Option<Arc<Window>>>,
     ime_allowed: Cell<bool>,
+    active_touch: Cell<Option<u64>>,
     terminal_fault: RefCell<Option<WinitPlatformError>>,
     attachment_handle: RefCell<Option<ContextAttachmentHandle>>,
     #[cfg(feature = "multi-viewport")]
@@ -402,6 +403,7 @@ impl WinitPlatformControl {
             baseline_ime_user_data: Cell::new(baseline_ime_user_data),
             attached_window: RefCell::new(None),
             ime_allowed: Cell::new(false),
+            active_touch: Cell::new(None),
             terminal_fault: RefCell::new(None),
             attachment_handle: RefCell::new(None),
             #[cfg(feature = "multi-viewport")]
@@ -660,12 +662,41 @@ impl WinitPlatformControl {
 
     #[cfg(feature = "multi-viewport")]
     fn note_runtime_key(&self, window_id: winit::window::WindowId, event: &winit::event::KeyEvent) {
-        let Some(key) = crate::input::winit_key_to_imgui_key(&event.logical_key, event.location)
+        let Some(key) =
+            crate::input::winit_key_to_imgui_key(&event.logical_key, event.physical_key)
         else {
             return;
         };
         if let Some(runtime) = self.runtime.borrow().as_ref() {
             runtime.note_key(window_id, key, event.state.is_pressed());
+        }
+    }
+
+    fn note_single_touch(&self, touch: &winit::event::Touch) -> Option<events::TouchAction> {
+        let (next_active, action) =
+            events::touch_transition(self.active_touch.get(), touch.id, touch.phase);
+        self.active_touch.set(next_active);
+        action
+    }
+
+    fn release_single_touch_in_current_context(&self) {
+        if self.active_touch.take().is_none() {
+            return;
+        }
+        let io = unsafe { dear_imgui_rs::sys::igGetIO_Nil() };
+        if io.is_null() {
+            return;
+        }
+        unsafe {
+            dear_imgui_rs::sys::ImGuiIO_AddMouseSourceEvent(
+                io,
+                dear_imgui_rs::input::MouseSource::TouchScreen.into(),
+            );
+            dear_imgui_rs::sys::ImGuiIO_AddMouseButtonEvent(
+                io,
+                dear_imgui_rs::input::MouseButton::Left.into(),
+                false,
+            );
         }
     }
 
@@ -695,6 +726,18 @@ impl WinitPlatformControl {
         if let Some(runtime) = self.runtime.borrow().as_ref() {
             runtime.note_mouse_button(window_id, button, state.is_pressed());
         }
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    fn note_runtime_touch(
+        &self,
+        window_id: winit::window::WindowId,
+        touch: &winit::event::Touch,
+    ) -> Option<events::TouchAction> {
+        self.runtime
+            .borrow()
+            .as_ref()
+            .and_then(|runtime| runtime.note_touch(window_id, touch.id, touch.phase))
     }
 
     #[cfg(feature = "multi-viewport")]
@@ -846,6 +889,7 @@ impl WinitPlatformControl {
             if !Arc::ptr_eq(&attached, window) {
                 return Err(WinitPlatformError::WindowMismatch);
             }
+            self.release_single_touch_in_current_context();
             unsafe {
                 let platform_io = dear_imgui_rs::sys::igGetPlatformIO_Nil();
                 (*platform_io).Platform_SetImeDataFn = self.baseline_ime_callback.get();
@@ -894,6 +938,7 @@ impl WinitPlatformControl {
             if io.is_null() || platform_io.is_null() {
                 return Err(WinitPlatformError::ContextMismatch);
             }
+            self.release_single_touch_in_current_context();
             let attached_window = self
                 .attached_window
                 .borrow()
@@ -1040,6 +1085,7 @@ impl ContextAttachment for WinitPlatformControl {
             runtime.context_destroyed_from_platform(_context);
         }
         self.attached_window.borrow_mut().take();
+        self.active_touch.set(None);
         unregister_platform_control(self.binding.id());
         self.attachment_handle.borrow_mut().take();
         self.state.set(PlatformState::ContextDestroyed);
@@ -1424,7 +1470,9 @@ impl WinitPlatform {
                 }
                 events::handle_mouse_button(*button, *state, imgui_ctx)
             }
-            WindowEvent::MouseWheel { delta, .. } => events::handle_mouse_wheel(*delta, imgui_ctx),
+            WindowEvent::MouseWheel { delta, phase, .. } => {
+                events::handle_mouse_wheel(*delta, *phase, window.scale_factor(), imgui_ctx)
+            }
             // Single-window mode invalidates immediately. Multi-viewport mode delays the leave
             // so an in-flight drag can enter another owned native window without losing position.
             WindowEvent::CursorLeft { .. } => {
@@ -1473,15 +1521,35 @@ impl WinitPlatform {
                         window,
                         [touch.location.x, touch.location.y],
                     );
-                    let _ = events::handle_touch_event_at(
-                        touch,
-                        position,
-                        Some(imgui_ctx.main_viewport().id()),
-                        imgui_ctx,
-                    );
+                    if position.is_some()
+                        || !matches!(
+                            touch.phase,
+                            winit::event::TouchPhase::Started | winit::event::TouchPhase::Moved
+                        )
+                    {
+                        let action = self.control.note_runtime_touch(window.id(), touch);
+                        if let Some(action) = action {
+                            let _ = events::handle_touch_event_at(
+                                action,
+                                position,
+                                Some(imgui_ctx.main_viewport().id()),
+                                imgui_ctx,
+                            );
+                        }
+                    }
                     return imgui_ctx.io().want_capture_mouse();
                 }
-                events::handle_touch_event(touch, window, imgui_ctx);
+                let position = events::touch_logical_position(touch, window);
+                if position.is_some()
+                    || !matches!(
+                        touch.phase,
+                        winit::event::TouchPhase::Started | winit::event::TouchPhase::Moved
+                    )
+                {
+                    if let Some(action) = self.control.note_single_touch(touch) {
+                        let _ = events::handle_touch_event_at(action, position, None, imgui_ctx);
+                    }
+                }
                 imgui_ctx.io().want_capture_mouse()
             }
             WindowEvent::Focused(focused) => {

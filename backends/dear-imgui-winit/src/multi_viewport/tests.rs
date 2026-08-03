@@ -585,6 +585,7 @@ fn destroyed_viewport_releases_only_the_input_it_owns() {
         super::runtime::ReleasedInput {
             keys: vec![dear_imgui_rs::Key::B],
             mouse_buttons: vec![dear_imgui_rs::input::MouseButton::Right],
+            touch: false,
         }
     );
 }
@@ -606,6 +607,7 @@ fn latest_input_event_transfers_ownership_between_viewports() {
         super::runtime::ReleasedInput {
             keys: vec![dear_imgui_rs::Key::A],
             mouse_buttons: vec![dear_imgui_rs::input::MouseButton::Left],
+            touch: false,
         }
     );
 }
@@ -624,6 +626,7 @@ fn captured_mouse_buttons_follow_a_destroyed_viewport_to_the_main_window() {
         super::runtime::ReleasedInput {
             keys: vec![dear_imgui_rs::Key::A],
             mouse_buttons: Vec::new(),
+            touch: false,
         }
     );
     assert_eq!(
@@ -631,6 +634,31 @@ fn captured_mouse_buttons_follow_a_destroyed_viewport_to_the_main_window() {
         super::runtime::ReleasedInput {
             keys: Vec::new(),
             mouse_buttons: vec![dear_imgui_rs::input::MouseButton::Left],
+            touch: false,
+        }
+    );
+}
+
+#[test]
+fn active_touch_follows_a_destroyed_viewport_handoff() {
+    let viewport = WindowId::from(41_u64);
+    let main = WindowId::from(42_u64);
+    let mut ownership = InputOwnership::default();
+
+    assert_eq!(
+        ownership.note_touch(viewport, 7, winit::event::TouchPhase::Started),
+        Some(crate::events::TouchAction::Press)
+    );
+    assert_eq!(
+        ownership.retire_window(viewport, Some(main)),
+        Default::default()
+    );
+    assert_eq!(
+        ownership.retire_window(main, None),
+        super::runtime::ReleasedInput {
+            keys: Vec::new(),
+            mouse_buttons: Vec::new(),
+            touch: true,
         }
     );
 }
