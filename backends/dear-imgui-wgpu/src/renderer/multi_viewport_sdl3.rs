@@ -11,6 +11,13 @@ mod removed_free_api_contracts {
     /// use dear_imgui_wgpu::multi_viewport_sdl3::shutdown_multi_viewport_support;
     /// ```
     struct Shutdown;
+
+    /// ```compile_fail
+    /// fn removed(runtime: &dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRuntime) {
+    ///     runtime.new_frame().unwrap();
+    /// }
+    /// ```
+    struct NewFrame;
 }
 
 use dear_imgui_rs::Context;
