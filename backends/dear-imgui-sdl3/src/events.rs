@@ -1,7 +1,10 @@
 use std::ffi::CString;
 
 use sdl3::event::{DisplayEvent, Event, WindowEvent};
-use sdl3_sys::events::{SDL_EVENT_TEXT_INPUT, SDL_Event, SDL_TextInputEvent};
+use sdl3_sys::events::{
+    SDL_DisplayEvent, SDL_EVENT_DISPLAY_USABLE_BOUNDS_CHANGED, SDL_EVENT_TEXT_INPUT, SDL_Event,
+    SDL_TextInputEvent,
+};
 use sdl3_sys::video::SDL_WindowID;
 
 use super::{Sdl3BackendError, ffi};
@@ -37,6 +40,18 @@ fn with_imgui_event<R>(
             display_event: DisplayEvent::None,
             ..
         } => Ok(None),
+        Event::Unknown { timestamp, type_ }
+            if *type_ == SDL_EVENT_DISPLAY_USABLE_BOUNDS_CHANGED.0 =>
+        {
+            let raw = SDL_Event {
+                display: SDL_DisplayEvent {
+                    r#type: SDL_EVENT_DISPLAY_USABLE_BOUNDS_CHANGED,
+                    timestamp: *timestamp,
+                    ..Default::default()
+                },
+            };
+            Ok(Some(callback(&raw)))
+        }
         Event::Window { .. }
         | Event::KeyDown { .. }
         | Event::KeyUp { .. }
@@ -121,5 +136,20 @@ mod tests {
 
         assert_eq!(result, None);
         assert!(!called);
+    }
+
+    #[test]
+    fn sdl_3_4_usable_bounds_event_reaches_the_safe_backend_path() {
+        let event = Event::Unknown {
+            timestamp: 84,
+            type_: SDL_EVENT_DISPLAY_USABLE_BOUNDS_CHANGED.0,
+        };
+
+        let display = with_imgui_event(&event, |raw| unsafe { raw.display }).unwrap();
+
+        assert_eq!(
+            display.map(|event| (event.r#type.0, event.timestamp)),
+            Some((SDL_EVENT_DISPLAY_USABLE_BOUNDS_CHANGED.0, 84))
+        );
     }
 }
