@@ -3,11 +3,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::rc::{Rc, Weak};
+use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(feature = "multi-viewport")]
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::{Arc, atomic::AtomicBool};
 
 #[cfg(feature = "multi-viewport")]
 use crate::callback_ownership::validate_platform_viewport_state;
@@ -42,6 +40,41 @@ use dear_imgui_rs::{
 
 struct Sdl3PlatformAttachmentMarker;
 struct Sdl3RendererAttachmentMarker;
+
+static NEXT_PLATFORM_SESSION_GENERATION: AtomicU64 = AtomicU64::new(1);
+static PLATFORM_SESSION_OWNER: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug)]
+struct Sdl3PlatformSession {
+    generation: u64,
+}
+
+impl Sdl3PlatformSession {
+    fn acquire() -> Result<Self, Sdl3BackendError> {
+        let generation = loop {
+            let generation = NEXT_PLATFORM_SESSION_GENERATION.fetch_add(1, Ordering::Relaxed);
+            if generation != 0 {
+                break generation;
+            }
+        };
+        PLATFORM_SESSION_OWNER
+            .compare_exchange(0, generation, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| Sdl3BackendError::PlatformSessionOccupied)?;
+        Ok(Self { generation })
+    }
+}
+
+impl Drop for Sdl3PlatformSession {
+    fn drop(&mut self) {
+        let released = PLATFORM_SESSION_OWNER.compare_exchange(
+            self.generation,
+            0,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+        debug_assert!(released.is_ok(), "SDL3 platform session owner changed");
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum RuntimeState {
@@ -191,11 +224,11 @@ impl Sdl3VulkanSurfaceProvider {
             {
                 return Err(Sdl3VulkanSurfaceError::OwnerUnavailable);
             }
-            control.ensure_bound_entry()?;
+            let entry = control.enter_bound()?;
             if !control.validate_platform_ownership_bound()
                 || !unsafe { validate_platform_viewport_state(control, viewport.as_raw_mut()) }
             {
-                control.finish_entry()?;
+                entry.finish()?;
                 return Err(Sdl3VulkanSurfaceError::OwnerUnavailable);
             }
 
@@ -218,6 +251,7 @@ impl Sdl3VulkanSurfaceProvider {
             if code != 0 || surface == 0 {
                 return Err(Sdl3VulkanSurfaceError::CallbackFailed { code, surface });
             }
+            entry.finish()?;
             Ok(surface)
         })
         .unwrap_or(Err(Sdl3VulkanSurfaceError::OwnerUnavailable))
@@ -361,6 +395,26 @@ impl Drop for ReleaseGuard<'_> {
     }
 }
 
+pub(super) struct RuntimeEntry<'runtime> {
+    control: &'runtime RuntimeControl,
+    finished: bool,
+}
+
+impl RuntimeEntry<'_> {
+    pub(super) fn finish(mut self) -> Result<(), Sdl3BackendError> {
+        self.finished = true;
+        self.control.finish_entry()
+    }
+}
+
+impl Drop for RuntimeEntry<'_> {
+    fn drop(&mut self) {
+        if !self.finished {
+            self.control.inspect_abandoned_entry();
+        }
+    }
+}
+
 impl fmt::Debug for NativeLifecycle {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -397,6 +451,7 @@ pub(super) struct RuntimeControl {
     renderer_callbacks: RefCell<Option<RendererCallbackOwnership>>,
     renderer_shutdown_restore: RefCell<Option<RendererShutdownRestore>>,
     renderer_consumer: RefCell<Option<RendererConsumer>>,
+    platform_session: RefCell<Option<Sdl3PlatformSession>>,
     #[cfg(any(
         feature = "opengl3-renderer",
         feature = "sdlrenderer3-renderer",
@@ -405,8 +460,6 @@ pub(super) struct RuntimeControl {
     renderer_textures: RefCell<RendererTextureStore>,
     owned_viewports: RefCell<HashMap<usize, ViewportPlatformState>>,
     owned_renderer_viewports: RefCell<HashMap<usize, *mut std::ffi::c_void>>,
-    deferred_platform_viewport_restores: RefCell<HashMap<usize, ViewportPlatformState>>,
-    deferred_renderer_viewport_restores: RefCell<HashMap<usize, *mut std::ffi::c_void>>,
     failed_viewports: RefCell<HashSet<usize>>,
     faults: RefCell<VecDeque<RuntimeFault>>,
     opengl_viewport_frame_trace: RefCell<OpenGlViewportFrameTraceState>,
@@ -437,6 +490,7 @@ impl RuntimeControl {
         renderer_shutdown: Option<Rc<dyn Fn()>>,
         renderer_device_objects_destroy: Option<Rc<dyn Fn()>>,
         renderer_texture_update: Option<RendererTextureUpdate>,
+        platform_session: Option<Sdl3PlatformSession>,
         platform_shutdown: Rc<dyn Fn()>,
         platform_graphics: PlatformGraphicsKind,
         native_renderer: NativeRendererKind,
@@ -469,6 +523,7 @@ impl RuntimeControl {
             renderer_callbacks: RefCell::new(None),
             renderer_shutdown_restore: RefCell::new(None),
             renderer_consumer: RefCell::new(None),
+            platform_session: RefCell::new(platform_session),
             #[cfg(any(
                 feature = "opengl3-renderer",
                 feature = "sdlrenderer3-renderer",
@@ -477,8 +532,6 @@ impl RuntimeControl {
             renderer_textures: RefCell::new(RendererTextureStore::default()),
             owned_viewports: RefCell::new(HashMap::new()),
             owned_renderer_viewports: RefCell::new(HashMap::new()),
-            deferred_platform_viewport_restores: RefCell::new(HashMap::new()),
-            deferred_renderer_viewport_restores: RefCell::new(HashMap::new()),
             failed_viewports: RefCell::new(HashSet::new()),
             faults: RefCell::new(VecDeque::new()),
             opengl_viewport_frame_trace: RefCell::new(OpenGlViewportFrameTraceState::default()),
@@ -599,7 +652,7 @@ impl RuntimeControl {
         &self,
         context: &Context,
     ) -> Result<Sdl3VulkanSurfaceProvider, Sdl3BackendError> {
-        self.ensure_entry(context)?;
+        let entry = self.enter(context)?;
         if !self.expects_vulkan() {
             return Err(Sdl3BackendError::VulkanSurfaceProviderRequiresVulkan);
         }
@@ -611,7 +664,7 @@ impl RuntimeControl {
                 }
         })?;
         if !callback_available {
-            self.finish_entry()?;
+            entry.finish()?;
             return Err(Sdl3BackendError::VulkanSurfaceCallbackUnavailable);
         }
         self.vulkan_surface_provider
@@ -621,7 +674,7 @@ impl RuntimeControl {
         let provider = Sdl3VulkanSurfaceProvider {
             state: Arc::clone(&self.vulkan_surface_provider),
         };
-        if let Err(error) = self.finish_entry() {
+        if let Err(error) = entry.finish() {
             drop(provider);
             return Err(error);
         }
@@ -671,6 +724,10 @@ impl RuntimeControl {
 
     fn platform_released(&self) -> bool {
         self.platform_release.get().is_released()
+    }
+
+    fn release_platform_session(&self) {
+        self.platform_session.borrow_mut().take();
     }
 
     fn release_renderer_device_objects_bound(&self) -> Result<(), Sdl3BackendError> {
@@ -784,6 +841,7 @@ impl RuntimeControl {
 
         if !self.platform_initialized.get() {
             release.commit();
+            self.release_platform_session();
             self.finish_shutdown();
             return Ok(());
         }
@@ -816,12 +874,6 @@ impl RuntimeControl {
                 }
             }
         };
-        let main_viewport = unsafe { sys::igGetMainViewport() };
-        if !main_viewport.is_null()
-            && let Some(restore) = restore.as_ref()
-        {
-            self.defer_platform_viewport_restore(main_viewport, restore.main_viewport());
-        }
         self.callback_teardown_active.set(true);
         struct CallbackTeardownGuard<'a>(&'a Cell<bool>);
         impl Drop for CallbackTeardownGuard<'_> {
@@ -834,7 +886,6 @@ impl RuntimeControl {
             (self.lifecycle.platform_shutdown)();
         }));
         drop(callback_guard);
-        self.restore_deferred_viewport_state();
 
         if let Err(payload) = shutdown_result {
             if let Some(restore) = restore {
@@ -880,6 +931,7 @@ impl RuntimeControl {
                 .borrow_mut()
                 .replace(renderer_restore);
         }
+        self.release_platform_session();
         self.finish_shutdown();
         restore_result
     }
@@ -1004,6 +1056,14 @@ impl RuntimeControl {
         self.ensure_bound_entry()
     }
 
+    pub(super) fn enter(&self, context: &Context) -> Result<RuntimeEntry<'_>, Sdl3BackendError> {
+        self.ensure_entry(context)?;
+        Ok(RuntimeEntry {
+            control: self,
+            finished: false,
+        })
+    }
+
     pub(super) fn ensure_bound_entry(&self) -> Result<(), Sdl3BackendError> {
         self.request_failed_viewport_closes();
         self.poll_fault()?;
@@ -1013,8 +1073,20 @@ impl RuntimeControl {
         Ok(())
     }
 
+    pub(super) fn enter_bound(&self) -> Result<RuntimeEntry<'_>, Sdl3BackendError> {
+        self.ensure_bound_entry()?;
+        Ok(RuntimeEntry {
+            control: self,
+            finished: false,
+        })
+    }
+
     pub(super) fn finish_entry(&self) -> Result<(), Sdl3BackendError> {
         self.poll_fault()
+    }
+
+    fn inspect_abandoned_entry(&self) {
+        self.detect_callback_replacements();
     }
 
     #[cfg(any(
@@ -1282,55 +1354,6 @@ impl RuntimeControl {
             .remove(&(viewport as usize))
     }
 
-    pub(super) fn defer_platform_viewport_restore(
-        &self,
-        viewport: *mut sys::ImGuiViewport,
-        state: ViewportPlatformState,
-    ) {
-        if !viewport.is_null() {
-            self.deferred_platform_viewport_restores
-                .borrow_mut()
-                .insert(viewport as usize, state);
-        }
-    }
-
-    pub(super) fn defer_renderer_viewport_restore(
-        &self,
-        viewport: *mut sys::ImGuiViewport,
-        user_data: *mut std::ffi::c_void,
-    ) {
-        if !viewport.is_null() {
-            self.deferred_renderer_viewport_restores
-                .borrow_mut()
-                .insert(viewport as usize, user_data);
-        }
-    }
-
-    fn restore_deferred_viewport_state(&self) {
-        let platform = self
-            .deferred_platform_viewport_restores
-            .borrow_mut()
-            .drain()
-            .collect::<Vec<_>>();
-        let renderer = self
-            .deferred_renderer_viewport_restores
-            .borrow_mut()
-            .drain()
-            .collect::<Vec<_>>();
-        for (viewport, state) in platform {
-            let viewport = viewport as *mut sys::ImGuiViewport;
-            if !viewport.is_null() {
-                unsafe { state.restore(viewport) };
-            }
-        }
-        for (viewport, user_data) in renderer {
-            let viewport = viewport as *mut sys::ImGuiViewport;
-            if !viewport.is_null() {
-                unsafe { (*viewport).RendererUserData = user_data };
-            }
-        }
-    }
-
     pub(super) fn mark_viewport_failed(&self, viewport: *mut sys::ImGuiViewport) {
         if viewport.is_null() {
             return;
@@ -1562,14 +1585,9 @@ impl RuntimeControl {
         self.renderer_callbacks.borrow_mut().take();
         self.renderer_shutdown_restore.borrow_mut().take();
         self.renderer_consumer.borrow_mut().take();
+        self.release_platform_session();
         self.owned_viewports.borrow_mut().clear();
         self.owned_renderer_viewports.borrow_mut().clear();
-        self.deferred_platform_viewport_restores
-            .borrow_mut()
-            .clear();
-        self.deferred_renderer_viewport_restores
-            .borrow_mut()
-            .clear();
         self.failed_viewports.borrow_mut().clear();
         self.platform_initialized.set(false);
         self.renderer_initialized.set(false);
@@ -1713,6 +1731,7 @@ impl RuntimeRegistration {
         platform_graphics: PlatformGraphicsKind,
         native_renderer: NativeRendererKind,
     ) -> Result<Self, Sdl3BackendError> {
+        let platform_session = Sdl3PlatformSession::acquire()?;
         let baseline = preflight_platform_claim(context, native_renderer)?;
         let renderer_shutdown = renderer_shutdown.map(|shutdown| Rc::new(shutdown) as Rc<dyn Fn()>);
         let renderer_device_objects_destroy =
@@ -1724,6 +1743,7 @@ impl RuntimeRegistration {
             renderer_shutdown,
             renderer_device_objects_destroy,
             renderer_texture_update,
+            Some(platform_session),
             Rc::new(shutdown_platform_impl),
             platform_graphics,
             native_renderer,
@@ -1827,6 +1847,7 @@ impl RuntimeRegistration {
         }
         self.control.platform_initialized.set(false);
         self.control.renderer_initialized.set(false);
+        self.control.release_platform_session();
         self.control.take_renderer_consumer();
         self.control.renderer_release.set(ReleaseState::Released);
         self.control.platform_release.set(ReleaseState::Released);
@@ -1877,7 +1898,7 @@ impl RuntimeRegistration {
         context: &mut Context,
         destroy_device_objects: impl FnOnce(),
     ) -> Result<(), Sdl3BackendError> {
-        self.control.ensure_entry(context)?;
+        let entry = self.control.enter(context)?;
         let consumer_guard = self.control.renderer_consumer.borrow();
         let consumer = consumer_guard
             .as_ref()
@@ -1894,7 +1915,7 @@ impl RuntimeRegistration {
         let _ = reset.commit();
         drop(consumer_guard);
         self.control.clear_destroyed_textures();
-        self.control.finish_entry()
+        entry.finish()
     }
 
     pub(super) fn shutdown_platform(
@@ -2299,12 +2320,14 @@ mod tests {
         platform_graphics: PlatformGraphicsKind,
         native_renderer: NativeRendererKind,
     ) -> RuntimeRegistration {
+        let platform_session = Sdl3PlatformSession::acquire().unwrap();
         let baseline = preflight_platform_claim(context, native_renderer).unwrap();
         let control = Rc::new(RuntimeControl::new_with_backend(
             context,
             renderer_shutdown,
             renderer_device_objects_destroy,
             renderer_texture_update,
+            Some(platform_session),
             platform_shutdown,
             platform_graphics,
             native_renderer,
@@ -2365,6 +2388,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             Rc::new(|| {}),
             PlatformGraphicsKind::OpenGl,
             NativeRendererKind::None,
@@ -2401,6 +2425,7 @@ mod tests {
         let context = Context::create();
         let control = RuntimeControl::new_with_backend(
             &context,
+            None,
             None,
             None,
             None,
@@ -2914,7 +2939,7 @@ mod tests {
     }
 
     #[test]
-    fn callback_registry_routes_each_current_context_to_its_own_runtime() {
+    fn platform_session_is_exclusive_and_reusable_across_contexts() {
         let _guard = crate::tests::test_guard();
         let mut context_a = Context::create();
         let runtime_a = synthetic_claimed_registration(
@@ -2932,6 +2957,29 @@ mod tests {
         );
 
         let suspended_a = context_a.suspend();
+        let mut blocked_context = Context::create();
+        let error = RuntimeRegistration::prepare_with_backend(
+            &mut blocked_context,
+            None,
+            None,
+            None,
+            PlatformGraphicsKind::Other,
+            NativeRendererKind::None,
+        )
+        .unwrap_err();
+        assert!(matches!(error, Sdl3BackendError::PlatformSessionOccupied));
+        drop(blocked_context);
+
+        let mut context_a = suspended_a.activate().expect("Context A should reactivate");
+        assert_eq!(
+            with_current_runtime(|control| control.binding.id()),
+            Some(id_a)
+        );
+        let mut runtime_a = runtime_a;
+        runtime_a.shutdown_platform(&mut context_a).unwrap();
+        assert!(!registry_contains(key_a));
+        drop(context_a);
+
         let mut context_b = Context::create();
         let mut runtime_b = synthetic_claimed_registration(
             &mut context_b,
@@ -2942,31 +2990,59 @@ mod tests {
         );
         let id_b = context_b.id();
         let key_b = runtime_b.control.platform_io_key.get();
-        assert_ne!(key_a, key_b);
-        assert_eq!(
-            with_current_runtime(|control| control.binding.id()),
-            Some(id_b)
-        );
-
-        let suspended_b = context_b.suspend();
-        let mut context_a = suspended_a.activate().expect("Context A should reactivate");
-        assert_eq!(
-            with_current_runtime(|control| control.binding.id()),
-            Some(id_a)
-        );
-        let mut runtime_a = runtime_a;
-        runtime_a.shutdown_platform(&mut context_a).unwrap();
-        assert!(!registry_contains(key_a));
         assert!(registry_contains(key_b));
-        drop(context_a);
-
-        let mut context_b = suspended_b.activate().expect("Context B should reactivate");
         assert_eq!(
             with_current_runtime(|control| control.binding.id()),
             Some(id_b)
         );
         runtime_b.shutdown_platform(&mut context_b).unwrap();
         assert!(!registry_contains(key_b));
+    }
+
+    #[test]
+    fn runtime_entry_detects_callback_drift_while_unwinding() {
+        let _guard = crate::tests::test_guard();
+        let mut context = Context::create();
+        let mut runtime = synthetic_claimed_registration(
+            &mut context,
+            Rc::new(Cell::new(0)),
+            Rc::new(Cell::new(0)),
+            Rc::new(Cell::new(0)),
+            synthetic_create_window,
+        );
+
+        let unwind = catch_unwind(AssertUnwindSafe(|| {
+            let _entry = runtime.control.enter(&context).unwrap();
+            context.binding().with_bound_context(|| unsafe {
+                (*sys::igGetPlatformIO_Nil()).Platform_CreateWindow = Some(foreign_create_window);
+            });
+            panic!("synthetic operation failure");
+        }));
+        assert!(unwind.is_err());
+        assert!(runtime.control.faults.borrow().iter().any(|fault| {
+            matches!(
+                fault,
+                RuntimeFault::CallbackReplaced("Platform_CreateWindow")
+            )
+        }));
+        assert!(matches!(
+            runtime.poll_fault(),
+            Err(Sdl3BackendError::PlatformCallbackReplaced {
+                callback: "Platform_CreateWindow"
+            })
+        ));
+
+        let shutdown = runtime.shutdown_platform(&mut context);
+        assert!(matches!(
+            shutdown,
+            Ok(())
+                | Err(Sdl3BackendError::PlatformCallbackReplaced {
+                    callback: "Platform_CreateWindow"
+                })
+        ));
+        context.binding().with_bound_context(|| unsafe {
+            (*sys::igGetPlatformIO_Nil()).Platform_CreateWindow = None;
+        });
     }
 
     struct TeardownPhaseObserver {
@@ -4426,7 +4502,7 @@ mod tests {
     ))]
     #[cfg(debug_assertions)]
     #[test]
-    fn real_imgui_destroy_platform_windows_restores_foreign_state_after_all_callbacks() {
+    fn real_imgui_destroy_platform_windows_never_resurrects_destroyed_viewport_state() {
         let _guard = crate::tests::test_guard();
         let mut context = Context::create();
         let viewport_pointer = Rc::new(Cell::new(0_usize));
@@ -4546,18 +4622,9 @@ mod tests {
                 FOREIGN_BACKEND_DATA
             );
         });
-        assert_eq!(
-            viewport._ImGuiViewport.PlatformUserData as usize,
-            FOREIGN_VIEWPORT_DATA
-        );
-        assert_eq!(
-            viewport._ImGuiViewport.PlatformHandle as usize,
-            FOREIGN_VIEWPORT_HANDLE
-        );
-        assert_eq!(
-            viewport._ImGuiViewport.RendererUserData as usize,
-            FOREIGN_BACKEND_DATA
-        );
+        assert!(viewport._ImGuiViewport.PlatformUserData.is_null());
+        assert!(viewport._ImGuiViewport.PlatformHandle.is_null());
+        assert!(viewport._ImGuiViewport.RendererUserData.is_null());
         context.binding().with_bound_context(|| unsafe {
             let main_viewport = sys::igGetMainViewport();
             (*main_viewport).PlatformUserData = std::ptr::null_mut();
@@ -4602,7 +4669,7 @@ mod tests {
     }
 
     #[test]
-    fn destroy_callback_frees_owned_data_and_preserves_foreign_replacement() {
+    fn destroy_callback_never_revisits_a_reused_viewport_address() {
         let _guard = crate::tests::test_guard();
         DESTROY_OBSERVED_USER_DATA.with(|observed| observed.set(0));
         let mut context = Context::create();
@@ -4645,9 +4712,17 @@ mod tests {
                 field: "Viewport.PlatformHandle"
             })
         ));
+        // Simulate Dear ImGui reusing the same allocation for a new viewport before platform
+        // shutdown. Teardown must not retain the old address and write the prior foreign state
+        // into this new object.
+        viewport.PlatformUserData = FOREIGN_PLATFORM_DATA as *mut _;
+        viewport.PlatformHandle = FOREIGN_VIEWPORT_HANDLE_RAW as *mut _;
         runtime.shutdown_platform(&mut context).unwrap();
-        assert_eq!(viewport.PlatformUserData as usize, FOREIGN_VIEWPORT_DATA);
-        assert_eq!(viewport.PlatformHandle as usize, FOREIGN_VIEWPORT_HANDLE);
+        assert_eq!(viewport.PlatformUserData as usize, FOREIGN_PLATFORM_DATA);
+        assert_eq!(
+            viewport.PlatformHandle as usize,
+            FOREIGN_VIEWPORT_HANDLE_RAW
+        );
         assert_eq!(platform_count.get(), 1);
     }
 

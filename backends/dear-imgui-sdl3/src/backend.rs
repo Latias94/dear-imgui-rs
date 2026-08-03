@@ -77,12 +77,12 @@ fn run_renderer_entry<R>(
     imgui: &Context,
     callback: impl FnOnce() -> R,
 ) -> Result<R, Sdl3BackendError> {
-    runtime.control().ensure_entry(imgui)?;
+    let entry = runtime.control().enter(imgui)?;
     let result = runtime
         .control()
         .binding()
         .try_with_bound_context(callback)?;
-    runtime.control().finish_entry()?;
+    entry.finish()?;
     Ok(result)
 }
 
@@ -233,13 +233,13 @@ impl Sdl3PlatformBackend {
         imgui: &mut Context,
         callback: impl FnOnce() -> R,
     ) -> Result<R, Sdl3BackendError> {
-        self.runtime.control().ensure_entry(imgui)?;
+        let entry = self.runtime.control().enter(imgui)?;
         let result = self
             .runtime
             .control()
             .binding()
             .try_with_bound_context(callback)?;
-        self.runtime.control().finish_entry()?;
+        entry.finish()?;
         Ok(result)
     }
 
@@ -655,7 +655,7 @@ impl Sdl3OpenGl3Backend {
     /// Consume and render one synchronous frame using the official OpenGL3 renderer.
     pub fn render(&mut self, mut frame: RenderedFrame<'_>) -> Result<(), Sdl3BackendError> {
         ensure_matching_rendered_frame(self.runtime.control().binding(), &frame)?;
-        self.runtime.control().ensure_bound_entry()?;
+        let entry = self.runtime.control().enter_bound()?;
         let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
         let feedback = self
             .runtime
@@ -680,7 +680,7 @@ impl Sdl3OpenGl3Backend {
                 assert_current_draw_data(frame.draw_data(), "Sdl3OpenGl3Backend::render()");
                 render_opengl3_impl(frame.draw_data());
             })?;
-        self.runtime.control().finish_entry()?;
+        entry.finish()?;
         Ok(())
     }
 
@@ -857,7 +857,7 @@ impl SdlGpu3RendererBackend {
         command_buffer: &'command CommandBuffer,
     ) -> Result<SdlGpu3PreparedFrame<'renderer, 'ctx, 'command>, Sdl3BackendError> {
         ensure_matching_rendered_frame(self.runtime.control().binding(), &frame)?;
-        self.runtime.control().ensure_bound_entry()?;
+        let entry = self.runtime.control().enter_bound()?;
         let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
         let feedback = self
             .runtime
@@ -885,6 +885,7 @@ impl SdlGpu3RendererBackend {
                 );
                 prepare_render_sdlgpu3_impl(frame.draw_data(), command_buffer);
             })?;
+        entry.finish()?;
         Ok(SdlGpu3PreparedFrame {
             backend: self,
             frame,
@@ -946,7 +947,7 @@ impl SdlGpu3PreparedFrame<'_, '_, '_> {
     /// `SDL_GPUDevice` used to initialize the backend, and have attachments compatible with the
     /// backend's configured color format and sample count.
     pub unsafe fn render(self, render_pass: &mut RenderPass) -> Result<(), Sdl3BackendError> {
-        self.backend.runtime.control().ensure_bound_entry()?;
+        let entry = self.backend.runtime.control().enter_bound()?;
         self.backend
             .runtime
             .control()
@@ -955,7 +956,7 @@ impl SdlGpu3PreparedFrame<'_, '_, '_> {
                 assert_current_draw_data(self.frame.draw_data(), "SdlGpu3PreparedFrame::render()");
                 render_sdlgpu3_impl(self.frame.draw_data(), self.command_buffer, render_pass);
             })?;
-        self.backend.runtime.control().finish_entry()
+        entry.finish()
     }
 }
 
@@ -1049,7 +1050,7 @@ impl Sdl3RendererBackend {
     ) -> Result<(), Sdl3BackendError> {
         ensure_matching_sdl_renderer(self.renderer, canvas.raw())?;
         ensure_matching_rendered_frame(self.runtime.control().binding(), &frame)?;
-        self.runtime.control().ensure_bound_entry()?;
+        let entry = self.runtime.control().enter_bound()?;
         let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
         let feedback = self
             .runtime
@@ -1074,7 +1075,7 @@ impl Sdl3RendererBackend {
                 assert_current_draw_data(frame.draw_data(), "Sdl3RendererBackend::render()");
                 render_sdlrenderer3_impl(frame.draw_data(), canvas);
             })?;
-        self.runtime.control().finish_entry()?;
+        entry.finish()?;
         Ok(())
     }
 

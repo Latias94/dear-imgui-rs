@@ -21,8 +21,10 @@ Typical use cases:
 
 ## Notes
 
-- This crate assumes a single Dear ImGui context and a single SDL3 event pump. The upstream
-  SDL3 backend notes that multi-context usage is not well tested and may be dysfunctional.
+- One SDL3 Dear ImGui platform runtime may be active per process. SDL cursor, capture, IME, and
+  hint state are process-wide in the official backend, so a second runtime returns
+  `Sdl3BackendError::PlatformSessionOccupied` before native initialization mutates that state.
+  After the first runtime shuts down, another Context may acquire the session.
 - The upstream SDL3 backend source is compiled from the Dear ImGui tree packaged by
   `dear-imgui-sys`, while this crate keeps the SDL3-specific build logic, Rust API, and SDL3
   wrapper boundary.
@@ -208,6 +210,8 @@ APIs of interest (see `src/lib.rs` for full docs):
 - `unsafe process_raw_event(&mut Context, &SDL_Event)`:
   the low-level escape hatch for SDL callbacks and foreign event loops. The caller must prove the
   active union variant, payload pointer lifetime, SDL thread, and backend provenance contracts.
+- Runtime entry checks are scope-bound. Callback replacement detected while an operation returns
+  an error or unwinds remains queued for `poll_fault()` instead of being skipped by an early exit.
 The free renderer initialization, render, texture-update, and device-object functions were
 removed. They allowed callers to bypass the Context-owned renderer epoch and write directly into
 native texture state. Call the owning backend's `shutdown(...)` method when shutdown errors need to

@@ -352,6 +352,7 @@ pub(super) struct PlatformClaimBaseline {
     backend: BackendState,
     renderer_backend: RendererBackendState,
     main_viewport: ViewportPlatformState,
+    main_viewport_renderer_user_data: *mut c_void,
 }
 
 impl PlatformClaimBaseline {
@@ -362,6 +363,7 @@ impl PlatformClaimBaseline {
             backend: self.backend,
             renderer_backend: self.renderer_backend,
             main_viewport: self.main_viewport,
+            main_viewport_renderer_user_data: self.main_viewport_renderer_user_data,
         }
     }
 }
@@ -383,12 +385,6 @@ pub(super) struct PlatformShutdownRestore {
     foreign_capabilities: bool,
 }
 
-impl PlatformShutdownRestore {
-    pub(super) const fn main_viewport(&self) -> ViewportPlatformState {
-        self.main_viewport
-    }
-}
-
 pub(super) struct RendererCallbackOwnership {
     baseline: PlatformCallbacks,
     baseline_set_window_size: RendererSetWindowSizeCallback,
@@ -398,12 +394,15 @@ pub(super) struct RendererCallbackOwnership {
     installed_set_window_size: RendererSetWindowSizeCallback,
     baseline_backend: RendererBackendState,
     installed_backend: RendererBackendState,
+    baseline_main_viewport_renderer_user_data: *mut c_void,
+    installed_main_viewport_renderer_user_data: *mut c_void,
 }
 
 pub(super) struct RendererShutdownRestore {
     callbacks: PlatformCallbacks,
     set_window_size: RendererSetWindowSizeCallback,
     backend: RendererBackendState,
+    main_viewport_renderer_user_data: *mut c_void,
     foreign_capabilities: bool,
 }
 
@@ -487,6 +486,10 @@ pub(super) fn preflight_platform_claim(
                     raw.Renderer_TextureMaxHeight != 0,
                 ),
                 ("Renderer_RenderState", !raw.Renderer_RenderState.is_null()),
+                (
+                    "MainViewport.RendererUserData",
+                    !(*main_viewport).RendererUserData.is_null(),
+                ),
             ] {
                 if occupied {
                     return Err(Sdl3BackendError::RendererStateOccupied { field });
@@ -516,6 +519,7 @@ pub(super) fn preflight_platform_claim(
             backend: BackendState::capture(io),
             renderer_backend: RendererBackendState::capture(io),
             main_viewport: ViewportPlatformState::capture(main_viewport),
+            main_viewport_renderer_user_data: (*main_viewport).RendererUserData,
         })
     })?
 }
@@ -530,7 +534,8 @@ impl RendererCallbackOwnership {
         }
         let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
         let io = unsafe { sys::igGetIO_Nil() };
-        if platform_io.is_null() || io.is_null() {
+        let main_viewport = unsafe { sys::igGetMainViewport() };
+        if platform_io.is_null() || io.is_null() || main_viewport.is_null() {
             return Err(Sdl3BackendError::PlatformStateUnavailable);
         }
 
@@ -569,6 +574,10 @@ impl RendererCallbackOwnership {
             installed_set_window_size,
             baseline_backend: baseline.renderer_backend,
             installed_backend: unsafe { RendererBackendState::capture(io) },
+            baseline_main_viewport_renderer_user_data: baseline.main_viewport_renderer_user_data,
+            installed_main_viewport_renderer_user_data: unsafe {
+                (*main_viewport).RendererUserData
+            },
         }))
     }
 
@@ -635,6 +644,20 @@ impl RendererCallbackOwnership {
             control.record_renderer_state_replaced("BackendFlags(renderer-owned bits)");
             owned = false;
         }
+        let main_viewport = unsafe { sys::igGetMainViewport() };
+        if main_viewport.is_null() {
+            control.record_renderer_state_replaced("MainViewport.RendererUserData");
+            owned = false;
+        } else {
+            let current = unsafe { (*main_viewport).RendererUserData };
+            if self.baseline_main_viewport_renderer_user_data
+                != self.installed_main_viewport_renderer_user_data
+                && current != self.installed_main_viewport_renderer_user_data
+            {
+                control.record_renderer_state_replaced("MainViewport.RendererUserData");
+                owned = false;
+            }
+        }
 
         if !owned && complete_foreign_takeover {
             control.preserve_complete_foreign_renderer_capabilities(current_backend.flags);
@@ -684,13 +707,15 @@ impl RendererCallbackOwnership {
     ) -> Result<RendererShutdownRestore, Sdl3BackendError> {
         let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
         let io = unsafe { sys::igGetIO_Nil() };
-        if platform_io.is_null() || io.is_null() {
+        let main_viewport = unsafe { sys::igGetMainViewport() };
+        if platform_io.is_null() || io.is_null() || main_viewport.is_null() {
             return Err(Sdl3BackendError::PlatformStateUnavailable);
         }
         let current = unsafe { PlatformCallbacks::capture(platform_io) };
         let current_set_window_size =
             unsafe { RendererSetWindowSizeCallback::capture(platform_io) };
         let current_backend = unsafe { RendererBackendState::capture(io) };
+        let current_main_viewport_renderer_user_data = unsafe { (*main_viewport).RendererUserData };
         let _ = unsafe { self.detect_replacements(control) };
 
         unsafe {
@@ -708,12 +733,18 @@ impl RendererCallbackOwnership {
             }
             for_each_renderer_value!(restore_owned_value);
             self.restore_owned_backend_fields(io, current_backend.flags);
+            if self.baseline_main_viewport_renderer_user_data
+                != self.installed_main_viewport_renderer_user_data
+            {
+                (*main_viewport).RendererUserData = self.installed_main_viewport_renderer_user_data;
+            }
         }
 
         Ok(RendererShutdownRestore {
             callbacks: current,
             set_window_size: current_set_window_size,
             backend: current_backend,
+            main_viewport_renderer_user_data: current_main_viewport_renderer_user_data,
             foreign_capabilities: control.capabilities_are_foreign(SDL_RENDERER_RESERVED_FLAGS),
         })
     }
@@ -724,13 +755,15 @@ impl RendererCallbackOwnership {
     ) -> Result<RendererShutdownRestore, Sdl3BackendError> {
         let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
         let io = unsafe { sys::igGetIO_Nil() };
-        if platform_io.is_null() || io.is_null() {
+        let main_viewport = unsafe { sys::igGetMainViewport() };
+        if platform_io.is_null() || io.is_null() || main_viewport.is_null() {
             return Err(Sdl3BackendError::PlatformStateUnavailable);
         }
         let current = unsafe { PlatformCallbacks::capture(platform_io) };
         let current_set_window_size =
             unsafe { RendererSetWindowSizeCallback::capture(platform_io) };
         let current_backend = unsafe { RendererBackendState::capture(io) };
+        let current_main_viewport_renderer_user_data = unsafe { (*main_viewport).RendererUserData };
         let _ = unsafe { self.detect_replacements(control) };
 
         unsafe {
@@ -748,12 +781,18 @@ impl RendererCallbackOwnership {
             }
             for_each_renderer_value!(restore_original_value);
             self.restore_owned_backend_fields(io, current_backend.flags);
+            if self.baseline_main_viewport_renderer_user_data
+                != self.installed_main_viewport_renderer_user_data
+            {
+                (*main_viewport).RendererUserData = self.installed_main_viewport_renderer_user_data;
+            }
         }
 
         Ok(RendererShutdownRestore {
             callbacks: current,
             set_window_size: current_set_window_size,
             backend: current_backend,
+            main_viewport_renderer_user_data: current_main_viewport_renderer_user_data,
             foreign_capabilities: control.capabilities_are_foreign(SDL_RENDERER_RESERVED_FLAGS),
         })
     }
@@ -763,7 +802,8 @@ impl RendererCallbackOwnership {
     ) -> Result<(), Sdl3BackendError> {
         let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
         let io = unsafe { sys::igGetIO_Nil() };
-        if platform_io.is_null() || io.is_null() {
+        let main_viewport = unsafe { sys::igGetMainViewport() };
+        if platform_io.is_null() || io.is_null() || main_viewport.is_null() {
             return Err(Sdl3BackendError::PlatformStateUnavailable);
         }
 
@@ -782,6 +822,11 @@ impl RendererCallbackOwnership {
             }
             for_each_renderer_value!(restore_original_value);
             self.restore_owned_backend_fields(io, (*io).BackendFlags);
+            if self.baseline_main_viewport_renderer_user_data
+                != self.installed_main_viewport_renderer_user_data
+            {
+                (*main_viewport).RendererUserData = self.installed_main_viewport_renderer_user_data;
+            }
         }
         Ok(())
     }
@@ -804,7 +849,8 @@ impl RendererCallbackOwnership {
     ) -> Result<(), Sdl3BackendError> {
         let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
         let io = unsafe { sys::igGetIO_Nil() };
-        if platform_io.is_null() || io.is_null() {
+        let main_viewport = unsafe { sys::igGetMainViewport() };
+        if platform_io.is_null() || io.is_null() || main_viewport.is_null() {
             return Err(Sdl3BackendError::PlatformStateUnavailable);
         }
 
@@ -846,6 +892,12 @@ impl RendererCallbackOwnership {
                 };
             }
             for_each_renderer_value!(restore_value);
+
+            (*main_viewport).RendererUserData = restored_owned_pointer(
+                self.baseline_main_viewport_renderer_user_data,
+                self.installed_main_viewport_renderer_user_data,
+                restore.main_viewport_renderer_user_data,
+            );
 
             let current_flags = (*io).BackendFlags;
             let backend = RendererBackendState {
@@ -1367,7 +1419,10 @@ pub(super) unsafe fn restore_baseline_after_failed_initialization(baseline: Plat
         }
     }
     if !main_viewport.is_null() {
-        unsafe { baseline.main_viewport.restore(main_viewport) };
+        unsafe {
+            baseline.main_viewport.restore(main_viewport);
+            (*main_viewport).RendererUserData = baseline.main_viewport_renderer_user_data;
+        }
     }
 }
 
@@ -1418,7 +1473,6 @@ unsafe extern "C" fn sdl3_destroy_window(viewport: *mut sys::ImGuiViewport) {
         let actual = ViewportPlatformState::capture(viewport);
         let Some(expected) = control.take_owned_viewport(viewport) else {
             record_viewport_replacements(control, None, actual);
-            control.defer_platform_viewport_restore(viewport, actual);
             ViewportPlatformState::clear(viewport);
             return true;
         };
@@ -1433,7 +1487,6 @@ unsafe extern "C" fn sdl3_destroy_window(viewport: *mut sys::ImGuiViewport) {
         expected.restore(viewport);
         callback(viewport);
         ViewportPlatformState::clear(viewport);
-        control.defer_platform_viewport_restore(viewport, actual);
         true
     });
     if invoked && !viewport.is_null() {
@@ -1578,18 +1631,15 @@ unsafe extern "C" fn sdl3_renderer_destroy_window(viewport: *mut sys::ImGuiViewp
             return false;
         }
         if !control.validate_renderer_ownership_bound() {
-            control.defer_renderer_viewport_restore(viewport, (*viewport).RendererUserData);
             (*viewport).RendererUserData = std::ptr::null_mut();
             return true;
         }
         let Some(callback) = control.original_renderer_destroy_window() else {
-            control.defer_renderer_viewport_restore(viewport, (*viewport).RendererUserData);
             (*viewport).RendererUserData = std::ptr::null_mut();
             return true;
         };
         let Some(expected_platform) = control.owned_viewport(viewport) else {
             record_viewport_replacements(control, None, ViewportPlatformState::capture(viewport));
-            control.defer_renderer_viewport_restore(viewport, (*viewport).RendererUserData);
             (*viewport).RendererUserData = std::ptr::null_mut();
             return true;
         };
@@ -1601,24 +1651,25 @@ unsafe extern "C" fn sdl3_renderer_destroy_window(viewport: *mut sys::ImGuiViewp
         }
         let Some(expected_renderer) = expected_renderer else {
             control.record_renderer_state_replaced("Viewport.RendererUserData");
-            control.defer_renderer_viewport_restore(viewport, actual_renderer);
             (*viewport).RendererUserData = std::ptr::null_mut();
             return true;
         };
 
-        if !viewport_platform_state_eq(actual_platform, expected_platform) {
+        let platform_was_replaced = !viewport_platform_state_eq(actual_platform, expected_platform);
+        if platform_was_replaced {
             record_viewport_replacements(control, Some(expected_platform), actual_platform);
-            control.defer_platform_viewport_restore(viewport, actual_platform);
         }
         if actual_renderer != expected_renderer {
             control.record_renderer_state_replaced("Viewport.RendererUserData");
-            control.defer_renderer_viewport_restore(viewport, actual_renderer);
         }
 
         expected_platform.restore(viewport);
         (*viewport).RendererUserData = expected_renderer;
         callback(viewport);
         (*viewport).RendererUserData = std::ptr::null_mut();
+        if platform_was_replaced {
+            actual_platform.restore(viewport);
+        }
         control.forget_owned_renderer_viewport(viewport);
         true
     });

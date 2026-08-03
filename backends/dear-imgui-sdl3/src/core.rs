@@ -209,6 +209,8 @@ pub enum Sdl3BackendError {
         expected: dear_imgui_rs::ContextId,
         actual: dear_imgui_rs::ContextId,
     },
+    #[error("another SDL3 platform runtime already owns the process-wide SDL session")]
+    PlatformSessionOccupied,
     #[error("SDL3 text input contains an interior NUL byte")]
     TextInputContainsNul,
     #[error(transparent)]
