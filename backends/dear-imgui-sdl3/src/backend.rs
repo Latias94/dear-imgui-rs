@@ -67,12 +67,7 @@ fn prepare_renderer_runtime(
     }
 }
 
-#[cfg(any(
-    feature = "opengl3-renderer",
-    feature = "sdlrenderer3-renderer",
-    feature = "sdlgpu3-renderer"
-))]
-fn run_renderer_entry<R>(
+fn run_backend_entry<R>(
     runtime: &RuntimeRegistration,
     imgui: &Context,
     callback: impl FnOnce() -> R,
@@ -101,6 +96,89 @@ fn ensure_matching_rendered_frame(
         return Err(Sdl3BackendError::ContextMismatch { expected, actual });
     }
     Ok(())
+}
+
+#[cfg(any(
+    feature = "opengl3-renderer",
+    feature = "sdlrenderer3-renderer",
+    feature = "sdlgpu3-renderer"
+))]
+fn reconcile_renderer_frame(
+    runtime: &RuntimeRegistration,
+    frame: &mut RenderedFrame<'_>,
+) -> Result<(), Sdl3BackendError> {
+    ensure_matching_rendered_frame(runtime.control().binding(), frame)?;
+    let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
+    if frame.is_texture_feedback_reconciled() {
+        return runtime
+            .control()
+            .reconciled_texture_epoch_is(request_epoch)
+            .then_some(())
+            .ok_or(Sdl3BackendError::ForeignTextureReconciliation {
+                epoch: request_epoch,
+            });
+    }
+
+    let entry = runtime.control().enter_bound()?;
+    let feedback = runtime.control().binding().try_with_bound_context(|| {
+        runtime
+            .control()
+            .process_texture_requests(frame.texture_requests(), request_epoch)
+    })??;
+    let progress = frame.reconcile_texture_feedback(feedback)?;
+    runtime
+        .control()
+        .mark_textures_reconciled(frame.texture_requests(), request_epoch);
+    runtime
+        .control()
+        .prune_destroyed_textures(progress.watermark());
+    entry.finish()?;
+    Ok(())
+}
+
+macro_rules! impl_sdl3_input_controls {
+    ($backend:ty) => {
+        impl $backend {
+            /// Configure how the SDL3 backend handles gamepads for the captured context.
+            pub fn set_gamepad_mode(
+                &mut self,
+                imgui: &mut Context,
+                mode: GamepadMode,
+            ) -> Result<(), Sdl3BackendError> {
+                run_backend_entry(&self.runtime, imgui, || set_gamepad_mode(mode))
+            }
+
+            /// Configure SDL3 backend to use manual gamepad selection for the captured context.
+            ///
+            /// # Safety
+            ///
+            /// - Every pointer in `gamepads` must be a valid, opened `SDL_Gamepad`.
+            /// - Those gamepads must remain alive until another gamepad mode is selected or the
+            ///   backend shuts down. The backend copies the pointers, not the gamepad objects.
+            pub unsafe fn set_gamepad_mode_manual(
+                &mut self,
+                imgui: &mut Context,
+                gamepads: &[*mut sdl3_sys::gamepad::SDL_Gamepad],
+            ) -> Result<(), Sdl3BackendError> {
+                run_backend_entry(&self.runtime, imgui, || unsafe {
+                    set_gamepad_mode_manual(gamepads)
+                })
+            }
+
+            /// Override the SDL3 backend mouse-capture policy for the captured context.
+            ///
+            /// This controls whether drags continue to receive pointer updates outside an SDL
+            /// window. It does not add global mouse or native viewport capabilities to an SDL
+            /// video driver that lacks them, such as Wayland.
+            pub fn set_mouse_capture_mode(
+                &mut self,
+                imgui: &mut Context,
+                mode: MouseCaptureMode,
+            ) -> Result<(), Sdl3BackendError> {
+                run_backend_entry(&self.runtime, imgui, || set_mouse_capture_mode(mode))
+            }
+        }
+    };
 }
 
 #[cfg(feature = "sdlrenderer3-renderer")]
@@ -164,6 +242,42 @@ mod renderer_contract_tests {
     }
 }
 
+#[cfg(test)]
+mod input_control_surface_tests {
+    use super::*;
+
+    macro_rules! assert_input_controls {
+        ($backend:ty) => {{
+            let _ = <$backend>::set_gamepad_mode;
+            let _ = <$backend>::set_gamepad_mode_manual;
+            let _ = <$backend>::set_mouse_capture_mode;
+        }};
+    }
+
+    #[test]
+    fn platform_owner_exposes_the_complete_input_control_surface() {
+        assert_input_controls!(Sdl3PlatformBackend);
+    }
+
+    #[cfg(feature = "opengl3-renderer")]
+    #[test]
+    fn opengl_owner_exposes_the_complete_input_control_surface() {
+        assert_input_controls!(Sdl3OpenGl3Backend);
+    }
+
+    #[cfg(feature = "sdlgpu3-renderer")]
+    #[test]
+    fn sdl_gpu_owner_exposes_the_complete_input_control_surface() {
+        assert_input_controls!(SdlGpu3RendererBackend);
+    }
+
+    #[cfg(feature = "sdlrenderer3-renderer")]
+    #[test]
+    fn sdl_renderer_owner_exposes_the_complete_input_control_surface() {
+        assert_input_controls!(Sdl3RendererBackend);
+    }
+}
+
 /// RAII owner for the SDL3 platform backend without an official renderer shim.
 ///
 /// This owner and its Context attachment share one runtime control. Explicit shutdown uses the
@@ -174,6 +288,8 @@ mod renderer_contract_tests {
 pub struct Sdl3PlatformBackend {
     runtime: RuntimeRegistration,
 }
+
+impl_sdl3_input_controls!(Sdl3PlatformBackend);
 
 impl Sdl3PlatformBackend {
     /// Returns the Dear ImGui Context identity owned by this SDL3 platform backend.
@@ -226,21 +342,6 @@ impl Sdl3PlatformBackend {
         }
         runtime.finish_native_initialization(imgui)?;
         Ok(Self { runtime })
-    }
-
-    fn entry<R>(
-        &self,
-        imgui: &mut Context,
-        callback: impl FnOnce() -> R,
-    ) -> Result<R, Sdl3BackendError> {
-        let entry = self.runtime.control().enter(imgui)?;
-        let result = self
-            .runtime
-            .control()
-            .binding()
-            .try_with_bound_context(callback)?;
-        entry.finish()?;
-        Ok(result)
     }
 
     /// Initialize the SDL3 platform backend for non-OpenGL renderers.
@@ -405,7 +506,7 @@ impl Sdl3PlatformBackend {
 
     /// Begin a new SDL3 platform frame.
     pub fn new_frame(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
-        self.entry(imgui, || {
+        run_backend_entry(&self.runtime, imgui, || {
             sdl3_new_frame_impl();
             self.runtime.control().refresh_platform_monitors_bound();
         })
@@ -417,7 +518,7 @@ impl Sdl3PlatformBackend {
         imgui: &mut Context,
         event: &Event,
     ) -> Result<bool, Sdl3BackendError> {
-        self.entry(imgui, || process_owned_event(event))?
+        run_backend_entry(&self.runtime, imgui, || process_owned_event(event))?
     }
 
     /// Process a raw SDL3 event with the captured ImGui context.
@@ -434,31 +535,9 @@ impl Sdl3PlatformBackend {
         imgui: &mut Context,
         event: &SDL_Event,
     ) -> Result<bool, Sdl3BackendError> {
-        self.entry(imgui, || unsafe { process_raw_sys_event(event) })
-    }
-
-    /// Configure how the SDL3 backend handles gamepads for the captured context.
-    pub fn set_gamepad_mode(
-        &mut self,
-        imgui: &mut Context,
-        mode: GamepadMode,
-    ) -> Result<(), Sdl3BackendError> {
-        self.entry(imgui, || set_gamepad_mode(mode))
-    }
-
-    /// Configure SDL3 backend to use manual gamepad selection for the captured context.
-    ///
-    /// # Safety
-    ///
-    /// - The caller must ensure every pointer in `gamepads` is a valid, opened `SDL_Gamepad`.
-    /// - The caller is responsible for keeping those gamepads alive for the duration of ImGui usage.
-    /// - The slice itself is only read during this call; the backend copies the pointers.
-    pub unsafe fn set_gamepad_mode_manual(
-        &mut self,
-        imgui: &mut Context,
-        gamepads: &[*mut sdl3_sys::gamepad::SDL_Gamepad],
-    ) -> Result<(), Sdl3BackendError> {
-        self.entry(imgui, || unsafe { set_gamepad_mode_manual(gamepads) })
+        run_backend_entry(&self.runtime, imgui, || unsafe {
+            process_raw_sys_event(event)
+        })
     }
 
     /// Returns and clears the oldest pending SDL3 platform callback fault.
@@ -496,6 +575,9 @@ impl Sdl3PlatformBackend {
 pub struct Sdl3OpenGl3Backend {
     runtime: RuntimeRegistration,
 }
+
+#[cfg(feature = "opengl3-renderer")]
+impl_sdl3_input_controls!(Sdl3OpenGl3Backend);
 
 #[cfg(feature = "opengl3-renderer")]
 impl Sdl3OpenGl3Backend {
@@ -618,7 +700,7 @@ impl Sdl3OpenGl3Backend {
 
     /// Begin a new SDL3 + OpenGL3 frame.
     pub fn new_frame(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, || {
+        run_backend_entry(&self.runtime, imgui, || {
             new_frame_opengl3_impl();
             self.runtime.control().refresh_platform_monitors_bound();
         })
@@ -630,7 +712,7 @@ impl Sdl3OpenGl3Backend {
         imgui: &mut Context,
         event: &Event,
     ) -> Result<bool, Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, || process_owned_event(event))?
+        run_backend_entry(&self.runtime, imgui, || process_owned_event(event))?
     }
 
     /// Process a raw SDL3 event with the captured ImGui context.
@@ -647,32 +729,15 @@ impl Sdl3OpenGl3Backend {
         imgui: &mut Context,
         event: &SDL_Event,
     ) -> Result<bool, Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, || unsafe {
+        run_backend_entry(&self.runtime, imgui, || unsafe {
             process_raw_sys_event(event)
         })
     }
 
     /// Consume and render one synchronous frame using the official OpenGL3 renderer.
     pub fn render(&mut self, mut frame: RenderedFrame<'_>) -> Result<(), Sdl3BackendError> {
-        ensure_matching_rendered_frame(self.runtime.control().binding(), &frame)?;
+        self.reconcile_frame(&mut frame)?;
         let entry = self.runtime.control().enter_bound()?;
-        let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
-        let feedback = self
-            .runtime
-            .control()
-            .binding()
-            .try_with_bound_context(|| {
-                self.runtime
-                    .control()
-                    .process_texture_requests(frame.texture_requests(), request_epoch)
-            })??;
-        let progress = frame.reconcile_texture_feedback(feedback)?;
-        self.runtime
-            .control()
-            .mark_textures_reconciled(frame.texture_requests());
-        self.runtime
-            .control()
-            .prune_destroyed_textures(progress.watermark());
         self.runtime
             .control()
             .binding()
@@ -684,35 +749,22 @@ impl Sdl3OpenGl3Backend {
         Ok(())
     }
 
-    /// Configure how the SDL3 backend handles gamepads for the captured context.
-    pub fn set_gamepad_mode(
-        &mut self,
-        imgui: &mut Context,
-        mode: GamepadMode,
-    ) -> Result<(), Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, || set_gamepad_mode(mode))
-    }
-
-    /// Configure SDL3 backend to use manual gamepad selection for the captured context.
+    /// Apply managed-texture requests without drawing or acquiring a surface.
     ///
-    /// # Safety
-    ///
-    /// - The caller must ensure every pointer in `gamepads` is a valid, opened `SDL_Gamepad`.
-    /// - The caller is responsible for keeping those gamepads alive for the duration of ImGui usage.
-    /// - The slice itself is only read during this call; the backend copies the pointers.
-    pub unsafe fn set_gamepad_mode_manual(
+    /// This operation is idempotent when this renderer already reconciled the same frame epoch;
+    /// feedback applied outside this renderer is rejected. Call it before the native
+    /// platform-window pump when secondary viewports must remain live while the main surface is
+    /// minimized, occluded, or temporarily unavailable.
+    pub fn reconcile_frame(
         &mut self,
-        imgui: &mut Context,
-        gamepads: &[*mut sdl3_sys::gamepad::SDL_Gamepad],
+        frame: &mut RenderedFrame<'_>,
     ) -> Result<(), Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, || unsafe {
-            set_gamepad_mode_manual(gamepads)
-        })
+        reconcile_renderer_frame(&self.runtime, frame)
     }
 
     /// Create OpenGL3 renderer device objects.
     pub fn create_device_objects(&mut self, imgui: &mut Context) -> Result<bool, Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, create_opengl3_device_objects)
+        run_backend_entry(&self.runtime, imgui, create_opengl3_device_objects)
     }
 
     /// Destroy OpenGL3 renderer device objects.
@@ -746,6 +798,9 @@ impl Sdl3OpenGl3Backend {
 pub struct SdlGpu3RendererBackend {
     runtime: RuntimeRegistration,
 }
+
+#[cfg(feature = "sdlgpu3-renderer")]
+impl_sdl3_input_controls!(SdlGpu3RendererBackend);
 
 #[cfg(feature = "sdlgpu3-renderer")]
 impl SdlGpu3RendererBackend {
@@ -814,7 +869,7 @@ impl SdlGpu3RendererBackend {
         imgui: &mut Context,
         event: &Event,
     ) -> Result<bool, Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, || process_owned_event(event))?
+        run_backend_entry(&self.runtime, imgui, || process_owned_event(event))?
     }
 
     /// Process a raw SDL3 event with the captured ImGui context.
@@ -831,14 +886,14 @@ impl SdlGpu3RendererBackend {
         imgui: &mut Context,
         event: &SDL_Event,
     ) -> Result<bool, Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, || unsafe {
+        run_backend_entry(&self.runtime, imgui, || unsafe {
             process_raw_sys_event(event)
         })
     }
 
     /// Begin a new SDL3 + SDLGPU3 frame.
     pub fn new_frame(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, || {
+        run_backend_entry(&self.runtime, imgui, || {
             new_frame_sdlgpu3_impl();
             self.runtime.control().refresh_platform_monitors_bound();
         })
@@ -856,25 +911,8 @@ impl SdlGpu3RendererBackend {
         mut frame: RenderedFrame<'ctx>,
         command_buffer: &'command CommandBuffer,
     ) -> Result<SdlGpu3PreparedFrame<'renderer, 'ctx, 'command>, Sdl3BackendError> {
-        ensure_matching_rendered_frame(self.runtime.control().binding(), &frame)?;
+        self.reconcile_frame(&mut frame)?;
         let entry = self.runtime.control().enter_bound()?;
-        let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
-        let feedback = self
-            .runtime
-            .control()
-            .binding()
-            .try_with_bound_context(|| {
-                self.runtime
-                    .control()
-                    .process_texture_requests(frame.texture_requests(), request_epoch)
-            })??;
-        let progress = frame.reconcile_texture_feedback(feedback)?;
-        self.runtime
-            .control()
-            .mark_textures_reconciled(frame.texture_requests());
-        self.runtime
-            .control()
-            .prune_destroyed_textures(progress.watermark());
         self.runtime
             .control()
             .binding()
@@ -893,13 +931,26 @@ impl SdlGpu3RendererBackend {
         })
     }
 
+    /// Apply managed-texture requests without drawing or acquiring a main swapchain texture.
+    ///
+    /// This operation is idempotent when this renderer already reconciled the same frame epoch;
+    /// feedback applied outside this renderer is rejected. It must precede the native
+    /// platform-window pump so secondary viewports can render even when the main window has no
+    /// presentable surface.
+    pub fn reconcile_frame(
+        &mut self,
+        frame: &mut RenderedFrame<'_>,
+    ) -> Result<(), Sdl3BackendError> {
+        reconcile_renderer_frame(&self.runtime, frame)
+    }
+
     /// Create SDL GPU3 renderer device objects.
     ///
     /// This first destroys the previous device objects and therefore requires the same idle
     /// renderer consumer as [`Self::destroy_device_objects`].
     pub fn create_device_objects(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
         self.destroy_device_objects(imgui)?;
-        run_renderer_entry(&self.runtime, imgui, create_sdlgpu3_device_objects)?;
+        run_backend_entry(&self.runtime, imgui, create_sdlgpu3_device_objects)?;
         Ok(())
     }
 
@@ -970,6 +1021,9 @@ pub struct Sdl3RendererBackend {
 }
 
 #[cfg(feature = "sdlrenderer3-renderer")]
+impl_sdl3_input_controls!(Sdl3RendererBackend);
+
+#[cfg(feature = "sdlrenderer3-renderer")]
 impl Sdl3RendererBackend {
     fn from_initialized_context(
         runtime: RuntimeRegistration,
@@ -1008,7 +1062,7 @@ impl Sdl3RendererBackend {
 
     /// Begin a new SDL3 + SDLRenderer3 frame.
     pub fn new_frame(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, || {
+        run_backend_entry(&self.runtime, imgui, || {
             new_frame_sdlrenderer3_impl();
             self.runtime.control().refresh_platform_monitors_bound();
         })
@@ -1020,7 +1074,7 @@ impl Sdl3RendererBackend {
         imgui: &mut Context,
         event: &Event,
     ) -> Result<bool, Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, || process_owned_event(event))?
+        run_backend_entry(&self.runtime, imgui, || process_owned_event(event))?
     }
 
     /// Process a raw SDL3 event with the captured ImGui context.
@@ -1037,7 +1091,7 @@ impl Sdl3RendererBackend {
         imgui: &mut Context,
         event: &SDL_Event,
     ) -> Result<bool, Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, || unsafe {
+        run_backend_entry(&self.runtime, imgui, || unsafe {
             process_raw_sys_event(event)
         })
     }
@@ -1049,25 +1103,8 @@ impl Sdl3RendererBackend {
         canvas: &WindowCanvas,
     ) -> Result<(), Sdl3BackendError> {
         ensure_matching_sdl_renderer(self.renderer, canvas.raw())?;
-        ensure_matching_rendered_frame(self.runtime.control().binding(), &frame)?;
+        self.reconcile_frame(&mut frame)?;
         let entry = self.runtime.control().enter_bound()?;
-        let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
-        let feedback = self
-            .runtime
-            .control()
-            .binding()
-            .try_with_bound_context(|| {
-                self.runtime
-                    .control()
-                    .process_texture_requests(frame.texture_requests(), request_epoch)
-            })??;
-        let progress = frame.reconcile_texture_feedback(feedback)?;
-        self.runtime
-            .control()
-            .mark_textures_reconciled(frame.texture_requests());
-        self.runtime
-            .control()
-            .prune_destroyed_textures(progress.watermark());
         self.runtime
             .control()
             .binding()
@@ -1079,35 +1116,20 @@ impl Sdl3RendererBackend {
         Ok(())
     }
 
-    /// Configure how the SDL3 backend handles gamepads for the captured context.
-    pub fn set_gamepad_mode(
-        &mut self,
-        imgui: &mut Context,
-        mode: GamepadMode,
-    ) -> Result<(), Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, || set_gamepad_mode(mode))
-    }
-
-    /// Configure SDL3 backend to use manual gamepad selection for the captured context.
+    /// Apply managed-texture requests without drawing or acquiring a surface.
     ///
-    /// # Safety
-    ///
-    /// - The caller must ensure every pointer in `gamepads` is a valid, opened `SDL_Gamepad`.
-    /// - The caller is responsible for keeping those gamepads alive for the duration of ImGui usage.
-    /// - The slice itself is only read during this call; the backend copies the pointers.
-    pub unsafe fn set_gamepad_mode_manual(
+    /// This operation is idempotent when this renderer already reconciled the same frame epoch;
+    /// feedback applied outside this renderer is rejected.
+    pub fn reconcile_frame(
         &mut self,
-        imgui: &mut Context,
-        gamepads: &[*mut sdl3_sys::gamepad::SDL_Gamepad],
+        frame: &mut RenderedFrame<'_>,
     ) -> Result<(), Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, || unsafe {
-            set_gamepad_mode_manual(gamepads)
-        })
+        reconcile_renderer_frame(&self.runtime, frame)
     }
 
     /// Create SDLRenderer3 renderer device objects.
     pub fn create_device_objects(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, create_sdlrenderer3_device_objects)
+        run_backend_entry(&self.runtime, imgui, create_sdlrenderer3_device_objects)
     }
 
     /// Destroy SDLRenderer3 renderer device objects.

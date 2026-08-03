@@ -107,6 +107,9 @@ pub(super) mod ffi {
             manual_gamepads_array: *const *mut sdl3_sys::gamepad::SDL_Gamepad,
             manual_gamepads_count: i32,
         );
+        pub fn ImGui_ImplSDL3_SetMouseCaptureMode_Enabled_Rust();
+        pub fn ImGui_ImplSDL3_SetMouseCaptureMode_EnabledAfterDrag_Rust();
+        pub fn ImGui_ImplSDL3_SetMouseCaptureMode_Disabled_Rust();
 
         #[cfg(feature = "sdlrenderer3-renderer")]
         pub fn dear_imgui_sdl3_backend_sdlrenderer3_init(renderer: *mut SDL_Renderer) -> bool;
@@ -303,6 +306,8 @@ pub enum Sdl3BackendError {
     RendererConsumer(#[from] dear_imgui_rs::render::RendererConsumerError),
     #[error(transparent)]
     TextureFeedback(#[from] dear_imgui_rs::render::TextureFeedbackError),
+    #[error("rendered frame epoch {epoch} was reconciled outside the active SDL3 renderer runtime")]
+    ForeignTextureReconciliation { epoch: u64 },
     #[error("managed texture {texture:?} received an update before renderer creation")]
     ManagedTextureNotCreated {
         texture: dear_imgui_rs::render::SnapshotTextureId,

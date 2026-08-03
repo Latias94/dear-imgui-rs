@@ -8,7 +8,13 @@
 //! The intent is to provide a simple, ownership-aware API that:
 //! - plugs into an existing `dear-imgui-rs::Context`
 //! - integrates with an SDL3 window and OpenGL context
-//! - supports Dear ImGui multi-viewport via the official backend behavior.
+//! - supports Dear ImGui multi-viewport when the active SDL video driver provides the global
+//!   mouse state and capture capabilities required by the official backend.
+//!
+//! The embedded upstream backend currently advertises native platform viewports on the Windows,
+//! Cocoa, X11, DIVE, and VMAN SDL video drivers. Wayland intentionally remains a single native
+//! window: docking inside the host window works, but detached Dear ImGui viewports are not created
+//! as OS windows because Wayland does not expose the required global pointer model.
 //!
 //! By default, this crate builds the SDL3 platform backend only. Enable
 //! `opengl3-renderer`, `sdlrenderer3-renderer`, or `sdlgpu3-renderer` to pair
@@ -58,7 +64,7 @@ mod clipboard;
 mod core;
 mod cursors;
 mod events;
-mod gamepad;
+mod input;
 #[cfg(any(
     feature = "opengl3-renderer",
     feature = "sdlrenderer3-renderer",
@@ -123,8 +129,8 @@ use self::core::{init_opengl3_impl, new_frame_opengl3_impl, shutdown_opengl3_ren
 #[cfg(feature = "sdlrenderer3-renderer")]
 use self::core::{new_frame_sdlrenderer3_impl, shutdown_sdlrenderer3_renderer_impl};
 use self::events::{process_owned_event, process_raw_sys_event};
-pub use self::gamepad::GamepadMode;
-use self::gamepad::{set_gamepad_mode, set_gamepad_mode_manual};
+pub use self::input::{GamepadMode, MouseCaptureMode};
+use self::input::{set_gamepad_mode, set_gamepad_mode_manual, set_mouse_capture_mode};
 #[cfg(feature = "multi-viewport")]
 pub use self::runtime::Sdl3VulkanSurfaceProvider;
 pub use self::runtime::{

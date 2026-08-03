@@ -1073,6 +1073,11 @@ impl RuntimeControl {
         Ok(())
     }
 
+    #[cfg(any(
+        feature = "opengl3-renderer",
+        feature = "sdlrenderer3-renderer",
+        feature = "sdlgpu3-renderer"
+    ))]
     pub(super) fn enter_bound(&self) -> Result<RuntimeEntry<'_>, Sdl3BackendError> {
         self.ensure_bound_entry()?;
         Ok(RuntimeEntry {
@@ -1114,10 +1119,21 @@ impl RuntimeControl {
         feature = "sdlrenderer3-renderer",
         feature = "sdlgpu3-renderer"
     ))]
-    pub(super) fn mark_textures_reconciled(&self, requests: &[TextureRequest]) {
+    pub(super) fn mark_textures_reconciled(&self, requests: &[TextureRequest], request_epoch: u64) {
         self.renderer_textures
             .borrow_mut()
-            .mark_reconciled(requests);
+            .mark_reconciled(requests, request_epoch);
+    }
+
+    #[cfg(any(
+        feature = "opengl3-renderer",
+        feature = "sdlrenderer3-renderer",
+        feature = "sdlgpu3-renderer"
+    ))]
+    pub(super) fn reconciled_texture_epoch_is(&self, request_epoch: u64) -> bool {
+        self.renderer_textures
+            .borrow()
+            .reconciled_epoch_is(request_epoch)
     }
 
     #[cfg(any(
