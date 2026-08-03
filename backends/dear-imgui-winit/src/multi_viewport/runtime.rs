@@ -1,5 +1,5 @@
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
@@ -25,7 +25,8 @@ use super::native_cursor_hittest::query_native_mouse_state;
 #[cfg(target_os = "windows")]
 use super::registry::viewport_id_for_native_window;
 use super::registry::{
-    preflight_viewport_ownership, register_runtime, secondary_viewport_windows, unregister_runtime,
+    apply_pending_geometry_refresh, preflight_viewport_ownership, register_runtime,
+    request_geometry_refresh_for_window, secondary_viewport_windows, unregister_runtime,
 };
 use super::viewport_data::{init_main_viewport, preflight_main_viewport};
 use crate::cursor::CursorSettings;
@@ -139,6 +140,7 @@ pub(crate) struct RuntimeControl {
     monitor_ownership: RefCell<Option<MonitorOwnership>>,
     main_window: RefCell<Option<Arc<Window>>>,
     mouse_leave: Cell<MouseLeaveState>,
+    input_ownership: RefCell<InputOwnership>,
     focus: RefCell<ContextFocusState>,
     pub(super) viewports: RefCell<Vec<super::registry::ViewportEntry>>,
 }
@@ -181,6 +183,67 @@ impl MouseLeaveState {
         } else {
             false
         }
+    }
+}
+
+#[derive(Debug, Default, Eq, PartialEq)]
+pub(super) struct InputOwnership {
+    keys: HashMap<dear_imgui_rs::Key, WindowId>,
+    mouse_buttons: HashMap<dear_imgui_rs::input::MouseButton, WindowId>,
+}
+
+#[derive(Debug, Default, Eq, PartialEq)]
+pub(super) struct ReleasedInput {
+    pub(super) keys: Vec<dear_imgui_rs::Key>,
+    pub(super) mouse_buttons: Vec<dear_imgui_rs::input::MouseButton>,
+}
+
+impl InputOwnership {
+    pub(super) fn note_key(&mut self, window_id: WindowId, key: dear_imgui_rs::Key, pressed: bool) {
+        if pressed {
+            self.keys.insert(key, window_id);
+        } else {
+            self.keys.remove(&key);
+        }
+    }
+
+    pub(super) fn note_mouse_button(
+        &mut self,
+        window_id: WindowId,
+        button: dear_imgui_rs::input::MouseButton,
+        pressed: bool,
+    ) {
+        if pressed {
+            self.mouse_buttons.insert(button, window_id);
+        } else {
+            self.mouse_buttons.remove(&button);
+        }
+    }
+
+    pub(super) fn release_window(&mut self, window_id: WindowId) -> ReleasedInput {
+        let mut released = ReleasedInput::default();
+        self.keys.retain(|key, owner| {
+            if *owner == window_id {
+                released.keys.push(*key);
+                false
+            } else {
+                true
+            }
+        });
+        self.mouse_buttons.retain(|button, owner| {
+            if *owner == window_id {
+                released.mouse_buttons.push(*button);
+                false
+            } else {
+                true
+            }
+        });
+        released
+    }
+
+    fn clear(&mut self) {
+        self.keys.clear();
+        self.mouse_buttons.clear();
     }
 }
 
@@ -267,6 +330,7 @@ impl RuntimeControl {
             monitor_ownership: RefCell::new(None),
             main_window: RefCell::new(Some(main_window)),
             mouse_leave: Cell::new(MouseLeaveState::default()),
+            input_ownership: RefCell::new(InputOwnership::default()),
             focus: RefCell::new(focus),
             viewports: RefCell::new(Vec::new()),
         }
@@ -288,6 +352,7 @@ impl RuntimeControl {
             monitor_ownership: RefCell::new(None),
             main_window: RefCell::new(None),
             mouse_leave: Cell::new(MouseLeaveState::default()),
+            input_ownership: RefCell::new(InputOwnership::default()),
             focus: RefCell::new(ContextFocusState::default()),
             viewports: RefCell::new(Vec::new()),
         }
@@ -631,14 +696,55 @@ impl RuntimeControl {
         self.main_window.borrow().clone()
     }
 
+    pub(crate) fn note_key(&self, window_id: WindowId, key: dear_imgui_rs::Key, pressed: bool) {
+        self.input_ownership
+            .borrow_mut()
+            .note_key(window_id, key, pressed);
+    }
+
     pub(crate) fn note_mouse_button(
         &self,
+        window_id: WindowId,
         button: dear_imgui_rs::input::MouseButton,
         pressed: bool,
     ) {
+        self.input_ownership
+            .borrow_mut()
+            .note_mouse_button(window_id, button, pressed);
         let mut state = self.mouse_leave.get();
         state.note_button(button, pressed);
         self.mouse_leave.set(state);
+    }
+
+    pub(crate) fn release_window_input(
+        &self,
+        window_id: WindowId,
+    ) -> Result<(), WinitPlatformError> {
+        if unsafe { dear_imgui_rs::sys::igGetCurrentContext() } != self.context_raw {
+            return Err(WinitPlatformError::ContextMismatch);
+        }
+        let io = unsafe { dear_imgui_rs::sys::igGetIO_Nil() };
+        if io.is_null() {
+            return Err(WinitPlatformError::ContextMismatch);
+        }
+
+        let released = self.input_ownership.borrow_mut().release_window(window_id);
+        let mut mouse_leave = self.mouse_leave.get();
+        for key in released.keys {
+            unsafe { dear_imgui_rs::sys::ImGuiIO_AddKeyEvent(io, key.into(), false) };
+        }
+        for button in released.mouse_buttons {
+            mouse_leave.note_button(button, false);
+            unsafe {
+                dear_imgui_rs::sys::ImGuiIO_AddMouseSourceEvent(
+                    io,
+                    dear_imgui_rs::input::MouseSource::Mouse.into(),
+                );
+                dear_imgui_rs::sys::ImGuiIO_AddMouseButtonEvent(io, button.into(), false);
+            }
+        }
+        self.mouse_leave.set(mouse_leave);
+        Ok(())
     }
 
     pub(crate) fn note_cursor_left(&self) {
@@ -668,6 +774,14 @@ impl RuntimeControl {
         }
     }
 
+    pub(crate) fn note_window_geometry(&self, window_id: WindowId, position: bool, size: bool) {
+        request_geometry_refresh_for_window(self, window_id, position, size);
+    }
+
+    pub(crate) fn reconcile_geometry_state(&self) {
+        apply_pending_geometry_refresh(self);
+    }
+
     pub(crate) fn reconcile_input_state(&self, context: &mut Context) {
         let mut owned_windows = HashSet::new();
         if let Some(main_window) = self.main_window() {
@@ -685,6 +799,7 @@ impl RuntimeControl {
 
         let mut mouse_leave = self.mouse_leave.get();
         if focus_lost {
+            self.input_ownership.borrow_mut().clear();
             mouse_leave.note_context_focus_lost();
         }
         let invalidation_due = mouse_leave.take_invalidation_due();

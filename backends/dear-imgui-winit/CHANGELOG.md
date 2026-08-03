@@ -12,6 +12,7 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ### Breaking Changes
 
+- Replace the reversed frame lifecycle API with `prepare_frame(&mut Context, &Window)` before UI construction and `prepare_render(&Ui, &Window)` afterward. The misleading pre-frame `prepare_render(&mut Context, ...)` and `prepare_render_with_ui` compatibility names are removed.
 - Replace the free multi-viewport `enable` and `shutdown_multi_viewport_support` APIs with `WinitPlatformRuntime::new(&mut Context, &WinitPlatform)`. `WinitPlatform::new` installs the sole Context platform attachment, and `WinitPlatform::attach_window(Arc<Window>, ...)` retains the main window while the runtime owns secondary windows and its callback claim without borrowing caller-managed callback state. Multi-viewport currently requires `HiDpiMode::Default`; custom primary-window coordinate scaling is rejected.
 - Make `WinitPlatform::attach_window` safe by requiring `Arc<Window>`. The platform retains the exact shared allocation until detach or Context teardown, so the IME callback cannot outlive the window.
 - Make `WinitPlatform::set_hidpi_mode` fallible. Once `WinitPlatformRuntime` is attached, both scaling-mode changes and main-window reattachment return `WinitPlatformError::RuntimeConfigurationLocked` without changing state.

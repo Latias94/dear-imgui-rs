@@ -265,6 +265,41 @@ pub(super) fn secondary_viewport_windows(control: &RuntimeControl) -> Vec<Arc<Wi
         .collect()
 }
 
+pub(super) fn request_geometry_refresh_for_window(
+    control: &RuntimeControl,
+    window_id: WindowId,
+    position: bool,
+    size: bool,
+) {
+    if let Some(entry) = control
+        .viewports
+        .borrow()
+        .iter()
+        .find(|entry| entry.data.window().id() == window_id)
+    {
+        entry.data.request_geometry_refresh(position, size);
+    }
+}
+
+pub(super) fn apply_pending_geometry_refresh(control: &RuntimeControl) {
+    for entry in control.viewports.borrow().iter() {
+        let refresh = entry.data.take_geometry_refresh();
+        if refresh.is_empty() {
+            continue;
+        }
+        let Some(viewport) = (unsafe { entry.resolve_viewport() }) else {
+            continue;
+        };
+        if unsafe { entry.native_ownership_loss(viewport).is_some() } {
+            continue;
+        }
+        unsafe {
+            (*viewport).PlatformRequestMove |= refresh.position;
+            (*viewport).PlatformRequestResize |= refresh.size;
+        }
+    }
+}
+
 #[cfg(target_os = "windows")]
 pub(super) fn viewport_id_for_native_window(
     control: &RuntimeControl,

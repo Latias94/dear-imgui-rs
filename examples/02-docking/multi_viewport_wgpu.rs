@@ -874,7 +874,7 @@ impl AppWindow {
             self.queue.submit(Some(encoder.finish()));
         }
 
-        self.platform.prepare_frame(&self.window, &mut self.imgui)?;
+        self.platform.prepare_frame(&mut self.imgui, &self.window)?;
         #[cfg(feature = "test-engine")]
         let mut viewport_count =
             i32::try_from(self.imgui.platform_io().viewports_iter().count()).unwrap_or(i32::MAX);
@@ -960,7 +960,7 @@ impl AppWindow {
         // let mut show_demo = true;
         // ui.show_demo_window(&mut show_demo);
 
-        self.platform.prepare_render_with_ui(ui, &self.window)?;
+        self.platform.prepare_render(ui, &self.window)?;
 
         let mut rendered = self.imgui.render();
         self.renderer.new_frame()?;

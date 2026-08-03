@@ -41,7 +41,7 @@ impl winit::application::ApplicationHandler for App {
                 // 2) per-frame prep
                 self.imgui
                     .platform
-                    .prepare_frame(&window, &mut self.imgui.context)
+                    .prepare_frame(&mut self.imgui.context, &window)
                     .expect("Winit platform contract changed");
                 let ui = self.imgui.context.frame();
 
@@ -53,7 +53,7 @@ impl winit::application::ApplicationHandler for App {
                 // 4) update OS cursor from UI
                 self.imgui
                     .platform
-                    .prepare_render_with_ui(&ui, &window)
+                    .prepare_render(&ui, &window)
                     .expect("Winit platform contract changed");
 
                 // 5) render via your renderer backend
@@ -72,8 +72,8 @@ APIs of interest:
 - `WinitPlatform::set_hidpi_mode(HiDpiMode) -> Result<(), WinitPlatformError>` — configure primary-window scaling before attaching multi-viewport support
 - `WinitPlatform::handle_window_event(&mut Context, &Window, &WindowEvent) -> Result<bool, WinitPlatformError>` — for `ApplicationHandler::window_event`
 - `WinitPlatform::handle_event(&mut Context, &Window, &Event<T>) -> Result<bool, WinitPlatformError>` — for closure-style `EventLoop::run`; events for another `WindowId` return `Ok(false)` without being dispatched
-- `WinitPlatform::prepare_frame(&Window, &mut Context) -> Result<(), WinitPlatformError>`
-- `WinitPlatform::prepare_render_with_ui(&Ui, &Window) -> Result<(), WinitPlatformError>` — updates OS cursor from ImGui
+- `WinitPlatform::prepare_frame(&mut Context, &Window) -> Result<(), WinitPlatformError>` — updates timing and native platform state before `Context::frame`
+- `WinitPlatform::prepare_render(&Ui, &Window) -> Result<(), WinitPlatformError>` — updates OS cursor and IME state after UI construction
 - `WinitPlatform::detach_window(&mut Context) -> Result<Arc<Window>, WinitPlatformError>` — clears winit-owned IME hooks before a window is destroyed while the context remains alive
 
 ## DPI / HiDPI
@@ -119,7 +119,7 @@ Basic touch-to-mouse translation is provided:
 
 ### IME integration
 
-- IME is **auto-managed** by default: `prepare_render_with_ui` inspects
+- IME is **auto-managed** by default: `prepare_render` inspects
   `ui.io().want_text_input()` and toggles `Window::set_ime_allowed(...)`
   accordingly. This means IME (and soft keyboards on mobile) are only enabled
   while text widgets are active.
@@ -136,7 +136,7 @@ Basic touch-to-mouse translation is provided:
 
 ## Cursor Handling
 
-`prepare_render_with_ui(&Ui, &Window)` updates the OS cursor from `ui.mouse_cursor()`.
+`prepare_render(&Ui, &Window)` updates the OS cursor from `ui.mouse_cursor()`.
 Changes are cached to avoid redundant OS calls. If `ConfigFlags::NO_MOUSE_CURSOR_CHANGE`
 is set, OS cursor updates are skipped. The software-drawn cursor flag is currently not
 exposed via our `Io` wrapper (defaults to OS cursor).

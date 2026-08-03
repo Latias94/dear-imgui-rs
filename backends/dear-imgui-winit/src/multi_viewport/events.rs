@@ -20,12 +20,15 @@ pub(super) fn route_secondary_event<T>(
                     // the new values at the next update boundary.
                     match event {
                         WindowEvent::Moved(_) => unsafe {
+                            data.request_geometry_refresh(true, false);
                             (*viewport).PlatformRequestMove = true;
                         },
                         WindowEvent::Resized(_) => unsafe {
+                            data.request_geometry_refresh(false, true);
                             (*viewport).PlatformRequestResize = true;
                         },
                         WindowEvent::ScaleFactorChanged { .. } => unsafe {
+                            data.request_geometry_refresh(true, true);
                             (*viewport).PlatformRequestMove = true;
                             (*viewport).PlatformRequestResize = true;
                         },
@@ -37,9 +40,18 @@ pub(super) fn route_secondary_event<T>(
 
                     match event {
                         WindowEvent::KeyboardInput { event, .. } => {
+                            if let Some(key) = crate::input::winit_key_to_imgui_key(
+                                &event.logical_key,
+                                event.location,
+                            ) {
+                                control.note_key(*window_id, key, event.state.is_pressed());
+                            }
                             crate::events::handle_keyboard_input(event, context)
                         }
                         WindowEvent::ModifiersChanged(modifiers) => {
+                            for (key, pressed) in crate::events::modifier_key_events(modifiers) {
+                                control.note_key(*window_id, key, pressed);
+                            }
                             crate::events::handle_modifiers_changed(modifiers, context);
                             context.io().want_capture_keyboard()
                         }
@@ -48,7 +60,7 @@ pub(super) fn route_secondary_event<T>(
                         }
                         WindowEvent::MouseInput { state, button, .. } => {
                             if let Some(button) = crate::input::to_imgui_mouse_button(*button) {
-                                control.note_mouse_button(button, state.is_pressed());
+                                control.note_mouse_button(*window_id, button, state.is_pressed());
                             }
                             crate::events::handle_mouse_button(*button, *state, context)
                         }

@@ -606,7 +606,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context)?;
+            .prepare_frame(&mut self.imgui.context, &self.window)?;
         let ui = self.imgui.context.frame();
 
         ui.window("Ash Texture Demo (ImGui-managed)")
@@ -634,9 +634,7 @@ impl AppWindow {
         ui.show_demo_window(&mut true);
 
         // Finalize inputs on platform and build draw data.
-        self.imgui
-            .platform
-            .prepare_render_with_ui(&ui, &self.window)?;
+        self.imgui.platform.prepare_render(&ui, &self.window)?;
         let rendered_frame = self.imgui.context.render();
 
         let frame_slot = self.vk.frame_index % self.vk.frames.len();

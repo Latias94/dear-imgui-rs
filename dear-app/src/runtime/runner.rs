@@ -579,7 +579,7 @@ impl Runtime {
                 application.prepare_frame(&mut prepare_frame)?;
                 super::state::validate_supported_imgui_config(context)?;
                 platform
-                    .prepare_frame(&window.window, context)
+                    .prepare_frame(context, &window.window)
                     .map_err(|error| {
                         super::state::platform_error("Winit frame preparation", error)
                     })?;
@@ -605,7 +605,7 @@ impl Runtime {
                     };
                     application.frame(&mut frame)?;
                     platform
-                        .prepare_render_with_ui(ui, &window.window)
+                        .prepare_render(ui, &window.window)
                         .map_err(|error| {
                             super::state::platform_error("Winit render preparation", error)
                         })?;

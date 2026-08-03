@@ -1177,7 +1177,7 @@ impl AppWindow {
 
         imgui
             .platform
-            .prepare_frame(&self.window, &mut imgui.context)?;
+            .prepare_frame(&mut imgui.context, &self.window)?;
 
         let ui = imgui.context.frame();
 
@@ -1223,9 +1223,7 @@ impl AppWindow {
         render_performance(ui, &mut imgui.game_state);
 
         // Let the platform backend finalize per-frame data (required for viewports)
-        imgui
-            .platform
-            .prepare_render(&mut imgui.context, &self.window)?;
+        imgui.platform.prepare_render(ui, &self.window)?;
         let draw_data = imgui.context.render();
 
         let mut encoder = self

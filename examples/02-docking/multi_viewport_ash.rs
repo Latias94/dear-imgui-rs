@@ -1186,7 +1186,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context)?;
+            .prepare_frame(&mut self.imgui.context, &self.window)?;
         if let Some(smoke) = self.viewport_smoke.as_mut() {
             smoke.begin_frame()?;
         }
@@ -1319,9 +1319,7 @@ impl AppWindow {
             }
         }
 
-        self.imgui
-            .platform
-            .prepare_render_with_ui(&ui, &self.window)?;
+        self.imgui.platform.prepare_render(&ui, &self.window)?;
         let mut draw_data = self.imgui.context.render();
         let callback_only_zero_geometry = callback_only_frame
             && draw_data.draw_data().total_vtx_count() == 0

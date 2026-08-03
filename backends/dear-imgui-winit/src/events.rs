@@ -104,9 +104,29 @@ pub fn handle_cursor_moved(position: [f64; 2], imgui_ctx: &mut Context) -> bool 
 }
 
 /// Handle modifier key state changes
+pub(crate) fn modifier_key_events(
+    modifiers: &winit::event::Modifiers,
+) -> [(dear_imgui_rs::Key, bool); 12] {
+    let state = modifiers.state();
+    [
+        (dear_imgui_rs::Key::ModShift, state.shift_key()),
+        (dear_imgui_rs::Key::LeftShift, state.shift_key()),
+        (dear_imgui_rs::Key::RightShift, state.shift_key()),
+        (dear_imgui_rs::Key::ModCtrl, state.control_key()),
+        (dear_imgui_rs::Key::LeftCtrl, state.control_key()),
+        (dear_imgui_rs::Key::RightCtrl, state.control_key()),
+        (dear_imgui_rs::Key::ModAlt, state.alt_key()),
+        (dear_imgui_rs::Key::LeftAlt, state.alt_key()),
+        (dear_imgui_rs::Key::RightAlt, state.alt_key()),
+        (dear_imgui_rs::Key::ModSuper, state.super_key()),
+        (dear_imgui_rs::Key::LeftSuper, state.super_key()),
+        (dear_imgui_rs::Key::RightSuper, state.super_key()),
+    ]
+}
+
+/// Handle modifier key state changes
 pub fn handle_modifiers_changed(modifiers: &winit::event::Modifiers, imgui_ctx: &mut Context) {
     let io = imgui_ctx.io_mut();
-    let state = modifiers.state();
 
     // Update modifier key states.
     //
@@ -115,18 +135,9 @@ pub fn handle_modifiers_changed(modifiers: &winit::event::Modifiers, imgui_ctx: 
     //
     // We update both left and right keys to the same state since `ModifiersChanged` doesn't
     // reliably distinguish them across platforms.
-    io.add_key_event(dear_imgui_rs::Key::ModShift, state.shift_key());
-    io.add_key_event(dear_imgui_rs::Key::LeftShift, state.shift_key());
-    io.add_key_event(dear_imgui_rs::Key::RightShift, state.shift_key());
-    io.add_key_event(dear_imgui_rs::Key::ModCtrl, state.control_key());
-    io.add_key_event(dear_imgui_rs::Key::LeftCtrl, state.control_key());
-    io.add_key_event(dear_imgui_rs::Key::RightCtrl, state.control_key());
-    io.add_key_event(dear_imgui_rs::Key::ModAlt, state.alt_key());
-    io.add_key_event(dear_imgui_rs::Key::LeftAlt, state.alt_key());
-    io.add_key_event(dear_imgui_rs::Key::RightAlt, state.alt_key());
-    io.add_key_event(dear_imgui_rs::Key::ModSuper, state.super_key());
-    io.add_key_event(dear_imgui_rs::Key::LeftSuper, state.super_key());
-    io.add_key_event(dear_imgui_rs::Key::RightSuper, state.super_key());
+    for (key, pressed) in modifier_key_events(modifiers) {
+        io.add_key_event(key, pressed);
+    }
 }
 
 /// Handle IME (Input Method Editor) events for international text input

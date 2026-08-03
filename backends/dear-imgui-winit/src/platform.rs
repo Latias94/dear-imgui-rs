@@ -115,12 +115,12 @@ pub enum WinitPlatformError {
         monitor: usize,
         reason: &'static str,
     },
-    /// Retained for source compatibility; mixed-DPI monitor layouts are now supported.
-    #[deprecated(note = "mixed-DPI monitor layouts are supported; this variant is never returned")]
-    #[error(
-        "mixed-DPI monitor layouts are supported; this compatibility variant is never returned"
-    )]
-    MixedMonitorScaleFactorsUnsupported,
+    /// Dear ImGui supplied viewport geometry that cannot be represented by Winit.
+    #[error("Dear ImGui viewport geometry is invalid during {operation}: {reason}")]
+    InvalidViewportGeometry {
+        operation: &'static str,
+        reason: &'static str,
+    },
     /// Custom single-window coordinate scaling is not implemented for platform viewports.
     #[error("Winit multi-viewport requires HiDpiMode::Default")]
     CustomHiDpiModeUnsupported,
@@ -659,8 +659,33 @@ impl WinitPlatformControl {
     }
 
     #[cfg(feature = "multi-viewport")]
+    fn note_runtime_key(&self, window_id: winit::window::WindowId, event: &winit::event::KeyEvent) {
+        let Some(key) = crate::input::winit_key_to_imgui_key(&event.logical_key, event.location)
+        else {
+            return;
+        };
+        if let Some(runtime) = self.runtime.borrow().as_ref() {
+            runtime.note_key(window_id, key, event.state.is_pressed());
+        }
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    fn note_runtime_modifiers(
+        &self,
+        window_id: winit::window::WindowId,
+        modifiers: &winit::event::Modifiers,
+    ) {
+        if let Some(runtime) = self.runtime.borrow().as_ref() {
+            for (key, pressed) in crate::events::modifier_key_events(modifiers) {
+                runtime.note_key(window_id, key, pressed);
+            }
+        }
+    }
+
+    #[cfg(feature = "multi-viewport")]
     fn note_runtime_mouse_button(
         &self,
+        window_id: winit::window::WindowId,
         button: winit::event::MouseButton,
         state: winit::event::ElementState,
     ) {
@@ -668,7 +693,7 @@ impl WinitPlatformControl {
             return;
         };
         if let Some(runtime) = self.runtime.borrow().as_ref() {
-            runtime.note_mouse_button(button, state.is_pressed());
+            runtime.note_mouse_button(window_id, button, state.is_pressed());
         }
     }
 
@@ -707,6 +732,18 @@ impl WinitPlatformControl {
     }
 
     #[cfg(feature = "multi-viewport")]
+    fn note_runtime_window_geometry(
+        &self,
+        window_id: winit::window::WindowId,
+        position: bool,
+        size: bool,
+    ) {
+        if let Some(runtime) = self.runtime.borrow().as_ref() {
+            runtime.note_window_geometry(window_id, position, size);
+        }
+    }
+
+    #[cfg(feature = "multi-viewport")]
     pub(crate) fn refresh_runtime_state(
         &self,
         context: &mut Context,
@@ -720,6 +757,7 @@ impl WinitPlatformControl {
         let Some(runtime) = runtime else {
             return Ok(());
         };
+        runtime.reconcile_geometry_state();
         runtime.reconcile_input_state(context);
         let result = runtime.refresh_monitors(context);
         #[cfg(target_os = "windows")]
@@ -1291,6 +1329,8 @@ impl WinitPlatform {
             WindowEvent::Resized(physical_size) => {
                 #[cfg(feature = "multi-viewport")]
                 if self.control.has_live_runtime() {
+                    self.control
+                        .note_runtime_window_geometry(window.id(), false, true);
                     let io = imgui_ctx.io_mut();
                     io.set_display_size(crate::multi_viewport::desktop_size_for_window(window));
                     io.set_display_framebuffer_scale(
@@ -1310,6 +1350,8 @@ impl WinitPlatform {
                 let new_hidpi = self.hidpi_factor_for_scale(*scale_factor);
                 #[cfg(feature = "multi-viewport")]
                 if self.control.has_live_runtime() {
+                    self.control
+                        .note_runtime_window_geometry(window.id(), true, true);
                     // Native desktop coordinates do not change when a viewport crosses a DPI
                     // boundary. Only its UI DPI and framebuffer relation change.
                     self.hidpi_factor = new_hidpi;
@@ -1345,6 +1387,10 @@ impl WinitPlatform {
                 false
             }
             WindowEvent::KeyboardInput { event, .. } => {
+                #[cfg(feature = "multi-viewport")]
+                if self.control.has_live_runtime() {
+                    self.control.note_runtime_key(window.id(), event);
+                }
                 events::handle_keyboard_input(event, imgui_ctx)
             }
             WindowEvent::CursorMoved { position, .. } => {
@@ -1373,7 +1419,8 @@ impl WinitPlatform {
             WindowEvent::MouseInput { button, state, .. } => {
                 #[cfg(feature = "multi-viewport")]
                 if self.control.has_live_runtime() {
-                    self.control.note_runtime_mouse_button(*button, *state);
+                    self.control
+                        .note_runtime_mouse_button(window.id(), *button, *state);
                 }
                 events::handle_mouse_button(*button, *state, imgui_ctx)
             }
@@ -1392,6 +1439,12 @@ impl WinitPlatform {
                 }
                 false
             }
+            #[cfg(feature = "multi-viewport")]
+            WindowEvent::Moved(_) if self.control.has_live_runtime() => {
+                self.control
+                    .note_runtime_window_geometry(window.id(), true, false);
+                false
+            }
             WindowEvent::CursorEntered { .. } => {
                 #[cfg(feature = "multi-viewport")]
                 if self.control.has_live_runtime() {
@@ -1400,6 +1453,10 @@ impl WinitPlatform {
                 false
             }
             WindowEvent::ModifiersChanged(modifiers) => {
+                #[cfg(feature = "multi-viewport")]
+                if self.control.has_live_runtime() {
+                    self.control.note_runtime_modifiers(window.id(), modifiers);
+                }
                 events::handle_modifiers_changed(modifiers, imgui_ctx);
                 false
             }
@@ -1441,8 +1498,8 @@ impl WinitPlatform {
         }
     }
 
-    /// Prepare for rendering - should be called before Dear ImGui rendering
-    pub fn prepare_render(
+    /// Update frame timing and platform state before calling [`Context::frame`].
+    pub fn prepare_frame(
         &mut self,
         imgui_ctx: &mut Context,
         window: &Window,
@@ -1488,17 +1545,8 @@ impl WinitPlatform {
                 let _ = window.set_cursor_position(LogicalPosition::new(pos[0], pos[1]));
             }
         }
-        // Note: cursor shape update is exposed via prepare_render_with_ui()
+        // Cursor and IME state depend on the completed UI and are updated by `prepare_render`.
         Ok(())
-    }
-
-    /// Prepare frame - alias for prepare_render for compatibility
-    pub fn prepare_frame(
-        &mut self,
-        window: &Window,
-        imgui_ctx: &mut Context,
-    ) -> Result<(), WinitPlatformError> {
-        self.prepare_render(imgui_ctx, window)
     }
 
     /// Toggle Dear ImGui software-drawn cursor.
@@ -1511,13 +1559,13 @@ impl WinitPlatform {
         self.control.ensure_context(imgui_ctx)?;
         self.control.validate_operational_contract()?;
         imgui_ctx.io_mut().set_mouse_draw_cursor(enabled);
-        // Invalidate cursor cache so next prepare_render_with_ui applies visibility change
+        // Invalidate cursor cache so the next `prepare_render` applies the visibility change.
         self.cursor_cache = None;
         Ok(())
     }
 
-    /// Update cursor given a Ui reference (preferred, matches upstream)
-    pub fn prepare_render_with_ui(
+    /// Update cursor and IME state after UI construction and before rendering.
+    pub fn prepare_render(
         &mut self,
         ui: &dear_imgui_rs::Ui,
         window: &Window,

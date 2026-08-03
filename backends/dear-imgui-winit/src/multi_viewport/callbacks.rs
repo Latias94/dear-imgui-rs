@@ -184,6 +184,7 @@ fn sync_window_policy(
     }
     if current.decorations != next.decorations {
         window.set_decorations(next.decorations);
+        data.request_geometry_refresh(true, true);
     }
     if current.top_most != next.top_most {
         window.set_window_level(if next.top_most {
@@ -576,11 +577,36 @@ pub(super) fn prepare_monitors(
     PreparedMonitors::allocate(context, &monitors)
 }
 
+fn move_primary_to_front<T: Eq>(monitors: &mut Vec<T>, primary: Option<T>) {
+    let Some(primary) = primary else {
+        return;
+    };
+    if let Some(index) = monitors.iter().position(|monitor| *monitor == primary) {
+        let primary = monitors.remove(index);
+        monitors.insert(0, primary);
+    } else {
+        monitors.insert(0, primary);
+    }
+}
+
 pub(super) fn collect_monitors(
     window: &winit::window::Window,
 ) -> Vec<dear_imgui_rs::sys::ImGuiPlatformMonitor> {
-    let mut monitors = window
-        .available_monitors()
+    let mut monitor_handles = window.available_monitors().collect::<Vec<_>>();
+    monitor_handles.sort_by_key(|monitor| {
+        let position = monitor.position();
+        let size = monitor.size();
+        (
+            position.x,
+            position.y,
+            size.width,
+            size.height,
+            monitor.name(),
+        )
+    });
+    move_primary_to_front(&mut monitor_handles, window.primary_monitor());
+    let mut monitors = monitor_handles
+        .into_iter()
         .map(|monitor| {
             monitor_from_physical(monitor.position(), monitor.size(), monitor.scale_factor())
         })
@@ -1233,6 +1259,7 @@ pub(super) unsafe extern "C" fn winit_destroy_window(vp: *mut dear_imgui_rs::sys
             if data.is_main() {
                 return Ok(());
             }
+            control.release_window_input(data.window().id())?;
             let Some(main_window) = control.main_window() else {
                 return Ok(());
             };
@@ -1283,13 +1310,9 @@ pub(super) unsafe extern "C" fn winit_get_window_pos_out(
             let vp_ref = unsafe { &*vp };
             let position = with_viewport_data(control, vp, |data| {
                 let window = data.window();
-                window
-                    .inner_position()
-                    .or_else(|_| window.outer_position())
-                    .ok()
-                    .and_then(|position| {
-                        desktop_position_from_physical(position, window.scale_factor())
-                    })
+                window.inner_position().ok().and_then(|position| {
+                    desktop_position_from_physical(position, window.scale_factor())
+                })
             })
             .flatten()
             .unwrap_or([vp_ref.Pos.x, vp_ref.Pos.y]);
@@ -1300,6 +1323,26 @@ pub(super) unsafe extern "C" fn winit_get_window_pos_out(
             unsafe { *out_pos = r };
         }
     });
+}
+
+fn validate_viewport_position(position: [f32; 2]) -> Option<[f32; 2]> {
+    let position = sanitize::finite_vec2_f32(position)?;
+    let minimum = f64::from(i32::MIN);
+    let maximum = f64::from(i32::MAX);
+    position
+        .into_iter()
+        .map(f64::from)
+        .all(|value| value >= minimum && value <= maximum)
+        .then_some(position)
+}
+
+fn validate_viewport_size(size: [f32; 2]) -> Option<[f32; 2]> {
+    let size = sanitize::finite_vec2_f32(size)?;
+    let maximum = f64::from(i32::MAX);
+    size.into_iter()
+        .map(f64::from)
+        .all(|value| value > 0.0 && value <= maximum)
+        .then_some(size)
 }
 
 fn target_monitor_dpi_scale(
@@ -1398,17 +1441,26 @@ pub(super) unsafe extern "C" fn winit_set_window_pos(
             return;
         }
         let pos = unsafe { *pos };
-        let requested_position = sanitize::finite_vec2_f32([pos.x, pos.y]);
+        let Some(requested_position) = validate_viewport_position([pos.x, pos.y]) else {
+            record_viewport_failure(
+                control,
+                vp,
+                WinitPlatformError::InvalidViewportGeometry {
+                    operation: "window positioning",
+                    reason: "position must be finite and representable by a native window",
+                },
+            );
+            return;
+        };
 
         with_viewport_data(control, vp, |data| {
-            let Some([x, y]) = requested_position else {
-                return;
-            };
+            let [x, y] = requested_position;
             let dpi_scale = unsafe { viewport_target_dpi_scale(vp, [x, y]) };
             let window = data.window();
             let desired_client = [x, y];
             let outer_target = outer_position_from_client(window, desired_client, dpi_scale);
             window.set_outer_position(window_position_from_desktop(outer_target));
+            data.request_geometry_refresh(true, false);
         });
     });
 }
@@ -1444,12 +1496,22 @@ pub(super) unsafe extern "C" fn winit_set_window_size(
             return;
         }
         let size = unsafe { *size };
+        let Some(size) = validate_viewport_size([size.x, size.y]) else {
+            record_viewport_failure(
+                control,
+                vp,
+                WinitPlatformError::InvalidViewportGeometry {
+                    operation: "window resizing",
+                    reason: "size must be finite, positive, and representable by a native window",
+                },
+            );
+            return;
+        };
 
         with_viewport_data(control, vp, |data| {
-            let size = sanitize::finite_vec2_f32([size.x, size.y]).unwrap_or([0.0, 0.0]);
-            let size = [size[0].max(0.0), size[1].max(0.0)];
             let window = data.window();
             let _ = window.request_inner_size(window_size_from_desktop(size));
+            data.request_geometry_refresh(false, true);
         });
     });
 }
@@ -1620,6 +1682,37 @@ pub(super) unsafe extern "C" fn winit_update_window(vp: *mut dear_imgui_rs::sys:
 #[cfg(test)]
 mod policy_tests {
     use super::*;
+
+    #[test]
+    fn primary_monitor_is_first_without_duplication() {
+        let mut monitors = vec![2, 1, 3];
+        move_primary_to_front(&mut monitors, Some(1));
+        assert_eq!(monitors, vec![1, 2, 3]);
+
+        move_primary_to_front(&mut monitors, Some(4));
+        assert_eq!(monitors, vec![4, 1, 2, 3]);
+
+        move_primary_to_front(&mut monitors, Some(3));
+        assert_eq!(monitors, vec![3, 4, 1, 2]);
+    }
+
+    #[test]
+    fn viewport_geometry_rejects_values_native_windows_cannot_represent() {
+        assert_eq!(
+            validate_viewport_position([-1920.0, 32.0]),
+            Some([-1920.0, 32.0])
+        );
+        assert_eq!(validate_viewport_position([f32::NAN, 32.0]), None);
+        assert_eq!(validate_viewport_position([f32::MAX, 32.0]), None);
+
+        assert_eq!(
+            validate_viewport_size([1280.0, 720.0]),
+            Some([1280.0, 720.0])
+        );
+        assert_eq!(validate_viewport_size([0.0, 720.0]), None);
+        assert_eq!(validate_viewport_size([f32::INFINITY, 720.0]), None);
+        assert_eq!(validate_viewport_size([f32::MAX, 720.0]), None);
+    }
 
     #[test]
     fn focus_click_and_appearance_are_best_effort_but_taskbar_requires_capability() {

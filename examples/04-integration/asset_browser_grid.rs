@@ -297,7 +297,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context)?;
+            .prepare_frame(&mut self.imgui.context, &self.window)?;
         let ui = self.imgui.context.frame();
 
         // Inline browser UI to avoid &Ui + &mut self borrow conflict
@@ -385,9 +385,7 @@ impl AppWindow {
                 .scan_and_load(&self.root, &mut self.imgui.renderer);
         }
 
-        self.imgui
-            .platform
-            .prepare_render_with_ui(&ui, &self.window)?;
+        self.imgui.platform.prepare_render(&ui, &self.window)?;
         let draw_data = self.imgui.context.render();
         if let Some(gl) = self.imgui.renderer.gl_context() {
             unsafe {

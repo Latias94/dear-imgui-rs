@@ -19,8 +19,8 @@ use super::callbacks::{
 };
 use super::registry::preflight_viewport_ownership;
 use super::runtime::{
-    ConstructionStage, ContextFocusState, MouseLeaveState, RuntimeState, WinitPlatformRuntime,
-    apply_raw_io_coordinate_contract_for_test,
+    ConstructionStage, ContextFocusState, InputOwnership, MouseLeaveState, RuntimeState,
+    WinitPlatformRuntime, apply_raw_io_coordinate_contract_for_test,
 };
 use crate::test_util::test_sync::lock_context;
 
@@ -560,6 +560,54 @@ fn context_focus_loss_invalidates_mouse_without_release_or_leave_events() {
 
     assert!(state.take_invalidation_due());
     assert!(!state.take_invalidation_due());
+}
+
+#[test]
+fn destroyed_viewport_releases_only_the_input_it_owns() {
+    let first = WindowId::from(41_u64);
+    let second = WindowId::from(42_u64);
+    let mut ownership = InputOwnership::default();
+
+    ownership.note_key(first, dear_imgui_rs::Key::A, true);
+    ownership.note_key(second, dear_imgui_rs::Key::B, true);
+    ownership.note_mouse_button(first, dear_imgui_rs::input::MouseButton::Left, true);
+    ownership.note_mouse_button(second, dear_imgui_rs::input::MouseButton::Right, true);
+
+    let released = ownership.release_window(first);
+
+    assert_eq!(released.keys, vec![dear_imgui_rs::Key::A]);
+    assert_eq!(
+        released.mouse_buttons,
+        vec![dear_imgui_rs::input::MouseButton::Left]
+    );
+    assert_eq!(
+        ownership.release_window(second),
+        super::runtime::ReleasedInput {
+            keys: vec![dear_imgui_rs::Key::B],
+            mouse_buttons: vec![dear_imgui_rs::input::MouseButton::Right],
+        }
+    );
+}
+
+#[test]
+fn latest_input_event_transfers_ownership_between_viewports() {
+    let first = WindowId::from(41_u64);
+    let second = WindowId::from(42_u64);
+    let mut ownership = InputOwnership::default();
+
+    ownership.note_key(first, dear_imgui_rs::Key::A, true);
+    ownership.note_key(second, dear_imgui_rs::Key::A, true);
+    ownership.note_mouse_button(first, dear_imgui_rs::input::MouseButton::Left, true);
+    ownership.note_mouse_button(second, dear_imgui_rs::input::MouseButton::Left, true);
+
+    assert_eq!(ownership.release_window(first), Default::default());
+    assert_eq!(
+        ownership.release_window(second),
+        super::runtime::ReleasedInput {
+            keys: vec![dear_imgui_rs::Key::A],
+            mouse_buttons: vec![dear_imgui_rs::input::MouseButton::Left],
+        }
+    );
 }
 
 #[test]

@@ -354,7 +354,7 @@ impl AppWindow {
             &mut self.imgui.platform,
             &mut self.imgui.renderer,
         );
-        platform.prepare_frame(&self.window, context)?;
+        platform.prepare_frame(context, &self.window)?;
         let ui = context.frame();
 
         let sampler_label = if self.use_nearest_sampler {
@@ -439,7 +439,7 @@ impl AppWindow {
                 label: Some("Main Encoder"),
             });
 
-        platform.prepare_render_with_ui(&ui, &self.window)?;
+        platform.prepare_render(&ui, &self.window)?;
         let draw_data = context.render();
 
         {
