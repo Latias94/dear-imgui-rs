@@ -75,7 +75,7 @@ fn main() {
     .add_systems(Startup, setup_scene)
     .add_systems(Update, (close_on_escape, animate_marker));
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(&primary_pass, plot_demo_ui);
+    app.add_imgui_systems(&primary_pass, primary_pass.system(plot_demo_ui));
 
     install_plot_context(&mut app);
     app.run();

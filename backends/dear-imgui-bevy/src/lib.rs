@@ -22,7 +22,7 @@
 //!         commands.spawn(Camera2d);
 //!     });
 //! let primary_pass = app.imgui_primary_pass();
-//! app.add_imgui_system(&primary_pass, draw_ui).run();
+//! app.add_imgui_systems(&primary_pass, primary_pass.system(draw_ui)).run();
 //! ```
 //!
 //! Advanced targets use explicit render and input route entities:
@@ -114,12 +114,13 @@ pub use self::context::ownership::{
 };
 pub use self::context::{
     ImguiAppExt, ImguiContextAdmissionError, ImguiContextConfig, ImguiContextError, ImguiContexts,
-    ImguiFrame, ImguiPass, ImguiPrimaryPass, ImguiShutdownError,
+    ImguiFrame, ImguiPass, ImguiPrimaryChange, ImguiPrimaryPass, ImguiShutdownError, ImguiSystem,
 };
 #[cfg(feature = "render")]
 pub use self::render::ImguiRenderSystems;
 #[cfg(feature = "bevy-ui")]
 pub use self::render::ImguiUiRenderOrder;
+pub use self::schedule::ImguiDriverSchedulePlacement;
 #[cfg(feature = "render")]
 pub use self::texture::{ImguiBevyTextures, ImguiTexture, ImguiTextureRegistrationError};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]

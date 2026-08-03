@@ -34,7 +34,8 @@ fn main() {
     .insert_non_send(CustomFonts::default())
     .add_systems(Startup, (setup_scene, configure_fonts));
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(&primary_pass, custom_font_ui).run();
+    app.add_imgui_systems(&primary_pass, primary_pass.system(custom_font_ui))
+        .run();
 }
 
 fn setup_scene(mut commands: Commands) {

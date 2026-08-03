@@ -12,7 +12,7 @@ use bevy_render::{Render, RenderApp, extract_plugin::ExtractPlugin};
 use bevy_window::{PrimaryWindow, Window};
 use dear_imgui_bevy::{
     BEVY_TARGET_COMMIT, BEVY_TARGET_VERSION, ImguiAppExt, ImguiContextConfig, ImguiContextError,
-    ImguiContexts, ImguiPlugin, ImguiPluginConfig, WGPU_TARGET_VERSION,
+    ImguiContexts, ImguiPlugin, ImguiPluginConfig, ImguiShutdownError, WGPU_TARGET_VERSION,
 };
 #[cfg(feature = "render")]
 use dear_imgui_bevy::{ContextId, ImguiFrame};
@@ -72,20 +72,21 @@ fn plugin_registers_the_primary_registry_and_private_driver_schedule() {
 }
 
 #[test]
-fn plugin_adopts_a_preinserted_registry_without_replacing_its_primary_context() {
+fn plugin_adopts_an_app_scoped_registry_without_replacing_its_primary_context() {
     let _guard = imgui_context_guard();
     let mut app = App::new();
-    let primary_pass = app.imgui_primary_pass();
     let additional_pass = app.declare_imgui_pass::<AdditionalPass>();
     let primary = dear_imgui_rs::SuspendedContext::create();
     let primary_id = primary.id();
-    let mut contexts = ImguiContexts::with_primary(primary, primary_pass);
-    let additional_id = contexts
-        .create(ImguiContextConfig::new(additional_pass))
+    app.adopt_imgui_primary_context(primary).unwrap();
+    let additional_id = app
+        .world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
+        .create(ImguiContextConfig::new(&additional_pass))
         .unwrap();
 
     let config = ImguiPluginConfig::default().with_docking(false);
-    app.insert_non_send(contexts);
     app.add_plugins(ImguiPlugin::new(config));
 
     let contexts = app.world().get_non_send::<ImguiContexts>().unwrap();
@@ -120,8 +121,7 @@ fn removing_a_context_clears_only_backend_state_owned_by_bevy() {
     let primary = dear_imgui_rs::SuspendedContext::create();
     let primary_id = primary.id();
     let mut app = App::new();
-    let primary_pass = app.imgui_primary_pass();
-    app.insert_non_send(ImguiContexts::with_primary(primary, primary_pass));
+    app.adopt_imgui_primary_context(primary).unwrap();
     app.add_plugins(ImguiPlugin::default());
 
     let mut removed = app
@@ -161,8 +161,7 @@ fn foreign_platform_name_is_not_overwritten_when_bevy_does_not_own_the_platform_
     let primary_id = primary.id();
 
     let mut app = App::new();
-    let primary_pass = app.imgui_primary_pass();
-    app.insert_non_send(ImguiContexts::with_primary(primary, primary_pass));
+    app.adopt_imgui_primary_context(primary).unwrap();
     app.add_plugins(ImguiPlugin::default());
 
     app.world_mut()
@@ -190,7 +189,6 @@ fn app_with_render_schedule() -> App {
 fn managed_shared_font_atlas_admission_fails_before_backend_fields_are_mutated() {
     let _guard = imgui_context_guard();
     let mut app = app_with_render_schedule();
-    let primary_pass = app.imgui_primary_pass();
     let additional_pass = app.declare_imgui_pass::<AdditionalPass>();
     let atlas = dear_imgui_rs::SharedFontAtlas::create();
     let mut primary =
@@ -205,12 +203,13 @@ fn managed_shared_font_atlas_admission_fails_before_backend_fields_are_mutated()
     let additional_font_texture_id = additional
         .try_with_active(|context| Ok::<_, ()>(context.font_atlas().texture_id()))
         .unwrap();
-    let mut contexts = ImguiContexts::with_primary(primary, primary_pass);
-    contexts
-        .insert_suspended(additional, ImguiContextConfig::new(additional_pass))
+    app.adopt_imgui_primary_context(primary).unwrap();
+    app.world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
+        .insert_suspended(additional, ImguiContextConfig::new(&additional_pass))
         .unwrap();
 
-    app.insert_non_send(contexts);
     let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         app.add_plugins(ImguiPlugin::default());
     }))
@@ -250,7 +249,6 @@ fn managed_shared_font_atlas_admission_fails_before_backend_fields_are_mutated()
 fn later_renderer_admission_failure_leaves_earlier_font_atlas_unclaimed() {
     let _guard = imgui_context_guard();
     let mut app = app_with_render_schedule();
-    let primary_pass = app.imgui_primary_pass();
     let additional_pass = app.declare_imgui_pass::<AdditionalPass>();
     let primary_atlas = dear_imgui_rs::SharedFontAtlas::create();
     let primary =
@@ -265,12 +263,13 @@ fn later_renderer_admission_failure_leaves_earlier_font_atlas_unclaimed() {
     let blocked_peer =
         dear_imgui_rs::SuspendedContext::try_create_with_shared_font_atlas(blocked_atlas).unwrap();
     let additional_id = additional.id();
-    let mut contexts = ImguiContexts::with_primary(primary, primary_pass);
-    contexts
-        .insert_suspended(additional, ImguiContextConfig::new(additional_pass))
+    app.adopt_imgui_primary_context(primary).unwrap();
+    app.world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
+        .insert_suspended(additional, ImguiContextConfig::new(&additional_pass))
         .unwrap();
 
-    app.insert_non_send(contexts);
     let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         app.add_plugins(ImguiPlugin::default());
     }))
@@ -320,7 +319,10 @@ fn renderer_ownership_drift_fails_closed_and_removal_can_be_repaired() {
     let additional_pass = app.declare_imgui_pass::<AdditionalPass>();
     app.world_mut().spawn((Window::default(), PrimaryWindow));
     app.init_resource::<UiErrorTrace>();
-    app.add_imgui_system(&additional_pass, observe_additional_context);
+    app.add_imgui_systems(
+        &additional_pass,
+        additional_pass.system(observe_additional_context),
+    );
     app.add_plugins(ImguiPlugin::default());
     let stale = dear_imgui_rs::SuspendedContext::create();
     let stale_id = stale.id();
@@ -329,7 +331,7 @@ fn renderer_ownership_drift_fails_closed_and_removal_can_be_repaired() {
         let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
         let primary_id = contexts.primary_id().unwrap();
         let additional_id = contexts
-            .create(ImguiContextConfig::new(additional_pass))
+            .create(ImguiContextConfig::new(&additional_pass))
             .unwrap();
         (primary_id, additional_id)
     };
@@ -446,6 +448,73 @@ fn renderer_ownership_drift_fails_closed_and_removal_can_be_repaired() {
 
 #[cfg(feature = "render")]
 #[test]
+fn renderer_ownership_drift_blocks_shutdown_before_registry_removal_and_can_be_repaired() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_render_schedule();
+    let additional_pass = app.declare_imgui_pass::<AdditionalPass>();
+    app.world_mut().spawn((Window::default(), PrimaryWindow));
+    app.add_plugins(ImguiPlugin::default());
+    let (primary_id, additional_id) = {
+        let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
+        let primary_id = contexts.primary_id().unwrap();
+        let additional_id = contexts
+            .create(ImguiContextConfig::new(&additional_pass))
+            .unwrap();
+        (primary_id, additional_id)
+    };
+
+    let expected_flags = app
+        .world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
+        .configure(additional_id, |context| {
+            let expected_flags = context.io().backend_flags();
+            let mut drifted_flags = expected_flags;
+            drifted_flags.remove(dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES);
+            context.io_mut().set_backend_flags(drifted_flags);
+            expected_flags
+        })
+        .unwrap();
+
+    let error = app
+        .shutdown_imgui()
+        .expect_err("renderer ownership drift must block terminal shutdown preflight");
+    assert!(matches!(
+        error,
+        ImguiShutdownError::ContextTeardownBlocked {
+            context_id,
+            reason:
+                dear_imgui_bevy::ImguiContextRemovalPendingReason::RendererOwnership(
+                    dear_imgui_bevy::ImguiRendererOwnershipError::FieldReplaced {
+                        field: "BackendFlags"
+                    }
+                ),
+        } if context_id == additional_id
+    ));
+    assert_eq!(
+        app.world()
+            .get_non_send::<ImguiContexts>()
+            .unwrap()
+            .ids()
+            .collect::<Vec<_>>(),
+        vec![primary_id, additional_id],
+        "a later Context failure must preserve every preflighted Context"
+    );
+
+    app.world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
+        .configure(additional_id, |context| {
+            context.io_mut().set_backend_flags(expected_flags);
+        })
+        .expect("the retained registry must allow renderer ownership repair");
+    app.shutdown_imgui()
+        .expect("repaired renderer ownership must permit terminal shutdown");
+    assert!(app.world().get_non_send::<ImguiContexts>().is_none());
+}
+
+#[cfg(feature = "render")]
+#[test]
 fn foreign_renderer_claim_is_rejected_without_mutating_the_context() {
     let _guard = imgui_context_guard();
     let mut primary = dear_imgui_rs::SuspendedContext::create();
@@ -458,8 +527,7 @@ fn foreign_renderer_claim_is_rejected_without_mutating_the_context() {
     let primary_id = primary.id();
 
     let mut app = app_with_render_schedule();
-    let primary_pass = app.imgui_primary_pass();
-    app.insert_non_send(ImguiContexts::with_primary(primary, primary_pass));
+    app.adopt_imgui_primary_context(primary).unwrap();
     let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         app.add_plugins(ImguiPlugin::default());
     }))
@@ -501,8 +569,8 @@ fn unknown_context_error_does_not_alias_the_primary_identity() {
     let stale_id = stale.id();
     drop(stale);
     let mut app = App::new();
-    let primary_pass = app.imgui_primary_pass();
-    let mut contexts = ImguiContexts::with_primary(primary, primary_pass);
+    app.adopt_imgui_primary_context(primary).unwrap();
+    let mut contexts = app.world_mut().remove_non_send::<ImguiContexts>().unwrap();
 
     assert!(matches!(
         contexts.configure(stale_id, |_| ()),

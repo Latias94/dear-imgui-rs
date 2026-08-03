@@ -48,7 +48,7 @@ fn add_secondary_context(app: &mut App) -> dear_imgui_bevy::ContextId {
     let pass = app.declare_imgui_pass::<SecondaryUi>();
     app.world_mut()
         .non_send_mut::<ImguiContexts>()
-        .create(ImguiContextConfig::new(pass))
+        .create(ImguiContextConfig::new(&pass))
         .expect("secondary Context admission must succeed")
 }
 

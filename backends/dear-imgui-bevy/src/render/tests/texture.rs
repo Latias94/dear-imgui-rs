@@ -203,7 +203,7 @@ fn managed_texture_create_request_repeats_without_gpu_feedback() {
     let texture_id = register_managed_texture(&mut app);
     let primary_id = texture_id.context_id();
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(&primary_pass, draw_managed_texture);
+    app.add_imgui_systems(&primary_pass, primary_pass.system(draw_managed_texture));
 
     app.update();
 
@@ -285,7 +285,7 @@ fn managed_texture_requests_and_lifecycles_are_isolated_by_context() {
         .world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .unwrap()
-        .create(ImguiContextConfig::new(secondary_pass))
+        .create(ImguiContextConfig::new(&secondary_pass))
         .expect("secondary Context admission should succeed");
 
     let register = |app: &mut App, context_id: imgui::ContextId, pixel: [u8; 4]| {
@@ -317,11 +317,14 @@ fn managed_texture_requests_and_lifecycles_are_isolated_by_context() {
         (primary_id, primary_texture),
         (secondary_id, secondary_texture),
     ])));
-    app.add_imgui_system(
+    app.add_imgui_systems(
         &primary_pass,
-        draw_context_managed_texture::<ImguiPrimaryPass>,
+        primary_pass.system(draw_context_managed_texture::<ImguiPrimaryPass>),
     );
-    app.add_imgui_system(&secondary_pass, draw_context_managed_texture::<SecondaryUi>);
+    app.add_imgui_systems(
+        &secondary_pass,
+        secondary_pass.system(draw_context_managed_texture::<SecondaryUi>),
+    );
 
     let camera = {
         let world = app.world_mut();
@@ -496,7 +499,10 @@ fn bevy_image_leases_register_as_stable_imgui_texture_ids_and_extract() {
     drop(registered_again);
     app.insert_resource(BevyImageTexture { texture });
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(&primary_pass, draw_bevy_image::<ImguiPrimaryPass>);
+    app.add_imgui_systems(
+        &primary_pass,
+        primary_pass.system(draw_bevy_image::<ImguiPrimaryPass>),
+    );
 
     app.update();
 
@@ -536,7 +542,7 @@ fn one_bevy_image_lease_can_draw_from_two_contexts() {
         .world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .expect("ImguiPlugin should retain its Context registry")
-        .create(ImguiContextConfig::new(secondary_pass))
+        .create(ImguiContextConfig::new(&secondary_pass))
         .expect("secondary Context admission should succeed");
     app.world_mut()
         .get_non_send_mut::<ImguiContexts>()
@@ -555,8 +561,14 @@ fn one_bevy_image_lease_can_draw_from_two_contexts() {
         .register_weak(AssetId::<Image>::invalid());
     let texture_id = texture.id();
     app.insert_resource(BevyImageTexture { texture });
-    app.add_imgui_system(&primary_pass, draw_bevy_image::<ImguiPrimaryPass>);
-    app.add_imgui_system(&secondary_pass, draw_bevy_image::<SecondaryUi>);
+    app.add_imgui_systems(
+        &primary_pass,
+        primary_pass.system(draw_bevy_image::<ImguiPrimaryPass>),
+    );
+    app.add_imgui_systems(
+        &secondary_pass,
+        secondary_pass.system(draw_bevy_image::<SecondaryUi>),
+    );
 
     let camera = {
         let world = app.world_mut();
@@ -681,7 +693,10 @@ fn weak_bevy_image_leases_use_the_fallback_and_publish_a_recoverable_diagnostic(
     assert!(texture.is_weak());
     app.insert_resource(BevyImageTexture { texture });
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(&primary_pass, draw_bevy_image::<ImguiPrimaryPass>);
+    app.add_imgui_systems(
+        &primary_pass,
+        primary_pass.system(draw_bevy_image::<ImguiPrimaryPass>),
+    );
 
     app.update();
 
@@ -739,7 +754,10 @@ fn a_lease_dropped_during_ui_submission_survives_the_in_flight_snapshot() {
     let texture_id = texture.id();
     app.insert_resource(OneShotBevyImageTexture(Some(texture)));
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(&primary_pass, draw_and_release_bevy_image);
+    app.add_imgui_systems(
+        &primary_pass,
+        primary_pass.system(draw_and_release_bevy_image),
+    );
 
     app.update();
     assert!(
@@ -819,7 +837,10 @@ fn render_target_texture_images_can_be_registered_and_drawn_as_imgui_viewports()
     let texture_id = texture.id();
     app.insert_resource(BevyImageTexture { texture });
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(&primary_pass, draw_bevy_image::<ImguiPrimaryPass>);
+    app.add_imgui_systems(
+        &primary_pass,
+        primary_pass.system(draw_bevy_image::<ImguiPrimaryPass>),
+    );
 
     app.update();
 

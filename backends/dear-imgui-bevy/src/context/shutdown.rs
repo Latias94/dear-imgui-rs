@@ -1,7 +1,8 @@
 use std::fmt;
 
 use bevy_app::App;
-use bevy_ecs::system::IntoSystem;
+use bevy_ecs::schedule::{InternedSystemSet, IntoScheduleConfigs};
+use bevy_ecs::system::ScheduleSystem;
 
 #[cfg(feature = "render")]
 use bevy_render::RenderApp;
@@ -9,7 +10,8 @@ use bevy_render::RenderApp;
 use bevy_render::pipelined_rendering::RenderExtractApp;
 
 use super::{
-    ImguiContexts, ImguiFrame, ImguiPass, ImguiPrimaryPass, ownership::ImguiContextRetirements,
+    ImguiContextAdmissionError, ImguiContextError, ImguiContexts, ImguiPass, ImguiPrimaryPass,
+    ownership::{ImguiContextRemovalPendingReason, ImguiContextRetirements},
 };
 use crate::schedule::ImguiContextDriver;
 
@@ -26,18 +28,44 @@ pub trait ImguiAppExt {
     /// Retrieve the private pass owned by the primary Dear ImGui Context.
     fn imgui_primary_pass(&mut self) -> ImguiPass<ImguiPrimaryPass>;
 
-    /// Register one frame-input system in `pass`'s private runner.
+    /// Adopt a custom suspended Context as this App's initial primary Context.
     ///
-    /// The system cannot be recovered as a unit-input Bevy system or registered in a public
-    /// schedule after this call.
-    fn add_imgui_system<P, S, M>(&mut self, pass: &ImguiPass<P>, system: S) -> &mut Self
+    /// Call this before adding [`crate::ImguiPlugin`]. Admission is App-scoped so an explicitly
+    /// shut down App cannot construct a fresh, unattached Context registry.
+    fn adopt_imgui_primary_context(
+        &mut self,
+        context: dear_imgui_rs::SuspendedContext,
+    ) -> Result<&mut Self, ImguiContextAdmissionError>;
+
+    /// Register configured unit-input systems in `pass`'s private runner.
+    ///
+    /// Bind each frame-input function with [`ImguiPass::system`] first. The supplied Bevy
+    /// [`IntoScheduleConfigs`] is preserved, including ordering, run conditions, system sets, and
+    /// automatically inserted deferred-command barriers.
+    fn add_imgui_systems<P, M>(
+        &mut self,
+        pass: &ImguiPass<P>,
+        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
+    ) -> &mut Self
     where
-        P: 'static,
-        S: IntoSystem<ImguiFrame<'static, P>, (), M> + 'static,
-        M: 'static;
+        P: 'static;
+
+    /// Configure system sets in `pass`'s private runner with Bevy's native set configuration.
+    fn configure_imgui_sets<P, M>(
+        &mut self,
+        pass: &ImguiPass<P>,
+        sets: impl IntoScheduleConfigs<InternedSystemSet, M>,
+    ) -> &mut Self
+    where
+        P: 'static;
 
     /// Release every managed Context and its render/viewport resources without running user
     /// application schedules.
+    ///
+    /// Renderer and viewport callback ownership is validated for every Context before this method
+    /// removes native window mappings or the Context registry. A
+    /// [`ImguiShutdownError::ContextTeardownBlocked`] error leaves both intact so the conflicting
+    /// field can be repaired through [`ImguiContexts::configure`] before retrying.
     ///
     /// This operation is idempotent. After it succeeds, the app no longer contains
     /// [`ImguiContexts`] and must not run Dear ImGui systems again.
@@ -48,6 +76,14 @@ pub trait ImguiAppExt {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ImguiShutdownError {
+    /// A Context still owns part of the backend contract, but another integration replaced one of
+    /// the fields needed for deterministic teardown.
+    ContextTeardownBlocked {
+        /// Context whose teardown ownership validation failed.
+        context_id: dear_imgui_rs::ContextId,
+        /// Exact renderer or viewport ownership conflict observed by the preflight.
+        reason: ImguiContextRemovalPendingReason,
+    },
     /// The plugin's private Context driver schedule was removed while retirement work remained.
     DriverScheduleUnavailable,
     /// One or more Contexts still depend on a render world that could not acknowledge release.
@@ -62,6 +98,10 @@ pub enum ImguiShutdownError {
 impl fmt::Display for ImguiShutdownError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ContextTeardownBlocked { context_id, reason } => write!(
+                formatter,
+                "Context {context_id:?} cannot begin terminal Dear ImGui teardown: {reason}"
+            ),
             Self::DriverScheduleUnavailable => formatter.write_str(
                 "the private Dear ImGui Context driver schedule is unavailable during shutdown",
             ),
@@ -76,7 +116,14 @@ impl fmt::Display for ImguiShutdownError {
     }
 }
 
-impl std::error::Error for ImguiShutdownError {}
+impl std::error::Error for ImguiShutdownError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ContextTeardownBlocked { reason, .. } => Some(reason),
+            Self::DriverScheduleUnavailable | Self::RetirementPending { .. } => None,
+        }
+    }
+}
 
 impl ImguiAppExt for App {
     fn declare_imgui_pass<P: 'static>(&mut self) -> ImguiPass<P> {
@@ -87,17 +134,73 @@ impl ImguiAppExt for App {
         super::pass::primary_pass(self)
     }
 
-    fn add_imgui_system<P, S, M>(&mut self, pass: &ImguiPass<P>, system: S) -> &mut Self
+    fn adopt_imgui_primary_context(
+        &mut self,
+        context: dear_imgui_rs::SuspendedContext,
+    ) -> Result<&mut Self, ImguiContextAdmissionError> {
+        if self
+            .world()
+            .get_resource::<super::lifecycle::ImguiAppLifecycle>()
+            .is_some_and(super::lifecycle::ImguiAppLifecycle::is_terminal)
+        {
+            return Err(ImguiContextAdmissionError::new(
+                ImguiContextError::AppTerminated,
+                context,
+            ));
+        }
+        super::pass::install_pass_registry(self);
+        let lifecycle = super::pass::lifecycle(self.world());
+        if self.world().get_non_send::<ImguiContexts>().is_some() || lifecycle.registry_claimed() {
+            return Err(ImguiContextAdmissionError::new(
+                ImguiContextError::ContextRegistryAlreadyInstalled,
+                context,
+            ));
+        }
+        let primary_pass = super::pass::primary_pass(self);
+        self.insert_non_send(ImguiContexts::with_primary(
+            context,
+            primary_pass,
+            lifecycle,
+        ));
+        Ok(self)
+    }
+
+    fn add_imgui_systems<P, M>(
+        &mut self,
+        pass: &ImguiPass<P>,
+        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
+    ) -> &mut Self
     where
         P: 'static,
-        S: IntoSystem<ImguiFrame<'static, P>, (), M> + 'static,
-        M: 'static,
     {
-        super::pass::add_system::<P, _, M>(self, pass, system);
+        super::pass::add_systems(self, pass, systems);
+        self
+    }
+
+    fn configure_imgui_sets<P, M>(
+        &mut self,
+        pass: &ImguiPass<P>,
+        sets: impl IntoScheduleConfigs<InternedSystemSet, M>,
+    ) -> &mut Self
+    where
+        P: 'static,
+    {
+        super::pass::configure_sets(self, pass, sets);
         self
     }
 
     fn shutdown_imgui(&mut self) -> Result<(), ImguiShutdownError> {
+        if let Some(mut contexts) = self.world_mut().get_non_send_mut::<ImguiContexts>()
+            && let Err((context_id, reason)) = contexts.preflight_backend_detach()
+        {
+            return Err(ImguiShutdownError::ContextTeardownBlocked { context_id, reason });
+        }
+
+        self.init_resource::<super::lifecycle::ImguiAppLifecycle>();
+        self.world()
+            .resource::<super::lifecycle::ImguiAppLifecycle>()
+            .commit_terminal();
+
         #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
         let native_windows = crate::viewport::retire_native_viewport_windows(self.world_mut());
         let contexts = self.world_mut().remove_non_send::<ImguiContexts>();

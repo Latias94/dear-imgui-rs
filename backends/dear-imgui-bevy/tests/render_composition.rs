@@ -333,8 +333,14 @@ fn multiple_contexts_compose_in_route_order_on_one_camera() {
 
     let primary_pass = app.imgui_primary_pass();
     let secondary_pass = app.declare_imgui_pass::<SameCameraSecondaryPass>();
-    app.add_imgui_system(&primary_pass, draw_primary_context_fixture)
-        .add_imgui_system(&secondary_pass, draw_secondary_context_fixture);
+    app.add_imgui_systems(
+        &primary_pass,
+        primary_pass.system(draw_primary_context_fixture),
+    )
+    .add_imgui_systems(
+        &secondary_pass,
+        secondary_pass.system(draw_secondary_context_fixture),
+    );
 
     app.world_mut().spawn((
         Window {
@@ -354,7 +360,7 @@ fn multiple_contexts_compose_in_route_order_on_one_camera() {
             .expect("primary Context configuration must succeed");
 
         let secondary = contexts
-            .create(ImguiContextConfig::new(secondary_pass).with_docking(false))
+            .create(ImguiContextConfig::new(&secondary_pass).with_docking(false))
             .expect("secondary Context creation must succeed");
         contexts
             .configure(secondary, |context| {
@@ -438,7 +444,10 @@ fn render_ui_order(order: ImguiUiRenderOrder, expectation: CompositionExpectatio
     .add_observer(collect_readback);
 
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(&primary_pass, draw_composition_fixture::<ImguiPrimaryPass>);
+    app.add_imgui_systems(
+        &primary_pass,
+        primary_pass.system(draw_composition_fixture::<ImguiPrimaryPass>),
+    );
 
     app.world_mut().spawn((
         Window {
@@ -585,11 +594,14 @@ fn spawn_case(app: &mut App, kind: CameraKind, msaa: Msaa, hdr: bool) {
         entity.id()
     };
     let pass = app.declare_imgui_pass::<CompositionPass>();
-    app.add_imgui_system(&pass, draw_composition_fixture::<CompositionPass>);
+    app.add_imgui_systems(
+        &pass,
+        pass.system(draw_composition_fixture::<CompositionPass>),
+    );
     let context_id = {
         let mut contexts = app.world_mut().non_send_mut::<ImguiContexts>();
         let context_id = contexts
-            .create(ImguiContextConfig::new(pass).with_docking(false))
+            .create(ImguiContextConfig::new(&pass).with_docking(false))
             .expect("each composition camera needs an independently routed Context");
         contexts
             .configure(context_id, |context| {

@@ -3,8 +3,32 @@ use std::fmt;
 
 use dear_imgui_rs::{Context, ContextId, SuspendedContext};
 
-use super::ownership::{ContextOwner, ImguiContextRetirementSink};
+use super::lifecycle::ImguiAppLifecycle;
+use super::ownership::{
+    ContextOwner, ImguiContextRemovalPendingReason, ImguiContextRetirementSink,
+};
 use super::{ImguiPass, ImguiPrimaryPass, PassIdentity};
+
+/// Result of atomically selecting a new primary Context.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ImguiPrimaryChange {
+    previous: Option<ContextId>,
+    current: ContextId,
+}
+
+impl ImguiPrimaryChange {
+    /// Return the Context that was primary before the transaction.
+    #[must_use]
+    pub const fn previous(self) -> Option<ContextId> {
+        self.previous
+    }
+
+    /// Return the Context selected as primary by the transaction.
+    #[must_use]
+    pub const fn current(self) -> ContextId {
+        self.current
+    }
+}
 
 /// Per-Context lifecycle and private UI pass configuration.
 ///
@@ -21,7 +45,7 @@ pub struct ImguiContextConfig {
 impl ImguiContextConfig {
     /// Create an additional-Context configuration bound to an application-owned pass.
     #[must_use]
-    pub fn new<P: 'static>(pass: ImguiPass<P>) -> Self {
+    pub fn new<P: 'static>(pass: &ImguiPass<P>) -> Self {
         Self {
             pass: pass.identity(),
             docking: true,
@@ -61,7 +85,7 @@ impl ImguiContextConfig {
         self.multi_viewport
     }
 
-    pub(crate) fn primary(pass: ImguiPass<ImguiPrimaryPass>) -> Self {
+    pub(crate) fn primary(pass: &ImguiPass<ImguiPrimaryPass>) -> Self {
         Self {
             pass: pass.identity(),
             docking: true,
@@ -78,6 +102,10 @@ impl ImguiContextConfig {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ImguiContextError {
+    /// Explicit shutdown committed this App's terminal Dear ImGui lifecycle.
+    AppTerminated,
+    /// The App already owns a Context registry.
+    ContextRegistryAlreadyInstalled,
     /// No registered Context has this process identity.
     UnknownContext { context_id: ContextId },
     /// This exact core Context identity is already registered.
@@ -153,6 +181,11 @@ pub enum ImguiContextError {
 impl fmt::Display for ImguiContextError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::AppTerminated => formatter
+                .write_str("the Dear ImGui integration is terminal after explicit App shutdown"),
+            Self::ContextRegistryAlreadyInstalled => {
+                formatter.write_str("the Bevy App already owns a Dear ImGui Context registry")
+            }
             Self::UnknownContext { context_id } => {
                 write!(formatter, "unknown Dear ImGui Context {context_id:?}")
             }
@@ -343,6 +376,7 @@ pub(crate) struct ContextSlot {
 /// time before activating it, so running a private pass never overlaps a registry borrow with a
 /// live Dear ImGui `Ui`.
 pub struct ImguiContexts {
+    lifecycle: ImguiAppLifecycle,
     pass_registry_id: u64,
     primary: Option<ContextId>,
     slots: HashMap<ContextId, ContextSlot>,
@@ -353,11 +387,21 @@ pub struct ImguiContexts {
 }
 
 impl ImguiContexts {
-    /// Create a registry adopting `primary` as the primary Context.
-    #[must_use]
-    pub fn with_primary(primary: SuspendedContext, pass: ImguiPass<ImguiPrimaryPass>) -> Self {
+    pub(crate) fn with_primary(
+        primary: SuspendedContext,
+        pass: ImguiPass<ImguiPrimaryPass>,
+        lifecycle: ImguiAppLifecycle,
+    ) -> Self {
+        assert!(
+            !lifecycle.is_terminal(),
+            "the Dear ImGui App lifecycle is terminal"
+        );
+        assert!(
+            lifecycle.try_claim_registry(),
+            "the Bevy App already created its Dear ImGui Context registry"
+        );
         let primary_id = primary.id();
-        let config = ImguiContextConfig::primary(pass);
+        let config = ImguiContextConfig::primary(&pass);
         let pass = config.pass;
         let mut slots = HashMap::new();
         slots.insert(
@@ -371,6 +415,7 @@ impl ImguiContexts {
             },
         );
         Self {
+            lifecycle,
             pass_registry_id: pass.registry_id(),
             primary: Some(primary_id),
             slots,
@@ -384,18 +429,51 @@ impl ImguiContexts {
     /// Return the primary Context identity.
     #[must_use]
     pub fn primary_id(&self) -> Option<ContextId> {
-        self.primary
+        (!self.lifecycle.is_terminal())
+            .then_some(self.primary)
+            .flatten()
+    }
+
+    /// Select an existing idle Context as the primary input and fallback-window target.
+    ///
+    /// Pass ownership and per-Context docking or viewport configuration stay with each Context.
+    /// The registry changes `primary` only after every precondition succeeds.
+    pub fn promote_primary(
+        &mut self,
+        context_id: ContextId,
+    ) -> Result<ImguiPrimaryChange, ImguiContextError> {
+        self.ensure_active()?;
+        if let Some(active) = self.driving_context() {
+            return Err(ImguiContextError::RawMutationWhileFrameOpen { context_id: active });
+        }
+        let slot = self
+            .slots
+            .get(&context_id)
+            .ok_or(ImguiContextError::UnknownContext { context_id })?;
+        if slot.state != ContextSlotState::Ready {
+            return Err(ImguiContextError::TeardownInProgress { context_id });
+        }
+        let previous = self.primary.replace(context_id);
+        Ok(ImguiPrimaryChange {
+            previous,
+            current: context_id,
+        })
     }
 
     /// Iterate Context identities in deterministic drive order.
     pub fn ids(&self) -> impl ExactSizeIterator<Item = ContextId> + '_ {
-        self.order.iter().copied()
+        let order = if self.lifecycle.is_terminal() {
+            &self.order[0..0]
+        } else {
+            self.order.as_slice()
+        };
+        order.iter().copied()
     }
 
     /// Return whether this registry recognizes `context_id`.
     #[must_use]
     pub fn contains(&self, context_id: ContextId) -> bool {
-        self.slots.contains_key(&context_id)
+        !self.lifecycle.is_terminal() && self.slots.contains_key(&context_id)
     }
 
     /// Return a Context's latest completed frame index.
@@ -419,6 +497,7 @@ impl ImguiContexts {
 
     /// Create and insert an independent suspended Context.
     pub fn create(&mut self, config: ImguiContextConfig) -> Result<ContextId, ImguiContextError> {
+        self.ensure_active()?;
         if let Some(active) = self.driving_context() {
             return Err(ImguiContextError::RawMutationWhileFrameOpen { context_id: active });
         }
@@ -433,6 +512,9 @@ impl ImguiContexts {
         context: SuspendedContext,
         config: ImguiContextConfig,
     ) -> Result<ContextId, ImguiContextAdmissionError> {
+        if let Err(error) = self.ensure_active() {
+            return Err(ImguiContextAdmissionError::new(error, context));
+        }
         if let Some(active) = self.driving_context() {
             return Err(ImguiContextAdmissionError::new(
                 ImguiContextError::RawMutationWhileFrameOpen { context_id: active },
@@ -495,6 +577,31 @@ impl ImguiContexts {
         Ok(context_id)
     }
 
+    /// Admit a suspended Context and select it as primary in one transaction.
+    ///
+    /// The previous primary remains registered under its existing pass. If admission fails, the
+    /// registry is unchanged and the returned [`ImguiContextAdmissionError`] retains `context`.
+    pub fn replace_primary(
+        &mut self,
+        context: SuspendedContext,
+        config: ImguiContextConfig,
+    ) -> Result<ImguiPrimaryChange, ImguiContextAdmissionError> {
+        if let Err(error) = self.ensure_active() {
+            return Err(ImguiContextAdmissionError::new(error, context));
+        }
+        if let Some(active) = self.driving_context() {
+            return Err(ImguiContextAdmissionError::new(
+                ImguiContextError::RawMutationWhileFrameOpen { context_id: active },
+                context,
+            ));
+        }
+        let current = context.id();
+        let previous = self.primary;
+        self.insert_suspended(context, config)?;
+        self.primary = Some(current);
+        Ok(ImguiPrimaryChange { previous, current })
+    }
+
     /// Run an outside-frame configuration closure against one Context.
     ///
     /// A Context whose removal is pending remains configurable so the integration that changed an
@@ -505,6 +612,7 @@ impl ImguiContexts {
         context_id: ContextId,
         configure: impl FnOnce(&mut Context) -> T,
     ) -> Result<T, ImguiContextError> {
+        self.ensure_active()?;
         if let Some(active) = self.driving_context() {
             return Err(ImguiContextError::RawMutationWhileFrameOpen { context_id: active });
         }
@@ -532,6 +640,7 @@ impl ImguiContexts {
 
     /// Retry Context-local backend teardown and remove the Context when it is idle.
     pub fn remove(&mut self, context_id: ContextId) -> Result<SuspendedContext, ImguiContextError> {
+        self.ensure_active()?;
         if let Some(active) = self.driving_context() {
             return Err(ImguiContextError::RawMutationWhileFrameOpen { context_id: active });
         }
@@ -566,6 +675,33 @@ impl ImguiContexts {
             .into_suspended())
     }
 
+    /// Validate every registered Context before terminal shutdown commits world changes.
+    ///
+    /// The first failure is returned in deterministic drive order, but every Context is checked so
+    /// this phase remains a complete, side-effect-free transaction preflight.
+    pub(crate) fn preflight_backend_detach(
+        &mut self,
+    ) -> Result<(), (ContextId, ImguiContextRemovalPendingReason)> {
+        let mut first_failure = None;
+        for context_id in self.order.clone() {
+            let slot = self
+                .slots
+                .get_mut(&context_id)
+                .expect("drive order must reference a registered Context");
+            debug_assert_ne!(slot.state, ContextSlotState::Driving);
+            let owner = slot
+                .owner
+                .as_mut()
+                .expect("shutdown preflight requires idle Context owners");
+            if let Err(reason) = owner.preflight_backend_detach()
+                && first_failure.is_none()
+            {
+                first_failure = Some((context_id, reason));
+            }
+        }
+        first_failure.map_or(Ok(()), Err)
+    }
+
     #[cfg(feature = "render")]
     pub(crate) fn is_tearing_down(&self, context_id: ContextId) -> bool {
         self.slots
@@ -574,6 +710,9 @@ impl ImguiContexts {
     }
 
     pub(crate) fn drive_order(&self) -> Vec<ContextId> {
+        if self.lifecycle.is_terminal() {
+            return Vec::new();
+        }
         self.order.clone()
     }
 
@@ -583,6 +722,9 @@ impl ImguiContexts {
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     pub(crate) fn native_viewport_context_ids(&self) -> Vec<ContextId> {
+        if self.lifecycle.is_terminal() {
+            return Vec::new();
+        }
         self.order
             .iter()
             .copied()
@@ -602,10 +744,19 @@ impl ImguiContexts {
         })
     }
 
+    fn ensure_active(&self) -> Result<(), ImguiContextError> {
+        if self.lifecycle.is_terminal() {
+            Err(ImguiContextError::AppTerminated)
+        } else {
+            Ok(())
+        }
+    }
+
     pub(crate) fn take_for_drive(
         &mut self,
         context_id: ContextId,
     ) -> Result<(ContextOwner, ImguiContextConfig, u64), ImguiContextError> {
+        self.ensure_active()?;
         let slot = self
             .slots
             .get_mut(&context_id)
@@ -739,6 +890,7 @@ impl ImguiContexts {
         &mut self,
         backend: super::ownership::BackendAttachment,
     ) -> Result<(), ImguiContextError> {
+        self.ensure_active()?;
         if let Some(active) = self.driving_context() {
             return Err(ImguiContextError::RawMutationWhileFrameOpen { context_id: active });
         }

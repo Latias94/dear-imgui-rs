@@ -4,7 +4,7 @@ use std::{cell::Cell, rc::Rc};
 use crate::test_util::imgui_context_guard;
 #[cfg(feature = "render")]
 use bevy_app::Main;
-use bevy_app::{App, Update};
+use bevy_app::{App, Last, PostUpdate, PreUpdate, Update};
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::{ScheduleLabel, Schedules};
 #[cfg(feature = "render")]
@@ -68,6 +68,22 @@ struct PassSystemSemantics {
 
 #[derive(Resource, Default)]
 struct TrackedPassResource;
+
+#[derive(Resource, Default)]
+struct ConfiguredPassTrace(Vec<&'static str>);
+
+#[derive(Component)]
+struct ConfiguredPassDeferredEntity;
+
+#[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum ConfiguredPassSet {
+    Produce,
+    Observe,
+    Final,
+}
+
+#[derive(Resource, Default)]
+struct MainScheduleTrace(Vec<&'static str>);
 
 #[cfg(feature = "render")]
 struct RetirementProbeMarker;
@@ -142,7 +158,7 @@ fn reject_raw_mutation_during_ui(
         Err(ImguiContextError::RawMutationWhileFrameOpen { .. })
     );
     let create_rejected = matches!(
-        contexts.create(ImguiContextConfig::new(*missing_pass)),
+        contexts.create(ImguiContextConfig::new(&missing_pass)),
         Err(ImguiContextError::RawMutationWhileFrameOpen { .. })
     );
     let removal_rejected = matches!(
@@ -213,6 +229,48 @@ fn exercise_pass_system_semantics(
     commands.spawn(DeferredPassEntity(frame.frame_index()));
 }
 
+fn produce_deferred_entity(
+    _frame: ImguiFrame<'_>,
+    mut commands: Commands,
+    mut trace: ResMut<ConfiguredPassTrace>,
+) {
+    trace.0.push("produce");
+    commands.spawn(ConfiguredPassDeferredEntity);
+}
+
+fn observe_deferred_entity(
+    _frame: ImguiFrame<'_>,
+    entities: Query<(), With<ConfiguredPassDeferredEntity>>,
+    mut trace: ResMut<ConfiguredPassTrace>,
+) {
+    assert_eq!(entities.iter().count(), 1);
+    trace.0.push("observe");
+}
+
+fn finish_configured_pass(_frame: ImguiFrame<'_>, mut trace: ResMut<ConfiguredPassTrace>) {
+    trace.0.push("final");
+}
+
+fn trace_update(mut trace: ResMut<MainScheduleTrace>) {
+    trace.0.push("update");
+}
+
+fn trace_pre_update(mut trace: ResMut<MainScheduleTrace>) {
+    trace.0.push("pre_update");
+}
+
+fn trace_post_update(mut trace: ResMut<MainScheduleTrace>) {
+    trace.0.push("post_update");
+}
+
+fn trace_last(mut trace: ResMut<MainScheduleTrace>) {
+    trace.0.push("last");
+}
+
+fn trace_imgui(_frame: ImguiFrame<'_>, mut trace: ResMut<MainScheduleTrace>) {
+    trace.0.push("imgui");
+}
+
 #[test]
 fn private_context_pass_does_not_collide_with_update() {
     let _guard = imgui_context_guard();
@@ -221,11 +279,11 @@ fn private_context_pass_does_not_collide_with_update() {
     app.init_resource::<ScheduleNamespaceTrace>()
         .add_systems(Update, record_update_schedule)
         .add_plugins(ImguiPlugin::default());
-    app.add_imgui_system(&pass, record_update_named_ui_pass);
+    app.add_imgui_systems(&pass, pass.system(record_update_named_ui_pass));
 
     app.world_mut()
         .non_send_mut::<ImguiContexts>()
-        .create(ImguiContextConfig::new(pass))
+        .create(ImguiContextConfig::new(&pass))
         .unwrap();
 
     app.update();
@@ -244,13 +302,13 @@ fn public_schedule_can_nest_without_obtaining_another_context_frame() {
     app.init_resource::<NestedScheduleTrace>()
         .add_systems(Update, record_nested_update)
         .add_plugins(ImguiPlugin::default());
-    app.add_imgui_system(&pass_a, attempt_nested_schedules);
-    app.add_imgui_system(&pass_b, record_nested_context_b);
+    app.add_imgui_systems(&pass_a, pass_a.system(attempt_nested_schedules));
+    app.add_imgui_systems(&pass_b, pass_b.system(record_nested_context_b));
 
     let context_b = {
         let mut contexts = app.world_mut().non_send_mut::<ImguiContexts>();
-        contexts.create(ImguiContextConfig::new(pass_a)).unwrap();
-        contexts.create(ImguiContextConfig::new(pass_b)).unwrap()
+        contexts.create(ImguiContextConfig::new(&pass_a)).unwrap();
+        contexts.create(ImguiContextConfig::new(&pass_b)).unwrap()
     };
 
     app.update();
@@ -270,7 +328,7 @@ fn dynamic_public_schedule_registration_does_not_expose_imgui_frame() {
     app.init_resource::<DynamicScheduleTrace>()
         .add_plugins(ImguiPlugin::default());
     let primary = app.imgui_primary_pass();
-    app.add_imgui_system(&primary, register_and_run_dynamic_schedule);
+    app.add_imgui_systems(&primary, primary.system(register_and_run_dynamic_schedule));
 
     app.update();
 
@@ -290,7 +348,7 @@ fn private_pass_preserves_commands_local_state_and_change_detection() {
         .init_resource::<TrackedPassResource>()
         .add_plugins(ImguiPlugin::default());
     let primary = app.imgui_primary_pass();
-    app.add_imgui_system(&primary, exercise_pass_system_semantics);
+    app.add_imgui_systems(&primary, primary.system(exercise_pass_system_semantics));
 
     app.update();
     app.update();
@@ -312,6 +370,87 @@ fn private_pass_preserves_commands_local_state_and_change_detection() {
 }
 
 #[test]
+fn private_pass_preserves_bevy_system_configs_and_intermediate_deferred_barriers() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+    app.init_resource::<ConfiguredPassTrace>()
+        .add_plugins(ImguiPlugin::default());
+    let pass = app.imgui_primary_pass();
+    app.configure_imgui_sets(
+        &pass,
+        (
+            ConfiguredPassSet::Produce,
+            ConfiguredPassSet::Observe,
+            ConfiguredPassSet::Final,
+        ),
+    );
+    app.add_imgui_systems(
+        &pass,
+        (
+            pass.system(produce_deferred_entity)
+                .in_set(ConfiguredPassSet::Produce),
+            pass.system(observe_deferred_entity)
+                .in_set(ConfiguredPassSet::Observe),
+        )
+            .chain()
+            .run_if(|| true)
+            .before(ConfiguredPassSet::Final),
+    );
+    app.add_imgui_systems(
+        &pass,
+        pass.system(finish_configured_pass)
+            .in_set(ConfiguredPassSet::Final)
+            .after(ConfiguredPassSet::Observe),
+    );
+
+    app.update();
+
+    assert_eq!(
+        app.world().resource::<ConfiguredPassTrace>().0,
+        ["produce", "observe", "final"]
+    );
+}
+
+#[test]
+fn driver_defaults_after_pre_update_and_supports_an_explicit_main_schedule_anchor() {
+    let _guard = imgui_context_guard();
+    let mut default_app = app_with_primary_window();
+    default_app
+        .init_resource::<MainScheduleTrace>()
+        .add_systems(PreUpdate, trace_pre_update)
+        .add_systems(Update, trace_update)
+        .add_systems(PostUpdate, trace_post_update)
+        .add_systems(Last, trace_last)
+        .add_plugins(ImguiPlugin::default());
+    let default_pass = default_app.imgui_primary_pass();
+    default_app.add_imgui_systems(&default_pass, default_pass.system(trace_imgui));
+
+    default_app.update();
+
+    assert_eq!(
+        default_app.world().resource::<MainScheduleTrace>().0,
+        ["pre_update", "imgui", "update", "post_update", "last"]
+    );
+
+    let mut anchored_app = app_with_primary_window();
+    anchored_app
+        .init_resource::<MainScheduleTrace>()
+        .add_systems(Update, trace_update)
+        .add_plugins(ImguiPlugin::new(
+            crate::ImguiPluginConfig::default().with_driver_after(Update),
+        ));
+    let anchored_pass = anchored_app.imgui_primary_pass();
+    anchored_app.add_imgui_systems(&anchored_pass, anchored_pass.system(trace_imgui));
+
+    anchored_app.update();
+
+    assert_eq!(
+        anchored_app.world().resource::<MainScheduleTrace>().0,
+        ["update", "imgui"]
+    );
+}
+
+#[test]
 fn explicit_headless_shutdown_is_terminal_and_idempotent() {
     let _guard = imgui_context_guard();
     let mut app = app_with_primary_window();
@@ -324,6 +463,137 @@ fn explicit_headless_shutdown_is_terminal_and_idempotent() {
 }
 
 #[test]
+fn terminal_shutdown_invalidates_retained_registries_and_rejects_app_scoped_readmission() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+    app.add_plugins(ImguiPlugin::default());
+    let primary = app
+        .world()
+        .get_non_send::<ImguiContexts>()
+        .unwrap()
+        .primary_id()
+        .unwrap();
+    let mut retained = app.world_mut().remove_non_send::<ImguiContexts>().unwrap();
+
+    app.shutdown_imgui().unwrap();
+
+    assert_eq!(retained.primary_id(), None);
+    assert_eq!(retained.ids().len(), 0);
+    assert!(matches!(
+        retained.configure(primary, |_| ()),
+        Err(ImguiContextError::AppTerminated)
+    ));
+    let rejected = dear_imgui_rs::SuspendedContext::create();
+    let rejected_id = rejected.id();
+    let error = match app.adopt_imgui_primary_context(rejected) {
+        Err(error) => error,
+        Ok(_) => panic!("a terminal App must reject a replacement registry"),
+    };
+    assert!(matches!(error.error(), ImguiContextError::AppTerminated));
+    assert_eq!(error.into_context().id(), rejected_id);
+
+    app.insert_non_send(retained);
+    app.shutdown_imgui()
+        .expect("terminal retry must still retire a retained inert registry");
+}
+
+#[test]
+fn shutdown_before_plugin_installation_still_closes_context_admission() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+
+    app.shutdown_imgui().unwrap();
+
+    let rejected = dear_imgui_rs::SuspendedContext::create();
+    let rejected_id = rejected.id();
+    let error = match app.adopt_imgui_primary_context(rejected) {
+        Err(error) => error,
+        Ok(_) => panic!("explicit shutdown must permanently close Context admission"),
+    };
+    assert!(matches!(error.error(), ImguiContextError::AppTerminated));
+    assert_eq!(error.into_context().id(), rejected_id);
+}
+
+#[test]
+fn removing_the_registry_does_not_open_a_second_context_admission() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+    app.add_plugins(ImguiPlugin::default());
+    let retained = app.world_mut().remove_non_send::<ImguiContexts>().unwrap();
+
+    let rejected = dear_imgui_rs::SuspendedContext::create();
+    let rejected_id = rejected.id();
+    let error = match app.adopt_imgui_primary_context(rejected) {
+        Err(error) => error,
+        Ok(_) => panic!("an App must never own two Context registries"),
+    };
+    assert!(matches!(
+        error.error(),
+        ImguiContextError::ContextRegistryAlreadyInstalled
+    ));
+    assert_eq!(error.into_context().id(), rejected_id);
+
+    app.insert_non_send(retained);
+    app.shutdown_imgui().unwrap();
+}
+
+#[test]
+fn primary_promotion_and_replacement_are_transactional() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+    let pass_a = app.declare_imgui_pass::<ContextPassA>();
+    let pass_b = app.declare_imgui_pass::<ContextPassB>();
+    app.add_plugins(ImguiPlugin::default());
+    let (initial_primary, context_a) = {
+        let mut contexts = app.world_mut().non_send_mut::<ImguiContexts>();
+        let initial_primary = contexts.primary_id().unwrap();
+        let context_a = contexts.create(ImguiContextConfig::new(&pass_a)).unwrap();
+        (initial_primary, context_a)
+    };
+
+    let promoted = app
+        .world_mut()
+        .non_send_mut::<ImguiContexts>()
+        .promote_primary(context_a)
+        .unwrap();
+    assert_eq!(promoted.previous(), Some(initial_primary));
+    assert_eq!(promoted.current(), context_a);
+
+    let duplicate = dear_imgui_rs::SuspendedContext::create();
+    let duplicate_id = duplicate.id();
+    let duplicate_error = app
+        .world_mut()
+        .non_send_mut::<ImguiContexts>()
+        .replace_primary(duplicate, ImguiContextConfig::new(&pass_a))
+        .expect_err("duplicate pass admission must leave the promoted primary unchanged");
+    assert!(matches!(
+        duplicate_error.error(),
+        ImguiContextError::DuplicatePass { owner, .. } if *owner == context_a
+    ));
+    assert_eq!(duplicate_error.into_context().id(), duplicate_id);
+    assert_eq!(
+        app.world().non_send::<ImguiContexts>().primary_id(),
+        Some(context_a)
+    );
+
+    let replacement = dear_imgui_rs::SuspendedContext::create();
+    let replacement_id = replacement.id();
+    let replaced = app
+        .world_mut()
+        .non_send_mut::<ImguiContexts>()
+        .replace_primary(replacement, ImguiContextConfig::new(&pass_b))
+        .unwrap();
+    assert_eq!(replaced.previous(), Some(context_a));
+    assert_eq!(replaced.current(), replacement_id);
+    let contexts = app.world().non_send::<ImguiContexts>();
+    assert_eq!(contexts.primary_id(), Some(replacement_id));
+    assert_eq!(
+        contexts.ids().collect::<Vec<_>>(),
+        [initial_primary, context_a, replacement_id]
+    );
+}
+
+#[test]
 fn primary_and_two_additional_contexts_run_in_stable_order_with_independent_frames() {
     let _guard = imgui_context_guard();
     let mut app = app_with_primary_window();
@@ -332,15 +602,18 @@ fn primary_and_two_additional_contexts_run_in_stable_order_with_independent_fram
     app.init_resource::<LifecycleTrace>()
         .add_plugins(ImguiPlugin::default());
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(&primary_pass, record_ui::<ImguiPrimaryPass>);
-    app.add_imgui_system(&pass_a, record_ui::<ContextPassA>);
-    app.add_imgui_system(&pass_b, record_ui::<ContextPassB>);
+    app.add_imgui_systems(
+        &primary_pass,
+        primary_pass.system(record_ui::<ImguiPrimaryPass>),
+    );
+    app.add_imgui_systems(&pass_a, pass_a.system(record_ui::<ContextPassA>));
+    app.add_imgui_systems(&pass_b, pass_b.system(record_ui::<ContextPassB>));
 
     let (primary, context_a, context_b, expected_raw) = {
         let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
         let primary = contexts.primary_id().unwrap();
-        let context_a = contexts.create(ImguiContextConfig::new(pass_a)).unwrap();
-        let context_b = contexts.create(ImguiContextConfig::new(pass_b)).unwrap();
+        let context_a = contexts.create(ImguiContextConfig::new(&pass_a)).unwrap();
+        let context_b = contexts.create(ImguiContextConfig::new(&pass_b)).unwrap();
         let mut expected_raw = Vec::new();
         for context_id in [primary, context_a, context_b, primary] {
             let raw = contexts
@@ -405,16 +678,16 @@ fn distinct_passes_with_the_same_brand_drive_independent_contexts() {
     let second_pass = app.declare_imgui_pass::<ContextPassA>();
     app.init_resource::<LifecycleTrace>()
         .add_plugins(ImguiPlugin::default());
-    app.add_imgui_system(&first_pass, record_ui::<ContextPassA>);
-    app.add_imgui_system(&second_pass, record_ui::<ContextPassA>);
+    app.add_imgui_systems(&first_pass, first_pass.system(record_ui::<ContextPassA>));
+    app.add_imgui_systems(&second_pass, second_pass.system(record_ui::<ContextPassA>));
 
     let (first, second) = {
         let mut contexts = app.world_mut().non_send_mut::<ImguiContexts>();
         let first = contexts
-            .create(ImguiContextConfig::new(first_pass))
+            .create(ImguiContextConfig::new(&first_pass))
             .unwrap();
         let second = contexts
-            .create(ImguiContextConfig::new(second_pass))
+            .create(ImguiContextConfig::new(&second_pass))
             .unwrap();
         (first, second)
     };
@@ -443,7 +716,7 @@ fn primary_pass_receives_bevy_time_and_logical_window_metrics() {
         .init_resource::<LifecycleTrace>()
         .add_plugins(ImguiPlugin::default());
     let primary = app.imgui_primary_pass();
-    app.add_imgui_system(&primary, capture_primary_metrics);
+    app.add_imgui_systems(&primary, primary.system(capture_primary_metrics));
 
     app.update();
 
@@ -464,7 +737,7 @@ fn primary_pass_sanitizes_invalid_window_metrics_before_begin_frame() {
     app.init_resource::<LifecycleTrace>()
         .add_plugins(ImguiPlugin::default());
     let primary = app.imgui_primary_pass();
-    app.add_imgui_system(&primary, capture_primary_metrics);
+    app.add_imgui_systems(&primary, primary.system(capture_primary_metrics));
 
     app.update();
 
@@ -484,13 +757,16 @@ fn any_live_ui_blocks_raw_mutation_of_every_registered_context() {
     app.init_resource::<LifecycleTrace>()
         .add_plugins(ImguiPlugin::default());
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(&primary_pass, reject_raw_mutation_during_ui);
-    app.add_imgui_system(&pass_a, record_ui::<ContextPassA>);
+    app.add_imgui_systems(
+        &primary_pass,
+        primary_pass.system(reject_raw_mutation_during_ui),
+    );
+    app.add_imgui_systems(&pass_a, pass_a.system(record_ui::<ContextPassA>));
 
     let (primary, context_a) = {
         let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
         let primary = contexts.primary_id().unwrap();
-        let context_a = contexts.create(ImguiContextConfig::new(pass_a)).unwrap();
+        let context_a = contexts.create(ImguiContextConfig::new(&pass_a)).unwrap();
         (primary, context_a)
     };
     app.world_mut().resource_mut::<LifecycleTrace>().expected = vec![primary, context_a];
@@ -513,14 +789,18 @@ fn duplicate_pass_and_stale_context_errors_are_typed_and_recover_ownership() {
     let mut app = App::new();
     let primary_pass = app.imgui_primary_pass();
     let pass_a = app.declare_imgui_pass::<ContextPassA>();
-    let mut contexts =
-        ImguiContexts::with_primary(dear_imgui_rs::SuspendedContext::create(), primary_pass);
-    let context_a = contexts.create(ImguiContextConfig::new(pass_a)).unwrap();
+    let lifecycle = crate::context::pass::lifecycle(app.world());
+    let mut contexts = ImguiContexts::with_primary(
+        dear_imgui_rs::SuspendedContext::create(),
+        primary_pass,
+        lifecycle,
+    );
+    let context_a = contexts.create(ImguiContextConfig::new(&pass_a)).unwrap();
     let rejected = dear_imgui_rs::SuspendedContext::create();
     let rejected_id = rejected.id();
 
     let error = contexts
-        .insert_suspended(rejected, ImguiContextConfig::new(pass_a))
+        .insert_suspended(rejected, ImguiContextConfig::new(&pass_a))
         .expect_err("duplicate pass ownership must be rejected");
     assert!(matches!(
         error.error(),
@@ -544,13 +824,17 @@ fn pass_from_another_app_is_rejected_without_consuming_the_context() {
     let foreign_pass = foreign_app.declare_imgui_pass::<ContextPassA>();
     let mut owner_app = App::new();
     let primary_pass = owner_app.imgui_primary_pass();
-    let mut contexts =
-        ImguiContexts::with_primary(dear_imgui_rs::SuspendedContext::create(), primary_pass);
+    let lifecycle = crate::context::pass::lifecycle(owner_app.world());
+    let mut contexts = ImguiContexts::with_primary(
+        dear_imgui_rs::SuspendedContext::create(),
+        primary_pass,
+        lifecycle,
+    );
     let rejected = dear_imgui_rs::SuspendedContext::create();
     let rejected_id = rejected.id();
 
     let error = contexts
-        .insert_suspended(rejected, ImguiContextConfig::new(foreign_pass))
+        .insert_suspended(rejected, ImguiContextConfig::new(&foreign_pass))
         .expect_err("a pass declared by another App must be rejected");
 
     assert!(matches!(
@@ -567,15 +851,19 @@ fn additional_multi_viewport_config_can_be_registered_before_backend_attachment(
     let mut app = App::new();
     let primary_pass = app.imgui_primary_pass();
     let pass_a = app.declare_imgui_pass::<ContextPassA>();
-    let mut contexts =
-        ImguiContexts::with_primary(dear_imgui_rs::SuspendedContext::create(), primary_pass);
+    let lifecycle = crate::context::pass::lifecycle(app.world());
+    let mut contexts = ImguiContexts::with_primary(
+        dear_imgui_rs::SuspendedContext::create(),
+        primary_pass,
+        lifecycle,
+    );
     let additional = dear_imgui_rs::SuspendedContext::create();
     let additional_id = additional.id();
 
     let admitted = contexts
         .insert_suspended(
             additional,
-            ImguiContextConfig::new(pass_a).with_multi_viewport(true),
+            ImguiContextConfig::new(&pass_a).with_multi_viewport(true),
         )
         .expect("multi-viewport configuration should be retained until backend attachment");
 
@@ -605,7 +893,7 @@ fn attached_backend_rejects_unavailable_native_multi_viewport_without_consuming_
         .non_send_mut::<ImguiContexts>()
         .insert_suspended(
             additional,
-            ImguiContextConfig::new(pass_a).with_multi_viewport(true),
+            ImguiContextConfig::new(&pass_a).with_multi_viewport(true),
         )
         .expect_err("a build without native viewport support must reject the request");
 
@@ -631,17 +919,23 @@ fn empty_pass_is_context_local_and_does_not_stop_later_contexts() {
     app.init_resource::<LifecycleTrace>()
         .add_plugins(ImguiPlugin::default());
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(&primary_pass, record_ui::<ImguiPrimaryPass>);
-    app.add_imgui_system(&healthy_pass, record_ui::<ContextPassB>);
+    app.add_imgui_systems(
+        &primary_pass,
+        primary_pass.system(record_ui::<ImguiPrimaryPass>),
+    );
+    app.add_imgui_systems(
+        &healthy_pass,
+        healthy_pass.system(record_ui::<ContextPassB>),
+    );
 
     let (primary, missing, healthy) = {
         let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
         let primary = contexts.primary_id().unwrap();
         let missing = contexts
-            .create(ImguiContextConfig::new(empty_pass))
+            .create(ImguiContextConfig::new(&empty_pass))
             .unwrap();
         let healthy = contexts
-            .create(ImguiContextConfig::new(healthy_pass))
+            .create(ImguiContextConfig::new(&healthy_pass))
             .unwrap();
         (primary, missing, healthy)
     };
@@ -682,7 +976,7 @@ fn pass_panic_reinserts_the_private_runner_and_restores_context_ownership() {
         .init_resource::<LifecycleTrace>()
         .add_plugins(ImguiPlugin::default());
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(&primary_pass, panic_once);
+    app.add_imgui_systems(&primary_pass, primary_pass.system(panic_once));
     let primary = app
         .world()
         .get_non_send::<ImguiContexts>()
@@ -732,7 +1026,10 @@ fn primary_without_a_window_does_not_advance_or_replay_a_frame() {
     app.init_resource::<LifecycleTrace>()
         .add_plugins(ImguiPlugin::default());
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(&primary_pass, record_ui::<ImguiPrimaryPass>);
+    app.add_imgui_systems(
+        &primary_pass,
+        primary_pass.system(record_ui::<ImguiPrimaryPass>),
+    );
     let primary = app
         .world()
         .get_non_send::<ImguiContexts>()
@@ -760,12 +1057,12 @@ fn removing_the_primary_context_does_not_stop_an_additional_context() {
     let pass_a = app.declare_imgui_pass::<ContextPassA>();
     app.init_resource::<LifecycleTrace>()
         .add_plugins(ImguiPlugin::default());
-    app.add_imgui_system(&pass_a, record_ui::<ContextPassA>);
+    app.add_imgui_systems(&pass_a, pass_a.system(record_ui::<ContextPassA>));
 
     let (primary, additional) = {
         let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
         let primary = contexts.primary_id().unwrap();
-        let additional = contexts.create(ImguiContextConfig::new(pass_a)).unwrap();
+        let additional = contexts.create(ImguiContextConfig::new(&pass_a)).unwrap();
         (primary, additional)
     };
     app.world_mut().resource_mut::<LifecycleTrace>().expected = vec![additional];
@@ -796,14 +1093,17 @@ fn context_removal_abandons_unextracted_snapshot_without_pausing_another_context
         .init_resource::<LifecycleTrace>()
         .add_plugins(ImguiPlugin::default());
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(&primary_pass, record_ui::<ImguiPrimaryPass>);
-    app.add_imgui_system(&pass_a, record_ui::<ContextPassA>);
+    app.add_imgui_systems(
+        &primary_pass,
+        primary_pass.system(record_ui::<ImguiPrimaryPass>),
+    );
+    app.add_imgui_systems(&pass_a, pass_a.system(record_ui::<ContextPassA>));
     app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
 
     let (context_a, context_b) = {
         let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
         let context_a = contexts.primary_id().unwrap();
-        let context_b = contexts.create(ImguiContextConfig::new(pass_a)).unwrap();
+        let context_b = contexts.create(ImguiContextConfig::new(&pass_a)).unwrap();
         (context_a, context_b)
     };
     app.world_mut().resource_mut::<LifecycleTrace>().expected = vec![context_a, context_b];
@@ -910,7 +1210,10 @@ fn removed_registry_retires_a_context_with_an_unextracted_snapshot() {
         .init_resource::<LifecycleTrace>()
         .add_plugins(ImguiPlugin::default());
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(&primary_pass, record_ui::<ImguiPrimaryPass>);
+    app.add_imgui_systems(
+        &primary_pass,
+        primary_pass.system(record_ui::<ImguiPrimaryPass>),
+    );
     app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
 
     let context_id = app

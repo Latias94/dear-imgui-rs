@@ -2295,6 +2295,27 @@ pub(crate) fn platform_callback_ownership(
     })
 }
 
+/// Validate the complete platform callback contract without latching a runtime fault or revoking
+/// native viewport capabilities.
+///
+/// Terminal shutdown uses this before it changes either Context ownership or native window
+/// mappings, so callers can repair an ownership drift and retry the same transaction.
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+pub(crate) fn preflight_platform_callback_ownership(
+    context: &imgui::Context,
+    keepalive: &ImguiViewportBridgeKeepalive,
+) -> Result<(), ImguiViewportCallbackOwnershipError> {
+    let binding = context.binding();
+    binding.with_bound_context(|| {
+        validate_platform_contract_raw(
+            context.as_raw(),
+            unsafe { sys::igGetMainViewport() },
+            keepalive,
+        )
+        .and_then(|()| validate_hidden_callback_contract_raw(context.as_raw()))
+    })
+}
+
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(crate) fn platform_callback_error(
     keepalive: &ImguiViewportBridgeKeepalive,

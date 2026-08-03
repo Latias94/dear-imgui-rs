@@ -359,7 +359,7 @@ mod tests {
                 .unwrap();
             let context_a = contexts.primary_id().unwrap();
             let context_b = contexts
-                .create(crate::ImguiContextConfig::new(recovery_pass))
+                .create(crate::ImguiContextConfig::new(&recovery_pass))
                 .unwrap();
             for context_id in [context_a, context_b] {
                 contexts

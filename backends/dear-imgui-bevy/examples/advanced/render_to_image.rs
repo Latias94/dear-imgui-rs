@@ -52,9 +52,9 @@ fn main() {
     .add_systems(Update, (close_on_escape, resize_render_target));
     let primary_pass = app.imgui_primary_pass();
     let offscreen_pass = app.declare_imgui_pass::<OffscreenContextPass>();
-    app.insert_resource(offscreen_pass)
-        .add_imgui_system(&primary_pass, primary_ui)
-        .add_imgui_system(&offscreen_pass, offscreen_ui)
+    app.insert_resource(offscreen_pass.clone())
+        .add_imgui_systems(&primary_pass, primary_pass.system(primary_ui))
+        .add_imgui_systems(&offscreen_pass, offscreen_pass.system(offscreen_ui))
         .run();
 }
 
@@ -67,7 +67,7 @@ fn setup(
     offscreen_pass: Res<ImguiPass<OffscreenContextPass>>,
 ) -> Result {
     let offscreen_context =
-        contexts.create(ImguiContextConfig::new(*offscreen_pass).with_docking(false))?;
+        contexts.create(ImguiContextConfig::new(&offscreen_pass).with_docking(false))?;
 
     let mut image = Image::new_target_texture(
         INITIAL_TARGET_SIZE.x,

@@ -150,7 +150,8 @@ fn main() {
         (close_on_escape, animate_scene, apply_composition_settings),
     );
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(&primary_pass, composition_ui).run();
+    app.add_imgui_systems(&primary_pass, primary_pass.system(composition_ui))
+        .run();
 }
 
 fn setup(mut commands: Commands) {

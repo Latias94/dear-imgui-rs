@@ -31,6 +31,7 @@
 use bevy_app::{App, Plugin};
 use bevy_ecs::prelude::World;
 use bevy_ecs::resource::Resource;
+use bevy_ecs::schedule::ScheduleLabel;
 #[cfg(feature = "render")]
 use std::ffi::c_void;
 use std::{
@@ -122,12 +123,22 @@ impl Plugin for ImguiPlugin {
             .unwrap_or_else(|error| panic!("invalid Dear ImGui viewport window policy: {error}"));
         super::pass::install_pass_registry(app);
         let primary_pass = super::pass::primary_pass(app);
+        let lifecycle = super::pass::lifecycle(app.world());
         if app.world().get_non_send::<ImguiContexts>().is_none() {
+            assert!(
+                !lifecycle.registry_claimed(),
+                "ImguiContexts was removed after installation; reinsert the original registry or shut the App down"
+            );
             app.insert_non_send(ImguiContexts::with_primary(
                 dear_imgui_rs::SuspendedContext::create(),
                 primary_pass,
+                lifecycle,
             ));
         } else {
+            assert!(
+                lifecycle.registry_claimed(),
+                "ImguiContexts exists without the App lifecycle ownership claim"
+            );
             let registry_id = super::pass::registry_id(app.world());
             assert_eq!(
                 app.world()
@@ -138,7 +149,7 @@ impl Plugin for ImguiPlugin {
                 "ImguiContexts was created with pass handles from another App"
             );
         }
-        schedule::install_imgui_schedules(app);
+        schedule::install_imgui_schedules(app, self.config.driver_schedule());
         #[cfg(feature = "render")]
         route::install_route_resolution(app);
         input::install_input_mapping(app);
@@ -210,6 +221,7 @@ pub struct ImguiPluginConfig {
     docking: bool,
     multi_viewport: bool,
     viewport_window: ImguiViewportWindowConfig,
+    driver_schedule: schedule::ImguiDriverSchedulePlacement,
 }
 
 impl ImguiPluginConfig {
@@ -253,6 +265,26 @@ impl ImguiPluginConfig {
     pub const fn viewport_window(&self) -> &ImguiViewportWindowConfig {
         &self.viewport_window
     }
+
+    /// Run the serial Context driver immediately before `anchor` in Bevy's main schedule order.
+    #[must_use]
+    pub fn with_driver_before(mut self, anchor: impl ScheduleLabel) -> Self {
+        self.driver_schedule = schedule::ImguiDriverSchedulePlacement::before(anchor);
+        self
+    }
+
+    /// Run the serial Context driver immediately after `anchor` in Bevy's main schedule order.
+    #[must_use]
+    pub fn with_driver_after(mut self, anchor: impl ScheduleLabel) -> Self {
+        self.driver_schedule = schedule::ImguiDriverSchedulePlacement::after(anchor);
+        self
+    }
+
+    /// Return the configured main-schedule placement of the serial Context driver.
+    #[must_use]
+    pub const fn driver_schedule(&self) -> schedule::ImguiDriverSchedulePlacement {
+        self.driver_schedule
+    }
 }
 
 impl Default for ImguiPluginConfig {
@@ -261,6 +293,7 @@ impl Default for ImguiPluginConfig {
             docking: true,
             multi_viewport: false,
             viewport_window: ImguiViewportWindowConfig::default(),
+            driver_schedule: schedule::ImguiDriverSchedulePlacement::default(),
         }
     }
 }
@@ -1196,6 +1229,50 @@ impl ContextOwner {
             })
     }
 
+    /// Validate every backend-owned field needed by teardown without starting either renderer or
+    /// viewport release. Shutdown runs this for every registered Context before committing any
+    /// irreversible world changes.
+    pub(crate) fn preflight_backend_detach(
+        &mut self,
+    ) -> Result<(), ImguiContextRemovalPendingReason> {
+        if self.context.is_none() {
+            return Ok(());
+        }
+
+        #[cfg(any(
+            feature = "render",
+            all(feature = "multi-viewport", not(target_arch = "wasm32"))
+        ))]
+        {
+            #[cfg(feature = "render")]
+            let renderer_ownership = &self.backend_ownership;
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            let viewport_keepalive = self.viewport_bridge.attached_keepalive().cloned();
+
+            return self
+                .context
+                .as_mut()
+                .expect("Context owner must retain its suspended Context")
+                .try_with_active(|context| {
+                    #[cfg(feature = "render")]
+                    validate_renderer_teardown_ownership(context, renderer_ownership)
+                        .map_err(ImguiContextRemovalPendingReason::RendererOwnership)?;
+                    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+                    if let Some(keepalive) = viewport_keepalive.as_ref() {
+                        viewport::preflight_platform_callback_ownership(context, keepalive)
+                            .map_err(ImguiContextRemovalPendingReason::ViewportCallbackOwnership)?;
+                    }
+                    Ok(())
+                });
+        }
+
+        #[cfg(not(any(
+            feature = "render",
+            all(feature = "multi-viewport", not(target_arch = "wasm32"))
+        )))]
+        Ok(())
+    }
+
     pub(crate) fn try_detach_backend(&mut self) -> Result<(), ImguiContextRemovalPendingReason> {
         if self.context.is_none() {
             return Ok(());
@@ -1505,19 +1582,28 @@ fn preflight_renderer_teardown_ownership(
     context: &dear_imgui_rs::Context,
     ownership: &mut ImguiBackendOwnership,
 ) -> Result<(), ImguiRendererOwnershipError> {
-    let Some(expected) = ownership.renderer_contract else {
+    let result = validate_renderer_teardown_ownership(context, ownership);
+    if result.is_ok() {
         ownership.renderer_fault = None;
+    }
+    result
+}
+
+#[cfg(feature = "render")]
+fn validate_renderer_teardown_ownership(
+    context: &dear_imgui_rs::Context,
+    ownership: &ImguiBackendOwnership,
+) -> Result<(), ImguiRendererOwnershipError> {
+    let Some(expected) = ownership.renderer_contract else {
         return Ok(());
     };
     let actual = ImguiRendererRuntimeContract::capture(context);
     let Some(error) = expected.first_drift(actual) else {
-        ownership.renderer_fault = None;
         return Ok(());
     };
     if expected.retains_any_identity(actual) {
         return Err(ownership.renderer_fault.unwrap_or(error));
     }
-    ownership.renderer_fault = None;
     Ok(())
 }
 
@@ -2077,7 +2163,8 @@ mod retirement_tests {
 
     fn primary_config() -> ImguiContextConfig {
         let mut app = App::new();
-        ImguiContextConfig::primary(crate::context::pass::primary_pass(&mut app))
+        let pass = crate::context::pass::primary_pass(&mut app);
+        ImguiContextConfig::primary(&pass)
     }
 
     #[test]

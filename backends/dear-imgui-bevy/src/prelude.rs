@@ -2,7 +2,7 @@
 
 pub use crate::context::{
     ImguiAppExt, ImguiContextAdmissionError, ImguiContextConfig, ImguiContextError, ImguiContexts,
-    ImguiFrame, ImguiPass, ImguiPrimaryPass, ImguiShutdownError,
+    ImguiFrame, ImguiPass, ImguiPrimaryChange, ImguiPrimaryPass, ImguiShutdownError, ImguiSystem,
 };
 pub use crate::input::{
     ImguiInputCapture, ImguiInputCaptureState, ImguiInputSystems,
@@ -16,7 +16,7 @@ pub use crate::viewport::{
     ImguiViewportCamera, ImguiViewportId, ImguiViewportWindow, ImguiViewportWindowConfig,
     ImguiViewportWindowConfigError,
 };
-pub use crate::{ContextId, ImguiPlugin, ImguiPluginConfig};
+pub use crate::{ContextId, ImguiDriverSchedulePlacement, ImguiPlugin, ImguiPluginConfig};
 
 #[cfg(feature = "render")]
 pub use crate::ImguiRenderSystems;

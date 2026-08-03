@@ -10,13 +10,13 @@ The backend owns Dear ImGui Contexts on Bevy's main thread, routes Bevy window i
 | --- | --- |
 | Rust | `1.95.0` or newer |
 | Bevy | exactly `0.19.0` |
-| dear-imgui-rs | `0.16.0-alpha.1` |
+| dear-imgui-rs | `0.16.0-alpha.2` |
 
 `dear-imgui-bevy` defaults to the renderer plus deterministic Bevy UI ordering. Native multi-viewport is supported through an explicit feature and runtime opt-in. WASM supports the normal and headless feature sets but cannot create native platform windows.
 
 ## Installation
 
-Until `0.16.0-alpha.1` is published:
+Until `0.16.0-alpha.2` is published:
 
 ```toml
 [dependencies]
@@ -30,14 +30,14 @@ After publication:
 ```toml
 [dependencies]
 bevy = "=0.19.0"
-dear-imgui-bevy = "=0.16.0-alpha.1"
-dear-imgui-rs = "=0.16.0-alpha.1"
+dear-imgui-bevy = "=0.16.0-alpha.2"
+dear-imgui-rs = "=0.16.0-alpha.2"
 ```
 
 For a headless integration that drives private UI passes without installing the Bevy renderer:
 
 ```toml
-dear-imgui-bevy = { version = "=0.16.0-alpha.1", default-features = false }
+dear-imgui-bevy = { version = "=0.16.0-alpha.2", default-features = false }
 ```
 
 ## Quick Start
@@ -56,7 +56,8 @@ fn main() {
             commands.spawn(Camera2d);
         });
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(&primary_pass, tools_ui).run();
+    app.add_imgui_systems(&primary_pass, primary_pass.system(tools_ui))
+        .run();
 }
 
 fn tools_ui(frame: ImguiFrame<'_>) {
@@ -66,7 +67,7 @@ fn tools_ui(frame: ImguiFrame<'_>) {
 }
 ```
 
-The plugin opens and closes each frame around a private, runner-owned pass. UI systems borrow the active frame through `ImguiFrame<'_, P>` and can only be registered through `ImguiAppExt::add_imgui_system`; they must not call `Context::frame()` or `Context::render()` themselves.
+The plugin opens and closes each frame around a private, runner-owned pass. UI systems borrow the active frame through `ImguiFrame<'_, P>` and must not call `Context::frame()` or `Context::render()` themselves. Bind each UI function with `pass.system(...)`, then register it through `ImguiAppExt::add_imgui_systems`.
 
 ## Feature Modes
 
@@ -93,6 +94,8 @@ The plugin opens and closes each frame around a private, runner-owned pass. UI s
 | `ImguiViewportWindow { viewport_id }`, `ImguiViewportCamera { viewport_id }`, direct field access, or `.copied()` marker queries | Query markers by reference and call `context_id()` / `viewport_id()`. The backend exclusively creates and repairs these identity projections. |
 | Public begin/end schedules, renderer resources, or viewport queue access | Let the plugin drive frames; order custom passes through `ImguiRenderSystems` and observe only public route, diagnostic, capture, texture, and viewport identity/configuration types. |
 | Reusing an application schedule for an additional Context | Declare an `ImguiPass<P>` and register typed frame systems through `ImguiAppExt`; the private runner cannot be invoked as an application schedule. |
+| Single-system `add_imgui_system` registration | Bind systems with `pass.system(...)`, then pass normal Bevy system configs to `add_imgui_systems`; tuples, `chain`, `before`, `after`, `run_if`, and system sets retain Bevy semantics. |
+| Constructing `ImguiContexts::with_primary` and inserting it manually | Call `app.adopt_imgui_primary_context(context)` before adding `ImguiPlugin`; the App-scoped lifecycle prevents registry reconstruction after terminal shutdown. |
 | Wrapper extraction through `into_inner()` | Call `ImguiContexts::remove`, continue updating while it returns `RemovalPending`, and take the returned `SuspendedContext` after both worlds acknowledge release. |
 
 ## Integration Model
@@ -108,7 +111,7 @@ fn create_inspector(
     pass: Res<ImguiPass<InspectorPass>>,
     mut contexts: NonSendMut<ImguiContexts>,
 ) -> Result {
-    contexts.create(ImguiContextConfig::new(*pass))?;
+    contexts.create(ImguiContextConfig::new(&pass))?;
     Ok(())
 }
 
@@ -117,12 +120,20 @@ fn inspector_ui(frame: ImguiFrame<'_, InspectorPass>) {
 }
 
 let inspector_pass = app.declare_imgui_pass::<InspectorPass>();
-app.insert_resource(inspector_pass)
+app.insert_resource(inspector_pass.clone())
     .add_systems(Startup, create_inspector)
-    .add_imgui_system(&inspector_pass, inspector_ui);
+    .add_imgui_systems(&inspector_pass, inspector_pass.system(inspector_ui));
 ```
 
-Each `declare_imgui_pass::<P>()` call creates a distinct runtime pass, even when `P` is the same type. Keep and reuse the exact handle for both `ImguiContextConfig::new` and `add_imgui_system`. The type parameter prevents accidental cross-brand registration, while the private runtime identity prevents two Contexts of one brand from sharing a runner. A normal Bevy schedule such as `Update`, or a standalone `Schedule`, cannot accept `ImguiFrame`; only the private driver can construct it. Use `frame.context_id()` when a system needs its active Context identity, and use `contexts.configure(context_id, |context| ...)` only outside an active frame for font, ini, style, or other Context configuration.
+Each `declare_imgui_pass::<P>()` call creates a distinct runtime pass, even when `P` is the same type. The handle is `Clone`, not `Copy`; keep the exact handle for `ImguiContextConfig::new(&pass)`, `pass.system(...)`, and `add_imgui_systems`. The type parameter prevents accidental cross-brand registration, while the private runtime identity prevents two Contexts of one brand from sharing a runner. A raw frame-input function cannot be added to a normal Bevy schedule; only the private driver can supply its `ImguiFrame`. A bound system registered elsewhere fails closed before accessing `Ui`, including in a render sub-app or on another thread. Use `frame.context_id()` when a system needs its active Context identity, and use `contexts.configure(context_id, |context| ...)` only outside an active frame for font, ini, style, or other Context configuration.
+
+`add_imgui_systems` and `configure_imgui_sets` forward Bevy's native `SystemConfigs` and set configs into the private pass schedule. Chained systems receive Bevy's normal intermediate `ApplyDeferred` barriers, so commands from one UI system can be observed by the next system in the chain.
+
+The serial Context driver runs immediately after `PreUpdate` by default. Bevy input is mapped before Dear ImGui opens its frame, while gameplay systems in `Update` can observe the current UI output and capture state. Use `ImguiPluginConfig::with_driver_before(label)` or `with_driver_after(label)` when an application instead needs UI to observe a later gameplay, transform, camera, or route update. A custom anchor must already be present in Bevy's `MainScheduleOrder` when `ImguiPlugin` is added.
+
+`ImguiContexts::promote_primary(context_id)` selects an existing idle Context as the primary input and fallback-window target. `replace_primary(context, config)` first admits a new Context and changes the primary pointer only after admission succeeds; the previous primary remains registered for explicit asynchronous removal. Neither operation silently moves pass ownership, docking settings, or native viewport ownership between Contexts.
+
+An App claims its `ImguiContexts` registry exactly once. Temporarily removing that non-send value from the World does not reopen admission; reinsert the same value before continuing or call terminal shutdown. This prevents two registries from sharing one set of private passes and backend resources.
 
 ### Fonts
 
@@ -204,7 +215,9 @@ A strong lease retains the image asset. The final lease drop withdraws the mappi
 
 `ImguiContexts::remove` starts Context-local retirement. It returns `ImguiContextError::RemovalPending` while native window entities or render-world resources are still releasing; keep updating the app and retry. Other Contexts continue framing during that wait.
 
-For terminal app teardown, call `app.shutdown_imgui()` through `ImguiAppExt`. It removes the registry and pumps only the private ImGui driver and Bevy render sub-app until renderer and viewport acknowledgements converge; it does not run user `Update` systems. The call is idempotent and the app must not run Dear ImGui systems after it succeeds.
+For terminal app teardown, call `app.shutdown_imgui()` through `ImguiAppExt`. It removes the registry and pumps only the private ImGui driver and Bevy render sub-app until renderer and viewport acknowledgements converge; it does not run user `Update` systems. The call is idempotent. Once teardown commits, the shared App lifecycle is permanently terminal: retained registry values become inert, and the App rejects new passes or `adopt_imgui_primary_context` calls.
+
+Shutdown first validates renderer and viewport callback ownership for every registered Context. `ImguiShutdownError::ContextTeardownBlocked { context_id, reason }` leaves the Context registry and native viewport mappings intact; restore the conflicting field through `ImguiContexts::configure` and retry the same shutdown call.
 
 Ordinary `Drop` synchronously releases Contexts whose backend state is already detachable. If another Bevy world still owns renderer or viewport resources, the complete Context owner is retained fail-closed instead of invalidating native callback pointers. Embedded hosts, tests, and hot-reload integrations should therefore use explicit shutdown before dropping the `App`.
 

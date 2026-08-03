@@ -65,7 +65,7 @@ fn main() {
     .add_systems(Startup, setup_scene)
     .add_systems(Update, close_on_escape);
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(&primary_pass, ecosystem_ui);
+    app.add_imgui_systems(&primary_pass, primary_pass.system(ecosystem_ui));
     install_ecosystem_contexts(&mut app);
     app.run();
 }

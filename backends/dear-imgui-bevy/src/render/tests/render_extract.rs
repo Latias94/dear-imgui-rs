@@ -70,11 +70,14 @@ fn configure_primary<T>(app: &mut App, configure: impl FnOnce(&mut imgui::Contex
 
 fn add_secondary_context(app: &mut App) -> imgui::ContextId {
     let secondary_pass = app.declare_imgui_pass::<SecondaryContextPass>();
-    app.add_imgui_system(&secondary_pass, draw_secondary_legacy_texture);
+    app.add_imgui_systems(
+        &secondary_pass,
+        secondary_pass.system(draw_secondary_legacy_texture),
+    );
     let secondary_id = app
         .world_mut()
         .non_send_mut::<ImguiContexts>()
-        .create(ImguiContextConfig::new(secondary_pass))
+        .create(ImguiContextConfig::new(&secondary_pass))
         .expect("the secondary Context should be admitted");
     app.world_mut()
         .non_send_mut::<ImguiContexts>()
@@ -273,7 +276,7 @@ fn draw_secondary_legacy_texture(frame: ImguiFrame<'_, SecondaryContextPass>) {
 
 fn add_primary_legacy_draw_system(app: &mut App) {
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(&primary_pass, draw_legacy_texture);
+    app.add_imgui_systems(&primary_pass, primary_pass.system(draw_legacy_texture));
 }
 
 #[test]
@@ -282,7 +285,7 @@ fn render_extract_moves_context_owned_managed_frame_and_commits_once() {
     let (mut app, primary_window, camera, texture_id) = app_with_primary_window();
     let context_id = primary_context_id(&app);
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(&primary_pass, draw_managed_texture);
+    app.add_imgui_systems(&primary_pass, primary_pass.system(draw_managed_texture));
 
     app.update();
 
@@ -1209,28 +1212,30 @@ fn renderer_prepare_routes_secondary_viewport_and_rejects_relocated_camera_marke
 
     app.init_resource::<SecondaryViewportRouteState>();
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(
+    app.add_imgui_systems(
         &primary_pass,
-        move |frame: ImguiFrame<'_>, mut route: ResMut<SecondaryViewportRouteState>| {
-            let ui = frame.ui();
-            let main_viewport_id = ui.main_viewport().id();
-            ui.set_next_window_viewport(main_viewport_id);
-            ui.window("Primary route proof")
-                .position([8.0, 8.0], imgui::Condition::Always)
-                .size([160.0, 80.0], imgui::Condition::Always)
-                .flags(imgui::WindowFlags::NO_DOCKING)
-                .build(|| {
-                    ui.text("primary viewport");
-                });
-            ui.window("Secondary route proof")
-                .position([32.0, 32.0], imgui::Condition::Always)
-                .size([160.0, 80.0], imgui::Condition::Always)
-                .flags(imgui::WindowFlags::NO_DOCKING)
-                .build(|| {
-                    ui.text("secondary viewport");
-                    route.viewport_id = Some(ui.window_viewport().id());
-                });
-        },
+        primary_pass.system(
+            move |frame: ImguiFrame<'_>, mut route: ResMut<SecondaryViewportRouteState>| {
+                let ui = frame.ui();
+                let main_viewport_id = ui.main_viewport().id();
+                ui.set_next_window_viewport(main_viewport_id);
+                ui.window("Primary route proof")
+                    .position([8.0, 8.0], imgui::Condition::Always)
+                    .size([160.0, 80.0], imgui::Condition::Always)
+                    .flags(imgui::WindowFlags::NO_DOCKING)
+                    .build(|| {
+                        ui.text("primary viewport");
+                    });
+                ui.window("Secondary route proof")
+                    .position([32.0, 32.0], imgui::Condition::Always)
+                    .size([160.0, 80.0], imgui::Condition::Always)
+                    .flags(imgui::WindowFlags::NO_DOCKING)
+                    .build(|| {
+                        ui.text("secondary viewport");
+                        route.viewport_id = Some(ui.window_viewport().id());
+                    });
+            },
+        ),
     );
 
     app.update();

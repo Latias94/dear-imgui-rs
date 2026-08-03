@@ -74,7 +74,8 @@ fn main() {
     .add_systems(Startup, setup)
     .add_systems(Update, (close_on_escape, animate_scene));
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(&primary_pass, editor_ui).run();
+    app.add_imgui_systems(&primary_pass, primary_pass.system(editor_ui))
+        .run();
 }
 
 fn setup(

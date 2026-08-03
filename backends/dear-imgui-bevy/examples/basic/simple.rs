@@ -34,7 +34,8 @@ fn main() {
     .add_systems(Startup, setup)
     .add_systems(Update, close_on_escape);
     let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_system(&primary_pass, simple_ui).run();
+    app.add_imgui_systems(&primary_pass, primary_pass.system(simple_ui))
+        .run();
 }
 
 fn setup(mut commands: Commands) {

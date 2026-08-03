@@ -59,9 +59,9 @@ fn main() {
     );
     let primary_pass = app.imgui_primary_pass();
     let secondary_pass = app.declare_imgui_pass::<SecondaryContextPass>();
-    app.insert_resource(secondary_pass)
-        .add_imgui_system(&primary_pass, primary_ui)
-        .add_imgui_system(&secondary_pass, secondary_ui)
+    app.insert_resource(secondary_pass.clone())
+        .add_imgui_systems(&primary_pass, primary_pass.system(primary_ui))
+        .add_imgui_systems(&secondary_pass, secondary_pass.system(secondary_ui))
         .run();
 }
 
@@ -74,7 +74,7 @@ fn setup(
         .primary_id()
         .ok_or("ImguiPlugin should install a primary Context before Startup")?;
     let secondary_context =
-        contexts.create(ImguiContextConfig::new(*secondary_pass).with_docking(false))?;
+        contexts.create(ImguiContextConfig::new(&secondary_pass).with_docking(false))?;
 
     let primary_camera = commands
         .spawn((
