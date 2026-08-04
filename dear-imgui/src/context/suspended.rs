@@ -47,17 +47,26 @@ impl SuspendedContext {
 
     /// Runs a closure while this suspended Context is active.
     ///
-    /// Any previously current Context is restored before this method returns. An open frame left
-    /// behind when the closure returns `Err` or panics is ended before propagating that outcome.
+    /// No other Context or Context binding scope may be active. This makes the closure's
+    /// `&mut Context` the only safe live Context owner in the process, so it cannot be exchanged
+    /// with another owner while native `GImGui` points at it. An open frame left behind when the
+    /// closure returns `Err` or panics is ended before propagating that outcome.
     ///
     /// # Panics
     ///
-    /// Resumes any panic raised by the closure with its original payload. This method also panics
-    /// after ending the frame if the closure returns `Ok` while a Dear ImGui frame is still open.
+    /// Panics before calling the closure if another Context or Context binding scope is active.
+    /// Suspend the current Context before entering this scope. This method also resumes any panic
+    /// raised by the closure with its original payload, and panics after ending the frame if the
+    /// closure returns `Ok` while a Dear ImGui frame is still open.
     pub fn try_with_active<T, E>(
         &mut self,
         f: impl FnOnce(&mut Context) -> Result<T, E>,
     ) -> Result<T, E> {
+        let _guard = CTX_MUTEX.lock();
+        assert!(
+            !bound_context_scope_active() && no_current_context(),
+            "SuspendedContext::try_with_active() requires no active Context or Context binding scope; suspend the current Context first"
+        );
         let expected_id = self.0.id();
         let expected_raw = self.0.raw;
         let binding = self.0.binding();
@@ -65,16 +74,8 @@ impl SuspendedContext {
             .try_with_bound_context_guarded(|bound| {
                 let result = panic::catch_unwind(AssertUnwindSafe(|| f(&mut self.0)));
 
+                debug_assert!(bound.previous_context().is_null());
                 if self.0.id() != expected_id || self.0.raw != expected_raw {
-                    if !bound.previous_context().is_null()
-                        && self.0.raw == bound.previous_context()
-                        && bound.previous_context() != expected_raw
-                    {
-                        // The closure moved the previous active owner into this suspended wrapper.
-                        // Its final native current Context now describes the owners it left behind;
-                        // restoring either captured pointer could reactivate a suspended owner.
-                        bound.preserve_current_context();
-                    }
                     if let Err(payload) = result {
                         panic::resume_unwind(payload);
                     }

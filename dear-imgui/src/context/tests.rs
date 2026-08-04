@@ -947,42 +947,37 @@ fn suspended_context_identity_and_activation_without_a_foreign_context_are_stabl
 }
 
 #[test]
-fn suspended_context_activation_restores_a_foreign_context_for_all_outcomes() {
+fn suspended_context_activation_rejects_a_foreign_context_before_the_closure() {
     let _guard = crate::test_support::imgui_context_guard();
     let active = Context::create();
     let active_raw = active.as_raw();
+    let active_id = active.id();
     let mut suspended = super::SuspendedContext::create();
     let suspended_raw = suspended.0.as_raw();
-
-    let value = suspended
-        .try_with_active(|context| {
-            assert_eq!(context.as_raw(), suspended_raw);
-            assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, suspended_raw);
-            Ok::<_, &'static str>(17)
-        })
-        .expect("successful scoped activation must return its value");
-    assert_eq!(value, 17);
-    assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, active_raw);
-
-    let error = suspended.try_with_active(|context| {
-        assert_eq!(context.as_raw(), suspended_raw);
-        Err::<(), _>("expected error")
-    });
-    assert_eq!(error, Err("expected error"));
-    assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, active_raw);
+    let suspended_id = suspended.id();
+    let closure_called = std::cell::Cell::new(false);
 
     let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = suspended.try_with_active::<(), ()>(|context| {
-            assert_eq!(context.as_raw(), suspended_raw);
-            std::panic::panic_any(0xA11CE_u32);
+        let _ = suspended.try_with_active::<(), ()>(|_| {
+            closure_called.set(true);
+            Ok(())
         });
-    }))
-    .expect_err("closure panic must propagate");
-    assert_eq!(panic.downcast_ref::<u32>(), Some(&0xA11CE));
+    }));
+    assert!(panic.is_err());
+    assert!(!closure_called.get());
     assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, active_raw);
+    assert_eq!(active.id(), active_id);
+    assert_eq!(suspended.id(), suspended_id);
+    assert_eq!(suspended.0.as_raw(), suspended_raw);
 
-    drop(suspended);
     drop(active);
+    suspended
+        .try_with_active(|context| {
+            assert_eq!(context.as_raw(), suspended_raw);
+            Ok::<_, ()>(())
+        })
+        .expect("activation must succeed after the current Context is dropped");
+    drop(suspended);
 }
 
 #[test]
@@ -1014,8 +1009,6 @@ fn suspended_context_error_closes_an_open_frame_and_can_reenter() {
 #[test]
 fn suspended_context_success_rejects_and_closes_an_open_frame() {
     let _guard = crate::test_support::imgui_context_guard();
-    let active = Context::create();
-    let active_raw = active.as_raw();
     let mut suspended = super::SuspendedContext::create();
 
     let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1030,7 +1023,7 @@ fn suspended_context_success_rejects_and_closes_an_open_frame() {
     }));
 
     assert!(panic.is_err());
-    assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, active_raw);
+    assert!(unsafe { crate::sys::igGetCurrentContext() }.is_null());
     suspended
         .try_with_active(|context| {
             assert_ne!(
@@ -1042,7 +1035,6 @@ fn suspended_context_success_rejects_and_closes_an_open_frame() {
         .expect("a contract-violation cleanup must leave the Context reusable");
 
     drop(suspended);
-    drop(active);
 }
 
 #[test]
@@ -1075,49 +1067,46 @@ fn suspended_context_panic_closes_an_open_frame_and_preserves_the_payload() {
 }
 
 #[test]
-fn nested_suspended_context_activation_restores_each_owner() {
+fn nested_suspended_context_activation_is_rejected_before_the_inner_closure() {
     let _guard = crate::test_support::imgui_context_guard();
-    let active = Context::create();
-    let active_raw = active.as_raw();
     let mut suspended_a = super::SuspendedContext::create();
     let raw_a = suspended_a.0.as_raw();
     let mut suspended_b = super::SuspendedContext::create();
     let raw_b = suspended_b.0.as_raw();
+    let inner_called = std::cell::Cell::new(false);
 
     suspended_a
         .try_with_active(|context_a| {
             assert_eq!(context_a.as_raw(), raw_a);
             assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_a);
 
-            suspended_b
-                .try_with_active(|context_b| {
+            let _panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = suspended_b.try_with_active::<(), ()>(|context_b| {
+                    inner_called.set(true);
                     assert_eq!(context_b.as_raw(), raw_b);
-                    assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_b);
-                    Ok::<_, ()>(())
-                })
-                .expect("nested Context activation must succeed");
-            assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_a);
-
-            let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = suspended_b.try_with_active::<(), ()>(|_| {
-                    std::panic::panic_any(0xB_u32);
+                    Ok(())
                 });
             }))
-            .expect_err("nested panic must propagate");
-            assert_eq!(panic.downcast_ref::<u32>(), Some(&0xB));
+            .expect_err("nested activation must be rejected");
+            assert!(!inner_called.get());
             assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_a);
             Ok::<_, ()>(())
         })
         .expect("outer Context activation must remain valid");
 
-    assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, active_raw);
+    assert!(unsafe { crate::sys::igGetCurrentContext() }.is_null());
+    suspended_b
+        .try_with_active(|context_b| {
+            assert_eq!(context_b.as_raw(), raw_b);
+            Ok::<_, ()>(())
+        })
+        .expect("the rejected nested scope must leave its Context reusable");
     drop(suspended_b);
     drop(suspended_a);
-    drop(active);
 }
 
 #[test]
-fn suspended_context_rejects_owner_swaps_without_corrupting_type_state() {
+fn suspended_context_rejects_a_potential_owner_swap_before_the_closure() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut active = Context::create();
     let original_active_id = active.id();
@@ -1125,93 +1114,34 @@ fn suspended_context_rejects_owner_swaps_without_corrupting_type_state() {
     let mut suspended = super::SuspendedContext::create();
     let original_suspended_id = suspended.id();
     let original_suspended_raw = suspended.0.as_raw();
+    let swap_attempted = std::cell::Cell::new(false);
 
     let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _ = suspended.try_with_active::<(), ()>(|context| {
+            swap_attempted.set(true);
             std::mem::swap(context, &mut active);
             Ok(())
         });
     }));
     assert!(panic.is_err());
+    assert!(!swap_attempted.get());
 
-    assert_eq!(active.id(), original_suspended_id);
-    assert_eq!(active.as_raw(), original_suspended_raw);
-    assert_eq!(suspended.id(), original_active_id);
-    assert_eq!(suspended.0.as_raw(), original_active_raw);
-    assert_eq!(
-        unsafe { crate::sys::igGetCurrentContext() },
-        original_suspended_raw
-    );
-    assert_eq!(
-        active.frame_lifecycle_state(),
-        super::FrameLifecycleState::Idle
-    );
-
-    let swapped_out = active.suspend();
-    let restored = suspended
-        .activate()
-        .expect("the original active Context must now be safely suspended");
-    assert_eq!(restored.id(), original_active_id);
+    assert_eq!(active.id(), original_active_id);
+    assert_eq!(active.as_raw(), original_active_raw);
+    assert_eq!(suspended.id(), original_suspended_id);
+    assert_eq!(suspended.0.as_raw(), original_suspended_raw);
     assert_eq!(
         unsafe { crate::sys::igGetCurrentContext() },
         original_active_raw
     );
-    drop(restored);
-    drop(swapped_out);
-}
 
-#[test]
-fn suspended_context_owner_swap_preserves_a_suspended_native_target() {
-    let _guard = crate::test_support::imgui_context_guard();
-    let active = Context::create();
-    let original_active_id = active.id();
-    let original_active_raw = active.as_raw();
-    let mut active = Some(active);
-    let mut suspended = super::SuspendedContext::create();
-    let original_suspended_id = suspended.id();
-    let original_suspended_raw = suspended.0.as_raw();
-    let mut swapped_out = None;
-
-    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = suspended.try_with_active::<(), ()>(|context| {
-            std::mem::swap(
-                context,
-                active
-                    .as_mut()
-                    .expect("the previous active Context must still be owned"),
-            );
-            swapped_out = Some(
-                active
-                    .take()
-                    .expect("the target Context must move out exactly once")
-                    .suspend(),
-            );
-            Ok(())
-        });
-    }));
-    assert!(panic.is_err());
-    assert!(active.is_none());
-    assert!(unsafe { crate::sys::igGetCurrentContext() }.is_null());
-    assert_eq!(suspended.id(), original_active_id);
-    assert_eq!(suspended.0.as_raw(), original_active_raw);
-
-    let restored_active = suspended
-        .activate()
-        .expect("the previous active Context must remain suspended");
-    assert_eq!(restored_active.id(), original_active_id);
-    let suspended_active = restored_active.suspend();
-
-    let restored_target = swapped_out
-        .take()
-        .expect("the swapped target must remain owned")
-        .activate()
-        .expect("the target Context must remain suspended");
-    assert_eq!(restored_target.id(), original_suspended_id);
-    assert_eq!(restored_target.as_raw(), original_suspended_raw);
-    let suspended_target = restored_target.suspend();
-
-    drop(suspended_target);
-    drop(suspended_active);
+    drop(active);
+    suspended
+        .try_with_active(|context| {
+            assert_eq!(context.id(), original_suspended_id);
+            Ok::<_, ()>(())
+        })
+        .expect("the rejected swap must leave the suspended Context reusable");
 }
 
 #[test]

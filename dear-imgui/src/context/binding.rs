@@ -483,10 +483,6 @@ impl RawBoundContextGuard {
     pub(crate) fn previous_context(&self) -> *mut sys::ImGuiContext {
         self.previous
     }
-
-    pub(crate) fn preserve_current_context(&mut self) {
-        self.restore = false;
-    }
 }
 
 impl Drop for RawBoundContextGuard {
