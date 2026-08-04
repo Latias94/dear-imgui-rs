@@ -346,7 +346,13 @@ fn callback_panic_and_reentry_are_deferred_to_rust_entry() {
     let _guard = super::test_context_guard();
     let mut context = Context::create();
     let _platform = attach_test_platform(&mut context);
-    let runtime = OwningViewportRuntime::attach_for_test(&mut context).unwrap();
+    let mut runtime = OwningViewportRuntime::attach_for_test(&mut context).unwrap();
+
+    runtime.trigger_reentrant_entry_for_test();
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(AshViewportError::CallbackReentered { .. })
+    ));
 
     runtime.panic_next_callback_for_test();
     unsafe { renderer_render_window_sys(std::ptr::null_mut(), std::ptr::null_mut()) };
@@ -356,12 +362,23 @@ fn callback_panic_and_reentry_are_deferred_to_rust_entry() {
             callback: "Renderer_RenderWindow"
         })
     ));
+    assert_eq!(runtime.state_for_test(), RuntimeState::ShuttingDown);
+    assert!(
+        !context
+            .io()
+            .backend_flags()
+            .contains(BackendFlags::RENDERER_HAS_VIEWPORTS)
+    );
 
-    runtime.trigger_reentrant_entry_for_test();
+    // Destroy is a cleanup entry and remains callable after a terminal callback fault.
+    unsafe { renderer_destroy_window_sys(std::ptr::null_mut()) };
     assert!(matches!(
         runtime.poll_fault(),
-        Err(AshViewportError::CallbackReentered { .. })
+        Err(AshViewportError::InvalidCallbackArgument {
+            callback: "Renderer_DestroyWindow"
+        })
     ));
+    runtime.shutdown(&mut context).unwrap();
 }
 
 #[test]

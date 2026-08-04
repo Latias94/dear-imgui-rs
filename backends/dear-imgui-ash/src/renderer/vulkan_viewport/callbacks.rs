@@ -248,6 +248,15 @@ fn clear_renderer_viewport_capability_if_owned(control: &RuntimeControl, platfor
     }
 }
 
+pub(super) fn revoke_renderer_viewport_capability_if_owned(control: &RuntimeControl) {
+    let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
+    if platform_io.is_null() {
+        return;
+    }
+    let platform_io = unsafe { PlatformIo::from_raw(platform_io) };
+    clear_renderer_viewport_capability_if_owned(control, platform_io);
+}
+
 pub(super) fn release_callbacks(control: &RuntimeControl) -> Result<(), AshViewportError> {
     if control.callback_released() {
         return Ok(());
@@ -1160,7 +1169,7 @@ unsafe fn renderer_swap_buffers(
     })
 }
 
-fn run_callback(
+fn run_work_callback(
     callback_name: &'static str,
     callback: impl FnOnce(&RuntimeControl) -> Result<(), AshViewportError>,
 ) {
@@ -1191,7 +1200,44 @@ fn run_callback(
     match result {
         Ok(Some(Err(error))) => control.record_fault(error),
         Ok(Some(Ok(()))) | Ok(None) => {}
-        Err(_) => control.record_fault(AshViewportError::CallbackPanicked {
+        Err(_) => control.record_runtime_contract_fault(AshViewportError::CallbackPanicked {
+            callback: callback_name,
+        }),
+    }
+}
+
+fn run_cleanup_callback(
+    callback_name: &'static str,
+    callback: impl FnOnce(&RuntimeControl) -> Result<(), AshViewportError>,
+) {
+    let Some(control) = runtime_for_context(current_context()) else {
+        return;
+    };
+    if !control.is_cleanup_callback_accessible() {
+        return;
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        control
+            .binding()
+            .try_with_bound_context(|| {
+                if control.should_validate_runtime_contract() {
+                    detect_runtime_contract_drift(&control);
+                }
+                if control.is_cleanup_callback_accessible() {
+                    #[cfg(test)]
+                    control.maybe_panic_callback_for_test();
+                    Some(callback(&control))
+                } else {
+                    None
+                }
+            })
+            .ok()
+            .flatten()
+    }));
+    match result {
+        Ok(Some(Err(error))) => control.record_fault(error),
+        Ok(Some(Ok(()))) | Ok(None) => {}
+        Err(_) => control.record_runtime_contract_fault(AshViewportError::CallbackPanicked {
             callback: callback_name,
         }),
     }
@@ -1199,20 +1245,20 @@ fn run_callback(
 
 #[cfg(test)]
 pub(super) unsafe extern "C" fn renderer_probe_runtime_sys() {
-    run_callback(
+    run_work_callback(
         "Renderer_Probe",
         RuntimeControl::probe_renderer_storage_for_test,
     );
 }
 
 pub unsafe extern "C" fn renderer_create_window_sys(viewport: *mut sys::ImGuiViewport) {
-    run_callback("Renderer_CreateWindow", |control| unsafe {
+    run_work_callback("Renderer_CreateWindow", |control| unsafe {
         renderer_create_window(control, viewport.cast())
     });
 }
 
 pub unsafe extern "C" fn renderer_destroy_window_sys(viewport: *mut sys::ImGuiViewport) {
-    run_callback("Renderer_DestroyWindow", |control| unsafe {
+    run_cleanup_callback("Renderer_DestroyWindow", |control| unsafe {
         renderer_destroy_window(control, viewport.cast())
     });
 }
@@ -1221,7 +1267,7 @@ pub unsafe extern "C" fn renderer_set_window_size_sys(
     viewport: *mut sys::ImGuiViewport,
     size: *const sys::ImVec2,
 ) {
-    run_callback("Renderer_SetWindowSize", |control| {
+    run_work_callback("Renderer_SetWindowSize", |control| {
         if size.is_null() {
             return Err(AshViewportError::InvalidCallbackArgument {
                 callback: "Renderer_SetWindowSize",
@@ -1235,7 +1281,7 @@ pub unsafe extern "C" fn renderer_render_window_sys(
     viewport: *mut sys::ImGuiViewport,
     argument: *mut c_void,
 ) {
-    run_callback("Renderer_RenderWindow", |control| unsafe {
+    run_work_callback("Renderer_RenderWindow", |control| unsafe {
         renderer_render_window(control, viewport.cast(), argument)
     });
 }
@@ -1244,7 +1290,7 @@ pub unsafe extern "C" fn renderer_swap_buffers_sys(
     viewport: *mut sys::ImGuiViewport,
     argument: *mut c_void,
 ) {
-    run_callback("Renderer_SwapBuffers", |control| unsafe {
+    run_work_callback("Renderer_SwapBuffers", |control| unsafe {
         renderer_swap_buffers(control, viewport.cast(), argument)
     });
 }

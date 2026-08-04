@@ -13,6 +13,7 @@ use thiserror::Error;
 
 use super::callbacks::{
     claim_callbacks, detect_callback_drift, preflight_callbacks, release_callbacks,
+    revoke_renderer_viewport_capability_if_owned,
 };
 use super::registry::{preflight_runtime, register_runtime, unregister_runtime};
 use crate::{GlowRenderer, InitError, RenderError};
@@ -373,6 +374,7 @@ impl RuntimeControl {
     }
 
     pub(super) fn record_dependency_fault(&self, fault: GlowViewportError) {
+        revoke_renderer_viewport_capability_if_owned(self);
         self.faults.borrow_mut().record_terminal(fault);
         self.begin_shutdown();
     }

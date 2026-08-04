@@ -18,7 +18,7 @@ use thiserror::Error;
 
 use super::callbacks::{
     claim_callbacks, destroy_renderer_viewport_resources, detect_runtime_contract_drift,
-    preflight_callbacks, release_callbacks,
+    preflight_callbacks, release_callbacks, revoke_renderer_viewport_capability_if_owned,
 };
 use super::registry::{
     GlobalHandles, preflight_runtime, query_surface_support, register_runtime, take_viewport_data,
@@ -390,6 +390,13 @@ impl RuntimeControl {
             && self.callback_state.get() != CallbackState::Released
     }
 
+    pub(super) fn is_cleanup_callback_accessible(&self) -> bool {
+        matches!(
+            self.state.get(),
+            RuntimeState::Attached | RuntimeState::ShuttingDown
+        ) && self.callback_state.get() == CallbackState::Claimed
+    }
+
     pub(super) fn can_enter_callback(&self) -> bool {
         self.is_callback_accessible()
             && self
@@ -487,6 +494,9 @@ impl RuntimeControl {
     }
 
     pub(super) fn record_runtime_contract_fault(&self, fault: AshViewportError) {
+        let _ = self.binding.try_with_bound_context(|| {
+            revoke_renderer_viewport_capability_if_owned(self);
+        });
         self.faults.borrow_mut().record_terminal(fault);
         self.begin_shutdown();
     }
