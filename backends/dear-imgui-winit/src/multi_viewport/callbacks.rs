@@ -115,6 +115,10 @@ fn supports_inactive_window_creation() -> bool {
     cfg!(any(target_os = "windows", target_os = "macos"))
 }
 
+fn should_focus_on_show(policy: ViewportWindowPolicy) -> bool {
+    !policy.no_focus_on_appearing
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SkipTaskbarCapability {
     Inherent,
@@ -1319,7 +1323,7 @@ pub(super) unsafe extern "C" fn winit_show_window(vp: *mut dear_imgui_rs::sys::I
                 return;
             }
             data.window().set_visible(true);
-            if supports_inactive_window_creation() && !policy.no_focus_on_appearing {
+            if should_focus_on_show(policy) {
                 if let Err(error) = focus_and_raise_window(data.window()) {
                     record_viewport_failure(control, vp, error);
                 }
@@ -1781,6 +1785,15 @@ mod policy_tests {
             })
         ));
         assert!(validate_policy_for_creation(no_taskbar, SkipTaskbarCapability::Inherent).is_ok());
+    }
+
+    #[test]
+    fn show_focus_follows_no_focus_on_appearing_policy() {
+        assert!(should_focus_on_show(ViewportWindowPolicy::default()));
+        assert!(!should_focus_on_show(ViewportWindowPolicy {
+            no_focus_on_appearing: true,
+            ..ViewportWindowPolicy::default()
+        }));
     }
 
     #[test]
