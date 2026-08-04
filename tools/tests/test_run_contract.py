@@ -321,7 +321,7 @@ class ContractRunnerTests(unittest.TestCase):
             with (
                 patch.dict(os.environ, {"GITHUB_OUTPUT": str(github_output)}),
                 patch.object(
-                    CONTRACTS.release_evidence,
+                    CONTRACTS,
                     "resolve_candidate_sha",
                     return_value=CANDIDATE_SHA,
                 ),

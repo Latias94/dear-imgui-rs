@@ -40,13 +40,18 @@ gh workflow run release.yml --ref main -f tag=v0.16.0-alpha.2
 The workflow binds the tag to the workspace version and the exact `main` commit before doing any irreversible work. It then:
 
 1. Requires a successful `main` push CI run for the exact candidate SHA.
-2. Runs the fixed 16-cell Release Gate for that commit, including native runtime tests, Winit/WGPU, SDL3/Glow, and Ash/Vulkan viewport smokes, WASM, Windows ABI/native dependency routes, macOS, all source packages, and five prebuilt producer/consumer targets. The source-package cell also regenerates every maintained binding, tests core public documentation, and verifies non-Bevy packages against Rust 1.92.
-3. Recomputes the authoritative decision from retained cell payloads and stages only the prebuilt archives recorded by successful cells.
-4. Generates `SHA256SUMS` and a release manifest for the exact staged assets.
-5. Enters the protected `release` environment and obtains a short-lived crates.io OIDC token.
-6. Publishes the complete 27-crate dependency train, automatically skipping an exact version only when its published Cargo archive records the same clean candidate commit.
-7. Confirms that all 27 exact versions are available through crates.io and Cargo and carry that candidate provenance.
-8. Creates the tag and GitHub Release for the same commit, rejecting pre-existing unexpected assets and verifying that the final download inventory contains exactly the staged archives and checksums.
+2. Builds every prebuilt profile on Linux x86_64, macOS x86_64/aarch64,
+   and Windows MSVC `/MD`/`/MT`, then consumes every generated archive from an
+   isolated crate.
+3. Enters the protected `release` environment and obtains a short-lived
+   crates.io OIDC token.
+4. Publishes the complete 27-crate dependency train, automatically skipping an
+   exact version only when its published Cargo archive records the same clean
+   candidate commit.
+5. Confirms that all 27 exact versions are available through crates.io and
+   Cargo.
+6. Generates `SHA256SUMS` and creates the tag and GitHub Release for the same
+   commit with all prebuilt archives.
 
 Pushing a tag does not trigger publication. Do not create the tag manually before this workflow; an existing tag is accepted only when it already points to the candidate commit.
 
@@ -58,20 +63,12 @@ crates.io uploads cannot be rolled back. A failed run is resumed by re-running i
 gh run rerun RUN_ID --failed
 ```
 
-Starting a new release workflow run is also safe, but it reruns the full Release Gate. Never bump the version merely because one attempt stopped after publishing only part of the train; first resume the same version and complete it.
+Starting a new release workflow run is also safe, but it reruns the five-target
+prebuilt matrix. Never bump the version merely because one attempt stopped
+after publishing only part of the train; first resume the same version and
+complete it.
 
 If a published crate is defective, finish or halt the current train deliberately, yank affected versions when appropriate, and prepare a new release version. A crates.io version can never be overwritten.
-
-## Diagnostic Gate
-
-`release-gate.yml` remains independently dispatchable for diagnostics without publishing:
-
-```bash
-git rev-parse HEAD
-gh workflow run release-gate.yml -f candidate_sha=FULL_40_HEX_SHA
-```
-
-A cell that is missing, skipped, cancelled, timed out, malformed, duplicated, or bound to another SHA makes the aggregate `No-Go`. Headless Test Engine success does not replace real viewport runtime cells.
 
 ## Manual fallback
 
@@ -92,4 +89,6 @@ Verify a completed train without uploading:
 python3 tools/publish.py --verify-published
 ```
 
-CI passes `--no-verify` only after the source-package cell has already packaged and consumed every release crate without credentials. This keeps the short-lived publishing token out of build scripts and inside its intended upload window.
+CI passes `--no-verify` only after exact-SHA normal CI and the complete prebuilt
+producer/consumer matrix succeed. This keeps the short-lived publishing token
+out of build scripts and inside its intended upload window.

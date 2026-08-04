@@ -111,22 +111,19 @@ SHA. Test Engine is separate: its crate-local source/shim/generator provenance
 is reproducible, but it is native source-only and never appears in a prebuilt
 artifact profile.
 
-## Release gates and evidence
+## Release gates
 
-A release requires `python3 tools/tasks.py release-check` from a clean commit and a remote `Go` decision for the same commit. The end-to-end `.github/workflows/release.yml` calls the gate directly; `.github/workflows/release-gate.yml` remains independently dispatchable for diagnostics.
+A release requires `python3 tools/tasks.py release-check` from a clean commit
+and a successful `ci.yml` push run for that exact `main` commit. Normal CI owns
+the Test Engine, real Winit/WGPU, SDL3/Glow, and Ash/Vulkan viewport smokes,
+WASM, source packages, Windows native routes, macOS, bindings, MSRV, tests, and
+documentation checks.
 
-The remote aggregate has a fixed 16-cell inventory: Linux Test Engine runtime, real Winit/WGPU, SDL3/Glow, and Ash/Vulkan viewport smokes, Linux WASM, all 27 publishable source packages, Windows vcpkg, Windows MSVC `/MD` and `/MT`, Windows GNU imports, macOS, and five prebuilt producer/consumer targets (Linux x86_64, macOS x86_64/aarch64, and Windows MSVC `/MD`/`/MT`). The source-package cell also proves canonical binding regeneration and checked-in drift, source/binding provenance, the Rust 1.92 non-Bevy MSRV, core tests, and core public API doctests. A missing, failed, skipped, cancelled, timed-out, malformed, duplicate, or wrong-SHA cell is `No-Go`; callers cannot narrow the production inventory.
-
-The run retains `gate-result.json`, stdout/stderr, runtime invocation/results, Xvfb/Mesa display and renderer data, target/CRT/vcpkg/MinGW metadata, binding hashes, manifests, candidate SHA, source-package results, and SHA256 evidence for approximately 30 days. Verify a downloaded aggregate locally with:
-
-```bash
-python3 tools/ci/release_evidence.py verify \
-  --repo-root . \
-  --candidate-sha CANDIDATE_SHA \
-  --gate-result artifacts/release-gate/gate-result.json
-```
-
-Headless Test Engine success does not replace the real viewport cells. Missing display or software-GPU infrastructure is a failed remote gate, not a skipped success.
+The release workflow does not replay those jobs or aggregate a second evidence
+schema. It directly builds and consumes all prebuilt profiles on five target/CRT
+combinations; any failed producer or isolated consumer stops publication.
+Normal Actions logs and artifacts remain the diagnostic record. Headless Test
+Engine success does not replace the real viewport jobs in normal CI.
 
 ## Pre-publish checks
 Verify all `-sys` crates have pregenerated bindings and build in docs mode locally:
@@ -175,7 +172,11 @@ After the candidate is merged to `main` and normal CI is green, run the single r
 gh workflow run release.yml --ref main -f tag=v0.16.0-alpha.2
 ```
 
-`release.yml` binds the tag, workspace version, `main` ref, and exact candidate; requires a successful `main` push CI run for that SHA; runs the 16-cell gate; stages only checksummed recorded archives; publishes the complete 27-package train with crates.io Trusted Publishing; verifies every exact version; then creates the tag and GitHub Release. See [PUBLISHING.md](./PUBLISHING.md) for setup and recovery.
+`release.yml` binds the tag, workspace version, `main` ref, and exact candidate;
+requires a successful `main` push CI run for that SHA; builds and consumes all
+five prebuilt targets; publishes the complete 27-package train with crates.io
+Trusted Publishing; verifies every exact version; then creates the checksummed
+GitHub Release. See [PUBLISHING.md](./PUBLISHING.md) for setup and recovery.
 
 ## Pre-release checklist
 

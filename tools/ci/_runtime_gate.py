@@ -22,7 +22,7 @@ from _process import (
     managed_background,
     run_bounded,
 )
-from release_evidence import atomic_write_json, parse_candidate_sha
+from _verification import parse_candidate_sha, write_json
 
 
 class GateCategory(str, Enum):
@@ -180,7 +180,7 @@ def _evidence_files(evidence_dir: Path) -> tuple[str, ...]:
 
 def _finalize(result: GateResult, evidence_dir: Path, candidate_sha: str) -> GateResult:
     candidate_sha = parse_candidate_sha(candidate_sha)
-    atomic_write_json(
+    write_json(
         evidence_dir / "gate-invocation.json",
         {
             "schema_version": 1,
@@ -194,7 +194,7 @@ def _finalize(result: GateResult, evidence_dir: Path, candidate_sha: str) -> Gat
     result = replace(result, evidence=_evidence_files(evidence_dir))
     result_json = result.to_json()
     result_json["candidate_sha"] = candidate_sha
-    atomic_write_json(evidence_dir / "gate-result.json", result_json)
+    write_json(evidence_dir / "gate-result.json", result_json)
     return result
 
 
@@ -210,7 +210,7 @@ def _prepare_evidence(
     evidence_dir.mkdir(parents=True, exist_ok=True)
     for name in ("gate-result.json", "gate-invocation.json", *owned_files):
         (evidence_dir / name).unlink(missing_ok=True)
-    atomic_write_json(
+    write_json(
         evidence_dir / "gate-invocation.json",
         {
             "schema_version": 1,
@@ -1367,7 +1367,7 @@ def _run_dear_app_graphical_smoke(
             "lavapipe_icd": str(lavapipe_icd),
             "tools": {name: str(path) for name, path in sorted(tools.items())},
         }
-        atomic_write_json(
+        write_json(
             evidence_dir / "dear-app-runtime-environment.json", diagnostics
         )
         details["environment"] = diagnostics
@@ -1666,7 +1666,7 @@ def _run_viewport_smoke(
             "tools": {name: str(path) for name, path in sorted(tools.items())},
             **route_diagnostics,
         }
-        atomic_write_json(evidence_dir / "runtime-environment.json", diagnostics)
+        write_json(evidence_dir / "runtime-environment.json", diagnostics)
         details["environment"] = diagnostics
 
         package_versions = run_bounded(
@@ -1735,7 +1735,7 @@ def _run_viewport_smoke(
             diagnostics["sdl3_library_dirs"] = [
                 str(path) for path in sdl3_library_dirs
             ]
-            atomic_write_json(evidence_dir / "runtime-environment.json", diagnostics)
+            write_json(evidence_dir / "runtime-environment.json", diagnostics)
 
         xvfb = managed_background(
             (

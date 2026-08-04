@@ -29,8 +29,11 @@ from _runtime_gate import (  # noqa: E402
     run_sdl3_glow_viewport_smoke,
     run_test_engine_runtime,
 )
-from _verification import VerificationError, temporary_workspace  # noqa: E402
-import release_evidence  # noqa: E402
+from _verification import (  # noqa: E402
+    VerificationError,
+    resolve_candidate_sha,
+    temporary_workspace,
+)
 from _windows_native import (  # noqa: E402
     ForbiddenImportError,
     WindowsNativeError,
@@ -647,9 +650,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             release_tag = os.environ.get("RELEASE_TAG", "")
             prepare_release_notes(release_tag, args.output)
         elif args.contract == "runtime-preparation-failure":
-            candidate_sha = release_evidence.resolve_candidate_sha(
-                WORKSPACE_ROOT, args.candidate_sha
-            )
+            candidate_sha = resolve_candidate_sha(WORKSPACE_ROOT, args.candidate_sha)
             result = record_runtime_preparation_failure(
                 gate=args.gate,
                 attempt=args.attempt,
@@ -696,9 +697,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 evidence=args.evidence,
             )
         elif args.contract == "test-engine-runtime":
-            candidate_sha = release_evidence.resolve_candidate_sha(
-                WORKSPACE_ROOT, args.candidate_sha
-            )
+            candidate_sha = resolve_candidate_sha(WORKSPACE_ROOT, args.candidate_sha)
             result = run_test_engine_runtime(
                 workspace_root=WORKSPACE_ROOT,
                 evidence_dir=args.evidence_dir,
@@ -712,9 +711,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 defer_infrastructure_retry=args.defer_infrastructure_retry,
             )
         elif args.contract == "multi-viewport-smoke":
-            candidate_sha = release_evidence.resolve_candidate_sha(
-                WORKSPACE_ROOT, args.candidate_sha
-            )
+            candidate_sha = resolve_candidate_sha(WORKSPACE_ROOT, args.candidate_sha)
             result = run_multi_viewport_smoke(
                 workspace_root=WORKSPACE_ROOT,
                 evidence_dir=args.evidence_dir,
@@ -728,9 +725,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 defer_infrastructure_retry=args.defer_infrastructure_retry,
             )
         elif args.contract == "sdl3-glow-multi-viewport-smoke":
-            candidate_sha = release_evidence.resolve_candidate_sha(
-                WORKSPACE_ROOT, args.candidate_sha
-            )
+            candidate_sha = resolve_candidate_sha(WORKSPACE_ROOT, args.candidate_sha)
             result = run_sdl3_glow_viewport_smoke(
                 workspace_root=WORKSPACE_ROOT,
                 evidence_dir=args.evidence_dir,
@@ -744,9 +739,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 defer_infrastructure_retry=args.defer_infrastructure_retry,
             )
         elif args.contract == "ash-vulkan-validation-smoke":
-            candidate_sha = release_evidence.resolve_candidate_sha(
-                WORKSPACE_ROOT, args.candidate_sha
-            )
+            candidate_sha = resolve_candidate_sha(WORKSPACE_ROOT, args.candidate_sha)
             result = run_ash_vulkan_validation_smoke(
                 workspace_root=WORKSPACE_ROOT,
                 evidence_dir=args.evidence_dir,
@@ -768,7 +761,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         OSError,
         VerificationError,
         WindowsNativeError,
-        release_evidence.EvidenceError,
     ) as error:
         print(f"::error::{error}", file=sys.stderr)
         return 1

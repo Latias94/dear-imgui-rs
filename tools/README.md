@@ -28,7 +28,10 @@ gh workflow run release.yml --ref main -f tag=v0.16.0-alpha.2
 
 `release-prepare` intentionally leaves changes in the working tree. `release-check` runs the strict clean-tree, changelog, locked dependency graph, reproducible binding, package/offline, documentation, and test gates. Keeping these phases separate prevents release preparation from failing its own clean-tree check.
 
-Local success is necessary but not sufficient. `release.yml` binds the tag to the exact `main` commit, runs all 16 release cells, publishes the complete 27-crate train through Trusted Publishing, verifies every exact registry version, and only then creates the tag and GitHub Release.
+Local success is necessary but not sufficient. `release.yml` binds the tag to
+the exact `main` commit, requires successful normal CI, builds and consumes all
+five prebuilt targets, publishes the complete 27-crate train through Trusted
+Publishing, and only then creates the tag and GitHub Release.
 
 ## Available Scripts
 
@@ -88,7 +91,15 @@ python3 tools/publish.py --yes
 python3 tools/publish.py --verify-published
 ```
 
-Print-only `--dry-run` validates metadata without running the expensive gate. `--cargo-dry-run` runs the strict local preflight. Real uploads reject partial crate selection, target `crates-io` explicitly, recheck the clean Git fingerprint before every upload, and automatically skip an exact version only when the published Cargo archive records the same clean candidate commit. Release authorization belongs to the protected workflow environment and its short-lived OIDC token; a local recovery operator must verify the exact commit and release gate before supplying credentials. `--journal PATH` writes resumable machine-readable state.
+Print-only `--dry-run` validates metadata without running the full pre-publish
+check. `--cargo-dry-run` runs the strict local preflight. Real uploads reject
+partial crate selection, target `crates-io` explicitly, recheck the clean Git
+fingerprint before every upload, and automatically skip an exact version only
+when the published Cargo archive records the same clean candidate commit.
+Release authorization belongs to the protected workflow environment and its
+short-lived OIDC token; a local recovery operator must verify the exact commit
+and normal CI before supplying credentials. `--journal PATH` writes resumable
+machine-readable state.
 
 **Publishing Order:**
 1. Build tooling: `dear-imgui-build-support`
@@ -192,38 +203,17 @@ and is resolved before validation; release workflows pass the full lowercase
 
 The no-argument form remains equivalent to `full`.
 
-### 7. Release Evidence
+### 7. Release Automation
 
-`.github/workflows/release-gate.yml` is the authoritative cross-platform gate.
-It checks out one explicit 40-hex candidate SHA and requires exactly these 16
-cells:
+Normal CI is the release gate. The release workflow accepts only the workspace
+version tag from `main` and requires a successful `ci.yml` run for the exact
+candidate commit. It then invokes `prebuilt-binaries.yml`, where every target
+builds all supported profiles and consumes them through an isolated crate
+before publication can start.
 
-- Linux Test Engine runtime plus real Winit/WGPU, SDL3/Glow, and Ash/Vulkan
-  multi-viewport smokes
-- Linux `wasm32-unknown-unknown` feature and binding routes
-- Windows vcpkg, MSVC `/MD`, MSVC `/MT`, and MinGW import checks
-- macOS native build
-- All publishable source packages, canonical bindings, core tests, and MSRV
-- five prebuilt producer/consumer cells: Linux x86_64, macOS x86_64/aarch64,
-  and Windows MSVC `/MD`/`/MT`
-
-A failed, skipped, cancelled, timed-out, missing, duplicate, malformed, or
-wrong-SHA cell makes the aggregate `No-Go`. The workflow retains the aggregate,
-stdout/stderr, runtime/display/renderer data, target/CRT/vcpkg/MinGW metadata,
-binding hashes, manifests, candidate SHA, and SHA256 evidence for approximately
-30 days.
-
-Verify a downloaded aggregate against the local committed `HEAD` with:
-
-```bash
-python3 tools/ci/release_evidence.py verify \
-  --repo-root . \
-  --candidate-sha CANDIDATE_SHA \
-  --gate-result artifacts/release-gate/gate-result.json
-```
-
-The production verifier owns the required cell inventory; callers cannot pass
-a smaller list.
+The workflow retains each target's package archives as ordinary Actions
+artifacts. There is no second evidence schema or aggregation layer: a failed CI
+job, prebuilt build, or consumer directly fails the release.
 
 ## Typical Release Workflow
 
@@ -243,7 +233,9 @@ python3 tools/tasks.py release-check
 gh workflow run release.yml --ref main -f tag=v0.16.0-alpha.2
 ```
 
-The release workflow runs the fixed 16-cell gate in the same workflow run, acquires a short-lived crates.io token only after package verification, resumes exact already-published versions automatically, and creates the tag and GitHub Release only after all 27 crates are available.
+The release workflow acquires a short-lived crates.io token only after all
+prebuilt targets pass, resumes exact already-published versions automatically,
+and creates the tag and GitHub Release only after all 27 crates are available.
 
 ## Common Tasks
 
@@ -296,7 +288,9 @@ Re-run failed jobs in the same release workflow. The publisher queries every exa
 gh run rerun RUN_ID --failed
 ```
 
-Starting a new `release.yml` run is safe but repeats all 16 release cells. Real uploads intentionally do not support `--start-from` or a partial `--crates` list because the release train is one contract.
+Starting a new `release.yml` run is safe but repeats the five-target prebuilt
+matrix. Real uploads intentionally do not support `--start-from` or a partial
+`--crates` list because the release train is one contract.
 
 ### Preview Specific Crates
 
