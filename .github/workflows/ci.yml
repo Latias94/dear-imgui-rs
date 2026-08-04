@@ -1075,7 +1075,6 @@ jobs:
         run: cargo +stable test --doc -p dear-imgui-bevy --features multi-viewport
 
       - name: Inspect Bevy backend package contents
-        # Full packaging becomes valid after dear-imgui-rs 0.16.0-alpha.1 reaches crates.io.
         run: cargo +stable package -p dear-imgui-bevy --list
 
       - name: Check Bevy backend wasm (headless)
