@@ -202,6 +202,49 @@ jobs:
           --index-timeout 300
           --poll-interval 2
 
+      - name: Reject stale assets on an existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: python
+        run: |
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          asset_root = Path(os.environ["RUNNER_TEMP"]) / "release-assets"
+          expected = {path.name for path in asset_root.iterdir() if path.is_file()}
+          if not expected:
+              sys.exit("the release asset set is empty")
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          tag = urllib.parse.quote(os.environ["RELEASE_TAG_INPUT"], safe="")
+          request = urllib.request.Request(
+              f"https://api.github.com/repos/{repository}/releases/tags/{tag}",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  release = json.load(response)
+          except urllib.error.HTTPError as error:
+              if error.code == 404:
+                  release = None
+              else:
+                  raise
+
+          if release is not None:
+              existing = {asset["name"] for asset in release["assets"]}
+              unexpected = sorted(existing - expected)
+              if unexpected:
+                  sys.exit(f"existing release contains stale assets: {unexpected}")
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
