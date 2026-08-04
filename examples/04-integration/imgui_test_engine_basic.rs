@@ -377,7 +377,10 @@ fn try_run_automated(cli: &Cli, scenario: Scenario) -> Result<RunReport, String>
     let mut context = dear_imgui_rs::Context::create();
     if scenario == Scenario::UpstreamDocking {
         let mut flags = context.io().config_flags();
-        flags.insert(dear_imgui_rs::ConfigFlags::DOCKING_ENABLE);
+        flags.insert(
+            dear_imgui_rs::ConfigFlags::DOCKING_ENABLE
+                | dear_imgui_rs::ConfigFlags::NAV_ENABLE_KEYBOARD,
+        );
         context.io_mut().set_config_flags(flags);
         context
             .set_ini_filename(None::<String>)
@@ -395,6 +398,9 @@ fn try_run_automated(cli: &Cli, scenario: Scenario) -> Result<RunReport, String>
         .map_err(|error| error.to_string())?;
     engine
         .set_verbose_level(cli.verbose.unwrap_or(VerboseLevel::Info))
+        .map_err(|error| error.to_string())?;
+    engine
+        .set_log_to_tty(cli.verbose.is_some())
         .map_err(|error| error.to_string())?;
     engine
         .set_run_speed(cli.speed.unwrap_or(RunSpeed::Fast))
@@ -431,6 +437,7 @@ fn try_run_automated(cli: &Cli, scenario: Scenario) -> Result<RunReport, String>
         .filter(filter)
         .run_flags(RunFlags::RUN_FROM_COMMAND_LINE)
         .frame_budget(cli.max_frames.unwrap_or(default_budget));
+    let mut show_demo_window = true;
 
     let result: Result<RunReport, HeadlessRunnerError<AutomatedCallbackError>> = runner
         .run_headless(&mut context, |ui, frame| {
@@ -438,6 +445,14 @@ fn try_run_automated(cli: &Cli, scenario: Scenario) -> Result<RunReport, String>
                 return Err(AutomatedCallbackError(
                     "injected application callback failure",
                 ));
+            }
+            if scenario == Scenario::UpstreamDocking {
+                if show_demo_window {
+                    ui.show_demo_window(&mut show_demo_window);
+                }
+                ui.window("Hello, world!").build(|| {
+                    ui.checkbox("Demo Window", &mut show_demo_window);
+                });
             }
             if scenario == Scenario::Failure {
                 ui.window("Failure Host")
