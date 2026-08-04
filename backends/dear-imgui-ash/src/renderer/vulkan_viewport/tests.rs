@@ -205,10 +205,11 @@ fn injected_viewport_registration_failure_publishes_no_sidecar() {
 fn viewport_identity_resolver_ignores_public_snapshot_and_mutable_id() {
     let _guard = super::test_context_guard();
     let mut context = Context::create();
+    let context_raw = context.as_raw();
     let (identity, raw) = {
         let viewport = context.main_viewport();
         (
-            ViewportIdentity::from_viewport(context.as_raw(), viewport),
+            ViewportIdentity::from_viewport(context_raw, viewport),
             viewport.as_raw_mut(),
         )
     };
