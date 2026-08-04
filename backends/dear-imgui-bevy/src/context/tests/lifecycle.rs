@@ -1020,10 +1020,8 @@ fn panic_once(_frame: ImguiFrame<'_>, mut state: ResMut<PanicOnce>) {
 }
 
 #[test]
-fn pass_panic_reinserts_the_private_runner_and_restores_context_ownership() {
+fn pass_panic_reinserts_the_private_runner_and_leaves_no_context_active() {
     let _guard = imgui_context_guard();
-    let foreign = dear_imgui_rs::Context::create();
-    let foreign_raw = foreign.as_raw();
 
     let mut app = app_with_primary_window();
     app.init_resource::<PanicOnce>()
@@ -1044,7 +1042,8 @@ fn pass_panic_reinserts_the_private_runner_and_restores_context_ownership() {
     assert!(panic.is_err());
     assert_eq!(
         unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
-        foreign_raw
+        std::ptr::null_mut(),
+        "the suspended Context must not remain active after unwinding"
     );
     {
         let contexts = app.world().get_non_send::<ImguiContexts>().unwrap();
@@ -1063,14 +1062,15 @@ fn pass_panic_reinserts_the_private_runner_and_restores_context_ownership() {
     );
     assert_eq!(
         unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
-        foreign_raw
+        std::ptr::null_mut(),
+        "the next successful frame must suspend its Context"
     );
     drop(app);
     assert_eq!(
         unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
-        foreign_raw
+        std::ptr::null_mut(),
+        "dropping the App must not install a Context"
     );
-    drop(foreign);
 }
 
 #[test]
