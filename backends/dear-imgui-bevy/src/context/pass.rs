@@ -1,5 +1,5 @@
 use std::any::{TypeId, type_name};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::marker::PhantomData;
 use std::panic::{self, AssertUnwindSafe};
@@ -11,7 +11,8 @@ use std::thread::{self, ThreadId};
 use bevy_app::App;
 use bevy_ecs::resource::Resource;
 use bevy_ecs::schedule::{
-    InternedSystemSet, IntoScheduleConfigs, Schedule, ScheduleLabel, SingleThreadedExecutor,
+    InternedSystemSet, IntoScheduleConfigs, NodeId, Schedule, ScheduleConfigs, ScheduleLabel,
+    SingleThreadedExecutor, SystemSet,
 };
 use bevy_ecs::system::{
     Adapt, AdapterSystem, FunctionSystem, IntoSystem, NonSendMarker, PipeSystem, RunSystemError,
@@ -92,6 +93,9 @@ impl<P: 'static> ImguiPass<P> {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
+struct ImguiPassBindingSet(PassIdentity);
+
 impl<P: 'static> Clone for ImguiPass<P> {
     fn clone(&self) -> Self {
         Self {
@@ -113,8 +117,9 @@ impl<P: 'static> fmt::Debug for ImguiPass<P> {
 
 /// A Dear ImGui frame-input system bound to one private pass.
 ///
-/// This implements [`IntoSystem`] with unit input, so callers can use Bevy's normal system
-/// configuration API before registering it with [`crate::ImguiAppExt::add_imgui_systems`].
+/// This implements [`IntoScheduleConfigs`] with unit input, so callers can use Bevy's normal
+/// system configuration API before registering it with
+/// [`crate::ImguiAppExt::add_imgui_systems`].
 pub struct ImguiSystem<P: 'static, S> {
     pass: PassIdentity,
     active: Arc<ActiveFrameControl>,
@@ -125,24 +130,19 @@ pub struct ImguiSystem<P: 'static, S> {
 #[doc(hidden)]
 pub struct ImguiSystemMarker<P, M>(PhantomData<fn() -> (P, M)>);
 
-impl<P, S, M> IntoSystem<(), (), ImguiSystemMarker<P, M>> for ImguiSystem<P, S>
+impl<P, S, M> IntoScheduleConfigs<ScheduleSystem, ImguiSystemMarker<P, M>> for ImguiSystem<P, S>
 where
     P: 'static,
     S: IntoSystem<ImguiFrame<'static, P>, (), M> + 'static,
     M: 'static,
 {
-    type System = PipeSystem<
-        FunctionSystem<fn(NonSendMarker), (), (), fn(NonSendMarker)>,
-        AdapterSystem<ImguiFrameAdapter<P>, S::System>,
-    >;
-
-    fn into_system(this: Self) -> Self::System {
-        let system = IntoSystem::into_system(this.system);
+    fn into_configs(self) -> ScheduleConfigs<ScheduleSystem> {
+        let system = IntoSystem::into_system(self.system);
         let name = system.name();
         let adapted = AdapterSystem::new(
             ImguiFrameAdapter {
-                pass: this.pass,
-                active: this.active,
+                pass: self.pass,
+                active: self.active,
                 _brand: PhantomData,
             },
             system,
@@ -150,7 +150,7 @@ where
         );
         let main_thread: FunctionSystem<fn(NonSendMarker), (), (), fn(NonSendMarker)> =
             IntoSystem::into_system(require_main_thread as fn(NonSendMarker));
-        PipeSystem::new(main_thread, adapted, name)
+        PipeSystem::new(main_thread, adapted, name).in_set(ImguiPassBindingSet(self.pass))
     }
 }
 
@@ -386,8 +386,39 @@ impl PassRunner {
         Self { schedule }
     }
 
-    fn add_systems<M>(&mut self, systems: impl IntoScheduleConfigs<ScheduleSystem, M>) {
+    fn add_systems<M>(
+        &mut self,
+        pass: PassIdentity,
+        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
+    ) {
+        let existing_systems = self
+            .schedule
+            .graph()
+            .systems
+            .iter()
+            .map(|(system_key, _, _)| system_key)
+            .collect::<HashSet<_>>();
         self.schedule.add_systems(systems);
+
+        let graph = self.schedule.graph();
+        let binding = ImguiPassBindingSet(pass).intern();
+        let binding_node = graph.system_sets.get_key(binding).map(NodeId::Set);
+        for (system_key, system, _) in graph
+            .systems
+            .iter()
+            .filter(|(system_key, _, _)| !existing_systems.contains(system_key))
+        {
+            assert!(
+                binding_node.is_some_and(|binding_node| {
+                    graph
+                        .hierarchy()
+                        .graph()
+                        .contains_edge(binding_node, NodeId::System(system_key))
+                }),
+                "Dear ImGui system '{}' is not bound to this exact pass",
+                system.name()
+            );
+        }
     }
 
     fn configure_sets<M>(&mut self, sets: impl IntoScheduleConfigs<InternedSystemSet, M>) {
@@ -500,7 +531,7 @@ impl ImguiPassRegistry {
         self.runners
             .get_mut(&pass.identity.key)
             .expect("a declared Dear ImGui pass must retain its private runner")
-            .add_systems(systems);
+            .add_systems(pass.identity, systems);
     }
 
     fn configure_sets<P, M>(

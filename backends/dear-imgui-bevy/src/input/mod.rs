@@ -323,9 +323,9 @@ impl ImguiInputCaptureState {
 
 /// Last-known Dear ImGui capture intent exposed as a Bevy resource.
 ///
-/// Dear ImGui computes these flags while processing a frame. The backend records the latest values
-/// seen in IO; game/editor systems can use them to decide whether to act on Bevy input, but the
-/// backend itself does not remove or stop Bevy messages.
+/// The backend samples these flags after mapping one input batch and before calling `NewFrame`, as
+/// Dear ImGui recommends for event dispatch. Game/editor systems in `Update` therefore receive one
+/// stable decision for that batch; the backend itself does not remove or stop Bevy messages.
 ///
 /// The unscoped queries are the aggregate across routed Contexts. Use the scoped helpers when a
 /// game system belongs to one Context or host window. The backend owns this resource's state;

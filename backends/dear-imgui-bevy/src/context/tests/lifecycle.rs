@@ -240,15 +240,26 @@ fn produce_deferred_entity(
 
 fn observe_deferred_entity(
     _frame: ImguiFrame<'_>,
-    entities: Query<(), With<ConfiguredPassDeferredEntity>>,
+    entities: Query<Entity, With<ConfiguredPassDeferredEntity>>,
+    mut commands: Commands,
     mut trace: ResMut<ConfiguredPassTrace>,
 ) {
     assert_eq!(entities.iter().count(), 1);
+    for entity in &entities {
+        commands.entity(entity).despawn();
+    }
     trace.0.push("observe");
 }
 
 fn finish_configured_pass(_frame: ImguiFrame<'_>, mut trace: ResMut<ConfiguredPassTrace>) {
     trace.0.push("final");
+}
+
+fn record_dynamically_registered_pass(
+    _frame: ImguiFrame<'_>,
+    mut trace: ResMut<ConfiguredPassTrace>,
+) {
+    trace.0.push("dynamic");
 }
 
 fn trace_update(mut trace: ResMut<MainScheduleTrace>) {
@@ -408,6 +419,20 @@ fn private_pass_preserves_bevy_system_configs_and_intermediate_deferred_barriers
     assert_eq!(
         app.world().resource::<ConfiguredPassTrace>().0,
         ["produce", "observe", "final"]
+    );
+
+    app.add_imgui_systems(
+        &pass,
+        pass.system(record_dynamically_registered_pass)
+            .after(ConfiguredPassSet::Final),
+    );
+    app.update();
+
+    assert_eq!(
+        app.world().resource::<ConfiguredPassTrace>().0,
+        [
+            "produce", "observe", "final", "produce", "observe", "final", "dynamic"
+        ]
     );
 }
 
@@ -668,6 +693,35 @@ fn primary_and_two_additional_contexts_run_in_stable_order_with_independent_fram
         !trace.wrong_current_context,
         "every private pass must run with its own native Context current"
     );
+}
+
+#[test]
+#[should_panic(expected = "is not bound to this exact pass")]
+fn private_pass_rejects_a_system_bound_to_another_runtime_pass_during_registration() {
+    let mut app = App::new();
+    let first_pass = app.declare_imgui_pass::<ContextPassA>();
+    let second_pass = app.declare_imgui_pass::<ContextPassA>();
+
+    app.add_imgui_systems(&second_pass, first_pass.system(record_ui::<ContextPassA>));
+}
+
+#[test]
+#[should_panic(expected = "is not bound to this exact pass")]
+fn private_pass_rejects_a_system_bound_to_another_brand_during_registration() {
+    let mut app = App::new();
+    let pass_a = app.declare_imgui_pass::<ContextPassA>();
+    let pass_b = app.declare_imgui_pass::<ContextPassB>();
+
+    app.add_imgui_systems(&pass_b, pass_a.system(record_ui::<ContextPassA>));
+}
+
+#[test]
+#[should_panic(expected = "is not bound to this exact pass")]
+fn private_pass_rejects_an_unbound_bevy_system_during_registration() {
+    let mut app = App::new();
+    let pass = app.declare_imgui_pass::<ContextPassA>();
+
+    app.add_imgui_systems(&pass, || {});
 }
 
 #[test]

@@ -254,6 +254,11 @@ fn count_scoped_capture(mut count: ResMut<ScopedCaptureRunCount>) {
 }
 
 #[cfg(feature = "render")]
+fn request_pointer_capture_next_frame(frame: ImguiFrame<'_, ImguiPrimaryPass>) {
+    frame.ui().set_next_frame_want_capture_mouse(true);
+}
+
+#[cfg(feature = "render")]
 fn configure_context<T>(
     app: &mut App,
     context_id: ContextId,
@@ -3323,4 +3328,43 @@ fn scoped_capture_queries_update_before_update_and_clear_when_a_window_disappear
     assert!(capture.for_context(primary_context).is_some());
     assert!(capture.for_context(secondary_context).is_none());
     assert!(capture.for_window(secondary_window).is_none());
+}
+
+#[cfg(feature = "render")]
+#[test]
+fn capture_decision_remains_stable_for_the_input_batch_that_update_consumes() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary_context, primary_window, _) = routed_input_app();
+    let region = logical_window_region(&app, primary_window);
+    app.world_mut().spawn(ImguiInputRoute::logical(
+        primary_context,
+        primary_window,
+        region,
+    ));
+    resolve_routed_input(&mut app);
+
+    let primary_pass = app.imgui_primary_pass();
+    app.add_imgui_systems(
+        &primary_pass,
+        primary_pass.system(request_pointer_capture_next_frame),
+    );
+    app.init_resource::<ScopedCaptureRunCount>().add_systems(
+        Update,
+        count_scoped_capture.run_if(imgui_context_wants_pointer_input(primary_context)),
+    );
+
+    app.update();
+    app.update();
+    assert_eq!(
+        app.world().resource::<ScopedCaptureRunCount>().0,
+        0,
+        "a capture override applied by NewFrame must not rewrite the decision for its input batch"
+    );
+
+    app.update();
+    assert_eq!(
+        app.world().resource::<ScopedCaptureRunCount>().0,
+        1,
+        "the next PreUpdate must sample the capture state produced by the preceding frame"
+    );
 }
