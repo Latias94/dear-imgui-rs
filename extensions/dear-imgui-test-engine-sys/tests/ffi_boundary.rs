@@ -133,37 +133,6 @@ fn built_in_suites_register_once_and_expose_their_exact_manifest() {
             registered_test_name(engine, c"demo_tests", 1),
             "input_value"
         );
-        let mut succeeded = true;
-        assert_eq!(
-            sys::imgui_test_engine_get_registered_test_succeeded(
-                engine,
-                c"demo_tests".as_ptr(),
-                0,
-                &mut succeeded,
-            ),
-            sys::ImGuiTestEngineStatus_Success
-        );
-        assert!(!succeeded, "newly registered tests must not report success");
-        assert_eq!(
-            sys::imgui_test_engine_get_registered_test_succeeded(
-                engine,
-                c"demo_tests".as_ptr(),
-                2,
-                &mut succeeded,
-            ),
-            sys::ImGuiTestEngineStatus_NotFound
-        );
-        assert!(!succeeded);
-        assert_eq!(
-            sys::imgui_test_engine_get_registered_test_succeeded(
-                engine,
-                c"demo_tests".as_ptr(),
-                0,
-                ptr::null_mut(),
-            ),
-            sys::ImGuiTestEngineStatus_InvalidArgument
-        );
-
         assert_eq!(
             sys::imgui_test_engine_register_builtin_test_suite(
                 engine,

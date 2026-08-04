@@ -92,3 +92,19 @@ fn a_non_empty_terminal_manifest_with_unfinished_tests_is_aborted_not_no_match()
 
     assert_eq!(completion.natural_outcome(), RunOutcome::Aborted);
 }
+
+#[test]
+fn a_failed_test_precedes_unfinished_tests_in_the_run_outcome() {
+    let tests = vec![
+        RunTestResult::new("category".into(), "failed".into(), RunTestStatus::Error),
+        RunTestResult::new("category".into(), "not-run".into(), RunTestStatus::NotRun),
+    ];
+    let completion = RunCompletion {
+        engine_id: EngineId::from_raw(1).expect("non-zero engine identity"),
+        run_id: RunId::from_raw(1).expect("non-zero run identity"),
+        summary: ResultSummary::from_tests(&tests),
+        tests,
+    };
+
+    assert_eq!(completion.natural_outcome(), RunOutcome::Failed);
+}

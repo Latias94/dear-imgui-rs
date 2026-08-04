@@ -336,44 +336,4 @@ ImGuiTestEngineStatus imgui_test_engine_get_registered_test_name(
     });
 }
 
-ImGuiTestEngineStatus imgui_test_engine_get_registered_test_succeeded(
-    ImGuiTestEngine* engine,
-    const char* category,
-    int index,
-    bool* out_succeeded
-) {
-    return abi::boundary("imgui_test_engine_get_registered_test_succeeded", [&]() {
-        if (out_succeeded == nullptr) {
-            return abi::fail(
-                ImGuiTestEngineStatus_InvalidArgument,
-                "out_succeeded must not be null"
-            );
-        }
-        *out_succeeded = false;
-        if (category == nullptr || category[0] == '\0') {
-            return abi::fail(
-                ImGuiTestEngineStatus_InvalidArgument,
-                "category must name a non-empty test category"
-            );
-        }
-        if (index < 0) {
-            return abi::fail(ImGuiTestEngineStatus_OutOfRange, "index must not be negative");
-        }
-
-        const ImGuiTestEngineStatus status = abi::require_engine(engine);
-        if (status != ImGuiTestEngineStatus_Success) {
-            return status;
-        }
-        const ImGuiTest* test = find_category_test(engine, category, index);
-        if (test == nullptr) {
-            return abi::fail(
-                ImGuiTestEngineStatus_NotFound,
-                "no registered test exists at the requested category index"
-            );
-        }
-        *out_succeeded = test->Output.Status == ImGuiTestStatus_Success;
-        return ImGuiTestEngineStatus_Success;
-    });
-}
-
 } // extern "C"

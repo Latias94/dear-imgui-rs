@@ -84527,6 +84527,36 @@
       "value": "struct cimnodes_editor_Style"
     },
     {
+      "id": "test-engine:constant:ImGuiTestEngineBuiltinTestSuite_NativeDefaults",
+      "source": "test-engine",
+      "kind": "constant",
+      "name": "ImGuiTestEngineBuiltinTestSuite_NativeDefaults",
+      "value": {
+        "type": "ImGuiTestEngineBuiltinTestSuite",
+        "value": "0"
+      }
+    },
+    {
+      "id": "test-engine:constant:ImGuiTestEngineBuiltinTestSuite_UpstreamDocking",
+      "source": "test-engine",
+      "kind": "constant",
+      "name": "ImGuiTestEngineBuiltinTestSuite_UpstreamDocking",
+      "value": {
+        "type": "ImGuiTestEngineBuiltinTestSuite",
+        "value": "1"
+      }
+    },
+    {
+      "id": "test-engine:constant:ImGuiTestEngineBuiltinTestSuite_UpstreamViewports",
+      "source": "test-engine",
+      "kind": "constant",
+      "name": "ImGuiTestEngineBuiltinTestSuite_UpstreamViewports",
+      "value": {
+        "type": "ImGuiTestEngineBuiltinTestSuite",
+        "value": "2"
+      }
+    },
+    {
       "id": "test-engine:constant:ImGuiTestEngineCaptureFlags_HideMouseCursor",
       "source": "test-engine",
       "kind": "constant",
@@ -84597,6 +84627,16 @@
       }
     },
     {
+      "id": "test-engine:constant:ImGuiTestEngineExceptionPoint_PostBind",
+      "source": "test-engine",
+      "kind": "constant",
+      "name": "ImGuiTestEngineExceptionPoint_PostBind",
+      "value": {
+        "type": "ImGuiTestEngineExceptionPoint",
+        "value": "5"
+      }
+    },
+    {
       "id": "test-engine:constant:ImGuiTestEngineExceptionPoint_ScriptAllocation",
       "source": "test-engine",
       "kind": "constant",
@@ -84614,6 +84654,16 @@
       "value": {
         "type": "ImGuiTestEngineExceptionPoint",
         "value": "3"
+      }
+    },
+    {
+      "id": "test-engine:constant:ImGuiTestEngineExceptionPoint_SuiteRegistrationAfterFirstTest",
+      "source": "test-engine",
+      "kind": "constant",
+      "name": "ImGuiTestEngineExceptionPoint_SuiteRegistrationAfterFirstTest",
+      "value": {
+        "type": "ImGuiTestEngineExceptionPoint",
+        "value": "6"
       }
     },
     {
@@ -84807,6 +84857,16 @@
       }
     },
     {
+      "id": "test-engine:constant:ImGuiTestEngineStatus_BindingOccupied",
+      "source": "test-engine",
+      "kind": "constant",
+      "name": "ImGuiTestEngineStatus_BindingOccupied",
+      "value": {
+        "type": "ImGuiTestEngineStatus",
+        "value": "8"
+      }
+    },
+    {
       "id": "test-engine:constant:ImGuiTestEngineStatus_CaptureFailed",
       "source": "test-engine",
       "kind": "constant",
@@ -84884,6 +84944,66 @@
       "value": {
         "type": "ImGuiTestEngineStatus",
         "value": "6"
+      }
+    },
+    {
+      "id": "test-engine:constant:ImGuiTestEngineTestStatus_Error",
+      "source": "test-engine",
+      "kind": "constant",
+      "name": "ImGuiTestEngineTestStatus_Error",
+      "value": {
+        "type": "ImGuiTestEngineTestStatus",
+        "value": "4"
+      }
+    },
+    {
+      "id": "test-engine:constant:ImGuiTestEngineTestStatus_Queued",
+      "source": "test-engine",
+      "kind": "constant",
+      "name": "ImGuiTestEngineTestStatus_Queued",
+      "value": {
+        "type": "ImGuiTestEngineTestStatus",
+        "value": "2"
+      }
+    },
+    {
+      "id": "test-engine:constant:ImGuiTestEngineTestStatus_Running",
+      "source": "test-engine",
+      "kind": "constant",
+      "name": "ImGuiTestEngineTestStatus_Running",
+      "value": {
+        "type": "ImGuiTestEngineTestStatus",
+        "value": "3"
+      }
+    },
+    {
+      "id": "test-engine:constant:ImGuiTestEngineTestStatus_Success",
+      "source": "test-engine",
+      "kind": "constant",
+      "name": "ImGuiTestEngineTestStatus_Success",
+      "value": {
+        "type": "ImGuiTestEngineTestStatus",
+        "value": "1"
+      }
+    },
+    {
+      "id": "test-engine:constant:ImGuiTestEngineTestStatus_Suspended",
+      "source": "test-engine",
+      "kind": "constant",
+      "name": "ImGuiTestEngineTestStatus_Suspended",
+      "value": {
+        "type": "ImGuiTestEngineTestStatus",
+        "value": "5"
+      }
+    },
+    {
+      "id": "test-engine:constant:ImGuiTestEngineTestStatus_Unknown",
+      "source": "test-engine",
+      "kind": "constant",
+      "name": "ImGuiTestEngineTestStatus_Unknown",
+      "value": {
+        "type": "ImGuiTestEngineTestStatus",
+        "value": "0"
       }
     },
     {
@@ -85274,6 +85394,46 @@
       }
     },
     {
+      "id": "test-engine:function:imgui_test_engine_finish_run",
+      "source": "test-engine",
+      "kind": "function",
+      "name": "imgui_test_engine_finish_run",
+      "value": {
+        "abi": "C",
+        "arguments": [
+          {
+            "name": "engine",
+            "type": "*mut ImGuiTestEngine"
+          },
+          {
+            "name": "run_id",
+            "type": "u64"
+          }
+        ],
+        "return_type": "ImGuiTestEngineStatus"
+      }
+    },
+    {
+      "id": "test-engine:function:imgui_test_engine_get_engine_id",
+      "source": "test-engine",
+      "kind": "function",
+      "name": "imgui_test_engine_get_engine_id",
+      "value": {
+        "abi": "C",
+        "arguments": [
+          {
+            "name": "engine",
+            "type": "*mut ImGuiTestEngine"
+          },
+          {
+            "name": "out_engine_id",
+            "type": "*mut u64"
+          }
+        ],
+        "return_type": "ImGuiTestEngineStatus"
+      }
+    },
+    {
       "id": "test-engine:function:imgui_test_engine_get_last_error",
       "source": "test-engine",
       "kind": "function",
@@ -85281,6 +85441,66 @@
       "value": {
         "abi": "C",
         "arguments": [
+          {
+            "name": "buffer",
+            "type": "*mut ::std::os::raw::c_char"
+          },
+          {
+            "name": "buffer_size",
+            "type": "usize"
+          },
+          {
+            "name": "out_required_size",
+            "type": "*mut usize"
+          }
+        ],
+        "return_type": "ImGuiTestEngineStatus"
+      }
+    },
+    {
+      "id": "test-engine:function:imgui_test_engine_get_registered_test_count",
+      "source": "test-engine",
+      "kind": "function",
+      "name": "imgui_test_engine_get_registered_test_count",
+      "value": {
+        "abi": "C",
+        "arguments": [
+          {
+            "name": "engine",
+            "type": "*mut ImGuiTestEngine"
+          },
+          {
+            "name": "category",
+            "type": "*const ::std::os::raw::c_char"
+          },
+          {
+            "name": "out_count",
+            "type": "*mut ::std::os::raw::c_int"
+          }
+        ],
+        "return_type": "ImGuiTestEngineStatus"
+      }
+    },
+    {
+      "id": "test-engine:function:imgui_test_engine_get_registered_test_name",
+      "source": "test-engine",
+      "kind": "function",
+      "name": "imgui_test_engine_get_registered_test_name",
+      "value": {
+        "abi": "C",
+        "arguments": [
+          {
+            "name": "engine",
+            "type": "*mut ImGuiTestEngine"
+          },
+          {
+            "name": "category",
+            "type": "*const ::std::os::raw::c_char"
+          },
+          {
+            "name": "index",
+            "type": "::std::os::raw::c_int"
+          },
           {
             "name": "buffer",
             "type": "*mut ::std::os::raw::c_char"
@@ -85312,6 +85532,82 @@
           {
             "name": "out_summary",
             "type": "*mut ImGuiTestEngineResultSummary_c"
+          }
+        ],
+        "return_type": "ImGuiTestEngineStatus"
+      }
+    },
+    {
+      "id": "test-engine:function:imgui_test_engine_get_run_test",
+      "source": "test-engine",
+      "kind": "function",
+      "name": "imgui_test_engine_get_run_test",
+      "value": {
+        "abi": "C",
+        "arguments": [
+          {
+            "name": "engine",
+            "type": "*mut ImGuiTestEngine"
+          },
+          {
+            "name": "run_id",
+            "type": "u64"
+          },
+          {
+            "name": "index",
+            "type": "::std::os::raw::c_int"
+          },
+          {
+            "name": "category_buffer",
+            "type": "*mut ::std::os::raw::c_char"
+          },
+          {
+            "name": "category_buffer_size",
+            "type": "usize"
+          },
+          {
+            "name": "out_category_required_size",
+            "type": "*mut usize"
+          },
+          {
+            "name": "name_buffer",
+            "type": "*mut ::std::os::raw::c_char"
+          },
+          {
+            "name": "name_buffer_size",
+            "type": "usize"
+          },
+          {
+            "name": "out_name_required_size",
+            "type": "*mut usize"
+          },
+          {
+            "name": "out_status",
+            "type": "*mut ::std::os::raw::c_int"
+          }
+        ],
+        "return_type": "ImGuiTestEngineStatus"
+      }
+    },
+    {
+      "id": "test-engine:function:imgui_test_engine_get_run_test_count",
+      "source": "test-engine",
+      "kind": "function",
+      "name": "imgui_test_engine_get_run_test_count",
+      "value": {
+        "abi": "C",
+        "arguments": [
+          {
+            "name": "engine",
+            "type": "*mut ImGuiTestEngine"
+          },
+          {
+            "name": "run_id",
+            "type": "u64"
+          },
+          {
+            "name": "out_count",
+            "type": "*mut ::std::os::raw::c_int"
           }
         ],
         "return_type": "ImGuiTestEngineStatus"
@@ -85551,6 +85847,34 @@
           {
             "name": "run_flags",
             "type": "::std::os::raw::c_int"
+          },
+          {
+            "name": "out_run_id",
+            "type": "*mut u64"
+          }
+        ],
+        "return_type": "ImGuiTestEngineStatus"
+      }
+    },
+    {
+      "id": "test-engine:function:imgui_test_engine_register_builtin_test_suite",
+      "source": "test-engine",
+      "kind": "function",
+      "name": "imgui_test_engine_register_builtin_test_suite",
+      "value": {
+        "abi": "C",
+        "arguments": [
+          {
+            "name": "engine",
+            "type": "*mut ImGuiTestEngine"
+          },
+          {
+            "name": "suite",
+            "type": "::std::os::raw::c_int"
+          },
+          {
+            "name": "out_registered_count",
+            "type": "*mut ::std::os::raw::c_int"
           }
         ],
         "return_type": "ImGuiTestEngineStatus"
@@ -87864,6 +88188,26 @@
       }
     },
     {
+      "id": "test-engine:function:imgui_test_engine_unregister_builtin_test_suite",
+      "source": "test-engine",
+      "kind": "function",
+      "name": "imgui_test_engine_unregister_builtin_test_suite",
+      "value": {
+        "abi": "C",
+        "arguments": [
+          {
+            "name": "engine",
+            "type": "*mut ImGuiTestEngine"
+          },
+          {
+            "name": "suite",
+            "type": "::std::os::raw::c_int"
+          }
+        ],
+        "return_type": "ImGuiTestEngineStatus"
+      }
+    },
+    {
       "id": "test-engine:layout:ImGuiTestEngine",
       "source": "test-engine",
       "kind": "layout",
@@ -88012,6 +88356,15 @@
       ]
     },
     {
+      "id": "test-engine:typedef:ImGuiTestEngineBuiltinTestSuite",
+      "source": "test-engine",
+      "kind": "typedef",
+      "name": "ImGuiTestEngineBuiltinTestSuite",
+      "value": {
+        "type": "::std::os::raw::c_int"
+      }
+    },
+    {
       "id": "test-engine:typedef:ImGuiTestEngineCaptureCallback_c",
       "source": "test-engine",
       "kind": "typedef",
@@ -88088,6 +88441,15 @@
       "source": "test-engine",
       "kind": "typedef",
       "name": "ImGuiTestEngineStatus",
+      "value": {
+        "type": "::std::os::raw::c_int"
+      }
+    },
+    {
+      "id": "test-engine:typedef:ImGuiTestEngineTestStatus",
+      "source": "test-engine",
+      "kind": "typedef",
+      "name": "ImGuiTestEngineTestStatus",
       "value": {
         "type": "::std::os::raw::c_int"
       }

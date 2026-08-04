@@ -89,10 +89,20 @@ impl RunCompletion {
         } else if self
             .tests
             .iter()
+            .any(|test| matches!(test.status, RunTestStatus::Error | RunTestStatus::Suspended))
+        {
+            RunOutcome::Failed
+        } else if self
+            .tests
+            .iter()
             .any(|test| test.status == RunTestStatus::NotRun)
         {
             RunOutcome::Aborted
-        } else if self.summary.count_success == self.summary.count_tested {
+        } else if self
+            .tests
+            .iter()
+            .all(|test| test.status == RunTestStatus::Success)
+        {
             RunOutcome::Passed
         } else {
             RunOutcome::Failed

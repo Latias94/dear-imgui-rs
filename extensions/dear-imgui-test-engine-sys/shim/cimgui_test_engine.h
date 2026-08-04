@@ -246,12 +246,6 @@ ImGuiTestEngineStatus imgui_test_engine_get_registered_test_name(
     size_t buffer_size,
     size_t* out_required_size
 );
-ImGuiTestEngineStatus imgui_test_engine_get_registered_test_succeeded(
-    ImGuiTestEngine* engine,
-    const char* category,
-    int index,
-    bool* out_succeeded
-);
 
 ImGuiTestEngineStatus imgui_test_engine_script_create(ImGuiTestEngineScript** out_script);
 ImGuiTestEngineStatus imgui_test_engine_script_destroy(ImGuiTestEngineScript* script);
