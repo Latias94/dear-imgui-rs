@@ -213,11 +213,11 @@ impl SuspendedContext {
 
     /// Attempts to activate this suspended context
     ///
-    /// If there is no active context, this suspended context is activated and `Ok` is returned.
-    /// If there is already an active context, nothing happens and `Err` is returned.
+    /// If there is no active Context or Context binding scope, this suspended Context is activated
+    /// and `Ok` is returned. Otherwise, nothing happens and `Err` returns the suspended Context.
     pub fn activate(self) -> Result<Context, SuspendedContext> {
         let _guard = CTX_MUTEX.lock();
-        if no_current_context() {
+        if !bound_context_scope_active() && no_current_context() {
             set_current_context(self.0.raw);
             Ok(self.0)
         } else {

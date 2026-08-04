@@ -1238,6 +1238,34 @@ fn binding_does_not_restore_a_previous_context_destroyed_inside_the_scope() {
 }
 
 #[test]
+fn suspended_context_activation_waits_for_binding_scope_exit() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let previous = Context::create();
+    let previous_raw = previous.as_raw();
+    let bound_owner = super::SuspendedContext::create();
+    let binding = bound_owner.0.binding();
+    let candidate = super::SuspendedContext::create();
+    let candidate_raw = candidate.0.as_raw();
+
+    let candidate = binding.with_bound_context(|| {
+        drop(bound_owner);
+        assert!(unsafe { crate::sys::igGetCurrentContext() }.is_null());
+        candidate
+            .activate()
+            .expect_err("binding scopes must reject Context owner exchange")
+    });
+
+    assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, previous_raw);
+    drop(previous);
+
+    let active = candidate
+        .activate()
+        .expect("activation must succeed after the binding scope exits");
+    assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, candidate_raw);
+    drop(active);
+}
+
+#[test]
 fn live_contexts_confine_process_global_imgui_state_to_one_thread() {
     let _guard = crate::test_support::imgui_context_guard();
     let suspended = super::SuspendedContext::create();
