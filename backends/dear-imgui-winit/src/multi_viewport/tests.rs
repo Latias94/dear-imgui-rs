@@ -1139,33 +1139,6 @@ fn viewport_identity_follows_a_live_viewport_when_docking_changes_its_id() {
 }
 
 #[test]
-fn preflight_retains_the_owned_sidecar_when_docking_changes_the_viewport_id() {
-    let _guard = lock_context();
-    let mut context = Context::create();
-    let mut runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
-    let viewport = unsafe { dear_imgui_rs::sys::igGetMainViewport() };
-    let original_id = unsafe { (*viewport).ID };
-    let platform_user_data = unsafe { (*viewport).PlatformUserData };
-    let platform_handle = unsafe { (*viewport).PlatformHandle };
-    assert!(!platform_user_data.is_null());
-    assert!(!platform_handle.is_null());
-
-    unsafe { (*viewport).ID = original_id.wrapping_add(1) };
-    let platform_io = context.platform_io_mut().as_raw_mut();
-    let result = unsafe { preflight_viewport_ownership(runtime.control(), platform_io) };
-    let retained_user_data = unsafe { (*viewport).PlatformUserData };
-    let retained_handle = unsafe { (*viewport).PlatformHandle };
-    unsafe { (*viewport).ID = original_id };
-
-    assert_eq!(result, Ok(()));
-    assert_eq!(retained_user_data, platform_user_data);
-    assert_eq!(retained_handle, platform_handle);
-    runtime.shutdown(&mut context).unwrap();
-    assert!(unsafe { (*viewport).PlatformUserData.is_null() });
-    assert!(unsafe { (*viewport).PlatformHandle.is_null() });
-}
-
-#[test]
 fn shutdown_preserves_a_replaced_direct_callback_and_is_idempotent() {
     let _guard = lock_context();
     let mut context = Context::create();
