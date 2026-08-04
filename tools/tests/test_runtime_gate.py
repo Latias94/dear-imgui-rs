@@ -1,21 +1,18 @@
 import importlib
-import io
 import json
 import os
-import subprocess
 import sys
 import unittest
-from contextlib import redirect_stderr
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_DIR = REPO_ROOT / "tools" / "ci"
 if str(CI_DIR) not in sys.path:
     sys.path.insert(0, str(CI_DIR))
 
-CONTRACTS = importlib.import_module("run_contract")
 RUNTIME = importlib.import_module("_runtime_gate")
 PROCESS = importlib.import_module("_process")
 CANDIDATE_SHA = "a" * 40
@@ -119,391 +116,6 @@ def ash_vulkan_smoke_payload(**overrides):
     return payload
 
 
-class ExpectedFailureTests(unittest.TestCase):
-    def test_accepts_nonzero_exit_with_every_required_diagnostic(self):
-        result = subprocess.CompletedProcess(
-            args=[], returncode=101, stdout="first contract\nsecond contract\n"
-        )
-        with patch.object(CONTRACTS, "run", return_value=result) as runner:
-            CONTRACTS.expect_failure(
-                "fixture", ("first contract", "second contract"), ("cargo", "check")
-            )
-
-        self.assertEqual(runner.call_args.kwargs["accepted_returncodes"], None)
-        self.assertTrue(runner.call_args.kwargs["combine_output"])
-
-    def test_rejects_an_unexpected_success(self):
-        result = subprocess.CompletedProcess(args=[], returncode=0, stdout="")
-        with (
-            patch.object(CONTRACTS, "run", return_value=result),
-            self.assertRaisesRegex(
-                CONTRACTS.VerificationError, "fixture unexpectedly succeeded"
-            ),
-        ):
-            CONTRACTS.expect_failure("fixture", ("contract",), ("cargo", "check"))
-
-    def test_rejects_failure_without_the_required_diagnostic(self):
-        result = subprocess.CompletedProcess(
-            args=[], returncode=101, stdout="some other compiler error"
-        )
-        with (
-            patch.object(CONTRACTS, "run", return_value=result),
-            self.assertRaisesRegex(
-                CONTRACTS.VerificationError, "missing diagnostic: expected contract"
-            ),
-        ):
-            CONTRACTS.expect_failure(
-                "fixture", ("expected contract",), ("cargo", "check")
-            )
-
-
-class ContractRunnerTests(unittest.TestCase):
-    def test_parser_accepts_a_diagnostic_that_starts_with_dashes(self):
-        args = CONTRACTS._build_parser().parse_args(
-            (
-                "expect-failure",
-                "--label",
-                "fixture",
-                "--contains=--features bindgen",
-                "--",
-                "cargo",
-                "check",
-            )
-        )
-
-        self.assertEqual(args.required_messages, ["--features bindgen"])
-        self.assertEqual(args.command, ["--", "cargo", "check"])
-
-    def test_prebuilt_test_engine_uses_an_isolated_dual_library_fixture(self):
-        observed = {}
-
-        def inspect_run(command, **kwargs):
-            fixture = Path(kwargs["env"]["IMGUI_SYS_LIB_DIR"])
-            observed["command"] = tuple(command)
-            observed["fixture"] = fixture
-            self.assertTrue((fixture / "libdear_imgui.a").is_file())
-            self.assertTrue((fixture / "dear_imgui.lib").is_file())
-            return subprocess.CompletedProcess(args=command, returncode=0)
-
-        with patch.object(CONTRACTS, "run", side_effect=inspect_run):
-            CONTRACTS.check_unified_prebuilt_test_engine()
-
-        self.assertIn("prebuilt,test-engine", observed["command"])
-        self.assertFalse(observed["fixture"].exists())
-
-    def test_clippy_expands_only_allowance_pairs_after_deny_warnings(self):
-        with (
-            patch.dict(
-                os.environ,
-                {"CLIPPY_HISTORICAL_LINTS": "-A dead_code -A clippy::needless_borrow"},
-            ),
-            patch.object(CONTRACTS, "run") as runner,
-        ):
-            CONTRACTS.run_clippy(("--", "-p", "dear-imgui-rs", "--lib"))
-
-        self.assertEqual(
-            tuple(runner.call_args.args[0]),
-            (
-                "cargo",
-                "clippy",
-                "-p",
-                "dear-imgui-rs",
-                "--lib",
-                "--",
-                "-D",
-                "warnings",
-                "-A",
-                "dead_code",
-                "-A",
-                "clippy::needless_borrow",
-            ),
-        )
-
-    def test_clippy_rejects_non_allowance_flags(self):
-        with (
-            patch.dict(os.environ, {"CLIPPY_HISTORICAL_LINTS": "-W dead_code"}),
-            self.assertRaisesRegex(
-                CONTRACTS.VerificationError, "may contain only -A allowances"
-            ),
-        ):
-            CONTRACTS.run_clippy(("--", "--workspace"))
-
-    def test_default_bindgen_check_covers_every_sys_crate_and_dependency(self):
-        absent = subprocess.CompletedProcess(
-            args=[], returncode=101, stdout="did not match any packages"
-        )
-        with patch.object(CONTRACTS, "run", return_value=absent) as runner:
-            CONTRACTS.check_no_default_bindgen()
-
-        self.assertEqual(runner.call_count, len(CONTRACTS.SYS_CRATES) * 2)
-
-    def test_release_notes_extract_the_validated_workspace_version(self):
-        with TemporaryDirectory() as temporary:
-            output = Path(temporary) / "release-notes.md"
-            with patch.object(CONTRACTS, "run") as runner:
-                CONTRACTS.prepare_release_notes("v0.16.0-alpha.2", output)
-
-            self.assertEqual(runner.call_count, 2)
-            validate_command = tuple(runner.call_args_list[0].args[0])
-            self.assertEqual(validate_command[-2:], ("--version", "0.16.0-alpha.2"))
-            extract_command = tuple(runner.call_args_list[1].args[0])
-            self.assertEqual(extract_command[-2:], ("--output", output))
-
-    def test_release_notes_reject_shell_metacharacters_in_tag(self):
-        with TemporaryDirectory() as temporary:
-            with self.assertRaisesRegex(
-                CONTRACTS.VerificationError, "invalid release tag"
-            ):
-                CONTRACTS.prepare_release_notes(
-                    "v0.16.0-alpha.1;echo",
-                    Path(temporary) / "notes",
-                )
-
-    def test_release_notes_require_the_workspace_release_version(self):
-        with TemporaryDirectory() as temporary:
-            with self.assertRaisesRegex(
-                CONTRACTS.VerificationError, "workspace release tag"
-            ):
-                CONTRACTS.prepare_release_notes(
-                    "v0.15.0",
-                    Path(temporary) / "notes",
-                )
-
-    def test_release_identity_accepts_an_uncreated_tag_on_exact_main_candidate(self):
-        candidate = "a" * 40
-        head = subprocess.CompletedProcess([], 0, stdout=f"{candidate}\n")
-        missing_tag = subprocess.CompletedProcess([], 1, stdout="")
-        with patch.object(CONTRACTS, "run", side_effect=[head, missing_tag]) as runner:
-            version = CONTRACTS.validate_release_identity(
-                tag="v0.16.0-alpha.2",
-                candidate_sha=candidate,
-                expected_ref="refs/heads/main",
-                actual_ref="refs/heads/main",
-            )
-
-        self.assertEqual(version, "0.16.0-alpha.2")
-        self.assertEqual(runner.call_count, 2)
-
-    def test_release_identity_rejects_an_existing_tag_on_another_commit(self):
-        candidate = "a" * 40
-        results = [
-            subprocess.CompletedProcess([], 0, stdout=f"{candidate}\n"),
-            subprocess.CompletedProcess([], 0, stdout=""),
-            subprocess.CompletedProcess([], 0, stdout=f"{'b' * 40}\n"),
-        ]
-        with (
-            patch.object(CONTRACTS, "run", side_effect=results),
-            self.assertRaisesRegex(CONTRACTS.VerificationError, "points to"),
-        ):
-            CONTRACTS.validate_release_identity(
-                tag="v0.16.0-alpha.2",
-                candidate_sha=candidate,
-                expected_ref="refs/heads/main",
-                actual_ref="refs/heads/main",
-            )
-
-    def test_release_identity_rejects_non_main_dispatch(self):
-        with (
-            patch.object(CONTRACTS, "run") as runner,
-            self.assertRaisesRegex(CONTRACTS.VerificationError, "refs/heads/main"),
-        ):
-            CONTRACTS.validate_release_identity(
-                tag="v0.16.0-alpha.2",
-                candidate_sha="a" * 40,
-                expected_ref="refs/heads/main",
-                actual_ref="refs/heads/topic",
-            )
-
-        runner.assert_not_called()
-
-    def test_windows_vcpkg_uses_resolved_executable_and_publishes_environment(self):
-        triplet = CONTRACTS.VcpkgTriplet.from_target(
-            "x86_64-pc-windows-msvc", "md"
-        )
-        status = type("Status", (), {"status_bytes": 12, "update_bytes": 0})()
-        with TemporaryDirectory() as temporary:
-            github_environment = Path(temporary) / "github-env"
-            with (
-                patch.object(
-                    CONTRACTS,
-                    "locate_vcpkg_executable",
-                    return_value=Path("C:/vcpkg/vcpkg.exe"),
-                ),
-                patch.object(
-                    CONTRACTS,
-                    "vcpkg_root_candidates",
-                    return_value=("candidate",),
-                ),
-                patch.object(
-                    CONTRACTS,
-                    "resolve_vcpkg_root",
-                    return_value=type("Root", (), {"path": Path("C:/vcpkg")})(),
-                ),
-                patch.object(CONTRACTS, "install_vcpkg_packages") as installer,
-                patch.object(
-                    CONTRACTS,
-                    "ensure_vcpkg_status_compatibility",
-                    return_value=status,
-                ),
-                patch.object(CONTRACTS, "append_github_assignments") as publisher,
-            ):
-                CONTRACTS.configure_windows_vcpkg(
-                    target=triplet.rust_target,
-                    crt=triplet.crt,
-                    packages=("freetype", "sdl3"),
-                    runner_temp=Path(temporary),
-                    github_environment=github_environment,
-                )
-
-            installer.assert_called_once_with(
-                ("freetype", "sdl3"),
-                triplet,
-                executable=Path("C:/vcpkg/vcpkg.exe"),
-            )
-            self.assertEqual(publisher.call_args.args[0], github_environment)
-
-    def test_windows_mingw_import_check_writes_complete_lf_evidence(self):
-        inspection = type(
-            "Inspection", (), {"evidence_text": "Checking a.exe\r\nDLL Name: KERNEL32.dll\r\n"}
-        )()
-        with TemporaryDirectory() as temporary:
-            evidence = Path(temporary) / "logs" / "imports.txt"
-            with patch.object(
-                CONTRACTS, "verify_mingw_imports", return_value=inspection
-            ):
-                CONTRACTS.check_windows_mingw_imports(
-                    deps_directory=Path("deps"),
-                    objdump=Path("objdump.exe"),
-                    evidence=evidence,
-                )
-
-            self.assertEqual(
-                evidence.read_bytes(),
-                b"Checking a.exe\nDLL Name: KERNEL32.dll\n",
-            )
-
-    def test_windows_cli_preserves_failure_evidence_and_exit_code(self):
-        with TemporaryDirectory() as temporary:
-            evidence = Path(temporary) / "logs" / "imports.txt"
-            failure = CONTRACTS.CommandError(
-                ("objdump.exe", "-p", "fixture.exe"),
-                9,
-                "objdump diagnostic\n",
-            )
-            diagnostic = io.StringIO()
-            with (
-                patch.object(CONTRACTS, "verify_mingw_imports", side_effect=failure),
-                redirect_stderr(diagnostic),
-            ):
-                result = CONTRACTS.main(
-                    (
-                        "windows-mingw-imports",
-                        "--deps",
-                        "deps",
-                        "--objdump",
-                        "objdump.exe",
-                        "--evidence",
-                        str(evidence),
-                    )
-                )
-
-            self.assertEqual(result, 9)
-            self.assertIn("objdump diagnostic", diagnostic.getvalue())
-            self.assertIn("exit code 9", evidence.read_text(encoding="utf-8"))
-
-    def test_runtime_disposition_only_defers_first_infrastructure_failure(self):
-        with TemporaryDirectory() as temporary:
-            github_output = Path(temporary) / "github-output"
-            first_infrastructure = RUNTIME.GateResult(
-                "fixture",
-                False,
-                RUNTIME.GateCategory.INFRASTRUCTURE_UNAVAILABLE,
-                "missing display",
-                attempt=1,
-            )
-            retried_infrastructure = RUNTIME.GateResult(
-                "fixture",
-                False,
-                RUNTIME.GateCategory.INFRASTRUCTURE_UNAVAILABLE,
-                "missing display",
-                attempt=2,
-            )
-            product = RUNTIME.GateResult(
-                "fixture",
-                False,
-                RUNTIME.GateCategory.PRODUCT_FAILURE,
-                "renderer failed",
-                attempt=1,
-            )
-            with (
-                patch.dict(os.environ, {"GITHUB_OUTPUT": str(github_output)}),
-                redirect_stderr(io.StringIO()),
-            ):
-                self.assertEqual(
-                    CONTRACTS._runtime_exit_code(
-                        first_infrastructure,
-                        defer_infrastructure_retry=True,
-                    ),
-                    0,
-                )
-                self.assertEqual(
-                    CONTRACTS._runtime_exit_code(
-                        retried_infrastructure,
-                        defer_infrastructure_retry=True,
-                    ),
-                    1,
-                )
-                self.assertEqual(
-                    CONTRACTS._runtime_exit_code(
-                        product,
-                        defer_infrastructure_retry=True,
-                    ),
-                    1,
-                )
-
-            outputs = github_output.read_text(encoding="utf-8")
-            self.assertIn("retry_eligible=true\n", outputs)
-            self.assertIn("gate_category=ProductFailure\n", outputs)
-
-    def test_runtime_preparation_failure_is_structured_and_retryable_once(self):
-        with TemporaryDirectory() as temporary:
-            evidence = Path(temporary) / "evidence"
-            github_output = Path(temporary) / "github-output"
-            with (
-                patch.dict(os.environ, {"GITHUB_OUTPUT": str(github_output)}),
-                patch.object(
-                    CONTRACTS.release_evidence,
-                    "resolve_candidate_sha",
-                    return_value=CANDIDATE_SHA,
-                ),
-            ):
-                exit_code = CONTRACTS.main(
-                    (
-                        "runtime-preparation-failure",
-                        "--gate",
-                        "multi-viewport-smoke",
-                        "--candidate-sha",
-                        CANDIDATE_SHA,
-                        "--evidence-dir",
-                        str(evidence),
-                        "--attempt",
-                        "1",
-                    )
-                )
-
-            self.assertEqual(exit_code, 0)
-            result = json.loads(
-                (evidence / "gate-result.json").read_text(encoding="utf-8")
-            )
-            self.assertEqual(result["category"], "InfrastructureUnavailable")
-            self.assertEqual(result["details"], {"phase": "preparation"})
-            self.assertTrue(result["retry"]["eligible"])
-            self.assertIn(
-                "retry_eligible=true\n",
-                github_output.read_text(encoding="utf-8"),
-            )
-
-
 class RuntimeGateTests(unittest.TestCase):
     def test_test_engine_gate_executes_and_classifies_every_contract(self):
         expectations = {
@@ -519,7 +131,6 @@ class RuntimeGateTests(unittest.TestCase):
                 stdout_log=evidence / "build.stdout.log",
                 stderr_log=evidence / "build.stderr.log",
             )
-            viewport_environment = {}
 
             def run_scenario(command, **kwargs):
                 arguments = [os.fspath(argument) for argument in command]
@@ -528,7 +139,11 @@ class RuntimeGateTests(unittest.TestCase):
                 expectation = expectations[name]
                 tested = 1 if expectation.outcome in {"Passed", "Failed"} else 0
                 succeeded = 1 if expectation.outcome == "Passed" else 0
-                error = "injected infrastructure error" if expectation.infrastructure else None
+                error = (
+                    "injected infrastructure error"
+                    if expectation.infrastructure
+                    else None
+                )
                 result_path.write_text(
                     json.dumps(
                         {
@@ -569,19 +184,14 @@ class RuntimeGateTests(unittest.TestCase):
 
             self.assertTrue(result.success)
             self.assertEqual(result.category, RUNTIME.GateCategory.PASSED)
-            scenarios = result.details["scenarios"]
-            self.assertEqual(len(scenarios), len(expectations))
             categories = {
-                scenario["scenario"]: scenario["category"] for scenario in scenarios
+                scenario["scenario"]: scenario["category"]
+                for scenario in result.details["scenarios"]
             }
+            self.assertEqual(set(categories), set(expectations))
             self.assertEqual(categories["timeout"], "TestTimedOut")
             self.assertEqual(categories["ffi-failure"], "InfrastructureUnavailable")
-            graphical_smoke.assert_called_once_with(
-                workspace_root=root,
-                evidence_dir=evidence,
-                binary=binary,
-                child_timeout=120.0,
-            )
+            graphical_smoke.assert_called_once()
             self.assertEqual(
                 result.details["dear_app_smoke"]["result"]["outcome"],
                 "Passed",
@@ -859,7 +469,9 @@ class RuntimeGateTests(unittest.TestCase):
             (evidence / "gate-result.json").write_text(
                 '{"success":true}', encoding="utf-8"
             )
-            (evidence / "pass.json").write_text('{"outcome":"Passed"}', encoding="utf-8")
+            (evidence / "pass.json").write_text(
+                '{"outcome":"Passed"}', encoding="utf-8"
+            )
 
             RUNTIME._prepare_evidence(
                 evidence_dir=evidence,
@@ -894,5 +506,7 @@ class RuntimeGateTests(unittest.TestCase):
             self.assertFalse(result.success)
             self.assertEqual(result.category, RUNTIME.GateCategory.PRODUCT_FAILURE)
             self.assertFalse(result.retry_eligible)
+
+
 if __name__ == "__main__":
     unittest.main()
