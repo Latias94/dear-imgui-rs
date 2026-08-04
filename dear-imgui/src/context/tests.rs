@@ -1470,13 +1470,13 @@ fn platform_release_commits_before_dropping_user_attachment() {
     let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| permit.commit()));
     assert!(panic.is_err());
     assert!(!handle.is_attached());
-    assert!(matches!(
+    assert!(
         ctx.register_attachment::<PlatformMarker>(
             ContextAttachmentRole::Platform,
             Rc::new(RecordingAttachment::new(Rc::new(RefCell::new(Vec::new())))),
-        ),
-        Ok(_)
-    ));
+        )
+        .is_ok()
+    );
 }
 
 #[test]
