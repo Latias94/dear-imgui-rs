@@ -43,7 +43,7 @@ python3 tools/tasks.py check
 # Update pregenerated bindings
 python3 tools/tasks.py bindings
 
-# Preview publishing; actual upload also needs --release-gate-result as shown above
+# Preview publishing
 python3 tools/tasks.py publish --dry-run
 
 # Run tests
@@ -81,16 +81,14 @@ python3 tools/publish.py --dry-run
 # Cargo package dry-run for a selected crate
 python3 tools/publish.py --cargo-dry-run --crates dear-imgui-sys
 
-# Manual full-train upload after authoritative evidence verification
-python3 tools/publish.py \
-  --release-gate-result artifacts/release-gate/gate-result.json \
-  --yes
+# Manual full-train recovery upload from an authorized environment
+python3 tools/publish.py --yes
 
 # Confirm every exact workspace version is available
 python3 tools/publish.py --verify-published
 ```
 
-Print-only `--dry-run` validates metadata without running the expensive gate. `--cargo-dry-run` runs the strict local preflight. Real uploads require the complete same-SHA 16-cell `Go` result, reject partial crate selection, target `crates-io` explicitly, recheck the clean Git fingerprint before every upload, and automatically skip an exact version only when the published Cargo archive records the same clean candidate commit. `--journal PATH` writes resumable machine-readable state.
+Print-only `--dry-run` validates metadata without running the expensive gate. `--cargo-dry-run` runs the strict local preflight. Real uploads reject partial crate selection, target `crates-io` explicitly, recheck the clean Git fingerprint before every upload, and automatically skip an exact version only when the published Cargo archive records the same clean candidate commit. Release authorization belongs to the protected workflow environment and its short-lived OIDC token; a local recovery operator must verify the exact commit and release gate before supplying credentials. `--journal PATH` writes resumable machine-readable state.
 
 **Publishing Order:**
 1. Build tooling: `dear-imgui-build-support`

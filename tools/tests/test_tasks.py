@@ -321,13 +321,12 @@ class ReleaseTaskTests(unittest.TestCase):
             cwd=REPO_ROOT,
         )
 
-    def test_publish_forwards_authoritative_gate_result(self):
+    def test_publish_forwards_upload_options(self):
         args = SimpleNamespace(
             dry_run=False,
             cargo_dry_run=False,
             no_verify=False,
             crates="dear-imgui-sys",
-            release_gate_result=Path("artifacts/gate-result.json"),
             yes=True,
             verify_published=False,
             index_timeout=300.0,
@@ -345,8 +344,6 @@ class ReleaseTaskTests(unittest.TestCase):
                 "tools/publish.py",
                 "--crates",
                 "dear-imgui-sys",
-                "--release-gate-result",
-                str(Path("artifacts/gate-result.json")),
                 "--yes",
                 "--index-timeout",
                 "300.0",
@@ -374,7 +371,6 @@ class ReleaseTaskTests(unittest.TestCase):
             cargo_dry_run=False,
             no_verify=False,
             crates=None,
-            release_gate_result=None,
             yes=False,
             verify_published=True,
             index_timeout=None,

@@ -48,6 +48,7 @@ _RUNTIME_RESULT_FIELDS = frozenset(
         "schema_version",
         "status",
         "gate",
+        "candidate_sha",
         "success",
         "category",
         "attempt",
@@ -1059,7 +1060,11 @@ def _runtime_source_file(root: Path, relative: str) -> Path:
 
 
 def _validate_runtime_attempt(
-    root: Path, *, expected_gate: str, expected_attempt: int
+    root: Path,
+    *,
+    expected_gate: str,
+    expected_attempt: int,
+    expected_candidate_sha: str,
 ) -> tuple[dict[str, Any], tuple[tuple[str, Path], ...]]:
     root = root.resolve()
     result_path = root / "gate-result.json"
@@ -1075,6 +1080,11 @@ def _validate_runtime_attempt(
     if value["gate"] != expected_gate:
         raise ReleaseCellError(
             f"runtime gate mismatch: expected {expected_gate!r}, found {value['gate']!r}"
+        )
+    if value["candidate_sha"] != expected_candidate_sha:
+        raise ReleaseCellError(
+            "runtime candidate mismatch: "
+            f"expected {expected_candidate_sha}, found {value['candidate_sha']!r}"
         )
     if type(value["attempt"]) is not int or value["attempt"] != expected_attempt:
         raise ReleaseCellError(
@@ -1130,6 +1140,7 @@ def _validate_runtime_attempt(
         "status",
         "gate",
         "attempt",
+        "candidate_sha",
         "process_id",
     } or type(invocation.get("schema_version")) is not int or invocation.get(
         "schema_version"
@@ -1138,6 +1149,7 @@ def _validate_runtime_attempt(
     if (
         invocation.get("status") != "Complete"
         or invocation.get("gate") != expected_gate
+        or invocation.get("candidate_sha") != expected_candidate_sha
         or type(invocation.get("attempt")) is not int
         or invocation.get("attempt") != expected_attempt
         or not isinstance(invocation.get("process_id"), int)
@@ -1239,7 +1251,10 @@ def finalize_runtime_cell(
     cell_root = Path(cell_root).resolve()
     output = _output_cell_path(cell_root, output_path)
     first, first_files = _validate_runtime_attempt(
-        Path(attempt1_dir), expected_gate=gate, expected_attempt=1
+        Path(attempt1_dir),
+        expected_gate=gate,
+        expected_attempt=1,
+        expected_candidate_sha=candidate_sha,
     )
     attempts = [(1, first_files)]
     selected = first
@@ -1250,7 +1265,10 @@ def finalize_runtime_cell(
         if first["retry"]["eligible"] is not True:
             raise ReleaseCellError("attempt 1 is not retry-eligible")
         second, second_files = _validate_runtime_attempt(
-            Path(attempt2_dir), expected_gate=gate, expected_attempt=2
+            Path(attempt2_dir),
+            expected_gate=gate,
+            expected_attempt=2,
+            expected_candidate_sha=candidate_sha,
         )
         attempts.append((2, second_files))
         selected = second
@@ -1338,6 +1356,12 @@ def _recorded_release_assets(
             f"{cell_id} cell record",
         )
         record = _read_json_object(cell_path, f"{cell_id} cell record")
+        recorded_digest = check.get("cell_record_sha256")
+        actual_record_digest = release_evidence.sha256_file(cell_path)
+        if recorded_digest != actual_record_digest:
+            raise ReleaseCellError(
+                f"prebuilt cell record checksum mismatch: {cell_id}"
+            )
         if record.get("cell_id") != cell_id:
             raise ReleaseCellError(f"prebuilt cell record identity mismatch: {cell_id}")
         if record.get("candidate_sha") != candidate_sha:
@@ -1394,6 +1418,7 @@ def prepare_release_bundle(
     *,
     repo_root: Path,
     candidate_sha: str,
+    ci_run_id: int,
     tag: str,
     evidence_root: Path,
     gate_result: Path,
@@ -1403,6 +1428,8 @@ def prepare_release_bundle(
     """Recompute the gate and stage only its checksummed release assets."""
     repo_root = Path(repo_root).resolve()
     candidate_sha = release_evidence.resolve_candidate_sha(repo_root, candidate_sha)
+    if isinstance(ci_run_id, bool) or not isinstance(ci_run_id, int) or ci_run_id <= 0:
+        raise ReleaseCellError("CI run ID must be a positive integer")
     if re.fullmatch(r"v[0-9A-Za-z][0-9A-Za-z.+-]*", tag) is None:
         raise ReleaseCellError(f"invalid release tag: {tag!r}")
     evidence_root = Path(evidence_root).resolve()
@@ -1463,6 +1490,7 @@ def prepare_release_bundle(
             "version": SCHEMA_VERSION,
             "tag": tag,
             "candidate_sha": candidate_sha,
+            "ci_run_id": ci_run_id,
             "assets": manifest_assets,
         }
         release_evidence.atomic_write_json(staging / "release-manifest.json", manifest)
@@ -1489,6 +1517,13 @@ def _nonnegative_float(value: str) -> float:
     parsed = float(value)
     if parsed < 0:
         raise argparse.ArgumentTypeError("value must be non-negative")
+    return parsed
+
+
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("value must be greater than zero")
     return parsed
 
 
@@ -1555,6 +1590,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     prepare.add_argument("--repo-root", type=Path, default=WORKSPACE_ROOT)
     prepare.add_argument("--candidate-sha", required=True)
+    prepare.add_argument("--ci-run-id", required=True, type=_positive_int)
     prepare.add_argument("--tag", required=True)
     prepare.add_argument("--evidence-root", required=True, type=Path)
     prepare.add_argument("--gate-result", required=True, type=Path)
@@ -1627,6 +1663,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             prepare_release_bundle(
                 repo_root=arguments.repo_root,
                 candidate_sha=arguments.candidate_sha,
+                ci_run_id=arguments.ci_run_id,
                 tag=arguments.tag,
                 evidence_root=arguments.evidence_root,
                 gate_result=arguments.gate_result,

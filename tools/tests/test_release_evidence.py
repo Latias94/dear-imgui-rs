@@ -690,6 +690,7 @@ class GateResultVerificationTests(unittest.TestCase):
             "checks": [
                 {
                     "cell_id": cell.cell_id,
+                    "cell_record_sha256": "0" * 64,
                     "conclusion": "success",
                     "evidence_paths": [f"{cell.cell_id}/cell.json"],
                     "errors": [],
@@ -764,6 +765,18 @@ class GateResultVerificationTests(unittest.TestCase):
                     release_evidence.verify_gate_result(
                         self.gate, expected_candidate_sha=SHA
                     )
+
+    def test_rejects_a_gate_without_a_bound_cell_record_checksum(self):
+        value = self.complete_gate()
+        value["checks"][0]["cell_record_sha256"] = None
+        self.write_gate(value)
+
+        with self.assertRaisesRegex(
+            release_evidence.EvidenceError, "bind one cell record checksum"
+        ):
+            release_evidence.verify_gate_result(
+                self.gate, expected_candidate_sha=SHA
+            )
 
     def test_verify_cli_binds_gate_to_resolved_head(self):
         self.write_gate(self.complete_gate())

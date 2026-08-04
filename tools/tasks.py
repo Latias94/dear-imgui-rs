@@ -150,7 +150,7 @@ def task_bindings(args, repo_root: Path) -> int:
 
 
 def task_publish(args, repo_root: Path) -> int:
-    """Publish crates to crates.io with authoritative release evidence."""
+    """Publish crates to crates.io."""
     cmd = [sys.executable, "tools/publish.py"]
     
     if getattr(args, "dry_run", False):
@@ -161,8 +161,6 @@ def task_publish(args, repo_root: Path) -> int:
         cmd.append("--no-verify")
     if getattr(args, "crates", None):
         cmd.extend(["--crates", args.crates])
-    if getattr(args, "release_gate_result", None):
-        cmd.extend(["--release-gate-result", str(args.release_gate_result)])
     if getattr(args, "yes", False):
         cmd.append("--yes")
     if getattr(args, "verify_published", False):
@@ -465,9 +463,7 @@ def main() -> int:
     bindings_parser.add_argument("--dry-run", action="store_true", help="Dry run")
     
     # publish task
-    publish_parser = subparsers.add_parser(
-        "publish", help="Publish crates with authoritative release evidence"
-    )
+    publish_parser = subparsers.add_parser("publish", help="Publish crates")
     publish_parser.add_argument("--crates", help="Comma-separated list of crates")
     publish_parser.add_argument("--dry-run", action="store_true", help="Dry run")
     publish_parser.add_argument(
@@ -476,11 +472,6 @@ def main() -> int:
         help="Run cargo publish --dry-run",
     )
     publish_parser.add_argument("--no-verify", action="store_true", help="Skip verification")
-    publish_parser.add_argument(
-        "--release-gate-result",
-        type=Path,
-        help="Authoritative same-SHA gate-result.json required for uploads",
-    )
     publish_parser.add_argument("--yes", action="store_true", help="Confirm upload")
     publish_parser.add_argument(
         "--verify-published",

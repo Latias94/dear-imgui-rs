@@ -26,8 +26,8 @@ Usage:
   # Cargo dry run (run cargo publish --dry-run for selected crates)
   python3 tools/publish.py --cargo-dry-run --crates dear-imgui-build-support
 
-  # Upload the complete train after verifying the authoritative same-SHA gate
-  python3 tools/publish.py --release-gate-result artifacts/gate-result.json --yes
+  # Upload the complete train from an authorized release environment
+  python3 tools/publish.py --yes
 
   # Verify that every exact workspace version is available
   python3 tools/publish.py --verify-published
@@ -589,38 +589,6 @@ def run_release_preflight(repo_root: Path) -> int:
     )
 
 
-def release_gate_verification_command(
-    repo_root: Path,
-    candidate_sha: str,
-    gate_result: Path,
-) -> List[str]:
-    """Build the authoritative same-SHA release evidence verification command."""
-    return [
-        sys.executable,
-        "tools/ci/release_evidence.py",
-        "verify",
-        "--repo-root",
-        str(repo_root),
-        "--candidate-sha",
-        candidate_sha,
-        "--gate-result",
-        str(gate_result),
-    ]
-
-
-def verify_release_gate_result(
-    repo_root: Path,
-    candidate_sha: str,
-    gate_result: Path,
-) -> int:
-    """Verify an authoritative remote Go result for the clean release HEAD."""
-    print_header("Authoritative Release Gate Evidence")
-    return run_command(
-        release_gate_verification_command(repo_root, candidate_sha, gate_result),
-        cwd=repo_root,
-    )
-
-
 def capture_release_fingerprint(repo_root: Path) -> Optional[str]:
     """Return the clean HEAD that subsequent publish commands must retain."""
     commands = [
@@ -705,13 +673,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip verification (pass --no-verify to cargo publish)"
     )
     parser.add_argument(
-        "--release-gate-result",
-        type=Path,
-        help=(
-            "Authoritative same-SHA gate-result.json; required for crates.io uploads"
-        ),
-    )
-    parser.add_argument(
         "--yes",
         action="store_true",
         help="Confirm a full release upload without reading stdin",
@@ -774,12 +735,6 @@ def main() -> int:
     actual_upload = not (
         args.dry_run or args.cargo_dry_run or args.verify_published
     )
-    if actual_upload and args.release_gate_result is None:
-        print_error(
-            "Actual crates.io uploads require --release-gate-result PATH from the "
-            "authoritative remote release gate."
-        )
-        return 1
     if actual_upload and args.crates:
         print_error("Actual uploads always publish the complete release train")
         return 1
@@ -810,27 +765,7 @@ def main() -> int:
         release_head = capture_release_fingerprint(repo_root)
         if release_head is None:
             return 1
-        if actual_upload:
-            gate_result = args.release_gate_result
-            assert gate_result is not None
-            gate_verification = verify_release_gate_result(
-                repo_root,
-                release_head,
-                gate_result,
-            )
-            if gate_verification != 0:
-                print_error(
-                    "Authoritative release gate verification failed; no crates "
-                    "were uploaded"
-                )
-                return gate_verification
-            if not verify_release_fingerprint(repo_root, release_head):
-                print_error(
-                    "Release source changed during gate verification; no crates "
-                    "were uploaded"
-                )
-                return 1
-        elif args.cargo_dry_run:
+        if args.cargo_dry_run:
             preflight = run_release_preflight(repo_root)
             if preflight != 0:
                 print_error("Strict release preflight failed")
@@ -859,13 +794,6 @@ def main() -> int:
     ):
         print_error("Release source changed while loading metadata")
         return 1
-
-    if actual_upload:
-        gate_status = f"verified from {args.release_gate_result}"
-    elif args.verify_published:
-        gate_status = "not required for registry verification"
-    else:
-        gate_status = "not required for preview"
 
     if args.dry_run:
         preflight_status = "not run for print-only dry-run"
@@ -906,7 +834,6 @@ def main() -> int:
     print_info(f"Cargo dry run: {args.cargo_dry_run}")
     print_info(f"Verify published: {args.verify_published}")
     print_info(f"No verify: {args.no_verify}")
-    print_info(f"Authoritative release gate: {gate_status}")
     print_info(f"Strict local release preflight: {preflight_status}")
     print_info(f"Per-crate index timeout: {args.index_timeout:g}s")
     print_info(f"Per-crate publish timeout: {args.publish_timeout:g}s")

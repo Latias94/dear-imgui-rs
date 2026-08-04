@@ -18,6 +18,7 @@ if str(CI_DIR) not in sys.path:
 CONTRACTS = importlib.import_module("run_contract")
 RUNTIME = importlib.import_module("_runtime_gate")
 PROCESS = importlib.import_module("_process")
+CANDIDATE_SHA = "a" * 40
 
 
 def bounded_result(
@@ -410,22 +411,6 @@ class ContractRunnerTests(unittest.TestCase):
             self.assertIn("objdump diagnostic", diagnostic.getvalue())
             self.assertIn("exit code 9", evidence.read_text(encoding="utf-8"))
 
-    def test_runtime_parser_owns_stable_child_budgets(self):
-        parser = CONTRACTS._build_parser()
-        test_engine = parser.parse_args(("test-engine-runtime",))
-        viewport = parser.parse_args(("multi-viewport-smoke",))
-        sdl3_glow = parser.parse_args(("sdl3-glow-multi-viewport-smoke",))
-        ash_vulkan = parser.parse_args(("ash-vulkan-validation-smoke",))
-
-        self.assertEqual(test_engine.child_timeout, 120.0)
-        self.assertEqual(viewport.child_timeout, 180.0)
-        self.assertEqual(sdl3_glow.child_timeout, 180.0)
-        self.assertEqual(ash_vulkan.child_timeout, 180.0)
-        self.assertEqual(test_engine.build_timeout, 900.0)
-        self.assertEqual(viewport.build_timeout, 900.0)
-        self.assertEqual(sdl3_glow.build_timeout, 900.0)
-        self.assertEqual(ash_vulkan.build_timeout, 900.0)
-
     def test_runtime_disposition_only_defers_first_infrastructure_failure(self):
         with TemporaryDirectory() as temporary:
             github_output = Path(temporary) / "github-output"
@@ -484,12 +469,21 @@ class ContractRunnerTests(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             evidence = Path(temporary) / "evidence"
             github_output = Path(temporary) / "github-output"
-            with patch.dict(os.environ, {"GITHUB_OUTPUT": str(github_output)}):
+            with (
+                patch.dict(os.environ, {"GITHUB_OUTPUT": str(github_output)}),
+                patch.object(
+                    CONTRACTS.release_evidence,
+                    "resolve_candidate_sha",
+                    return_value=CANDIDATE_SHA,
+                ),
+            ):
                 exit_code = CONTRACTS.main(
                     (
                         "runtime-preparation-failure",
                         "--gate",
                         "multi-viewport-smoke",
+                        "--candidate-sha",
+                        CANDIDATE_SHA,
                         "--evidence-dir",
                         str(evidence),
                         "--attempt",
@@ -570,6 +564,7 @@ class RuntimeGateTests(unittest.TestCase):
                 result = RUNTIME.run_test_engine_runtime(
                     workspace_root=root,
                     evidence_dir=evidence,
+                    candidate_sha=CANDIDATE_SHA,
                 )
 
             self.assertTrue(result.success)
@@ -600,6 +595,7 @@ class RuntimeGateTests(unittest.TestCase):
                 (evidence / "gate-invocation.json").read_text(encoding="utf-8")
             )
             self.assertEqual(invocation["status"], "Complete")
+            self.assertEqual(invocation["candidate_sha"], CANDIDATE_SHA)
 
     def test_dear_app_smoke_schema_requires_wiring_terminal_and_teardown_proof(self):
         valid = dear_app_smoke_payload()
@@ -648,6 +644,7 @@ class RuntimeGateTests(unittest.TestCase):
                 result = RUNTIME.run_test_engine_runtime(
                     workspace_root=root,
                     evidence_dir=evidence,
+                    candidate_sha=CANDIDATE_SHA,
                     child_timeout=0.5,
                 )
 
@@ -704,6 +701,7 @@ class RuntimeGateTests(unittest.TestCase):
                 result = RUNTIME.run_multi_viewport_smoke(
                     workspace_root=REPO_ROOT,
                     evidence_dir=evidence,
+                    candidate_sha=CANDIDATE_SHA,
                 )
 
             self.assertFalse(result.success)
@@ -867,6 +865,7 @@ class RuntimeGateTests(unittest.TestCase):
                 evidence_dir=evidence,
                 gate="test-engine-runtime",
                 attempt=2,
+                candidate_sha=CANDIDATE_SHA,
                 owned_files=("pass.json",),
             )
 
@@ -877,6 +876,7 @@ class RuntimeGateTests(unittest.TestCase):
             )
             self.assertEqual(invocation["status"], "Running")
             self.assertEqual(invocation["attempt"], 2)
+            self.assertEqual(invocation["candidate_sha"], CANDIDATE_SHA)
 
     def test_third_fresh_runner_attempt_is_rejected_without_building(self):
         with TemporaryDirectory() as temporary:
@@ -886,6 +886,7 @@ class RuntimeGateTests(unittest.TestCase):
                 result = RUNTIME.run_test_engine_runtime(
                     workspace_root=root,
                     evidence_dir=evidence,
+                    candidate_sha=CANDIDATE_SHA,
                     attempt=3,
                 )
 

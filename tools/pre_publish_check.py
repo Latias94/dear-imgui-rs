@@ -739,11 +739,8 @@ def main() -> int:
         print("Next steps:")
         print("  1. Review changes one more time")
         print("  2. Run: python3 tools/publish.py --dry-run")
-        print("  3. Download the authoritative same-SHA release gate result")
-        print(
-            "  4. Run: python3 tools/publish.py "
-            "--release-gate-result PATH/to/gate-result.json"
-        )
+        print("  3. Prefer the protected release workflow for publication")
+        print("  4. For manual recovery only: python3 tools/publish.py --yes")
         return 0
     else:
         print()

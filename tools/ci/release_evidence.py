@@ -39,7 +39,14 @@ _GATE_RESULT_FIELDS = frozenset(
     {"version", "candidate_sha", "decision", "checks", "summary"}
 )
 _GATE_CHECK_FIELDS = frozenset(
-    {"cell_id", "conclusion", "evidence_paths", "errors", "status"}
+    {
+        "cell_id",
+        "cell_record_sha256",
+        "conclusion",
+        "evidence_paths",
+        "errors",
+        "status",
+    }
 )
 _GATE_SUMMARY_FIELDS = frozenset(
     {"expected_cells", "successful_checks", "failed_checks"}
@@ -804,6 +811,7 @@ def aggregate_release_evidence(
         checks.append(
             {
                 "cell_id": "__inventory__",
+                "cell_record_sha256": None,
                 "conclusion": None,
                 "evidence_paths": [],
                 "errors": sorted(inventory_errors),
@@ -821,6 +829,7 @@ def aggregate_release_evidence(
         )
         errors: list[str] = []
         conclusion: str | None = None
+        cell_record_sha256: str | None = None
         if not records:
             errors.append("required cell evidence is missing")
         elif len(records) > 1:
@@ -828,7 +837,11 @@ def aggregate_release_evidence(
             for _path, _value, record_errors in records:
                 errors.extend(record_errors)
         else:
-            _path, value, record_errors = records[0]
+            record_path, value, record_errors = records[0]
+            try:
+                cell_record_sha256 = sha256_file(record_path)
+            except EvidenceError as error:
+                errors.append(str(error))
             errors.extend(record_errors)
             errors.extend(_validate_required_evidence(value, expected))
             conclusion_value = value.get("conclusion")
@@ -850,6 +863,7 @@ def aggregate_release_evidence(
         checks.append(
             {
                 "cell_id": expected.cell_id,
+                "cell_record_sha256": cell_record_sha256,
                 "conclusion": conclusion,
                 "evidence_paths": evidence_names,
                 "errors": sorted(set(errors)),
@@ -860,10 +874,16 @@ def aggregate_release_evidence(
     for cell_id in sorted(set(records_by_id) - set(expected_by_id)):
         records = records_by_id[cell_id]
         errors = ["cell is not present in the expected inventory"]
+        cell_record_sha256: str | None = None
         for _path, _value, record_errors in records:
             errors.extend(record_errors)
         if len(records) > 1:
             errors.append(f"duplicate cell evidence: found {len(records)} records")
+        elif len(records) == 1:
+            try:
+                cell_record_sha256 = sha256_file(records[0][0])
+            except EvidenceError as error:
+                errors.append(str(error))
         conclusions = {
             value.get("conclusion")
             for _path, value, _errors in records
@@ -872,6 +892,7 @@ def aggregate_release_evidence(
         checks.append(
             {
                 "cell_id": cell_id,
+                "cell_record_sha256": cell_record_sha256,
                 "conclusion": next(iter(conclusions)) if len(conclusions) == 1 else None,
                 "evidence_paths": sorted(
                     _display_path(path, evidence_root)
@@ -886,6 +907,7 @@ def aggregate_release_evidence(
         checks.append(
             {
                 "cell_id": None,
+                "cell_record_sha256": None,
                 "conclusion": None,
                 "evidence_paths": [_display_path(path, evidence_root)],
                 "errors": sorted(set(errors)),
@@ -946,6 +968,12 @@ def verify_gate_result(path: Path, *, expected_candidate_sha: str) -> dict[str, 
         observed_ids.append(cell_id)
         if check["status"] != "success" or check["conclusion"] != "success":
             raise EvidenceError(f"{label} is not a successful release cell")
+        cell_record_sha256 = check["cell_record_sha256"]
+        if (
+            not isinstance(cell_record_sha256, str)
+            or _CHECKSUM.fullmatch(cell_record_sha256) is None
+        ):
+            raise EvidenceError(f"{label} must bind one cell record checksum")
         if check["errors"] != []:
             raise EvidenceError(f"{label} must not contain errors")
         evidence_paths = check["evidence_paths"]

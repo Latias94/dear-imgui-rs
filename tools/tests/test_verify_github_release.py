@@ -42,6 +42,7 @@ class ReleaseAssetInventoryTests(unittest.TestCase):
                     "version": 1,
                     "tag": "v0.16.0-alpha.1",
                     "candidate_sha": self.candidate_sha,
+                    "ci_run_id": 123,
                     "assets": [
                         {"name": "linux.tar.gz", "sha256": "b" * 64},
                         {"name": "windows.tar.gz", "sha256": "c" * 64},
@@ -58,6 +59,7 @@ class ReleaseAssetInventoryTests(unittest.TestCase):
                 self.write_manifest(directory),
                 tag="v0.16.0-alpha.1",
                 candidate_sha=self.candidate_sha,
+                expected_ci_run_id=123,
             )
 
         self.assertEqual(
@@ -73,12 +75,41 @@ class ReleaseAssetInventoryTests(unittest.TestCase):
                     manifest,
                     tag="v0.16.0-alpha.2",
                     candidate_sha=self.candidate_sha,
+                    expected_ci_run_id=123,
                 )
             with self.assertRaisesRegex(VERIFY.ReleaseAssetError, "candidate"):
                 VERIFY.expected_asset_names(
                     manifest,
                     tag="v0.16.0-alpha.1",
                     candidate_sha="d" * 40,
+                    expected_ci_run_id=123,
+                )
+
+    def test_manifest_requires_a_valid_ci_run_id(self):
+        with TemporaryDirectory() as directory:
+            manifest = self.write_manifest(directory)
+            value = json.loads(manifest.read_text(encoding="utf-8"))
+            value["ci_run_id"] = 0
+            manifest.write_text(json.dumps(value), encoding="utf-8")
+
+            with self.assertRaisesRegex(VERIFY.ReleaseAssetError, "CI run ID"):
+                VERIFY.expected_asset_names(
+                    manifest,
+                    tag="v0.16.0-alpha.1",
+                    candidate_sha=self.candidate_sha,
+                    expected_ci_run_id=123,
+                )
+
+    def test_manifest_is_bound_to_the_validated_ci_run(self):
+        with TemporaryDirectory() as directory:
+            manifest = self.write_manifest(directory)
+
+            with self.assertRaisesRegex(VERIFY.ReleaseAssetError, "validated CI run"):
+                VERIFY.expected_asset_names(
+                    manifest,
+                    tag="v0.16.0-alpha.1",
+                    candidate_sha=self.candidate_sha,
+                    expected_ci_run_id=456,
                 )
 
     def test_compatible_mode_allows_absent_or_partial_release(self):

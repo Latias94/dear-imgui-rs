@@ -587,6 +587,7 @@ class RuntimeFinalizeTests(unittest.TestCase):
                 "status": "Complete",
                 "gate": gate,
                 "attempt": attempt,
+                "candidate_sha": SHA,
                 "process_id": 123,
             },
         )
@@ -608,6 +609,7 @@ class RuntimeFinalizeTests(unittest.TestCase):
                 "schema_version": 1,
                 "status": "Complete",
                 "gate": gate,
+                "candidate_sha": SHA,
                 "success": success,
                 "category": category,
                 "attempt": attempt,
@@ -982,6 +984,7 @@ class ReleaseBundleTests(unittest.TestCase):
         )
         check = {
             "cell_id": cell_id,
+            "cell_record_sha256": release_evidence.sha256_file(cell / "cell.json"),
             "conclusion": "success",
             "evidence_paths": [f"{cell_id}/cell.json"],
             "errors": [],
@@ -1017,6 +1020,7 @@ class ReleaseBundleTests(unittest.TestCase):
             return release_cell.prepare_release_bundle(
                 repo_root=self.repo,
                 candidate_sha=SHA,
+                ci_run_id=123,
                 tag="v0.16.0-alpha.1",
                 evidence_root=self.evidence,
                 gate_result=self.gate_result,
@@ -1033,6 +1037,7 @@ class ReleaseBundleTests(unittest.TestCase):
 
         manifest = self.prepare(gate)
 
+        self.assertEqual(manifest["ci_run_id"], 123)
         self.assertEqual(
             sorted(path.name for path in (self.output / "assets").iterdir()),
             ["SHA256SUMS", "dear-imgui-linux.tar.gz"],

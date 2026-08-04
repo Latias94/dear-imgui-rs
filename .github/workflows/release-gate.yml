@@ -114,7 +114,6 @@ jobs:
           path: target/release-evidence
           if-no-files-found: error
           retention-days: 30
-          overwrite: true
 
   viewport-attempt-1:
     needs: validate-candidate-identity
@@ -190,7 +189,6 @@ jobs:
           path: target/release-evidence
           if-no-files-found: error
           retention-days: 30
-          overwrite: true
 
   ash-vulkan-validation-attempt-1:
     needs: validate-candidate-identity
@@ -266,7 +264,6 @@ jobs:
           path: target/release-evidence
           if-no-files-found: error
           retention-days: 30
-          overwrite: true
 
   sdl3-glow-viewport-attempt-1:
     needs: validate-candidate-identity
@@ -342,7 +339,6 @@ jobs:
           path: target/release-evidence
           if-no-files-found: error
           retention-days: 30
-          overwrite: true
 
   standard-cells:
     needs: validate-candidate-identity
@@ -672,7 +668,6 @@ jobs:
           path: target/release-evidence
           if-no-files-found: error
           retention-days: 30
-          overwrite: true
 
   source-packages:
     needs: validate-candidate-identity
@@ -902,7 +897,6 @@ jobs:
           path: target/release-evidence
           if-no-files-found: error
           retention-days: 30
-          overwrite: true
 
   prebuilt:
     needs: validate-candidate-identity
@@ -950,4 +944,3 @@ jobs:
           path: target/release-evidence/cells/gate-result.json
           if-no-files-found: error
           retention-days: 30
-          overwrite: true

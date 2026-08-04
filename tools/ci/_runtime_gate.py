@@ -22,7 +22,7 @@ from _process import (
     managed_background,
     run_bounded,
 )
-from release_evidence import atomic_write_json
+from release_evidence import atomic_write_json, parse_candidate_sha
 
 
 class GateCategory(str, Enum):
@@ -178,7 +178,8 @@ def _evidence_files(evidence_dir: Path) -> tuple[str, ...]:
     )
 
 
-def _finalize(result: GateResult, evidence_dir: Path) -> GateResult:
+def _finalize(result: GateResult, evidence_dir: Path, candidate_sha: str) -> GateResult:
+    candidate_sha = parse_candidate_sha(candidate_sha)
     atomic_write_json(
         evidence_dir / "gate-invocation.json",
         {
@@ -186,11 +187,14 @@ def _finalize(result: GateResult, evidence_dir: Path) -> GateResult:
             "status": "Complete",
             "gate": result.gate,
             "attempt": result.attempt,
+            "candidate_sha": candidate_sha,
             "process_id": os.getpid(),
         },
     )
     result = replace(result, evidence=_evidence_files(evidence_dir))
-    atomic_write_json(evidence_dir / "gate-result.json", result.to_json())
+    result_json = result.to_json()
+    result_json["candidate_sha"] = candidate_sha
+    atomic_write_json(evidence_dir / "gate-result.json", result_json)
     return result
 
 
@@ -199,8 +203,10 @@ def _prepare_evidence(
     evidence_dir: Path,
     gate: str,
     attempt: int,
+    candidate_sha: str,
     owned_files: Sequence[str],
 ) -> None:
+    candidate_sha = parse_candidate_sha(candidate_sha)
     evidence_dir.mkdir(parents=True, exist_ok=True)
     for name in ("gate-result.json", "gate-invocation.json", *owned_files):
         (evidence_dir / name).unlink(missing_ok=True)
@@ -211,6 +217,7 @@ def _prepare_evidence(
             "status": "Running",
             "gate": gate,
             "attempt": attempt,
+            "candidate_sha": candidate_sha,
             "process_id": os.getpid(),
         },
     )
@@ -220,6 +227,7 @@ def record_runtime_preparation_failure(
     *,
     gate: str,
     attempt: int,
+    candidate_sha: str,
     evidence_dir: Path,
     summary: str,
 ) -> GateResult:
@@ -228,6 +236,7 @@ def record_runtime_preparation_failure(
         evidence_dir=evidence_dir,
         gate=gate,
         attempt=attempt,
+        candidate_sha=candidate_sha,
         owned_files=(),
     )
     return _finalize(
@@ -240,6 +249,7 @@ def record_runtime_preparation_failure(
             details={"phase": "preparation"},
         ),
         evidence_dir,
+        candidate_sha,
     )
 
 
@@ -247,6 +257,7 @@ def _reject_excess_attempt(
     *,
     gate: str,
     attempt: int,
+    candidate_sha: str,
     evidence_dir: Path,
 ) -> GateResult | None:
     if attempt <= 2:
@@ -260,6 +271,7 @@ def _reject_excess_attempt(
             attempt,
         ),
         evidence_dir,
+        candidate_sha,
     )
 
 
@@ -571,6 +583,7 @@ def run_test_engine_runtime(
     *,
     workspace_root: Path,
     evidence_dir: Path,
+    candidate_sha: str,
     child_timeout: float = 120.0,
     build_timeout: float = 900.0,
     attempt: int = 1,
@@ -610,6 +623,7 @@ def run_test_engine_runtime(
         evidence_dir=evidence_dir,
         gate=gate,
         attempt=attempt,
+        candidate_sha=candidate_sha,
         owned_files=(
             "build.stdout.log",
             "build.stderr.log",
@@ -620,6 +634,7 @@ def run_test_engine_runtime(
     if rejected := _reject_excess_attempt(
         gate=gate,
         attempt=attempt,
+        candidate_sha=candidate_sha,
         evidence_dir=evidence_dir,
     ):
         return rejected
@@ -791,7 +806,7 @@ def run_test_engine_runtime(
             attempt,
             details,
         )
-    return _finalize(result, evidence_dir)
+    return _finalize(result, evidence_dir, candidate_sha)
 
 
 def _find_lavapipe_icd() -> Path:
@@ -1541,6 +1556,7 @@ def _run_viewport_smoke(
     spec: ViewportSmokeSpec,
     workspace_root: Path,
     evidence_dir: Path,
+    candidate_sha: str,
     child_timeout: float = 180.0,
     build_timeout: float = 900.0,
     attempt: int = 1,
@@ -1553,6 +1569,7 @@ def _run_viewport_smoke(
         evidence_dir=evidence_dir,
         gate=gate,
         attempt=attempt,
+        candidate_sha=candidate_sha,
         owned_files=(
             "runtime-environment.json",
             "build.stdout.log",
@@ -1588,6 +1605,7 @@ def _run_viewport_smoke(
     if rejected := _reject_excess_attempt(
         gate=gate,
         attempt=attempt,
+        candidate_sha=candidate_sha,
         evidence_dir=evidence_dir,
     ):
         return rejected
@@ -1997,13 +2015,14 @@ def _run_viewport_smoke(
     finally:
         if xdg_runtime_owner is not None:
             xdg_runtime_owner.cleanup()
-    return _finalize(result, evidence_dir)
+    return _finalize(result, evidence_dir, candidate_sha)
 
 
 def run_multi_viewport_smoke(
     *,
     workspace_root: Path,
     evidence_dir: Path,
+    candidate_sha: str,
     child_timeout: float = 180.0,
     build_timeout: float = 900.0,
     attempt: int = 1,
@@ -2013,6 +2032,7 @@ def run_multi_viewport_smoke(
         spec=_WGPU_VIEWPORT_SMOKE,
         workspace_root=workspace_root,
         evidence_dir=evidence_dir,
+        candidate_sha=candidate_sha,
         child_timeout=child_timeout,
         build_timeout=build_timeout,
         attempt=attempt,
@@ -2023,6 +2043,7 @@ def run_sdl3_glow_viewport_smoke(
     *,
     workspace_root: Path,
     evidence_dir: Path,
+    candidate_sha: str,
     child_timeout: float = 180.0,
     build_timeout: float = 900.0,
     attempt: int = 1,
@@ -2032,6 +2053,7 @@ def run_sdl3_glow_viewport_smoke(
         spec=_SDL3_GLOW_VIEWPORT_SMOKE,
         workspace_root=workspace_root,
         evidence_dir=evidence_dir,
+        candidate_sha=candidate_sha,
         child_timeout=child_timeout,
         build_timeout=build_timeout,
         attempt=attempt,
@@ -2042,6 +2064,7 @@ def run_ash_vulkan_validation_smoke(
     *,
     workspace_root: Path,
     evidence_dir: Path,
+    candidate_sha: str,
     child_timeout: float = 180.0,
     build_timeout: float = 900.0,
     attempt: int = 1,
@@ -2051,6 +2074,7 @@ def run_ash_vulkan_validation_smoke(
         spec=_ASH_VULKAN_VIEWPORT_SMOKE,
         workspace_root=workspace_root,
         evidence_dir=evidence_dir,
+        candidate_sha=candidate_sha,
         child_timeout=child_timeout,
         build_timeout=build_timeout,
         attempt=attempt,

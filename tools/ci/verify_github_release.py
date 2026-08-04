@@ -153,6 +153,7 @@ def expected_asset_names(
     *,
     tag: str,
     candidate_sha: str,
+    expected_ci_run_id: int,
 ) -> set[str]:
     """Load and validate the exact user-facing asset names from a bundle."""
     try:
@@ -168,6 +169,13 @@ def expected_asset_names(
     if manifest.get("candidate_sha") != candidate_sha:
         raise ReleaseAssetError(
             "release manifest candidate does not match the workflow candidate"
+        )
+    ci_run_id = manifest.get("ci_run_id")
+    if isinstance(ci_run_id, bool) or not isinstance(ci_run_id, int) or ci_run_id <= 0:
+        raise ReleaseAssetError("release manifest has no valid CI run ID")
+    if ci_run_id != expected_ci_run_id:
+        raise ReleaseAssetError(
+            "release manifest CI run ID does not match the validated CI run"
         )
     assets = manifest.get("assets")
     if not isinstance(assets, list) or not assets:
@@ -266,12 +274,20 @@ def verify_asset_inventory(
             )
 
 
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("value must be greater than zero")
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--repository", required=True)
     parser.add_argument("--tag", required=True)
     parser.add_argument("--candidate-sha", required=True)
+    parser.add_argument("--ci-run-id", required=True, type=_positive_int)
     parser.add_argument(
         "--require-exact",
         action="store_true",
@@ -291,6 +307,7 @@ def main() -> int:
             args.manifest,
             tag=args.tag,
             candidate_sha=args.candidate_sha,
+            expected_ci_run_id=args.ci_run_id,
         )
         existing = existing_asset_names(
             api_url=os.environ.get("GITHUB_API_URL", "https://api.github.com"),

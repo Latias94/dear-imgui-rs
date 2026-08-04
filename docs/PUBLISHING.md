@@ -75,18 +75,16 @@ A cell that is missing, skipped, cancelled, timed out, malformed, duplicated, or
 
 ## Manual fallback
 
-The normal path is `release.yml`. For registry incident recovery, `tools/publish.py` can use a downloaded same-SHA `gate-result.json` and a manually supplied crates.io token:
+The normal path is `release.yml`. For registry incident recovery, `tools/publish.py` can resume the complete train with a manually supplied crates.io token:
 
 ```bash
 python3 tools/publish.py --dry-run
 python3 tools/publish.py --cargo-dry-run --crates dear-imgui-sys
 
-python3 tools/publish.py \
-  --release-gate-result artifacts/release-gate/gate-result.json \
-  --yes
+python3 tools/publish.py --yes
 ```
 
-Real uploads always operate on the complete release train; `--crates` is limited to previews and Cargo dry-runs. The script fails closed when crates.io state is unavailable, rejects published archives from a different or dirty Git candidate, reconciles Cargo upload errors against the exact registry version, rechecks the clean source commit before every upload, and can write a machine-readable journal with `--journal PATH`.
+Real uploads always operate on the complete release train; `--crates` is limited to previews and Cargo dry-runs. The script fails closed when crates.io state is unavailable, rejects published archives from a different or dirty Git candidate, reconciles Cargo upload errors against the exact registry version, rechecks the clean source commit before every upload, and can write a machine-readable journal with `--journal PATH`. Release authorization is deliberately external: the normal workflow uses the protected `release` environment and a short-lived OIDC token. Before a manual recovery upload, verify the exact commit and successful release workflow yourself.
 
 Verify a completed train without uploading:
 

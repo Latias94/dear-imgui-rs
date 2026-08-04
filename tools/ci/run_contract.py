@@ -30,6 +30,7 @@ from _runtime_gate import (  # noqa: E402
     run_test_engine_runtime,
 )
 from _verification import VerificationError, temporary_workspace  # noqa: E402
+import release_evidence  # noqa: E402
 from _windows_native import (  # noqa: E402
     ForbiddenImportError,
     WindowsNativeError,
@@ -429,6 +430,11 @@ def _add_runtime_arguments(
     evidence_dir: Path,
     child_timeout: float,
 ) -> None:
+    parser.add_argument(
+        "--candidate-sha",
+        required=True,
+        help="Exact checked-out commit recorded in runtime evidence",
+    )
     parser.add_argument("--evidence-dir", type=Path, default=evidence_dir)
     parser.add_argument(
         "--child-timeout",
@@ -517,6 +523,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Record a native runtime gate skipped during runner preparation",
     )
     preparation_failure.add_argument("--gate", required=True)
+    preparation_failure.add_argument("--candidate-sha", required=True)
     preparation_failure.add_argument("--evidence-dir", required=True, type=Path)
     preparation_failure.add_argument("--attempt", required=True, type=_positive_int)
     preparation_failure.add_argument(
@@ -640,9 +647,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             release_tag = os.environ.get("RELEASE_TAG", "")
             prepare_release_notes(release_tag, args.output)
         elif args.contract == "runtime-preparation-failure":
+            candidate_sha = release_evidence.resolve_candidate_sha(
+                WORKSPACE_ROOT, args.candidate_sha
+            )
             result = record_runtime_preparation_failure(
                 gate=args.gate,
                 attempt=args.attempt,
+                candidate_sha=candidate_sha,
                 evidence_dir=args.evidence_dir,
                 summary=args.summary,
             )
@@ -685,9 +696,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 evidence=args.evidence,
             )
         elif args.contract == "test-engine-runtime":
+            candidate_sha = release_evidence.resolve_candidate_sha(
+                WORKSPACE_ROOT, args.candidate_sha
+            )
             result = run_test_engine_runtime(
                 workspace_root=WORKSPACE_ROOT,
                 evidence_dir=args.evidence_dir,
+                candidate_sha=candidate_sha,
                 child_timeout=args.child_timeout,
                 build_timeout=args.build_timeout,
                 attempt=args.attempt,
@@ -697,9 +712,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 defer_infrastructure_retry=args.defer_infrastructure_retry,
             )
         elif args.contract == "multi-viewport-smoke":
+            candidate_sha = release_evidence.resolve_candidate_sha(
+                WORKSPACE_ROOT, args.candidate_sha
+            )
             result = run_multi_viewport_smoke(
                 workspace_root=WORKSPACE_ROOT,
                 evidence_dir=args.evidence_dir,
+                candidate_sha=candidate_sha,
                 child_timeout=args.child_timeout,
                 build_timeout=args.build_timeout,
                 attempt=args.attempt,
@@ -709,9 +728,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 defer_infrastructure_retry=args.defer_infrastructure_retry,
             )
         elif args.contract == "sdl3-glow-multi-viewport-smoke":
+            candidate_sha = release_evidence.resolve_candidate_sha(
+                WORKSPACE_ROOT, args.candidate_sha
+            )
             result = run_sdl3_glow_viewport_smoke(
                 workspace_root=WORKSPACE_ROOT,
                 evidence_dir=args.evidence_dir,
+                candidate_sha=candidate_sha,
                 child_timeout=args.child_timeout,
                 build_timeout=args.build_timeout,
                 attempt=args.attempt,
@@ -721,9 +744,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 defer_infrastructure_retry=args.defer_infrastructure_retry,
             )
         elif args.contract == "ash-vulkan-validation-smoke":
+            candidate_sha = release_evidence.resolve_candidate_sha(
+                WORKSPACE_ROOT, args.candidate_sha
+            )
             result = run_ash_vulkan_validation_smoke(
                 workspace_root=WORKSPACE_ROOT,
                 evidence_dir=args.evidence_dir,
+                candidate_sha=candidate_sha,
                 child_timeout=args.child_timeout,
                 build_timeout=args.build_timeout,
                 attempt=args.attempt,
@@ -737,7 +764,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     except CommandError as error:
         print(f"::error::{error}", file=sys.stderr)
         return error.returncode if error.returncode > 0 else 1
-    except (OSError, VerificationError, WindowsNativeError) as error:
+    except (
+        OSError,
+        VerificationError,
+        WindowsNativeError,
+        release_evidence.EvidenceError,
+    ) as error:
         print(f"::error::{error}", file=sys.stderr)
         return 1
     return exit_code

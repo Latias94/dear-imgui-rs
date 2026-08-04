@@ -67,6 +67,7 @@ jobs:
           IMGUI_SYS_FORCE_BUILD: "1"
         run: >-
           python3 tools/ci/run_contract.py "$RUNTIME_CONTRACT"
+          --candidate-sha "${{ inputs.candidate_sha }}"
           --evidence-dir "target/runtime-evidence/$RUNTIME_CONTRACT"
           --attempt "$RUNTIME_GATE_ATTEMPT"
           --defer-infrastructure-retry
@@ -77,6 +78,7 @@ jobs:
         run: >-
           python3 tools/ci/run_contract.py runtime-preparation-failure
           --gate "$RUNTIME_CONTRACT"
+          --candidate-sha "${{ inputs.candidate_sha }}"
           --evidence-dir "target/runtime-evidence/$RUNTIME_CONTRACT"
           --attempt "$RUNTIME_GATE_ATTEMPT"
 
@@ -88,4 +90,3 @@ jobs:
           path: target/runtime-evidence/${{ inputs.contract }}
           if-no-files-found: error
           retention-days: 30
-          overwrite: true
