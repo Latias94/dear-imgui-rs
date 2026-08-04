@@ -411,17 +411,19 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
             sys::imgui_test_engine_set_run_speed(engine, 99),
             sys::ImGuiTestEngineStatus_OutOfRange
         );
+        let mut run_id = 0;
         assert_eq!(
             sys::imgui_test_engine_queue_tests(
                 engine,
                 sys::ImGuiTestEngineGroup_Tests,
                 ptr::null(),
                 sys::ImGuiTestEngineRunFlags_None,
+                &mut run_id,
             ),
             sys::ImGuiTestEngineStatus_InvalidArgument
         );
         assert_eq!(
-            sys::imgui_test_engine_queue_tests(engine, 99, c"".as_ptr(), 0),
+            sys::imgui_test_engine_queue_tests(engine, 99, c"".as_ptr(), 0, &mut run_id),
             sys::ImGuiTestEngineStatus_OutOfRange
         );
         assert_eq!(
@@ -430,6 +432,7 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
                 sys::ImGuiTestEngineGroup_Tests,
                 c"".as_ptr(),
                 1 << 30,
+                &mut run_id,
             ),
             sys::ImGuiTestEngineStatus_OutOfRange
         );
@@ -760,12 +763,14 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
         (*io).DisplaySize = dear_imgui_sys::ImVec2_c { x: 800.0, y: 600.0 };
         (*io).DisplayFramebufferScale = dear_imgui_sys::ImVec2_c { x: 1.0, y: 1.0 };
         (*io).DeltaTime = 1.0 / 60.0;
+        let mut run_id = 0;
         assert_eq!(
             sys::imgui_test_engine_queue_tests(
                 engine,
                 sys::ImGuiTestEngineGroup_Tests,
                 c"".as_ptr(),
                 sys::ImGuiTestEngineRunFlags_None,
+                &mut run_id,
             ),
             sys::ImGuiTestEngineStatus_Success
         );
@@ -827,6 +832,13 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
             }
         }
         assert!(completed, "scripted missing-table failure did not complete");
+        assert_ne!(run_id, 0);
+        let mut run_test_count = 0;
+        assert_eq!(
+            sys::imgui_test_engine_get_run_test_count(engine, run_id, &mut run_test_count),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert_eq!(run_test_count, 3);
 
         let mut runtime_summary = sys::ImGuiTestEngineResultSummary_c::default();
         assert_eq!(
@@ -835,6 +847,31 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
         );
         assert_eq!(runtime_summary.CountTested, 3);
         assert_eq!(runtime_summary.CountSuccess, 0);
+        assert_eq!(
+            sys::imgui_test_engine_finish_run(engine, run_id),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        let mut no_match_run_id = 0;
+        assert_eq!(
+            sys::imgui_test_engine_queue_tests(
+                engine,
+                sys::ImGuiTestEngineGroup_Tests,
+                c"no-such-boundary-test".as_ptr(),
+                sys::ImGuiTestEngineRunFlags_None,
+                &mut no_match_run_id,
+            ),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert_ne!(no_match_run_id, run_id);
+        assert_eq!(
+            sys::imgui_test_engine_get_run_test_count(engine, no_match_run_id, &mut run_test_count,),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert_eq!(run_test_count, 0);
+        assert_eq!(
+            sys::imgui_test_engine_finish_run(engine, no_match_run_id),
+            sys::ImGuiTestEngineStatus_Success
+        );
         assert_eq!(
             sys::imgui_test_engine_start(engine, ui_context),
             sys::ImGuiTestEngineStatus_InvalidState

@@ -37,12 +37,4 @@ impl RunState {
     pub const fn accepts_queue(self) -> bool {
         matches!(self, Self::Ready)
     }
-
-    /// Applies the terminal-report consumption transition.
-    pub const fn after_terminal_consumed(self) -> Self {
-        match self {
-            Self::Terminal => Self::Ready,
-            other => other,
-        }
-    }
 }

@@ -7,6 +7,8 @@
 #include <new>
 #include <utility>
 
+enum ImGuiTestRunSpeed : int;
+
 namespace dear_imgui_test_engine_abi {
 
 constexpr std::size_t kDiagnosticCapacity = 2048;
@@ -36,6 +38,8 @@ void begin_destroy_engine(ImGuiTestEngine* engine) noexcept;
 void cancel_destroy_engine(ImGuiTestEngine* engine) noexcept;
 void finish_destroy_engine(ImGuiTestEngine* engine) noexcept;
 bool has_live_engines() noexcept;
+bool has_active_run(ImGuiTestEngine* engine) noexcept;
+void release_process_binding(ImGuiTestEngine* engine, ImGuiContext* context) noexcept;
 bool begin_presentation(ImGuiTestEngine* engine) noexcept;
 bool presentation_pending(ImGuiTestEngine* engine) noexcept;
 void finish_presentation(ImGuiTestEngine* engine) noexcept;

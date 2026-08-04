@@ -1,5 +1,7 @@
 use dear_imgui_test_engine_sys as sys;
 
+use crate::EngineId;
+
 const NATIVE_DEFAULT_TESTS: &[&str] = &["basic_interaction", "input_value"];
 
 const UPSTREAM_DOCKING_TESTS: &[&str] = &[
@@ -107,24 +109,24 @@ impl BuiltInTestSuite {
     }
 }
 
-/// Exact manifest returned after one built-in suite has been registered.
+/// Exact manifest and engine-generation capability returned after built-in suite registration.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RegisteredTestSuite {
     suite: BuiltInTestSuite,
     test_names: Vec<String>,
-    engine_identity: usize,
+    engine_id: EngineId,
 }
 
 impl RegisteredTestSuite {
     pub(crate) fn new(
         suite: BuiltInTestSuite,
         test_names: Vec<String>,
-        engine_identity: usize,
+        engine_id: EngineId,
     ) -> Self {
         Self {
             suite,
             test_names,
-            engine_identity,
+            engine_id,
         }
     }
 
@@ -143,7 +145,7 @@ impl RegisteredTestSuite {
         self.test_names.len()
     }
 
-    pub(crate) const fn engine_identity(&self) -> usize {
-        self.engine_identity
+    pub(crate) const fn engine_id(&self) -> EngineId {
+        self.engine_id
     }
 }

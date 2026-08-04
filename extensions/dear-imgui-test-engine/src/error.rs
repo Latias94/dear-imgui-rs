@@ -20,6 +20,7 @@ pub enum TestEngineStatus {
     Exception,
     Unsupported,
     CaptureFailed,
+    BindingOccupied,
     Unknown(i32),
 }
 
@@ -33,6 +34,7 @@ impl TestEngineStatus {
             sys::ImGuiTestEngineStatus_Exception => Self::Exception,
             sys::ImGuiTestEngineStatus_Unsupported => Self::Unsupported,
             sys::ImGuiTestEngineStatus_CaptureFailed => Self::CaptureFailed,
+            sys::ImGuiTestEngineStatus_BindingOccupied => Self::BindingOccupied,
             other => Self::Unknown(other),
         }
     }
@@ -79,7 +81,13 @@ pub enum TestEngineError {
         tested: usize,
         succeeded: usize,
         in_queue: usize,
+        exact_manifest: bool,
         non_successful: Vec<String>,
+    },
+    /// Registration failed and native rollback also failed.
+    TestSuiteRollback {
+        source: Box<TestEngineError>,
+        rollback: Box<TestEngineError>,
     },
     /// A `Ui` belongs to a Context other than the attached Context.
     ContextMismatch {
@@ -194,10 +202,15 @@ impl fmt::Display for TestEngineError {
                 tested,
                 succeeded,
                 in_queue,
+                exact_manifest,
                 non_successful,
             } => write!(
                 f,
-                "built-in test category {category:?} expected {expected} successful terminal tests, found tested={tested}, success={succeeded}, in_queue={in_queue}, non_successful={non_successful:?}"
+                "built-in test category {category:?} expected {expected} exact successful terminal tests, found exact_manifest={exact_manifest}, tested={tested}, success={succeeded}, in_queue={in_queue}, non_successful={non_successful:?}"
+            ),
+            Self::TestSuiteRollback { source, rollback } => write!(
+                f,
+                "built-in test suite registration failed ({source}) and rollback also failed ({rollback})"
             ),
             Self::ContextMismatch {
                 operation,
@@ -241,6 +254,7 @@ impl Error for TestEngineError {
             Self::ContextBinding { source, .. } => Some(source),
             Self::Attachment { source, .. } => Some(source),
             Self::AttachmentDetach { source, .. } => Some(source),
+            Self::TestSuiteRollback { source, .. } => Some(source.as_ref()),
             _ => None,
         }
     }

@@ -4,6 +4,7 @@
 
 #include "imgui.h"
 #include "imgui_test_engine/imgui_te_engine.h"
+#include "imgui_test_engine/imgui_te_internal.h"
 
 #include "cimgui_test_engine.h"
 #include "cimgui_test_engine_internal.h"
@@ -68,6 +69,12 @@ ImGuiTestEngineStatus register_upstream_docking(ImGuiTestEngine* engine) {
 ImGuiTestEngineStatus register_upstream_viewports(ImGuiTestEngine* engine) {
     RegisterTests_Viewports(engine);
     return ImGuiTestEngineStatus_Success;
+}
+
+void rollback_added_tests(ImGuiTestEngine* engine, int original_count) noexcept {
+    while (engine->TestsAll.Size > original_count) {
+        ImGuiTestEngine_UnregisterTest(engine, engine->TestsAll.back());
+    }
 }
 
 ImGuiTestEngineStatus resolve_suite(int suite, SuiteSpec* out_spec) {
@@ -151,6 +158,12 @@ ImGuiTestEngineStatus imgui_test_engine_register_builtin_test_suite(
                 "built-in tests cannot be registered while tests are running"
             );
         }
+        if (abi::has_active_run(engine)) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidState,
+                "built-in tests cannot be registered before the previous run is consumed"
+            );
+        }
 
         SuiteSpec spec{};
         const ImGuiTestEngineStatus suite_status = resolve_suite(suite, &spec);
@@ -164,13 +177,20 @@ ImGuiTestEngineStatus imgui_test_engine_register_builtin_test_suite(
             );
         }
         auto register_suite = [&]() {
-            abi::maybe_inject(ImGuiTestEngineExceptionPoint_UpstreamCall);
-            const ImGuiTestEngineStatus registration_status = spec.register_tests(engine);
-            if (registration_status != ImGuiTestEngineStatus_Success) {
-                return registration_status;
+            const int original_count = engine->TestsAll.Size;
+            try {
+                abi::maybe_inject(ImGuiTestEngineExceptionPoint_UpstreamCall);
+                const ImGuiTestEngineStatus registration_status = spec.register_tests(engine);
+                if (registration_status != ImGuiTestEngineStatus_Success) {
+                    rollback_added_tests(engine, original_count);
+                    return registration_status;
+                }
+                *out_registered_count = count_category(engine, spec.category);
+                return ImGuiTestEngineStatus_Success;
+            } catch (...) {
+                rollback_added_tests(engine, original_count);
+                throw;
             }
-            *out_registered_count = count_category(engine, spec.category);
-            return ImGuiTestEngineStatus_Success;
         };
 
         if (suite == ImGuiTestEngineBuiltinTestSuite_UpstreamViewports) {
@@ -190,6 +210,39 @@ ImGuiTestEngineStatus imgui_test_engine_register_builtin_test_suite(
             return register_suite();
         }
         return register_suite();
+    });
+}
+
+ImGuiTestEngineStatus imgui_test_engine_unregister_builtin_test_suite(
+    ImGuiTestEngine* engine,
+    int suite
+) {
+    return abi::boundary("imgui_test_engine_unregister_builtin_test_suite", [&]() {
+        const ImGuiTestEngineStatus engine_status = abi::require_engine(engine);
+        if (engine_status != ImGuiTestEngineStatus_Success) {
+            return engine_status;
+        }
+        if (ImGuiTestEngine_GetIO(engine).IsRunningTests ||
+            !ImGuiTestEngine_IsTestQueueEmpty(engine) || abi::has_active_run(engine)) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidState,
+                "built-in tests cannot be unregistered while a run is active"
+            );
+        }
+
+        SuiteSpec spec{};
+        const ImGuiTestEngineStatus suite_status = resolve_suite(suite, &spec);
+        if (suite_status != ImGuiTestEngineStatus_Success) {
+            return suite_status;
+        }
+        for (int index = engine->TestsAll.Size - 1; index >= 0; index--) {
+            ImGuiTest* test = engine->TestsAll[index];
+            if (test != nullptr && test->Category != nullptr &&
+                std::strcmp(test->Category, spec.category) == 0) {
+                ImGuiTestEngine_UnregisterTest(engine, test);
+            }
+        }
+        return ImGuiTestEngineStatus_Success;
     });
 }
 

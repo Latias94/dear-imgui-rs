@@ -9,9 +9,9 @@ use dear_imgui_rs::{
     render::{ReconciledFrame, RenderedFrame},
 };
 use dear_imgui_test_engine::{
-    AttachmentState, BuiltInTestSuite, CaptureOutput, FrameDriverError, ResultSummary, RunFlags,
-    RunSpeed, RunState, ScriptCount, TestEngine, TestEngineError, TestEngineResult,
-    TestEngineStatus, TestFrameDriver, TestGroup, VerboseLevel, raw,
+    AttachmentState, BuiltInTestSuite, CaptureOutput, FrameDriverError, RunFlags, RunSpeed,
+    RunState, ScriptCount, TestEngine, TestEngineError, TestEngineResult, TestEngineStatus,
+    TestFrameDriver, TestGroup, TestRunner, VerboseLevel, raw,
 };
 
 static TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -265,7 +265,7 @@ fn one_context_accepts_one_engine_and_start_failure_rolls_back_the_slot() {
     let mut context = context();
 
     let mut first = TestEngine::create().expect("first engine");
-    inject(raw::ImGuiTestEngineExceptionPoint_UpstreamCall);
+    inject(raw::ImGuiTestEngineExceptionPoint_PostBind);
     let error = first
         .start(&mut context)
         .expect_err("injected native start must fail");
@@ -714,9 +714,7 @@ fn public_engine_methods_enforce_the_attachment_and_run_state_matrix() {
     let stopped_frame = stopped_context.render();
     detached.stop().expect("Ready to Inactive");
     assert_eq!(detached.run_state(), RunState::Inactive);
-    detached
-        .result_summary()
-        .expect("summary remains queryable");
+    assert_invalid_state(detached.result_summary());
     assert_invalid_state(detached.take_terminal_summary());
     assert_invalid_state(detached.queue_all_tests());
     assert_frame_driver_invalid_state(&mut detached, stopped_frame);
@@ -763,12 +761,85 @@ fn public_engine_methods_enforce_the_attachment_and_run_state_matrix() {
 }
 
 #[test]
+fn process_binding_rejects_a_second_suspended_context_until_unbind() {
+    let _guard = test_lock();
+    let mut context_a = context();
+    let mut engine_a = TestEngine::create().expect("engine A");
+    engine_a.start(&mut context_a).expect("start A");
+    let suspended_a = context_a.suspend();
+
+    let mut context_b = SuspendedContext::create().activate().expect("activate B");
+    let mut engine_b = TestEngine::create().expect("engine B");
+    let occupied = engine_b
+        .start(&mut context_b)
+        .expect_err("the process lease must reject B");
+    assert_eq!(occupied.status(), Some(TestEngineStatus::BindingOccupied));
+
+    let suspended_b = context_b.suspend();
+    let context_a = suspended_a.activate().expect("reactivate A");
+    engine_a.stop().expect("stop A");
+    let suspended_a = context_a.suspend();
+    let mut context_b = suspended_b.activate().expect("reactivate B");
+    let occupied = engine_b
+        .start(&mut context_b)
+        .expect_err("stop must retain the process lease");
+    assert_eq!(occupied.status(), Some(TestEngineStatus::BindingOccupied));
+
+    let suspended_b = context_b.suspend();
+    let context_a = suspended_a.activate().expect("activate A for shutdown");
+    engine_a.shutdown().expect("unbind A");
+    let suspended_a = context_a.suspend();
+    let mut context_b = suspended_b.activate().expect("activate B after unbind");
+    engine_b.start(&mut context_b).expect("start B");
+    engine_b.shutdown().expect("shutdown B");
+    drop(context_b);
+    drop(suspended_a);
+}
+
+#[test]
+fn suspended_context_destruction_releases_the_process_binding() {
+    let _guard = test_lock();
+    let mut context_a = context();
+    let mut engine_a = TestEngine::create().expect("engine A");
+    engine_a.start(&mut context_a).expect("start A");
+    let suspended_a = context_a.suspend();
+
+    let mut context_b = SuspendedContext::create().activate().expect("activate B");
+    let mut engine_b = TestEngine::create().expect("engine B");
+    let occupied = engine_b
+        .start(&mut context_b)
+        .expect_err("A still owns the process binding");
+    assert_eq!(occupied.status(), Some(TestEngineStatus::BindingOccupied));
+
+    drop(suspended_a);
+    assert_eq!(
+        engine_a.attachment_state(),
+        AttachmentState::ContextDestroyed
+    );
+    engine_b
+        .start(&mut context_b)
+        .expect("Context-first teardown released the binding");
+    engine_b.shutdown().expect("shutdown B");
+    engine_a.shutdown().expect("destroy detached A");
+    drop(context_b);
+}
+
+#[test]
 fn built_in_suite_registration_validates_manifests_and_per_test_results() {
     let _guard = test_lock();
     let mut context = context();
     let mut engine = TestEngine::create().expect("engine");
     engine.start(&mut context).expect("start engine");
 
+    inject(raw::ImGuiTestEngineExceptionPoint_SuiteRegistrationAfterFirstTest);
+    let interrupted = engine.register_builtin_test_suite(BuiltInTestSuite::NativeDefaults);
+    assert!(matches!(
+        interrupted,
+        Err(TestEngineError::Ffi {
+            status: TestEngineStatus::Exception,
+            ..
+        })
+    ));
     let defaults = engine
         .register_builtin_test_suite(BuiltInTestSuite::NativeDefaults)
         .expect("register native defaults");
@@ -781,21 +852,20 @@ fn built_in_suite_registration_validates_manifests_and_per_test_results() {
             .collect::<Vec<_>>(),
         BuiltInTestSuite::NativeDefaults.expected_test_names()
     );
-    let unexecuted = engine.validate_registered_test_suite(
-        &defaults,
-        ResultSummary {
-            count_tested: 2,
-            count_success: 2,
-            count_in_queue: 0,
-        },
-    );
+    engine
+        .queue_tests(
+            TestGroup::Tests,
+            Some("no-such-default-test"),
+            RunFlags::NONE,
+        )
+        .expect("queue no-match run");
+    let unexecuted = engine.take_terminal_test_suite_result(&defaults);
     assert!(matches!(
         unexecuted,
         Err(TestEngineError::UnexpectedTestSuiteResult {
-            non_successful,
+            exact_manifest: false,
             ..
-        }) if non_successful
-            == ["basic_interaction".to_owned(), "input_value".to_owned()]
+        })
     ));
 
     let docking = engine
@@ -825,6 +895,92 @@ fn built_in_suite_registration_validates_manifests_and_per_test_results() {
         viewport,
         Err(TestEngineError::Ffi {
             status: TestEngineStatus::Unsupported,
+            ..
+        })
+    ));
+
+    engine.shutdown().expect("shutdown engine");
+    drop(context);
+}
+
+#[test]
+fn stale_suite_tokens_cannot_cross_engine_generations() {
+    let _guard = test_lock();
+    let mut first_context = context();
+    let mut first_engine = TestEngine::create().expect("first engine");
+    first_engine
+        .start(&mut first_context)
+        .expect("start first engine");
+    let stale_suite = first_engine
+        .register_builtin_test_suite(BuiltInTestSuite::NativeDefaults)
+        .expect("register first suite");
+    let first_id = first_engine.id();
+    first_engine.shutdown().expect("shutdown first engine");
+    drop(first_context);
+
+    let mut second_context = context();
+    let mut second_engine = TestEngine::create().expect("second engine");
+    assert_ne!(first_id, second_engine.id());
+    second_engine
+        .start(&mut second_context)
+        .expect("start second engine");
+    second_engine
+        .register_builtin_test_suite(BuiltInTestSuite::NativeDefaults)
+        .expect("register second suite");
+    second_engine
+        .queue_tests(TestGroup::Tests, Some("no-such-test"), RunFlags::NONE)
+        .expect("queue no-match run");
+    assert!(matches!(
+        second_engine.take_terminal_test_suite_result(&stale_suite),
+        Err(TestEngineError::InvalidInput { .. })
+    ));
+    second_engine
+        .take_terminal_summary()
+        .expect("consume second run")
+        .expect("terminal second run");
+    second_engine.shutdown().expect("shutdown second engine");
+    drop(second_context);
+}
+
+#[test]
+fn suite_validation_requires_the_exact_run_manifest() {
+    let _guard = test_lock();
+    let mut context = context();
+    let mut engine = TestEngine::create().expect("engine");
+    engine.start(&mut context).expect("start engine");
+    let suite = engine
+        .register_builtin_test_suite(BuiltInTestSuite::NativeDefaults)
+        .expect("register defaults");
+
+    let full = TestRunner::new(&mut engine)
+        .run_headless(&mut context, |_, _| {
+            Ok::<_, Infallible>(dear_imgui_test_engine::RunnerControl::Continue)
+        })
+        .expect("run full suite");
+    engine
+        .validate_registered_test_suite(&suite, &full)
+        .expect("validate exact full run");
+
+    let stale_full = TestRunner::new(&mut engine)
+        .run_headless(&mut context, |_, _| {
+            Ok::<_, Infallible>(dear_imgui_test_engine::RunnerControl::Continue)
+        })
+        .expect("run full suite before a newer generation");
+    let partial = TestRunner::new(&mut engine)
+        .filter("basic_interaction")
+        .run_headless(&mut context, |_, _| {
+            Ok::<_, Infallible>(dear_imgui_test_engine::RunnerControl::Continue)
+        })
+        .expect("run one suite member");
+    assert_eq!(partial.summary().count_tested, 1);
+    assert!(matches!(
+        engine.validate_registered_test_suite(&suite, &stale_full),
+        Err(TestEngineError::InvalidInput { .. })
+    ));
+    assert!(matches!(
+        engine.validate_registered_test_suite(&suite, &partial),
+        Err(TestEngineError::UnexpectedTestSuiteResult {
+            exact_manifest: false,
             ..
         })
     ));

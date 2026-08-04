@@ -16,6 +16,15 @@ This crate pairs with `dear-imgui-sys` and is intended for advanced users. Most 
   thread-local diagnostic.
 - Engine and script handles are non-thread-safe and must follow the documented create, transfer,
   unbind, and destroy lifecycle. A successfully destroyed raw handle is invalid immediately.
+- The shim owns the authoritative process-wide binding lease required by upstream's global Test
+  Engine pointer. A second `start`, including one targeting another Context, returns
+  `ImGuiTestEngineStatus_BindingOccupied` until the first engine is unbound.
+- `start` has a strong exception guarantee: partial hooks, settings handlers, coroutine state, and
+  the process lease are rolled back before an exception status is returned.
+- Every successful queue operation returns a monotonic run ID. Run-test queries and `finish_run`
+  operate on the exact selected-test snapshot, never the upstream cumulative result summary.
+- Built-in suite registration rolls back every test appended by a failed registration attempt and
+  can then be retried.
 - Prefer the safe `dear-imgui-test-engine` crate when Context identity, frame scope, or retryable
   teardown matters.
 

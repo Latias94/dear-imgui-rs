@@ -1202,17 +1202,29 @@ impl AppWindow {
                 .viewport_smoke
                 .as_ref()
                 .is_some_and(|smoke| !smoke.complete);
-            if smoke_pending && let Some(summary) = engine.take_terminal_summary()? {
+            let terminal_summary = if smoke_pending {
+                let smoke = self
+                    .viewport_smoke
+                    .as_ref()
+                    .expect("a pending viewport smoke state must exist");
+                match &smoke.mode {
+                    ViewportSmokeMode::UpstreamSuite { suite, .. } => {
+                        engine.take_terminal_test_suite_result(suite)?
+                    }
+                    ViewportSmokeMode::Lifecycle(_) => engine.take_terminal_summary()?,
+                }
+            } else {
+                None
+            };
+            if let Some(summary) = terminal_summary {
                 let smoke = self
                     .viewport_smoke
                     .as_mut()
                     .expect("a pending viewport smoke state must exist");
                 match &mut smoke.mode {
                     ViewportSmokeMode::UpstreamSuite {
-                        suite,
-                        terminal_summary,
+                        terminal_summary, ..
                     } => {
-                        engine.validate_registered_test_suite(suite, summary)?;
                         *terminal_summary = Some(summary);
                         println!("official upstream viewport Test Engine suite passed");
                     }

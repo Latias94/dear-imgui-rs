@@ -454,7 +454,7 @@ fn try_run_automated(cli: &Cli, scenario: Scenario) -> Result<RunReport, String>
         .and_then(|report| {
             if let Some(suite) = registered.suite.as_ref() {
                 engine
-                    .validate_registered_test_suite(suite, report.summary())
+                    .validate_registered_test_suite(suite, &report)
                     .map_err(|error| error.to_string())?;
             }
             Ok(report)
