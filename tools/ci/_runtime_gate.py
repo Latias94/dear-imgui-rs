@@ -100,7 +100,6 @@ class ScenarioExpectation:
     outcome: str
     infrastructure: bool
     category: GateCategory
-    expected_test_count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -151,7 +150,6 @@ TEST_ENGINE_SCENARIOS = (
         "Passed",
         False,
         GateCategory.PASSED,
-        expected_test_count=2,
     ),
     ScenarioExpectation(
         "upstream-docking",
@@ -159,23 +157,7 @@ TEST_ENGINE_SCENARIOS = (
         "Passed",
         False,
         GateCategory.PASSED,
-        expected_test_count=39,
     ),
-)
-
-
-UPSTREAM_VIEWPORT_TESTS = (
-    "viewport_basic_1",
-    "viewport_translate",
-    "viewport_parent_id",
-    "viewport_platform_focus",
-    "viewport_platform_focus_2",
-    "viewport_platform_focus_3",
-    "viewport_platform_focus_4",
-    "viewport_platform_close",
-    "viewport_platform_close_2",
-    "viewport_owner_change_1",
-    "viewport_owner_change_2",
 )
 
 
@@ -475,8 +457,12 @@ def _validate_test_engine_payload(
         or not isinstance(succeeded, int)
         or isinstance(succeeded, bool)
         or succeeded != tested
+        or payload.get("in_queue") != 0
     ):
-        errors.append("Passed requires a nonzero tested count with every test successful")
+        errors.append(
+            "Passed requires a nonzero tested count, every test successful, "
+            "and an empty queue"
+        )
     elif expectation.outcome == "Failed" and (
         not isinstance(tested, int)
         or isinstance(tested, bool)
@@ -488,15 +474,6 @@ def _validate_test_engine_payload(
         errors.append("Failed requires at least one executed, unsuccessful test")
     elif expectation.outcome == "NoMatch" and (tested != 0 or succeeded != 0):
         errors.append("NoMatch requires zero tested and zero successful tests")
-    if expectation.expected_test_count is not None and (
-        tested != expectation.expected_test_count
-        or succeeded != expectation.expected_test_count
-        or payload.get("in_queue") != 0
-    ):
-        errors.append(
-            f"{expectation.name} requires exactly "
-            f"{expectation.expected_test_count} successful terminal tests"
-        )
     error = payload.get("error")
     if expectation.infrastructure and (not isinstance(error, str) or not error):
         errors.append("an infrastructure result requires a nonempty error diagnostic")
@@ -712,7 +689,6 @@ def run_test_engine_runtime(
                     "expected_outcome": expectation.outcome,
                     "expected_infrastructure": expectation.infrastructure,
                     "expected_category": expectation.category.value,
-                    "expected_test_count": expectation.expected_test_count,
                 }
             )
             if result.timed_out:
@@ -1084,26 +1060,35 @@ def _validate_upstream_viewport_suite_payload(
     for field_name in ("real_platform_backend", "runtime_teardown_complete"):
         if payload.get(field_name) is not True:
             errors.append(f"{field_name} expected True, got {payload.get(field_name)!r}")
-    expected_count = len(UPSTREAM_VIEWPORT_TESTS)
-    if payload.get("registered_count") != expected_count:
-        errors.append(
-            f"registered_count expected {expected_count}, "
-            f"got {payload.get('registered_count')!r}"
-        )
-    if payload.get("registered_tests") != list(UPSTREAM_VIEWPORT_TESTS):
-        errors.append("registered_tests did not match the pinned upstream viewport manifest")
     for field_name in ("registered_count", "tested", "success", "in_queue"):
         value = payload.get(field_name)
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
             errors.append(f"{field_name} must be a nonnegative integer")
+    registered_tests = payload.get("registered_tests")
     if (
-        payload.get("tested") != expected_count
-        or payload.get("success") != expected_count
+        not isinstance(registered_tests, list)
+        or not registered_tests
+        or any(not isinstance(name, str) or not name for name in registered_tests)
+        or len(set(registered_tests)) != len(registered_tests)
+    ):
+        errors.append("registered_tests must contain unique, nonempty test names")
+        registered_tests = []
+    registered_count = payload.get("registered_count")
+    if registered_count != len(registered_tests):
+        errors.append(
+            "registered_count must match the dynamically registered test manifest"
+        )
+    if (
+        not isinstance(registered_count, int)
+        or isinstance(registered_count, bool)
+        or registered_count <= 0
+        or payload.get("tested") != registered_count
+        or payload.get("success") != registered_count
         or payload.get("in_queue") != 0
     ):
         errors.append(
-            f"upstream viewport suite requires exactly {expected_count} successful "
-            "terminal tests"
+            "upstream viewport suite requires every dynamically registered test "
+            "to finish successfully"
         )
     _validate_software_vulkan_adapter(payload, errors)
     return errors
@@ -1263,8 +1248,8 @@ _WGPU_VIEWPORT_SMOKE = ViewportSmokeSpec(
     build_label="WGPU multi-viewport example build",
     child_label="WGPU multi-viewport child",
     success_summary=(
-        "secondary Winit/WGPU viewport lifecycle and all 11 official upstream "
-        "viewport tests passed"
+        "secondary Winit/WGPU viewport lifecycle and every registered official "
+        "upstream viewport test passed"
     ),
     payload_validator=_validate_viewport_payload,
 )

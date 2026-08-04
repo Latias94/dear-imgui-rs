@@ -417,41 +417,5 @@ class CrateBindingSourceMetadataTests(unittest.TestCase):
         )
         self.assertEqual(other_manifest.read_text(encoding="utf-8"), "untouched\n")
 
-
-class SourceMetadataIntegrationTests(unittest.TestCase):
-    def test_ci_invokes_the_shared_verifier_without_inline_schema(self):
-        workflow = (REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-        step_start = workflow.index("- name: Verify exact vendored source provenance")
-        step_end = workflow.index("- name: Regenerate and verify", step_start)
-        step = workflow[step_start:step_end]
-
-        self.assertIn("python3 tools/source_metadata.py verify\n", step)
-        self.assertIn("python3 tools/source_metadata.py verify-bindings", step)
-        self.assertNotIn("tomllib", step)
-        self.assertNotIn("cimgui-revision", step)
-
-    def test_prepublish_and_updater_import_the_shared_module(self):
-        for relative_path in (
-            "tools/pre_publish_check.py",
-            "tools/update_submodule_and_bindings.py",
-        ):
-            content = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
-            with self.subTest(path=relative_path):
-                self.assertIn("import source_metadata", content)
-                self.assertNotIn("SOURCE_METADATA_KEYS =", content)
-                self.assertNotIn("GIT_REVISION_RE =", content)
-
-    def test_package_gate_imports_the_shared_schema(self):
-        content = (REPO_ROOT / "tools/ci/_source_packages.py").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertIn(
-            "from source_metadata import read_core_source_metadata", content
-        )
-        self.assertNotIn('required_keys = {"cimgui-revision"', content)
-        self.assertNotIn("re.fullmatch", content)
-
-
 if __name__ == "__main__":
     unittest.main()

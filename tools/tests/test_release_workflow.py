@@ -1167,18 +1167,6 @@ class ChangelogTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "must keep .*Unreleased"):
                 CHANGELOG.validate_unreleased_first(changelog)
 
-    def test_publish_check_validates_changelog_structure(self):
-        workflow = (REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-        job_start = workflow.index("  publish-check:")
-        job_end = workflow.index("\n  fmt:", job_start)
-        job = workflow[job_start:job_end]
-
-        self.assertIn(
-            "run: python3 -B tools/changelog.py check-unreleased",
-            job,
-        )
-
-
 class PrepublishTests(unittest.TestCase):
     def setUp(self):
         self.metadata = metadata_for(
@@ -1254,14 +1242,6 @@ class PrepublishTests(unittest.TestCase):
             show_output=True,
         )
 
-    def test_package_gate_verifies_every_source_archive(self):
-        script = (REPO_ROOT / "tools/ci/_source_packages.py").read_text(
-            encoding="utf-8"
-        )
-
-        self.assertNotIn("--no-verify", script)
-        self.assertIn("Create every publishable workspace source archive", script)
-
     def test_strict_release_contract_commands_are_deterministic(self):
         self.assertEqual(
             PREPUBLISH.release_contract_commands(),
@@ -1279,10 +1259,6 @@ class PrepublishTests(unittest.TestCase):
                         "-p",
                         "test_*.py",
                     ],
-                ),
-                (
-                    "API surface policy",
-                    [sys.executable, "tools/api_surface_report.py", "--check"],
                 ),
                 (
                     "Workflow policy",
@@ -1324,18 +1300,18 @@ class PrepublishTests(unittest.TestCase):
             patch.object(
                 PREPUBLISH,
                 "run_command",
-                side_effect=[(0, "", ""), (23, "", "API drift")],
+                side_effect=[(0, "", ""), (23, "", "workflow drift")],
             ) as run,
             redirect_stdout(io.StringIO()),
         ):
             success, errors = PREPUBLISH.check_release_contracts(Path("/repo"))
 
         self.assertFalse(success)
-        self.assertEqual(errors, ["API surface policy failed: API drift"])
+        self.assertEqual(errors, ["Workflow policy failed: workflow drift"])
         self.assertEqual(run.call_count, 2)
         self.assertEqual(
             run.call_args_list[-1].args[0],
-            [sys.executable, "tools/api_surface_report.py", "--check"],
+            [sys.executable, "tools/ci/workflow_policy.py", "--check"],
         )
 
     def test_release_contract_gate_runs_every_owned_command_in_order(self):

@@ -137,40 +137,16 @@ def task_bump(args, repo_root: Path) -> int:
 def task_bindings(args, repo_root: Path) -> int:
     """Update every maintained binding profile through the canonical xtask."""
     crates = getattr(args, "crates", None) or "all"
-    selected = {crate.strip() for crate in crates.split(",") if crate.strip()}
-    includes_core = crates.strip().lower() == "all" or "dear-imgui-sys" in selected
 
     cmd = [sys.executable, "tools/update_submodule_and_bindings.py"]
     cmd.extend(["--crates", crates])
-    cmd.extend(["--profile", "release"])
     if getattr(args, "update_submodules", False):
         cmd.extend(["--submodules", "update"])
     else:
         cmd.extend(["--submodules", "skip"])
-    if includes_core:
-        cmd.append("--skip-core-bindings")
     if getattr(args, "dry_run", False):
         cmd.append("--dry-run")
-
-    rc = run_command(cmd, cwd=repo_root)
-    if rc != 0 or not includes_core:
-        return rc
-
-    core_command = [
-        "cargo",
-        "run",
-        "-p",
-        "xtask",
-        "--",
-        "verify-bindings",
-        "--update",
-        "--allow-dirty",
-    ]
-    if getattr(args, "dry_run", False):
-        print(f"$ {' '.join(core_command)}")
-        return 0
-
-    return run_command(core_command, cwd=repo_root)
+    return run_command(cmd, cwd=repo_root)
 
 
 def task_publish(args, repo_root: Path) -> int:

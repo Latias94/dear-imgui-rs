@@ -191,8 +191,6 @@ DEFAULT_EXPECTED_CELL_INVENTORY = (
                 "logs/source-provenance.stderr.log",
                 "logs/binding-provenance.stdout.log",
                 "logs/binding-provenance.stderr.log",
-                "logs/api-coverage.stdout.log",
-                "logs/api-coverage.stderr.log",
                 "logs/binding-regeneration.stdout.log",
                 "logs/binding-regeneration.stderr.log",
                 "logs/binding-diff.stdout.log",

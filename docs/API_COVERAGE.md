@@ -1,188 +1,86 @@
-# High-level API coverage workflow
+# High-level API coverage
 
-This repository contains a safe, ergonomic Rust API surface (`dear-imgui-rs`) built on top of
-the raw sys bindings (`dear-imgui-sys`).
+`dear-imgui-rs` provides safe, ergonomic Rust APIs over the raw `dear-imgui-sys` bindings.
+Coverage is a semantic review problem: finding the same native symbol in Rust source does not prove
+that the wrapper has correct ownership, lifetime, callback, or ABI behavior.
 
-The goal of this document is to describe how we **track** and **incrementally improve** the
-high-level coverage of Dear ImGui's *public* API without accidentally creating duplicated wrappers.
+## Coverage policy
 
-## What we cover (and what we don't)
+Add a safe wrapper when the native operation can be expressed with enforceable Rust invariants.
+Prefer typed flags, owned copies, validated IDs, scoped tokens, and borrows tied to the owning
+`Context`, frame, atlas, or renderer epoch.
 
-We aim to provide high-level wrappers for:
-- Common, stable, public Dear ImGui APIs.
-- APIs that can be exposed ergonomically (typed flags, `Option<T>` for nullable, RAII for begin/end).
-- APIs that are testable in a headless context (no real OS window required).
+Keep an operation sys-only when a safe contract would be misleading. Current examples include:
 
-We intentionally avoid:
-- `imgui_internal` APIs.
-- C variadic formatting APIs (`*V` / `...`) where possible. Prefer non-variadic equivalents such as
-  `TextUnformatted`-style helpers.
+- C variadic formatting entry points;
+- obsolete Columns APIs, which are superseded by tables;
+- process-global allocator and raw hook configuration;
+- raw `MemAlloc` and `MemFree` ownership;
+- internal or evolving font-loader callbacks; and
+- APIs whose native parser accepts an unbounded external buffer.
 
-## Coverage report tool
+The sys crates remain the explicit unsafe escape hatch. A wrapper may be added later when its
+ownership and lifetime design is clear.
 
-Run:
+## Reviewing an upstream update
 
-```bash
-python tools/api_surface_report.py --format plain --limit 40
-python tools/api_surface_report.py --check
-```
+The vendored source and regenerated bindings are the canonical diff. Do not infer Rust safety from
+symbol names or maintain a second generated snapshot of the same declarations.
 
-The tool has two deliberately different coverage layers.
+1. Read the upstream release notes and inspect every updated submodule commit range.
+2. Regenerate all maintained bindings with the canonical libclang version:
 
-### Generator function snapshot: all namespaces
+   ```console
+   cargo run -p xtask -- verify-bindings --allow-dirty
+   ```
 
-`tools/api_surface_snapshot.json` records every public function declaration emitted by cimgui's
-generator across all namespaces. The canonical record includes the symbol, namespace, signature,
-return type, arguments, defaults, generator traits, and the exact cimgui and Dear ImGui source
-revisions. `--check` rejects added, removed, or changed declarations and source revision drift.
+3. Review generated binding changes, especially callback signatures, aggregate parameters and
+   returns, field layout, enum representation, ownership comments, and newly exposed functions.
+4. Search the high-level crate for an existing semantic equivalent:
 
-This layer detects raw API drift; it does **not** claim that every non-`ImGui` namespace function has
-a safe Rust wrapper. After reviewing an intentional upstream change, refresh it explicitly with:
+   ```console
+   rg -n 'alias = "FooBar"|foo_bar\(|sys::igFooBar' dear-imgui/src
+   ```
 
-```bash
-python tools/api_surface_report.py --update-snapshot
-```
+5. For each user-relevant addition, choose one explicit outcome: add or extend a safe wrapper, keep
+   it sys-only with a documented reason, or defer it because a separate lifetime design is needed.
+6. Prove the chosen contract with the narrowest appropriate mechanism: a Rust unit test,
+   compile-fail doctest, native C++/Rust ABI probe, or backend runtime test.
 
-This snapshot is the focused function-declaration layer. The comprehensive upstream contract below
-separately covers constants, enums and variants, fields, layouts, typedefs, and source revisions.
+`#[doc(alias = "...")]` improves discovery and prevents duplicate wrappers. It is not itself proof
+of safe coverage.
 
-### Comprehensive upstream contract: every maintained source
+## Lifetime-sensitive designs
 
-`tools/upstream_contract_baseline.json` records the last accepted generated facts, while
-`tools/upstream_contract_snapshot.json` records the candidate facts for the currently pinned source
-tree. `tools/upstream_contract_decisions.json` is the human-reviewed approval layer: every delta must
-be classified exactly once as a safe alias, safe wrapper, raw-only operation, rejected operation, or
-internal detail. Safe classifications must name compile evidence, and runtime-shaped functions,
-fields, or layouts must also name runtime evidence.
+The high-level layer already models the major ownership-sensitive surfaces:
 
-Every entry in `tools/build-support/maintained_sources.json` declares an `api_contract` provider. Cimgui-style sources are audited from generator output, including field width/bitfield metadata and typedefs that lack location records. Dear ImGui Test Engine is audited from its final checked-in Rust binding; unknown public Rust syntax fails closed, while `xtask verify-bindings` separately proves that file's source/spec/output provenance.
+- `BakedFont<'ui>` resolves native baked storage through a live frame borrow, while glyph queries
+  return owned metric copies.
+- `FontAtlasTexture<'_>` is a read-only atlas lease; rebuild, clear, and pixel mutation reject a
+  live lease.
+- `CustomRectId` is atlas-validated, and custom-rectangle queries return owned snapshots.
+- external font sources that rely on native parsers remain explicitly unsafe constructors.
+- curated demo and diagnostics windows are safe; the destructive font-atlas panel is isolated.
+- clipper tokens enforce their exact frame, window, table, and native stack order.
+- rendered frames and snapshots are move-only leases tied to one renderer consumer and epoch.
 
-Use the explicit review workflow after changing maintained source revisions or regenerated bindings:
+## Context and callback rules
 
-```bash
-python tools/upstream_contract.py --write-review-template
-# Classify every generated delta and attach the required evidence paths.
-python tools/upstream_contract.py --update-snapshot
-python tools/upstream_contract.py --check
-```
+Only the core Context binding implementation may switch native `GImGui`. Backends and extensions
+must use the scoped Context APIs instead of calling `igSetCurrentContext` in production code.
 
-`tools/api_surface_report.py --check` runs this comprehensive audit in addition to the focused
-function and removed-surface checks. It fails closed on missing or stale decisions, duplicate or
-unsorted generated facts, missing evidence markers, source-pin drift, and changes to public sizes,
-alignments, or selected field offsets. The source-build-only `abi-probe` feature provides an
-independent native C++/Rust layout comparison for selected runtime-sensitive aggregates; prebuilt
-consumers remain compiler-free.
+Dear ImGui platform callbacks that pass `ImVec2` or `ImVec4` by value are compiler-ABI-sensitive.
+Repository-owned C++ shims translate those slots to pointer or out-parameter callbacks. Changes to
+these callbacks require the existing native ABI probes on MSVC and the affected backend runtime
+tests; source-text scanning is not an ABI test.
 
-### Safe semantic audit: top-level `ImGui` functions
+## Adding a wrapper
 
-For top-level `ImGui` functions, the report treats a matching `#[doc(alias = "...")]` on a public,
-safe Rust item as direct safe API coverage. A builder, RAII token, context lifecycle, or typed
-composition should carry the aliases of the upstream operations it replaces. Every remaining
-function must have an explicit decision in `tools/api_surface_policy.json`:
+- Put the API in the module that owns its state and lifetime.
+- Add the upstream C++ name as a rustdoc alias.
+- Avoid exposing raw pointers, process-global state, or unvalidated native IDs from safe methods.
+- Add a headless test when possible and a runtime or ABI test when native behavior matters.
+- Update `CHANGELOG.md` for user-visible additions or migration requirements.
 
-- `intentional-sys-only`: wrapping it would expose variadic formatting, obsolete APIs, or unsafe
-  global/raw ownership contracts.
-- `deferred-design`: a safe wrapper is desirable but needs a documented lifetime or type design.
-
-`--check` fails on generator drift, unclassified top-level functions, stale policy entries, or an
-unreviewed comprehensive upstream delta. CI runs it after checking the vendored source revisions,
-so a maintained source update cannot silently add an unreviewed safe API or ABI gap.
-
-Notes:
-- A policy decision is not permanent. Replace it with a rustdoc alias when a direct safe wrapper is
-  added, or update its rationale when the high-level design changes.
-- Direct `sys::ig*` usage is reported only as information. It is not proof of safe API coverage,
-  because an internal call may expose only a small subset of the public operation.
-- Namespaced APIs such as `ImFontAtlas`, `ImFontBaked`, `ImDrawList`, and `ImTextureData` are included
-  in the comprehensive delta inventory. Their decision records still require a human-reviewed safe
-  ownership/lifetime classification rather than treating generated availability as safe coverage.
-
-### Removed safe surface and FFI ownership
-
-The same `--check` command discovers maintained Cargo packages from the repository manifest and
-enforces the frozen 0.16 removal inventory. It tokenizes Rust source instead of searching raw text,
-so comments, documentation, and string literals cannot hide or reintroduce an API. The contract
-rejects:
-
-- removed identifiers and call paths, including `Context::frame_with`, `Selectable::new`, the
-  horizontal `Slider::new`, `TextureData::new`, `InputFlags`, `ArrowDirection`, and backend
-  compatibility helpers;
-- public re-exports of the removed `render::renderer` and `fonts::glyph_ranges` modules;
-- a public ImPlot3D export of `validate_nonempty`, `validate_lengths`, or `validate_multiple` while
-  allowing their crate-private implementation use;
-- the removed `sdl3-backends` Cargo feature alias; and
-- a foreign function declaration in a safe crate when that symbol is already supplied by a
-  maintained `*-sys` crate, including the retired extension `compat_ffi` symbols.
-
-Raw sys crates are deliberately outside the removed-safe-surface scan. They remain the documented
-escape hatch for users who accept the native API's unsafe contract. Safe crates may call
-`sys::function(...)` directly and may define C-ABI callbacks or declarations for crate-owned native
-shims; only duplicate ownership of a generated sys declaration is rejected.
-
-## Completed lifetime-sensitive designs
-
-The safe layer models the previously deferred namespaced capabilities through lifetime- and
-state-aware APIs:
-
-- `Ui::current_font()` returns an atlas-validated `FontId`, and metadata methods copy owned values
-  instead of exposing a borrowed `ImFont` view. `Ui::{current_baked_font,baked_font,
-  baked_font_with_density}` returns `BakedFont<'ui>`, which revalidates the font and resolves native
-  baked storage on each access. Glyph queries return owned `Glyph` metric copies. The safe glyph API
-  intentionally omits UVs because another lazy glyph load may repack the atlas within the same frame.
-- `FontAtlas::tex_data()` returns a read-only `FontAtlasTexture<'_>` lease. Atlas rebuilds, clears,
-  custom-rectangle pixel writes, and context frame advancement reject a live lease rather than
-  invalidating borrowed texture memory.
-- `FontSource` is opaque, and constructors for external TTF/OTF, compressed, Base85, and file inputs
-  are unsafe because the native parsers do not consistently enforce their input bounds. Direct
-  include ranges use structured `(start, end)` pairs stored for the native source lifetime.
-- `FontAtlas::{add_custom_rect,write_custom_rect,remove_custom_rect,custom_rect}` uses an
-  atlas-validated `CustomRectId`, strict `CustomRectData`, and copy-out `CustomRectSnapshot` values.
-  Pixel writes queue the exact managed texture region for renderer upload; `Ui::image_custom_rect`
-  resolves current texture and UV data at submission time.
-- `Ui::{show_demo_window,show_metrics_window,show_style_editor,show_default_style_editor}` are safe
-  curated upstream diagnostics: they retain all controls outside the destructive `ShowFontAtlas()`
-  paths, including ordinary font selection and scaling. Exact upstream surfaces remain explicitly
-  named `unsafe` APIs, and `Ui::show_font_atlas_debug_panel()` isolates the font-atlas boundary.
-- `ListClipper::unknown_count()` returns a distinct token whose `next_range()` protocol is finalized
-  by consuming `finish(final_items_count)`. Known counts reject the native `INT_MAX` sentinel.
-  Clipper tokens enforce native LIFO plus their exact frame, window `Begin`, and table instance. An
-  out-of-order drop defers cleanup until the stack recovers, wrong-scope cleanup suppresses cursor
-  seeking while letting native code restore its temporary stack, and a forgotten token rejects and
-  recovers only the current frame.
-
-Obsolete functions such as `ImFontAtlas::ClearInputData` remain intentionally sys-only, while
-low-level font rendering already has safe draw-list equivalents. `ImFontLoader` remains an unsafe
-native extension boundary because upstream still declares its callback table as internal and
-evolving.
-
-## Avoiding duplicate wrappers (required)
-
-Before adding a wrapper for an upstream ImGui function `FooBar`:
-
-1. Search by doc alias:
-   - `rg -n "alias = \\\"FooBar\\\"" dear-imgui/src`
-2. Search by Rust naming convention:
-   - `rg -n "foo_bar\\(|FooBar" dear-imgui/src`
-3. Search by sys usage:
-   - `rg -n "sys::igFooBar" dear-imgui/src`
-
-If an equivalent exists, prefer adding `#[doc(alias = "...")]` and/or a convenience overload
-instead of creating a second wrapper with a different name.
-
-## Implementation checklist
-
-When you add a new wrapper:
-- Put it in the most relevant module (`ui`, `input`, `widget/*`, `window`, `platform_io`, ...).
-- Add `#[doc(alias = "...")]` to match the upstream C++ API name.
-- Prefer typed flags and safe Rust signatures.
-- Add a focused headless test when feasible (see `dear-imgui/tests/*`).
-- Update `CHANGELOG.md` for user-visible additions.
-
-Some APIs require cross-crate coordination (backends/extensions/examples). In those cases, update
-the relevant crate(s) or examples in the same PR to keep the repository consistent.
-
-## Local TODO tracking (optional)
-
-For local, non-committed tracking, keep notes under `repo-ref/` (this folder is ignored by git in
-this repo). This is useful for scratch work and prioritization, but user-facing changes should be
-captured in `CHANGELOG.md`.
+Use `repo-ref/` for local comparison checkouts and scratch notes. User-facing decisions belong in
+the API documentation, tests, and changelog.

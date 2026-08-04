@@ -8,7 +8,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Iterable
 
 
-INVENTORY_SCHEMA = "dear-imgui-maintained-sources-v2"
+INVENTORY_SCHEMA = "dear-imgui-maintained-sources-v3"
 INVENTORY_RELATIVE_PATH = Path("tools/build-support/maintained_sources.json")
 
 
@@ -38,19 +38,11 @@ class WasmProviderSpec:
 
 
 @dataclass(frozen=True)
-class ApiContractSpec:
-    kind: str
-    locations: tuple[str, ...] = ()
-    path: PurePosixPath | None = None
-
-
-@dataclass(frozen=True)
 class MaintainedSource:
     id: str
     crate_name: str
     crate_root: PurePosixPath
     source_root: PurePosixPath
-    api_contract: ApiContractSpec
     files: tuple[MaintainedSourceFile, ...]
     native_required_files: tuple[str, ...]
     archive_sentinels: tuple[str, ...]
@@ -229,7 +221,6 @@ def _parse_source(raw: Any, index: int) -> MaintainedSource:
             "crate_name",
             "crate_root",
             "source_root",
-            "api_contract",
             "files",
             "native_required_files",
             "archive_sentinels",
@@ -243,7 +234,6 @@ def _parse_source(raw: Any, index: int) -> MaintainedSource:
         crate_name=_identifier(data["crate_name"], f"{context}.crate_name"),
         crate_root=_relative_path(data["crate_root"], f"{context}.crate_root"),
         source_root=_relative_path(data["source_root"], f"{context}.source_root"),
-        api_contract=_parse_api_contract(data["api_contract"], context),
         files=tuple(
             _parse_source_file(item, context, file_index)
             for file_index, item in enumerate(_array(data["files"], f"{context}.files"))
@@ -256,27 +246,6 @@ def _parse_source(raw: Any, index: int) -> MaintainedSource:
         ),
         provider=None if provider_raw is None else _parse_provider(provider_raw, context),
     )
-
-
-def _parse_api_contract(raw: Any, source_context: str) -> ApiContractSpec:
-    context = f"{source_context}.api_contract"
-    if not isinstance(raw, dict):
-        raise SourceInventoryError(f"{context} must be a JSON object")
-    kind = _string(raw.get("kind"), f"{context}.kind")
-    if kind == "cimgui-generator":
-        data = _object(raw, {"kind", "locations"}, context)
-        locations = _c_symbol_tuple(data["locations"], f"{context}.locations")
-        if not locations:
-            raise SourceInventoryError(f"{context}.locations must not be empty")
-        _require_unique(locations, f"{context}.locations entry")
-        return ApiContractSpec(kind=kind, locations=locations)
-    if kind == "rust-bindings":
-        data = _object(raw, {"kind", "path"}, context)
-        path = _relative_path(data["path"], f"{context}.path")
-        if path.suffix != ".rs":
-            raise SourceInventoryError(f"{context}.path must name a .rs file")
-        return ApiContractSpec(kind=kind, path=path)
-    raise SourceInventoryError(f"{context}.kind has unsupported value {kind!r}")
 
 
 def _parse_source_file(raw: Any, source_context: str, index: int) -> MaintainedSourceFile:

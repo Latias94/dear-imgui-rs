@@ -35,13 +35,12 @@ $env:LIBCLANG_PATH = '<canonical LLVM 14 bin directory>'
 python tools/update_submodule_and_bindings.py `
   --crates dear-imgui-sys,dear-imgui-test-engine-sys `
   --submodules auto `
-  --profile release `
   --cimgui-branch docking_inter `
   --imgui-test-engine-branch main `
   --wasm
 ```
 
-Use the libclang major version selected by repository CI or binding-generation documentation; do not substitute a newer local install just because it is available. Expand `--crates` and the upstream branch arguments only when those independent libraries are part of the requested upgrade. Core WASM regeneration covers the supported ImGui-dependent extension profiles, so the legacy `--wasm-ext` compatibility argument is normally unnecessary.
+Use the libclang major version selected by repository CI or binding-generation documentation; do not substitute a newer local install just because it is available. Expand `--crates` and the upstream branch arguments only when those independent libraries are part of the requested upgrade. Canonical regeneration covers every supported ImGui-dependent extension profile; there is no separate extension WASM filter.
 
 Verify that every generated file carries the expected source revision and deterministic hash before editing the safe layer:
 
@@ -49,23 +48,10 @@ Verify that every generated file carries the expected source revision and determ
 cargo run -p xtask -- verify-bindings --allow-dirty
 ```
 
-Then make upstream change review explicit. This is deliberately separate from
-binding generation: facts describe what changed, while decisions describe why a
-safe Rust surface is valid.
-
-```powershell
-# After moving source pins and regenerating bindings:
-python tools/upstream_contract.py --write-review-template
-
-# Review each generated group, classify it, add evidence for every safe item,
-# then accept the reviewed facts and prove the checked-in state is clean:
-python tools/upstream_contract.py --update-snapshot
-python tools/upstream_contract.py --check
-```
-
-The snapshot includes maintained extension APIs and recursive submodule pins.
-Never replace the decision manifest with unreviewed generated output or treat a
-binding hash as approval for an ABI, ownership, or safe-API change.
+Review the submodule commit range and generated binding diff directly. Record user-facing decisions
+in the safe API, tests, documentation, and changelog instead of duplicating the generated source in
+a second snapshot. A clean binding hash proves reproducibility, not ABI, ownership, or safe-API
+correctness.
 
 ### Bump unified release version
 
@@ -101,7 +87,7 @@ Run that in each standalone example workspace that carries its own `Cargo.lock`.
    - Prefer transparent wrappers over handwritten native structure mirrors. If a mirror is required, validate field offsets and a semantic sentinel that distinguishes count, frame, ID, and pointer fields; size/alignment assertions alone cannot catch same-sized substitutions.
    - Trace hidden queue, ownership, and lifecycle fields through upstream implementation code. Check native auto-transitions against Rust sidecars, renderer feedback, abandoned work, retries, and teardown.
    - If the new sys surface makes the old safe shape awkward, refactor the safe layer instead of layering compatibility hacks.
-   - Run `python tools/upstream_contract.py --check` before and after the upgrade. For live drift, generate a review template, classify each declaration/constant/enum/field/layout/typedef/source-pin delta exactly once, and require compile evidence plus runtime evidence for every runtime-shaped safe change. Confirm every maintained source has an `api_contract` provider, generator field facts retain bitfield/array widths, unlocated typedefs remain visible, and Test Engine's final Rust binding parser still fails closed on unknown public syntax.
+   - Review generated declaration and layout changes against the upstream implementation. Add compile evidence for safe type/lifetime contracts and runtime evidence for behavior, callbacks, or layouts that execute across the native boundary.
 
 2. Backend and platform impact
    - Audit `dear-imgui-sys/src/backend_shim/**` and `dear-imgui-sys/build.rs`.
@@ -144,8 +130,6 @@ $env:CARGO_BUILD_JOBS = '1'
 cargo run -p xtask -- verify-bindings --allow-dirty
 cargo fmt --all -- --check
 cargo check --workspace
-python tools/upstream_contract.py --check
-python tools/api_surface_report.py --check
 python tools/ci/verify_wasm_provider.py --check-rust-route
 python tools/pre_publish_check.py
 python tools/publish.py --dry-run

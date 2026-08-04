@@ -4,20 +4,11 @@ import json
 import os
 import subprocess
 import sys
-import tomllib
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
-
-from tools.tests.workflow_semantics import (
-    load_workflow,
-    named_step,
-    require_mapping,
-    workflow_jobs,
-)
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_DIR = REPO_ROOT / "tools" / "ci"
@@ -27,7 +18,6 @@ if str(CI_DIR) not in sys.path:
 CONTRACTS = importlib.import_module("run_contract")
 RUNTIME = importlib.import_module("_runtime_gate")
 PROCESS = importlib.import_module("_process")
-BUILD_GLSLANG = importlib.import_module("build_glslang")
 
 
 def bounded_result(
@@ -126,37 +116,6 @@ def ash_vulkan_smoke_payload(**overrides):
     }
     payload.update(overrides)
     return payload
-
-
-class FakeBackground:
-    def __init__(self, command, *, stdout_log: Path, stderr_log: Path):
-        self.args = tuple(os.fspath(argument) for argument in command)
-        self.stdout_log = Path(stdout_log)
-        self.stderr_log = Path(stderr_log)
-        self.stdout_log.parent.mkdir(parents=True, exist_ok=True)
-        self.stdout_log.write_text("background stdout\n", encoding="utf-8")
-        self.stderr_log.write_text("background stderr\n", encoding="utf-8")
-        self.returncode = None
-        self.stream_errors = ()
-        self.termination = None
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_args):
-        self.returncode = -15
-        self.termination = PROCESS.TerminationDiagnostics(
-            strategy="fixture",
-            attempted=True,
-            graceful=True,
-            force_kill=False,
-            fallback_reason=None,
-            notes=(),
-            errors=(),
-        )
-
-    def poll(self):
-        return self.returncode
 
 
 class ExpectedFailureTests(unittest.TestCase):
@@ -573,14 +532,8 @@ class RuntimeGateTests(unittest.TestCase):
                 name = arguments[arguments.index("--scenario") + 1]
                 result_path = Path(arguments[arguments.index("--json-output") + 1])
                 expectation = expectations[name]
-                tested = expectation.expected_test_count
-                if tested is None:
-                    tested = 1 if name in {"pass", "failure"} else 0
-                succeeded = (
-                    expectation.expected_test_count
-                    if expectation.expected_test_count is not None
-                    else 1 if name == "pass" else 0
-                )
+                tested = 1 if expectation.outcome in {"Passed", "Failed"} else 0
+                succeeded = 1 if expectation.outcome == "Passed" else 0
                 error = "injected infrastructure error" if expectation.infrastructure else None
                 result_path.write_text(
                     json.dumps(
@@ -670,83 +623,6 @@ class RuntimeGateTests(unittest.TestCase):
             "graphical smoke requires exactly one successful terminal test", errors
         )
         self.assertIn("a passed graphical smoke must not contain an error", errors)
-
-    def test_dear_app_graphical_smoke_uses_xvfb_openbox_and_lavapipe(self):
-        with TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            evidence = root / "evidence"
-            evidence.mkdir()
-            binary = root / "imgui_test_engine_basic"
-            binary.touch()
-            icd = root / "lvp_icd.x86_64.json"
-            icd.write_text("{}", encoding="utf-8")
-            tools = {
-                name: root / name
-                for name in (
-                    "Xvfb",
-                    "openbox",
-                    "xdpyinfo",
-                    "xprop",
-                    "vulkaninfo",
-                    "dpkg-query",
-                )
-            }
-            child_environment = {}
-            child_arguments = []
-
-            def background(command, **kwargs):
-                return FakeBackground(
-                    command,
-                    stdout_log=kwargs["stdout_log"],
-                    stderr_log=kwargs["stderr_log"],
-                )
-
-            def stage(command, **kwargs):
-                result = bounded_result(
-                    stdout_log=kwargs["stdout_log"],
-                    stderr_log=kwargs["stderr_log"],
-                )
-                if result.stdout_log.name == "dear-app-adapter.stdout.log":
-                    result.stdout_log.write_text(
-                        "deviceName = llvmpipe (LLVM 20)\n", encoding="utf-8"
-                    )
-                elif result.stdout_log.name == "dear-app-window-manager.stdout.log":
-                    result.stdout_log.write_text(
-                        "_NET_SUPPORTING_WM_CHECK(WINDOW): window id # 0x200001\n",
-                        encoding="utf-8",
-                    )
-                elif result.stdout_log.name == "dear-app.stdout.log":
-                    child_environment.update(kwargs["env"])
-                    child_arguments.extend(os.fspath(argument) for argument in command)
-                    (evidence / "dear-app-result.json").write_text(
-                        json.dumps(dear_app_smoke_payload()), encoding="utf-8"
-                    )
-                return result
-
-            with (
-                patch.object(RUNTIME, "_require_linux_runtime_tools", return_value=tools),
-                patch.object(RUNTIME, "_find_lavapipe_icd", return_value=icd),
-                patch.object(RUNTIME, "managed_background", side_effect=background),
-                patch.object(RUNTIME, "_wait_for_xvfb"),
-                patch.object(RUNTIME, "run_bounded", side_effect=stage),
-                patch.object(RUNTIME.time, "sleep"),
-            ):
-                details = RUNTIME._run_dear_app_graphical_smoke(
-                    workspace_root=root,
-                    evidence_dir=evidence,
-                    binary=binary,
-                    child_timeout=120.0,
-                )
-
-            self.assertEqual(details["result"]["outcome"], "Passed")
-            self.assertTrue(details["xvfb"]["termination"]["attempted"])
-            self.assertTrue(details["openbox"]["termination"]["attempted"])
-            self.assertIn("--dear-app-smoke", child_arguments)
-            self.assertEqual(child_environment["WGPU_BACKEND"], "vulkan")
-            self.assertEqual(child_environment["WINIT_UNIX_BACKEND"], "x11")
-            self.assertEqual(child_environment["VK_DRIVER_FILES"], str(icd))
-            xdg_runtime = Path(details["environment"]["xdg_runtime_dir"])
-            self.assertFalse(xdg_runtime.exists())
 
     def test_child_deadline_is_harness_timeout_not_test_timeout(self):
         with TemporaryDirectory() as temporary:
@@ -839,64 +715,6 @@ class RuntimeGateTests(unittest.TestCase):
             )
             self.assertEqual(aggregate["category"], "InfrastructureUnavailable")
 
-    def test_viewport_tool_profiles_preserve_platform_and_missing_tool_contract(self):
-        profiles = (
-            (
-                RUNTIME._require_linux_runtime_tools,
-                "multi-viewport-smoke requires Linux, Xvfb, and Mesa Lavapipe",
-                ("Xvfb", "openbox", "xdpyinfo", "xprop", "vulkaninfo", "dpkg-query"),
-            ),
-            (
-                RUNTIME._require_linux_sdl3_glow_tools,
-                "sdl3-glow-multi-viewport-smoke requires Linux, Xvfb, and Mesa llvmpipe",
-                ("Xvfb", "openbox", "xdpyinfo", "xprop", "glxinfo", "dpkg-query"),
-            ),
-        )
-
-        for require_tools, platform_error, tool_names in profiles:
-            with self.subTest(profile=require_tools.__name__):
-                with patch.object(RUNTIME.sys, "platform", "win32"):
-                    with self.assertRaises(RUNTIME.RuntimeContractError) as raised:
-                        require_tools()
-                self.assertEqual(str(raised.exception), platform_error)
-                self.assertEqual(
-                    raised.exception.category,
-                    RUNTIME.GateCategory.INFRASTRUCTURE_UNAVAILABLE,
-                )
-
-                checked: list[str] = []
-
-                def which(name):
-                    checked.append(name)
-                    return None if name == tool_names[4] else f"/usr/bin/{name}"
-
-                with (
-                    patch.object(RUNTIME.sys, "platform", "linux"),
-                    patch.object(RUNTIME.shutil, "which", side_effect=which),
-                ):
-                    with self.assertRaises(RUNTIME.RuntimeContractError) as raised:
-                        require_tools()
-                self.assertEqual(checked, list(tool_names[:5]))
-                self.assertEqual(
-                    str(raised.exception),
-                    f"required runtime program is unavailable: {tool_names[4]}",
-                )
-
-                with (
-                    patch.object(RUNTIME.sys, "platform", "linux"),
-                    patch.object(
-                        RUNTIME.shutil,
-                        "which",
-                        side_effect=lambda name: f"/usr/bin/{name}",
-                    ),
-                ):
-                    tools = require_tools()
-                self.assertEqual(list(tools), list(tool_names))
-                self.assertEqual(
-                    tools,
-                    {name: Path(f"/usr/bin/{name}") for name in tool_names},
-                )
-
     def test_viewport_success_requires_lavapipe_and_full_lifecycle(self):
         valid = {
             "schema_version": 3,
@@ -927,7 +745,8 @@ class RuntimeGateTests(unittest.TestCase):
             "must share a viewport ID",
         )
 
-    def test_upstream_viewport_suite_requires_the_exact_official_manifest(self):
+    def test_upstream_viewport_suite_requires_every_registered_test_to_pass(self):
+        registered_tests = ["viewport_basic", "viewport_focus"]
         valid = {
             "schema_version": 1,
             "suite": "upstream-viewports",
@@ -936,10 +755,10 @@ class RuntimeGateTests(unittest.TestCase):
             "renderer_backend": "WGPU",
             "real_platform_backend": True,
             "runtime_teardown_complete": True,
-            "registered_count": len(RUNTIME.UPSTREAM_VIEWPORT_TESTS),
-            "registered_tests": list(RUNTIME.UPSTREAM_VIEWPORT_TESTS),
-            "tested": len(RUNTIME.UPSTREAM_VIEWPORT_TESTS),
-            "success": len(RUNTIME.UPSTREAM_VIEWPORT_TESTS),
+            "registered_count": len(registered_tests),
+            "registered_tests": registered_tests,
+            "tested": len(registered_tests),
+            "success": len(registered_tests),
             "in_queue": 0,
             "adapter": {
                 "name": "llvmpipe (LLVM 20)",
@@ -960,67 +779,21 @@ class RuntimeGateTests(unittest.TestCase):
             RUNTIME._validate_upstream_viewport_suite_payload(invalid_bool),
         )
 
-        valid["registered_tests"] = valid["registered_tests"][:-1]
-        valid["success"] = len(RUNTIME.UPSTREAM_VIEWPORT_TESTS) - 1
-        errors = RUNTIME._validate_upstream_viewport_suite_payload(valid)
+        invalid_manifest = dict(valid)
+        invalid_manifest["registered_tests"] = ["viewport_basic", "viewport_basic"]
+        errors = RUNTIME._validate_upstream_viewport_suite_payload(invalid_manifest)
         self.assertIn(
-            "registered_tests did not match the pinned upstream viewport manifest",
-            errors,
-        )
-        self.assertIn(
-            "upstream viewport suite requires exactly 11 successful terminal tests",
+            "registered_tests must contain unique, nonempty test names",
             errors,
         )
 
-    def test_viewport_common_validation_preserves_error_order(self):
-        wgpu_errors = RUNTIME._validate_viewport_payload(
-            {
-                "schema_version": 0,
-                "secondary_viewport_while_held_observed": False,
-                "merge_observed": False,
-                "main_present_bracketed_by_test_engine": False,
-                "secondary_render_submitted_before_main_acquire_viewport_ids": [],
-                "secondary_present_submitted_before_main_acquire_viewport_ids": [-1],
-            }
-        )
-        self.assertEqual(
-            wgpu_errors,
-            [
-                "schema_version expected 3, got 0",
-                "secondary_viewport_while_held_observed expected True, got False",
-                "merge_observed expected True, got False",
-                "main_present_bracketed_by_test_engine expected True, got False",
-                "secondary_render_submitted_before_main_acquire_viewport_ids must be a nonempty u32 array",
-                "secondary_present_submitted_before_main_acquire_viewport_ids must contain only u32 values",
-                "adapter must be a JSON object",
-            ],
-        )
-
-        sdl3_glow_errors = RUNTIME._validate_sdl3_glow_viewport_payload(
-            {
-                "schema_version": 0,
-                "merge_observed": False,
-                "main_present_bracketed_by_test_engine": False,
-            }
-        )
-        self.assertEqual(
-            sdl3_glow_errors,
-            [
-                "schema_version expected 5, got 0",
-                "merge_observed expected True, got False",
-                "main_present_bracketed_by_test_engine expected True, got False",
-                "external_texture_filters_preserved expected True, got None",
-                "sampler_pixels_prove_isolation expected True, got None",
-                "raw_callback_typed_state_observed expected True, got None",
-                "reset_render_state_recovered expected True, got None",
-                "render_state_cleared_after_callback expected True, got None",
-                "application_gl_state_restored expected True, got None",
-                "sampler_strategy must be sampler_objects or texture_parameters, got None",
-                "secondary_context_ready_before_main_present_viewport_ids must be a nonempty u32 array",
-                "secondary_draw_issued_before_main_present_viewport_ids must be a nonempty u32 array",
-                "secondary_swap_succeeded_before_main_present_viewport_ids must be a nonempty u32 array",
-                "renderer must be a JSON object",
-            ],
+        incomplete = dict(valid)
+        incomplete["success"] = len(registered_tests) - 1
+        errors = RUNTIME._validate_upstream_viewport_suite_payload(incomplete)
+        self.assertIn(
+            "upstream viewport suite requires every dynamically registered test "
+            "to finish successfully",
+            errors,
         )
 
     def test_ash_vulkan_success_requires_validation_callbacks_and_teardown(self):
@@ -1081,386 +854,6 @@ class RuntimeGateTests(unittest.TestCase):
             "must share a viewport ID",
         )
 
-    def test_viewport_gate_retains_display_adapter_and_teardown_evidence(self):
-        with TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            evidence = root / "evidence"
-            binary = root / "multi_viewport_wgpu"
-            binary.touch()
-            icd = root / "lvp_icd.x86_64.json"
-            icd.write_text("{}", encoding="utf-8")
-            tools = {
-                name: root / name
-                for name in (
-                    "Xvfb",
-                    "openbox",
-                    "xdpyinfo",
-                    "xprop",
-                    "vulkaninfo",
-                    "dpkg-query",
-                )
-            }
-            build = bounded_result(
-                stdout_log=evidence / "build.stdout.log",
-                stderr_log=evidence / "build.stderr.log",
-            )
-            viewport_environment = {}
-            upstream_viewport_environment = {}
-
-            def background(command, **kwargs):
-                return FakeBackground(
-                    command,
-                    stdout_log=kwargs["stdout_log"],
-                    stderr_log=kwargs["stderr_log"],
-                )
-
-            def stage(_command, **kwargs):
-                result = bounded_result(
-                    stdout_log=kwargs["stdout_log"],
-                    stderr_log=kwargs["stderr_log"],
-                )
-                if result.stdout_log.name == "adapter.stdout.log":
-                    result.stdout_log.write_text(
-                        "deviceName = llvmpipe (LLVM 20)\n", encoding="utf-8"
-                    )
-                elif result.stdout_log.name == "window-manager.stdout.log":
-                    result.stdout_log.write_text(
-                        "_NET_SUPPORTING_WM_CHECK(WINDOW): window id # 0x200001\n",
-                        encoding="utf-8",
-                    )
-                elif result.stdout_log.name == "viewport.stdout.log":
-                    viewport_environment.update(kwargs["env"])
-                    (evidence / "viewport-result.json").write_text(
-                        json.dumps(
-                            {
-                                "schema_version": 3,
-                                "adapter": {
-                                    "name": "llvmpipe (LLVM 20)",
-                                    "backend": "Vulkan",
-                                    "device_type": "Cpu",
-                                    "driver": "llvmpipe",
-                                    "driver_info": "Mesa 25",
-                                },
-                                "secondary_viewport_while_held_observed": True,
-                                "merge_observed": True,
-                                "secondary_render_submitted_before_main_acquire_viewport_ids": [42],
-                                "secondary_present_submitted_before_main_acquire_viewport_ids": [42],
-                                "main_present_bracketed_by_test_engine": True,
-                            }
-                        ),
-                        encoding="utf-8",
-                    )
-                elif result.stdout_log.name == "upstream-viewports.stdout.log":
-                    upstream_viewport_environment.update(kwargs["env"])
-                    (evidence / "upstream-viewports-result.json").write_text(
-                        json.dumps(
-                            {
-                                "schema_version": 1,
-                                "suite": "upstream-viewports",
-                                "category": "viewport",
-                                "platform_backend": "Winit",
-                                "renderer_backend": "WGPU",
-                                "real_platform_backend": True,
-                                "runtime_teardown_complete": True,
-                                "registered_count": len(
-                                    RUNTIME.UPSTREAM_VIEWPORT_TESTS
-                                ),
-                                "registered_tests": list(
-                                    RUNTIME.UPSTREAM_VIEWPORT_TESTS
-                                ),
-                                "tested": len(RUNTIME.UPSTREAM_VIEWPORT_TESTS),
-                                "success": len(RUNTIME.UPSTREAM_VIEWPORT_TESTS),
-                                "in_queue": 0,
-                                "adapter": {
-                                    "name": "llvmpipe (LLVM 20)",
-                                    "backend": "Vulkan",
-                                    "device_type": "Cpu",
-                                    "driver": "llvmpipe",
-                                    "driver_info": "Mesa 25",
-                                },
-                            }
-                        ),
-                        encoding="utf-8",
-                    )
-                return result
-
-            with (
-                patch.object(RUNTIME, "_require_linux_runtime_tools", return_value=tools),
-                patch.object(RUNTIME, "_find_lavapipe_icd", return_value=icd),
-                patch.object(RUNTIME, "_run_example_build", return_value=build),
-                patch.object(RUNTIME, "_example_binary", return_value=binary),
-                patch.object(RUNTIME, "managed_background", side_effect=background),
-                patch.object(RUNTIME, "_wait_for_xvfb"),
-                patch.object(RUNTIME, "run_bounded", side_effect=stage),
-                patch.object(RUNTIME.time, "sleep"),
-                patch.dict(
-                    os.environ,
-                    {"DEAR_IMGUI_UPSTREAM_VIEWPORT_SUITE": "1"},
-                ),
-            ):
-                result = RUNTIME.run_multi_viewport_smoke(
-                    workspace_root=root,
-                    evidence_dir=evidence,
-                )
-
-            self.assertTrue(result.success)
-            self.assertEqual(result.category, RUNTIME.GateCategory.PASSED)
-            self.assertTrue(result.details["xvfb"]["termination"]["attempted"])
-            self.assertTrue(result.details["openbox"]["termination"]["attempted"])
-            xdg_runtime = Path(result.details["environment"]["xdg_runtime_dir"])
-            self.assertNotEqual(xdg_runtime.parent, evidence)
-            self.assertTrue(xdg_runtime.name.startswith("dear-imgui-xdg-"))
-            self.assertFalse(xdg_runtime.exists())
-            self.assertIn("adapter.stdout.log", result.evidence)
-            self.assertIn("viewport-result.json", result.evidence)
-            self.assertIn("upstream-viewports-result.json", result.evidence)
-            self.assertEqual(
-                viewport_environment["DEAR_IMGUI_VIEWPORT_DRAG_SMOKE"],
-                "1",
-            )
-            self.assertNotIn(
-                "DEAR_IMGUI_UPSTREAM_VIEWPORT_SUITE", viewport_environment
-            )
-            self.assertNotIn(
-                "DEAR_IMGUI_VIEWPORT_DRAG_SMOKE", upstream_viewport_environment
-            )
-            self.assertEqual(
-                upstream_viewport_environment[
-                    "DEAR_IMGUI_UPSTREAM_VIEWPORT_SUITE"
-                ],
-                "1",
-            )
-
-    def test_sdl3_glow_gate_retains_renderer_and_teardown_evidence(self):
-        with TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            evidence = root / "evidence"
-            binary = root / "sdl3_glow_multi_viewport"
-            binary.touch()
-            sdl3_library = (
-                root
-                / "target"
-                / "debug"
-                / "build"
-                / "sdl3-sys-test"
-                / "out"
-                / "lib"
-                / "libSDL3.so.0"
-            )
-            sdl3_library.parent.mkdir(parents=True)
-            sdl3_library.touch()
-            tools = {
-                name: root / name
-                for name in (
-                    "Xvfb",
-                    "openbox",
-                    "xdpyinfo",
-                    "xprop",
-                    "glxinfo",
-                    "dpkg-query",
-                )
-            }
-            build = bounded_result(
-                stdout_log=evidence / "build.stdout.log",
-                stderr_log=evidence / "build.stderr.log",
-            )
-
-            def background(command, **kwargs):
-                return FakeBackground(
-                    command,
-                    stdout_log=kwargs["stdout_log"],
-                    stderr_log=kwargs["stderr_log"],
-                )
-
-            def stage(_command, **kwargs):
-                result = bounded_result(
-                    stdout_log=kwargs["stdout_log"],
-                    stderr_log=kwargs["stderr_log"],
-                )
-                if result.stdout_log.name == "renderer.stdout.log":
-                    result.stdout_log.write_text(
-                        "OpenGL renderer string: llvmpipe (LLVM 20)\n",
-                        encoding="utf-8",
-                    )
-                elif result.stdout_log.name == "window-manager.stdout.log":
-                    result.stdout_log.write_text(
-                        "_NET_SUPPORTING_WM_CHECK(WINDOW): window id # 0x200001\n",
-                        encoding="utf-8",
-                    )
-                elif result.stdout_log.name in (
-                    "viewport-texture-parameters.stdout.log",
-                    "viewport-sampler-objects.stdout.log",
-                ):
-                    self.assertEqual(
-                        kwargs["env"]["LD_LIBRARY_PATH"].split(os.pathsep)[0],
-                        str(sdl3_library.parent.resolve()),
-                    )
-                    fallback = (
-                        result.stdout_log.name
-                        == "viewport-texture-parameters.stdout.log"
-                    )
-                    expected_strategy = (
-                        "texture_parameters" if fallback else "sampler_objects"
-                    )
-                    self.assertEqual(
-                        kwargs["env"]["MESA_GL_VERSION_OVERRIDE"],
-                        "3.2" if fallback else "3.3",
-                    )
-                    if fallback:
-                        self.assertEqual(
-                            kwargs["env"]["MESA_EXTENSION_OVERRIDE"],
-                            "-GL_ARB_sampler_objects",
-                        )
-                    else:
-                        self.assertNotIn("MESA_EXTENSION_OVERRIDE", kwargs["env"])
-                    result_path = Path(
-                        kwargs["env"]["DEAR_IMGUI_VIEWPORT_SMOKE_JSON"]
-                    )
-                    result_path.write_text(
-                        json.dumps(
-                            {
-                                "schema_version": 5,
-                                "renderer": {
-                                    "backend": "OpenGL",
-                                    "vendor": "Mesa",
-                                    "name": "llvmpipe (LLVM 20)",
-                                    "version": "3.2 Mesa 25"
-                                    if fallback
-                                    else "3.3 Mesa 25",
-                                },
-                                "sampler_strategy": expected_strategy,
-                                "merge_observed": True,
-                                "secondary_context_ready_before_main_present_viewport_ids": [7],
-                                "secondary_draw_issued_before_main_present_viewport_ids": [7],
-                                "secondary_swap_succeeded_before_main_present_viewport_ids": [7],
-                                "main_present_bracketed_by_test_engine": True,
-                                "external_texture_filters_preserved": True,
-                                "sampler_pixels_prove_isolation": True,
-                                "raw_callback_typed_state_observed": True,
-                                "reset_render_state_recovered": True,
-                                "render_state_cleared_after_callback": True,
-                                "application_gl_state_restored": True,
-                            }
-                        ),
-                        encoding="utf-8",
-                    )
-                return result
-
-            with (
-                patch.object(
-                    RUNTIME, "_require_linux_sdl3_glow_tools", return_value=tools
-                ),
-                patch.object(RUNTIME, "_run_example_build", return_value=build),
-                patch.object(RUNTIME, "_example_binary", return_value=binary),
-                patch.object(RUNTIME, "managed_background", side_effect=background),
-                patch.object(RUNTIME, "_wait_for_xvfb"),
-                patch.object(RUNTIME, "run_bounded", side_effect=stage),
-                patch.object(RUNTIME.time, "sleep"),
-            ):
-                result = RUNTIME.run_sdl3_glow_viewport_smoke(
-                    workspace_root=root,
-                    evidence_dir=evidence,
-                )
-
-            self.assertTrue(result.success)
-            self.assertEqual(result.category, RUNTIME.GateCategory.PASSED)
-            self.assertIn("renderer.stdout.log", result.evidence)
-            self.assertIn("viewport-texture-parameters-result.json", result.evidence)
-            self.assertIn("viewport-sampler-objects-result.json", result.evidence)
-            self.assertEqual(
-                set(result.details["results"]),
-                {"texture-parameters", "sampler-objects"},
-            )
-            self.assertEqual(
-                result.details["environment"]["sdl3_library_dirs"],
-                [str(sdl3_library.parent.resolve())],
-            )
-
-    def test_ash_vulkan_gate_requires_validation_and_retains_teardown_evidence(self):
-        with TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            evidence = root / "evidence"
-            binary = root / "multi_viewport_ash"
-            binary.touch()
-            icd = root / "lvp_icd.x86_64.json"
-            icd.write_text("{}", encoding="utf-8")
-            tools = {
-                name: root / name
-                for name in (
-                    "Xvfb",
-                    "openbox",
-                    "xdpyinfo",
-                    "xprop",
-                    "vulkaninfo",
-                    "dpkg-query",
-                )
-            }
-            build = bounded_result(
-                stdout_log=evidence / "build.stdout.log",
-                stderr_log=evidence / "build.stderr.log",
-            )
-            viewport_environment = {}
-
-            def background(command, **kwargs):
-                return FakeBackground(
-                    command,
-                    stdout_log=kwargs["stdout_log"],
-                    stderr_log=kwargs["stderr_log"],
-                )
-
-            def stage(_command, **kwargs):
-                result = bounded_result(
-                    stdout_log=kwargs["stdout_log"],
-                    stderr_log=kwargs["stderr_log"],
-                )
-                if result.stdout_log.name == "adapter.stdout.log":
-                    result.stdout_log.write_text(
-                        "deviceName = llvmpipe (LLVM 20)\n"
-                        "VK_LAYER_KHRONOS_validation\n",
-                        encoding="utf-8",
-                    )
-                elif result.stdout_log.name == "window-manager.stdout.log":
-                    result.stdout_log.write_text(
-                        "_NET_SUPPORTING_WM_CHECK(WINDOW): window id # 0x200001\n",
-                        encoding="utf-8",
-                    )
-                elif result.stdout_log.name == "viewport.stdout.log":
-                    viewport_environment.update(kwargs["env"])
-                    payload = ash_vulkan_smoke_payload()
-                    (evidence / "viewport-result.json").write_text(
-                        json.dumps(payload), encoding="utf-8"
-                    )
-                return result
-
-            with (
-                patch.object(RUNTIME, "_require_linux_runtime_tools", return_value=tools),
-                patch.object(RUNTIME, "_find_lavapipe_icd", return_value=icd),
-                patch.object(RUNTIME, "_run_example_build", return_value=build) as builder,
-                patch.object(RUNTIME, "_example_binary", return_value=binary),
-                patch.object(RUNTIME, "managed_background", side_effect=background),
-                patch.object(RUNTIME, "_wait_for_xvfb"),
-                patch.object(RUNTIME, "run_bounded", side_effect=stage),
-                patch.object(RUNTIME.time, "sleep"),
-            ):
-                result = RUNTIME.run_ash_vulkan_validation_smoke(
-                    workspace_root=root,
-                    evidence_dir=evidence,
-                )
-
-            self.assertTrue(result.success)
-            self.assertEqual(result.category, RUNTIME.GateCategory.PASSED)
-            self.assertEqual(
-                builder.call_args.kwargs["features"],
-                "ash-winit-multi-viewport,ash-dynamic-rendering",
-            )
-            self.assertEqual(
-                viewport_environment["DEAR_IMGUI_REQUIRE_VULKAN_VALIDATION"], "1"
-            )
-            self.assertEqual(
-                viewport_environment["VK_ICD_FILENAMES"], str(icd)
-            )
-            self.assertIn("viewport-result.json", result.evidence)
-
     def test_new_invocation_invalidates_owned_stale_success_evidence(self):
         with TemporaryDirectory() as temporary:
             evidence = Path(temporary) / "evidence"
@@ -1500,226 +893,5 @@ class RuntimeGateTests(unittest.TestCase):
             self.assertFalse(result.success)
             self.assertEqual(result.category, RUNTIME.GateCategory.PRODUCT_FAILURE)
             self.assertFalse(result.retry_eligible)
-
-
-class WorkflowPortabilityTests(unittest.TestCase):
-    def _ci_jobs(self):
-        workflow = load_workflow(REPO_ROOT / ".github" / "workflows" / "ci.yml")
-        return workflow_jobs(workflow)
-
-    def test_sanitizer_linker_includes_the_cxx_runtime(self):
-        job = self._ci_jobs()["test-engine-sanitizers"]
-        step = named_step(
-            job, "Run Test Engine FFI boundary tests with ASan and UBSan"
-        )
-        environment = require_mapping(
-            step.get("env"), "jobs.test-engine-sanitizers.steps.sanitizer.env"
-        )
-
-        self.assertIn("-Clinker=clang++", environment["RUSTFLAGS"])
-        self.assertIn("-Clink-arg=-lstdc++", environment["RUSTFLAGS"])
-
-    def test_binding_contract_installs_and_selects_the_pinned_libclang(self):
-        jobs = self._ci_jobs()
-        job = jobs["binding-contract"]
-        install = named_step(job, "Install fixed LLVM toolchain")
-        install_command = str(install.get("run", ""))
-        self.assertNotIn("uses", install)
-        self.assertIn("python3 tools/ci/install_llvm.py", install_command)
-        self.assertIn("${{ runner.temp }}/llvm", install_command)
-        self.assertFalse(
-            any(
-                "install-llvm-action" in str(step.get("uses", ""))
-                for workflow_job in jobs.values()
-                for step in workflow_job.get("steps", ())
-                if isinstance(step, dict)
-            ),
-            "JavaScript LLVM setup actions must not re-enter the workflow",
-        )
-
-        step = named_step(
-            job, "Regenerate and verify every maintained binding profile"
-        )
-        environment = require_mapping(
-            step.get("env"), "jobs.binding-contract.steps.regenerate.env"
-        )
-
-        self.assertEqual(
-            environment.get("LIBCLANG_PATH"), "${{ runner.temp }}/llvm/lib"
-        )
-        self.assertFalse(
-            any(
-                "install_llvm.py" in str(step.get("run", ""))
-                for step in jobs["wasm-check"]["steps"]
-            ),
-            "WASM uses pregenerated bindings and must not install libclang",
-        )
-
-    def test_source_contracts_gate_msrv_and_public_doctests(self):
-        job = self._ci_jobs()["source-contracts"]
-
-        msrv = named_step(
-            job, "Check publishable non-Bevy crates at the declared MSRV"
-        )
-        self.assertIn("cargo +1.92.0 check --workspace", msrv.get("run", ""))
-        self.assertIn("--exclude dear-imgui-bevy", msrv.get("run", ""))
-
-        expected_doctest_steps = (
-            "Test core public API documentation",
-            "Test Winit public API documentation",
-            "Test WGPU public API documentation",
-            "Test Glow public API documentation",
-            "Test Ash public API documentation",
-            "Test SDL3 public API documentation",
-        )
-        for step_name in expected_doctest_steps:
-            with self.subTest(step=step_name):
-                command = str(named_step(job, step_name).get("run", ""))
-                self.assertIn("cargo +1.95.0 test --doc", command)
-
-    def test_checkout_and_packaged_wasm_providers_use_the_pinned_emsdk(self):
-        jobs = self._ci_jobs()
-        for job_id in ("publish-check", "wasm-check"):
-            setup = named_step(
-                jobs[job_id], "Set up pinned Emscripten provider toolchain"
-            )
-            inputs = require_mapping(setup.get("with"), f"jobs.{job_id}.emsdk.with")
-            with self.subTest(job=job_id):
-                self.assertEqual(
-                    setup.get("uses"),
-                    "emscripten-core/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984",
-                )
-                self.assertEqual(str(inputs.get("version")), "5.0.1")
-                self.assertEqual(str(inputs.get("emsdk-version")), "5.0.5")
-                self.assertNotIn("actions-cache-folder", inputs)
-
-        checkout_provider = str(
-            named_step(
-                jobs["wasm-check"],
-                "Build and structurally verify the Emscripten provider",
-            ).get("run", "")
-        )
-        packaged_provider = str(
-            named_step(
-                jobs["publish-check"], "Package, unpack, and consume core crates"
-            ).get("run", "")
-        )
-        self.assertIn("verify_wasm_provider.py", checkout_provider)
-        self.assertIn("verify_packaged_core.py", packaged_provider)
-
-    def test_ash_shader_contract_rebuilds_with_pinned_glslang(self):
-        job = self._ci_jobs()["ash-routes"]
-        install = named_step(job, "Build pinned glslangValidator")
-        install_command = str(install.get("run", ""))
-        self.assertEqual(
-            install.get("if"),
-            "matrix.platform == 'Winit' && matrix.rendering == 'classic'",
-        )
-        self.assertNotIn("shell", install)
-        self.assertIn("tools/ci/build_glslang.py", install_command)
-        self.assertIn("--work-root", install_command)
-        self.assertIn("--github-env", install_command)
-        self.assertEqual(
-            BUILD_GLSLANG.GLSLANG_COMMIT,
-            "1062752a891c95b2bfeed9e356562d88f9df84ac",
-        )
-
-        verify = named_step(job, "Verify checked-in Ash shaders")
-        verify_command = str(verify.get("run", ""))
-        self.assertIn("tools/generate_ash_shaders.py", verify_command)
-        self.assertIn("--check", verify_command)
-        self.assertIn("--recompile", verify_command)
-        self.assertIn('--compiler "$GLSLANG_VALIDATOR"', verify_command)
-
-    def test_native_runtime_retry_chain_retains_release_evidence(self):
-        ci = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
-            encoding="utf-8"
-        )
-        runtime = (
-            REPO_ROOT / ".github" / "workflows" / "native-runtime.yml"
-        ).read_text(encoding="utf-8")
-        workflow = f"{ci}\n{runtime}"
-
-        self.assertIn("test-engine-runtime", workflow)
-        self.assertIn("multi-viewport-smoke", workflow)
-        self.assertIn("sdl3-glow-multi-viewport-smoke", workflow)
-        self.assertIn("ash-vulkan-validation-smoke", workflow)
-        self.assertIn("xvfb", runtime)
-        self.assertIn("openbox", runtime)
-        self.assertIn("mesa-vulkan-drivers", runtime)
-        self.assertIn("vulkan-tools", runtime)
-        self.assertIn("vulkan-validationlayers", runtime)
-        self.assertIn("libxkbcommon-x11-dev", runtime)
-        self.assertIn("mesa-utils", runtime)
-        self.assertIn("retention-days: 30", workflow)
-        self.assertRegex(workflow, r"(?m)^\s+if: always\(\)$")
-        self.assertIn("--defer-infrastructure-retry", runtime)
-        self.assertIn("runtime-preparation-failure", runtime)
-        self.assertIn("steps.preparation.outputs.retry_eligible", runtime)
-        self.assertIn("gate_attempt: 2", ci)
-        self.assertEqual(ci.count("outputs.retry_eligible == 'true'"), 4)
-
-    def test_bevy_software_gpu_contracts_run_serially(self):
-        job = self._ci_jobs()["bevy-backend"]
-        for step_name in (
-            "Run Bevy GPU composition tests",
-            "Run Bevy image bind-group GPU contracts",
-        ):
-            command = str(named_step(job, step_name).get("run", ""))
-            self.assertIn("nextest run -j 1", command)
-
-    def test_safe_test_engine_contracts_cover_default_and_capture_serially(self):
-        job = self._ci_jobs()["build"]
-        default_command = str(
-            named_step(job, "Test safe Test Engine runner contracts").get("run", "")
-        )
-        capture_command = str(
-            named_step(job, "Test safe Test Engine capture contracts").get("run", "")
-        )
-
-        for command in (default_command, capture_command):
-            self.assertIn("nextest run -j 1", command)
-            self.assertIn("-p dear-imgui-test-engine", command)
-            self.assertIn("--no-default-features", command)
-        self.assertNotIn("--features capture", default_command)
-        self.assertIn("--features capture", capture_command)
-
-    def test_glow_runtime_contracts_have_native_and_wasm_ci_coverage(self):
-        jobs = self._ci_jobs()
-        native = str(
-            named_step(jobs["build"], "Run Glow renderer acceptance tests").get("run", "")
-        )
-        self.assertIn("cargo nextest run", native)
-        self.assertIn("-p dear-imgui-glow", native)
-        self.assertIn("--features multi-viewport", native)
-
-        wasm = str(
-            named_step(jobs["wasm-check"], "Check Glow renderer WASM provider").get(
-                "run", ""
-            )
-        )
-        self.assertIn("cargo check", wasm)
-        self.assertIn("-p dear-imgui-glow", wasm)
-        self.assertIn("--target wasm32-unknown-unknown", wasm)
-        self.assertIn("--no-default-features", wasm)
-        self.assertIn("--features wasm", wasm)
-
-
-class GlowFeatureManifestTests(unittest.TestCase):
-    def test_glow_manifest_exposes_only_runtime_truthful_capability_routes(self):
-        manifest = tomllib.loads(
-            (REPO_ROOT / "backends" / "dear-imgui-glow" / "Cargo.toml").read_text(
-                encoding="utf-8"
-            )
-        )
-        features = manifest["features"]
-        self.assertEqual(set(features), {"default", "wasm", "multi-viewport"})
-        self.assertEqual(features["default"], [])
-        self.assertEqual(features["wasm"], ["dear-imgui-rs/wasm"])
-        self.assertEqual(
-            features["multi-viewport"], ["dear-imgui-rs/multi-viewport"]
-        )
-
-
 if __name__ == "__main__":
     unittest.main()

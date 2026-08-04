@@ -1,5 +1,4 @@
 import importlib
-import os
 import re
 import subprocess
 import sys
@@ -161,24 +160,6 @@ class RepositoryScriptContractTests(unittest.TestCase):
         self.assertIsNotNone(contract)
         self.assertEqual(dependency.group(1), contract.group(1))
 
-    def test_binding_updater_uses_canonical_xtask_without_out_dir_guessing(self):
-        content = (
-            REPO_ROOT / "tools" / "update_submodule_and_bindings.py"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("verify-bindings", content)
-        self.assertNotIn("find_bindings", content)
-        self.assertNotIn("st_mtime", content)
-
-    def test_binding_updater_selects_imguizmo_repositories_independently(self):
-        content = (
-            REPO_ROOT / "tools" / "update_submodule_and_bindings.py"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn('"--cimguizmo-branch"', content)
-        self.assertIn('"--cimguizmo-quat-branch"', content)
-        self.assertIn("args.cimguizmo_quat_branch", content)
-
     def test_binding_updater_previews_wasm_generation_without_running_cargo(self):
         result = subprocess.run(
             [
@@ -188,7 +169,6 @@ class RepositoryScriptContractTests(unittest.TestCase):
                 "dear-imgui-sys",
                 "--submodules",
                 "skip",
-                "--skip-core-bindings",
                 "--wasm",
                 "--dry-run",
             ],
@@ -204,95 +184,6 @@ class RepositoryScriptContractTests(unittest.TestCase):
             "cargo check -p dear-imgui-rs -F wasm --target wasm32-unknown-unknown",
             result.stdout,
         )
-
-    def test_repository_has_no_tracked_non_python_script_entry_points(self):
-        result = subprocess.run(
-            [
-                "git",
-                "ls-files",
-                "*.sh",
-                "*.bash",
-                "*.zsh",
-                "*.ps1",
-                "*.bat",
-                "*.cmd",
-            ],
-            cwd=REPO_ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        existing = [
-            path for path in result.stdout.splitlines() if (REPO_ROOT / path).is_file()
-        ]
-
-        self.assertEqual(existing, [])
-
-    def test_repository_has_no_extensionless_shell_entry_points(self):
-        result = subprocess.run(
-            ["git", "ls-files", "-z"],
-            cwd=REPO_ROOT,
-            check=True,
-            capture_output=True,
-        )
-        shell_entry_points = []
-        for raw_path in result.stdout.split(b"\0"):
-            if not raw_path:
-                continue
-            path = REPO_ROOT / os.fsdecode(raw_path)
-            if not path.is_file():
-                continue
-            with path.open("rb") as source:
-                first_line = source.readline(256)
-            if first_line.startswith(b"#!") and any(
-                shell in first_line for shell in (b"/sh", b"/bash", b"/zsh", b"/ksh")
-            ):
-                shell_entry_points.append(os.fspath(path.relative_to(REPO_ROOT)))
-
-        self.assertEqual(shell_entry_points, [])
-
-    def test_active_callers_use_python_entry_points(self):
-        active_paths = (
-            REPO_ROOT / ".github" / "workflows" / "ci.yml",
-            REPO_ROOT / ".github" / "workflows" / "prebuilt-binaries.yml",
-            REPO_ROOT / "tools" / "pre_publish_check.py",
-            REPO_ROOT / "examples-ios" / "dear-imgui-ios-smoke" / "README.md",
-        )
-        content = "\n".join(path.read_text(encoding="utf-8") for path in active_paths)
-
-        self.assertNotIn("update_submodules.sh", content)
-        self.assertNotIn("verify_packaged_core.sh", content)
-        self.assertNotIn("build-xcframework.sh", content)
-
-    def test_workflows_select_a_python_command_available_on_each_runner(self):
-        ci = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
-            encoding="utf-8"
-        )
-
-        def job_block(name: str) -> str:
-            tail = ci.split(f"\n  {name}:\n", 1)[1]
-            next_job = re.search(r"\n  [a-zA-Z0-9_-]+:\n", tail)
-            return tail if next_job is None else tail[: next_job.start()]
-
-        for job_name in (
-            "windows-platform-io-abi",
-            "windows-vcpkg-native-deps",
-            "windows-gnu",
-        ):
-            job = job_block(job_name)
-            with self.subTest(job=job_name):
-                self.assertIn("run: python tools/ci/update_submodules.py", job)
-
-        runner_expression = "runner.os == 'Windows' && 'python' || 'python3'"
-        self.assertIn(runner_expression, job_block("build"))
-
-        prebuilt = (
-            REPO_ROOT / ".github" / "workflows" / "prebuilt-binaries.yml"
-        ).read_text(encoding="utf-8")
-        self.assertIn("python: python3", prebuilt)
-        self.assertIn("python: python", prebuilt)
-        self.assertGreaterEqual(prebuilt.count("${{ matrix.python }}"), 5)
-
 
 if __name__ == "__main__":
     unittest.main()

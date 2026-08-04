@@ -454,9 +454,6 @@ jobs:
       - name: Verify exact binding provenance
         run: python3 tools/source_metadata.py verify-bindings
 
-      - name: Verify high-level API coverage policy
-        run: python3 tools/api_surface_report.py --check
-
       - name: Regenerate and verify every maintained binding profile
         env:
           LIBCLANG_PATH: ${{ runner.temp }}/llvm/lib

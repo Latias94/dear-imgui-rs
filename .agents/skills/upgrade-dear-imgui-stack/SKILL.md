@@ -9,63 +9,61 @@ Use this skill for repository-local Dear ImGui stack upgrades in `dear-imgui-rs`
 
 Read `references/workspace-upgrade-checklist.md` before making changes.
 
-## Quick start
+## Principles
 
-1. Confirm the requested upstream targets and whether this is just an integration bump or a release cut.
-2. Confirm the repository's canonical binding generator, libclang major version, target profiles, and current clean verification hashes before moving any submodule. `tools/build-support/maintained_sources.json` is the canonical source inventory consumed by both Rust and Python tooling. Run `python tools/upstream_contract.py --check` and preserve the accepted facts/decision manifests as the review baseline. A different libclang version may produce a valid but non-canonical binding diff.
-3. Use primary sources for upstream changes: Dear ImGui release notes / changelog, `cimgui`, `cimplot`, `cimplot3d`, and `imgui_test_engine` commits or changelogs.
-4. Prefer the repository scripts for submodule refresh, bindings generation, version bumps, pre-publish checks, and publishing.
+1. Treat upstream source, release notes, and regenerated bindings as the canonical change record.
+   Do not replace semantic review with generated API snapshots or source-text inference.
+2. Use the canonical libclang version and binding profiles before moving source pins so the binding
+   diff remains attributable to the upstream change.
+3. Review sys and safe layers together. A generated symbol is not a safe Rust API until ownership,
+   lifetime, callback, and ABI behavior are modeled and tested.
+4. Prefer a coherent breaking refactor over a compatibility shim when the old contract is unsound.
 
 ## Workflow
 
-1. Define scope.
-   - Minimum scope for a Dear ImGui core bump is `dear-imgui-sys` + `dear-imgui-rs`.
-   - Common coupled scope also includes `dear-implot-sys`, `dear-implot3d-sys`, and `dear-imgui-test-engine-sys`.
-   - If upstream backends or platform callbacks changed, include backend crates, `backend_shim`, and mobile/SDL examples in the audit scope.
-   - If the target release is breaking, scan the previous release notes for deprecations promised for removal in this release and remove them now.
+1. Define the coupled scope.
+   - A core bump always includes `dear-imgui-sys` and `dear-imgui-rs`.
+   - Include Test Engine when Dear ImGui internals or hooks moved.
+   - Include extension sys crates whose generators embed or depend on the updated ImGui revision.
+   - Include platform and renderer backends when callback, viewport, texture, or draw-data contracts
+     changed.
 
-2. Refresh submodules and pregenerated bindings.
-   - Prefer `tools/update_submodule_and_bindings.py` over manual per-crate binding steps.
-   - Regenerate both native pregenerated bindings and WASM pregenerated bindings when ABI or public header shape changes.
-   - Build the actual WASM provider after regeneration. Its compile definitions must come from the same canonical binding profiles as the Rust imports; import/export agreement alone does not prove that every provider translation unit is compatible with those definitions.
-   - Set `EMSDK` to a working Emscripten SDK and ensure `em++` is available, then run `python tools/ci/verify_wasm_provider.py --check-rust-route`. A Rust-only `cargo check --target wasm32-unknown-unknown` is not provider evidence.
-   - When one maintained source is incompatible with a required provider definition, preserve the canonical definition and model the source adaptation explicitly in the source inventory with an upstream-drift test. Do not silently drop the definition or add an untracked one-off patch.
-   - Keep `imgui_test_engine` in sync when the new Dear ImGui version changes internal hooks or test-engine integration points.
-   - After regeneration, use `python tools/upstream_contract.py --write-review-template` to enumerate every live declaration, enum, field (including bitfield/array width), typedef (including declarations without generator locations), layout, and nested-source-pin delta. The command writes `tools/upstream_contract_decisions.pending.json` and refuses to overwrite existing review work. The inventory must give every source an API-contract provider; Test Engine is audited from its final checked-in Rust binding and unknown public syntax is a hard failure. Do not update the accepted snapshot until every item has a reviewed classification and safe items name compile/runtime evidence; then use `--update-snapshot` to validate and promote the pending review, followed by `--check`.
+2. Establish the baseline.
+   - Record the current submodule SHAs and canonical binding verification result.
+   - Read primary upstream release notes and commit ranges.
+   - Note public declarations, internal lifecycle changes, callback ABI changes, and backend changes
+     that require focused review.
 
-3. Audit the sys layer and safe layer together.
-   - Compare upstream release notes and generated binding diffs against current safe wrappers.
-   - Look for added or removed functions, changed return types, enums, flags, struct fields, renamed APIs, callback ABI changes, backend/platform hooks, and new style/spec fields.
-   - Never treat equal structure size and alignment as proof that a handwritten FFI mirror is compatible. Audit field order, offsets, types, names, and semantics. Prefer a `repr(transparent)` wrapper around the generated type; if a mirror is unavoidable, add offset checks and behavior sentinels in addition to size checks.
-   - For changed public native aggregates, run the source-build-only `abi-probe` profile. It compares C++ `sizeof`, `alignof`, and selected field offsets with the Rust binding; it is a release/CI proof and must never become a prebuilt-consumer requirement.
-   - Audit lifecycle and ownership fields even when they should remain hidden from the safe API. A new queue pointer, status transition, or native auto-completion rule can change Rust-side ownership without changing the public ABI size.
-   - Inspect the implementation of zero-argument or non-variadic string wrappers such as `*_Str0`. They may still interpret the input as a `printf` format string; a safe Rust `&str` API must provide literal-text semantics through a `%s` shim or complete percent escaping.
-   - For Dear ImGui core bumps, re-audit the local stack layout compatibility patch: the `imgui.cpp` `ItemSize()` / `ItemAdd()` hook markers, `dear-imgui-sys/src/stack_layout_shim.cpp`, the `stack_layout_imgui_*.cpp.inc` snippets, native prebuilt manifest feature detection, and the `node_editor_showcase` blueprints layout.
-   - Do not stop at raw compatibility. If upstream semantics changed, prefer a coherent safe API refactor over thin shims.
-   - When Dear ImGui backends move, audit `dear-imgui-sys::backend_shim`, backend crates, and any examples that expose the changed integration path.
+3. Refresh sources and bindings.
+   - Prefer `tools/update_submodule_and_bindings.py` for source updates.
+   - Regenerate native and WASM bindings for every affected profile.
+   - Run `cargo run -p xtask -- verify-bindings --allow-dirty` with canonical libclang.
+   - Build the real Emscripten provider with
+     `python tools/ci/verify_wasm_provider.py --check-rust-route` when its source or profile changes.
 
-4. Update examples and docs.
-   - Add or adjust examples that exercise newly exposed safe APIs, especially for ImPlot / ImPlot3D / test-engine / backend changes.
-   - Update `CHANGELOG.md`, compatibility docs, publishing docs, and release notes.
-   - For an actual release, convert the top `Unreleased` notes into a dated release entry and add a concise `Highlights` section.
+4. Audit the generated diff and native implementation.
+   - Check added and removed functions, enum representation, fields, defaults, callback signatures,
+     aggregate parameters and returns, and source revision markers.
+   - Inspect hidden queue, ownership, status, and teardown semantics even when layout is unchanged.
+   - Never accept size/alignment alone as proof for a handwritten FFI mirror. Prefer generated or
+     transparent types; otherwise add field-offset and behavior probes.
+   - Re-audit local C++ shims and source patches against their upstream markers.
 
-5. Align versions and release metadata.
-   - Keep the published workspace on a single release train minor unless there is a strong reason not to.
-   - Update `dear-imgui-build-support` and every `*-sys` dependency edge when the workspace release train changes.
-   - Refresh workspace and example lockfiles after version changes.
-   - Re-check publish order and packaging assumptions whenever a new published helper crate is introduced or repriced.
+5. Design the safe Rust response.
+   - Search rustdoc aliases, Rust names, and sys call sites to find existing semantic wrappers.
+   - For every user-relevant addition, explicitly add/extend a safe wrapper, retain a documented
+     unsafe sys-only path, or defer it for a separate lifetime design.
+   - Add compile-fail tests for lifetime/state restrictions and native/runtime tests for ABI or
+     backend behavior. Symbol-name matching is discovery, not proof.
 
-6. Validate.
-   - Serialize Cargo builds and nextest execution on shared development machines, reusing the workspace target directory.
-   - Verify regenerated binding hashes before formatting and workspace checks.
-   - Run `python tools/ci/verify_wasm_provider.py --check-rust-route` with a working Emscripten SDK whenever the maintained WASM provider or its source inventory changes.
-   - Require a clean upstream-contract audit after the reviewed snapshot update; binding hashes alone cannot approve a changed API or ownership contract.
-   - Run the native aggregate ABI probe whenever core declarations or handwritten public mirrors changed.
-   - Run the repository pre-publish checks.
-   - Run targeted tests and example checks for the upgraded surface.
-   - Dry-run the publish flow before considering the work done.
+6. Finish the workspace change.
+   - Update examples that exercise the changed user path.
+   - Update `CHANGELOG.md`, compatibility docs, and release metadata.
+   - Remove deprecations promised for the target breaking release.
+   - Run targeted tests first, then the repository release checks. Serialize Cargo on shared
+     machines and reuse the workspace target directory.
 
-## Bundled Resources
+## Bundled resource
 
-- `references/workspace-upgrade-checklist.md`
-  Use this for the repository-specific upstream map, command recipes, validation matrix, and release/doc checklist.
+- `references/workspace-upgrade-checklist.md` contains the upstream map, PowerShell command recipes,
+  repository-specific audit areas, and validation matrix.

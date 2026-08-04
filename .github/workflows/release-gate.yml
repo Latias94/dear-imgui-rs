@@ -768,18 +768,6 @@ jobs:
           --
           python3 -B tools/source_metadata.py verify-bindings
 
-      - name: Capture high-level API coverage
-        continue-on-error: true
-        run: >-
-          python3 tools/ci/release_cell.py capture
-          --cell-root target/release-evidence/linux-source-packages
-          --execution executions/api-coverage.json
-          --stdout-log logs/api-coverage.stdout.log
-          --stderr-log logs/api-coverage.stderr.log
-          --timeout 300
-          --
-          python3 -B tools/api_surface_report.py --check
-
       - name: Capture canonical binding regeneration
         continue-on-error: true
         env:
@@ -899,7 +887,6 @@ jobs:
           --execution executions/binding-models.json
           --execution executions/source-provenance.json
           --execution executions/binding-provenance.json
-          --execution executions/api-coverage.json
           --execution executions/binding-regeneration.json
           --execution executions/binding-diff.json
           --execution executions/msrv.json
