@@ -131,7 +131,8 @@ pub(crate) use self::viewport::ImguiViewportFeedback;
 pub(crate) use self::viewport::ImguiViewportSnapshot;
 pub use self::viewport::{
     ImguiNativeViewportStatus, ImguiNativeViewportSupport, ImguiViewportCamera, ImguiViewportId,
-    ImguiViewportWindow, ImguiViewportWindowConfig, ImguiViewportWindowConfigError,
+    ImguiViewportInstanceId, ImguiViewportWindow, ImguiViewportWindowConfig,
+    ImguiViewportWindowConfigError,
 };
 
 /// Current Bevy version targeted by this crate.

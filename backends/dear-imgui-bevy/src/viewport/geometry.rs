@@ -7,8 +7,8 @@
 //! that latest request, Dear ImGui must immediately synchronize to the native value.
 
 use super::{
-    DesktopCoordinateSpace, ImguiViewportFeedback, native_desktop_coordinate_space,
-    positive_finite_or,
+    desktop::{DesktopCoordinateSpace, native_desktop_coordinate_space, positive_finite_or},
+    protocol::ImguiViewportFeedback,
 };
 
 /// Latest unresolved geometry intent for one native viewport.

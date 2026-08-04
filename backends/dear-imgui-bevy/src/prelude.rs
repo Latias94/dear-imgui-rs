@@ -13,8 +13,8 @@ pub use crate::input::{
     imgui_window_wants_text_input,
 };
 pub use crate::viewport::{
-    ImguiViewportCamera, ImguiViewportId, ImguiViewportWindow, ImguiViewportWindowConfig,
-    ImguiViewportWindowConfigError,
+    ImguiViewportCamera, ImguiViewportId, ImguiViewportInstanceId, ImguiViewportWindow,
+    ImguiViewportWindowConfig, ImguiViewportWindowConfigError,
 };
 pub use crate::{ContextId, ImguiDriverSchedulePlacement, ImguiPlugin, ImguiPluginConfig};
 

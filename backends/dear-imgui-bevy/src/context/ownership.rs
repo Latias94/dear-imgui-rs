@@ -1781,7 +1781,7 @@ fn finish_viewport_detach(
         .expect("the drained Bevy viewport bridge has no renderer attachment dependency");
     viewport::finish_viewport_ecs_release(&owner.keepalive);
     if let Some(registration) = owner.registration.as_ref() {
-        registration.unregister_context(owner.context_id);
+        registration.unregister_context(owner.context_id, &owner.keepalive);
     }
     let capabilities_still_owned = owner.capabilities_still_owned;
     drop(lifecycle.owner.take());
@@ -2241,6 +2241,25 @@ mod tests {
             .unwrap();
         // SAFETY: the owner retains both the callback allocation and its Context attachment.
         unsafe { viewport::install_owned_platform_callbacks(&mut context, &keepalive) }.unwrap();
+        let context_bridge = viewport::ImguiViewportBridgeContext {
+            context_id: context.id(),
+            inner: Rc::clone(&keepalive),
+        };
+        let primary_window =
+            bevy_ecs::entity::Entity::from_raw_u32(1).expect("test entity index should be valid");
+        viewport::prepare_platform_viewports_for_frame(
+            &mut context,
+            &context_bridge,
+            primary_window,
+            &bevy_window::Window::default(),
+            &[],
+            std::iter::empty(),
+            viewport::NativeViewportFrameSupport::new(
+                true,
+                viewport::native_window::DesktopPositionSupport::Available,
+            ),
+        )
+        .expect("the viewport fixture should complete the real platform-frame preparation");
 
         let mut owner = ContextOwner::new(context.suspend());
         owner.attach_viewport_bridge(keepalive, attachment);
