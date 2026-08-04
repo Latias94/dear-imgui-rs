@@ -1074,6 +1074,7 @@ impl RuntimeControl {
     }
 
     #[cfg(any(
+        feature = "multi-viewport",
         feature = "opengl3-renderer",
         feature = "sdlrenderer3-renderer",
         feature = "sdlgpu3-renderer"

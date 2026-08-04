@@ -127,6 +127,8 @@ pub struct ImguiSystem<P: 'static, S> {
     _brand: PhantomData<fn() -> P>,
 }
 
+type MainThreadGateSystem = FunctionSystem<fn(NonSendMarker), (), (), fn(NonSendMarker)>;
+
 #[doc(hidden)]
 pub struct ImguiSystemMarker<P, M>(PhantomData<fn() -> (P, M)>);
 
@@ -148,7 +150,7 @@ where
             system,
             name.clone(),
         );
-        let main_thread: FunctionSystem<fn(NonSendMarker), (), (), fn(NonSendMarker)> =
+        let main_thread: MainThreadGateSystem =
             IntoSystem::into_system(require_main_thread as fn(NonSendMarker));
         PipeSystem::new(main_thread, adapted, name).in_set(ImguiPassBindingSet(self.pass))
     }

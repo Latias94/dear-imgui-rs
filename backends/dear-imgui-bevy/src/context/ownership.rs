@@ -1249,8 +1249,7 @@ impl ContextOwner {
             #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
             let viewport_keepalive = self.viewport_bridge.attached_keepalive().cloned();
 
-            return self
-                .context
+            self.context
                 .as_mut()
                 .expect("Context owner must retain its suspended Context")
                 .try_with_active(|context| {
@@ -1263,7 +1262,7 @@ impl ContextOwner {
                             .map_err(ImguiContextRemovalPendingReason::ViewportCallbackOwnership)?;
                     }
                     Ok(())
-                });
+                })
         }
 
         #[cfg(not(any(
