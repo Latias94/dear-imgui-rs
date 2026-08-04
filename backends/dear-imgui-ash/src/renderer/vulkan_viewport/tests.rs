@@ -8,10 +8,9 @@ use super::callbacks::{
 };
 use super::registry::{
     ViewportIdentity, fail_next_viewport_registration, preflight_registered_viewport_data,
-    register_viewport_data, resolve_viewport, resolve_viewport_by_id,
-    take_viewport_data_from_viewport, unregister_viewport_data, validate_queue_family_selection,
-    validate_swapchain_image_usage, validate_vulkan_handles, viewport_data_count,
-    viewport_user_data_mut,
+    register_viewport_data, resolve_viewport, take_viewport_data_from_viewport,
+    unregister_viewport_data, validate_queue_family_selection, validate_swapchain_image_usage,
+    validate_vulkan_handles, viewport_data_count, viewport_user_data_mut,
 };
 use super::*;
 use ash::vk::Handle;
@@ -189,7 +188,7 @@ fn injected_viewport_registration_failure_publishes_no_sidecar() {
     let _guard = super::test_context_guard();
     let mut context = Context::create();
     let binding = context.binding();
-    let identity = ViewportIdentity::from_viewport(context.main_viewport());
+    let identity = ViewportIdentity::from_viewport(context.as_raw(), context.main_viewport());
     let pointer = std::ptr::NonNull::<ViewportAshData>::dangling().as_ptr();
     fail_next_viewport_registration();
 
@@ -203,13 +202,13 @@ fn injected_viewport_registration_failure_publishes_no_sidecar() {
 }
 
 #[test]
-fn viewport_identity_resolver_ignores_missing_public_viewport_entry() {
+fn viewport_identity_resolver_ignores_public_snapshot_and_mutable_id() {
     let _guard = super::test_context_guard();
     let mut context = Context::create();
     let (identity, raw) = {
         let viewport = context.main_viewport();
         (
-            ViewportIdentity::from_viewport(viewport),
+            ViewportIdentity::from_viewport(context.as_raw(), viewport),
             viewport.as_raw_mut(),
         )
     };
@@ -223,13 +222,12 @@ fn viewport_identity_resolver_ignores_missing_public_viewport_entry() {
             .any(|viewport| std::ptr::eq(*viewport, raw))
     );
     assert_eq!(resolve_viewport(identity), Some(raw));
-    assert_eq!(
-        resolve_viewport_by_id(identity, |id| {
-            assert_eq!(id, identity.id);
-            raw
-        }),
-        Some(raw)
-    );
+    let original_id = unsafe { (*raw).ID };
+    let changed_id = original_id.wrapping_add(1);
+    unsafe { (*raw).ID = changed_id };
+    let resolved_after_id_change = resolve_viewport(identity);
+    unsafe { (*raw).ID = original_id };
+    assert_eq!(resolved_after_id_change, Some(raw));
 
     let replaced_address = ViewportIdentity {
         address: identity
@@ -237,7 +235,7 @@ fn viewport_identity_resolver_ignores_missing_public_viewport_entry() {
             .wrapping_add(std::mem::align_of::<sys::ImGuiViewport>()),
         ..identity
     };
-    assert_eq!(resolve_viewport_by_id(replaced_address, |_| raw), None);
+    assert_eq!(resolve_viewport(replaced_address), None);
 }
 
 #[test]
@@ -245,12 +243,14 @@ fn preflight_rejects_foreign_sidecar_filtered_from_public_snapshot() {
     let _guard = super::test_context_guard();
     let mut context = Context::create();
     let binding = context.binding();
-    let identity = ViewportIdentity::from_viewport(context.main_viewport());
+    let identity = ViewportIdentity::from_viewport(context.as_raw(), context.main_viewport());
     let viewport = context.main_viewport().as_raw_mut();
     let pointer = std::ptr::NonNull::<ViewportAshData>::dangling().as_ptr();
     register_viewport_data(&binding, identity, pointer).unwrap();
     let foreign = std::ptr::dangling_mut::<std::ffi::c_void>();
     unsafe { (*viewport).RendererUserData = foreign };
+    let original_id = unsafe { (*viewport).ID };
+    unsafe { (*viewport).ID = original_id.wrapping_add(1) };
 
     let platform_io = context.platform_io_mut().as_raw_mut();
     let original_size = unsafe { (*platform_io).Viewports.Size };
@@ -258,6 +258,7 @@ fn preflight_rejects_foreign_sidecar_filtered_from_public_snapshot() {
     unsafe { (*platform_io).Viewports.Size = 0 };
     let result = preflight_registered_viewport_data(context.as_raw(), &binding);
     unsafe { (*platform_io).Viewports.Size = original_size };
+    unsafe { (*viewport).ID = original_id };
 
     assert!(matches!(
         result,

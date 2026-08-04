@@ -37,22 +37,20 @@ impl ViewportDataState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct ViewportIdentity {
     address: usize,
-    id: u32,
 }
 
 impl ViewportIdentity {
     pub(super) fn capture(viewport: &Viewport) -> Self {
         Self {
             address: viewport.as_raw() as usize,
-            id: viewport.id().raw(),
         }
     }
 
     /// Resolves this identity through Dear ImGui's complete internal viewport list.
     ///
     /// `PlatformIO.Viewports` is a presentation-facing list and may omit still-live hidden
-    /// viewports. The address comparison makes an ID reuse or stale registry entry fail closed
-    /// without dereferencing the address retained by this identity.
+    /// viewports. Docking may also change a live viewport's numeric ID in place, so the stable
+    /// address is compared inside native code without dereferencing the retained Rust value.
     pub(super) fn with_live_viewport<R>(
         self,
         expected_context: *mut dear_imgui_rs::sys::ImGuiContext,
@@ -61,19 +59,24 @@ impl ViewportIdentity {
         if expected_context.is_null() || current_context() != expected_context {
             return None;
         }
-        // SAFETY: the caller proved that the expected live Context is current. Dear ImGui owns
-        // the returned viewport while it remains in that Context's internal viewport list.
-        let viewport = unsafe { dear_imgui_rs::sys::igFindViewportByID(self.id) };
-        if viewport.is_null() || viewport as usize != self.address {
+        // SAFETY: the caller proved that the expected live Context is current. The native helper
+        // compares the integer address against the Context's authoritative internal list.
+        let viewport = unsafe {
+            dear_imgui_rs::sys::ImGuiContext_FindLiveViewportByAddress(
+                expected_context,
+                self.address,
+            )
+        };
+        if viewport.is_null() {
             return None;
         }
-        // SAFETY: `igFindViewportByID` returned this exact live viewport for the current Context.
+        // SAFETY: the native helper returned this exact live viewport for the current Context.
         Some(callback(unsafe { Viewport::from_raw_mut(viewport) }))
     }
 
     #[cfg(test)]
-    pub(super) const fn for_test(address: usize, id: u32) -> Self {
-        Self { address, id }
+    pub(super) const fn for_test(address: usize) -> Self {
+        Self { address }
     }
 }
 

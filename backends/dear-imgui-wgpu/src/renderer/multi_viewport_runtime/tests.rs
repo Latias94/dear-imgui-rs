@@ -16,9 +16,9 @@ use super::callbacks::{
     renderer_set_window_size_sys, renderer_swap_buffers_sys, unary_callback_matches,
 };
 use super::registry::{
-    ViewportIdentity, fail_next_viewport_registration, preflight_runtime,
-    register_test_viewport_data, register_viewport_data, unregister_viewport_data,
-    viewport_data_count,
+    ViewportDataDestroy, ViewportIdentity, destroy_viewport_data, fail_next_viewport_registration,
+    preflight_runtime, register_test_viewport_data, register_viewport_data,
+    unregister_viewport_data, viewport_data_count,
 };
 use super::runtime::{RuntimeControl, RuntimeState};
 #[cfg(feature = "wgpu-30")]
@@ -261,7 +261,7 @@ fn viewport_identity(viewport: &mut sys::ImGuiViewport) -> ViewportIdentity {
 }
 
 #[test]
-fn viewport_identity_resolves_only_the_current_id_and_address() {
+fn viewport_identity_follows_a_live_viewport_when_docking_changes_its_id() {
     let _guard = lock_context();
     let context = Context::create();
     let viewport = unsafe { sys::igGetMainViewport() };
@@ -273,15 +273,44 @@ fn viewport_identity_resolves_only_the_current_id_and_address() {
         Some(id)
     );
     assert!(
-        ViewportIdentity::for_test((viewport as usize).wrapping_add(1), id)
+        ViewportIdentity::for_test((viewport as usize).wrapping_add(1))
             .with_live_viewport(context.as_raw(), |_| ())
             .is_none()
     );
-    assert!(
-        ViewportIdentity::for_test(viewport as usize, id.wrapping_add(1))
-            .with_live_viewport(context.as_raw(), |_| ())
-            .is_none()
+    let changed_id = id.wrapping_add(1);
+    unsafe { (*viewport).ID = changed_id };
+    let resolved_after_id_change =
+        identity.with_live_viewport(context.as_raw(), |viewport| viewport.id().raw());
+    unsafe { (*viewport).ID = id };
+    assert_eq!(
+        resolved_after_id_change,
+        Some(changed_id),
+        "docking may transfer a live viewport to a different window ID without replacing it"
     );
+}
+
+#[test]
+fn viewport_sidecar_destroy_survives_a_docking_id_change() {
+    let _guard = lock_context();
+    let context = Context::create();
+    let viewport = unsafe { sys::igGetMainViewport() };
+    let drops = Rc::new(Cell::new(0));
+    publish_drop_probe(&context, unsafe { &mut *viewport }, Rc::clone(&drops));
+    let original_id = unsafe { (*viewport).ID };
+    unsafe { (*viewport).ID = original_id.wrapping_add(1) };
+
+    let result = unsafe {
+        destroy_viewport_data(
+            context.as_raw(),
+            dear_imgui_rs::platform_io::Viewport::from_raw_mut(viewport),
+        )
+    };
+    unsafe { (*viewport).ID = original_id };
+
+    assert_eq!(result, ViewportDataDestroy::Destroyed);
+    assert_eq!(drops.get(), 1);
+    assert!(unsafe { (*viewport).RendererUserData.is_null() });
+    assert_eq!(viewport_data_count(context.id()), 0);
 }
 
 fn publish_drop_probe(context: &Context, viewport: &mut sys::ImGuiViewport, drops: Rc<Cell<u32>>) {

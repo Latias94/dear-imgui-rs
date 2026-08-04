@@ -17,7 +17,7 @@ use super::callbacks::{
     record_viewport_failure, run_callback, winit_create_window, winit_destroy_window,
     winit_get_window_pos_out,
 };
-use super::registry::preflight_viewport_ownership;
+use super::registry::{ViewportIdentity, preflight_viewport_ownership};
 use super::runtime::{
     ConstructionStage, ContextFocusState, InputOwnership, MouseLeaveState, RuntimeState,
     WinitPlatformRuntime, apply_raw_io_coordinate_contract_for_test,
@@ -1120,6 +1120,49 @@ fn preflight_keeps_owned_viewports_filtered_from_the_public_snapshot() {
 
     assert_eq!(result, Ok(()));
     runtime.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn viewport_identity_follows_a_live_viewport_when_docking_changes_its_id() {
+    let _guard = lock_context();
+    let context = Context::create();
+    let viewport = unsafe { dear_imgui_rs::sys::igGetMainViewport() };
+    let original_id = unsafe { (*viewport).ID };
+    let identity = ViewportIdentity::capture(context.as_raw(), viewport);
+    unsafe { (*viewport).ID = original_id.wrapping_add(1) };
+
+    let resolved_after_id_change = unsafe { identity.resolve() };
+    unsafe { (*viewport).ID = original_id };
+
+    assert_eq!(resolved_after_id_change, Some(viewport));
+    drop(context);
+}
+
+#[test]
+fn preflight_retains_the_owned_sidecar_when_docking_changes_the_viewport_id() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let mut runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
+    let viewport = unsafe { dear_imgui_rs::sys::igGetMainViewport() };
+    let original_id = unsafe { (*viewport).ID };
+    let platform_user_data = unsafe { (*viewport).PlatformUserData };
+    let platform_handle = unsafe { (*viewport).PlatformHandle };
+    assert!(!platform_user_data.is_null());
+    assert!(!platform_handle.is_null());
+
+    unsafe { (*viewport).ID = original_id.wrapping_add(1) };
+    let platform_io = context.platform_io_mut().as_raw_mut();
+    let result = unsafe { preflight_viewport_ownership(runtime.control(), platform_io) };
+    let retained_user_data = unsafe { (*viewport).PlatformUserData };
+    let retained_handle = unsafe { (*viewport).PlatformHandle };
+    unsafe { (*viewport).ID = original_id };
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(retained_user_data, platform_user_data);
+    assert_eq!(retained_handle, platform_handle);
+    runtime.shutdown(&mut context).unwrap();
+    assert!(unsafe { (*viewport).PlatformUserData.is_null() });
+    assert!(unsafe { (*viewport).PlatformHandle.is_null() });
 }
 
 #[test]

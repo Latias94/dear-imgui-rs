@@ -481,7 +481,7 @@ unsafe fn renderer_create_window(
             return Err(error);
         }
 
-        let identity = ViewportIdentity::from_viewport(viewport);
+        let identity = ViewportIdentity::from_viewport(control.context_raw(), viewport);
         publish_registered_box_transactionally(
             Box::new(data),
             |pointer| register_viewport_data(control.binding(), identity, pointer),

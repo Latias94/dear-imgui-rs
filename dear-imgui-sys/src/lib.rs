@@ -474,6 +474,38 @@ unsafe extern "C" {
     ) -> std::os::raw::c_int;
 
     fn dear_imgui_rs_platform_io_aggregate_callback_storage_count() -> std::os::raw::c_int;
+
+    fn dear_imgui_rs_find_live_viewport_by_address(
+        context: *mut ImGuiContext,
+        address: usize,
+    ) -> *mut ImGuiViewport;
+}
+
+/// Resolve a retained viewport address through the current Context's internal live registry.
+///
+/// Dear ImGui may change a viewport's numeric ID in place while docking transfers ownership.
+/// This repository-owned helper therefore compares the address against `ImGuiContext::Viewports`
+/// without dereferencing the retained address.
+///
+/// # Safety
+///
+/// `context` must be the current live Context. The returned pointer remains valid only while that
+/// Context stays current and no Dear ImGui operation removes the viewport.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn ImGuiContext_FindLiveViewportByAddress(
+    context: *mut ImGuiContext,
+    address: usize,
+) -> *mut ImGuiViewport {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    {
+        unsafe { dear_imgui_rs_find_live_viewport_by_address(context, address) }
+    }
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        let _ = (context, address);
+        std::ptr::null_mut()
+    }
 }
 
 /// Results returned by [`ImGuiPlatformIO_ProbeAggregateCallbacks`].

@@ -12,7 +12,6 @@ use dear_imgui_rs::{
     ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding, ContextBindingError,
     ContextDestroyed, ContextId, ContextLifecycle, ContextTeardown, Id, TextureData, TextureId,
     platform_io::{PlatformIo, Viewport},
-    sys,
 };
 use thiserror::Error;
 
@@ -21,8 +20,8 @@ use super::callbacks::{
     preflight_callbacks, release_callbacks, revoke_renderer_viewport_capability_if_owned,
 };
 use super::registry::{
-    GlobalHandles, preflight_runtime, query_surface_support, register_runtime, take_viewport_data,
-    unregister_runtime, validate_vulkan_config,
+    GlobalHandles, ViewportIdentity, preflight_runtime, query_surface_support, register_runtime,
+    resolve_viewport, take_viewport_data, unregister_runtime, validate_vulkan_config,
 };
 use super::trace::{AshViewportFrameReport, FrameTraceState};
 use super::{SurfaceAdapter, SurfaceCreateError, SurfaceSupportError, VulkanViewportConfig};
@@ -280,7 +279,7 @@ pub(super) struct RuntimeControl {
     callback_state: Cell<CallbackState>,
     // ImGui clears PlatformRequestClose at the end of UpdatePlatformWindows, including failures
     // raised by Renderer_CreateWindow in that same call.
-    failed_viewports: RefCell<HashSet<Id>>,
+    failed_viewports: RefCell<HashSet<ViewportIdentity>>,
     // Native RendererUserData stores addresses into these boxes, so vector relocation must not
     // relocate the sidecar allocations themselves.
     #[allow(
@@ -538,12 +537,22 @@ impl RuntimeControl {
     }
 
     pub(super) fn mark_viewport_create_failed(&self, viewport: &mut Viewport) {
-        self.failed_viewports.borrow_mut().insert(viewport.id());
+        self.failed_viewports
+            .borrow_mut()
+            .insert(ViewportIdentity::from_viewport(
+                self.context_raw(),
+                viewport,
+            ));
         viewport.set_platform_request_close(true);
     }
 
     pub(super) fn clear_viewport_create_failure(&self, viewport: &Viewport) {
-        self.failed_viewports.borrow_mut().remove(&viewport.id());
+        self.failed_viewports
+            .borrow_mut()
+            .remove(&ViewportIdentity::from_viewport(
+                self.context_raw(),
+                viewport,
+            ));
     }
 
     pub(super) fn clear_viewport_create_failures(&self) {
@@ -560,14 +569,15 @@ impl RuntimeControl {
         if failed_viewports.is_empty() {
             return;
         }
-        for id in failed_viewports {
+        for identity in failed_viewports {
             // A failed secondary viewport may be hidden from `PlatformIO.Viewports` while Dear
             // ImGui still owns it internally. Reassert the close request through the complete
             // internal lookup so its platform/renderer sidecars can be destroyed normally.
-            let viewport = unsafe { sys::igFindViewportByID(id.raw()) };
-            if !viewport.is_null() {
+            if let Some(viewport) = resolve_viewport(identity) {
                 // SAFETY: this runtime's Context is current while contract drift is checked.
                 unsafe { Viewport::from_raw_mut(viewport) }.set_platform_request_close(true);
+            } else {
+                self.failed_viewports.borrow_mut().remove(&identity);
             }
         }
     }

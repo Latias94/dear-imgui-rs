@@ -3769,6 +3769,10 @@ struct tm {
             "native_stack_layout_transform",
             "imgui-core-stack-layout-v1",
         );
+        hash.field(
+            "native_platform_io_contract",
+            "aggregate-hooks-v2+live-viewport-address-v1",
+        );
         hash.finish()
     }
 
@@ -6183,7 +6187,7 @@ mod binding_contract_tests {
 
     #[test]
     fn core_source_contract_hash_covers_versioned_maintained_transforms() {
-        assert_eq!(core_source_contract_hash(), "fnv1a64:87db29af04764e60");
+        assert_eq!(core_source_contract_hash(), "fnv1a64:07ad0616502f7f61");
     }
 
     #[test]

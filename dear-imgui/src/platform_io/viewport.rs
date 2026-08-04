@@ -101,7 +101,10 @@ impl Viewport {
         self.raw.get()
     }
 
-    /// Get the viewport ID
+    /// Get the viewport's current numeric ID.
+    ///
+    /// Docking may transfer ownership by changing this value in place. Use it for current routing
+    /// and diagnostics, not as a persistent native allocation or backend-resource identity.
     pub fn id(&self) -> Id {
         Id::from(self.inner().ID)
     }
@@ -504,6 +507,45 @@ mod tests {
 
             sys::ImGuiViewport_destroy(raw);
         }
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    #[test]
+    fn native_viewport_address_lookup_tracks_liveness_in_the_current_context() {
+        let _guard = crate::test_support::imgui_context_guard();
+        let context_a = Context::create();
+        let binding_a = context_a.binding();
+        let raw_context_a = context_a.as_raw();
+        let viewport = unsafe { sys::igGetMainViewport() };
+        let address = viewport as usize;
+        let original_id = unsafe { (*viewport).ID };
+        let changed_id = original_id.wrapping_add(1);
+        unsafe { (*viewport).ID = changed_id };
+
+        let resolved =
+            unsafe { sys::ImGuiContext_FindLiveViewportByAddress(raw_context_a, address) };
+        let resolved_id = unsafe { resolved.as_ref().map(|viewport| viewport.ID) };
+        let unknown = unsafe {
+            sys::ImGuiContext_FindLiveViewportByAddress(
+                raw_context_a,
+                address.wrapping_add(std::mem::align_of::<sys::ImGuiViewport>()),
+            )
+        };
+        unsafe { (*viewport).ID = original_id };
+
+        assert_eq!(resolved, viewport);
+        assert_eq!(resolved_id, Some(changed_id));
+        assert!(unknown.is_null());
+
+        unsafe { sys::igSetCurrentContext(std::ptr::null_mut()) };
+        let context_b = Context::create();
+        assert!(unsafe {
+            sys::ImGuiContext_FindLiveViewportByAddress(raw_context_a, address).is_null()
+        });
+        drop(context_b);
+        binding_a.with_bound_context(|| {
+            assert_eq!(unsafe { sys::igGetMainViewport() }, viewport);
+        });
     }
 
     #[test]
