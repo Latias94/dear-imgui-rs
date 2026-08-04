@@ -17,12 +17,12 @@ The repository workflow token defaults to read-only. Only the crates.io job rece
 Preparation intentionally changes the worktree; validation requires the resulting commit to be clean.
 
 ```bash
-python3 tools/tasks.py release-prepare 0.16.0-alpha.1
+python3 tools/tasks.py release-prepare 0.16.0-alpha.2
 
 # Review generated bindings, source metadata, Cargo.lock, CHANGELOG.md, and docs.
 git diff
 git add -A
-git commit -m "chore: prepare release v0.16.0-alpha.1"
+git commit -m "chore: prepare release v0.16.0-alpha.2"
 
 python3 tools/tasks.py release-check
 ```
@@ -34,13 +34,13 @@ Before merging, require normal CI to pass on Linux, Windows, and macOS. The root
 Merge the candidate to `main`, then dispatch the release workflow with the matching tag:
 
 ```bash
-gh workflow run release.yml --ref main -f tag=v0.16.0-alpha.1
+gh workflow run release.yml --ref main -f tag=v0.16.0-alpha.2
 ```
 
 The workflow binds the tag to the workspace version and the exact `main` commit before doing any irreversible work. It then:
 
 1. Requires a successful `main` push CI run for the exact candidate SHA.
-2. Runs the fixed 16-cell Release Gate for that commit, including native runtime tests, Winit/WGPU and SDL3/Glow viewport smokes, WASM, Windows ABI/native dependency routes, macOS, all source packages, and five prebuilt producer/consumer targets. The source-package cell also regenerates every maintained binding, checks high-level API coverage, tests core public documentation, and verifies non-Bevy packages against Rust 1.92.
+2. Runs the fixed 16-cell Release Gate for that commit, including native runtime tests, Winit/WGPU, SDL3/Glow, and Ash/Vulkan viewport smokes, WASM, Windows ABI/native dependency routes, macOS, all source packages, and five prebuilt producer/consumer targets. The source-package cell also regenerates every maintained binding, tests core public documentation, and verifies non-Bevy packages against Rust 1.92.
 3. Recomputes the authoritative decision from retained cell payloads and stages only the prebuilt archives recorded by successful cells.
 4. Generates `SHA256SUMS` and a release manifest for the exact staged assets.
 5. Enters the protected `release` environment and obtains a short-lived crates.io OIDC token.

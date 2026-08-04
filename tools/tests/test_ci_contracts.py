@@ -240,11 +240,11 @@ class ContractRunnerTests(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             output = Path(temporary) / "release-notes.md"
             with patch.object(CONTRACTS, "run") as runner:
-                CONTRACTS.prepare_release_notes("v0.16.0-alpha.1", output)
+                CONTRACTS.prepare_release_notes("v0.16.0-alpha.2", output)
 
             self.assertEqual(runner.call_count, 2)
             validate_command = tuple(runner.call_args_list[0].args[0])
-            self.assertEqual(validate_command[-2:], ("--version", "0.16.0-alpha.1"))
+            self.assertEqual(validate_command[-2:], ("--version", "0.16.0-alpha.2"))
             extract_command = tuple(runner.call_args_list[1].args[0])
             self.assertEqual(extract_command[-2:], ("--output", output))
 
@@ -274,13 +274,13 @@ class ContractRunnerTests(unittest.TestCase):
         missing_tag = subprocess.CompletedProcess([], 1, stdout="")
         with patch.object(CONTRACTS, "run", side_effect=[head, missing_tag]) as runner:
             version = CONTRACTS.validate_release_identity(
-                tag="v0.16.0-alpha.1",
+                tag="v0.16.0-alpha.2",
                 candidate_sha=candidate,
                 expected_ref="refs/heads/main",
                 actual_ref="refs/heads/main",
             )
 
-        self.assertEqual(version, "0.16.0-alpha.1")
+        self.assertEqual(version, "0.16.0-alpha.2")
         self.assertEqual(runner.call_count, 2)
 
     def test_release_identity_rejects_an_existing_tag_on_another_commit(self):
@@ -295,7 +295,7 @@ class ContractRunnerTests(unittest.TestCase):
             self.assertRaisesRegex(CONTRACTS.VerificationError, "points to"),
         ):
             CONTRACTS.validate_release_identity(
-                tag="v0.16.0-alpha.1",
+                tag="v0.16.0-alpha.2",
                 candidate_sha=candidate,
                 expected_ref="refs/heads/main",
                 actual_ref="refs/heads/main",
@@ -307,7 +307,7 @@ class ContractRunnerTests(unittest.TestCase):
             self.assertRaisesRegex(CONTRACTS.VerificationError, "refs/heads/main"),
         ):
             CONTRACTS.validate_release_identity(
-                tag="v0.16.0-alpha.1",
+                tag="v0.16.0-alpha.2",
                 candidate_sha="a" * 40,
                 expected_ref="refs/heads/main",
                 actual_ref="refs/heads/topic",

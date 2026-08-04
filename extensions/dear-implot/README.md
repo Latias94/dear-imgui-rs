@@ -21,9 +21,9 @@ For native build/link options (source, system/prebuilt, remote prebuilt), see `e
 
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.16.0-alpha.1  |
-| dear-imgui-rs     | 0.16.0-alpha.1  |
-| dear-implot-sys   | 0.16.0-alpha.1  |
+| Crate             | 0.16.0-alpha.2  |
+| dear-imgui-rs     | 0.16.0-alpha.2  |
+| dear-implot-sys   | 0.16.0-alpha.2  |
 
 ### WASM (WebAssembly) support
 
@@ -64,7 +64,7 @@ See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob
 
 This crate integrates with `dear-imgui-rs` directly — add both crates, then build plots inside an ImGui window using a `PlotContext` bound to the current ImGui context.
 
-Until `0.16.0-alpha.1` is published, take both crates from `main`:
+Until `0.16.0-alpha.2` is published, take both crates from `main`:
 
 ```toml
 [dependencies]
@@ -76,8 +76,8 @@ After publication, use the exact prerelease requirements:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "=0.16.0-alpha.1"
-dear-implot = "=0.16.0-alpha.1"
+dear-imgui-rs = "=0.16.0-alpha.2"
+dear-implot = "=0.16.0-alpha.2"
 ```
 
 ```rust
@@ -142,8 +142,8 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "=0.16.0-alpha.1"
-dear-implot = "=0.16.0-alpha.1"
+dear-imgui-rs = "=0.16.0-alpha.2"
+dear-implot = "=0.16.0-alpha.2"
 ```
 
 Basic usage:

@@ -128,24 +128,21 @@ while a native framebuffer has a zero dimension, and rebuilds attachments from t
 owner's current physical size after resize or DPI changes. Attachment fails transactionally when
 the adapter cannot support the configured formats and sample count.
 
-A lost secondary surface is terminal for the owning viewport runtime. WGPU exposes Device loss
-through an application-owned, single-slot callback, so this backend neither replaces that callback
-nor guesses that the Device remains usable. On `WgpuViewportError::SurfaceLost`, shut down and
-rebuild the viewport runtime; if the application's Device-lost callback fired, recreate the Device,
-Queue, renderer, and all GPU resources first.
+A lost secondary surface is rebuilt from that viewport's still-live platform window. Successful
+surface recreation leaves the renderer runtime and every other viewport attached. If recreation
+fails, the backend requests closure of only the affected viewport and reports the creation error.
+WGPU exposes Device loss separately through an application-owned, single-slot callback; if that
+callback fires, recreate the Device, Queue, renderer, and all GPU resources before reattaching the
+viewport runtime.
 
-The renderer opens its in-flight resource arena from the `RenderedFrame` epoch. Every viewport
+The renderer opens a fresh upload-resource arena for each `RenderedFrame` epoch. Every viewport
 draw then uses a separate pass slot with its own vertex, index, uniform, and sampler bindings, so
-command buffers cannot observe data uploaded for another viewport. Before invoking default
-multi-viewport callbacks, call `runtime.reconcile_frame(&mut frame)`; this both prepares the exact
-frame epoch and applies managed-texture feedback. A callback reached without that preparation
-fails with `RendererError::FrameNotPrepared` instead of reusing the preceding frame's resources.
-
-`num_frames_in_flight` is the submitted-frame resource window, not an unbounded encoder queue.
-Submit a frame's command buffers before recording more than that many later ImGui frames. Because
-the renderer records into an application-owned render pass, it cannot observe when its encoder is
-submitted; retaining an unsubmitted command buffer past the configured ring can make it reference
-a reused upload buffer. Normal acquire-record-submit-present loops satisfy this contract.
+command buffers cannot observe data uploaded for another viewport or a later epoch. The renderer
+does not recycle upload buffers across epochs because submission of the application-owned encoder
+is not observable. Before invoking default multi-viewport callbacks, call
+`runtime.reconcile_frame(&mut frame)`; this both prepares the exact frame epoch and applies
+managed-texture feedback. A callback reached without that preparation fails with
+`RendererError::FrameNotPrepared` instead of reusing the preceding frame's resources.
 
 For SDL3, initialize `Sdl3PlatformBackend` first and then call
 `dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRuntime::attach(imgui, &platform, renderer)`.
@@ -160,12 +157,12 @@ instead of replacing foreign renderer callbacks or `RendererUserData`, rejects s
 that already exist, and requires an active Context `Platform` attachment. Attach is transactional:
 the error returns the unchanged renderer through `WgpuViewportAttachError`. Moving the runtime does
 not move callback-visible renderer storage. Callback replacement, panic, reentry, rendering, and
-terminal surface failures are contained at the C ABI boundary and returned by `poll_fault` or the
-next Rust runtime entry. A terminal fault revokes renderer viewport capability and stops
-create/resize/render/present work. Its `Renderer_DestroyWindow` callback remains available only
-for cleanup: a Context- and viewport-identity sidecar releases the owned WGPU surface even when
-foreign code cleared or replaced `RendererUserData`, before the platform backend destroys the
-native window.
+unrecoverable surface validation failures are contained at the C ABI boundary and returned by
+`poll_fault` or the next Rust runtime entry. A terminal fault revokes renderer viewport capability
+and stops create/resize/render/present work. Its `Renderer_DestroyWindow` callback remains
+available only for cleanup: a Context- and viewport-identity sidecar releases the owned WGPU
+surface even when foreign code cleared or replaced `RendererUserData`, before the platform backend
+destroys the native window.
 
 From a repository checkout, run the same native Winit/WGPU Test Engine contract used by the
 release gate. It moves a window into a real secondary OS viewport, renders its GPU surface, merges
@@ -215,7 +212,7 @@ teardown. Foreign callback and backend-state replacements are preserved rather t
 
 ## Selecting wgpu version
 
-The `0.16.0-alpha.1` candidate defaults to WGPU 30. Until it is published, test
+The `0.16.0-alpha.2` candidate defaults to WGPU 30. Until it is published, test
 the candidate from `main`:
 
 ```toml
@@ -230,17 +227,17 @@ If your ecosystem is pinned to `wgpu` v29, v28, or v27, select it explicitly:
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "=0.16.0-alpha.1", default-features = false, features = ["wgpu-29"] }
+dear-imgui-wgpu = { version = "=0.16.0-alpha.2", default-features = false, features = ["wgpu-29"] }
 ```
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "=0.16.0-alpha.1", default-features = false, features = ["wgpu-28"] }
+dear-imgui-wgpu = { version = "=0.16.0-alpha.2", default-features = false, features = ["wgpu-28"] }
 ```
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "=0.16.0-alpha.1", default-features = false, features = ["wgpu-27"] }
+dear-imgui-wgpu = { version = "=0.16.0-alpha.2", default-features = false, features = ["wgpu-27"] }
 ```
 
 ## What You Get
@@ -259,7 +256,7 @@ dear-imgui-wgpu = { version = "=0.16.0-alpha.1", default-features = false, featu
 
 | Track | wgpu support |
 |-------|--------------|
-| `main` (unpublished 0.16.0-alpha.1) | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
+| `main` (unpublished 0.16.0-alpha.2) | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 

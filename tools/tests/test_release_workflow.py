@@ -340,7 +340,7 @@ class CurrentReleaseTrainTests(unittest.TestCase):
         version = workspace["workspace"]["package"]["version"]
         catalog = workspace["workspace"]["dependencies"]
 
-        self.assertEqual(version, "0.16.0-alpha.1")
+        self.assertEqual(version, "0.16.0-alpha.2")
         self.assertEqual(
             {
                 dependency["version"]
@@ -374,7 +374,7 @@ class CurrentReleaseTrainTests(unittest.TestCase):
                 self.assertTrue(path_packages)
                 self.assertEqual(
                     {package["version"] for package in path_packages},
-                    {"0.16.0-alpha.1"},
+                    {"0.16.0-alpha.2"},
                 )
 
 

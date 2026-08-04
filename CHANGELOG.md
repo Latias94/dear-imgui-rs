@@ -8,9 +8,38 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
-## [0.16.0-alpha.1]
+## [0.16.0-alpha.2]
 
-Pending publication. This alpha release candidate will receive its release date and installation guidance when it is published.
+Pending publication.
+
+This prerelease hardens the ownership contracts introduced in alpha.1. It intentionally removes provisional APIs where they could expose transient native state, ambiguous backend ownership, or a live Dear ImGui frame outside its valid execution scope.
+
+### Breaking Changes and Migration
+
+| If you used in alpha.1 | Migrate to |
+| --- | --- |
+| `Viewport::debug_name()` as a borrowed `&str`, or safe `Viewport::{set_flags,set_parent_viewport_id}` writes | Keep the owned `String` returned by `debug_name()`. Treat viewport flags and parent topology as read-only; custom backends may use the documented unsafe raw mutation escape hatch only while upholding native invariants. |
+| Live `Context` values created on independent OS threads | Create and destroy every live Context in the process on one owner thread, and handle `try_create` / `try_create_shared` failure when another thread or a bound Context scope owns Dear ImGui's global state. |
+| `SuspendedContext::try_with_active` while another Context or nested binding scope is active | Suspend the current Context first. Scoped activation now requires no other active Context or binding scope, preventing safe closures from exchanging complete Context owners while native `GImGui` points at one of them. |
+| `DockspaceTarget`, `DockFlags`, or alpha.1's declarative docking options | Submit `DockLayout` with `DockspaceOptions`; use `DockNodeFlags`, `WindowClassDockNodeFlags`, and `WindowClassViewportFlags` for their separate native domains. Submit the dockspace before its windows. |
+| `WgpuRenderer::new_frame()`, `WinitViewportRuntime::new_frame()`, or `Sdl3ViewportRuntime::new_frame()` | Remove the renderer call; call the platform runtime's `reconcile_frame(&mut frame)` before default multi-viewport callbacks. |
+| `WgpuInitInfo::{num_frames_in_flight,with_frames_in_flight}` | Remove the setting. Upload resources are scoped to the Context render epoch because the backend cannot safely infer application queue completion from an internal frame ring. |
+| Safe SDL processing of `&SDL_Event` or `sdl3_poll_event_ll()` | Pass owned `sdl3::event::Event` values to `process_event`. Callback integrations must use unsafe `process_raw_event` and uphold union variant, payload lifetime, thread, and runtime provenance requirements. Keep only one SDL3 ImGui platform runtime active per process. |
+| Bevy `ImguiUi`, `ImguiPrimaryContextPass`, `ImguiContextPass`, or raw `ScheduleLabel` Context configuration | Obtain `app.imgui_primary_pass()` or declare `app.declare_imgui_pass::<P>()`, bind systems with `pass.system(...)`, register them through `app.add_imgui_systems(&pass, ...)`, and pass the same handle to `ImguiContextConfig::new(&pass)`. Systems receive frame-scoped `ImguiFrame<'_, P>`. |
+| Test Engine suite validation from `ResultSummary`, concurrent bound engines, or treating an aborted native test as an unknown result | Pass the exact `RunReport` to `validate_registered_test_suite`, or use `take_terminal_test_suite_result` for a manually pumped suite. Keep one engine bound per process; an upstream abort is reported as safe `RunTestStatus::NotRun`. |
+| `Viewport::draw_data_ref()` | Render through a `RenderedFrame`, or capture a pointer-free `FrameSnapshot`. Custom renderers may read `Viewport::draw_data()` only inside an unsafe, current-frame native render boundary. |
+
+### Changed
+
+- Context binding now preserves wrapper identity across unwind and teardown, reclaims attachment releases even when a safe permit is forgotten, commits attachment state before running user destructors, and prevents safe cross-thread ownership of Dear ImGui's process-global Context state.
+- Declarative docking now validates and stages a complete tree before replacing a live root. Failed validation, staging, or same-frame ordering leaves the existing layout unchanged.
+- Winit and SDL3 multi-viewport runtimes now reconcile OS-observed geometry, display work areas, input ownership, capture transfer, callback drift, and terminal teardown through Context-owned runtime state. Wayland continues to support docking inside the host window without claiming unavailable global desktop positioning. Reported and tested by [@lysenika](https://github.com/lysenika). [#60](https://github.com/Latias94/dear-imgui-rs/issues/60)
+- WGPU render resources are owned by Context render epochs, keeping main and secondary viewport buffers, uniforms, samplers, surfaces, and terminal faults isolated until completion or explicit recovery. Glow and Ash viewport callback panics now revoke renderer capability and enter terminal recovery; Ash keeps its cleanup callback available until GPU-owned viewport resources are released.
+- Bevy UI access now comes only from App-owned private pass runners as lifetime-bound `ImguiFrame<'_, P>` input. Ordinary Bevy schedules cannot obtain the live `Ui`; registration validates the exact pass identity before the first frame, and deterministic shutdown drains renderer and native-window retirement without running arbitrary user schedules.
+- Test Engine integration now owns the process-global native binding through an exclusive lease, rolls back failed starts and partial suite registration, and binds validation to an exact engine, run, and test manifest so historical results cannot satisfy the current run. A failed test takes precedence over later `NotRun` entries when stop-on-error aborts the remainder.
+- CI pins every third-party Action, cancels stale runs, checks Rust 1.92 and public API doctests, regenerates maintained bindings in the release gate, and requires successful CI for the exact release candidate SHA.
+
+## [0.16.0-alpha.1] - 2026-08-02
 
 0.16 is an intentionally source-breaking release. It replaces APIs that exposed Dear ImGui's transient native state with ownership- and lifetime-aware Rust contracts. The result is safer rendering, font, callback, multi-context, and multi-viewport behavior, but applications should expect a deliberate migration rather than compatibility aliases.
 

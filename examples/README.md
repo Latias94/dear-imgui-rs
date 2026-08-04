@@ -24,14 +24,14 @@ Continue with the complete, feature-free `Application` lifecycle when the progra
 cargo run -p dear-imgui-examples --bin application_lifecycle
 ```
 
-For a new project, add the unreleased `0.16.0-alpha.1` candidate from `main`:
+For a new project, add the unreleased `0.16.0-alpha.2` candidate from `main`:
 
 ```toml
 [dependencies]
 dear-app = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", package = "dear-app" }
 ```
 
-After publication, replace that dependency with `dear-app = "=0.16.0-alpha.1"`.
+After publication, replace that dependency with `dear-app = "=0.16.0-alpha.2"`.
 
 ```rust
 use dear_app::{AppConfig, RunError, imgui::Condition, run_ui};

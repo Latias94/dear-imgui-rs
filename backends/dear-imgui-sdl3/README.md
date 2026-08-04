@@ -41,7 +41,7 @@ Typical use cases:
 - `sdlgpu3-renderer`: enables this crate's official SDLGPU3 renderer shim.
 - `multi-viewport`: enables multi-viewport helpers (requires `dear-imgui-rs/multi-viewport`).
 
-Until `0.16.0-alpha.1` is published, test any feature combination from `main`:
+Until `0.16.0-alpha.2` is published, test any feature combination from `main`:
 
 ```toml
 dear-imgui-sdl3 = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["opengl3-renderer"] }
@@ -52,33 +52,33 @@ After publication, use the exact prerelease requirement in the combinations belo
 Platform-only usage (SDL3 + WGPU/Glow, no official OpenGL3 renderer):
 
 ```toml
-dear-imgui-sdl3 = { version = "=0.16.0-alpha.1", default-features = false }
+dear-imgui-sdl3 = { version = "=0.16.0-alpha.2", default-features = false }
 ```
 
 Enable the official OpenGL3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "=0.16.0-alpha.1", features = ["opengl3-renderer"] }
+dear-imgui-sdl3 = { version = "=0.16.0-alpha.2", features = ["opengl3-renderer"] }
 ```
 
 Enable the official SDLRenderer3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "=0.16.0-alpha.1", features = ["sdlrenderer3-renderer"] }
+dear-imgui-sdl3 = { version = "=0.16.0-alpha.2", features = ["sdlrenderer3-renderer"] }
 ```
 
 Enable the official SDLGPU3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "=0.16.0-alpha.1", features = ["sdlgpu3-renderer"] }
+dear-imgui-sdl3 = { version = "=0.16.0-alpha.2", features = ["sdlgpu3-renderer"] }
 ```
 
 ## Compatibility
 
 | Item          | Version  |
 |---------------|----------|
-| Crate         | 0.16.0-alpha.1  |
-| dear-imgui-rs | 0.16.0-alpha.1  |
+| Crate         | 0.16.0-alpha.2  |
+| dear-imgui-rs | 0.16.0-alpha.2  |
 | SDL3 crate    | 0.18.4   |
 | sdl3-sys      | 0.6      |
 
@@ -176,7 +176,10 @@ APIs of interest (see `src/lib.rs` for full docs):
   `SdlGpu3PreparedFrame` that keeps the renderer and Context frame alive until its unsafe
   `render(...)` call inside the SDL GPU render pass. The calls are unsafe because `sdl3` does not
   expose enough provenance to verify that the command buffer, render pass, and initialized device
-  share one native owner.
+  share one native owner. `reconcile_frame(...)` is a surface-independent preparation step for
+  applications that must render secondary viewports before attempting to acquire the main
+  swapchain image. Repeating it is accepted only when the same renderer reconciled that exact
+  frame epoch; feedback produced outside the renderer is rejected.
 - `Sdl3PlatformBackend`:
   platform-only RAII owner for applications that provide a separate renderer. It intentionally
   does not claim a renderer consumer. Construct it with unsafe `Sdl3PlatformBackend::init_for_other`,
@@ -407,7 +410,7 @@ Example:
 
 ```toml
 [dependencies]
-dear-imgui-sdl3 = { version = "=0.16.0-alpha.1", features = ["opengl3-renderer"] }
+dear-imgui-sdl3 = { version = "=0.16.0-alpha.2", features = ["opengl3-renderer"] }
 sdl3 = { version = "0.18", features = ["build-from-source"] }
 ```
 
@@ -520,11 +523,36 @@ unsafe {
 }
 ```
 
+### Mouse Capture Mode
+
+Mouse capture keeps drag coordinates updating after the pointer leaves an SDL window. The official
+backend enables it immediately on capable desktop drivers, except on X11 where it waits until a drag
+starts so a debugger break is less likely to leave the desktop pointer captured. Applications can
+override that policy through any owning backend:
+
+```rust
+use dear_imgui_sdl3::MouseCaptureMode;
+
+sdl3_backend.set_mouse_capture_mode(&mut imgui, MouseCaptureMode::EnabledAfterDrag)?;
+```
+
+`MouseCaptureMode::Disabled` also releases an active capture. Changing this policy cannot add
+global mouse or native viewport capabilities to a video driver that does not provide them.
+
 ## Examples
 
 The workspace includes several examples that use this backend:
 
 Multi-viewport status on SDL3:
+
+Native OS viewports depend on the active SDL video driver, not only the Cargo feature. The embedded
+official backend currently sets `BackendFlags::PLATFORM_HAS_VIEWPORTS` for the Windows, Cocoa, X11,
+DIVE, and VMAN drivers. It intentionally does not set that capability on Wayland, whose compositor
+security model does not provide the global pointer position and capture behavior required by Dear
+ImGui's current platform-viewport contract. On Wayland, docking and dragging continue to work
+inside the main SDL window, but detached panels remain in that host window instead of becoming
+independent OS windows. Applications can inspect `imgui.io().backend_flags()` after backend
+initialization when they need to report this runtime degradation.
 
 For OpenGL viewports the Rust-owned callback wrapper verifies that each secondary window has a
 distinct current GL context and restores the previous window, context, and
