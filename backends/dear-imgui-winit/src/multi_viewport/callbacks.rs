@@ -119,6 +119,19 @@ fn should_focus_on_show(policy: ViewportWindowPolicy) -> bool {
     !policy.no_focus_on_appearing
 }
 
+fn request_platform_window_focus(
+    control: &RuntimeControl,
+    window: &winit::window::Window,
+) -> Result<(), WinitPlatformError> {
+    let window_id = window.id();
+    control.request_platform_window_focus(window_id);
+    if let Err(error) = focus_and_raise_window(window) {
+        control.cancel_platform_window_focus(window_id);
+        return Err(error);
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SkipTaskbarCapability {
     Inherent,
@@ -1324,7 +1337,7 @@ pub(super) unsafe extern "C" fn winit_show_window(vp: *mut dear_imgui_rs::sys::I
             }
             data.window().set_visible(true);
             if should_focus_on_show(policy) {
-                if let Err(error) = focus_and_raise_window(data.window()) {
+                if let Err(error) = request_platform_window_focus(control, data.window()) {
                     record_viewport_failure(control, vp, error);
                 }
             } else if !policy.cursor_hittest
@@ -1562,9 +1575,9 @@ pub(super) unsafe extern "C" fn winit_set_window_focus(vp: *mut dear_imgui_rs::s
         if vp.is_null() {
             return;
         }
-        if let Some(Err(error)) =
-            with_viewport_data(control, vp, |data| focus_and_raise_window(data.window()))
-        {
+        if let Some(Err(error)) = with_viewport_data(control, vp, |data| {
+            request_platform_window_focus(control, data.window())
+        }) {
             control.record_fault(error);
         }
     });
@@ -1578,7 +1591,10 @@ pub(super) unsafe extern "C" fn winit_get_window_focus(
         if vp.is_null() {
             return false;
         }
-        with_viewport_data(control, vp, |data| data.window().has_focus()).unwrap_or(false)
+        with_viewport_data(control, vp, |data| {
+            control.platform_window_focus(data.window().id(), data.window().has_focus())
+        })
+        .unwrap_or(false)
     })
 }
 

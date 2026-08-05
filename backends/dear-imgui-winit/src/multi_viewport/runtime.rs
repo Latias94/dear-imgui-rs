@@ -4,6 +4,11 @@ use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
+
 use dear_imgui_rs::{
     Context, ContextAttachmentTeardownError, ContextBinding, ContextBindingError, ContextDestroyed,
     ContextId, ContextTeardown,
@@ -20,6 +25,8 @@ use super::callbacks::{
     preflight_platform_window_destruction, prepare_monitors, publish_monitors, refresh_monitors,
     release_platform_callbacks, validate_platform_callback_contract,
 };
+use super::focus::{ContextFocusState, PlatformFocusState};
+use super::native_cursor_hittest::focus_and_raise_window;
 #[cfg(target_os = "windows")]
 use super::native_cursor_hittest::query_native_mouse_state;
 #[cfg(target_os = "windows")]
@@ -142,6 +149,7 @@ pub(crate) struct RuntimeControl {
     mouse_leave: Cell<MouseLeaveState>,
     input_ownership: RefCell<InputOwnership>,
     focus: RefCell<ContextFocusState>,
+    platform_focus: Cell<PlatformFocusState>,
     pub(super) viewports: RefCell<Vec<super::registry::ViewportEntry>>,
 }
 
@@ -287,66 +295,6 @@ impl InputOwnership {
     }
 }
 
-#[derive(Debug, Default, Eq, PartialEq)]
-pub(super) struct ContextFocusState {
-    focused_windows: HashSet<WindowId>,
-    context_focused: bool,
-    focus_loss_pending: bool,
-}
-
-impl ContextFocusState {
-    pub(super) fn with_focused_window(window_id: Option<WindowId>) -> Self {
-        // Dear ImGui treats a newly attached platform as focused until it receives an explicit
-        // loss event. Start from that reported state even when Winit says the main window is
-        // already unfocused, then reconcile the empty set at the next platform-frame boundary.
-        let mut state = Self {
-            context_focused: true,
-            ..Self::default()
-        };
-        if let Some(window_id) = window_id {
-            state.focused_windows.insert(window_id);
-        }
-        state
-    }
-
-    /// Records a native focus event and returns whether Dear ImGui needs a focus-gained event.
-    pub(super) fn note_window_focus(&mut self, window_id: WindowId, focused: bool) -> bool {
-        if focused {
-            self.focused_windows.insert(window_id);
-            self.focus_loss_pending = false;
-            if !self.context_focused {
-                self.context_focused = true;
-                return true;
-            }
-        } else if self.focused_windows.remove(&window_id)
-            && self.focused_windows.is_empty()
-            && self.context_focused
-        {
-            // Focus transfers between native viewports commonly report the old window losing
-            // focus before the new one gains it. Defer the Context-level loss until the next
-            // platform-frame boundary so that transfer can cancel it.
-            self.focus_loss_pending = true;
-        }
-        false
-    }
-
-    /// Reconciles destroyed windows and returns whether the Context has now lost focus.
-    pub(super) fn reconcile_owned_windows(&mut self, owned_windows: &HashSet<WindowId>) -> bool {
-        self.focused_windows
-            .retain(|window_id| owned_windows.contains(window_id));
-        if self.context_focused && self.focused_windows.is_empty() {
-            self.focus_loss_pending = true;
-        }
-        if self.focus_loss_pending && self.focused_windows.is_empty() {
-            self.focus_loss_pending = false;
-            self.context_focused = false;
-            true
-        } else {
-            false
-        }
-    }
-}
-
 impl RuntimeControl {
     fn new(
         context: &Context,
@@ -372,6 +320,7 @@ impl RuntimeControl {
             mouse_leave: Cell::new(MouseLeaveState::default()),
             input_ownership: RefCell::new(InputOwnership::default()),
             focus: RefCell::new(focus),
+            platform_focus: Cell::new(PlatformFocusState::default()),
             viewports: RefCell::new(Vec::new()),
         }
     }
@@ -394,6 +343,7 @@ impl RuntimeControl {
             mouse_leave: Cell::new(MouseLeaveState::default()),
             input_ownership: RefCell::new(InputOwnership::default()),
             focus: RefCell::new(ContextFocusState::default()),
+            platform_focus: Cell::new(PlatformFocusState::default()),
             viewports: RefCell::new(Vec::new()),
         }
     }
@@ -741,6 +691,34 @@ impl RuntimeControl {
         self.main_window.borrow().clone()
     }
 
+    fn window_for_id(&self, window_id: WindowId) -> Option<Arc<Window>> {
+        self.main_window()
+            .filter(|window| window.id() == window_id)
+            .or_else(|| {
+                secondary_viewport_windows(self)
+                    .into_iter()
+                    .find(|window| window.id() == window_id)
+            })
+    }
+
+    pub(crate) fn request_platform_window_focus(&self, window_id: WindowId) {
+        let mut state = self.platform_focus.get();
+        state.request(window_id, Instant::now());
+        self.platform_focus.set(state);
+    }
+
+    pub(super) fn cancel_platform_window_focus(&self, window_id: WindowId) {
+        let mut state = self.platform_focus.get();
+        state.cancel(window_id);
+        self.platform_focus.set(state);
+    }
+
+    pub(crate) fn platform_window_focus(&self, window_id: WindowId, native_focused: bool) -> bool {
+        self.platform_focus
+            .get()
+            .effective_focus(Instant::now(), window_id, native_focused)
+    }
+
     pub(crate) fn note_key(&self, window_id: WindowId, key: dear_imgui_rs::Key, pressed: bool) {
         self.input_ownership
             .borrow_mut()
@@ -838,6 +816,9 @@ impl RuntimeControl {
         focused: bool,
         context: &mut Context,
     ) {
+        let mut platform_focus = self.platform_focus.get();
+        platform_focus.note_native_event(focused);
+        self.platform_focus.set(platform_focus);
         if self
             .focus
             .borrow_mut()
@@ -865,10 +846,26 @@ impl RuntimeControl {
                 .into_iter()
                 .map(|window| window.id()),
         );
+
+        let now = Instant::now();
+        let mut platform_focus = self.platform_focus.get();
+        let retry_focus = platform_focus.advance(now, &owned_windows);
+        self.platform_focus.set(platform_focus);
+        if let Some(window_id) = retry_focus
+            && let Some(window) = self.window_for_id(window_id)
+            && let Err(error) = focus_and_raise_window(&window)
+        {
+            self.cancel_platform_window_focus(window_id);
+            self.record_fault(error);
+        }
+        let platform_focus_pending = self
+            .platform_focus
+            .get()
+            .has_pending_for_owned_window(now, &owned_windows);
         let focus_lost = self
             .focus
             .borrow_mut()
-            .reconcile_owned_windows(&owned_windows);
+            .reconcile_owned_windows(&owned_windows, platform_focus_pending);
 
         let mut mouse_leave = self.mouse_leave.get();
         if focus_lost {

@@ -688,9 +688,9 @@ impl AppWindow {
             color_space: wgpu::SurfaceColorSpace::Auto,
             width: size.width.max(1),
             height: size.height.max(1),
-            // Keep platform event delivery paced with presentation. Test Engine viewport actions
-            // intentionally wait in frames for native focus and geometry events to round-trip.
-            present_mode: wgpu::PresentMode::Fifo,
+            // Secondary viewports inherit this policy. AutoNoVsync prefers low-latency present
+            // modes and falls back portably when a surface cannot provide one.
+            present_mode: wgpu::PresentMode::AutoNoVsync,
             alpha_mode: wgpu::CompositeAlphaMode::Opaque,
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
