@@ -4,9 +4,9 @@ use std::fmt;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use dear_imgui_rs::render::RenderedFrame;
 #[cfg(test)]
 use dear_imgui_rs::render::{FrameSnapshot, RendererConsumer};
-use dear_imgui_rs::render::RenderedFrame;
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
     ContextAttachmentRole, ContextBinding, ContextBindingError, ContextId, ContextLifecycle,
