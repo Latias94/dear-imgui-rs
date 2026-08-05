@@ -616,12 +616,14 @@ pub const DEFAULT_GITHUB_REPO: &str = "dear-imgui";
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    use super::file_url_path;
     use super::{
-        CppRuntimeLinkage, extract_archive_to_cache, file_url_path, local_path_from_urlish,
-        prebuilt_cpp_runtime_linkage, prebuilt_manifest_has_feature, should_static_link_cpp_stdlib,
+        CppRuntimeLinkage, local_path_from_urlish, prebuilt_cpp_runtime_linkage,
+        prebuilt_manifest_has_feature, should_static_link_cpp_stdlib,
     };
     #[cfg(feature = "archive")]
-    use super::{extract_archive_to_dir, extraction_lock_path};
+    use super::{extract_archive_to_cache, extract_archive_to_dir, extraction_lock_path};
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
