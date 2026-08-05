@@ -335,7 +335,7 @@ fn decorated_viewport_waits_for_client_geometry_before_platform_sync() {
         .borrow_mut()
         .record_mut(instance_id)
         .expect("the viewport record should exist")
-        .pending_client_placement = Some(crate::viewport::PendingClientPlacement {
+        .pending_client_placement = Some(super::super::PendingClientPlacement {
         pos: [0.0, 0.0],
         dpi_scale: 0.5,
         show_requested: false,
