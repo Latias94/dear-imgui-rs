@@ -327,6 +327,30 @@ impl RuntimeFaults {
     }
 }
 
+fn entry_fault_is_terminal(fault: &AshViewportError) -> bool {
+    match fault {
+        AshViewportError::CallbackPanicked { .. }
+        | AshViewportError::DeviceLost { .. }
+        | AshViewportError::RendererUserDataOwnershipLost { .. }
+        | AshViewportError::Renderer(
+            RendererError::Vulkan(ash::vk::Result::ERROR_DEVICE_LOST)
+            | RendererError::RendererStateReplaced { .. }
+            | RendererError::RendererStateDrift { .. },
+        ) => true,
+        #[cfg(feature = "multi-viewport-winit")]
+        AshViewportError::SurfaceCreate(SurfaceCreateError::Vulkan(
+            ash::vk::Result::ERROR_DEVICE_LOST,
+        )) => true,
+        AshViewportError::SurfaceUnsupported(
+            SurfaceSupportError::PresentSupportQuery(ash::vk::Result::ERROR_DEVICE_LOST)
+            | SurfaceSupportError::CapabilitiesQuery(ash::vk::Result::ERROR_DEVICE_LOST)
+            | SurfaceSupportError::FormatsQuery(ash::vk::Result::ERROR_DEVICE_LOST)
+            | SurfaceSupportError::PresentModesQuery(ash::vk::Result::ERROR_DEVICE_LOST),
+        ) => true,
+        _ => false,
+    }
+}
+
 impl fmt::Debug for RuntimeControl {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -461,6 +485,15 @@ impl RuntimeControl {
 
     pub(super) fn record_fault(&self, fault: AshViewportError) {
         self.faults.borrow_mut().record_non_terminal(fault);
+    }
+
+    /// Classifies a fault raised by a native callback or callback-scoped Vulkan operation.
+    pub(super) fn record_entry_fault(&self, fault: AshViewportError) {
+        if entry_fault_is_terminal(&fault) {
+            self.record_runtime_contract_fault(fault);
+        } else {
+            self.record_fault(fault);
+        }
     }
 
     fn begin_frame_trace(&self) -> Result<(), AshViewportError> {
@@ -737,7 +770,7 @@ impl RuntimeControl {
         match classify_device_idle(unsafe { renderer.device.device_wait_idle() }) {
             Ok(DeviceIdleOutcome::Complete) => Ok(DeviceIdleOutcome::Complete),
             Ok(DeviceIdleOutcome::DeviceLost) => {
-                self.record_fault(AshViewportError::DeviceLost { operation });
+                self.record_entry_fault(AshViewportError::DeviceLost { operation });
                 Ok(DeviceIdleOutcome::DeviceLost)
             }
             Err(source) => Err(AshViewportError::DeviceCompletionFailed { operation, source }),

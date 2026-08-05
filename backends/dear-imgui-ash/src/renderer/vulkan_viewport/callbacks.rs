@@ -1169,7 +1169,7 @@ unsafe fn renderer_swap_buffers(
     })
 }
 
-fn run_work_callback(
+pub(super) fn run_work_callback(
     callback_name: &'static str,
     callback: impl FnOnce(&RuntimeControl) -> Result<(), AshViewportError>,
 ) {
@@ -1198,9 +1198,9 @@ fn run_work_callback(
         }
     }));
     match result {
-        Ok(Some(Err(error))) => control.record_fault(error),
+        Ok(Some(Err(error))) => control.record_entry_fault(error),
         Ok(Some(Ok(()))) | Ok(None) => {}
-        Err(_) => control.record_runtime_contract_fault(AshViewportError::CallbackPanicked {
+        Err(_) => control.record_entry_fault(AshViewportError::CallbackPanicked {
             callback: callback_name,
         }),
     }
@@ -1235,9 +1235,9 @@ fn run_cleanup_callback(
             .flatten()
     }));
     match result {
-        Ok(Some(Err(error))) => control.record_fault(error),
+        Ok(Some(Err(error))) => control.record_entry_fault(error),
         Ok(Some(Ok(()))) | Ok(None) => {}
-        Err(_) => control.record_runtime_contract_fault(AshViewportError::CallbackPanicked {
+        Err(_) => control.record_entry_fault(AshViewportError::CallbackPanicked {
             callback: callback_name,
         }),
     }
