@@ -1,4 +1,4 @@
-//! Two independently scheduled Dear ImGui Contexts routed to two Bevy windows.
+//! Two Dear ImGui Contexts with independent private passes routed to two Bevy windows.
 //!
 //! The second camera uses an inset viewport, so its automatically derived input route covers only
 //! that region of the second window. Remove the second Context from the primary UI to exercise
@@ -10,14 +10,12 @@
 use bevy::{
     app::AppExit,
     camera::{RenderTarget, Viewport},
-    ecs::schedule::ScheduleLabel,
     prelude::*,
     window::{PresentMode, WindowPlugin, WindowRef, WindowTheme},
 };
 use dear_imgui_bevy::prelude::*;
 use dear_imgui_rs::Condition;
 
-#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
 struct SecondaryContextPass;
 
 #[derive(Resource)]
@@ -37,39 +35,46 @@ struct MultipleContextState {
 }
 
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "dear-imgui-bevy primary Context".to_owned(),
-                resolution: (960, 640).into(),
-                present_mode: PresentMode::AutoVsync,
-                window_theme: Some(WindowTheme::Dark),
-                ..Default::default()
-            }),
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: "dear-imgui-bevy primary Context".to_owned(),
+            resolution: (960, 640).into(),
+            present_mode: PresentMode::AutoVsync,
+            window_theme: Some(WindowTheme::Dark),
             ..Default::default()
-        }))
-        .add_plugins(ImguiPlugin::default())
-        .init_resource::<MultipleContextState>()
-        .add_systems(Startup, setup)
-        .add_systems(
-            Update,
-            (
-                close_on_escape,
-                resize_secondary_camera_viewport,
-                retire_secondary_context,
-            ),
-        )
-        .add_systems(ImguiPrimaryContextPass, primary_ui)
-        .add_systems(SecondaryContextPass, secondary_ui)
+        }),
+        ..Default::default()
+    }))
+    .add_plugins(ImguiPlugin::default())
+    .init_resource::<MultipleContextState>()
+    .add_systems(Startup, setup)
+    .add_systems(
+        Update,
+        (
+            close_on_escape,
+            resize_secondary_camera_viewport,
+            retire_secondary_context,
+        ),
+    );
+    let primary_pass = app.imgui_primary_pass();
+    let secondary_pass = app.declare_imgui_pass::<SecondaryContextPass>();
+    app.insert_resource(secondary_pass.clone())
+        .add_imgui_systems(&primary_pass, primary_pass.system(primary_ui))
+        .add_imgui_systems(&secondary_pass, secondary_pass.system(secondary_ui))
         .run();
 }
 
-fn setup(mut commands: Commands, mut contexts: NonSendMut<ImguiContexts>) -> Result {
+fn setup(
+    mut commands: Commands,
+    mut contexts: NonSendMut<ImguiContexts>,
+    secondary_pass: Res<ImguiPass<SecondaryContextPass>>,
+) -> Result {
     let primary_context = contexts
         .primary_id()
         .ok_or("ImguiPlugin should install a primary Context before Startup")?;
     let secondary_context =
-        contexts.create(ImguiContextConfig::new(SecondaryContextPass).with_docking(false))?;
+        contexts.create(ImguiContextConfig::new(&secondary_pass).with_docking(false))?;
 
     let primary_camera = commands
         .spawn((
@@ -194,14 +199,14 @@ fn close_on_escape(input: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<App
 }
 
 fn primary_ui(
-    imgui: ImguiUi,
+    frame: ImguiFrame<'_>,
     capture: Res<ImguiInputCapture>,
     integration: Res<SecondaryIntegration>,
     mut state: ResMut<MultipleContextState>,
 ) -> Result {
-    let context_id = imgui.context_id()?;
-    let frame_index = imgui.frame_index()?;
-    let ui = imgui.ui()?;
+    let context_id = frame.context_id();
+    let frame_index = frame.frame_index();
+    let ui = frame.ui();
 
     ui.window("Primary Context")
         .position([32.0, 32.0], Condition::FirstUseEver)
@@ -245,10 +250,13 @@ fn primary_ui(
     Ok(())
 }
 
-fn secondary_ui(imgui: ImguiUi, mut state: ResMut<MultipleContextState>) -> Result {
-    let context_id = imgui.context_id()?;
-    let frame_index = imgui.frame_index()?;
-    let ui = imgui.ui()?;
+fn secondary_ui(
+    frame: ImguiFrame<'_, SecondaryContextPass>,
+    mut state: ResMut<MultipleContextState>,
+) -> Result {
+    let context_id = frame.context_id();
+    let frame_index = frame.frame_index();
+    let ui = frame.ui();
 
     ui.window("Secondary Context")
         .position([24.0, 24.0], Condition::FirstUseEver)

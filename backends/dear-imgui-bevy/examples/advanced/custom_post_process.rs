@@ -120,36 +120,37 @@ impl FullscreenMaterial for AfterOverlayEffect {
 }
 
 fn main() {
-    App::new()
-        .add_plugins(
-            DefaultPlugins
-                .set(AssetPlugin {
-                    file_path: format!("{}/examples/advanced", env!("CARGO_MANIFEST_DIR")),
-                    ..Default::default()
-                })
-                .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        title: "dear-imgui-bevy custom post-process".to_owned(),
-                        resolution: (1180, 720).into(),
-                        present_mode: PresentMode::AutoVsync,
-                        window_theme: Some(WindowTheme::Dark),
-                        ..Default::default()
-                    }),
+    let mut app = App::new();
+    app.add_plugins(
+        DefaultPlugins
+            .set(AssetPlugin {
+                file_path: format!("{}/examples/advanced", env!("CARGO_MANIFEST_DIR")),
+                ..Default::default()
+            })
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "dear-imgui-bevy custom post-process".to_owned(),
+                    resolution: (1180, 720).into(),
+                    present_mode: PresentMode::AutoVsync,
+                    window_theme: Some(WindowTheme::Dark),
                     ..Default::default()
                 }),
-        )
-        .add_plugins((
-            ImguiPlugin::default(),
-            FullscreenMaterialPlugin::<BeforeOverlayEffect>::default(),
-            FullscreenMaterialPlugin::<AfterOverlayEffect>::default(),
-        ))
-        .init_resource::<CompositionSettings>()
-        .add_systems(Startup, setup)
-        .add_systems(
-            Update,
-            (close_on_escape, animate_scene, apply_composition_settings),
-        )
-        .add_systems(ImguiPrimaryContextPass, composition_ui)
+                ..Default::default()
+            }),
+    )
+    .add_plugins((
+        ImguiPlugin::default(),
+        FullscreenMaterialPlugin::<BeforeOverlayEffect>::default(),
+        FullscreenMaterialPlugin::<AfterOverlayEffect>::default(),
+    ))
+    .init_resource::<CompositionSettings>()
+    .add_systems(Startup, setup)
+    .add_systems(
+        Update,
+        (close_on_escape, animate_scene, apply_composition_settings),
+    );
+    let primary_pass = app.imgui_primary_pass();
+    app.add_imgui_systems(&primary_pass, primary_pass.system(composition_ui))
         .run();
 }
 
@@ -243,8 +244,8 @@ fn apply_composition_settings(
     }
 }
 
-fn composition_ui(imgui: ImguiUi, mut settings: ResMut<CompositionSettings>) -> Result {
-    let ui = imgui.ui()?;
+fn composition_ui(frame: ImguiFrame<'_>, mut settings: ResMut<CompositionSettings>) -> Result {
+    let ui = frame.ui();
 
     ui.window("Composition Contract")
         .position([32.0, 32.0], Condition::FirstUseEver)

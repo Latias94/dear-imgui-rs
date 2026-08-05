@@ -152,7 +152,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context)?;
+            .prepare_frame(&mut self.imgui.context, &self.window)?;
         let ui = self.imgui.context.frame();
 
         // Main window content
@@ -209,9 +209,7 @@ impl AppWindow {
             gl.disable(glow::FRAMEBUFFER_SRGB);
         }
 
-        self.imgui
-            .platform
-            .prepare_render_with_ui(&ui, &self.window)?;
+        self.imgui.platform.prepare_render(&ui, &self.window)?;
         let draw_data = self.imgui.context.render();
 
         self.imgui.renderer.new_frame()?;

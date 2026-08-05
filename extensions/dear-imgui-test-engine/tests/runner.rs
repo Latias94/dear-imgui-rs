@@ -22,9 +22,9 @@ use dear_imgui_test_engine::{
     Rgba8, RunFlags, TestGroup,
 };
 use dear_imgui_test_engine::{
-    FrameDriverError, HeadlessRenderError, RunMode, RunOutcome, RunState, RunnerControl,
-    RunnerError, ScriptCount, TestEngine, TestEngineError, TestEngineStatus, TestFrameDriver,
-    TestRunner, raw,
+    FrameDriverError, HeadlessRenderError, RunMode, RunOutcome, RunState, RunTestStatus,
+    RunnerControl, RunnerError, ScriptCount, TestEngine, TestEngineError, TestEngineStatus,
+    TestFrameDriver, TestRunner, raw,
 };
 
 static TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -425,8 +425,21 @@ fn runner_distinguishes_pass_failure_and_no_match() {
     assert_eq!(passed.summary().count_tested, 1);
     assert_eq!(passed.summary().count_success, 1);
     assert_eq!(passed.summary().count_in_queue, 0);
+    assert_eq!(passed.tests().len(), 1);
+    assert_eq!(passed.tests()[0].category(), "runner");
+    assert_eq!(passed.tests()[0].name(), "pass");
+    assert_eq!(passed.tests()[0].status(), RunTestStatus::Success);
     assert_eq!(passed.mode(), RunMode::Headless);
     assert!(passed.frames() > 0);
+    let no_match_after_pass = TestRunner::new(&mut pass_engine)
+        .filter("does-not-match-after-pass")
+        .run_headless(&mut pass_context, no_error)
+        .expect("historical success must not pollute a no-match run");
+    assert_eq!(no_match_after_pass.outcome(), RunOutcome::NoMatch);
+    assert_eq!(no_match_after_pass.summary().count_tested, 0);
+    assert_eq!(no_match_after_pass.summary().count_success, 0);
+    assert!(no_match_after_pass.tests().is_empty());
+    assert_ne!(passed.run_id(), no_match_after_pass.run_id());
     pass_engine.shutdown().expect("pass shutdown");
     drop(pass_context);
 
@@ -467,6 +480,7 @@ fn runner_distinguishes_pass_failure_and_no_match() {
     assert_eq!(failed.outcome(), RunOutcome::Failed);
     assert_eq!(failed.summary().count_tested, 1);
     assert_eq!(failed.summary().count_success, 0);
+    assert_eq!(failed.tests()[0].status(), RunTestStatus::Error);
     failure_engine.shutdown().expect("failure shutdown");
     drop(failure_context);
 
@@ -509,6 +523,11 @@ fn runner_distinguishes_timeout_and_explicit_abort_after_cleanup() {
         .expect("timeout cleanup must settle");
     assert_eq!(timed_out.outcome(), RunOutcome::TimedOut);
     assert_eq!(timed_out.summary().count_in_queue, 0);
+    assert_eq!(timed_out.tests().len(), 1);
+    assert_eq!(timed_out.tests()[0].category(), "runner");
+    assert_eq!(timed_out.tests()[0].name(), "timeout");
+    assert_eq!(timed_out.tests()[0].status(), RunTestStatus::NotRun);
+    assert_eq!(timed_out.frames(), 1 + timed_out.cleanup_frames());
     timeout_engine.shutdown().expect("timeout shutdown");
     drop(timeout_context);
 
@@ -533,6 +552,11 @@ fn runner_distinguishes_timeout_and_explicit_abort_after_cleanup() {
         .expect("abort cleanup must settle");
     assert_eq!(aborted.outcome(), RunOutcome::Aborted);
     assert_eq!(aborted.summary().count_in_queue, 0);
+    assert_eq!(aborted.tests().len(), 1);
+    assert_eq!(aborted.tests()[0].category(), "runner");
+    assert_eq!(aborted.tests()[0].name(), "abort");
+    assert_eq!(aborted.tests()[0].status(), RunTestStatus::NotRun);
+    assert_eq!(aborted.frames(), 1 + aborted.cleanup_frames());
     abort_engine.shutdown().expect("abort shutdown");
     drop(abort_context);
 }
@@ -1291,6 +1315,7 @@ fn clearing_an_interactive_capture_provider_does_not_abort_the_next_run() {
         .run_graphical_with_capture(&mut context, no_error, &mut driver)
         .expect("first run with interactive capture state");
     assert_eq!(first.outcome(), RunOutcome::Passed);
+    assert_eq!(first.summary().count_tested, 1);
     set_presentation_trace(&engine, None);
     assert_capture_state_clear(&engine);
 
@@ -1299,6 +1324,8 @@ fn clearing_an_interactive_capture_provider_does_not_abort_the_next_run() {
         .run_headless(&mut context, no_error)
         .expect("capture-only cleanup must not abort the next run");
     assert_eq!(second.outcome(), RunOutcome::Passed);
+    assert_eq!(second.summary().count_tested, 1);
+    assert_ne!(first.run_id(), second.run_id());
     engine.shutdown().expect("interactive cleanup shutdown");
 }
 

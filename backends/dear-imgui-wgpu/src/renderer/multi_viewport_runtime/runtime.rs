@@ -241,7 +241,7 @@ pub(super) struct RuntimeControl {
     globals: RefCell<Option<GlobalHandles>>,
     attachment: RefCell<Option<ContextAttachmentLease>>,
     callback_state: Cell<CallbackState>,
-    faults: RefCell<Option<WgpuViewportError>>,
+    faults: RefCell<RuntimeFaults>,
     frame_trace: RefCell<FrameTraceState>,
     #[cfg(test)]
     panic_next_callback: Cell<bool>,
@@ -249,6 +249,34 @@ pub(super) struct RuntimeControl {
     fail_next_viewport_cleanup: Cell<bool>,
     #[cfg(test)]
     transitions: RefCell<Vec<&'static str>>,
+}
+
+#[derive(Default)]
+struct RuntimeFaults {
+    terminal: Option<WgpuViewportError>,
+    non_terminal: Option<WgpuViewportError>,
+}
+
+impl RuntimeFaults {
+    fn record_terminal(&mut self, fault: WgpuViewportError) {
+        if self.terminal.is_none() {
+            self.terminal = Some(fault);
+        }
+    }
+
+    fn record_non_terminal(&mut self, fault: WgpuViewportError) {
+        if self.non_terminal.is_none() {
+            self.non_terminal = Some(fault);
+        }
+    }
+
+    fn has_pending(&self) -> bool {
+        self.terminal.is_some() || self.non_terminal.is_some()
+    }
+
+    fn take_next(&mut self) -> Option<WgpuViewportError> {
+        self.terminal.take().or_else(|| self.non_terminal.take())
+    }
 }
 
 impl fmt::Debug for RuntimeControl {
@@ -273,7 +301,7 @@ impl RuntimeControl {
             globals: RefCell::new(globals),
             attachment: RefCell::new(None),
             callback_state: Cell::new(CallbackState::Unclaimed),
-            faults: RefCell::new(None),
+            faults: RefCell::new(RuntimeFaults::default()),
             frame_trace: RefCell::new(FrameTraceState::default()),
             #[cfg(test)]
             panic_next_callback: Cell::new(false),
@@ -364,10 +392,11 @@ impl RuntimeControl {
     }
 
     pub(super) fn record_fault(&self, fault: WgpuViewportError) {
-        let mut faults = self.faults.borrow_mut();
-        if faults.is_none() {
-            *faults = Some(fault);
-        }
+        self.faults.borrow_mut().record_non_terminal(fault);
+    }
+
+    fn record_terminal_fault(&self, fault: WgpuViewportError) {
+        self.faults.borrow_mut().record_terminal(fault);
     }
 
     fn begin_frame_trace(&self) -> Result<(), WgpuViewportError> {
@@ -403,7 +432,7 @@ impl RuntimeControl {
         let _ = self.binding.try_with_bound_context(|| {
             revoke_renderer_viewport_capability_if_owned(self);
         });
-        self.record_fault(fault);
+        self.record_terminal_fault(fault);
         self.begin_shutdown();
     }
 
@@ -453,7 +482,7 @@ impl RuntimeControl {
 
     fn detect_and_take_fault(&self) -> Option<WgpuViewportError> {
         detect_runtime_contract_drift(self);
-        self.faults.borrow_mut().take()
+        self.faults.borrow_mut().take_next()
     }
 
     fn ensure_context(&self, context: &Context) -> Result<(), WgpuViewportError> {
@@ -544,7 +573,7 @@ impl RuntimeControl {
         callback: impl FnOnce(&mut WgpuRenderer, &GlobalHandles) -> Result<(), WgpuViewportError>,
     ) {
         detect_runtime_contract_drift(self);
-        if self.state.get() != RuntimeState::Attached || self.faults.borrow().is_some() {
+        if self.state.get() != RuntimeState::Attached || self.faults.borrow().has_pending() {
             return;
         }
         let Ok(mut renderer) = self.renderer.try_borrow_mut() else {
@@ -996,11 +1025,6 @@ impl OwningViewportRuntime {
 
     pub(crate) fn poll_fault(&self) -> Result<(), WgpuViewportError> {
         self.control.detect_and_take_fault().map_or(Ok(()), Err)
-    }
-
-    pub(crate) fn new_frame(&self) -> Result<(), WgpuViewportError> {
-        self.control
-            .with_renderer_mut(|renderer| renderer.new_frame().map_err(Into::into))
     }
 
     pub(crate) fn reconcile_frame(

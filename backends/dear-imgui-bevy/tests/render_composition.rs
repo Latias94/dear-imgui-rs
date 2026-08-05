@@ -1,5 +1,9 @@
 #![cfg(feature = "render")]
 
+#[cfg(feature = "bevy-ui")]
+use bevy::ecs::schedule::ScheduleLabel;
+#[cfg(feature = "bevy-ui")]
+use bevy::ecs::schedule::{NodeId, ScheduleGraph};
 use bevy::{
     app::App,
     asset::{Assets, Handle},
@@ -7,7 +11,6 @@ use bevy::{
     color::LinearRgba,
     core_pipeline::{Core2d, Core3d, tonemapping::Tonemapping},
     ecs::prelude::*,
-    ecs::schedule::ScheduleLabel,
     image::Image,
     prelude::{Camera2d, Camera3d, DefaultPlugins, PluginGroup, Window},
     render::{
@@ -28,13 +31,13 @@ use bevy::{
     color::Color as BevyColor,
     prelude::{BackgroundColor, Node, UiTargetCamera, percent},
 };
-#[cfg(feature = "bevy-ui")]
-use dear_imgui_bevy::ImguiUiRenderOrder;
 use dear_imgui_bevy::{
-    ImguiContextConfig, ImguiContexts, ImguiPlugin, ImguiPluginConfig, ImguiPrimaryContextPass,
-    ImguiRenderSystems, ImguiUi,
+    ImguiAppExt, ImguiContextConfig, ImguiContexts, ImguiFrame, ImguiPlugin, ImguiPluginConfig,
+    ImguiRenderSystems,
     route::{ImguiInputPolicy, ImguiInputRoute, ImguiInputSource, ImguiRenderRoute},
 };
+#[cfg(feature = "bevy-ui")]
+use dear_imgui_bevy::{ImguiPrimaryPass, ImguiUiRenderOrder};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Mutex, MutexGuard, OnceLock},
@@ -65,8 +68,14 @@ struct CompositionReadbackTarget {
 #[derive(Clone, Copy)]
 enum CompositionExpectation {
     PostProcessAndImgui,
-    DominantRed { at: [u32; 2] },
-    DominantBlue { at: [u32; 2] },
+    #[cfg(feature = "bevy-ui")]
+    DominantRed {
+        at: [u32; 2],
+    },
+    #[cfg(feature = "bevy-ui")]
+    DominantBlue {
+        at: [u32; 2],
+    },
     OrderedContexts,
 }
 
@@ -80,7 +89,9 @@ impl CompositionExpectation {
                 is_post_process_blue(rgba8_pixel(data, 48, 48))
                     && is_dominant_red(rgba8_pixel(data, 12, 12))
             }
+            #[cfg(feature = "bevy-ui")]
             Self::DominantRed { at } => is_dominant_red(rgba8_pixel(data, at[0], at[1])),
+            #[cfg(feature = "bevy-ui")]
             Self::DominantBlue { at } => is_dominant_blue(rgba8_pixel(data, at[0], at[1])),
             Self::OrderedContexts => {
                 is_dominant_red(rgba8_pixel(data, 12, 12))
@@ -91,10 +102,8 @@ impl CompositionExpectation {
     }
 }
 
-#[derive(ScheduleLabel, Clone, Debug, Eq, Hash, PartialEq)]
-struct CompositionPass(&'static str);
+struct CompositionPass;
 
-#[derive(ScheduleLabel, Clone, Debug, Eq, Hash, PartialEq)]
 struct SameCameraSecondaryPass;
 
 #[derive(Resource, Default)]
@@ -252,6 +261,49 @@ fn bevy_ui_order_modes_control_overlap_pixels() {
     );
 }
 
+#[cfg(feature = "bevy-ui")]
+#[test]
+fn bevy_ui_order_modes_define_complete_overlay_topology() {
+    for (order, expected) in [
+        (
+            ImguiUiRenderOrder::ImguiAboveBevyUi,
+            [
+                RenderTopologyNode::BeforeOverlay,
+                RenderTopologyNode::BevyUi,
+                RenderTopologyNode::Overlay,
+                RenderTopologyNode::AfterOverlay,
+            ],
+        ),
+        (
+            ImguiUiRenderOrder::BevyUiAboveImgui,
+            [
+                RenderTopologyNode::BeforeOverlay,
+                RenderTopologyNode::Overlay,
+                RenderTopologyNode::BevyUi,
+                RenderTopologyNode::AfterOverlay,
+            ],
+        ),
+    ] {
+        let mut app = App::new();
+        app.add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: None,
+                    exit_condition: ExitCondition::DontExit,
+                    ..Default::default()
+                })
+                .disable::<WinitPlugin>(),
+        )
+        .add_plugins(
+            ImguiPlugin::new(ImguiPluginConfig::default().with_docking(false))
+                .with_ui_render_order(order),
+        );
+
+        assert_render_dependency_chain(&app, Core2d, expected);
+        assert_render_dependency_chain(&app, Core3d, expected);
+    }
+}
+
 #[test]
 fn multiple_contexts_compose_in_route_order_on_one_camera() {
     if std::env::var("DEAR_IMGUI_BEVY_GPU_TESTS").as_deref() != Ok("1") {
@@ -277,9 +329,18 @@ fn multiple_contexts_compose_in_route_order_on_one_camera() {
         ImguiPluginConfig::default().with_docking(false),
     ))
     .init_resource::<CompositionReadbacks>()
-    .add_observer(collect_readback)
-    .add_systems(ImguiPrimaryContextPass, draw_primary_context_fixture)
-    .add_systems(SameCameraSecondaryPass, draw_secondary_context_fixture);
+    .add_observer(collect_readback);
+
+    let primary_pass = app.imgui_primary_pass();
+    let secondary_pass = app.declare_imgui_pass::<SameCameraSecondaryPass>();
+    app.add_imgui_systems(
+        &primary_pass,
+        primary_pass.system(draw_primary_context_fixture),
+    )
+    .add_imgui_systems(
+        &secondary_pass,
+        secondary_pass.system(draw_secondary_context_fixture),
+    );
 
     app.world_mut().spawn((
         Window {
@@ -299,7 +360,7 @@ fn multiple_contexts_compose_in_route_order_on_one_camera() {
             .expect("primary Context configuration must succeed");
 
         let secondary = contexts
-            .create(ImguiContextConfig::new(SameCameraSecondaryPass).with_docking(false))
+            .create(ImguiContextConfig::new(&secondary_pass).with_docking(false))
             .expect("secondary Context creation must succeed");
         contexts
             .configure(secondary, |context| {
@@ -380,8 +441,13 @@ fn render_ui_order(order: ImguiUiRenderOrder, expectation: CompositionExpectatio
             .with_ui_render_order(order),
     )
     .init_resource::<CompositionReadbacks>()
-    .add_observer(collect_readback)
-    .add_systems(ImguiPrimaryContextPass, draw_composition_fixture);
+    .add_observer(collect_readback);
+
+    let primary_pass = app.imgui_primary_pass();
+    app.add_imgui_systems(
+        &primary_pass,
+        primary_pass.system(draw_composition_fixture::<ImguiPrimaryPass>),
+    );
 
     app.world_mut().spawn((
         Window {
@@ -445,6 +511,58 @@ fn render_ui_order(order: ImguiUiRenderOrder, expectation: CompositionExpectatio
     rgba8_pixel(pixels, 12, 12)
 }
 
+#[cfg(feature = "bevy-ui")]
+#[derive(Clone, Copy, Debug)]
+enum RenderTopologyNode {
+    BeforeOverlay,
+    BevyUi,
+    Overlay,
+    AfterOverlay,
+}
+
+#[cfg(feature = "bevy-ui")]
+fn assert_render_dependency_chain(
+    app: &App,
+    schedule_label: impl ScheduleLabel,
+    expected: [RenderTopologyNode; 4],
+) {
+    let render_world = app.sub_app(RenderApp).world();
+    let schedules = render_world.resource::<Schedules>();
+    let schedule = schedules
+        .get(schedule_label)
+        .expect("the core render schedule must be installed");
+    let graph = schedule.graph();
+    let dependencies = graph.dependency().graph();
+
+    for pair in expected.windows(2) {
+        let before = render_topology_node(graph, pair[0]);
+        let after = render_topology_node(graph, pair[1]);
+        assert!(
+            dependencies.contains_edge(before, after),
+            "missing direct render dependency {:?} -> {:?}",
+            pair[0],
+            pair[1]
+        );
+    }
+}
+
+#[cfg(feature = "bevy-ui")]
+fn render_topology_node(graph: &ScheduleGraph, node: RenderTopologyNode) -> NodeId {
+    let set = match node {
+        RenderTopologyNode::BeforeOverlay => ImguiRenderSystems::BeforeOverlay.intern(),
+        RenderTopologyNode::BevyUi => {
+            IntoSystemSet::into_system_set(bevy_ui_render::ui_pass).intern()
+        }
+        RenderTopologyNode::Overlay => ImguiRenderSystems::Overlay.intern(),
+        RenderTopologyNode::AfterOverlay => ImguiRenderSystems::AfterOverlay.intern(),
+    };
+    let key = graph
+        .system_sets
+        .get_key(set)
+        .expect("every topology node must be registered as a system set");
+    NodeId::Set(key)
+}
+
 fn spawn_case(app: &mut App, kind: CameraKind, msaa: Msaa, hdr: bool) {
     let name = match (kind, msaa, hdr) {
         (CameraKind::Core2d, Msaa::Off, false) => "core2d-1x-ldr",
@@ -475,12 +593,15 @@ fn spawn_case(app: &mut App, kind: CameraKind, msaa: Msaa, hdr: bool) {
         }
         entity.id()
     };
-    let pass = CompositionPass(name);
-    app.add_systems(pass.clone(), draw_composition_fixture);
+    let pass = app.declare_imgui_pass::<CompositionPass>();
+    app.add_imgui_systems(
+        &pass,
+        pass.system(draw_composition_fixture::<CompositionPass>),
+    );
     let context_id = {
         let mut contexts = app.world_mut().non_send_mut::<ImguiContexts>();
         let context_id = contexts
-            .create(ImguiContextConfig::new(pass).with_docking(false))
+            .create(ImguiContextConfig::new(&pass).with_docking(false))
             .expect("each composition camera needs an independently routed Context");
         contexts
             .configure(context_id, |context| {
@@ -500,30 +621,24 @@ fn spawn_case(app: &mut App, kind: CameraKind, msaa: Msaa, hdr: bool) {
     ));
 }
 
-fn draw_composition_fixture(imgui: ImguiUi) {
-    let Ok(ui) = imgui.ui() else {
-        return;
-    };
+fn draw_composition_fixture<P: 'static>(frame: ImguiFrame<'_, P>) {
+    let ui = frame.ui();
     ui.get_background_draw_list()
         .add_rect([8.0, 8.0], [24.0, 24.0], [1.0, 0.0, 0.0, 1.0])
         .filled(true)
         .build();
 }
 
-fn draw_primary_context_fixture(imgui: ImguiUi) {
-    let Ok(ui) = imgui.ui() else {
-        return;
-    };
+fn draw_primary_context_fixture(frame: ImguiFrame<'_>) {
+    let ui = frame.ui();
     ui.get_background_draw_list()
         .add_rect([8.0, 8.0], [32.0, 32.0], [1.0, 0.0, 0.0, 1.0])
         .filled(true)
         .build();
 }
 
-fn draw_secondary_context_fixture(imgui: ImguiUi) {
-    let Ok(ui) = imgui.ui() else {
-        return;
-    };
+fn draw_secondary_context_fixture(frame: ImguiFrame<'_, SameCameraSecondaryPass>) {
+    let ui = frame.ui();
     ui.get_background_draw_list()
         .add_rect([20.0, 20.0], [48.0, 48.0], [0.0, 0.0, 1.0, 1.0])
         .filled(true)

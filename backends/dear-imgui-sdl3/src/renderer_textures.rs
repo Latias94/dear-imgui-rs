@@ -15,6 +15,8 @@ pub(super) struct RendererTextureStore {
     textures: HashMap<SnapshotTextureId, RendererTexture>,
     /// Identities sealed by Destroy, paired with their latest request epoch.
     destroyed: HashMap<SnapshotTextureId, u64>,
+    /// Latest synchronous frame reconciled through this renderer instance.
+    reconciled_epoch: Option<u64>,
 }
 
 impl std::fmt::Debug for RendererTextureStore {
@@ -23,6 +25,7 @@ impl std::fmt::Debug for RendererTextureStore {
             .debug_struct("RendererTextureStore")
             .field("textures", &self.textures)
             .field("destroyed", &self.destroyed)
+            .field("reconciled_epoch", &self.reconciled_epoch)
             .finish()
     }
 }
@@ -164,7 +167,7 @@ impl RendererTextureStore {
     }
 
     /// Mark request-created proxies as visible to Context after feedback was reconciled.
-    pub(super) fn mark_reconciled(&mut self, requests: &[TextureRequest]) {
+    pub(super) fn mark_reconciled(&mut self, requests: &[TextureRequest], request_epoch: u64) {
         for request in requests {
             if matches!(
                 request.operation(),
@@ -174,6 +177,11 @@ impl RendererTextureStore {
                 proxy.installed = true;
             }
         }
+        self.reconciled_epoch = Some(request_epoch);
+    }
+
+    pub(super) fn reconciled_epoch_is(&self, request_epoch: u64) -> bool {
+        self.reconciled_epoch == Some(request_epoch)
     }
 
     /// Destroy proxies that were never installed into Context-owned texture data.
@@ -203,6 +211,7 @@ impl RendererTextureStore {
             "uninstalled SDL3 proxy must be explicitly destroyed before upstream teardown"
         );
         self.textures.clear();
+        self.reconciled_epoch = None;
     }
 
     pub(super) fn clear_destroyed(&mut self) {
@@ -531,7 +540,10 @@ mod tests {
             )
             .unwrap();
         rendered.reconcile_texture_feedback(feedback).unwrap();
-        store.mark_reconciled(rendered.texture_requests());
+        store.mark_reconciled(
+            rendered.texture_requests(),
+            rendered.epoch().unwrap().sequence(),
+        );
         drop(rendered);
         assert_eq!(
             context
@@ -560,7 +572,10 @@ mod tests {
             )
             .unwrap();
         rendered.reconcile_texture_feedback(feedback).unwrap();
-        store.mark_reconciled(rendered.texture_requests());
+        store.mark_reconciled(
+            rendered.texture_requests(),
+            rendered.epoch().unwrap().sequence(),
+        );
         drop(rendered);
         assert_eq!(
             store
@@ -585,7 +600,10 @@ mod tests {
             )
             .unwrap();
         rendered.reconcile_texture_feedback(feedback).unwrap();
-        store.mark_reconciled(rendered.texture_requests());
+        store.mark_reconciled(
+            rendered.texture_requests(),
+            rendered.epoch().unwrap().sequence(),
+        );
         drop(rendered);
         assert!(
             !store
@@ -622,6 +640,19 @@ mod tests {
         store.forget_destroyed_by_upstream();
 
         assert!(store.textures.is_empty());
+    }
+
+    #[test]
+    fn reconciliation_provenance_is_exact_and_cleared_by_teardown() {
+        let mut store = RendererTextureStore::default();
+
+        assert!(!store.reconciled_epoch_is(7));
+        store.mark_reconciled(&[], 7);
+        assert!(store.reconciled_epoch_is(7));
+        assert!(!store.reconciled_epoch_is(6));
+
+        store.forget_destroyed_by_upstream();
+        assert!(!store.reconciled_epoch_is(7));
     }
 
     #[test]
@@ -833,7 +864,7 @@ mod tests {
             )
             .unwrap();
             let progress = rendered.reconcile_texture_feedback(feedback).unwrap();
-            store.mark_reconciled(rendered.texture_requests());
+            store.mark_reconciled(rendered.texture_requests(), epoch);
             store.prune_destroyed(progress.watermark());
             drop(rendered);
 
@@ -849,7 +880,7 @@ mod tests {
             )
             .unwrap();
             let progress = rendered.reconcile_texture_feedback(feedback).unwrap();
-            store.mark_reconciled(rendered.texture_requests());
+            store.mark_reconciled(rendered.texture_requests(), epoch);
             store.prune_destroyed(progress.watermark());
             drop(rendered);
 

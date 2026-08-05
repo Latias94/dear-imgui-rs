@@ -1,4 +1,4 @@
-//! Safe event handoff for SDL3 main-callback examples.
+//! Owned event handoff for SDL3 main-callback examples.
 //!
 //! SDL can invoke `SDL_AppEvent` on a worker thread, while Dear ImGui, SDL video, and every
 //! renderer in these examples must stay on the main thread. This queue copies the high-level
@@ -94,7 +94,12 @@ enum QueuedImGuiEvent {
 }
 
 impl QueuedSdl3Event {
-    fn from_raw(raw: &SDL_Event) -> Self {
+    /// # Safety
+    ///
+    /// `raw` must either come from the live SDL runtime or be constructed with the same validity
+    /// invariants. Its type must name the active union member, and every pointer reachable from
+    /// that member must remain valid for this call.
+    unsafe fn from_callback_raw(raw: &SDL_Event) -> Self {
         // Convert while SDL owns the event. The resulting enum is reduced to a fully owned
         // application summary before returning, so pointer-bearing `SDL_Event` variants never
         // cross the callback-thread boundary.
@@ -195,11 +200,20 @@ pub struct Sdl3CallbackEventHandoff {
 
 impl Sdl3CallbackEventHandoff {
     /// Copy one callback event while SDL's transient payload pointers remain valid.
-    pub fn push(&self, raw: &SDL_Event) {
-        self.events
-            .lock()
-            .expect("SDL3 callback event handoff mutex poisoned")
-            .push(raw);
+    ///
+    /// # Safety
+    ///
+    /// `raw` must be the valid event supplied to the current SDL application callback, or an event
+    /// constructed with equivalent validity invariants. Its type must name the active union
+    /// member, and every pointer reachable from that member must remain valid until this method
+    /// returns.
+    pub unsafe fn push_from_callback(&self, raw: &SDL_Event) {
+        unsafe {
+            self.events
+                .lock()
+                .expect("SDL3 callback event handoff mutex poisoned")
+                .push_from_callback(raw);
+        }
     }
 
     /// Move the currently queued events into a main-thread-owned batch.
@@ -220,8 +234,9 @@ pub struct Sdl3CallbackEventQueue {
 }
 
 impl Sdl3CallbackEventQueue {
-    fn push(&mut self, raw: &SDL_Event) {
-        self.events.push_back(QueuedSdl3Event::from_raw(raw));
+    unsafe fn push_from_callback(&mut self, raw: &SDL_Event) {
+        self.events
+            .push_back(unsafe { QueuedSdl3Event::from_callback_raw(raw) });
     }
 
     /// Take the next event for main-thread processing.
@@ -260,7 +275,8 @@ mod tests {
                 },
             };
             let handoff = Sdl3CallbackEventHandoff::default();
-            handoff.push(&raw);
+            // SAFETY: `raw` has the active text member and its text pointer remains valid here.
+            unsafe { handoff.push_from_callback(&raw) };
             drop(source);
             handoff.drain()
         })
@@ -293,7 +309,8 @@ mod tests {
                 },
             };
             let handoff = Sdl3CallbackEventHandoff::default();
-            handoff.push(&raw);
+            // SAFETY: `raw` has the active drop member and both pointers remain valid here.
+            unsafe { handoff.push_from_callback(&raw) };
             drop((source, data));
             handoff.drain()
         })
@@ -317,7 +334,8 @@ mod tests {
             },
         };
         let handoff = Sdl3CallbackEventHandoff::default();
-        handoff.push(&raw);
+        // SAFETY: `raw` has the active display member and contains no pointer payload.
+        unsafe { handoff.push_from_callback(&raw) };
         let mut queue = handoff.drain();
 
         let queued = queue.pop().expect("event must be queued");
@@ -343,7 +361,8 @@ mod tests {
             },
         };
         let handoff = Sdl3CallbackEventHandoff::default();
-        handoff.push(&raw);
+        // SAFETY: `raw` has the active window member and contains no pointer payload.
+        unsafe { handoff.push_from_callback(&raw) };
         let mut queue = handoff.drain();
 
         assert!(
@@ -380,7 +399,8 @@ mod tests {
                     timestamp: 42,
                 },
             };
-            callback_handoff.push(&raw);
+            // SAFETY: `raw` has the active quit member and contains no pointer payload.
+            unsafe { callback_handoff.push_from_callback(&raw) };
         })
         .join()
         .expect("callback worker must not panic");
@@ -400,7 +420,8 @@ mod tests {
                 timestamp: 1,
             },
         };
-        handoff.push(&first);
+        // SAFETY: `first` has the active quit member and contains no pointer payload.
+        unsafe { handoff.push_from_callback(&first) };
         let mut first_batch = handoff.drain();
 
         let callback_handoff = Arc::clone(&handoff);
@@ -412,7 +433,8 @@ mod tests {
                     timestamp: 2,
                 },
             };
-            callback_handoff.push(&second);
+            // SAFETY: `second` has the active quit member and contains no pointer payload.
+            unsafe { callback_handoff.push_from_callback(&second) };
         })
         .join()
         .expect("callback must not wait for the drained batch");

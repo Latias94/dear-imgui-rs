@@ -26,7 +26,7 @@ class SourceInventoryTests(unittest.TestCase):
     def test_checked_in_inventory_drives_sources_archives_and_submodules(self):
         inventory = load_inventory(REPO_ROOT)
 
-        self.assertEqual(inventory.schema, "dear-imgui-maintained-sources-v2")
+        self.assertEqual(inventory.schema, "dear-imgui-maintained-sources-v3")
         self.assertEqual(inventory.wasm_import_module, "imgui-sys-v1")
         self.assertEqual(len(inventory.sources), 8)
         self.assertIn(
@@ -41,8 +41,8 @@ class SourceInventoryTests(unittest.TestCase):
     def test_duplicate_json_keys_are_rejected_before_schema_validation(self):
         contents = (REPO_ROOT / INVENTORY_RELATIVE_PATH).read_text(encoding="utf-8")
         contents = contents.replace(
-            '"schema": "dear-imgui-maintained-sources-v2",',
-            '"schema": "duplicate",\n  "schema": "dear-imgui-maintained-sources-v2",',
+            '"schema": "dear-imgui-maintained-sources-v3",',
+            '"schema": "duplicate",\n  "schema": "dear-imgui-maintained-sources-v3",',
             1,
         )
         with tempfile.TemporaryDirectory() as directory:
@@ -98,58 +98,6 @@ class SourceInventoryTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 SourceInventoryError, "package_order values must be contiguous from zero"
             ):
-                load_inventory(root)
-
-    def test_api_contract_is_mandatory_and_strict(self):
-        raw = json.loads(
-            (REPO_ROOT / INVENTORY_RELATIVE_PATH).read_text(encoding="utf-8")
-        )
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-
-            missing = json.loads(json.dumps(raw))
-            missing["sources"][0].pop("api_contract")
-            self.write_inventory(root, json.dumps(missing))
-            with self.assertRaisesRegex(SourceInventoryError, "missing.*api_contract"):
-                load_inventory(root)
-
-            unsupported = json.loads(json.dumps(raw))
-            unsupported["sources"][0]["api_contract"] = {"kind": "none"}
-            self.write_inventory(root, json.dumps(unsupported))
-            with self.assertRaisesRegex(SourceInventoryError, "unsupported value"):
-                load_inventory(root)
-
-            empty_locations = json.loads(json.dumps(raw))
-            empty_locations["sources"][0]["api_contract"] = {
-                "kind": "cimgui-generator",
-                "locations": [],
-            }
-            self.write_inventory(root, json.dumps(empty_locations))
-            with self.assertRaisesRegex(SourceInventoryError, "must not be empty"):
-                load_inventory(root)
-
-            escaped_path = json.loads(json.dumps(raw))
-            escaped_path["sources"][0]["api_contract"] = {
-                "kind": "rust-bindings",
-                "path": "../bindings.rs",
-            }
-            self.write_inventory(root, json.dumps(escaped_path))
-            with self.assertRaisesRegex(SourceInventoryError, "relative path"):
-                load_inventory(root)
-
-            non_rust_path = json.loads(json.dumps(raw))
-            non_rust_path["sources"][0]["api_contract"] = {
-                "kind": "rust-bindings",
-                "path": "src/bindings.txt",
-            }
-            self.write_inventory(root, json.dumps(non_rust_path))
-            with self.assertRaisesRegex(SourceInventoryError, "must name a .rs file"):
-                load_inventory(root)
-
-            extra_field = json.loads(json.dumps(raw))
-            extra_field["sources"][0]["api_contract"]["path"] = "src/unused.rs"
-            self.write_inventory(root, json.dumps(extra_field))
-            with self.assertRaisesRegex(SourceInventoryError, "unexpected.*path"):
                 load_inventory(root)
 
     def test_canonical_and_alternate_paths_are_mutually_exclusive(self):

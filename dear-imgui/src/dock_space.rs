@@ -21,6 +21,10 @@
 //! ```no_run
 //! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
+//! # ctx.io_mut().set_display_size([1280.0, 720.0]);
+//! # let flags = ctx.io().config_flags() | ConfigFlags::DOCKING_ENABLE;
+//! # ctx.io_mut().set_config_flags(flags);
+//! # let _ = ctx.font_atlas().build();
 //! # let ui = ctx.frame();
 //! // Create a dockspace over the main viewport
 //! let dockspace_id = ui.dockspace_over_main_viewport();
@@ -37,8 +41,9 @@ mod ui;
 mod validation;
 mod window_class;
 
-pub use flags::{DockFlags, DockNodeFlags};
+pub use flags::{DockNodeFlags, WindowClassDockNodeFlags};
 pub(crate) use validation::{
-    claim_dockspace_submission, main_viewport_dockspace_host_name, window_skips_items,
+    MAX_DOCKSPACE_HOST_NAME_BYTES, claim_dockspace_submission, current_dockspace_host_name_len,
+    is_valid_dockspace_size_component,
 };
-pub use window_class::{WindowClass, WindowClassParentViewport};
+pub use window_class::{WindowClass, WindowClassError, WindowClassParentViewport};

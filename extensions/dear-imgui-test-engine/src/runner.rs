@@ -12,6 +12,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use dear_imgui_rs::render::{ReconciledFrame, RenderedFrame, RendererConsumerError};
 use dear_imgui_rs::{Context, ContextBindingError, ContextId, FrameLifecycleState, Ui};
 
+use crate::results::RunCompletion;
 use crate::{
     AttachmentState, FrameDriverError, FrameDriverPhase, ResultSummary, RunFlags, RunMode,
     RunOutcome, RunReport, RunState, TestEngine, TestEngineError, TestFrameDriver, TestGroup,
@@ -741,8 +742,8 @@ impl<'engine> TestRunner<'engine> {
         self.engine
             .queue_tests(self.group, self.filter.as_deref(), self.run_flags)?;
 
-        if let Some(summary) = self.take_terminal_summary()? {
-            return self.natural_report(summary, 0, 0, mode);
+        if let Some(completion) = self.take_terminal_run()? {
+            return self.natural_report(completion, 0, 0, mode);
         }
 
         let mut pump = FramePump {
@@ -757,8 +758,8 @@ impl<'engine> TestRunner<'engine> {
             let control = self.pump_frame(frame_index, &mut pump)?;
             frames = frame_index;
 
-            if let Some(summary) = self.take_terminal_summary()? {
-                return self.natural_report(summary, frames, 0, pump.mode);
+            if let Some(completion) = self.take_terminal_run()? {
+                return self.natural_report(completion, frames, 0, pump.mode);
             }
 
             if control == RunnerControl::Abort {
@@ -822,10 +823,10 @@ impl<'engine> TestRunner<'engine> {
         let mut cleanup_frames = 0;
 
         for _ in 0..self.cleanup_frame_budget.get() {
-            if let Some(summary) = self.take_terminal_summary()? {
+            if let Some(completion) = self.take_terminal_run()? {
                 return self.requested_report(
                     requested,
-                    summary,
+                    completion,
                     frames,
                     cleanup_frames,
                     pump.mode,
@@ -833,11 +834,11 @@ impl<'engine> TestRunner<'engine> {
             }
 
             if self.engine.try_abort_engine()?
-                && let Some(summary) = self.take_terminal_summary()?
+                && let Some(completion) = self.take_terminal_run()?
             {
                 return self.requested_report(
                     requested,
-                    summary,
+                    completion,
                     frames,
                     cleanup_frames,
                     pump.mode,
@@ -848,10 +849,10 @@ impl<'engine> TestRunner<'engine> {
             self.pump_frame(frame_index, pump)?;
             cleanup_frames += 1;
 
-            if let Some(summary) = self.take_terminal_summary()? {
+            if let Some(completion) = self.take_terminal_run()? {
                 return self.requested_report(
                     requested,
-                    summary,
+                    completion,
                     frames,
                     cleanup_frames,
                     pump.mode,
@@ -868,16 +869,16 @@ impl<'engine> TestRunner<'engine> {
     fn requested_report<ApplicationError, RenderError, PresentError, CaptureError>(
         &self,
         outcome: RunOutcome,
-        summary: ResultSummary,
+        completion: RunCompletion,
         frames: u64,
         cleanup_frames: u64,
         mode: RunMode,
     ) -> Result<RunReport, RunnerError<ApplicationError, RenderError, PresentError, CaptureError>>
     {
-        self.validate_terminal_summary(summary)?;
+        self.validate_terminal_summary(completion.summary)?;
         Ok(RunReport::new(
+            completion,
             outcome,
-            summary,
             frames + cleanup_frames,
             cleanup_frames,
             mode,
@@ -894,37 +895,32 @@ impl<'engine> TestRunner<'engine> {
         }
     }
 
-    fn take_terminal_summary<ApplicationError, RenderError, PresentError, CaptureError>(
+    fn take_terminal_run<ApplicationError, RenderError, PresentError, CaptureError>(
         &mut self,
     ) -> Result<
-        Option<ResultSummary>,
+        Option<RunCompletion>,
         RunnerError<ApplicationError, RenderError, PresentError, CaptureError>,
     > {
         if self.engine.run_state() != RunState::Terminal {
             return Ok(None);
         }
-        self.engine.take_terminal_summary().map_err(Into::into)
+        self.engine.take_terminal_run().map_err(Into::into)
     }
 
     fn natural_report<ApplicationError, RenderError, PresentError, CaptureError>(
         &self,
-        summary: ResultSummary,
+        completion: RunCompletion,
         frames: u64,
         cleanup_frames: u64,
         mode: RunMode,
     ) -> Result<RunReport, RunnerError<ApplicationError, RenderError, PresentError, CaptureError>>
     {
+        let summary = completion.summary;
         self.validate_terminal_summary(summary)?;
-        let outcome = if summary.count_tested == 0 {
-            RunOutcome::NoMatch
-        } else if summary.count_success == summary.count_tested {
-            RunOutcome::Passed
-        } else {
-            RunOutcome::Failed
-        };
+        let outcome = completion.natural_outcome();
         Ok(RunReport::new(
+            completion,
             outcome,
-            summary,
             frames,
             cleanup_frames,
             mode,

@@ -1,6 +1,8 @@
 #include "../third-party/cimgui/imgui/imgui.h"
+#include "../third-party/cimgui/imgui/imgui_internal.h"
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef IMGUI_HAS_DOCK
 
@@ -506,6 +508,19 @@ extern "C" int dear_imgui_rs_platform_io_aggregate_callback_storage_count()
     return G_DearImguiRsPlatformIoHookStorage.Size;
 }
 
+extern "C" ImGuiViewport* dear_imgui_rs_find_live_viewport_by_address(
+    ImGuiContext* context,
+    uintptr_t address)
+{
+    if (context == nullptr || context != ImGui::GetCurrentContext() || address == 0)
+        return nullptr;
+
+    for (ImGuiViewportP* viewport : context->Viewports)
+        if (reinterpret_cast<uintptr_t>(viewport) == address)
+            return viewport;
+    return nullptr;
+}
+
 #else
 
 struct DearImguiRsPlatformIoAggregateProbeResult
@@ -605,6 +620,13 @@ extern "C" int dear_imgui_rs_platform_io_invoke_renderer_set_window_size(
 extern "C" int dear_imgui_rs_platform_io_aggregate_callback_storage_count()
 {
     return 0;
+}
+
+extern "C" ImGuiViewport* dear_imgui_rs_find_live_viewport_by_address(
+    ImGuiContext*,
+    uintptr_t)
+{
+    return nullptr;
 }
 
 #endif

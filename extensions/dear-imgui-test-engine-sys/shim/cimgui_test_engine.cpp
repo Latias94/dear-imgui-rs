@@ -11,12 +11,21 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace dear_imgui_test_engine_abi {
 namespace {
+
+static_assert(ImGuiTestEngineTestStatus_Unknown == static_cast<int>(ImGuiTestStatus_Unknown));
+static_assert(ImGuiTestEngineTestStatus_Success == static_cast<int>(ImGuiTestStatus_Success));
+static_assert(ImGuiTestEngineTestStatus_Queued == static_cast<int>(ImGuiTestStatus_Queued));
+static_assert(ImGuiTestEngineTestStatus_Running == static_cast<int>(ImGuiTestStatus_Running));
+static_assert(ImGuiTestEngineTestStatus_Error == static_cast<int>(ImGuiTestStatus_Error));
+static_assert(ImGuiTestEngineTestStatus_Suspended == static_cast<int>(ImGuiTestStatus_Suspended));
 
 struct Diagnostic {
     char Message[kDiagnosticCapacity]{};
@@ -45,7 +54,15 @@ struct HiddenWindowState {
     ImS8 HiddenFramesForRenderOnly = 0;
 };
 
+struct RunRecord {
+    std::uint64_t Id = 0;
+    std::vector<ImGuiTest*> Tests;
+};
+
 struct EngineRecord {
+    std::uint64_t Id = 0;
+    std::uint64_t NextRunId = 1;
+    RunRecord ActiveRun;
     EngineState State = EngineState::Live;
     bool PresentationPending = false;
     ImGuiTestEnginePresentationTraceCallback_c PresentationTrace = nullptr;
@@ -70,6 +87,9 @@ struct EngineRecord {
 
 std::atomic_flag g_engine_lock = ATOMIC_FLAG_INIT;
 std::unordered_map<ImGuiTestEngine*, EngineRecord> g_engines;
+std::uint64_t g_next_engine_id = 1;
+ImGuiTestEngine* g_bound_engine = nullptr;
+ImGuiContext* g_bound_context = nullptr;
 
 struct AtomicCounters {
     std::atomic<std::uint64_t> EnginesCreated{0};
@@ -213,7 +233,12 @@ ImGuiTestEngineStatus require_engine(ImGuiTestEngine* engine) noexcept {
 
 void register_engine(ImGuiTestEngine* engine) {
     SpinGuard guard(g_engine_lock);
-    g_engines.insert_or_assign(engine, EngineRecord{});
+    if (g_next_engine_id == 0) {
+        throw std::overflow_error("Test Engine identity space exhausted");
+    }
+    EngineRecord record{};
+    record.Id = g_next_engine_id++;
+    g_engines.insert_or_assign(engine, std::move(record));
 }
 
 void begin_destroy_engine(ImGuiTestEngine* engine) noexcept {
@@ -234,12 +259,151 @@ void cancel_destroy_engine(ImGuiTestEngine* engine) noexcept {
 
 void finish_destroy_engine(ImGuiTestEngine* engine) noexcept {
     SpinGuard guard(g_engine_lock);
+    if (g_bound_engine == engine) {
+        g_bound_engine = nullptr;
+        g_bound_context = nullptr;
+    }
     g_engines.erase(engine);
 }
 
 bool has_live_engines() noexcept {
     SpinGuard guard(g_engine_lock);
     return !g_engines.empty();
+}
+
+ImGuiTestEngineStatus reserve_process_binding(
+    ImGuiTestEngine* engine,
+    ImGuiContext* context
+) noexcept {
+    SpinGuard guard(g_engine_lock);
+    if (g_bound_engine != nullptr) {
+        return fail(
+            ImGuiTestEngineStatus_BindingOccupied,
+            g_bound_engine == engine
+                ? "engine already owns the process Test Engine binding"
+                : "another Test Engine already owns the process binding"
+        );
+    }
+    const auto found = g_engines.find(engine);
+    if (found == g_engines.end() || found->second.State != EngineState::Live) {
+        return fail(ImGuiTestEngineStatus_InvalidState, "engine is not live");
+    }
+    g_bound_engine = engine;
+    g_bound_context = context;
+    return ImGuiTestEngineStatus_Success;
+}
+
+void release_process_binding(ImGuiTestEngine* engine, ImGuiContext* context) noexcept {
+    SpinGuard guard(g_engine_lock);
+    if (g_bound_engine == engine && g_bound_context == context) {
+        g_bound_engine = nullptr;
+        g_bound_context = nullptr;
+    }
+}
+
+bool owns_process_binding(ImGuiTestEngine* engine) noexcept {
+    SpinGuard guard(g_engine_lock);
+    return g_bound_engine == engine;
+}
+
+bool engine_identity(ImGuiTestEngine* engine, std::uint64_t* out_id) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    if (found == g_engines.end() || found->second.State != EngineState::Live) {
+        return false;
+    }
+    *out_id = found->second.Id;
+    return true;
+}
+
+bool has_active_run(ImGuiTestEngine* engine) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    return found != g_engines.end() && found->second.ActiveRun.Id != 0;
+}
+
+ImGuiTestEngineStatus install_run(
+    ImGuiTestEngine* engine,
+    std::vector<ImGuiTest*>&& tests,
+    std::uint64_t* out_run_id
+) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    if (found == g_engines.end() || found->second.State != EngineState::Live) {
+        return fail(ImGuiTestEngineStatus_InvalidState, "engine is not live");
+    }
+    EngineRecord& record = found->second;
+    if (record.ActiveRun.Id != 0) {
+        return fail(
+            ImGuiTestEngineStatus_InvalidState,
+            "the previous Test Engine run has not been consumed"
+        );
+    }
+    if (record.NextRunId == 0) {
+        return fail(ImGuiTestEngineStatus_OutOfRange, "Test Engine run identity space exhausted");
+    }
+    record.ActiveRun.Id = record.NextRunId++;
+    record.ActiveRun.Tests = std::move(tests);
+    *out_run_id = record.ActiveRun.Id;
+    return ImGuiTestEngineStatus_Success;
+}
+
+ImGuiTestEngineStatus get_run_test(
+    ImGuiTestEngine* engine,
+    std::uint64_t run_id,
+    int index,
+    ImGuiTest** out_test
+) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    if (found == g_engines.end() || found->second.State != EngineState::Live) {
+        return fail(ImGuiTestEngineStatus_InvalidState, "engine is not live");
+    }
+    const RunRecord& run = found->second.ActiveRun;
+    if (run.Id == 0 || run.Id != run_id) {
+        return fail(ImGuiTestEngineStatus_InvalidState, "run does not belong to this engine");
+    }
+    if (index < 0 || static_cast<std::size_t>(index) >= run.Tests.size()) {
+        return fail(ImGuiTestEngineStatus_OutOfRange, "run test index is out of range");
+    }
+    *out_test = run.Tests[static_cast<std::size_t>(index)];
+    return ImGuiTestEngineStatus_Success;
+}
+
+ImGuiTestEngineStatus get_run_test_count(
+    ImGuiTestEngine* engine,
+    std::uint64_t run_id,
+    int* out_count
+) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    if (found == g_engines.end() || found->second.State != EngineState::Live) {
+        return fail(ImGuiTestEngineStatus_InvalidState, "engine is not live");
+    }
+    const RunRecord& run = found->second.ActiveRun;
+    if (run.Id == 0 || run.Id != run_id) {
+        return fail(ImGuiTestEngineStatus_InvalidState, "run does not belong to this engine");
+    }
+    if (run.Tests.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        return fail(ImGuiTestEngineStatus_OutOfRange, "run contains too many tests");
+    }
+    *out_count = static_cast<int>(run.Tests.size());
+    return ImGuiTestEngineStatus_Success;
+}
+
+ImGuiTestEngineStatus finish_run(ImGuiTestEngine* engine, std::uint64_t run_id) noexcept {
+    SpinGuard guard(g_engine_lock);
+    const auto found = g_engines.find(engine);
+    if (found == g_engines.end() || found->second.State != EngineState::Live) {
+        return fail(ImGuiTestEngineStatus_InvalidState, "engine is not live");
+    }
+    RunRecord& run = found->second.ActiveRun;
+    if (run.Id == 0 || run.Id != run_id) {
+        return fail(ImGuiTestEngineStatus_InvalidState, "run does not belong to this engine");
+    }
+    run.Tests.clear();
+    run.Id = 0;
+    return ImGuiTestEngineStatus_Success;
 }
 
 void increment(Counter counter) noexcept {
@@ -281,6 +445,31 @@ ScopedCurrentContext::~ScopedCurrentContext() noexcept {
     if (target_ != nullptr && previous_ != target_) {
         ImGui::SetCurrentContext(previous_);
     }
+}
+
+void rollback_failed_start(
+    ImGuiTestEngine* engine,
+    ImGuiContext* context,
+    int settings_count,
+    int hooks_count
+) noexcept {
+    ScopedCurrentContext current(context);
+    unregister_context_shutdown_observer(engine, context);
+
+    if (engine->UiContextTarget == context && context->TestEngine == engine) {
+        ImGuiTestEngine_UnbindImGuiContext(engine, context);
+    } else {
+        context->Hooks.resize(hooks_count);
+        context->SettingsHandlers.resize(settings_count);
+        if (context->TestEngine == engine) {
+            context->TestEngine = nullptr;
+        }
+        engine->UiContextTarget = nullptr;
+        engine->UiContextActive = nullptr;
+    }
+
+    engine->Started = false;
+    release_process_binding(engine, context);
 }
 
 } // namespace dear_imgui_test_engine_abi
@@ -342,6 +531,29 @@ ImGuiTestEngineStatus imgui_test_engine_create_context(ImGuiTestEngine** out_eng
     });
 }
 
+ImGuiTestEngineStatus imgui_test_engine_get_engine_id(
+    ImGuiTestEngine* engine,
+    std::uint64_t* out_engine_id
+) {
+    return abi::boundary("imgui_test_engine_get_engine_id", [&]() {
+        if (out_engine_id == nullptr) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidArgument,
+                "out_engine_id must not be null"
+            );
+        }
+        *out_engine_id = 0;
+        const ImGuiTestEngineStatus status = abi::require_engine(engine);
+        if (status != ImGuiTestEngineStatus_Success) {
+            return status;
+        }
+        if (!abi::engine_identity(engine, out_engine_id) || *out_engine_id == 0) {
+            return abi::fail(ImGuiTestEngineStatus_InvalidState, "engine has no stable identity");
+        }
+        return ImGuiTestEngineStatus_Success;
+    });
+}
+
 ImGuiTestEngineStatus imgui_test_engine_destroy_context(ImGuiTestEngine* engine) {
     return abi::boundary("imgui_test_engine_destroy_context", [&]() {
         if (engine == nullptr) {
@@ -355,6 +567,12 @@ ImGuiTestEngineStatus imgui_test_engine_destroy_context(ImGuiTestEngine* engine)
             return abi::fail(
                 ImGuiTestEngineStatus_InvalidState,
                 "engine must be stopped and unbound before destruction"
+            );
+        }
+        if (abi::owns_process_binding(engine)) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidState,
+                "engine still owns the process Test Engine binding"
             );
         }
 
@@ -448,6 +666,7 @@ ImGuiTestEngineStatus imgui_test_engine_unbind(ImGuiTestEngine* engine) {
         abi::clear_capture_provider(engine);
         abi::unregister_context_shutdown_observer(engine, target);
         ImGuiTestEngine_UnbindImGuiContext(engine, target);
+        abi::release_process_binding(engine, target);
         abi::increment(abi::Counter::EngineUnbound);
         return ImGuiTestEngineStatus_Success;
     });
@@ -477,15 +696,20 @@ ImGuiTestEngineStatus imgui_test_engine_start(ImGuiTestEngine* engine, ImGuiCont
                 "engine has no coroutine implementation"
             );
         }
+        const ImGuiTestEngineStatus lease_status = abi::reserve_process_binding(engine, ui_ctx);
+        if (lease_status != ImGuiTestEngineStatus_Success) {
+            return lease_status;
+        }
         abi::register_imgui_hooks();
-        abi::maybe_inject(ImGuiTestEngineExceptionPoint_UpstreamCall);
         abi::ScopedCurrentContext current(ui_ctx);
-        ImGuiTestEngine_Start(engine, ui_ctx);
+        const int settings_count = ui_ctx->SettingsHandlers.Size;
+        const int hooks_count = ui_ctx->Hooks.Size;
         try {
+            abi::maybe_inject(ImGuiTestEngineExceptionPoint_UpstreamCall);
+            ImGuiTestEngine_Start(engine, ui_ctx);
             abi::register_context_shutdown_observer(engine, ui_ctx);
         } catch (...) {
-            ImGuiTestEngine_Stop(engine);
-            ImGuiTestEngine_UnbindImGuiContext(engine, ui_ctx);
+            abi::rollback_failed_start(engine, ui_ctx, settings_count, hooks_count);
             throw;
         }
         abi::increment(abi::Counter::EngineStarted);
@@ -1268,9 +1492,14 @@ ImGuiTestEngineStatus imgui_test_engine_queue_tests(
     ImGuiTestEngine* engine,
     int group,
     const char* filter,
-    int run_flags
+    int run_flags,
+    std::uint64_t* out_run_id
 ) {
     return abi::boundary("imgui_test_engine_queue_tests", [&]() {
+        if (out_run_id == nullptr) {
+            return abi::fail(ImGuiTestEngineStatus_InvalidArgument, "out_run_id must not be null");
+        }
+        *out_run_id = 0;
         const ImGuiTestEngineStatus status = abi::require_engine(engine);
         if (status != ImGuiTestEngineStatus_Success) {
             return status;
@@ -1300,14 +1529,177 @@ ImGuiTestEngineStatus imgui_test_engine_queue_tests(
                 "engine frame hooks are not receiving the bound UI context"
             );
         }
-        abi::maybe_inject(ImGuiTestEngineExceptionPoint_UpstreamCall);
-        ImGuiTestEngine_QueueTests(
-            engine,
-            static_cast<ImGuiTestGroup>(group),
-            filter[0] != '\0' ? filter : nullptr,
-            static_cast<ImGuiTestRunFlags>(run_flags)
-        );
+        if (abi::has_active_run(engine)) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidState,
+                "the previous Test Engine run has not been consumed"
+            );
+        }
+        if (!ImGuiTestEngine_IsTestQueueEmpty(engine)) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidState,
+                "the native Test Engine queue must be empty before starting a run"
+            );
+        }
+
+        std::vector<std::pair<ImGuiTest*, ImGuiTestStatus>> status_backup;
+        std::vector<ImGuiTest*> selected_tests;
+        status_backup.reserve(static_cast<std::size_t>(engine->TestsAll.Size));
+        selected_tests.reserve(static_cast<std::size_t>(engine->TestsAll.Size));
+        for (ImGuiTest* test : engine->TestsAll) {
+            status_backup.emplace_back(test, test->Output.Status);
+        }
+
+        auto rollback_queue = [&]() noexcept {
+            engine->TestsQueue.clear();
+            for (const auto& [test, previous_status] : status_backup) {
+                test->Output.Status = previous_status;
+            }
+        };
+
+        try {
+            abi::maybe_inject(ImGuiTestEngineExceptionPoint_UpstreamCall);
+            ImGuiTestEngine_QueueTests(
+                engine,
+                static_cast<ImGuiTestGroup>(group),
+                filter[0] != '\0' ? filter : nullptr,
+                static_cast<ImGuiTestRunFlags>(run_flags)
+            );
+            for (const ImGuiTestRunTask& task : engine->TestsQueue) {
+                selected_tests.push_back(task.Test);
+            }
+            const ImGuiTestEngineStatus install_status =
+                abi::install_run(engine, std::move(selected_tests), out_run_id);
+            if (install_status != ImGuiTestEngineStatus_Success) {
+                rollback_queue();
+                return install_status;
+            }
+            return ImGuiTestEngineStatus_Success;
+        } catch (...) {
+            rollback_queue();
+            throw;
+        }
+    });
+}
+
+ImGuiTestEngineStatus imgui_test_engine_get_run_test_count(
+    ImGuiTestEngine* engine,
+    std::uint64_t run_id,
+    int* out_count
+) {
+    return abi::boundary("imgui_test_engine_get_run_test_count", [&]() {
+        if (out_count == nullptr) {
+            return abi::fail(ImGuiTestEngineStatus_InvalidArgument, "out_count must not be null");
+        }
+        *out_count = 0;
+        if (run_id == 0) {
+            return abi::fail(ImGuiTestEngineStatus_InvalidArgument, "run_id must not be zero");
+        }
+        return abi::get_run_test_count(engine, run_id, out_count);
+    });
+}
+
+ImGuiTestEngineStatus imgui_test_engine_get_run_test(
+    ImGuiTestEngine* engine,
+    std::uint64_t run_id,
+    int index,
+    char* category_buffer,
+    std::size_t category_buffer_size,
+    std::size_t* out_category_required_size,
+    char* name_buffer,
+    std::size_t name_buffer_size,
+    std::size_t* out_name_required_size,
+    int* out_status
+) {
+    return abi::boundary("imgui_test_engine_get_run_test", [&]() {
+        if (out_category_required_size == nullptr || out_name_required_size == nullptr ||
+            out_status == nullptr) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidArgument,
+                "run test output pointers must not be null"
+            );
+        }
+        *out_category_required_size = 0;
+        *out_name_required_size = 0;
+        *out_status = ImGuiTestEngineTestStatus_Unknown;
+        if (run_id == 0) {
+            return abi::fail(ImGuiTestEngineStatus_InvalidArgument, "run_id must not be zero");
+        }
+        if ((category_buffer == nullptr && category_buffer_size != 0) ||
+            (name_buffer == nullptr && name_buffer_size != 0)) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidArgument,
+                "a null run test buffer requires zero capacity"
+            );
+        }
+
+        ImGuiTest* test = nullptr;
+        const ImGuiTestEngineStatus test_status =
+            abi::get_run_test(engine, run_id, index, &test);
+        if (test_status != ImGuiTestEngineStatus_Success) {
+            return test_status;
+        }
+        if (test == nullptr || test->Category == nullptr || test->Name == nullptr) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidState,
+                "queued test has an invalid identity"
+            );
+        }
+
+        const std::size_t category_required = std::strlen(test->Category) + 1;
+        const std::size_t name_required = std::strlen(test->Name) + 1;
+        *out_category_required_size = category_required;
+        *out_name_required_size = name_required;
+        *out_status = static_cast<int>(test->Output.Status);
+
+        if (category_buffer == nullptr && name_buffer == nullptr) {
+            return ImGuiTestEngineStatus_Success;
+        }
+        if (category_buffer == nullptr || name_buffer == nullptr) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidArgument,
+                "run test category and name buffers must be copied together"
+            );
+        }
+        if (category_buffer_size < category_required || name_buffer_size < name_required) {
+            if (category_buffer_size != 0) {
+                category_buffer[0] = '\0';
+            }
+            if (name_buffer_size != 0) {
+                name_buffer[0] = '\0';
+            }
+            return abi::fail(
+                ImGuiTestEngineStatus_OutOfRange,
+                "run test identity buffer is too small"
+            );
+        }
+
+        std::memcpy(category_buffer, test->Category, category_required);
+        std::memcpy(name_buffer, test->Name, name_required);
         return ImGuiTestEngineStatus_Success;
+    });
+}
+
+ImGuiTestEngineStatus imgui_test_engine_finish_run(
+    ImGuiTestEngine* engine,
+    std::uint64_t run_id
+) {
+    return abi::boundary("imgui_test_engine_finish_run", [&]() {
+        const ImGuiTestEngineStatus status = abi::require_engine(engine);
+        if (status != ImGuiTestEngineStatus_Success) {
+            return status;
+        }
+        if (run_id == 0) {
+            return abi::fail(ImGuiTestEngineStatus_InvalidArgument, "run_id must not be zero");
+        }
+        if (ImGuiTestEngine_GetIO(engine).IsRunningTests ||
+            !ImGuiTestEngine_IsTestQueueEmpty(engine)) {
+            return abi::fail(
+                ImGuiTestEngineStatus_InvalidState,
+                "run cannot be consumed before its queue reaches terminal state"
+            );
+        }
+        return abi::finish_run(engine, run_id);
     });
 }
 
@@ -1526,7 +1918,7 @@ ImGuiTestEngineStatus imgui_test_engine_test_set_exception_injection(
 ) {
     return abi::boundary("imgui_test_engine_test_set_exception_injection", [&]() {
         if (point < ImGuiTestEngineExceptionPoint_None ||
-            point > ImGuiTestEngineExceptionPoint_UpstreamCall) {
+            point > ImGuiTestEngineExceptionPoint_SuiteRegistrationAfterFirstTest) {
             return abi::fail(ImGuiTestEngineStatus_OutOfRange, "exception point is out of range");
         }
         abi::g_exception_point = static_cast<ImGuiTestEngineExceptionPoint>(point);

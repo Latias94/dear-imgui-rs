@@ -44,6 +44,9 @@ fn prepare_secondary_viewport_frame(
     feedback: ImguiViewportFeedback,
 ) {
     reset_platform_geometry_requests(app, viewport_id);
+    let instance_id = context_bridge
+        .instance_for_id(viewport_id)
+        .expect("the viewport route should have a stable instance");
     with_primary_context(app, |context| {
         crate::viewport::prepare_platform_viewports_for_frame(
             context,
@@ -51,7 +54,7 @@ fn prepare_secondary_viewport_frame(
             primary_window,
             &Window::default(),
             &[],
-            std::iter::once((entity, viewport_id, feedback)),
+            std::iter::once((entity, instance_id, feedback)),
             crate::viewport::NativeViewportFrameSupport::new(
                 true,
                 crate::viewport::native_window::DesktopPositionSupport::Available,
@@ -76,6 +79,9 @@ fn viewport_native_geometry_polling_requests_imgui_platform_sync_without_pending
         .non_send::<ImguiViewportBridge>()
         .context(context_id)
         .expect("the primary Context bridge should remain registered");
+    let instance_id = context_bridge
+        .instance_for_id(id)
+        .expect("the viewport route should have a stable instance");
     let initial = ImguiViewportFeedback {
         pos: [100.0, 200.0],
         size: [320.0, 180.0],
@@ -88,8 +94,8 @@ fn viewport_native_geometry_polling_requests_imgui_platform_sync_without_pending
         pos: [420.0, 630.0],
         ..initial
     };
-    context_bridge.remove_viewport_feedback(id);
-    context_bridge.set_viewport_feedback(id, initial);
+    context_bridge.remove_viewport_feedback(instance_id);
+    context_bridge.set_viewport_feedback(instance_id, initial);
 
     prepare_secondary_viewport_frame(&mut app, &context_bridge, primary_window, entity, id, moved);
     assert_eq!(context_bridge.viewport_feedback(id), Some(moved));
@@ -136,6 +142,9 @@ fn pending_size_request_reconciles_matching_and_constrained_native_extents() {
         .non_send::<ImguiViewportBridge>()
         .context(context_id)
         .expect("the primary Context bridge should remain registered");
+    let instance_id = context_bridge
+        .instance_for_id(id)
+        .expect("the viewport route should have a stable instance");
     let initial = ImguiViewportFeedback {
         pos: [100.0, 200.0],
         size: [320.0, 180.0],
@@ -145,17 +154,20 @@ fn pending_size_request_reconciles_matching_and_constrained_native_extents() {
         minimized: false,
     };
     let requested_size = [640.0, 360.0];
-    context_bridge.remove_viewport_feedback(id);
-    context_bridge.set_viewport_feedback(id, initial);
-    context_bridge.record_size_request(id, requested_size, 1.0);
+    context_bridge.remove_viewport_feedback(instance_id);
+    context_bridge.set_viewport_feedback(instance_id, initial);
+    context_bridge.record_size_request(instance_id, requested_size, 1.0);
     assert!(
         context_bridge
             .inner
             .state
             .borrow()
-            .viewport_geometry
-            .get(&id)
-            .is_some_and(crate::viewport::geometry::ViewportGeometryReconciler::has_requested_size)
+            .record(
+                context_bridge
+                    .instance_for_id(id)
+                    .expect("the viewport route should have a stable instance")
+            )
+            .is_some_and(|record| record.geometry.has_requested_size())
     );
 
     let matching = ImguiViewportFeedback {
@@ -172,7 +184,7 @@ fn pending_size_request_reconciles_matching_and_constrained_native_extents() {
     );
     assert_eq!(platform_geometry_requests(&mut app, id), (false, false));
 
-    context_bridge.record_size_request(id, requested_size, 1.0);
+    context_bridge.record_size_request(instance_id, requested_size, 1.0);
     let constrained = ImguiViewportFeedback {
         size: [600.0, 340.0],
         ..matching
@@ -209,6 +221,9 @@ fn minimized_viewport_defers_geometry_reconciliation_until_restore() {
         .non_send::<ImguiViewportBridge>()
         .context(context_id)
         .expect("the primary Context bridge should remain registered");
+    let instance_id = context_bridge
+        .instance_for_id(id)
+        .expect("the viewport route should have a stable instance");
     let initial = ImguiViewportFeedback {
         pos: [100.0, 200.0],
         size: [320.0, 180.0],
@@ -217,10 +232,10 @@ fn minimized_viewport_defers_geometry_reconciliation_until_restore() {
         focused: true,
         minimized: false,
     };
-    context_bridge.remove_viewport_feedback(id);
-    context_bridge.set_viewport_feedback(id, initial);
-    context_bridge.record_position_request(id, [500.0, 600.0], 1.0);
-    context_bridge.record_size_request(id, [640.0, 360.0], 1.0);
+    context_bridge.remove_viewport_feedback(instance_id);
+    context_bridge.set_viewport_feedback(instance_id, initial);
+    context_bridge.record_position_request(instance_id, [500.0, 600.0], 1.0);
+    context_bridge.record_size_request(instance_id, [640.0, 360.0], 1.0);
 
     let minimized = ImguiViewportFeedback {
         pos: [0.0, 0.0],
@@ -250,8 +265,12 @@ fn minimized_viewport_defers_geometry_reconciliation_until_restore() {
     {
         let state = context_bridge.inner.state.borrow();
         let geometry = state
-            .viewport_geometry
-            .get(&id)
+            .record(
+                context_bridge
+                    .instance_for_id(id)
+                    .expect("the viewport route should have a stable instance"),
+            )
+            .map(|record| &record.geometry)
             .expect("minimized frames must preserve unresolved geometry intent");
         assert!(geometry.has_requested_position());
         assert!(geometry.has_requested_size());
@@ -295,6 +314,9 @@ fn decorated_viewport_waits_for_client_geometry_before_platform_sync() {
         .non_send::<ImguiViewportBridge>()
         .context(context_id)
         .expect("the primary Context bridge should remain registered");
+    let instance_id = context_bridge
+        .instance_for_id(id)
+        .expect("the viewport route should have a stable instance");
     let target = ImguiViewportFeedback {
         pos: [320.0, 240.0],
         size: [480.0, 270.0],
@@ -304,34 +326,35 @@ fn decorated_viewport_waits_for_client_geometry_before_platform_sync() {
         minimized: false,
     };
 
-    context_bridge.remove_viewport_feedback(id);
-    context_bridge.set_viewport_feedback(id, target);
-    context_bridge.record_position_request(id, [128.0, 96.0], 1.0);
+    context_bridge.remove_viewport_feedback(instance_id);
+    context_bridge.set_viewport_feedback(instance_id, target);
+    context_bridge.record_position_request(instance_id, [128.0, 96.0], 1.0);
     context_bridge
         .inner
         .state
         .borrow_mut()
-        .pending_client_placements
-        .insert(
-            id,
-            crate::viewport::PendingClientPlacement {
-                pos: [0.0, 0.0],
-                dpi_scale: 0.5,
-                show_requested: false,
-                focus_requested: false,
-            },
-        );
-    context_bridge.record_position_request(id, target.pos, target.dpi_scale);
+        .record_mut(instance_id)
+        .expect("the viewport record should exist")
+        .pending_client_placement = Some(super::super::PendingClientPlacement {
+        pos: [0.0, 0.0],
+        dpi_scale: 0.5,
+        show_requested: false,
+        focus_requested: false,
+    });
+    context_bridge.record_position_request(instance_id, target.pos, target.dpi_scale);
     {
         let state = context_bridge.inner.state.borrow();
-        let placement = state
-            .pending_client_placements
-            .get(&id)
+        let record = state
+            .record(instance_id)
+            .expect("the viewport record should exist");
+        let placement = record
+            .pending_client_placement
+            .as_ref()
             .expect("decorated client placement should own the deferred request");
         assert_eq!(placement.pos, target.pos);
         assert_eq!(placement.dpi_scale, target.dpi_scale);
         assert!(
-            !state.viewport_geometry.contains_key(&id),
+            record.geometry.is_empty(),
             "deferred position intent must not be duplicated in the geometry reconciler"
         );
     }
@@ -364,11 +387,12 @@ fn decorated_viewport_waits_for_client_geometry_before_platform_sync() {
     settle_schedule.run(app.world_mut());
     {
         let state = context_bridge.inner.state.borrow();
-        assert!(!state.pending_client_placements.contains_key(&id));
+        let record = state
+            .record(instance_id)
+            .expect("the viewport record should exist");
+        assert!(record.pending_client_placement.is_none());
         assert!(
-            state.viewport_geometry.get(&id).is_some_and(
-                crate::viewport::geometry::ViewportGeometryReconciler::has_requested_position
-            ),
+            record.geometry.has_requested_position(),
             "settlement must transfer the client-origin request to the geometry reconciler"
         );
     }

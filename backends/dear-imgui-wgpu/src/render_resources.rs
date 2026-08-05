@@ -11,17 +11,14 @@ use wgpu::*;
 /// Shared render resources
 ///
 /// This corresponds to the RenderResources struct in the C++ implementation.
-/// Contains samplers, uniform buffers, and bind group layouts that are shared
-/// across all frames.
+/// Contains samplers and bind group layouts shared across all frames.
 pub struct RenderResources {
     /// Linear texture sampler
     pub sampler: Option<Sampler>,
     /// Nearest/point texture sampler
     pub sampler_nearest: Option<Sampler>,
-    /// Uniform buffer manager (also owns the common bind group layout)
-    pub uniform_buffer: Option<UniformBuffer>,
-    /// Common bind group using the nearest/point sampler
-    pub nearest_common_bind_group: Option<BindGroup>,
+    /// Common layout shared by per-pass uniform and sampler bindings.
+    pub common_bind_group_layout: Option<BindGroupLayout>,
     /// Image bind groups cache (texture_id -> bind_group)
     pub image_bind_groups: HashMap<TextureId, BindGroup>,
     /// Image bind group layout (cached for efficiency)
@@ -34,8 +31,7 @@ impl RenderResources {
         Self {
             sampler: None,
             sampler_nearest: None,
-            uniform_buffer: None,
-            nearest_common_bind_group: None,
+            common_bind_group_layout: None,
             image_bind_groups: HashMap::new(),
             image_bind_group_layout: None,
         }
@@ -87,23 +83,7 @@ impl RenderResources {
             ..Default::default()
         });
 
-        // Create uniform buffer + common bind group layout
-        let uniform_buffer = UniformBuffer::new(device, &sampler);
-
-        let nearest_common_bind_group = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("Dear ImGui Common Bind Group Nearest Sampler"),
-            layout: uniform_buffer.bind_group_layout(),
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: uniform_buffer.buffer().as_entire_binding(),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::Sampler(&sampler_nearest),
-                },
-            ],
-        });
+        let common_bind_group_layout = UniformBuffer::create_bind_group_layout(device);
 
         // Create image bind group layout (for texture views)
         let image_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -122,8 +102,7 @@ impl RenderResources {
 
         self.sampler = Some(sampler);
         self.sampler_nearest = Some(sampler_nearest);
-        self.uniform_buffer = Some(uniform_buffer);
-        self.nearest_common_bind_group = Some(nearest_common_bind_group);
+        self.common_bind_group_layout = Some(common_bind_group_layout);
         self.image_bind_group_layout = Some(image_bind_group_layout);
 
         Ok(())
@@ -168,19 +147,45 @@ impl RenderResources {
         })
     }
 
+    pub(crate) fn create_frame_bindings(
+        &self,
+        device: &Device,
+    ) -> RendererResult<(UniformBuffer, BindGroup)> {
+        let sampler = self.sampler.as_ref().ok_or_else(|| {
+            RendererError::InvalidRenderState("Linear sampler not initialized".to_owned())
+        })?;
+        let nearest_sampler = self.sampler_nearest.as_ref().ok_or_else(|| {
+            RendererError::InvalidRenderState("Nearest sampler not initialized".to_owned())
+        })?;
+        let layout = self.common_bind_group_layout().ok_or_else(|| {
+            RendererError::InvalidRenderState("Common bind group layout not initialized".to_owned())
+        })?;
+        let uniform = UniformBuffer::new_with_layout(device, sampler, layout);
+        let nearest = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Dear ImGui Frame Bind Group Nearest Sampler"),
+            layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: uniform.buffer().as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::Sampler(nearest_sampler),
+                },
+            ],
+        });
+        Ok((uniform, nearest))
+    }
+
     /// Remove an image bind group
     pub fn remove_image_bind_group(&mut self, texture_id: TextureId) {
         self.image_bind_groups.remove(&texture_id);
     }
 
-    /// Get the uniform buffer
-    pub fn uniform_buffer(&self) -> Option<&UniformBuffer> {
-        self.uniform_buffer.as_ref()
-    }
-
-    /// Get the common bind group using nearest/point sampling
-    pub fn nearest_common_bind_group(&self) -> Option<&BindGroup> {
-        self.nearest_common_bind_group.as_ref()
+    /// Get the common layout used by every per-pass binding.
+    pub fn common_bind_group_layout(&self) -> Option<&BindGroupLayout> {
+        self.common_bind_group_layout.as_ref()
     }
 
     /// Get the image bind group layout

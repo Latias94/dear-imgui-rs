@@ -7,25 +7,31 @@ use dear_imgui_rs::{
 use dear_imgui_test_engine_sys as sys;
 
 use crate::error::ffi_status;
-use crate::{AttachmentState, RunState, TestEngineError};
+use crate::{AttachmentState, EngineId, RunId, RunState, TestEngineError};
 
 pub(crate) struct TestEngineAttachmentMarker;
 
 pub(crate) struct AttachmentControl {
     raw: Cell<*mut sys::ImGuiTestEngine>,
+    engine_id: EngineId,
     attachment: Cell<AttachmentState>,
     run: Cell<RunState>,
+    active_run_id: Cell<Option<RunId>>,
+    completed_run_id: Cell<Option<RunId>>,
     context_id: Cell<Option<ContextId>>,
     binding: RefCell<Option<ContextBinding>>,
     teardown_error: RefCell<Option<TestEngineError>>,
 }
 
 impl AttachmentControl {
-    pub(crate) fn new(raw: *mut sys::ImGuiTestEngine) -> Self {
+    pub(crate) fn new(raw: *mut sys::ImGuiTestEngine, engine_id: EngineId) -> Self {
         Self {
             raw: Cell::new(raw),
+            engine_id,
             attachment: Cell::new(AttachmentState::Detached),
             run: Cell::new(RunState::Inactive),
+            active_run_id: Cell::new(None),
+            completed_run_id: Cell::new(None),
             context_id: Cell::new(None),
             binding: RefCell::new(None),
             teardown_error: RefCell::new(None),
@@ -34,6 +40,10 @@ impl AttachmentControl {
 
     pub(crate) fn raw(&self) -> *mut sys::ImGuiTestEngine {
         self.raw.get()
+    }
+
+    pub(crate) fn engine_id(&self) -> EngineId {
+        self.engine_id
     }
 
     pub(crate) fn attachment_state(&self) -> AttachmentState {
@@ -46,6 +56,28 @@ impl AttachmentControl {
 
     pub(crate) fn set_run_state(&self, state: RunState) {
         self.run.set(state);
+    }
+
+    pub(crate) fn active_run_id(&self) -> Option<RunId> {
+        self.active_run_id.get()
+    }
+
+    pub(crate) fn completed_run_id(&self) -> Option<RunId> {
+        self.completed_run_id.get()
+    }
+
+    pub(crate) fn begin_run(&self, run_id: RunId) {
+        debug_assert!(self.active_run_id.get().is_none());
+        self.active_run_id.set(Some(run_id));
+        self.completed_run_id.set(None);
+        self.run.set(RunState::Queued);
+    }
+
+    pub(crate) fn finish_run(&self, run_id: RunId) {
+        debug_assert_eq!(self.active_run_id.get(), Some(run_id));
+        self.active_run_id.set(None);
+        self.completed_run_id.set(Some(run_id));
+        self.run.set(RunState::Ready);
     }
 
     pub(crate) fn context_id(&self) -> Option<ContextId> {
@@ -75,11 +107,15 @@ impl AttachmentControl {
         self.binding.replace(None);
         self.attachment.set(AttachmentState::Detached);
         self.run.set(RunState::Inactive);
+        self.active_run_id.set(None);
+        self.completed_run_id.set(None);
     }
 
     pub(crate) fn mark_detached(&self) {
         self.attachment.set(AttachmentState::Detached);
         self.run.set(RunState::Inactive);
+        self.active_run_id.set(None);
+        self.completed_run_id.set(None);
     }
 
     pub(crate) fn mark_destroyed(&self) {
@@ -88,6 +124,8 @@ impl AttachmentControl {
         self.binding.replace(None);
         self.attachment.set(AttachmentState::Destroyed);
         self.run.set(RunState::Inactive);
+        self.active_run_id.set(None);
+        self.completed_run_id.set(None);
     }
 
     pub(crate) fn take_teardown_error(&self) -> Option<TestEngineError> {
@@ -143,6 +181,8 @@ impl ContextAttachment for AttachmentControl {
             self.binding.replace(None);
             self.attachment.set(AttachmentState::ContextDestroyed);
             self.run.set(RunState::Inactive);
+            self.active_run_id.set(None);
+            self.completed_run_id.set(None);
         }
     }
 }

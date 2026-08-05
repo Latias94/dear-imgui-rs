@@ -3,12 +3,10 @@
 //! This module contains event processing logic for various winit events
 //! including keyboard, mouse, touch, and IME events.
 
+use dear_imgui_rs::Context;
 use dear_imgui_rs::input::MouseSource;
-use dear_imgui_rs::{Context, ContextId};
 use winit::event::{DeviceEvent, ElementState, Ime, KeyEvent, MouseScrollDelta, TouchPhase};
 
-use std::cell::RefCell;
-use std::collections::HashMap;
 use winit::window::Window;
 
 use crate::input::{to_imgui_mouse_button, winit_key_to_imgui_key};
@@ -30,7 +28,7 @@ pub fn handle_keyboard_input(event: &KeyEvent, imgui_ctx: &mut Context) -> bool 
         }
     }
 
-    if let Some(imgui_key) = winit_key_to_imgui_key(&event.logical_key, event.location) {
+    if let Some(imgui_key) = winit_key_to_imgui_key(&event.logical_key, event.physical_key) {
         let pressed = event.state == ElementState::Pressed;
         io.add_key_event(imgui_key, pressed);
         return io.want_capture_keyboard();
@@ -40,31 +38,22 @@ pub fn handle_keyboard_input(event: &KeyEvent, imgui_ctx: &mut Context) -> bool 
 }
 
 /// Handle mouse wheel scrolling
-pub fn handle_mouse_wheel(delta: MouseScrollDelta, imgui_ctx: &mut Context) -> bool {
+pub fn handle_mouse_wheel(
+    delta: MouseScrollDelta,
+    phase: TouchPhase,
+    scale_factor: f64,
+    imgui_ctx: &mut Context,
+) -> bool {
+    if phase == TouchPhase::Cancelled {
+        return imgui_ctx.io().want_capture_mouse();
+    }
+
     let io = imgui_ctx.io_mut();
 
     // Desktop winit mouse wheel events always come from a physical mouse.
     io.add_mouse_source_event(MouseSource::Mouse);
 
-    match delta {
-        MouseScrollDelta::LineDelta(h, v) => {
-            io.add_mouse_wheel_event([sanitize::finite_or_zero(h), sanitize::finite_or_zero(v)]);
-        }
-        MouseScrollDelta::PixelDelta(pos) => {
-            // Follow upstream practice: treat pixel delta as +/- 1.0 per event
-            let h = match pos.x.partial_cmp(&0.0) {
-                Some(std::cmp::Ordering::Greater) => 1.0,
-                Some(std::cmp::Ordering::Less) => -1.0,
-                _ => 0.0,
-            };
-            let v = match pos.y.partial_cmp(&0.0) {
-                Some(std::cmp::Ordering::Greater) => 1.0,
-                Some(std::cmp::Ordering::Less) => -1.0,
-                _ => 0.0,
-            };
-            io.add_mouse_wheel_event([h, v]);
-        }
-    }
+    io.add_mouse_wheel_event(normalize_mouse_wheel_delta(delta, scale_factor));
 
     io.want_capture_mouse()
 }
@@ -104,29 +93,50 @@ pub fn handle_cursor_moved(position: [f64; 2], imgui_ctx: &mut Context) -> bool 
 }
 
 /// Handle modifier key state changes
+pub(crate) fn modifier_key_events(
+    modifiers: &winit::event::Modifiers,
+) -> [(dear_imgui_rs::Key, bool); 4] {
+    let state = modifiers.state();
+    [
+        (dear_imgui_rs::Key::ModShift, state.shift_key()),
+        (dear_imgui_rs::Key::ModCtrl, state.control_key()),
+        (dear_imgui_rs::Key::ModAlt, state.alt_key()),
+        (dear_imgui_rs::Key::ModSuper, state.super_key()),
+    ]
+}
+
+fn normalize_mouse_wheel_delta(delta: MouseScrollDelta, scale_factor: f64) -> [f32; 2] {
+    match delta {
+        MouseScrollDelta::LineDelta(horizontal, vertical) => [
+            sanitize::finite_or_zero(horizontal),
+            sanitize::finite_or_zero(vertical),
+        ],
+        MouseScrollDelta::PixelDelta(position) => {
+            let scale_factor = sanitize::positive_finite_or(scale_factor, 1.0);
+            // Winit reports physical pixels. Dear ImGui expects small, continuous wheel units.
+            // Keeping the magnitude preserves trackpad acceleration and fractional scrolling.
+            [
+                sanitize::finite_f64_to_f32(position.x / scale_factor * 0.01).unwrap_or(0.0),
+                sanitize::finite_f64_to_f32(position.y / scale_factor * 0.01).unwrap_or(0.0),
+            ]
+        }
+    }
+}
+
+/// Handle modifier key state changes
 pub fn handle_modifiers_changed(modifiers: &winit::event::Modifiers, imgui_ctx: &mut Context) {
     let io = imgui_ctx.io_mut();
-    let state = modifiers.state();
 
     // Update modifier key states.
     //
     // Dear ImGui derives `io.KeyMods`/`io.KeyCtrl`/`io.KeyShift`/`io.KeyAlt`/`io.KeySuper`
     // from the `ImGuiMod_*` keys, so we must submit those in addition to the left/right keys.
     //
-    // We update both left and right keys to the same state since `ModifiersChanged` doesn't
-    // reliably distinguish them across platforms.
-    io.add_key_event(dear_imgui_rs::Key::ModShift, state.shift_key());
-    io.add_key_event(dear_imgui_rs::Key::LeftShift, state.shift_key());
-    io.add_key_event(dear_imgui_rs::Key::RightShift, state.shift_key());
-    io.add_key_event(dear_imgui_rs::Key::ModCtrl, state.control_key());
-    io.add_key_event(dear_imgui_rs::Key::LeftCtrl, state.control_key());
-    io.add_key_event(dear_imgui_rs::Key::RightCtrl, state.control_key());
-    io.add_key_event(dear_imgui_rs::Key::ModAlt, state.alt_key());
-    io.add_key_event(dear_imgui_rs::Key::LeftAlt, state.alt_key());
-    io.add_key_event(dear_imgui_rs::Key::RightAlt, state.alt_key());
-    io.add_key_event(dear_imgui_rs::Key::ModSuper, state.super_key());
-    io.add_key_event(dear_imgui_rs::Key::LeftSuper, state.super_key());
-    io.add_key_event(dear_imgui_rs::Key::RightSuper, state.super_key());
+    // Left/right modifier identity comes from `KeyEvent::physical_key`. `ModifiersChanged`
+    // provides only aggregate Mod* state and must not synthesize both physical keys.
+    for (key, pressed) in modifier_key_events(modifiers) {
+        io.add_key_event(key, pressed);
+    }
 }
 
 /// Handle IME (Input Method Editor) events for international text input
@@ -153,13 +163,13 @@ pub fn handle_ime_event(ime: &Ime, imgui_ctx: &mut Context) {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum TouchAction {
+pub(crate) enum TouchAction {
     Press,
     Move,
     Release,
 }
 
-fn touch_transition(
+pub(crate) fn touch_transition(
     active_id: Option<u64>,
     event_id: u64,
     phase: TouchPhase,
@@ -174,25 +184,6 @@ fn touch_transition(
     }
 }
 
-fn context_touch_transition(
-    active_touches: &mut HashMap<ContextId, u64>,
-    context: ContextId,
-    event_id: u64,
-    phase: TouchPhase,
-) -> Option<TouchAction> {
-    let (next_active, action) =
-        touch_transition(active_touches.get(&context).copied(), event_id, phase);
-    match next_active {
-        Some(active_id) => {
-            active_touches.insert(context, active_id);
-        }
-        None => {
-            active_touches.remove(&context);
-        }
-    }
-    action
-}
-
 pub(crate) fn touch_logical_position(
     touch: &winit::event::Touch,
     window: &Window,
@@ -204,55 +195,29 @@ pub(crate) fn touch_logical_position(
 }
 
 pub(crate) fn handle_touch_event_at(
-    touch: &winit::event::Touch,
+    action: TouchAction,
     position: Option<[f32; 2]>,
     viewport: Option<dear_imgui_rs::Id>,
     imgui_ctx: &mut Context,
 ) -> bool {
-    thread_local! {
-        static ACTIVE_TOUCHES: RefCell<HashMap<ContextId, u64>> = RefCell::new(HashMap::new());
+    let io = imgui_ctx.io_mut();
+    io.add_mouse_source_event(MouseSource::TouchScreen);
+    if let Some(viewport) = viewport {
+        io.add_mouse_viewport_event(viewport);
     }
-
-    let context = imgui_ctx.id();
-    ACTIVE_TOUCHES.with(|active_touches| {
-        if position.is_none() && matches!(touch.phase, TouchPhase::Started | TouchPhase::Moved) {
-            return false;
+    if let Some(position) = position {
+        io.add_mouse_pos_event(position);
+    }
+    match action {
+        TouchAction::Press => {
+            io.add_mouse_button_event(dear_imgui_rs::input::MouseButton::Left, true);
         }
-
-        let Some(action) = context_touch_transition(
-            &mut active_touches.borrow_mut(),
-            context,
-            touch.id,
-            touch.phase,
-        ) else {
-            return false;
-        };
-
-        let io = imgui_ctx.io_mut();
-        io.add_mouse_source_event(MouseSource::TouchScreen);
-        if let Some(viewport) = viewport {
-            io.add_mouse_viewport_event(viewport);
+        TouchAction::Move => {}
+        TouchAction::Release => {
+            io.add_mouse_button_event(dear_imgui_rs::input::MouseButton::Left, false);
         }
-        if let Some(position) = position {
-            io.add_mouse_pos_event(position);
-        }
-        match action {
-            TouchAction::Press => {
-                io.add_mouse_button_event(dear_imgui_rs::input::MouseButton::Left, true);
-            }
-            TouchAction::Move => {}
-            TouchAction::Release => {
-                io.add_mouse_button_event(dear_imgui_rs::input::MouseButton::Left, false);
-            }
-        }
-        true
-    })
-}
-
-/// Handle touch events by converting them to mouse events.
-pub fn handle_touch_event(touch: &winit::event::Touch, window: &Window, imgui_ctx: &mut Context) {
-    let position = touch_logical_position(touch, window);
-    let _ = handle_touch_event_at(touch, position, None, imgui_ctx);
+    }
+    true
 }
 
 /// Handle device events (raw input events)
@@ -331,11 +296,24 @@ mod tests {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             handle_mouse_wheel(
                 MouseScrollDelta::LineDelta(f32::NAN, f32::INFINITY),
+                TouchPhase::Moved,
+                1.0,
                 &mut ctx,
             );
         }));
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn pixel_wheel_preserves_fractional_logical_motion() {
+        assert_eq!(
+            normalize_mouse_wheel_delta(
+                MouseScrollDelta::PixelDelta(winit::dpi::PhysicalPosition::new(25.0, -10.0)),
+                2.0,
+            ),
+            [0.125, -0.05]
+        );
     }
 
     #[test]
@@ -383,30 +361,5 @@ mod tests {
             touch_transition(Some(7), 7, TouchPhase::Ended),
             (None, Some(TouchAction::Release))
         );
-    }
-
-    #[test]
-    fn active_touch_is_isolated_per_context() {
-        let _guard = lock_context();
-        let context_a = Context::create();
-        let context_a_id = context_a.id();
-        let context_a = context_a.suspend();
-        let context_b = Context::create();
-        let context_b_id = context_b.id();
-        let mut active_touches = HashMap::new();
-
-        assert_eq!(
-            context_touch_transition(&mut active_touches, context_a_id, 7, TouchPhase::Started,),
-            Some(TouchAction::Press)
-        );
-        assert_eq!(
-            context_touch_transition(&mut active_touches, context_b_id, 9, TouchPhase::Started,),
-            Some(TouchAction::Press)
-        );
-        assert_eq!(active_touches.get(&context_a_id), Some(&7));
-        assert_eq!(active_touches.get(&context_b_id), Some(&9));
-
-        drop(context_b);
-        drop(context_a.activate().unwrap());
     }
 }

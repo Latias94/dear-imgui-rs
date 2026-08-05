@@ -11,7 +11,7 @@ use super::{
     },
     core::{RendererContextState, RendererPublication},
 };
-use crate::{FrameResources, RenderResources, RendererError, RendererResult, ShaderManager};
+use crate::{FrameResourceArena, RenderResources, RendererError, RendererResult, ShaderManager};
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
     ContextAttachmentRole, ContextAttachmentTeardownError, ContextBindingError, ContextDestroyed,
@@ -181,10 +181,11 @@ impl RendererDropControl {
 }
 
 impl WgpuRenderer {
-    /// Called every frame to prepare for rendering
-    ///
-    /// This corresponds to ImGui_ImplWGPU_NewFrame in the C++ implementation
-    pub fn new_frame(&mut self) -> RendererResult<()> {
+    pub(super) fn prepare_frame_epoch(
+        &mut self,
+        epoch: u64,
+        native_frame_count: i32,
+    ) -> RendererResult<()> {
         let needs_recreation = match &self.backend_data {
             Some(backend_data) => {
                 self.ensure_context_alive()?;
@@ -202,12 +203,15 @@ impl WgpuRenderer {
             let mut backend_data = self
                 .backend_data
                 .take()
-                .expect("new_frame() already verified backend data");
+                .expect("prepare_frame_epoch() already verified backend data");
             let result = self.create_device_objects(&mut backend_data);
             self.backend_data = Some(backend_data);
             result?;
         }
-        Ok(())
+        self.backend_data
+            .as_mut()
+            .expect("prepare_frame_epoch() already verified backend data")
+            .begin_frame(epoch, native_frame_count)
     }
 
     /// Invalidate renderer-owned device objects and reset managed texture bindings.
@@ -245,9 +249,8 @@ impl WgpuRenderer {
             backend_data.render_resources = RenderResources::new();
 
             // Clear frame resources
-            for frame_resources in &mut backend_data.frame_resources {
-                *frame_resources = FrameResources::new();
-            }
+            backend_data.frame_resources = FrameResourceArena::new();
+            backend_data.frame_cursor = Default::default();
         }
 
         self.texture_manager.clear_renderer_owned_textures();

@@ -16,12 +16,13 @@ impl WgpuRenderer {
 
         // Reuse bind group layouts from shared render resources so that the
         // pipeline layout and the actually bound groups share the same layouts.
-        let uniform_layout = backend_data
+        let common_layout = backend_data
             .render_resources
-            .uniform_buffer()
-            .map(|ub| ub.bind_group_layout())
+            .common_bind_group_layout()
             .ok_or_else(|| {
-                RendererError::InvalidRenderState("Uniform buffer not initialized".to_string())
+                RendererError::InvalidRenderState(
+                    "Common bind group layout not initialized".to_string(),
+                )
             })?;
 
         let image_layout = backend_data
@@ -37,13 +38,13 @@ impl WgpuRenderer {
         #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Dear ImGui Pipeline Layout"),
-            bind_group_layouts: &[Some(uniform_layout), Some(image_layout)],
+            bind_group_layouts: &[Some(common_layout), Some(image_layout)],
             immediate_size: 0,
         });
         #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Dear ImGui Pipeline Layout"),
-            bind_group_layouts: &[uniform_layout, image_layout],
+            bind_group_layouts: &[common_layout, image_layout],
             #[cfg(feature = "wgpu-28")]
             immediate_size: 0,
             #[cfg(feature = "wgpu-27")]

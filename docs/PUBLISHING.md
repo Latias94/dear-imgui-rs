@@ -10,19 +10,19 @@ The release workflow uses crates.io Trusted Publishing. It does not store a crat
 2. Require maintainer approval for that environment and restrict deployments to `main`.
 3. For each of the 27 crates on crates.io, add the same GitHub Trusted Publisher configuration: repository owner `Latias94`, repository `dear-imgui-rs`, workflow `release.yml`, environment `release`.
 
-The repository workflow token defaults to read-only. Only the crates.io job receives `id-token: write`, and only the final GitHub Release job receives `contents: write`.
+The repository workflow token defaults to read-only. The protected crates.io job receives `id-token: write` and `contents: write` so it can reserve the exact tag before the first upload. The final GitHub Release job receives `contents: write` to publish the verified assets.
 
 ## Prepare a candidate
 
 Preparation intentionally changes the worktree; validation requires the resulting commit to be clean.
 
 ```bash
-python3 tools/tasks.py release-prepare 0.16.0-alpha.1
+python3 tools/tasks.py release-prepare 0.16.0-alpha.2
 
 # Review generated bindings, source metadata, Cargo.lock, CHANGELOG.md, and docs.
 git diff
 git add -A
-git commit -m "chore: prepare release v0.16.0-alpha.1"
+git commit -m "chore: prepare release v0.16.0-alpha.2"
 
 python3 tools/tasks.py release-check
 ```
@@ -34,18 +34,27 @@ Before merging, require normal CI to pass on Linux, Windows, and macOS. The root
 Merge the candidate to `main`, then dispatch the release workflow with the matching tag:
 
 ```bash
-gh workflow run release.yml --ref main -f tag=v0.16.0-alpha.1
+gh workflow run release.yml --ref main -f tag=v0.16.0-alpha.2
 ```
 
 The workflow binds the tag to the workspace version and the exact `main` commit before doing any irreversible work. It then:
 
-1. Runs the fixed 16-cell Release Gate for that commit, including native runtime tests, Winit/WGPU and SDL3/Glow viewport smokes, WASM, Windows ABI/native dependency routes, macOS, all source packages, and five prebuilt producer/consumer targets.
-2. Recomputes the authoritative decision from retained cell payloads and stages only the prebuilt archives recorded by successful cells.
-3. Generates `SHA256SUMS` and a release manifest for the exact staged assets.
-4. Enters the protected `release` environment and obtains a short-lived crates.io OIDC token.
-5. Publishes the complete 27-crate dependency train, automatically skipping an exact version only when its published Cargo archive records the same clean candidate commit.
-6. Confirms that all 27 exact versions are available through crates.io and Cargo and carry that candidate provenance.
-7. Creates the tag and GitHub Release for the same commit, rejecting pre-existing unexpected assets and verifying that the final download inventory contains exactly the staged archives and checksums.
+1. Requires a successful `main` push CI run for the exact candidate SHA.
+2. Builds every prebuilt profile on Linux x86_64, macOS x86_64/aarch64,
+   and Windows MSVC `/MD`/`/MT`, then consumes every generated archive from an
+   isolated crate.
+3. Enters the protected `release` environment and atomically creates or
+   verifies the exact candidate tag before publishing any crate.
+4. Obtains a short-lived crates.io OIDC token and publishes the complete
+   27-crate dependency train, automatically skipping an
+   exact version only when its published Cargo archive records the same clean
+   candidate commit.
+5. Confirms that all 27 exact versions are available through crates.io and
+   Cargo.
+6. Generates deterministic `SHA256SUMS`, validates every existing Release
+   asset by name and GitHub-computed digest, and lets the release action upload
+   only missing assets with overwrites disabled. The completed asset set is
+   verified again after publication.
 
 Pushing a tag does not trigger publication. Do not create the tag manually before this workflow; an existing tag is accepted only when it already points to the candidate commit.
 
@@ -57,35 +66,28 @@ crates.io uploads cannot be rolled back. A failed run is resumed by re-running i
 gh run rerun RUN_ID --failed
 ```
 
-Starting a new release workflow run is also safe, but it reruns the full Release Gate. Never bump the version merely because one attempt stopped after publishing only part of the train; first resume the same version and complete it.
+Starting a new release workflow run is also safe, but it reruns the five-target
+prebuilt matrix. An existing Release may contain an identical subset of the
+expected assets; the workflow validates their SHA-256 digests, skips those
+names, and uploads only missing files. Any unexpected asset or same-name digest
+mismatch fails closed and is never overwritten. Never bump the version merely
+because one attempt stopped after publishing only part of the train; first
+resume the same version and complete it.
 
 If a published crate is defective, finish or halt the current train deliberately, yank affected versions when appropriate, and prepare a new release version. A crates.io version can never be overwritten.
 
-## Diagnostic Gate
-
-`release-gate.yml` remains independently dispatchable for diagnostics without publishing:
-
-```bash
-git rev-parse HEAD
-gh workflow run release-gate.yml -f candidate_sha=FULL_40_HEX_SHA
-```
-
-A cell that is missing, skipped, cancelled, timed out, malformed, duplicated, or bound to another SHA makes the aggregate `No-Go`. Headless Test Engine success does not replace real viewport runtime cells.
-
 ## Manual fallback
 
-The normal path is `release.yml`. For registry incident recovery, `tools/publish.py` can use a downloaded same-SHA `gate-result.json` and a manually supplied crates.io token:
+The normal path is `release.yml`. For registry incident recovery, `tools/publish.py` can resume the complete train with a manually supplied crates.io token:
 
 ```bash
 python3 tools/publish.py --dry-run
 python3 tools/publish.py --cargo-dry-run --crates dear-imgui-sys
 
-python3 tools/publish.py \
-  --release-gate-result artifacts/release-gate/gate-result.json \
-  --yes
+python3 tools/publish.py --yes
 ```
 
-Real uploads always operate on the complete release train; `--crates` is limited to previews and Cargo dry-runs. The script fails closed when crates.io state is unavailable, rejects published archives from a different or dirty Git candidate, reconciles Cargo upload errors against the exact registry version, rechecks the clean source commit before every upload, and can write a machine-readable journal with `--journal PATH`.
+Real uploads always operate on the complete release train; `--crates` is limited to previews and Cargo dry-runs. The script fails closed when crates.io state is unavailable, rejects published archives from a different or dirty Git candidate, reconciles Cargo upload errors against the exact registry version, rechecks the clean source commit before every upload, and can write a machine-readable journal with `--journal PATH`. Release authorization is deliberately external: the normal workflow uses the protected `release` environment and a short-lived OIDC token. Before a manual recovery upload, verify the exact commit and successful release workflow yourself.
 
 Verify a completed train without uploading:
 
@@ -93,4 +95,6 @@ Verify a completed train without uploading:
 python3 tools/publish.py --verify-published
 ```
 
-CI passes `--no-verify` only after the source-package cell has already packaged and consumed every release crate without credentials. This keeps the short-lived publishing token out of build scripts and inside its intended upload window.
+CI passes `--no-verify` only after exact-SHA normal CI and the complete prebuilt
+producer/consumer matrix succeed. This keeps the short-lived publishing token
+out of build scripts and inside its intended upload window.

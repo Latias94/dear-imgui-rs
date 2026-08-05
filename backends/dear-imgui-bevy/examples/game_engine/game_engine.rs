@@ -16,7 +16,7 @@ use bevy::{
 use dear_imgui_bevy::prelude::*;
 use dear_imgui_bevy::{ImguiNativeViewportStatus, ImguiNativeViewportSupport};
 use dear_imgui_rs::{
-    Condition, DockLayout, DockLayoutApply, DockSplit, DockspaceTarget, WindowFlags,
+    Condition, DockLayout, DockLayoutApply, DockSplit, DockspaceOptions, WindowFlags,
 };
 
 const SCENE_SIZE: [u32; 2] = [960, 540];
@@ -54,26 +54,27 @@ impl Default for EditorState {
 }
 
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "dear-imgui-bevy game engine".to_owned(),
-                resolution: (1440, 900).into(),
-                present_mode: PresentMode::AutoVsync,
-                window_theme: Some(WindowTheme::Dark),
-                ..Default::default()
-            }),
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: "dear-imgui-bevy game engine".to_owned(),
+            resolution: (1440, 900).into(),
+            present_mode: PresentMode::AutoVsync,
+            window_theme: Some(WindowTheme::Dark),
             ..Default::default()
-        }))
-        .add_plugins(ImguiPlugin::new(
-            ImguiPluginConfig::default()
-                .with_docking(true)
-                .with_multi_viewport(cfg!(feature = "multi-viewport")),
-        ))
-        .init_resource::<EditorState>()
-        .add_systems(Startup, setup)
-        .add_systems(Update, (close_on_escape, animate_scene))
-        .add_systems(ImguiPrimaryContextPass, editor_ui)
+        }),
+        ..Default::default()
+    }))
+    .add_plugins(ImguiPlugin::new(
+        ImguiPluginConfig::default()
+            .with_docking(true)
+            .with_multi_viewport(cfg!(feature = "multi-viewport")),
+    ))
+    .init_resource::<EditorState>()
+    .add_systems(Startup, setup)
+    .add_systems(Update, (close_on_escape, animate_scene));
+    let primary_pass = app.imgui_primary_pass();
+    app.add_imgui_systems(&primary_pass, primary_pass.system(editor_ui))
         .run();
 }
 
@@ -207,29 +208,28 @@ fn animate_scene(
 }
 
 fn editor_ui(
-    imgui: ImguiUi,
+    frame: ImguiFrame<'_>,
     native_viewports: Res<ImguiNativeViewportSupport>,
     preview: Res<ScenePreview>,
     mut editor: ResMut<EditorState>,
     objects: Query<(Entity, &Name, &Transform), With<SceneObject>>,
     frame_count: Res<FrameCount>,
 ) -> Result {
-    let context_id = imgui.context_id()?;
-    let frame_index = imgui.frame_index()?;
-    let ui = imgui.ui()?;
+    let context_id = frame.context_id();
+    let frame_index = frame.frame_index();
+    let ui = frame.ui();
     let native_viewport_status = native_viewports.get(context_id);
 
     let root_id = ui.get_id("DearImguiBevyGameEngineDockspace");
-    let viewport = ui.main_viewport();
-    let target = match DockspaceTarget::new(root_id, viewport.work_pos(), viewport.work_size()) {
-        Ok(target) => target,
+    let options = match DockspaceOptions::new(root_id) {
+        Ok(options) => options,
         Err(error) => {
-            error!("invalid game-engine dockspace target: {error}");
+            error!("invalid game-engine dockspace options: {error}");
             return Ok(());
         }
     };
     let dockspace_id = match ui.dockspace_over_main_viewport_with_layout(
-        &target,
+        &options,
         &game_engine_dock_layout(),
         DockLayoutApply::IfMissing,
     ) {

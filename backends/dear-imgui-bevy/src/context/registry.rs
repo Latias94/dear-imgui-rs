@@ -1,31 +1,53 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use bevy_ecs::schedule::{InternedScheduleLabel, ScheduleLabel};
 use dear_imgui_rs::{Context, ContextId, SuspendedContext};
 
-use crate::ImguiPrimaryContextPass;
+use super::lifecycle::ImguiAppLifecycle;
+use super::ownership::{
+    ContextOwner, ImguiContextRemovalPendingReason, ImguiContextRetirementSink,
+};
+use super::{ImguiPass, ImguiPrimaryPass, PassIdentity};
 
-use super::ownership::{ContextOwner, ImguiContextRetirementSink};
+/// Result of atomically selecting a new primary Context.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ImguiPrimaryChange {
+    previous: Option<ContextId>,
+    current: ContextId,
+}
 
-/// Per-Context lifecycle and UI schedule configuration.
+impl ImguiPrimaryChange {
+    /// Return the Context that was primary before the transaction.
+    #[must_use]
+    pub const fn previous(self) -> Option<ContextId> {
+        self.previous
+    }
+
+    /// Return the Context selected as primary by the transaction.
+    #[must_use]
+    pub const fn current(self) -> ContextId {
+        self.current
+    }
+}
+
+/// Per-Context lifecycle and private UI pass configuration.
 ///
-/// In headless builds without the `render` feature, every configured Context schedule is driven,
+/// In headless builds without the `render` feature, every configured Context pass is driven,
 /// but only the primary Context receives implicit primary-window input and capture updates.
 /// Explicit input routing for additional Contexts requires `render`.
 #[derive(Clone, Debug)]
 pub struct ImguiContextConfig {
-    schedule: InternedScheduleLabel,
+    pass: PassIdentity,
     docking: bool,
     multi_viewport: bool,
 }
 
 impl ImguiContextConfig {
-    /// Create an additional-Context configuration bound to a unique UI schedule.
+    /// Create an additional-Context configuration bound to an application-owned pass.
     #[must_use]
-    pub fn new(schedule: impl ScheduleLabel) -> Self {
+    pub fn new<P: 'static>(pass: &ImguiPass<P>) -> Self {
         Self {
-            schedule: schedule.intern(),
+            pass: pass.identity(),
             docking: true,
             multi_viewport: false,
         }
@@ -45,10 +67,10 @@ impl ImguiContextConfig {
         self
     }
 
-    /// Return the interned UI schedule owned by this Context.
+    /// Return the Rust type name used to brand this Context pass.
     #[must_use]
-    pub fn schedule(&self) -> InternedScheduleLabel {
-        self.schedule
+    pub const fn pass_name(&self) -> &'static str {
+        self.pass.brand_name()
     }
 
     /// Return whether docking is enabled.
@@ -63,41 +85,42 @@ impl ImguiContextConfig {
         self.multi_viewport
     }
 
-    pub(crate) fn primary() -> Self {
-        Self::new(ImguiPrimaryContextPass)
+    pub(crate) fn primary(pass: &ImguiPass<ImguiPrimaryPass>) -> Self {
+        Self {
+            pass: pass.identity(),
+            docking: true,
+            multi_viewport: false,
+        }
+    }
+
+    pub(crate) const fn pass(&self) -> PassIdentity {
+        self.pass
     }
 }
 
-/// Typed failure from Context lookup, schedule access, configuration, or teardown.
+/// Typed failure from Context lookup, pass admission, configuration, or teardown.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ImguiContextError {
+    /// Explicit shutdown committed this App's terminal Dear ImGui lifecycle.
+    AppTerminated,
+    /// The App already owns a Context registry.
+    ContextRegistryAlreadyInstalled,
     /// No registered Context has this process identity.
     UnknownContext { context_id: ContextId },
     /// This exact core Context identity is already registered.
     AlreadyRegistered { context_id: ContextId },
-    /// Another Context already owns the requested UI schedule.
-    DuplicateSchedule {
-        schedule: InternedScheduleLabel,
+    /// Another Context already owns the requested UI pass.
+    DuplicatePass {
+        pass: &'static str,
         owner: ContextId,
     },
-    /// A system requested a Context other than the one bound to its current schedule.
-    WrongSchedule {
-        requested: ContextId,
-        active: ContextId,
-        active_schedule: InternedScheduleLabel,
-    },
-    /// No Context frame is currently exposed to this system.
-    NoOpenFrame,
+    /// The requested pass belongs to a different Bevy App.
+    ForeignPass { pass: &'static str },
     /// The requested Context is being removed.
     TeardownInProgress { context_id: ContextId },
     /// Raw Context mutation was requested while its UI frame was live.
     RawMutationWhileFrameOpen { context_id: ContextId },
-    /// The configured Bevy schedule is not installed.
-    MissingSchedule {
-        context_id: ContextId,
-        schedule: InternedScheduleLabel,
-    },
     /// The legacy/headless font atlas could not be built before opening a frame.
     FontAtlasBuildFailed { context_id: ContextId },
     /// Managed renderer admission failed before backend fields were mutated.
@@ -158,6 +181,11 @@ pub enum ImguiContextError {
 impl fmt::Display for ImguiContextError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::AppTerminated => formatter
+                .write_str("the Dear ImGui integration is terminal after explicit App shutdown"),
+            Self::ContextRegistryAlreadyInstalled => {
+                formatter.write_str("the Bevy App already owns a Dear ImGui Context registry")
+            }
             Self::UnknownContext { context_id } => {
                 write!(formatter, "unknown Dear ImGui Context {context_id:?}")
             }
@@ -167,35 +195,24 @@ impl fmt::Display for ImguiContextError {
                     "Dear ImGui Context {context_id:?} is already registered"
                 )
             }
-            Self::DuplicateSchedule { schedule, owner } => {
+            Self::DuplicatePass { pass, owner } => {
                 write!(
                     formatter,
-                    "Dear ImGui UI schedule {schedule:?} is already owned by Context {owner:?}"
+                    "Dear ImGui pass {pass} is already owned by Context {owner:?}"
                 )
             }
-            Self::WrongSchedule {
-                requested,
-                active,
-                active_schedule,
-            } => write!(
-                formatter,
-                "Context {requested:?} was requested while schedule {active_schedule:?} drives Context {active:?}"
-            ),
-            Self::NoOpenFrame => formatter
-                .write_str("ImguiUi is available only while a Context UI schedule is running"),
+            Self::ForeignPass { pass } => {
+                write!(
+                    formatter,
+                    "Dear ImGui pass {pass} belongs to another Bevy App"
+                )
+            }
             Self::TeardownInProgress { context_id } => {
                 write!(formatter, "Context {context_id:?} teardown is in progress")
             }
             Self::RawMutationWhileFrameOpen { context_id } => write!(
                 formatter,
                 "Context {context_id:?} cannot be configured while its Ui is live"
-            ),
-            Self::MissingSchedule {
-                context_id,
-                schedule,
-            } => write!(
-                formatter,
-                "Context {context_id:?} UI schedule {schedule:?} is not installed"
             ),
             Self::FontAtlasBuildFailed { context_id } => {
                 write!(
@@ -356,24 +373,36 @@ pub(crate) struct ContextSlot {
 /// Main-thread registry that owns all Bevy-managed Dear ImGui Contexts.
 ///
 /// Slots retain Contexts as [`SuspendedContext`] owners. The private driver removes one owner at a
-/// time before activating it, so running a nested Bevy schedule never overlaps a registry borrow
-/// with a live Dear ImGui `Ui`.
+/// time before activating it, so running a private pass never overlaps a registry borrow with a
+/// live Dear ImGui `Ui`.
 pub struct ImguiContexts {
+    lifecycle: ImguiAppLifecycle,
+    pass_registry_id: u64,
     primary: Option<ContextId>,
     slots: HashMap<ContextId, ContextSlot>,
     order: Vec<ContextId>,
-    schedule_owners: HashMap<InternedScheduleLabel, ContextId>,
+    pass_owners: HashMap<super::pass::PassKey, ContextId>,
     backend: Option<super::ownership::BackendAttachment>,
     retirement_sink: Option<ImguiContextRetirementSink>,
 }
 
 impl ImguiContexts {
-    /// Create a registry adopting `primary` as the primary Context.
-    #[must_use]
-    pub fn with_primary(primary: SuspendedContext) -> Self {
+    pub(crate) fn with_primary(
+        primary: SuspendedContext,
+        pass: ImguiPass<ImguiPrimaryPass>,
+        lifecycle: ImguiAppLifecycle,
+    ) -> Self {
+        assert!(
+            !lifecycle.is_terminal(),
+            "the Dear ImGui App lifecycle is terminal"
+        );
+        assert!(
+            lifecycle.try_claim_registry(),
+            "the Bevy App already created its Dear ImGui Context registry"
+        );
         let primary_id = primary.id();
-        let config = ImguiContextConfig::primary();
-        let schedule = config.schedule;
+        let config = ImguiContextConfig::primary(&pass);
+        let pass = config.pass;
         let mut slots = HashMap::new();
         slots.insert(
             primary_id,
@@ -386,10 +415,12 @@ impl ImguiContexts {
             },
         );
         Self {
+            lifecycle,
+            pass_registry_id: pass.registry_id(),
             primary: Some(primary_id),
             slots,
             order: vec![primary_id],
-            schedule_owners: HashMap::from([(schedule, primary_id)]),
+            pass_owners: HashMap::from([(pass.key(), primary_id)]),
             backend: None,
             retirement_sink: None,
         }
@@ -398,18 +429,51 @@ impl ImguiContexts {
     /// Return the primary Context identity.
     #[must_use]
     pub fn primary_id(&self) -> Option<ContextId> {
-        self.primary
+        (!self.lifecycle.is_terminal())
+            .then_some(self.primary)
+            .flatten()
+    }
+
+    /// Select an existing idle Context as the primary input and fallback-window target.
+    ///
+    /// Pass ownership and per-Context docking or viewport configuration stay with each Context.
+    /// The registry changes `primary` only after every precondition succeeds.
+    pub fn promote_primary(
+        &mut self,
+        context_id: ContextId,
+    ) -> Result<ImguiPrimaryChange, ImguiContextError> {
+        self.ensure_active()?;
+        if let Some(active) = self.driving_context() {
+            return Err(ImguiContextError::RawMutationWhileFrameOpen { context_id: active });
+        }
+        let slot = self
+            .slots
+            .get(&context_id)
+            .ok_or(ImguiContextError::UnknownContext { context_id })?;
+        if slot.state != ContextSlotState::Ready {
+            return Err(ImguiContextError::TeardownInProgress { context_id });
+        }
+        let previous = self.primary.replace(context_id);
+        Ok(ImguiPrimaryChange {
+            previous,
+            current: context_id,
+        })
     }
 
     /// Iterate Context identities in deterministic drive order.
     pub fn ids(&self) -> impl ExactSizeIterator<Item = ContextId> + '_ {
-        self.order.iter().copied()
+        let order = if self.lifecycle.is_terminal() {
+            &self.order[0..0]
+        } else {
+            self.order.as_slice()
+        };
+        order.iter().copied()
     }
 
     /// Return whether this registry recognizes `context_id`.
     #[must_use]
     pub fn contains(&self, context_id: ContextId) -> bool {
-        self.slots.contains_key(&context_id)
+        !self.lifecycle.is_terminal() && self.slots.contains_key(&context_id)
     }
 
     /// Return a Context's latest completed frame index.
@@ -433,6 +497,7 @@ impl ImguiContexts {
 
     /// Create and insert an independent suspended Context.
     pub fn create(&mut self, config: ImguiContextConfig) -> Result<ContextId, ImguiContextError> {
+        self.ensure_active()?;
         if let Some(active) = self.driving_context() {
             return Err(ImguiContextError::RawMutationWhileFrameOpen { context_id: active });
         }
@@ -447,16 +512,27 @@ impl ImguiContexts {
         context: SuspendedContext,
         config: ImguiContextConfig,
     ) -> Result<ContextId, ImguiContextAdmissionError> {
+        if let Err(error) = self.ensure_active() {
+            return Err(ImguiContextAdmissionError::new(error, context));
+        }
         if let Some(active) = self.driving_context() {
             return Err(ImguiContextAdmissionError::new(
                 ImguiContextError::RawMutationWhileFrameOpen { context_id: active },
                 context,
             ));
         }
-        if let Some(owner) = self.schedule_owners.get(&config.schedule).copied() {
+        if config.pass.registry_id() != self.pass_registry_id {
             return Err(ImguiContextAdmissionError::new(
-                ImguiContextError::DuplicateSchedule {
-                    schedule: config.schedule,
+                ImguiContextError::ForeignPass {
+                    pass: config.pass.brand_name(),
+                },
+                context,
+            ));
+        }
+        if let Some(owner) = self.pass_owners.get(&config.pass.key()).copied() {
+            return Err(ImguiContextAdmissionError::new(
+                ImguiContextError::DuplicatePass {
+                    pass: config.pass.brand_name(),
                     owner,
                 },
                 context,
@@ -486,7 +562,7 @@ impl ImguiContexts {
             return Err(ImguiContextAdmissionError::new(error, context));
         }
 
-        self.schedule_owners.insert(config.schedule, context_id);
+        self.pass_owners.insert(config.pass.key(), context_id);
         self.order.push(context_id);
         self.slots.insert(
             context_id,
@@ -501,6 +577,31 @@ impl ImguiContexts {
         Ok(context_id)
     }
 
+    /// Admit a suspended Context and select it as primary in one transaction.
+    ///
+    /// The previous primary remains registered under its existing pass. If admission fails, the
+    /// registry is unchanged and the returned [`ImguiContextAdmissionError`] retains `context`.
+    pub fn replace_primary(
+        &mut self,
+        context: SuspendedContext,
+        config: ImguiContextConfig,
+    ) -> Result<ImguiPrimaryChange, ImguiContextAdmissionError> {
+        if let Err(error) = self.ensure_active() {
+            return Err(ImguiContextAdmissionError::new(error, context));
+        }
+        if let Some(active) = self.driving_context() {
+            return Err(ImguiContextAdmissionError::new(
+                ImguiContextError::RawMutationWhileFrameOpen { context_id: active },
+                context,
+            ));
+        }
+        let current = context.id();
+        let previous = self.primary;
+        self.insert_suspended(context, config)?;
+        self.primary = Some(current);
+        Ok(ImguiPrimaryChange { previous, current })
+    }
+
     /// Run an outside-frame configuration closure against one Context.
     ///
     /// A Context whose removal is pending remains configurable so the integration that changed an
@@ -511,6 +612,7 @@ impl ImguiContexts {
         context_id: ContextId,
         configure: impl FnOnce(&mut Context) -> T,
     ) -> Result<T, ImguiContextError> {
+        self.ensure_active()?;
         if let Some(active) = self.driving_context() {
             return Err(ImguiContextError::RawMutationWhileFrameOpen { context_id: active });
         }
@@ -538,6 +640,7 @@ impl ImguiContexts {
 
     /// Retry Context-local backend teardown and remove the Context when it is idle.
     pub fn remove(&mut self, context_id: ContextId) -> Result<SuspendedContext, ImguiContextError> {
+        self.ensure_active()?;
         if let Some(active) = self.driving_context() {
             return Err(ImguiContextError::RawMutationWhileFrameOpen { context_id: active });
         }
@@ -562,7 +665,7 @@ impl ImguiContexts {
             .remove(&context_id)
             .expect("the validated Context slot must still exist");
         self.order.retain(|candidate| *candidate != context_id);
-        self.schedule_owners.remove(&slot.config.schedule);
+        self.pass_owners.remove(&slot.config.pass.key());
         if self.primary == Some(context_id) {
             self.primary = None;
         }
@@ -572,6 +675,34 @@ impl ImguiContexts {
             .into_suspended())
     }
 
+    /// Validate every registered Context before terminal shutdown commits world changes.
+    ///
+    /// The first failure is returned in deterministic drive order, but every Context is checked so
+    /// this phase remains a complete, side-effect-free transaction preflight.
+    pub(crate) fn preflight_backend_detach(
+        &mut self,
+    ) -> Result<(), (ContextId, ImguiContextRemovalPendingReason)> {
+        let mut first_failure = None;
+        for context_id in self.order.clone() {
+            let slot = self
+                .slots
+                .get_mut(&context_id)
+                .expect("drive order must reference a registered Context");
+            debug_assert_ne!(slot.state, ContextSlotState::Driving);
+            let owner = slot
+                .owner
+                .as_mut()
+                .expect("shutdown preflight requires idle Context owners");
+            if let Err(reason) = owner.preflight_backend_detach()
+                && first_failure.is_none()
+            {
+                first_failure = Some((context_id, reason));
+            }
+        }
+        first_failure.map_or(Ok(()), Err)
+    }
+
+    #[cfg(feature = "render")]
     pub(crate) fn is_tearing_down(&self, context_id: ContextId) -> bool {
         self.slots
             .get(&context_id)
@@ -579,11 +710,21 @@ impl ImguiContexts {
     }
 
     pub(crate) fn drive_order(&self) -> Vec<ContextId> {
+        if self.lifecycle.is_terminal() {
+            return Vec::new();
+        }
         self.order.clone()
+    }
+
+    pub(crate) const fn pass_registry_id(&self) -> u64 {
+        self.pass_registry_id
     }
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     pub(crate) fn native_viewport_context_ids(&self) -> Vec<ContextId> {
+        if self.lifecycle.is_terminal() {
+            return Vec::new();
+        }
         self.order
             .iter()
             .copied()
@@ -603,10 +744,19 @@ impl ImguiContexts {
         })
     }
 
+    fn ensure_active(&self) -> Result<(), ImguiContextError> {
+        if self.lifecycle.is_terminal() {
+            Err(ImguiContextError::AppTerminated)
+        } else {
+            Ok(())
+        }
+    }
+
     pub(crate) fn take_for_drive(
         &mut self,
         context_id: ContextId,
     ) -> Result<(ContextOwner, ImguiContextConfig, u64), ImguiContextError> {
+        self.ensure_active()?;
         let slot = self
             .slots
             .get_mut(&context_id)
@@ -740,6 +890,7 @@ impl ImguiContexts {
         &mut self,
         backend: super::ownership::BackendAttachment,
     ) -> Result<(), ImguiContextError> {
+        self.ensure_active()?;
         if let Some(active) = self.driving_context() {
             return Err(ImguiContextError::RawMutationWhileFrameOpen { context_id: active });
         }

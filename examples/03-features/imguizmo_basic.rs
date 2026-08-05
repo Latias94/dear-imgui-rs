@@ -267,7 +267,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context)?;
+            .prepare_frame(&mut self.imgui.context, &self.window)?;
 
         let ui = self.imgui.context.frame();
 

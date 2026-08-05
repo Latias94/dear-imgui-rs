@@ -28,11 +28,9 @@ Script: `tools/update_submodule_and_bindings.py`
 
 Key flags:
 - `--crates`: comma-separated list or `all`.
-- `--profile`: `debug` or `release` (affects target build dir only).
 - `--submodules`: `update` (update all known submodules), `auto` (update only selected crates), `skip` (don’t touch submodules).
 - `--wasm`: regenerate/verify the core WASM profile and compile-check the explicit provider feature.
 - The WASM import module is fixed to `imgui-sys-v1`; it is not a command-line option.
-- `--wasm-ext`: comma-separated WASM extension bindings (`implot,implot3d,imnodes,imguizmo,imguizmo-quat`).
 - Per-submodule branches:
   - `--cimgui-branch` (default `docking_inter`)
   - `--cimplot-branch` (default `master`)
@@ -48,14 +46,13 @@ Examples
 python3 tools/update_submodule_and_bindings.py \
   --crates dear-imgui-sys \
   --submodules auto \
-  --cimgui-branch docking_inter \
-  --profile release
+  --cimgui-branch docking_inter
 ```
 
 - All known -sys crates (update all submodules + pregenerate, Release):
 ```
 python3 tools/update_submodule_and_bindings.py \
-  --crates all --submodules update --profile release \
+  --crates all --submodules update \
   --cimgui-branch docking_inter \
   --cimplot-branch master \
   --cimplot3d-branch main \
@@ -68,16 +65,15 @@ python3 tools/update_submodule_and_bindings.py \
 - All known -sys crates plus current WASM pregenerated bindings, without moving submodules:
 ```
 python3 tools/update_submodule_and_bindings.py \
-  --crates all --submodules skip --profile release \
-  --wasm \
-  --wasm-ext implot,implot3d,imnodes,imguizmo,imguizmo-quat
+  --crates all --submodules skip \
+  --wasm
 ```
 
 - Regenerate pregenerated bindings only (no submodule changes):
 ```
 python3 tools/update_submodule_and_bindings.py \
   --crates dear-implot-sys,dear-imnodes-sys \
-  --submodules skip --profile debug
+  --submodules skip
 ```
 
 What the script does:
@@ -115,22 +111,19 @@ SHA. Test Engine is separate: its crate-local source/shim/generator provenance
 is reproducible, but it is native source-only and never appears in a prebuilt
 artifact profile.
 
-## Release gates and evidence
+## Release gates
 
-A release requires `python3 tools/tasks.py release-check` from a clean commit and a remote `Go` decision for the same commit. The end-to-end `.github/workflows/release.yml` calls the gate directly; `.github/workflows/release-gate.yml` remains independently dispatchable for diagnostics.
+A release requires `python3 tools/tasks.py release-check` from a clean commit
+and a successful `ci.yml` push run for that exact `main` commit. Normal CI owns
+the Test Engine, real Winit/WGPU, SDL3/Glow, and Ash/Vulkan viewport smokes,
+WASM, source packages, Windows native routes, macOS, bindings, MSRV, tests, and
+documentation checks.
 
-The remote aggregate has a fixed 16-cell inventory: Linux Test Engine runtime, real Winit/WGPU and SDL3/Glow viewport smokes, Linux WASM, all 27 publishable source packages, Windows vcpkg, Windows MSVC `/MD` and `/MT`, Windows GNU imports, macOS, and five prebuilt producer/consumer targets (Linux x86_64, macOS x86_64/aarch64, and Windows MSVC `/MD`/`/MT`). A missing, failed, skipped, cancelled, timed-out, malformed, duplicate, or wrong-SHA cell is `No-Go`; callers cannot narrow the production inventory.
-
-The run retains `gate-result.json`, stdout/stderr, runtime invocation/results, Xvfb/Mesa display and renderer data, target/CRT/vcpkg/MinGW metadata, binding hashes, manifests, candidate SHA, source-package results, and SHA256 evidence for approximately 30 days. Verify a downloaded aggregate locally with:
-
-```bash
-python3 tools/ci/release_evidence.py verify \
-  --repo-root . \
-  --candidate-sha CANDIDATE_SHA \
-  --gate-result artifacts/release-gate/gate-result.json
-```
-
-Headless Test Engine success does not replace the real viewport cells. Missing display or software-GPU infrastructure is a failed remote gate, not a skipped success.
+The release workflow does not replay those jobs or aggregate a second evidence
+schema. It directly builds and consumes all prebuilt profiles on five target/CRT
+combinations; any failed producer or isolated consumer stops publication.
+Normal Actions logs and artifacts remain the diagnostic record. Headless Test
+Engine success does not replace the real viewport jobs in normal CI.
 
 ## Pre-publish checks
 Verify all `-sys` crates have pregenerated bindings and build in docs mode locally:
@@ -166,20 +159,28 @@ These checks generate/use bindings only and won’t build/link native code.
 Preparation and validation remain separate because preparation intentionally changes the worktree:
 
 ```bash
-python3 tools/tasks.py release-prepare 0.16.0-alpha.1
+python3 tools/tasks.py release-prepare 0.16.0-alpha.2
 git diff
 git add -A
-git commit -m "chore: prepare release v0.16.0-alpha.1"
+git commit -m "chore: prepare release v0.16.0-alpha.2"
 python3 tools/tasks.py release-check
 ```
 
 After the candidate is merged to `main` and normal CI is green, run the single release entry point:
 
 ```bash
-gh workflow run release.yml --ref main -f tag=v0.16.0-alpha.1
+gh workflow run release.yml --ref main -f tag=v0.16.0-alpha.2
 ```
 
-`release.yml` binds the tag, workspace version, `main` ref, and exact candidate; runs the 16-cell gate; stages only checksummed recorded archives; publishes the complete 27-package train with crates.io Trusted Publishing; verifies every exact version; then creates the tag and GitHub Release. See [PUBLISHING.md](./PUBLISHING.md) for setup and recovery.
+`release.yml` binds the tag, workspace version, `main` ref, and exact candidate;
+requires a successful `main` push CI run for that SHA; builds and consumes all
+five prebuilt targets; atomically creates or verifies the candidate tag inside
+the protected environment before the first upload; publishes the complete
+27-package train with crates.io Trusted Publishing; verifies every exact
+version; then validates asset names and SHA-256 digests before completing the
+checksummed GitHub Release. A rerun accepts only an identical existing asset
+subset and never overwrites a differing same-name asset. See
+[PUBLISHING.md](./PUBLISHING.md) for setup and recovery.
 
 ## Pre-release checklist
 

@@ -26,6 +26,16 @@ pub enum ImGuiError {
     #[error("A Dear ImGui context is already active")]
     ContextAlreadyActive,
 
+    /// Safe contexts using the process-global `GImGui` storage belong to one OS thread.
+    #[error(
+        "Dear ImGui contexts are already owned by another OS thread; destroy every Context on that thread before creating one here"
+    )]
+    ContextThreadConflict,
+
+    /// A restorable binding scope cannot admit a replacement Context.
+    #[error("Cannot create a Dear ImGui context from inside a Context binding scope")]
+    ContextBindingScopeActive,
+
     /// A managed renderer exclusively owns the shared font atlas.
     #[error(
         "Cannot register another Dear ImGui context: the shared font atlas is exclusively owned by a managed renderer"

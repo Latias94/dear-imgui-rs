@@ -142,7 +142,7 @@ def safe_extract_tar(archive: Path, destination: Path) -> set[str]:
 
 
 def require_file(path: Path, description: str) -> None:
-    """Require one regular file with a release-gate-specific diagnostic."""
+    """Require one regular file with an archive-specific diagnostic."""
     if not path.is_file():
         raise VerificationError(f"missing {description}: {path}")
 

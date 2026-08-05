@@ -137,6 +137,7 @@ mod tests {
         BevyImageBindingSource, ImguiTextureViewCompatibility, pad_index_buffer_for_copy_alignment,
     };
     use super::*;
+    use crate::ImguiAppExt;
     use bevy_asset::AssetId;
     use bevy_ecs::schedule::ScheduleLabel;
     use bevy_render::render_resource::{SamplerId, TextureViewId};
@@ -342,14 +343,13 @@ mod tests {
 
     #[test]
     fn driver_skips_teardown_during_device_recovery_and_frames_other_context() {
-        #[derive(ScheduleLabel, Clone, Debug, Eq, Hash, PartialEq)]
         struct RecoveryContextPass;
 
         let mut app = App::new();
         app.add_plugins(bevy_render::extract_plugin::ExtractPlugin::default());
         app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
-        app.init_schedule(RecoveryContextPass);
         app.add_plugins(crate::ImguiPlugin::default());
+        let recovery_pass = app.declare_imgui_pass::<RecoveryContextPass>();
         app.world_mut().spawn((Window::default(), PrimaryWindow));
 
         let (context_a, context_b) = {
@@ -359,7 +359,7 @@ mod tests {
                 .unwrap();
             let context_a = contexts.primary_id().unwrap();
             let context_b = contexts
-                .create(crate::ImguiContextConfig::new(RecoveryContextPass))
+                .create(crate::ImguiContextConfig::new(&recovery_pass))
                 .unwrap();
             for context_id in [context_a, context_b] {
                 contexts
@@ -429,6 +429,30 @@ mod tests {
             2,
             "Context B must remain live after Context A finishes removal"
         );
+    }
+
+    #[test]
+    fn explicit_shutdown_drains_render_world_acknowledgements_without_update() {
+        use crate::ImguiAppExt as _;
+
+        let mut app = App::new();
+        app.add_plugins(bevy_render::extract_plugin::ExtractPlugin::default());
+        app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
+        app.add_plugins(crate::ImguiPlugin::default());
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+
+        let context_id = app
+            .world()
+            .get_non_send::<crate::ImguiContexts>()
+            .unwrap()
+            .primary_id()
+            .unwrap();
+        let releases = app.world().resource::<ImguiRendererReleases>().clone();
+
+        app.shutdown_imgui().unwrap();
+
+        assert!(app.world().get_non_send::<crate::ImguiContexts>().is_none());
+        assert!(!releases.release_requested(context_id));
     }
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]

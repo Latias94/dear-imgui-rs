@@ -214,15 +214,6 @@ enum ImguiRenderer {
 }
 
 impl ImguiRenderer {
-    fn new_frame(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        match self {
-            Self::Single(renderer) => renderer.new_frame()?,
-            #[cfg(feature = "multi-viewport")]
-            Self::Multi(runtime) => runtime.new_frame()?,
-        }
-        Ok(())
-    }
-
     fn render_with_fb_size(
         &mut self,
         frame: dear_imgui_rs::render::RenderedFrame<'_>,
@@ -1177,20 +1168,14 @@ impl AppWindow {
 
         imgui
             .platform
-            .prepare_frame(&self.window, &mut imgui.context)?;
+            .prepare_frame(&mut imgui.context, &self.window)?;
 
         let ui = imgui.context.frame();
 
         // Submit the stable dockspace and let the declarative compiler own its lifecycle.
         let dock_id_struct = ui.get_id("MainDockSpace");
         imgui.dockspace_id = dock_id_struct.into();
-        let viewport = ui.main_viewport();
-        let target = dear_imgui_rs::DockspaceTarget::new(
-            dock_id_struct,
-            viewport.work_pos(),
-            viewport.work_size(),
-        )?
-        .flags(
+        let options = dear_imgui_rs::DockspaceOptions::new(dock_id_struct)?.flags(
             dear_imgui_rs::DockNodeFlags::PASSTHRU_CENTRAL_NODE
                 | dear_imgui_rs::DockNodeFlags::AUTO_HIDE_TAB_BAR,
         );
@@ -1199,7 +1184,7 @@ impl AppWindow {
         } else {
             dear_imgui_rs::DockLayoutApply::IfMissing
         };
-        ui.dockspace_over_main_viewport_with_layout(&target, &initial_docking_layout(), apply)?;
+        ui.dockspace_over_main_viewport_with_layout(&options, &initial_docking_layout(), apply)?;
         imgui.first_frame = false;
 
         let actions = render_main_menu_bar(ui, &mut imgui.game_state);
@@ -1229,9 +1214,7 @@ impl AppWindow {
         render_performance(ui, &mut imgui.game_state);
 
         // Let the platform backend finalize per-frame data (required for viewports)
-        imgui
-            .platform
-            .prepare_render(&mut imgui.context, &self.window)?;
+        imgui.platform.prepare_render(ui, &self.window)?;
         let draw_data = imgui.context.render();
 
         let mut encoder = self
@@ -1289,7 +1272,6 @@ impl AppWindow {
                 multiview_mask: None,
             });
 
-            imgui.renderer.new_frame()?;
             imgui.renderer.render_with_fb_size(
                 draw_data,
                 &mut render_pass,

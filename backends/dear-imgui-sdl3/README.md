@@ -21,8 +21,10 @@ Typical use cases:
 
 ## Notes
 
-- This crate assumes a single Dear ImGui context and a single SDL3 event pump. The upstream
-  SDL3 backend notes that multi-context usage is not well tested and may be dysfunctional.
+- One SDL3 Dear ImGui platform runtime may be active per process. SDL cursor, capture, IME, and
+  hint state are process-wide in the official backend, so a second runtime returns
+  `Sdl3BackendError::PlatformSessionOccupied` before native initialization mutates that state.
+  After the first runtime shuts down, another Context may acquire the session.
 - The upstream SDL3 backend source is compiled from the Dear ImGui tree packaged by
   `dear-imgui-sys`, while this crate keeps the SDL3-specific build logic, Rust API, and SDL3
   wrapper boundary.
@@ -39,7 +41,7 @@ Typical use cases:
 - `sdlgpu3-renderer`: enables this crate's official SDLGPU3 renderer shim.
 - `multi-viewport`: enables multi-viewport helpers (requires `dear-imgui-rs/multi-viewport`).
 
-Until `0.16.0-alpha.1` is published, test any feature combination from `main`:
+Until `0.16.0-alpha.2` is published, test any feature combination from `main`:
 
 ```toml
 dear-imgui-sdl3 = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["opengl3-renderer"] }
@@ -50,33 +52,33 @@ After publication, use the exact prerelease requirement in the combinations belo
 Platform-only usage (SDL3 + WGPU/Glow, no official OpenGL3 renderer):
 
 ```toml
-dear-imgui-sdl3 = { version = "=0.16.0-alpha.1", default-features = false }
+dear-imgui-sdl3 = { version = "=0.16.0-alpha.2", default-features = false }
 ```
 
 Enable the official OpenGL3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "=0.16.0-alpha.1", features = ["opengl3-renderer"] }
+dear-imgui-sdl3 = { version = "=0.16.0-alpha.2", features = ["opengl3-renderer"] }
 ```
 
 Enable the official SDLRenderer3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "=0.16.0-alpha.1", features = ["sdlrenderer3-renderer"] }
+dear-imgui-sdl3 = { version = "=0.16.0-alpha.2", features = ["sdlrenderer3-renderer"] }
 ```
 
 Enable the official SDLGPU3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "=0.16.0-alpha.1", features = ["sdlgpu3-renderer"] }
+dear-imgui-sdl3 = { version = "=0.16.0-alpha.2", features = ["sdlgpu3-renderer"] }
 ```
 
 ## Compatibility
 
 | Item          | Version  |
 |---------------|----------|
-| Crate         | 0.16.0-alpha.1  |
-| dear-imgui-rs | 0.16.0-alpha.1  |
+| Crate         | 0.16.0-alpha.2  |
+| dear-imgui-rs | 0.16.0-alpha.2  |
 | SDL3 crate    | 0.18.4   |
 | sdl3-sys      | 0.6      |
 
@@ -89,15 +91,14 @@ Minimal SDL3 + OpenGL3 flow (single window):
 
 ```rust,no_run
 use dear_imgui_rs::{Context, Condition};
-use dear_imgui_sdl3::{
-    enable_native_ime_ui, sdl3_poll_event_ll, Sdl3OpenGl3Backend,
-};
+use dear_imgui_sdl3::{enable_native_ime_ui, Sdl3OpenGl3Backend};
 use sdl3::video::GLProfile;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // SDL3 initialization (simplified)
     let sdl = sdl3::init()?;
     let video = sdl.video()?;
+    let mut event_pump = sdl.event_pump()?;
 
     // Recommended on IME-heavy platforms (Windows/Asia locales)
     enable_native_ime_ui();
@@ -128,7 +129,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     'main: loop {
         // 1) Poll SDL3 events and feed ImGui
-        while let Some(event) = sdl3_poll_event_ll() {
+        for event in event_pump.poll_iter() {
             if sdl3_backend.process_event(&mut imgui, &event)? {
                 // ImGui consumed the event; continue if you do not need it.
             }
@@ -175,7 +176,10 @@ APIs of interest (see `src/lib.rs` for full docs):
   `SdlGpu3PreparedFrame` that keeps the renderer and Context frame alive until its unsafe
   `render(...)` call inside the SDL GPU render pass. The calls are unsafe because `sdl3` does not
   expose enough provenance to verify that the command buffer, render pass, and initialized device
-  share one native owner.
+  share one native owner. `reconcile_frame(...)` is a surface-independent preparation step for
+  applications that must render secondary viewports before attempting to acquire the main
+  swapchain image. Repeating it is accepted only when the same renderer reconciled that exact
+  frame epoch; feedback produced outside the renderer is rejected.
 - `Sdl3PlatformBackend`:
   platform-only RAII owner for applications that provide a separate renderer. It intentionally
   does not claim a renderer consumer. Construct it with unsafe `Sdl3PlatformBackend::init_for_other`,
@@ -203,9 +207,14 @@ APIs of interest (see `src/lib.rs` for full docs):
 - `poll_fault()`:
   returns deferred platform callback failures without unwinding through native code. Ordinary
   owner methods also surface the oldest pending fault before entering SDL.
-- `sdl3_poll_event_ll() -> Option<SDL_Event>`:
-  low-level SDL event polling. Feed returned events through the owning backend's
-  `process_event(&mut Context, &SDL_Event)` method.
+- `process_event(&mut Context, &sdl3::event::Event)`:
+  the safe event path for normal `EventPump` loops. Pointer-bearing SDL payloads such as text input
+  remain owned while the official backend consumes them.
+- `unsafe process_raw_event(&mut Context, &SDL_Event)`:
+  the low-level escape hatch for SDL callbacks and foreign event loops. The caller must prove the
+  active union variant, payload pointer lifetime, SDL thread, and backend provenance contracts.
+- Runtime entry checks are scope-bound. Callback replacement detected while an operation returns
+  an error or unwinds remains queued for `poll_fault()` instead of being skipped by an early exit.
 The free renderer initialization, render, texture-update, and device-object functions were
 removed. They allowed callers to bypass the Context-owned renderer epoch and write directly into
 native texture state. Call the owning backend's `shutdown(...)` method when shutdown errors need to
@@ -401,7 +410,7 @@ Example:
 
 ```toml
 [dependencies]
-dear-imgui-sdl3 = { version = "=0.16.0-alpha.1", features = ["opengl3-renderer"] }
+dear-imgui-sdl3 = { version = "=0.16.0-alpha.2", features = ["opengl3-renderer"] }
 sdl3 = { version = "0.18", features = ["build-from-source"] }
 ```
 
@@ -514,11 +523,36 @@ unsafe {
 }
 ```
 
+### Mouse Capture Mode
+
+Mouse capture keeps drag coordinates updating after the pointer leaves an SDL window. The official
+backend enables it immediately on capable desktop drivers, except on X11 where it waits until a drag
+starts so a debugger break is less likely to leave the desktop pointer captured. Applications can
+override that policy through any owning backend:
+
+```rust
+use dear_imgui_sdl3::MouseCaptureMode;
+
+sdl3_backend.set_mouse_capture_mode(&mut imgui, MouseCaptureMode::EnabledAfterDrag)?;
+```
+
+`MouseCaptureMode::Disabled` also releases an active capture. Changing this policy cannot add
+global mouse or native viewport capabilities to a video driver that does not provide them.
+
 ## Examples
 
 The workspace includes several examples that use this backend:
 
 Multi-viewport status on SDL3:
+
+Native OS viewports depend on the active SDL video driver, not only the Cargo feature. The embedded
+official backend currently sets `BackendFlags::PLATFORM_HAS_VIEWPORTS` for the Windows, Cocoa, X11,
+DIVE, and VMAN drivers. It intentionally does not set that capability on Wayland, whose compositor
+security model does not provide the global pointer position and capture behavior required by Dear
+ImGui's current platform-viewport contract. On Wayland, docking and dragging continue to work
+inside the main SDL window, but detached panels remain in that host window instead of becoming
+independent OS windows. Applications can inspect `imgui.io().backend_flags()` after backend
+initialization when they need to report this runtime degradation.
 
 For OpenGL viewports the Rust-owned callback wrapper verifies that each secondary window has a
 distinct current GL context and restores the previous window, context, and

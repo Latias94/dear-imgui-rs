@@ -503,6 +503,38 @@ fn ordinary_callback_render_failure_does_not_shutdown_the_runtime() {
     runtime.shutdown(&mut context).unwrap();
 }
 
+#[test]
+fn terminal_fault_preempts_and_preserves_pending_non_terminal_fault() {
+    let _guard = test_guard();
+    let mut context = Context::create();
+    let _platform = attach_test_platform(&mut context);
+    let gl = fake_gl();
+    let renderer = test_renderer(&mut context, Some(Rc::clone(&gl)), false);
+    let mut runtime = unsafe { GlowViewportRuntime::attach(&mut context, renderer) }.unwrap();
+    let control = runtime.control_for_test();
+
+    control.record_fault(GlowViewportError::CallbackReentered {
+        callback: "earlier recoverable fault",
+    });
+    control.record_dependency_fault(GlowViewportError::RendererCallbackReplaced {
+        callback: "terminal dependency fault",
+    });
+
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(GlowViewportError::RendererCallbackReplaced {
+            callback: "terminal dependency fault"
+        })
+    ));
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(GlowViewportError::CallbackReentered {
+            callback: "earlier recoverable fault"
+        })
+    ));
+    runtime.shutdown(&mut context).unwrap();
+}
+
 #[derive(Clone, Copy)]
 enum OccupiedRendererSlot {
     Create,
@@ -1052,6 +1084,13 @@ fn callback_panic_is_contained_and_deferred() {
             callback: "Renderer_RenderWindow"
         })
     ));
+    assert_eq!(runtime.state_for_test(), RuntimeState::ShuttingDown);
+    assert!(
+        !context
+            .io()
+            .backend_flags()
+            .contains(BackendFlags::RENDERER_HAS_VIEWPORTS)
+    );
     runtime.shutdown(&mut context).unwrap();
 }
 

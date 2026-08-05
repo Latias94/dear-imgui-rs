@@ -113,6 +113,16 @@ unsafe extern "C" {
     pub fn dear_imgui_rs_show_metrics_window_without_font_atlas(p_open: *mut bool);
     pub fn dear_imgui_rs_show_style_editor_without_font_atlas(ref_: *mut ImGuiStyle);
     pub fn dear_imgui_rs_show_font_atlas_debug_panel();
+    pub fn dear_imgui_rs_dock_builder_keep_root_alive(root_id: ImGuiID) -> ::std::os::raw::c_int;
+    pub fn dear_imgui_rs_dock_builder_root_has_active_content_window(
+        root_id: ImGuiID,
+    ) -> ::std::os::raw::c_int;
+    pub fn dear_imgui_rs_dock_builder_copy_node(
+        source_root_id: ImGuiID,
+        destination_root_id: ImGuiID,
+        remap_data: *mut ImGuiID,
+        remap_capacity: ::std::os::raw::c_int,
+    ) -> ::std::os::raw::c_int;
 }
 
 /// Optional backend shim entry points for downstream integrations.
@@ -464,6 +474,38 @@ unsafe extern "C" {
     ) -> std::os::raw::c_int;
 
     fn dear_imgui_rs_platform_io_aggregate_callback_storage_count() -> std::os::raw::c_int;
+
+    fn dear_imgui_rs_find_live_viewport_by_address(
+        context: *mut ImGuiContext,
+        address: usize,
+    ) -> *mut ImGuiViewport;
+}
+
+/// Resolve a retained viewport address through the current Context's internal live registry.
+///
+/// Dear ImGui may change a viewport's numeric ID in place while docking transfers ownership.
+/// This repository-owned helper therefore compares the address against `ImGuiContext::Viewports`
+/// without dereferencing the retained address.
+///
+/// # Safety
+///
+/// `context` must be the current live Context. The returned pointer remains valid only while that
+/// Context stays current and no Dear ImGui operation removes the viewport.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn ImGuiContext_FindLiveViewportByAddress(
+    context: *mut ImGuiContext,
+    address: usize,
+) -> *mut ImGuiViewport {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    {
+        unsafe { dear_imgui_rs_find_live_viewport_by_address(context, address) }
+    }
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        let _ = (context, address);
+        std::ptr::null_mut()
+    }
 }
 
 /// Results returned by [`ImGuiPlatformIO_ProbeAggregateCallbacks`].

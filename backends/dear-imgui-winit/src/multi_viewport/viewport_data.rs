@@ -9,6 +9,18 @@ use super::native_cursor_hittest::NativeCursorHitTest;
 use super::registry::{insert_viewport_data, owns_viewport_data};
 use super::runtime::RuntimeControl;
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) struct GeometryRefresh {
+    pub(super) position: bool,
+    pub(super) size: bool,
+}
+
+impl GeometryRefresh {
+    pub(super) const fn is_empty(self) -> bool {
+        !self.position && !self.size
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct ViewportWindowPolicy {
     pub(super) decorations: bool,
@@ -57,6 +69,7 @@ pub(super) struct ViewportData {
     main: bool,
     pub(super) window_policy: Cell<ViewportWindowPolicy>,
     pub(super) last_log_fb_scale: Cell<f32>,
+    pending_geometry_refresh: Cell<GeometryRefresh>,
 }
 
 impl ViewportData {
@@ -68,6 +81,7 @@ impl ViewportData {
             main,
             window_policy: Cell::new(ViewportWindowPolicy::default()),
             last_log_fb_scale: Cell::new(0.0),
+            pending_geometry_refresh: Cell::new(GeometryRefresh::default()),
         })
     }
 
@@ -95,6 +109,18 @@ impl ViewportData {
 
     pub(super) fn is_main(&self) -> bool {
         self.main
+    }
+
+    pub(super) fn request_geometry_refresh(&self, position: bool, size: bool) {
+        let current = self.pending_geometry_refresh.get();
+        self.pending_geometry_refresh.set(GeometryRefresh {
+            position: current.position || position,
+            size: current.size || size,
+        });
+    }
+
+    pub(super) fn take_geometry_refresh(&self) -> GeometryRefresh {
+        self.pending_geometry_refresh.take()
     }
 }
 

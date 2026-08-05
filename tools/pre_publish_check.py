@@ -8,7 +8,6 @@ This script performs various checks to ensure the workspace is ready for publish
 - Git working tree is clean
 - Cargo.lock is up-to-date
 - Python release-tool contracts and release policy are valid
-- The public API surface matches its checked-in policy
 - Core and supported high-level extensions build for wasm32
 - Documentation builds successfully
 - Packaged core crates build from an offline consumer
@@ -192,10 +191,6 @@ def release_contract_commands() -> list[tuple[str, list[str]]]:
             ],
         ),
         (
-            "API surface policy",
-            [sys.executable, "tools/api_surface_report.py", "--check"],
-        ),
-        (
             "Workflow policy",
             [sys.executable, "tools/ci/workflow_policy.py", "--check"],
         ),
@@ -208,7 +203,7 @@ def release_contract_commands() -> list[tuple[str, list[str]]]:
 
 def check_release_contracts(repo_root: Path) -> Tuple[bool, List[str]]:
     """Run local release contracts in order and stop at the first failure."""
-    print_check("Python, API, workflow, and WASM release contracts")
+    print_check("Python, workflow, and WASM release contracts")
     for label, command in release_contract_commands():
         print(f"\n  Checking {label}...")
         code, stdout, stderr = run_command(
@@ -408,7 +403,7 @@ def check_pregenerated_bindings(repo_root: Path) -> Tuple[bool, List[str]]:
         print_success("All -sys crates have pregenerated bindings")
         return True, []
     else:
-        print_error("Run: python3 tools/update_submodule_and_bindings.py --crates all --profile release")
+        print_error("Run: python3 tools/update_submodule_and_bindings.py --crates all")
         return False, errors
 
 
@@ -744,11 +739,8 @@ def main() -> int:
         print("Next steps:")
         print("  1. Review changes one more time")
         print("  2. Run: python3 tools/publish.py --dry-run")
-        print("  3. Download the authoritative same-SHA release gate result")
-        print(
-            "  4. Run: python3 tools/publish.py "
-            "--release-gate-result PATH/to/gate-result.json"
-        )
+        print("  3. Prefer the protected release workflow for publication")
+        print("  4. For manual recovery only: python3 tools/publish.py --yes")
         return 0
     else:
         print()

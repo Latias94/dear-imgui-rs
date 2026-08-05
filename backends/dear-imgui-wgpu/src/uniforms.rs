@@ -162,23 +162,11 @@ impl Default for Uniforms {
 pub struct UniformBuffer {
     buffer: Buffer,
     bind_group: BindGroup,
-    bind_group_layout: BindGroupLayout,
 }
 
 impl UniformBuffer {
-    /// Create a new uniform buffer
-    pub fn new(device: &Device, sampler: &Sampler) -> Self {
-        // Create the uniform buffer with proper alignment (16 bytes for uniforms)
-        let buffer_size = align_size(std::mem::size_of::<Uniforms>(), 16);
-        let buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("Dear ImGui Uniform Buffer"),
-            size: buffer_size as u64,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        // Create bind group layout (uniform buffer + sampler)
-        let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+    pub(crate) fn create_bind_group_layout(device: &Device) -> BindGroupLayout {
+        device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("Dear ImGui Common Bind Group Layout"),
             entries: &[
                 BindGroupLayoutEntry {
@@ -198,12 +186,24 @@ impl UniformBuffer {
                     count: None,
                 },
             ],
-        });
+        })
+    }
 
-        // Create bind group
+    pub(crate) fn new_with_layout(
+        device: &Device,
+        sampler: &Sampler,
+        bind_group_layout: &BindGroupLayout,
+    ) -> Self {
+        let buffer_size = align_size(std::mem::size_of::<Uniforms>(), 16);
+        let buffer = device.create_buffer(&BufferDescriptor {
+            label: Some("Dear ImGui Uniform Buffer"),
+            size: buffer_size as u64,
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
             label: Some("Dear ImGui Common Bind Group"),
-            layout: &bind_group_layout,
+            layout: bind_group_layout,
             entries: &[
                 BindGroupEntry {
                     binding: 0,
@@ -216,11 +216,7 @@ impl UniformBuffer {
             ],
         });
 
-        Self {
-            buffer,
-            bind_group,
-            bind_group_layout,
-        }
+        Self { buffer, bind_group }
     }
 
     /// Update the uniform buffer with new data
@@ -231,11 +227,6 @@ impl UniformBuffer {
     /// Get the bind group for rendering
     pub fn bind_group(&self) -> &BindGroup {
         &self.bind_group
-    }
-
-    /// Get the bind group layout
-    pub fn bind_group_layout(&self) -> &BindGroupLayout {
-        &self.bind_group_layout
     }
 
     /// Get the buffer

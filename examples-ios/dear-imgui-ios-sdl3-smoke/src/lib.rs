@@ -13,6 +13,7 @@ fn run_inner(_argc: c_int, _argv: *mut *mut c_char) -> Result<c_int, Box<dyn std
 
     let sdl = sdl3::init()?;
     let video = sdl.video()?;
+    let mut event_pump = sdl.event_pump()?;
     let main_scale = video
         .get_primary_display()?
         .get_content_scale()
@@ -111,9 +112,8 @@ fn run_inner(_argc: c_int, _argv: *mut *mut c_char) -> Result<c_int, Box<dyn std
     };
 
     let exit_result: Result<c_int, Box<dyn std::error::Error>> = 'running: loop {
-        while let Some(raw) = imgui_sdl3_backend::sdl3_poll_event_ll() {
-            let _ = sdl3_backend.process_event(&mut imgui, &raw)?;
-            let event = Event::from_ll(raw);
+        while let Some(event) = event_pump.poll_event() {
+            let _ = sdl3_backend.process_event(&mut imgui, &event)?;
             match event {
                 Event::Quit { .. } => {
                     break 'running Ok(0);
@@ -232,7 +232,6 @@ fn run_inner(_argc: c_int, _argv: *mut *mut c_char) -> Result<c_int, Box<dyn std
                 multiview_mask: None,
             });
 
-            renderer.new_frame()?;
             renderer.render_with_fb_size(
                 draw_data,
                 &mut render_pass,

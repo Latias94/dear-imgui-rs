@@ -19,21 +19,22 @@ struct CustomFonts {
 }
 
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "dear-imgui-bevy custom font".to_owned(),
-                resolution: (720, 480).into(),
-                present_mode: PresentMode::AutoVsync,
-                window_theme: Some(WindowTheme::Dark),
-                ..Default::default()
-            }),
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: "dear-imgui-bevy custom font".to_owned(),
+            resolution: (720, 480).into(),
+            present_mode: PresentMode::AutoVsync,
+            window_theme: Some(WindowTheme::Dark),
             ..Default::default()
-        }))
-        .add_plugins(ImguiPlugin::default())
-        .insert_non_send(CustomFonts::default())
-        .add_systems(Startup, (setup_scene, configure_fonts))
-        .add_systems(ImguiPrimaryContextPass, custom_font_ui)
+        }),
+        ..Default::default()
+    }))
+    .add_plugins(ImguiPlugin::default())
+    .insert_non_send(CustomFonts::default())
+    .add_systems(Startup, (setup_scene, configure_fonts));
+    let primary_pass = app.imgui_primary_pass();
+    app.add_imgui_systems(&primary_pass, primary_pass.system(custom_font_ui))
         .run();
 }
 
@@ -63,11 +64,11 @@ fn configure_fonts(
     Ok(())
 }
 
-fn custom_font_ui(imgui: ImguiUi, fonts: NonSend<CustomFonts>) -> Result {
+fn custom_font_ui(frame: ImguiFrame<'_>, fonts: NonSend<CustomFonts>) -> Result {
     let roboto_medium = fonts
         .roboto_medium
         .ok_or("the custom font should be configured before the first UI frame")?;
-    let ui = imgui.ui()?;
+    let ui = frame.ui();
 
     ui.window("Custom Font")
         .size([440.0, 190.0], Condition::FirstUseEver)

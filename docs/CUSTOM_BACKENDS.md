@@ -454,7 +454,7 @@ correct. Multi-viewport requires both platform and renderer support:
   are destroyed.
 - Identify the main viewport through `Viewport::is_main()`. Its numeric ID is an upstream-private
   implementation detail and is not a cross-Context identity.
-- Key every engine-side window, camera, surface, command, feedback, callback fault, and teardown acknowledgement by `(ContextId, ViewportId)`. Numeric viewport IDs may repeat across live Contexts.
+- Give every native viewport a backend-owned stable instance identity scoped to its Context, and key engine-side windows, cameras, surfaces, commands, feedback, callback faults, and teardown acknowledgements by that identity. Treat the numeric `ViewportId` as a mutable routing projection: IDs may repeat across live Contexts and docking may change an ID while preserving the native viewport.
 
 Install the owning platform runtime first and the owning renderer runtime
 second, before any secondary platform window exists. Treat each backend's

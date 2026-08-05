@@ -76,17 +76,23 @@ pub(super) fn prepare_context_platform_frame(
         let mut viewport_windows = Vec::new();
         let mut marker_repairs = Vec::new();
         for (entity, window, marker, owner) in query.iter(world) {
-            let Some((owner_context_id, viewport_id)) = owner.window_identity() else {
+            let Some((owner_context_id, instance_id)) = owner.window_identity() else {
                 continue;
             };
-            if owner_context_id != context_id || bridge.viewport_window(viewport_id) != Some(entity)
+            if owner_context_id != context_id
+                || bridge.viewport_window_for_instance(instance_id) != Some(entity)
             {
                 continue;
             }
-            if marker.is_none_or(|marker| !owner.matches_window(marker)) {
-                marker_repairs.push((entity, viewport_id));
+            let Some(viewport_id) = bridge.viewport_id(instance_id) else {
+                continue;
+            };
+            if marker.is_none_or(|marker| {
+                !owner.matches_window(marker) || marker.viewport_id() != viewport_id
+            }) {
+                marker_repairs.push((entity, instance_id, viewport_id));
             }
-            viewport_windows.push((entity, window.clone(), viewport_id));
+            viewport_windows.push((entity, window.clone(), instance_id));
         }
         (viewport_windows, marker_repairs)
     };
@@ -101,7 +107,7 @@ pub(super) fn prepare_context_platform_frame(
                 }
                 let is_projection_of_owner = owner.is_some_and(|owner| {
                     owner.matches_window(marker)
-                        && bridge.viewport_window(marker.viewport_id()) == Some(entity)
+                        && bridge.viewport_window_for_instance(marker.instance_id()) == Some(entity)
                 });
                 (!is_projection_of_owner).then_some(entity)
             })
@@ -111,10 +117,10 @@ pub(super) fn prepare_context_platform_frame(
     for entity in stale_markers {
         world.entity_mut(entity).remove::<ImguiViewportWindow>();
     }
-    for (entity, viewport_id) in marker_repairs {
+    for (entity, instance_id, viewport_id) in marker_repairs {
         world
             .entity_mut(entity)
-            .insert(ImguiViewportWindow::new(context_id, viewport_id));
+            .insert(ImguiViewportWindow::new(instance_id, viewport_id));
     }
     let monitors = {
         let mut query = world.query::<(&Monitor, Option<&PrimaryMonitor>)>();
@@ -126,14 +132,14 @@ pub(super) fn prepare_context_platform_frame(
     };
     let viewport_feedback = viewport_windows
         .iter()
-        .map(|(entity, window, viewport_id)| {
+        .map(|(entity, window, instance_id)| {
             (
                 *entity,
-                *viewport_id,
+                *instance_id,
                 crate::viewport::viewport_feedback_from_window(
                     *entity,
                     window,
-                    bridge.viewport_feedback(*viewport_id),
+                    bridge.viewport_feedback_for_instance(*instance_id),
                 ),
             )
         })
@@ -162,8 +168,7 @@ pub(super) fn prepare_context_platform_frame(
             render_integration_installed,
             desktop_position_support,
         ),
-    )
-    .map_err(crate::viewport::ImguiViewportRuntimeError::CallbackOwnership)?;
+    )?;
     Ok(desktop_position_support
         != crate::viewport::native_window::DesktopPositionSupport::PendingWindow)
 }
@@ -483,9 +488,10 @@ fn host_window_and_viewport_entities(
                 let mut query =
                     world.query_filtered::<(Entity, &ImguiViewportOwner), With<Window>>();
                 for (entity, owner) in query.iter(world) {
-                    if let Some((owner_context_id, viewport_id)) = owner.window_identity()
+                    if let Some((owner_context_id, instance_id)) = owner.window_identity()
                         && owner_context_id == context_id
-                        && bridge.viewport_window(viewport_id) == Some(entity)
+                        && bridge.viewport_window_for_instance(instance_id) == Some(entity)
+                        && let Some(viewport_id) = bridge.viewport_id(instance_id)
                     {
                         viewports.push((entity, viewport_id.raw()));
                     }

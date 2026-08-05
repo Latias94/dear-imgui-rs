@@ -24,6 +24,7 @@ typedef enum ImGuiTestEngineStatus {
     ImGuiTestEngineStatus_Exception = 5,
     ImGuiTestEngineStatus_Unsupported = 6,
     ImGuiTestEngineStatus_CaptureFailed = 7,
+    ImGuiTestEngineStatus_BindingOccupied = 8,
 } ImGuiTestEngineStatus;
 
 typedef bool (*ImGuiTestEngineCaptureCallback_c)(
@@ -57,6 +58,12 @@ typedef enum ImGuiTestEngineGroup {
     ImGuiTestEngineGroup_Perfs = 1,
 } ImGuiTestEngineGroup;
 
+typedef enum ImGuiTestEngineBuiltinTestSuite {
+    ImGuiTestEngineBuiltinTestSuite_NativeDefaults = 0,
+    ImGuiTestEngineBuiltinTestSuite_UpstreamDocking = 1,
+    ImGuiTestEngineBuiltinTestSuite_UpstreamViewports = 2,
+} ImGuiTestEngineBuiltinTestSuite;
+
 typedef enum ImGuiTestEngineRunFlags {
     ImGuiTestEngineRunFlags_None = 0,
     ImGuiTestEngineRunFlags_GuiFuncDisable = 1 << 0,
@@ -84,6 +91,15 @@ typedef struct ImGuiTestEngineResultSummary_c {
     int CountInQueue;
 } ImGuiTestEngineResultSummary_c;
 
+typedef enum ImGuiTestEngineTestStatus {
+    ImGuiTestEngineTestStatus_Unknown = 0,
+    ImGuiTestEngineTestStatus_Success = 1,
+    ImGuiTestEngineTestStatus_Queued = 2,
+    ImGuiTestEngineTestStatus_Running = 3,
+    ImGuiTestEngineTestStatus_Error = 4,
+    ImGuiTestEngineTestStatus_Suspended = 5,
+} ImGuiTestEngineTestStatus;
+
 // The diagnostic is copied into an internal 2048-byte thread-local buffer. The
 // required size includes the trailing NUL and describes the full stored
 // diagnostic. Diagnostics longer than 2047 bytes are truncated before storage.
@@ -95,6 +111,10 @@ ImGuiTestEngineStatus imgui_test_engine_get_last_error(
 ) IMGUI_TEST_ENGINE_ABI_NOEXCEPT;
 
 ImGuiTestEngineStatus imgui_test_engine_create_context(ImGuiTestEngine** out_engine);
+ImGuiTestEngineStatus imgui_test_engine_get_engine_id(
+    ImGuiTestEngine* engine,
+    uint64_t* out_engine_id
+);
 ImGuiTestEngineStatus imgui_test_engine_destroy_context(ImGuiTestEngine* engine);
 ImGuiTestEngineStatus imgui_test_engine_get_ui_context_target(
     ImGuiTestEngine* engine,
@@ -131,7 +151,31 @@ ImGuiTestEngineStatus imgui_test_engine_queue_tests(
     ImGuiTestEngine* engine,
     int group,
     const char* filter,
-    int run_flags
+    int run_flags,
+    uint64_t* out_run_id
+);
+ImGuiTestEngineStatus imgui_test_engine_get_run_test_count(
+    ImGuiTestEngine* engine,
+    uint64_t run_id,
+    int* out_count
+);
+// Both required sizes include the trailing NUL. Query with null buffers and
+// zero capacities before copying the exact test identity.
+ImGuiTestEngineStatus imgui_test_engine_get_run_test(
+    ImGuiTestEngine* engine,
+    uint64_t run_id,
+    int index,
+    char* category_buffer,
+    size_t category_buffer_size,
+    size_t* out_category_required_size,
+    char* name_buffer,
+    size_t name_buffer_size,
+    size_t* out_name_required_size,
+    int* out_status
+);
+ImGuiTestEngineStatus imgui_test_engine_finish_run(
+    ImGuiTestEngine* engine,
+    uint64_t run_id
 );
 ImGuiTestEngineStatus imgui_test_engine_is_test_queue_empty(
     ImGuiTestEngine* engine,
@@ -142,6 +186,8 @@ ImGuiTestEngineStatus imgui_test_engine_try_abort_engine(
     bool* out_aborted
 );
 ImGuiTestEngineStatus imgui_test_engine_abort_current_test(ImGuiTestEngine* engine);
+// Diagnostic-only cumulative upstream counters. Per-run consumers must use the
+// run ID snapshot APIs above.
 ImGuiTestEngineStatus imgui_test_engine_get_result_summary(
     ImGuiTestEngine* engine,
     ImGuiTestEngineResultSummary_c* out_summary
@@ -176,6 +222,30 @@ ImGuiTestEngineStatus imgui_test_engine_is_requesting_max_app_speed(
 );
 ImGuiTestEngineStatus imgui_test_engine_install_default_crash_handler(void);
 ImGuiTestEngineStatus imgui_test_engine_register_default_tests(ImGuiTestEngine* engine);
+ImGuiTestEngineStatus imgui_test_engine_register_builtin_test_suite(
+    ImGuiTestEngine* engine,
+    int suite,
+    int* out_registered_count
+);
+ImGuiTestEngineStatus imgui_test_engine_unregister_builtin_test_suite(
+    ImGuiTestEngine* engine,
+    int suite
+);
+ImGuiTestEngineStatus imgui_test_engine_get_registered_test_count(
+    ImGuiTestEngine* engine,
+    const char* category,
+    int* out_count
+);
+// The required size includes the trailing NUL. Query with a null buffer and
+// zero capacity. Tests are returned in upstream registration order.
+ImGuiTestEngineStatus imgui_test_engine_get_registered_test_name(
+    ImGuiTestEngine* engine,
+    const char* category,
+    int index,
+    char* buffer,
+    size_t buffer_size,
+    size_t* out_required_size
+);
 
 ImGuiTestEngineStatus imgui_test_engine_script_create(ImGuiTestEngineScript** out_script);
 ImGuiTestEngineStatus imgui_test_engine_script_destroy(ImGuiTestEngineScript* script);
@@ -290,6 +360,8 @@ typedef enum ImGuiTestEngineExceptionPoint {
     ImGuiTestEngineExceptionPoint_ScriptAllocation = 2,
     ImGuiTestEngineExceptionPoint_ScriptVectorGrowth = 3,
     ImGuiTestEngineExceptionPoint_UpstreamCall = 4,
+    ImGuiTestEngineExceptionPoint_PostBind = 5,
+    ImGuiTestEngineExceptionPoint_SuiteRegistrationAfterFirstTest = 6,
 } ImGuiTestEngineExceptionPoint;
 
 typedef struct ImGuiTestEngineLifecycleCounters_c {

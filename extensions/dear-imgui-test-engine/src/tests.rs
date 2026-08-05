@@ -1,19 +1,27 @@
 use std::num::NonZeroU32;
 
+use crate::results::RunCompletion;
+
 use super::*;
 
 #[test]
-fn result_summary_rejects_negative_native_counts() {
-    let summary = ResultSummary::try_from_raw(3, 2, 1).expect("valid summary");
+fn result_summary_is_derived_from_the_exact_run_manifest() {
+    let tests = [
+        RunTestResult::new("category".into(), "not-run".into(), RunTestStatus::NotRun),
+        RunTestResult::new("category".into(), "queued".into(), RunTestStatus::Queued),
+        RunTestResult::new("category".into(), "running".into(), RunTestStatus::Running),
+        RunTestResult::new("category".into(), "success".into(), RunTestStatus::Success),
+        RunTestResult::new("category".into(), "error".into(), RunTestStatus::Error),
+        RunTestResult::new(
+            "category".into(),
+            "suspended".into(),
+            RunTestStatus::Suspended,
+        ),
+    ];
+    let summary = ResultSummary::from_tests(&tests);
     assert_eq!(summary.count_tested, 3);
-    assert_eq!(summary.count_success, 2);
-    assert_eq!(summary.count_in_queue, 1);
-
-    for counts in [(-1, 0, 0), (0, -1, 0), (0, 0, -1)] {
-        let error = ResultSummary::try_from_raw(counts.0, counts.1, counts.2)
-            .expect_err("negative native counts must be rejected");
-        assert!(matches!(error, TestEngineError::InvalidNativeData { .. }));
-    }
+    assert_eq!(summary.count_success, 1);
+    assert_eq!(summary.count_in_queue, 2);
 }
 
 #[test]
@@ -67,8 +75,36 @@ fn queued_and_running_states_reject_another_queue_until_terminal_is_consumed() {
     assert!(!RunState::Queued.accepts_queue());
     assert!(!RunState::Running.accepts_queue());
     assert!(!RunState::Terminal.accepts_queue());
-    assert_eq!(
-        RunState::Terminal.after_terminal_consumed(),
-        RunState::Ready
-    );
+}
+
+#[test]
+fn a_non_empty_terminal_manifest_with_unfinished_tests_is_aborted_not_no_match() {
+    let completion = RunCompletion {
+        engine_id: EngineId::from_raw(1).expect("non-zero engine identity"),
+        run_id: RunId::from_raw(1).expect("non-zero run identity"),
+        summary: ResultSummary::default(),
+        tests: vec![RunTestResult::new(
+            "category".into(),
+            "not-run".into(),
+            RunTestStatus::NotRun,
+        )],
+    };
+
+    assert_eq!(completion.natural_outcome(), RunOutcome::Aborted);
+}
+
+#[test]
+fn a_failed_test_precedes_unfinished_tests_in_the_run_outcome() {
+    let tests = vec![
+        RunTestResult::new("category".into(), "failed".into(), RunTestStatus::Error),
+        RunTestResult::new("category".into(), "not-run".into(), RunTestStatus::NotRun),
+    ];
+    let completion = RunCompletion {
+        engine_id: EngineId::from_raw(1).expect("non-zero engine identity"),
+        run_id: RunId::from_raw(1).expect("non-zero run identity"),
+        summary: ResultSummary::from_tests(&tests),
+        tests,
+    };
+
+    assert_eq!(completion.natural_outcome(), RunOutcome::Failed);
 }

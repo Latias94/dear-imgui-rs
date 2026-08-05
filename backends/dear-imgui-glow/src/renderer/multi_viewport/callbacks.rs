@@ -115,6 +115,12 @@ fn clear_renderer_viewport_flag_if_callback_owned() {
     }
 }
 
+pub(super) fn revoke_renderer_viewport_capability_if_owned(control: &RuntimeControl) {
+    let _ = control.binding().try_with_bound_context(|| {
+        clear_renderer_viewport_flag_if_callback_owned();
+    });
+}
+
 fn runtime_owns_any_renderer_callback(raw: &sys::ImGuiPlatformIO) -> bool {
     render_callback_matches(raw.Renderer_RenderWindow)
 }
@@ -277,7 +283,7 @@ pub(crate) unsafe extern "C" fn renderer_render_window_sys(
         let _ = with_current_runtime(|active| render_viewport(active, viewport));
     }));
     if result.is_err() {
-        control.record_fault(GlowViewportError::CallbackPanicked {
+        control.record_dependency_fault(GlowViewportError::CallbackPanicked {
             callback: "Renderer_RenderWindow",
         });
     }

@@ -34,16 +34,8 @@ def _build_parser() -> argparse.ArgumentParser:
         usage=(
             "%(prog)s [full]\n"
             "       %(prog)s build-prebuilt PACKAGE_DIR TARGET CANDIDATE_SHA [CRT]\n"
-            "       %(prog)s prebuilt PACKAGE_DIR TARGET CANDIDATE_SHA [CRT]\n"
-            "       %(prog)s --verify-prebuilt-packages PACKAGE_DIR TARGET CANDIDATE_SHA [CRT]"
+            "       %(prog)s prebuilt PACKAGE_DIR TARGET CANDIDATE_SHA [CRT]"
         ),
-    )
-    parser.add_argument(
-        "--verify-prebuilt-packages",
-        dest="legacy_prebuilt",
-        nargs="+",
-        metavar="ARG",
-        help=argparse.SUPPRESS,
     )
     commands = parser.add_subparsers(dest="command", title="commands")
     commands.add_parser("full", help="Run the complete source-package gate")
@@ -68,24 +60,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _prebuilt_arguments(
-    parser: argparse.ArgumentParser, args: argparse.Namespace
-) -> tuple[Path, str, str, str] | None:
-    if args.legacy_prebuilt is not None:
-        if args.command is not None:
-            parser.error("--verify-prebuilt-packages cannot be combined with a command")
-        if len(args.legacy_prebuilt) not in (3, 4):
-            parser.error(
-                "--verify-prebuilt-packages requires "
-                "PACKAGE_DIR TARGET CANDIDATE_SHA [CRT]"
-            )
-        package_dir, target, candidate_sha, *optional_crt = args.legacy_prebuilt
-        return (
-            Path(package_dir),
-            target,
-            candidate_sha,
-            optional_crt[0] if optional_crt else "",
-        )
+def _prebuilt_arguments(args: argparse.Namespace) -> tuple[Path, str, str, str] | None:
     if args.command == "prebuilt":
         return args.package_dir, args.target, args.candidate_sha, args.crt
     return None
@@ -104,7 +79,7 @@ def _resolve_candidate_sha(candidate_sha: str) -> str:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
-    prebuilt_arguments = _prebuilt_arguments(parser, args)
+    prebuilt_arguments = _prebuilt_arguments(args)
     try:
         if args.command == "build-prebuilt":
             target_dir = args.target_dir

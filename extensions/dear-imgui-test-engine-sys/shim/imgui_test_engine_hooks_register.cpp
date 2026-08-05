@@ -39,6 +39,10 @@ void context_shutdown_observer(ImGuiContext* ui_ctx, ImGuiContextHook*) {
     }
     const ImGuiTestEngine* engine = observer->second.Engine;
     if (ui_ctx->TestEngine == nullptr && engine->UiContextTarget == nullptr) {
+        dear_imgui_test_engine_abi::release_process_binding(
+            observer->second.Engine,
+            ui_ctx
+        );
         dear_imgui_test_engine_abi::increment(
             dear_imgui_test_engine_abi::Counter::EngineUnbound
         );

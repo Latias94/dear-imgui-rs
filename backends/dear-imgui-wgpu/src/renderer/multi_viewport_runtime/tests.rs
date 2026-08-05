@@ -16,15 +16,16 @@ use super::callbacks::{
     renderer_set_window_size_sys, renderer_swap_buffers_sys, unary_callback_matches,
 };
 use super::registry::{
-    ViewportIdentity, fail_next_viewport_registration, preflight_runtime,
-    register_test_viewport_data, register_viewport_data, unregister_viewport_data,
-    viewport_data_count,
+    ViewportDataDestroy, ViewportIdentity, destroy_viewport_data, fail_next_viewport_registration,
+    preflight_runtime, register_test_viewport_data, register_viewport_data,
+    unregister_viewport_data, viewport_data_count,
 };
 use super::runtime::{RuntimeControl, RuntimeState};
 #[cfg(feature = "wgpu-30")]
 use super::surface::supports_surface_format;
 use super::surface::{
-    SurfaceAction, SurfaceEvent, ViewportWgpuData, resolve_alpha_mode, resolve_present_mode,
+    SurfaceAction, SurfaceEvent, ViewportWgpuData, release_surface_bundle_parts,
+    request_close_after_surface_creation_failure, resolve_alpha_mode, resolve_present_mode,
     should_clear_viewport, surface_action, surface_config_from_capabilities,
 };
 use super::{OwningViewportRuntime, WgpuViewportError};
@@ -112,6 +113,17 @@ struct DropProbe(Rc<Cell<u32>>);
 impl Drop for DropProbe {
     fn drop(&mut self) {
         self.0.set(self.0.get() + 1);
+    }
+}
+
+struct OrderedDropProbe {
+    name: &'static str,
+    drops: Rc<RefCell<Vec<&'static str>>>,
+}
+
+impl Drop for OrderedDropProbe {
+    fn drop(&mut self) {
+        self.drops.borrow_mut().push(self.name);
     }
 }
 
@@ -249,7 +261,7 @@ fn viewport_identity(viewport: &mut sys::ImGuiViewport) -> ViewportIdentity {
 }
 
 #[test]
-fn viewport_identity_resolves_only_the_current_id_and_address() {
+fn viewport_identity_follows_a_live_viewport_when_docking_changes_its_id() {
     let _guard = lock_context();
     let context = Context::create();
     let viewport = unsafe { sys::igGetMainViewport() };
@@ -261,15 +273,44 @@ fn viewport_identity_resolves_only_the_current_id_and_address() {
         Some(id)
     );
     assert!(
-        ViewportIdentity::for_test((viewport as usize).wrapping_add(1), id)
+        ViewportIdentity::for_test((viewport as usize).wrapping_add(1))
             .with_live_viewport(context.as_raw(), |_| ())
             .is_none()
     );
-    assert!(
-        ViewportIdentity::for_test(viewport as usize, id.wrapping_add(1))
-            .with_live_viewport(context.as_raw(), |_| ())
-            .is_none()
+    let changed_id = id.wrapping_add(1);
+    unsafe { (*viewport).ID = changed_id };
+    let resolved_after_id_change =
+        identity.with_live_viewport(context.as_raw(), |viewport| viewport.id().raw());
+    unsafe { (*viewport).ID = id };
+    assert_eq!(
+        resolved_after_id_change,
+        Some(changed_id),
+        "docking may transfer a live viewport to a different window ID without replacing it"
     );
+}
+
+#[test]
+fn viewport_sidecar_destroy_survives_a_docking_id_change() {
+    let _guard = lock_context();
+    let context = Context::create();
+    let viewport = unsafe { sys::igGetMainViewport() };
+    let drops = Rc::new(Cell::new(0));
+    publish_drop_probe(&context, unsafe { &mut *viewport }, Rc::clone(&drops));
+    let original_id = unsafe { (*viewport).ID };
+    unsafe { (*viewport).ID = original_id.wrapping_add(1) };
+
+    let result = unsafe {
+        destroy_viewport_data(
+            context.as_raw(),
+            dear_imgui_rs::platform_io::Viewport::from_raw_mut(viewport),
+        )
+    };
+    unsafe { (*viewport).ID = original_id };
+
+    assert_eq!(result, ViewportDataDestroy::Destroyed);
+    assert_eq!(drops.get(), 1);
+    assert!(unsafe { (*viewport).RendererUserData.is_null() });
+    assert_eq!(viewport_data_count(context.id()), 0);
 }
 
 fn publish_drop_probe(context: &Context, viewport: &mut sys::ImGuiViewport, drops: Rc<Cell<u32>>) {
@@ -1456,7 +1497,7 @@ fn rust_runtime_entry_records_core_drift_and_enters_shutdown() {
     context.io_mut().set_backend_flags(flags);
 
     assert!(matches!(
-        runtime.new_frame(),
+        runtime.with_renderer(|_| ()),
         Err(WgpuViewportError::Renderer(
             crate::RendererError::RendererStateDrift {
                 field: "RENDERER_HAS_TEXTURES"
@@ -1536,7 +1577,7 @@ fn callback_panic_is_contained_and_deferred() {
 }
 
 #[test]
-fn terminal_surface_fault_revokes_capability_and_stays_shutdown() {
+fn terminal_surface_rejection_revokes_capability_and_stays_shutdown() {
     let _guard = lock_context();
     let mut context = Context::create();
     let _platform = attach_test_platform(&mut context);
@@ -1562,9 +1603,46 @@ fn terminal_surface_fault_revokes_capability_and_stays_shutdown() {
             .contains(BackendFlags::RENDERER_HAS_VIEWPORTS)
     );
     assert!(matches!(
-        runtime.new_frame(),
+        runtime.with_renderer(|_| ()),
         Err(WgpuViewportError::RuntimeDetached)
     ));
+
+    runtime.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn terminal_fault_is_sticky_and_preempts_pending_non_terminal_fault() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let _platform = attach_test_platform(&mut context);
+    let mut runtime =
+        OwningViewportRuntime::attach_for_test(&mut context, WgpuRenderer::empty()).unwrap();
+    let control = runtime.control_for_test();
+
+    control.record_fault(WgpuViewportError::SurfaceOperationFailed {
+        operation: "earlier recoverable fault",
+    });
+    control.record_entry_fault(WgpuViewportError::SurfaceRejected {
+        event: "first terminal fault",
+    });
+    control.record_entry_fault(WgpuViewportError::CallbackPanicked {
+        callback: "later terminal fault",
+    });
+
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(WgpuViewportError::SurfaceRejected {
+            event: "first terminal fault"
+        })
+    ));
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(WgpuViewportError::SurfaceOperationFailed {
+            operation: "earlier recoverable fault"
+        })
+    ));
+    assert!(runtime.poll_fault().is_ok());
+    assert_eq!(runtime.state_for_test(), RuntimeState::ShuttingDown);
 
     runtime.shutdown(&mut context).unwrap();
 }
@@ -1933,4 +2011,40 @@ fn surface_events_have_explicit_recovery_actions() {
     assert!(!should_clear_viewport(
         dear_imgui_rs::ViewportFlags::NO_RENDERER_CLEAR
     ));
+}
+
+#[test]
+fn failed_surface_recreation_requests_only_the_affected_viewport_close() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let viewport = context.main_viewport();
+    assert!(!viewport.platform_request_close());
+
+    request_close_after_surface_creation_failure(viewport);
+
+    assert!(viewport.platform_request_close());
+}
+
+#[test]
+fn surface_bundle_release_drops_frame_before_targets_and_surface() {
+    let drops = Rc::new(RefCell::new(Vec::new()));
+    let probe = |name| {
+        Some(OrderedDropProbe {
+            name,
+            drops: Rc::clone(&drops),
+        })
+    };
+    let mut pending_frame = probe("pending_frame");
+    let mut targets = probe("targets");
+    let mut surface = probe("surface");
+
+    release_surface_bundle_parts(&mut pending_frame, &mut targets, &mut surface);
+
+    assert_eq!(
+        drops.borrow().as_slice(),
+        &["pending_frame", "targets", "surface"]
+    );
+    assert!(pending_frame.is_none());
+    assert!(targets.is_none());
+    assert!(surface.is_none());
 }

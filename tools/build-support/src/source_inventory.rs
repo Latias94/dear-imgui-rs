@@ -6,7 +6,7 @@ use std::fmt;
 use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 
-const INVENTORY_SCHEMA: &str = "dear-imgui-maintained-sources-v2";
+const INVENTORY_SCHEMA: &str = "dear-imgui-maintained-sources-v3";
 const WASM_MAGIC_AND_VERSION: &[u8; 8] = b"\0asm\x01\0\0\0";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,42 +46,10 @@ pub struct MaintainedSource {
     pub crate_name: String,
     pub crate_root: String,
     pub source_root: String,
-    pub api_contract: ApiContractSpec,
     pub files: Vec<MaintainedSourceFile>,
     pub native_required_files: Vec<String>,
     pub archive_sentinels: Vec<String>,
     pub provider: Option<WasmProviderSpec>,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
-pub enum ApiContractSpec {
-    CimguiGenerator { locations: Vec<String> },
-    RustBindings { path: String },
-}
-
-impl ApiContractSpec {
-    fn validate(&self) -> Result<(), SourceInventoryError> {
-        match self {
-            Self::CimguiGenerator { locations } => {
-                if locations.is_empty() {
-                    return Err(SourceInventoryError::new(
-                        "source.api_contract.locations must not be empty",
-                    ));
-                }
-                validate_unique_c_symbols("source.api_contract.locations", locations)
-            }
-            Self::RustBindings { path } => {
-                validate_relative_path("source.api_contract.path", path)?;
-                if !path.ends_with(".rs") {
-                    return Err(SourceInventoryError::new(
-                        "source.api_contract.path must name a .rs file",
-                    ));
-                }
-                Ok(())
-            }
-        }
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -208,7 +176,6 @@ impl SourceInventory {
             validate_identifier("source.crate_name", &source.crate_name)?;
             validate_relative_path("source.crate_root", &source.crate_root)?;
             validate_relative_path("source.source_root", &source.source_root)?;
-            source.api_contract.validate()?;
             insert_unique(&mut source_ids, &source.id, "source id")?;
             insert_unique(&mut crate_names, &source.crate_name, "source crate name")?;
             insert_unique(&mut crate_roots, &source.crate_root, "source crate root")?;
@@ -902,45 +869,6 @@ mod tests {
     }
 
     #[test]
-    fn api_contract_provider_is_mandatory_and_fails_closed() {
-        let mut inventory = SourceInventory::embedded().clone();
-        inventory.sources[0].api_contract = ApiContractSpec::CimguiGenerator {
-            locations: Vec::new(),
-        };
-        assert!(
-            inventory
-                .validate()
-                .unwrap_err()
-                .to_string()
-                .contains("api_contract.locations must not be empty")
-        );
-
-        let mut inventory = SourceInventory::embedded().clone();
-        inventory.sources[0].api_contract = ApiContractSpec::RustBindings {
-            path: "../bindings.rs".into(),
-        };
-        assert!(
-            inventory
-                .validate()
-                .unwrap_err()
-                .to_string()
-                .contains("api_contract.path")
-        );
-
-        let mut inventory = SourceInventory::embedded().clone();
-        inventory.sources[0].api_contract = ApiContractSpec::RustBindings {
-            path: "src/bindings.txt".into(),
-        };
-        assert!(
-            inventory
-                .validate()
-                .unwrap_err()
-                .to_string()
-                .contains("must name a .rs file")
-        );
-    }
-
-    #[test]
     fn package_order_must_be_contiguous_from_zero() {
         let mut inventory = SourceInventory::embedded().clone();
         let last = inventory
@@ -984,9 +912,6 @@ mod tests {
             crate_name: "test-sys".into(),
             crate_root: "test-sys".into(),
             source_root: "third-party/source".into(),
-            api_contract: ApiContractSpec::CimguiGenerator {
-                locations: vec!["test".into()],
-            },
             files: vec![MaintainedSourceFile {
                 id: "implementation".into(),
                 canonical: "third-party/source/src/implementation.cpp".into(),

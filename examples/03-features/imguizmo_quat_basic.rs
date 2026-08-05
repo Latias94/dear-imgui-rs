@@ -757,7 +757,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context)?;
+            .prepare_frame(&mut self.imgui.context, &self.window)?;
         // Work on local copies during the UI frame to avoid borrowing self while Ui is alive
         let mut rot = self.rot;
         let mut light_dir = self.light_dir;
@@ -823,9 +823,7 @@ impl AppWindow {
                 label: Some("Render Encoder"),
             });
 
-        self.imgui
-            .platform
-            .prepare_render_with_ui(&ui, &self.window)?;
+        self.imgui.platform.prepare_render(&ui, &self.window)?;
         let draw_data = self.imgui.context.render();
         // Persist state after the UI frame ends
         self.rot = rot;
@@ -867,7 +865,6 @@ impl AppWindow {
                 multiview_mask: None,
             });
 
-            self.imgui.renderer.new_frame()?;
             self.imgui.renderer.render(draw_data, &mut rpass)?;
         }
 

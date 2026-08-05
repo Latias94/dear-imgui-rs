@@ -1227,27 +1227,6 @@ class ConsumerContractTests(unittest.TestCase):
             self.assertIn("x86_64-pc-windows-msvc", call.args[0])
             self.assertEqual(call.kwargs["env"].get("IMGUI_SYS_PKG_CRT", "md"), "md")
 
-
-class PrebuiltWorkflowTests(unittest.TestCase):
-    def test_workflow_delegates_candidate_and_profile_mapping_to_python(self):
-        workflow = REPO_ROOT.joinpath(
-            ".github/workflows/prebuilt-binaries.yml"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("verify_packaged_core.py build-prebuilt", workflow)
-        self.assertIn("verify_packaged_core.py prebuilt", workflow)
-        self.assertIn("timeout-minutes: 160", workflow)
-        self.assertIn("run_contract.py windows-vcpkg", workflow)
-        self.assertIn('--target "${{ matrix.target }}"', workflow)
-        self.assertIn('--crt "${{ matrix.crt }}"', workflow)
-        self.assertIn("--package freetype", workflow)
-        self.assertEqual(workflow.count("${{ matrix.candidate_arg }}"), 3)
-        self.assertNotIn("cargo run -p", workflow)
-        self.assertNotIn("configure_prebuilt_windows.py", workflow)
-        self.assertNotIn("DEAR_IMGUI_CORE_ARTIFACT_PROFILE_HASH", workflow)
-        self.assertNotIn("DEAR_IMGUI_RS_CANDIDATE_SHA:", workflow)
-
-
 class PackageWorkspaceTests(unittest.TestCase):
     def test_packaged_provider_sources_follow_inventory_crate_roots(self):
         inventory_source = REPO_ROOT / "tools/build-support/maintained_sources.json"
@@ -1455,27 +1434,6 @@ class CliTests(unittest.TestCase):
         self.assertEqual(resolved, CANDIDATE_SHA)
         command.assert_called_once()
 
-    def test_legacy_prebuilt_alias_remains_compatible(self):
-        with patch.object(CLI, "verify_prebuilt_packages") as verify:
-            result = CLI.main(
-                [
-                    "--verify-prebuilt-packages",
-                    "packages",
-                    "aarch64-apple-darwin",
-                    CANDIDATE_SHA,
-                ]
-            )
-
-        self.assertEqual(result, 0)
-        verify.assert_called_once_with(
-            Path("packages"),
-            "aarch64-apple-darwin",
-            CANDIDATE_SHA,
-            crt="",
-            source_root=CLI.WORKSPACE_ROOT,
-            profile_scope="all",
-        )
-
     def test_verification_failure_returns_one(self):
         stderr = io.StringIO()
         with (
@@ -1506,10 +1464,7 @@ class CliTests(unittest.TestCase):
         self.assertIn(
             "prebuilt PACKAGE_DIR TARGET CANDIDATE_SHA [CRT]", help_text
         )
-        self.assertIn(
-            "--verify-prebuilt-packages PACKAGE_DIR TARGET CANDIDATE_SHA [CRT]",
-            help_text,
-        )
+        self.assertNotIn("--verify-prebuilt-packages", help_text)
 
 
 if __name__ == "__main__":

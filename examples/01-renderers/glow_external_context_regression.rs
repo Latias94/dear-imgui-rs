@@ -327,7 +327,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context)?;
+            .prepare_frame(&mut self.imgui.context, &self.window)?;
         let ui = self.imgui.context.frame();
 
         let stage = self.imgui.stage;
@@ -376,9 +376,7 @@ impl AppWindow {
             self.gl.disable(glow::FRAMEBUFFER_SRGB);
         }
 
-        self.imgui
-            .platform
-            .prepare_render_with_ui(&ui, &self.window)?;
+        self.imgui.platform.prepare_render(&ui, &self.window)?;
         let draw_data = self.imgui.context.render();
 
         // Mirror the original issue reproduction, where the application keeps the GL

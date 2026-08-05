@@ -25,22 +25,30 @@ pub(super) struct ViewportEntry {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct ViewportIdentity {
+pub(super) struct ViewportIdentity {
+    context: usize,
     address: usize,
-    id: u32,
 }
 
 impl ViewportIdentity {
-    unsafe fn capture(viewport: *mut dear_imgui_rs::sys::ImGuiViewport) -> Self {
+    pub(super) fn capture(
+        context: *mut dear_imgui_rs::sys::ImGuiContext,
+        viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+    ) -> Self {
         Self {
+            context: context as usize,
             address: viewport as usize,
-            id: unsafe { (*viewport).ID },
         }
     }
 
-    unsafe fn resolve(self) -> Option<*mut dear_imgui_rs::sys::ImGuiViewport> {
-        let viewport = unsafe { dear_imgui_rs::sys::igFindViewportByID(self.id) };
-        (!viewport.is_null() && viewport as usize == self.address).then_some(viewport)
+    pub(super) unsafe fn resolve(self) -> Option<*mut dear_imgui_rs::sys::ImGuiViewport> {
+        let viewport = unsafe {
+            dear_imgui_rs::sys::ImGuiContext_FindLiveViewportByAddress(
+                self.context as *mut dear_imgui_rs::sys::ImGuiContext,
+                self.address,
+            )
+        };
+        (!viewport.is_null()).then_some(viewport)
     }
 }
 
@@ -81,8 +89,9 @@ impl ViewportEntry {
         unsafe { self.native_ownership_loss(viewport).is_none() }
     }
 
-    fn viewport_id(&self) -> u32 {
-        self.identity.id
+    fn viewport_id(&self) -> Option<u32> {
+        let viewport = unsafe { self.resolve_viewport()? };
+        Some(unsafe { (*viewport).ID })
     }
 
     pub(super) fn detach_and_drop(self) {
@@ -90,7 +99,7 @@ impl ViewportEntry {
         // storage. `PlatformIO.Viewports` intentionally omits hidden viewports, and a destroyed
         // viewport must never be reached through the address retained by this sidecar.
         if let Some(viewport) = unsafe { self.resolve_viewport() } {
-            // SAFETY: `igFindViewportByID` returned this exact still-live viewport address.
+            // SAFETY: the native registry returned this exact still-live viewport address.
             let viewport = unsafe { &mut *viewport };
             if viewport.PlatformUserData == self.data_ptr().cast() {
                 viewport.PlatformUserData = std::ptr::null_mut();
@@ -189,7 +198,7 @@ pub(super) fn insert_viewport_data(
     let mut data = Box::new(data);
     let data_ptr = std::ptr::from_mut::<ViewportData>(&mut data);
     viewports.push(ViewportEntry {
-        identity: unsafe { ViewportIdentity::capture(viewport) },
+        identity: ViewportIdentity::capture(control.context_raw(), viewport),
         data,
     });
     Ok(data_ptr)
@@ -265,14 +274,52 @@ pub(super) fn secondary_viewport_windows(control: &RuntimeControl) -> Vec<Arc<Wi
         .collect()
 }
 
+pub(super) fn request_geometry_refresh_for_window(
+    control: &RuntimeControl,
+    window_id: WindowId,
+    position: bool,
+    size: bool,
+) {
+    if let Some(entry) = control
+        .viewports
+        .borrow()
+        .iter()
+        .find(|entry| entry.data.window().id() == window_id)
+    {
+        entry.data.request_geometry_refresh(position, size);
+    }
+}
+
+pub(super) fn apply_pending_geometry_refresh(control: &RuntimeControl) {
+    for entry in control.viewports.borrow().iter() {
+        let refresh = entry.data.take_geometry_refresh();
+        if refresh.is_empty() {
+            continue;
+        }
+        let Some(viewport) = (unsafe { entry.resolve_viewport() }) else {
+            continue;
+        };
+        if unsafe { entry.native_ownership_loss(viewport).is_some() } {
+            continue;
+        }
+        unsafe {
+            (*viewport).PlatformRequestMove |= refresh.position;
+            (*viewport).PlatformRequestResize |= refresh.size;
+        }
+    }
+}
+
 #[cfg(target_os = "windows")]
 pub(super) fn viewport_id_for_native_window(
     control: &RuntimeControl,
     native_window: usize,
 ) -> Option<u32> {
-    control.viewports.borrow().iter().find_map(|entry| {
-        (entry.data.native_window_id() == native_window).then_some(entry.viewport_id())
-    })
+    control
+        .viewports
+        .borrow()
+        .iter()
+        .find(|entry| entry.data.native_window_id() == native_window)
+        .and_then(ViewportEntry::viewport_id)
 }
 
 pub(super) fn remove_viewport_data(
@@ -300,8 +347,8 @@ pub(super) fn remove_viewport_data(
 
 fn discard_destroyed_viewport_data(control: &RuntimeControl) {
     control.viewports.borrow_mut().retain(|entry| {
-        // SAFETY: callers hold the current live Context. The resolver never dereferences the
-        // retained address and only returns a pointer Dear ImGui still owns under this identity.
+        // SAFETY: callers hold the current live Context. Native code compares the retained
+        // integer address against that Context's authoritative internal viewport list.
         unsafe { entry.resolve_viewport().is_some() }
     });
 }
@@ -335,7 +382,7 @@ pub(super) unsafe fn preflight_viewport_ownership(
         };
         if let Some(field) = unsafe { entry.native_ownership_loss(viewport) } {
             return Err(WinitPlatformError::ViewportOwnershipLost {
-                viewport_id: entry.viewport_id(),
+                viewport_id: unsafe { (*viewport).ID },
                 field,
             });
         }

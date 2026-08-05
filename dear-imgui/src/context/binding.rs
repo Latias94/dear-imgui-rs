@@ -5,14 +5,18 @@ use std::num::NonZeroU64;
 use std::ptr;
 use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread::ThreadId;
 
-use parking_lot::ReentrantMutex;
+use parking_lot::{Mutex, ReentrantMutex};
 use thiserror::Error;
 
 use crate::sys;
 
 // All safe context switching, including backend callbacks, serializes through this lock.
 pub(crate) static CTX_MUTEX: ReentrantMutex<()> = parking_lot::const_reentrant_mutex(());
+
+static CONTEXT_THREAD_OWNER: Mutex<ContextThreadOwner> =
+    parking_lot::const_mutex(ContextThreadOwner::new());
 
 static NEXT_CONTEXT_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -21,6 +25,61 @@ thread_local! {
     // old Context generation and cannot restore the reused address by mistake.
     static MANAGED_CONTEXTS: RefCell<HashMap<usize, ManagedContextEntry>> =
         RefCell::new(HashMap::new());
+    static BOUND_CONTEXT_DEPTH: Cell<usize> = const { Cell::new(0) };
+}
+
+#[derive(Debug)]
+struct ContextThreadOwner {
+    thread: Option<ThreadId>,
+    live_contexts: usize,
+}
+
+impl ContextThreadOwner {
+    const fn new() -> Self {
+        Self {
+            thread: None,
+            live_contexts: 0,
+        }
+    }
+}
+
+/// Process-global ownership of Dear ImGui's default `GImGui` storage.
+#[derive(Debug)]
+pub(crate) struct ContextThreadLease {
+    thread: ThreadId,
+}
+
+impl ContextThreadLease {
+    pub(crate) fn acquire() -> crate::error::ImGuiResult<Self> {
+        let thread = std::thread::current().id();
+        let mut owner = CONTEXT_THREAD_OWNER.lock();
+        if owner.thread.is_some_and(|current| current != thread) {
+            return Err(crate::error::ImGuiError::ContextThreadConflict);
+        }
+        owner.live_contexts = owner.live_contexts.checked_add(1).ok_or_else(|| {
+            crate::error::ImGuiError::context_creation(
+                "process Context ownership count is exhausted",
+            )
+        })?;
+        owner.thread = Some(thread);
+        Ok(Self { thread })
+    }
+}
+
+impl Drop for ContextThreadLease {
+    fn drop(&mut self) {
+        let mut owner = CONTEXT_THREAD_OWNER.lock();
+        debug_assert_eq!(owner.thread, Some(self.thread));
+        debug_assert!(owner.live_contexts > 0);
+        owner.live_contexts -= 1;
+        if owner.live_contexts == 0 {
+            owner.thread = None;
+        }
+    }
+}
+
+pub(super) fn bound_context_scope_active() -> bool {
+    BOUND_CONTEXT_DEPTH.with(|depth| depth.get() != 0)
 }
 
 #[derive(Clone)]
@@ -71,13 +130,30 @@ pub(crate) struct ContextState {
     address: usize,
     raw: Cell<*mut sys::ImGuiContext>,
     lifecycle: Cell<ContextLifecycle>,
-    dockspace_submissions: RefCell<DockspaceSubmissions>,
+    dockspace_submissions: RefCell<FrameIdClaims>,
+    dock_layout_applications: RefCell<FrameIdClaims>,
 }
 
 #[derive(Default)]
-struct DockspaceSubmissions {
+struct FrameIdClaims {
     frame: Option<i32>,
     ids: HashSet<sys::ImGuiID>,
+}
+
+impl FrameIdClaims {
+    fn claim(&mut self, frame: i32, id: sys::ImGuiID) -> bool {
+        if self.frame != Some(frame) {
+            self.frame = Some(frame);
+            self.ids.clear();
+        }
+        self.ids.insert(id)
+    }
+
+    fn release(&mut self, frame: i32, id: sys::ImGuiID) {
+        if self.frame == Some(frame) {
+            self.ids.remove(&id);
+        }
+    }
 }
 
 impl fmt::Debug for ContextState {
@@ -97,7 +173,8 @@ impl ContextState {
             address: raw as usize,
             raw: Cell::new(raw),
             lifecycle: Cell::new(ContextLifecycle::Alive),
-            dockspace_submissions: RefCell::new(DockspaceSubmissions::default()),
+            dockspace_submissions: RefCell::new(FrameIdClaims::default()),
+            dock_layout_applications: RefCell::new(FrameIdClaims::default()),
         });
         MANAGED_CONTEXTS.with(|contexts| {
             contexts.borrow_mut().insert(
@@ -211,25 +288,46 @@ impl ContextBinding {
         &self,
         frame: i32,
         id: sys::ImGuiID,
-    ) -> Option<DockspaceSubmissionClaim> {
+    ) -> Option<DockspaceFrameClaim> {
+        self.claim_dockspace_frame_id(frame, id, DockspaceClaimKind::Submission)
+    }
+
+    pub(crate) fn claim_dock_layout_application(
+        &self,
+        frame: i32,
+        id: sys::ImGuiID,
+    ) -> Option<DockspaceFrameClaim> {
+        self.claim_dockspace_frame_id(frame, id, DockspaceClaimKind::LayoutApplication)
+    }
+
+    fn claim_dockspace_frame_id(
+        &self,
+        frame: i32,
+        id: sys::ImGuiID,
+        kind: DockspaceClaimKind,
+    ) -> Option<DockspaceFrameClaim> {
         let state = self.state.upgrade()?;
         if state.lifecycle() != ContextLifecycle::Alive {
             return None;
         }
 
-        let mut submissions = state.dockspace_submissions.borrow_mut();
-        if submissions.frame != Some(frame) {
-            submissions.frame = Some(frame);
-            submissions.ids.clear();
-        }
-        if !submissions.ids.insert(id) {
+        let claimed = match kind {
+            DockspaceClaimKind::Submission => {
+                state.dockspace_submissions.borrow_mut().claim(frame, id)
+            }
+            DockspaceClaimKind::LayoutApplication => {
+                state.dock_layout_applications.borrow_mut().claim(frame, id)
+            }
+        };
+        if !claimed {
             return None;
         }
 
-        Some(DockspaceSubmissionClaim {
+        Some(DockspaceFrameClaim {
             state: Rc::downgrade(&state),
             frame,
             id,
+            kind,
             committed: false,
         })
     }
@@ -238,6 +336,13 @@ impl ContextBinding {
     pub fn try_with_bound_context<R>(
         &self,
         f: impl FnOnce() -> R,
+    ) -> Result<R, ContextBindingError> {
+        self.try_with_bound_context_guarded(|_| f())
+    }
+
+    pub(crate) fn try_with_bound_context_guarded<R>(
+        &self,
+        f: impl FnOnce(&mut RawBoundContextGuard) -> R,
     ) -> Result<R, ContextBindingError> {
         let state = self
             .state
@@ -264,8 +369,8 @@ impl ContextBinding {
             return Err(ContextBindingError::NativeDestroyed);
         }
 
-        let _bound = RawBoundContextGuard::bind(raw);
-        Ok(f())
+        let mut bound = RawBoundContextGuard::bind(raw);
+        Ok(f(&mut bound))
     }
 
     /// Runs a closure while the originating Context is current.
@@ -280,20 +385,27 @@ impl ContextBinding {
     }
 }
 
-pub(crate) struct DockspaceSubmissionClaim {
+#[derive(Clone, Copy)]
+enum DockspaceClaimKind {
+    Submission,
+    LayoutApplication,
+}
+
+pub(crate) struct DockspaceFrameClaim {
     state: Weak<ContextState>,
     frame: i32,
     id: sys::ImGuiID,
+    kind: DockspaceClaimKind,
     committed: bool,
 }
 
-impl DockspaceSubmissionClaim {
+impl DockspaceFrameClaim {
     pub(crate) fn commit(mut self) {
         self.committed = true;
     }
 }
 
-impl Drop for DockspaceSubmissionClaim {
+impl Drop for DockspaceFrameClaim {
     fn drop(&mut self) {
         if self.committed {
             return;
@@ -301,9 +413,15 @@ impl Drop for DockspaceSubmissionClaim {
         let Some(state) = self.state.upgrade() else {
             return;
         };
-        let mut submissions = state.dockspace_submissions.borrow_mut();
-        if submissions.frame == Some(self.frame) {
-            submissions.ids.remove(&self.id);
+        match self.kind {
+            DockspaceClaimKind::Submission => state
+                .dockspace_submissions
+                .borrow_mut()
+                .release(self.frame, self.id),
+            DockspaceClaimKind::LayoutApplication => state
+                .dock_layout_applications
+                .borrow_mut()
+                .release(self.frame, self.id),
         }
     }
 }
@@ -332,6 +450,14 @@ pub(crate) struct RawBoundContextGuard {
 
 impl RawBoundContextGuard {
     pub(crate) fn bind(target: *mut sys::ImGuiContext) -> Self {
+        BOUND_CONTEXT_DEPTH.with(|depth| {
+            depth.set(
+                depth
+                    .get()
+                    .checked_add(1)
+                    .expect("Dear ImGui Context binding depth overflowed"),
+            );
+        });
         unsafe {
             let previous = sys::igGetCurrentContext();
             let restore = previous != target;
@@ -352,6 +478,10 @@ impl RawBoundContextGuard {
                 restore,
             }
         }
+    }
+
+    pub(crate) fn previous_context(&self) -> *mut sys::ImGuiContext {
+        self.previous
     }
 }
 
@@ -375,6 +505,11 @@ impl Drop for RawBoundContextGuard {
                 ptr::null_mut()
             });
         }
+        BOUND_CONTEXT_DEPTH.with(|depth| {
+            let current = depth.get();
+            debug_assert!(current > 0);
+            depth.set(current - 1);
+        });
     }
 }
 

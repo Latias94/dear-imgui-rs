@@ -158,7 +158,9 @@ impl Ui {
     /// for widgets or dockspaces inside the current window/scope.
     #[doc(alias = "GetID")]
     pub fn get_id(&self, label: &str) -> Id {
-        let label = self.scratch_txt(label);
-        self.run_with_bound_context(|| unsafe { Id::from(sys::igGetID_Str(label)) })
+        let label = self.scratch_txt_range(label);
+        self.run_with_bound_context(|| unsafe {
+            Id::from(sys::igGetID_StrStr(label.start, label.end))
+        })
     }
 }

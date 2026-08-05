@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::ffi::c_void;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentRole,
@@ -17,9 +18,10 @@ use super::callbacks::{
     record_viewport_failure, run_callback, winit_create_window, winit_destroy_window,
     winit_get_window_pos_out,
 };
-use super::registry::preflight_viewport_ownership;
+use super::focus::{ContextFocusState, PlatformFocusState};
+use super::registry::{ViewportIdentity, preflight_viewport_ownership};
 use super::runtime::{
-    ConstructionStage, ContextFocusState, MouseLeaveState, RuntimeState, WinitPlatformRuntime,
+    ConstructionStage, InputOwnership, MouseLeaveState, RuntimeState, WinitPlatformRuntime,
     apply_raw_io_coordinate_contract_for_test,
 };
 use crate::test_util::test_sync::lock_context;
@@ -517,15 +519,15 @@ fn focus_transfer_between_owned_viewports_does_not_unfocus_the_context() {
     assert!(!state.note_window_focus(second, true));
 
     let owned = HashSet::from([first, second]);
-    assert!(!state.reconcile_owned_windows(&owned));
+    assert!(!state.reconcile_owned_windows(&owned, false));
 }
 
 #[test]
 fn runtime_attached_while_unfocused_reports_loss_at_the_frame_boundary() {
     let mut state = ContextFocusState::with_focused_window(None);
 
-    assert!(state.reconcile_owned_windows(&HashSet::new()));
-    assert!(!state.reconcile_owned_windows(&HashSet::new()));
+    assert!(state.reconcile_owned_windows(&HashSet::new(), false));
+    assert!(!state.reconcile_owned_windows(&HashSet::new(), false));
 }
 
 #[test]
@@ -537,8 +539,8 @@ fn losing_the_last_owned_viewport_focus_is_reconciled_once() {
     assert!(!state.note_window_focus(window, false));
 
     let owned = HashSet::from([window]);
-    assert!(state.reconcile_owned_windows(&owned));
-    assert!(!state.reconcile_owned_windows(&owned));
+    assert!(state.reconcile_owned_windows(&owned, false));
+    assert!(!state.reconcile_owned_windows(&owned, false));
 }
 
 #[test]
@@ -547,7 +549,73 @@ fn destroying_the_focused_viewport_reconciles_context_focus_loss() {
     let mut state = ContextFocusState::default();
 
     assert!(state.note_window_focus(window, true));
-    assert!(state.reconcile_owned_windows(&HashSet::new()));
+    assert!(state.reconcile_owned_windows(&HashSet::new(), false));
+}
+
+#[test]
+fn pending_platform_focus_overrides_stale_native_focus_until_confirmation() {
+    let first = WindowId::from(41_u64);
+    let second = WindowId::from(42_u64);
+    let mut state = PlatformFocusState::default();
+    let now = Instant::now();
+
+    state.request(second, now);
+    assert!(!state.effective_focus(now, first, true));
+    assert!(state.effective_focus(now, second, false));
+
+    state.note_native_event(false);
+    assert!(state.effective_focus(now, second, false));
+
+    state.note_native_event(true);
+    assert!(!state.effective_focus(now, first, false));
+    assert!(state.effective_focus(now, second, true));
+}
+
+#[test]
+fn pending_platform_focus_retries_once_then_expires() {
+    let window = WindowId::from(41_u64);
+    let owned = HashSet::from([window]);
+    let mut state = PlatformFocusState::default();
+    let now = Instant::now();
+    state.request(window, now);
+
+    assert_eq!(state.advance(now, &owned), Some(window));
+    assert!(state.effective_focus(now, window, false));
+    assert_eq!(state.advance(now, &owned), None);
+    let expired = now + Duration::from_secs(1);
+    assert_eq!(state.advance(expired, &owned), None);
+    assert!(!state.effective_focus(expired, window, false));
+}
+
+#[test]
+fn native_focus_on_another_window_rejects_the_pending_target() {
+    let first = WindowId::from(41_u64);
+    let second = WindowId::from(42_u64);
+    let mut state = PlatformFocusState::default();
+    let now = Instant::now();
+    state.request(second, now);
+
+    state.note_native_event(true);
+
+    assert!(state.effective_focus(now, first, true));
+    assert!(!state.effective_focus(now, second, false));
+}
+
+#[test]
+fn pending_platform_focus_keeps_context_focus_transfer_pending() {
+    let first = WindowId::from(41_u64);
+    let second = WindowId::from(42_u64);
+    let mut platform = PlatformFocusState::default();
+    let mut context = ContextFocusState::default();
+    let now = Instant::now();
+
+    assert!(context.note_window_focus(first, true));
+    assert!(!context.note_window_focus(first, false));
+    platform.request(second, now);
+    let owned = HashSet::from([second]);
+    let platform_focus_pending = platform.has_pending_for_owned_window(now, &owned);
+
+    assert!(!context.reconcile_owned_windows(&owned, platform_focus_pending));
 }
 
 #[test]
@@ -560,6 +628,107 @@ fn context_focus_loss_invalidates_mouse_without_release_or_leave_events() {
 
     assert!(state.take_invalidation_due());
     assert!(!state.take_invalidation_due());
+}
+
+#[test]
+fn destroyed_viewport_releases_only_the_input_it_owns() {
+    let first = WindowId::from(41_u64);
+    let second = WindowId::from(42_u64);
+    let mut ownership = InputOwnership::default();
+
+    ownership.note_key(first, dear_imgui_rs::Key::A, true);
+    ownership.note_key(second, dear_imgui_rs::Key::B, true);
+    ownership.note_mouse_button(first, dear_imgui_rs::input::MouseButton::Left, true);
+    ownership.note_mouse_button(second, dear_imgui_rs::input::MouseButton::Right, true);
+
+    let released = ownership.retire_window(first, None);
+
+    assert_eq!(released.keys, vec![dear_imgui_rs::Key::A]);
+    assert_eq!(
+        released.mouse_buttons,
+        vec![dear_imgui_rs::input::MouseButton::Left]
+    );
+    assert_eq!(
+        ownership.retire_window(second, None),
+        super::runtime::ReleasedInput {
+            keys: vec![dear_imgui_rs::Key::B],
+            mouse_buttons: vec![dear_imgui_rs::input::MouseButton::Right],
+            touch: false,
+        }
+    );
+}
+
+#[test]
+fn latest_input_event_transfers_ownership_between_viewports() {
+    let first = WindowId::from(41_u64);
+    let second = WindowId::from(42_u64);
+    let mut ownership = InputOwnership::default();
+
+    ownership.note_key(first, dear_imgui_rs::Key::A, true);
+    ownership.note_key(second, dear_imgui_rs::Key::A, true);
+    ownership.note_mouse_button(first, dear_imgui_rs::input::MouseButton::Left, true);
+    ownership.note_mouse_button(second, dear_imgui_rs::input::MouseButton::Left, true);
+
+    assert_eq!(ownership.retire_window(first, None), Default::default());
+    assert_eq!(
+        ownership.retire_window(second, None),
+        super::runtime::ReleasedInput {
+            keys: vec![dear_imgui_rs::Key::A],
+            mouse_buttons: vec![dear_imgui_rs::input::MouseButton::Left],
+            touch: false,
+        }
+    );
+}
+
+#[test]
+fn captured_mouse_buttons_follow_a_destroyed_viewport_to_the_main_window() {
+    let viewport = WindowId::from(41_u64);
+    let main = WindowId::from(42_u64);
+    let mut ownership = InputOwnership::default();
+
+    ownership.note_key(viewport, dear_imgui_rs::Key::A, true);
+    ownership.note_mouse_button(viewport, dear_imgui_rs::input::MouseButton::Left, true);
+
+    assert_eq!(
+        ownership.retire_window(viewport, Some(main)),
+        super::runtime::ReleasedInput {
+            keys: vec![dear_imgui_rs::Key::A],
+            mouse_buttons: Vec::new(),
+            touch: false,
+        }
+    );
+    assert_eq!(
+        ownership.retire_window(main, None),
+        super::runtime::ReleasedInput {
+            keys: Vec::new(),
+            mouse_buttons: vec![dear_imgui_rs::input::MouseButton::Left],
+            touch: false,
+        }
+    );
+}
+
+#[test]
+fn active_touch_follows_a_destroyed_viewport_handoff() {
+    let viewport = WindowId::from(41_u64);
+    let main = WindowId::from(42_u64);
+    let mut ownership = InputOwnership::default();
+
+    assert_eq!(
+        ownership.note_touch(viewport, 7, winit::event::TouchPhase::Started),
+        Some(crate::events::TouchAction::Press)
+    );
+    assert_eq!(
+        ownership.retire_window(viewport, Some(main)),
+        Default::default()
+    );
+    assert_eq!(
+        ownership.retire_window(main, None),
+        super::runtime::ReleasedInput {
+            keys: Vec::new(),
+            mouse_buttons: Vec::new(),
+            touch: true,
+        }
+    );
 }
 
 #[test]
@@ -1019,6 +1188,22 @@ fn preflight_keeps_owned_viewports_filtered_from_the_public_snapshot() {
 
     assert_eq!(result, Ok(()));
     runtime.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn viewport_identity_follows_a_live_viewport_when_docking_changes_its_id() {
+    let _guard = lock_context();
+    let context = Context::create();
+    let viewport = unsafe { dear_imgui_rs::sys::igGetMainViewport() };
+    let original_id = unsafe { (*viewport).ID };
+    let identity = ViewportIdentity::capture(context.as_raw(), viewport);
+    unsafe { (*viewport).ID = original_id.wrapping_add(1) };
+
+    let resolved_after_id_change = unsafe { identity.resolve() };
+    unsafe { (*viewport).ID = original_id };
+
+    assert_eq!(resolved_after_id_change, Some(viewport));
+    drop(context);
 }
 
 #[test]

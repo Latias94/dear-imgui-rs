@@ -1,5 +1,6 @@
 use std::{
     ffi::{CStr, CString},
+    os::raw::c_char,
     ptr,
     sync::Mutex,
 };
@@ -19,7 +20,7 @@ unsafe fn diagnostic() -> String {
     );
     assert!(required >= 1);
 
-    let mut bytes = vec![0i8; required];
+    let mut bytes = vec![0 as c_char; required];
     assert_eq!(
         unsafe {
             sys::imgui_test_engine_get_last_error(bytes.as_mut_ptr(), bytes.len(), &mut required)
@@ -39,6 +40,235 @@ unsafe fn create_engine() -> *mut sys::ImGuiTestEngine {
     );
     assert!(!engine.is_null());
     engine
+}
+
+unsafe fn registered_test_name(
+    engine: *mut sys::ImGuiTestEngine,
+    category: &CStr,
+    index: i32,
+) -> String {
+    let mut required = 0usize;
+    assert_eq!(
+        unsafe {
+            sys::imgui_test_engine_get_registered_test_name(
+                engine,
+                category.as_ptr(),
+                index,
+                ptr::null_mut(),
+                0,
+                &mut required,
+            )
+        },
+        sys::ImGuiTestEngineStatus_Success
+    );
+    assert!(required > 1);
+    let mut bytes = vec![0 as c_char; required];
+    assert_eq!(
+        unsafe {
+            sys::imgui_test_engine_get_registered_test_name(
+                engine,
+                category.as_ptr(),
+                index,
+                bytes.as_mut_ptr(),
+                bytes.len(),
+                &mut required,
+            )
+        },
+        sys::ImGuiTestEngineStatus_Success
+    );
+    unsafe { CStr::from_ptr(bytes.as_ptr()) }
+        .to_str()
+        .expect("registered test names must be UTF-8")
+        .to_owned()
+}
+
+#[test]
+fn built_in_suites_register_once_and_expose_their_exact_manifest() {
+    let _guard = TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    unsafe {
+        let engine = create_engine();
+        let mut registered = -1;
+
+        assert_eq!(
+            sys::imgui_test_engine_register_builtin_test_suite(engine, 99, &mut registered),
+            sys::ImGuiTestEngineStatus_OutOfRange
+        );
+        assert_eq!(registered, 0);
+        assert_eq!(
+            sys::imgui_test_engine_register_builtin_test_suite(
+                engine,
+                sys::ImGuiTestEngineBuiltinTestSuite_NativeDefaults,
+                &mut registered,
+            ),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert_eq!(registered, 2);
+        assert_eq!(
+            sys::imgui_test_engine_register_builtin_test_suite(
+                engine,
+                sys::ImGuiTestEngineBuiltinTestSuite_NativeDefaults,
+                &mut registered,
+            ),
+            sys::ImGuiTestEngineStatus_InvalidState
+        );
+        assert_eq!(registered, 0);
+
+        let mut count = -1;
+        assert_eq!(
+            sys::imgui_test_engine_get_registered_test_count(
+                engine,
+                c"demo_tests".as_ptr(),
+                &mut count,
+            ),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert_eq!(count, 2);
+        assert_eq!(
+            registered_test_name(engine, c"demo_tests", 0),
+            "basic_interaction"
+        );
+        assert_eq!(
+            registered_test_name(engine, c"demo_tests", 1),
+            "input_value"
+        );
+        assert_eq!(
+            sys::imgui_test_engine_register_builtin_test_suite(
+                engine,
+                sys::ImGuiTestEngineBuiltinTestSuite_UpstreamDocking,
+                &mut registered,
+            ),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert_eq!(registered, 39);
+        assert_eq!(
+            sys::imgui_test_engine_get_registered_test_count(
+                engine,
+                c"docking".as_ptr(),
+                &mut count,
+            ),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert_eq!(count, 39);
+        assert_eq!(
+            registered_test_name(engine, c"docking", 0),
+            "docking_move_does_not_dock"
+        );
+        assert_eq!(
+            registered_test_name(engine, c"docking", 38),
+            "docking_settings_invalid_1"
+        );
+
+        assert_eq!(
+            sys::imgui_test_engine_register_builtin_test_suite(
+                engine,
+                sys::ImGuiTestEngineBuiltinTestSuite_UpstreamViewports,
+                &mut registered,
+            ),
+            sys::ImGuiTestEngineStatus_InvalidState
+        );
+        assert_eq!(registered, 0);
+
+        let ui_context = dear_imgui_sys::igCreateContext(ptr::null_mut());
+        assert!(!ui_context.is_null());
+        assert_eq!(
+            sys::imgui_test_engine_start(engine, ui_context),
+            sys::ImGuiTestEngineStatus_Success
+        );
+
+        let unrelated_context = dear_imgui_sys::igCreateContext(ptr::null_mut());
+        assert!(!unrelated_context.is_null());
+        (*unrelated_context).IO.ConfigFlags |= dear_imgui_sys::ImGuiConfigFlags_ViewportsEnable
+            | dear_imgui_sys::ImGuiConfigFlags_DockingEnable;
+        (*unrelated_context).IO.BackendFlags |=
+            dear_imgui_sys::ImGuiBackendFlags_PlatformHasViewports
+                | dear_imgui_sys::ImGuiBackendFlags_RendererHasViewports;
+        dear_imgui_sys::igSetCurrentContext(unrelated_context);
+        assert_eq!(
+            sys::imgui_test_engine_register_builtin_test_suite(
+                engine,
+                sys::ImGuiTestEngineBuiltinTestSuite_UpstreamViewports,
+                &mut registered,
+            ),
+            sys::ImGuiTestEngineStatus_Unsupported
+        );
+        assert_eq!(registered, 0);
+        assert!(diagnostic().contains("ViewportsEnable"));
+
+        (*ui_context).IO.ConfigFlags |= dear_imgui_sys::ImGuiConfigFlags_ViewportsEnable;
+        (*ui_context).IO.BackendFlags |= dear_imgui_sys::ImGuiBackendFlags_PlatformHasViewports
+            | dear_imgui_sys::ImGuiBackendFlags_RendererHasViewports;
+        assert_eq!(
+            sys::imgui_test_engine_register_builtin_test_suite(
+                engine,
+                sys::ImGuiTestEngineBuiltinTestSuite_UpstreamViewports,
+                &mut registered,
+            ),
+            sys::ImGuiTestEngineStatus_Unsupported
+        );
+        assert_eq!(registered, 0);
+        assert!(diagnostic().contains("DockingEnable"));
+
+        (*unrelated_context).IO.ConfigFlags &= !(dear_imgui_sys::ImGuiConfigFlags_ViewportsEnable
+            | dear_imgui_sys::ImGuiConfigFlags_DockingEnable);
+        (*unrelated_context).IO.BackendFlags &=
+            !(dear_imgui_sys::ImGuiBackendFlags_PlatformHasViewports
+                | dear_imgui_sys::ImGuiBackendFlags_RendererHasViewports);
+        (*ui_context).IO.ConfigFlags |= dear_imgui_sys::ImGuiConfigFlags_DockingEnable;
+        assert_eq!(
+            sys::imgui_test_engine_register_builtin_test_suite(
+                engine,
+                sys::ImGuiTestEngineBuiltinTestSuite_UpstreamViewports,
+                &mut registered,
+            ),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        const VIEWPORT_TESTS: &[&str] = &[
+            "viewport_basic_1",
+            "viewport_translate",
+            "viewport_parent_id",
+            "viewport_platform_focus",
+            "viewport_platform_focus_2",
+            "viewport_platform_focus_3",
+            "viewport_platform_focus_4",
+            "viewport_platform_close",
+            "viewport_platform_close_2",
+            "viewport_owner_change_1",
+            "viewport_owner_change_2",
+        ];
+        assert_eq!(registered, VIEWPORT_TESTS.len() as i32);
+        assert_eq!(
+            sys::imgui_test_engine_get_registered_test_count(
+                engine,
+                c"viewport".as_ptr(),
+                &mut count,
+            ),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert_eq!(count, VIEWPORT_TESTS.len() as i32);
+        for (index, expected) in VIEWPORT_TESTS.iter().enumerate() {
+            assert_eq!(
+                registered_test_name(engine, c"viewport", index as i32),
+                *expected
+            );
+        }
+
+        assert_eq!(
+            sys::imgui_test_engine_stop(engine),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert_eq!(
+            sys::imgui_test_engine_unbind(engine),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        dear_imgui_sys::igDestroyContext(unrelated_context);
+        dear_imgui_sys::igDestroyContext(ui_context);
+        assert_eq!(
+            sys::imgui_test_engine_destroy_context(engine),
+            sys::ImGuiTestEngineStatus_Success
+        );
+    }
 }
 
 unsafe fn create_script() -> *mut sys::ImGuiTestEngineScript {
@@ -150,17 +380,19 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
             sys::imgui_test_engine_set_run_speed(engine, 99),
             sys::ImGuiTestEngineStatus_OutOfRange
         );
+        let mut run_id = 0;
         assert_eq!(
             sys::imgui_test_engine_queue_tests(
                 engine,
                 sys::ImGuiTestEngineGroup_Tests,
                 ptr::null(),
                 sys::ImGuiTestEngineRunFlags_None,
+                &mut run_id,
             ),
             sys::ImGuiTestEngineStatus_InvalidArgument
         );
         assert_eq!(
-            sys::imgui_test_engine_queue_tests(engine, 99, c"".as_ptr(), 0),
+            sys::imgui_test_engine_queue_tests(engine, 99, c"".as_ptr(), 0, &mut run_id),
             sys::ImGuiTestEngineStatus_OutOfRange
         );
         assert_eq!(
@@ -169,6 +401,7 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
                 sys::ImGuiTestEngineGroup_Tests,
                 c"".as_ptr(),
                 1 << 30,
+                &mut run_id,
             ),
             sys::ImGuiTestEngineStatus_OutOfRange
         );
@@ -499,12 +732,14 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
         (*io).DisplaySize = dear_imgui_sys::ImVec2_c { x: 800.0, y: 600.0 };
         (*io).DisplayFramebufferScale = dear_imgui_sys::ImVec2_c { x: 1.0, y: 1.0 };
         (*io).DeltaTime = 1.0 / 60.0;
+        let mut run_id = 0;
         assert_eq!(
             sys::imgui_test_engine_queue_tests(
                 engine,
                 sys::ImGuiTestEngineGroup_Tests,
                 c"".as_ptr(),
                 sys::ImGuiTestEngineRunFlags_None,
+                &mut run_id,
             ),
             sys::ImGuiTestEngineStatus_Success
         );
@@ -566,6 +801,13 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
             }
         }
         assert!(completed, "scripted missing-table failure did not complete");
+        assert_ne!(run_id, 0);
+        let mut run_test_count = 0;
+        assert_eq!(
+            sys::imgui_test_engine_get_run_test_count(engine, run_id, &mut run_test_count),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert_eq!(run_test_count, 3);
 
         let mut runtime_summary = sys::ImGuiTestEngineResultSummary_c::default();
         assert_eq!(
@@ -574,6 +816,31 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
         );
         assert_eq!(runtime_summary.CountTested, 3);
         assert_eq!(runtime_summary.CountSuccess, 0);
+        assert_eq!(
+            sys::imgui_test_engine_finish_run(engine, run_id),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        let mut no_match_run_id = 0;
+        assert_eq!(
+            sys::imgui_test_engine_queue_tests(
+                engine,
+                sys::ImGuiTestEngineGroup_Tests,
+                c"no-such-boundary-test".as_ptr(),
+                sys::ImGuiTestEngineRunFlags_None,
+                &mut no_match_run_id,
+            ),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert_ne!(no_match_run_id, run_id);
+        assert_eq!(
+            sys::imgui_test_engine_get_run_test_count(engine, no_match_run_id, &mut run_test_count,),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert_eq!(run_test_count, 0);
+        assert_eq!(
+            sys::imgui_test_engine_finish_run(engine, no_match_run_id),
+            sys::ImGuiTestEngineStatus_Success
+        );
         assert_eq!(
             sys::imgui_test_engine_start(engine, ui_context),
             sys::ImGuiTestEngineStatus_InvalidState

@@ -8,8 +8,9 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 ## Versioning Policy
 
 - Unified release train: all published `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
-- Upcoming train: unified `v0.16.0-alpha.1`. Until it is published, test the candidate with a Git dependency on `main`; after publication, use an exact `=0.16.0-alpha.1` requirement rather than a broad crates.io `0.16` requirement.
-- Current published train: unified `v0.15.1` (use `version = "0.15"`).
+- Upcoming train: unified `v0.16.0-alpha.2`. Until it is published, test the candidate with a Git dependency on `main`; after publication, use an exact `=0.16.0-alpha.2` requirement rather than a broad crates.io `0.16` requirement.
+- Current published prerelease: unified `v0.16.0-alpha.1` (use exact requirements such as `version = "=0.16.0-alpha.1"`).
+- Current stable train: unified `v0.15.1` (use `version = "0.15"`).
 - Previous train: unified `v0.14.1` (use `version = "0.14"`).
 - Previous train: unified `v0.13.0` (use `version = "0.13"`).
 - Previous train: unified `v0.12.0` (use `version = "0.12"`).
@@ -17,57 +18,57 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 - Previous train: unified `v0.10.4` (use `version = "0.10"`).
 - Previous train: unified `v0.9.0` (use `version = "0.9"`).
 - Previous train: unified `v0.8.0` (use `version = "0.8"`).
-- Internal dependency constraints in this repo pin to the exact current prerelease (for example, `=0.16.0-alpha.1`). Mixing different release trains across our crates is unsupported.
+- Internal dependency constraints in this repo pin to the exact current prerelease (for example, `=0.16.0-alpha.2`). Mixing different release trains across our crates is unsupported.
 
-## Release Candidate (0.16.0-alpha.1)
+## Release Candidate (0.16.0-alpha.2)
 
 Core
 
 | Crate           | Version | Upstream        | Notes                                     |
 |-----------------|---------|-----------------|-------------------------------------------|
-| dear-imgui-rs   | 0.16.0-alpha.1  | —               | Safe Rust API over dear-imgui-sys         |
-| dear-imgui-sys  | 0.16.0-alpha.1  | ImGui v1.92.9b  | Docking branch via cimgui; three binding profiles |
+| dear-imgui-rs   | 0.16.0-alpha.2  | —               | Safe Rust API over dear-imgui-sys         |
+| dear-imgui-sys  | 0.16.0-alpha.2  | ImGui v1.92.9b  | Docking branch via cimgui; three binding profiles |
 
 Backends
 
 | Crate             | Version | External deps           | Notes |
 |-------------------|---------|-------------------------|-------|
-| dear-imgui-wgpu   | 0.16.0-alpha.1  | wgpu = 30/29/28/27     | WGPU 30 default; native Winit/SDL3 multi-viewport; browser single-window |
-| dear-imgui-glow   | 0.16.0-alpha.1  | glow = 0.17            | OpenGL 3.0+/ES 3.0+/WebGL 2 renderer; live sampler capability with restorative fallback |
-| dear-imgui-ash    | 0.16.0-alpha.1  | ash = 0.38             | Native Vulkan renderer; shared Winit/SDL3 multi-viewport runtime |
-| dear-imgui-winit  | 0.16.0-alpha.1  | winit = 0.30.13        | Winit platform backend |
-| dear-imgui-sdl3   | 0.16.0-alpha.1  | sdl3 = 0.18.4, sdl3-sys 0.6 | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
-| dear-imgui-bevy   | 0.16.0-alpha.1  | Bevy = 0.19.0          | Bevy-native backend; default renderer and Bevy UI ordering, explicit advanced routes, Rust 1.95 minimum |
+| dear-imgui-wgpu   | 0.16.0-alpha.2  | wgpu = 30/29/28/27     | WGPU 30 default; native Winit/SDL3 multi-viewport; browser single-window |
+| dear-imgui-glow   | 0.16.0-alpha.2  | glow = 0.17            | OpenGL 3.0+/ES 3.0+/WebGL 2 renderer; live sampler capability with restorative fallback |
+| dear-imgui-ash    | 0.16.0-alpha.2  | ash = 0.38             | Native Vulkan renderer; shared Winit/SDL3 multi-viewport runtime |
+| dear-imgui-winit  | 0.16.0-alpha.2  | winit = 0.30.13        | Winit platform backend |
+| dear-imgui-sdl3   | 0.16.0-alpha.2  | sdl3 = 0.18.4, sdl3-sys 0.6 | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
+| dear-imgui-bevy   | 0.16.0-alpha.2  | Bevy = 0.19.0          | Bevy-native backend; default renderer and Bevy UI ordering, explicit advanced routes, Rust 1.95 minimum |
 
 Utilities
 
 | Crate     | Version | External deps | Notes |
 |-----------|---------|---------------|-------|
-| dear-app  | 0.16.0-alpha.1  | winit, wgpu 30 | Generation-aware application runtime |
+| dear-app  | 0.16.0-alpha.2  | winit, wgpu 30 | Generation-aware application runtime |
 
 Tooling
 
 | Crate                    | Version | External deps | Notes |
 |--------------------------|---------|---------------|-------|
-| dear-imgui-build-support | 0.16.0-alpha.1  | ureq = 3.3    | Binding specification, build, package, and prebuilt helpers |
+| dear-imgui-build-support | 0.16.0-alpha.2  | ureq = 3.3    | Binding specification, build, package, and prebuilt helpers |
 
 Extensions
 
 | Crate               | Version | Requires dear-imgui-rs | Sys crate                    | Notes                                  |
 |---------------------|---------|------------------------|------------------------------|----------------------------------------|
-| dear-implot         | 0.16.0-alpha.1 | 0.16.0-alpha.1 | dear-implot-sys 0.16.0-alpha.1 | 2D plotting |
-| dear-imnodes        | 0.16.0-alpha.1 | 0.16.0-alpha.1 | dear-imnodes-sys 0.16.0-alpha.1 | WASM-capable node editor |
-| dear-node-editor    | 0.16.0-alpha.1 | 0.16.0-alpha.1 | dear-node-editor-sys 0.16.0-alpha.1 | Native-only; opt-in blueprints profile |
-| dear-imguizmo       | 0.16.0-alpha.1 | 0.16.0-alpha.1 | dear-imguizmo-sys 0.16.0-alpha.1 | 3D gizmo |
-| dear-file-browser   | 0.16.0-alpha.1 | 0.16.0-alpha.1 | — | State-owned ImGui UI + native dialogs |
-| dear-implot3d       | 0.16.0-alpha.1 | 0.16.0-alpha.1 | dear-implot3d-sys 0.16.0-alpha.1 | 3D plotting |
-| dear-imguizmo-quat  | 0.16.0-alpha.1 | 0.16.0-alpha.1 | dear-imguizmo-quat-sys 0.16.0-alpha.1 | Quaternion gizmo |
-| dear-imgui-test-engine | 0.16.0-alpha.1 | 0.16.0-alpha.1 | dear-imgui-test-engine-sys 0.16.0-alpha.1 | UI automation and test runner |
-| dear-imgui-reflect  | 0.16.0-alpha.1 | 0.16.0-alpha.1 | — | Session-owned reflection UI |
+| dear-implot         | 0.16.0-alpha.2 | 0.16.0-alpha.2 | dear-implot-sys 0.16.0-alpha.2 | 2D plotting |
+| dear-imnodes        | 0.16.0-alpha.2 | 0.16.0-alpha.2 | dear-imnodes-sys 0.16.0-alpha.2 | WASM-capable node editor |
+| dear-node-editor    | 0.16.0-alpha.2 | 0.16.0-alpha.2 | dear-node-editor-sys 0.16.0-alpha.2 | Native-only; opt-in blueprints profile |
+| dear-imguizmo       | 0.16.0-alpha.2 | 0.16.0-alpha.2 | dear-imguizmo-sys 0.16.0-alpha.2 | 3D gizmo |
+| dear-file-browser   | 0.16.0-alpha.2 | 0.16.0-alpha.2 | — | State-owned ImGui UI + native dialogs |
+| dear-implot3d       | 0.16.0-alpha.2 | 0.16.0-alpha.2 | dear-implot3d-sys 0.16.0-alpha.2 | 3D plotting |
+| dear-imguizmo-quat  | 0.16.0-alpha.2 | 0.16.0-alpha.2 | dear-imguizmo-quat-sys 0.16.0-alpha.2 | Quaternion gizmo |
+| dear-imgui-test-engine | 0.16.0-alpha.2 | 0.16.0-alpha.2 | dear-imgui-test-engine-sys 0.16.0-alpha.2 | UI automation and test runner |
+| dear-imgui-reflect  | 0.16.0-alpha.2 | 0.16.0-alpha.2 | — | Session-owned reflection UI |
 
 ## 0.16 Architecture Contracts
 
-Release 0.16.0-alpha.1 is not source-compatible with 0.15.x. The baseline is Dear ImGui v1.92.9b docking via cimgui, Rust 1.92 for the workspace, Rust 1.95 for the Bevy backend, WGPU 30 by default with explicit 29/28/27 routes, and Bevy 0.19. Migration details and before/after examples live in the `0.16.0-alpha.1` section of `CHANGELOG.md`.
+The 0.16 train is not source-compatible with 0.15.x, and alpha.2 deliberately removes provisional alpha.1 APIs whose contracts were not sound enough to stabilize. The baseline is Dear ImGui v1.92.9b docking via cimgui, Rust 1.92 for the workspace, Rust 1.95 for the Bevy backend, WGPU 30 by default with explicit 29/28/27 routes, and Bevy 0.19. Alpha.2 migrations live in the `0.16.0-alpha.2` section of `CHANGELOG.md`; applications coming from 0.15.x must also apply the alpha.1 migrations.
 
 The safe Rust layer intentionally breaks APIs that expose C++ lifecycle
 protocols, wrong-context state, stale GPU handles, or platform-specific ABI
@@ -93,7 +94,7 @@ target.
 | Bevy default | `dear-imgui-bevy` enables `render` and `bevy-ui`; the primary Context automatically targets the unique eligible primary-window camera. |
 | Bevy headless | `default-features = false` retains all Context schedules/lifecycle and primary-Context input/capture without RenderApp extraction; explicit multi-Context input routes require `render`. |
 | Bevy render-only | `default-features = false, features = ["render"]` installs the renderer without Bevy UI ordering. |
-| Bevy native multi-viewport | `multi-viewport` implies `render` and `bevy_winit`; each Context opts in explicitly and secondary state is keyed by `(ContextId, ViewportId)`. Wayland falls back to host-window docking because global desktop client coordinates are unavailable; call `ImguiNativeViewportSupport::get(context_id)` for the per-Context runtime status. |
+| Bevy native multi-viewport | `multi-viewport` implies `render` and `bevy_winit`; each Context opts in explicitly. Secondary state is keyed by stable `ImguiViewportInstanceId`; the numeric `ViewportId` is only the current routing projection and may change during docking. Wayland falls back to host-window docking because global desktop client coordinates are unavailable; call `ImguiNativeViewportSupport::get(context_id)` for the per-Context runtime status. |
 | Bevy WASM | `wasm` supports both default and headless builds; combining WASM with native `multi-viewport` is rejected. |
 
 The six native safe extension crates forward build strategy through both the
@@ -151,7 +152,7 @@ Engine integrations can use idempotent `Context::end_frame()` before their own
 detachment sequence. Main viewport checks use `Viewport::is_main()` rather than
 an exported numeric ID.
 
-The Bevy backend applies the same ownership model across the engine boundary. A main-thread registry serially drives independent Context schedules; frame mailboxes, extracted snapshots, render routes, input capture, renderer generations, managed textures, diagnostics, and native viewport state remain keyed by `ContextId`. Render and input routes are separate declarations, so image targets never acquire window input implicitly. Each frame snapshot carries the immutable route epoch and viewport metrics used to create it, while cursor and IME feedback are arbitrated by Context input ownership. Context retirement waits for both RenderWorld and ECS acknowledgements; `Drop` only transfers complete owners into an app-local retirement queue and never reaches into another Bevy world.
+The Bevy backend applies the same ownership model across the engine boundary. A main-thread registry serially drives App-owned private Context passes; each pass injects a lifetime-bound `ImguiFrame<'_, P>` that cannot be installed in an ordinary Bevy schedule. Frame mailboxes, extracted snapshots, render routes, input capture, renderer generations, managed textures, diagnostics, and native viewport state remain keyed by `ContextId`. Render and input routes are separate declarations, so image targets never acquire window input implicitly. Each frame snapshot carries the immutable route epoch and viewport metrics used to create it, while cursor and IME feedback are arbitrated by Context input ownership. Context retirement waits for both RenderWorld and ECS acknowledgements; `Drop` only transfers complete owners into an app-local retirement queue and never reaches into another Bevy world.
 
 ### PlatformIO callback ABI
 
@@ -169,7 +170,7 @@ First-party platform and renderer backends now claim an exact Context-bound iden
 | File browser draw methods borrow `&dyn FileSystem` | `FileDialogState` owns a blocking or background filesystem capability | Workers cannot outlive borrowed caller state; `FileSystem::visit_dir` streams entries and cooperates with cancellation through `ScanVisit`. |
 | Incremental/synchronous scan presets | `ScanPolicy::Blocking` or native `ScanPolicy::Background` | Background mode requires `Arc<dyn FileSystem + Send + Sync>` and never silently downgrades; browser/JS adapters stay on the caller thread. |
 | Raw monitor vector access | `PlatformIo::set_monitors` | Dear ImGui's allocator owns the replacement vector storage. |
-| Public Bevy backend config/status resources, camera markers, helper setup, manual begin/end schedules, or viewport command queues | `ImguiPlugin` / `ImguiPluginConfig`, `ImguiUi`, `ImguiContextConfig`, and explicit `ImguiRenderRoute` / `ImguiInputRoute` declarations | The default single-camera path needs no marker; advanced ownership is declared by Context and camera identity while renderer and callback storage stays private. |
+| Public Bevy backend config/status resources, `ImguiUi`, camera markers, helper setup, manual begin/end schedules, or viewport command queues | `ImguiPlugin` / `ImguiPluginConfig`, private `ImguiPass<P>` handles, frame-scoped `ImguiFrame<'_, P>`, `ImguiContextConfig`, and explicit `ImguiRenderRoute` / `ImguiInputRoute` declarations | Register UI systems with `ImguiAppExt::add_imgui_system`; the default single-camera path needs no marker, while advanced ownership is declared by Context and camera identity and renderer/pass/callback storage stays private. |
 | Manual Bevy texture IDs or best-effort Context extraction | `ImguiTexture` RAII leases and retryable `ImguiContexts::remove` | Image mappings remain alive through in-flight snapshots, and Context removal waits for render-world plus viewport-ECS acknowledgement while unrelated Contexts continue. |
 | Public Bevy input state/systems, writable capture fields, or directly copied viewport markers | Read-only `ImguiInputCapture` queries/run conditions and borrowed `ImguiViewportWindow` / `ImguiViewportCamera` accessors | The plugin owns input translation and marker creation; `aggregate()` returns a copyable capture snapshot while marker identity is read through `context_id()` / `viewport_id()`. |
 
@@ -204,7 +205,7 @@ import-style binding artifact. `xtask verify-bindings` regenerates and compares
 all supported profiles; arbitrary bindgen clang-argument overrides are rejected
 for canonical artifacts.
 
-The binding generator contract, formatter, allow/block lists, enum normalization, header shims, opaque types, provider name, and exact compatibility target facts all participate in the deterministic binding-spec hash. `dear-imgui-build-support` will ship on the same 0.16.0-alpha.1 train as every other publishable crate.
+The binding generator contract, formatter, allow/block lists, enum normalization, header shims, opaque types, provider name, and exact compatibility target facts all participate in the deterministic binding-spec hash. `dear-imgui-build-support` will ship on the same 0.16.0-alpha.2 train as every other publishable crate.
 
 Source identity is package data rather than repository state. The exact 40-hex
 cimgui and nested Dear ImGui revisions live in

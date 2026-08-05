@@ -14,7 +14,8 @@
 //! - **Managed textures**: pointer-free create/update/destroy requests owned by rendered frames
 //! - **External textures**: Register application-owned `wgpu::TextureView` handles for UI display
 //! - **Gamma correction**: Automatic sRGB format detection and gamma correction
-//! - **Multi-frame buffering**: Support for multiple frames in flight
+//! - **Epoch-isolated uploads**: Vertex, index, and uniform buffers are never reused across
+//!   render epochs
 //! - **Device object management**: Helpers to recreate device objects (pipelines/buffers/textures) after loss
 //! - **Multi-viewport support**: Support for multiple windows (feature-gated via `multi-viewport-winit` for winit or `multi-viewport-sdl3` for SDL3 on native targets)
 //!
@@ -256,6 +257,12 @@ mod removed_public_contracts {
     struct TwoPhaseRendererInitialization;
 
     /// ```compile_fail
+    /// use dear_imgui_wgpu::WgpuRenderer;
+    /// let _ = WgpuRenderer::new_frame;
+    /// ```
+    struct ManualFramePreparation;
+
+    /// ```compile_fail
     /// use dear_imgui_wgpu::FrameResources;
     /// ```
     ///
@@ -314,7 +321,7 @@ pub use renderer::WgpuRenderer;
 pub use texture::ExternalTextureId;
 
 pub(crate) use data::{WgpuBackendData, WgpuRenderStateStorage};
-pub(crate) use frame_resources::FrameResources;
+pub(crate) use frame_resources::{FrameResourceArena, FrameResources};
 pub(crate) use render_resources::RenderResources;
 pub(crate) use shaders::ShaderManager;
 pub(crate) use texture::{OwnedWgpuTexture, WgpuTextureManager};

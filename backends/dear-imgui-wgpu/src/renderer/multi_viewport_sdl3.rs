@@ -11,6 +11,13 @@ mod removed_free_api_contracts {
     /// use dear_imgui_wgpu::multi_viewport_sdl3::shutdown_multi_viewport_support;
     /// ```
     struct Shutdown;
+
+    /// ```compile_fail
+    /// fn removed(runtime: &dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRuntime) {
+    ///     runtime.new_frame().unwrap();
+    /// }
+    /// ```
+    struct NewFrame;
 }
 
 use dear_imgui_rs::Context;
@@ -95,12 +102,7 @@ impl Sdl3ViewportRuntime {
         self.inner.begin_frame_trace()
     }
 
-    /// Prepares renderer device objects for a new frame.
-    pub fn new_frame(&self) -> Result<(), WgpuViewportError> {
-        self.inner.new_frame()
-    }
-
-    /// Applies managed-texture requests before platform-window rendering.
+    /// Prepares frame resources and applies managed-texture requests before platform-window rendering.
     pub fn reconcile_frame(&self, frame: &mut RenderedFrame<'_>) -> Result<(), WgpuViewportError> {
         self.inner.reconcile_frame(frame)
     }

@@ -54,6 +54,8 @@ ImGuiTestEngineStatus imgui_test_engine_register_default_tests(ImGuiTestEngine* 
             ctx->ItemUncheck("Node/Checkbox");
         };
 
+        abi::maybe_inject(ImGuiTestEngineExceptionPoint_SuiteRegistrationAfterFirstTest);
+
         // Demo: value entry (slider int)
         t = IM_REGISTER_TEST(engine, "demo_tests", "input_value");
         struct TestVars2 {

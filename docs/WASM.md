@@ -17,7 +17,7 @@ revision instead of renaming its files or remapping it under the v1 module name.
 
 WASM support is explicit and target-specific. The only supported Rust target is
 `wasm32-unknown-unknown`, and every dependency path to the core crate must
-enable the `wasm` feature. Until `0.16.0-alpha.1` is published, use the candidate
+enable the `wasm` feature. Until `0.16.0-alpha.2` is published, use the candidate
 from `main`:
 
 ```toml
@@ -35,8 +35,8 @@ dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "m
 ```
 
 After publication, replace those Git dependencies with the exact prerelease
-requirements `dear-imgui-rs = { version = "=0.16.0-alpha.1", features = ["wasm"] }`
-and `dear-imgui-bevy = { version = "=0.16.0-alpha.1", features = ["render", "wasm"] }`.
+requirements `dear-imgui-rs = { version = "=0.16.0-alpha.2", features = ["wasm"] }`
+and `dear-imgui-bevy = { version = "=0.16.0-alpha.2", features = ["render", "wasm"] }`.
 
 Five safe native extensions expose the same `wasm` feature and forward it to
 both `dear-imgui-rs` and their matching sys crate:

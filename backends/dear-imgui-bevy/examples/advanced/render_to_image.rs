@@ -11,7 +11,6 @@
 use bevy::{
     app::AppExit,
     camera::{RenderTarget, visibility::RenderLayers},
-    ecs::schedule::ScheduleLabel,
     prelude::*,
     render::render_resource::{Extent3d, TextureFormat, TextureUsages},
     window::{PresentMode, PrimaryWindow, WindowPlugin, WindowTheme},
@@ -21,7 +20,6 @@ use dear_imgui_rs::Condition;
 
 const INITIAL_TARGET_SIZE: UVec2 = UVec2::new(640, 360);
 
-#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
 struct OffscreenContextPass;
 
 #[derive(Resource)]
@@ -38,22 +36,25 @@ struct RenderToImageState {
 }
 
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "dear-imgui-bevy render to image".to_owned(),
-                resolution: (1280, 760).into(),
-                present_mode: PresentMode::AutoVsync,
-                window_theme: Some(WindowTheme::Dark),
-                ..Default::default()
-            }),
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: "dear-imgui-bevy render to image".to_owned(),
+            resolution: (1280, 760).into(),
+            present_mode: PresentMode::AutoVsync,
+            window_theme: Some(WindowTheme::Dark),
             ..Default::default()
-        }))
-        .add_plugins(ImguiPlugin::default())
-        .add_systems(Startup, setup)
-        .add_systems(Update, (close_on_escape, resize_render_target))
-        .add_systems(ImguiPrimaryContextPass, primary_ui)
-        .add_systems(OffscreenContextPass, offscreen_ui)
+        }),
+        ..Default::default()
+    }))
+    .add_plugins(ImguiPlugin::default())
+    .add_systems(Startup, setup)
+    .add_systems(Update, (close_on_escape, resize_render_target));
+    let primary_pass = app.imgui_primary_pass();
+    let offscreen_pass = app.declare_imgui_pass::<OffscreenContextPass>();
+    app.insert_resource(offscreen_pass.clone())
+        .add_imgui_systems(&primary_pass, primary_pass.system(primary_ui))
+        .add_imgui_systems(&offscreen_pass, offscreen_pass.system(offscreen_ui))
         .run();
 }
 
@@ -63,9 +64,10 @@ fn setup(
     mut images: ResMut<Assets<Image>>,
     mut textures: ResMut<ImguiBevyTextures>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
+    offscreen_pass: Res<ImguiPass<OffscreenContextPass>>,
 ) -> Result {
     let offscreen_context =
-        contexts.create(ImguiContextConfig::new(OffscreenContextPass).with_docking(false))?;
+        contexts.create(ImguiContextConfig::new(&offscreen_pass).with_docking(false))?;
 
     let mut image = Image::new_target_texture(
         INITIAL_TARGET_SIZE.x,
@@ -141,11 +143,11 @@ fn resize_render_target(mut state: ResMut<RenderToImageState>, mut images: ResMu
 }
 
 fn primary_ui(
+    frame: ImguiFrame<'_>,
     mut commands: Commands,
-    imgui: ImguiUi,
     mut state: ResMut<RenderToImageState>,
 ) -> Result {
-    let ui = imgui.ui()?;
+    let ui = frame.ui();
 
     ui.window("Offscreen Context Host")
         .position([32.0, 32.0], Condition::FirstUseEver)
@@ -194,9 +196,12 @@ fn primary_ui(
     Ok(())
 }
 
-fn offscreen_ui(imgui: ImguiUi, mut state: ResMut<RenderToImageState>) -> Result {
-    let frame_index = imgui.frame_index()?;
-    let ui = imgui.ui()?;
+fn offscreen_ui(
+    frame: ImguiFrame<'_, OffscreenContextPass>,
+    mut state: ResMut<RenderToImageState>,
+) -> Result {
+    let frame_index = frame.frame_index();
+    let ui = frame.ui();
 
     ui.window("Rendered to a Bevy Image")
         .position([20.0, 20.0], Condition::Always)

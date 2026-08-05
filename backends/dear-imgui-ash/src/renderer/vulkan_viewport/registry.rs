@@ -29,29 +29,21 @@ struct RegisteredRuntime {
 
 /// Identifies the exact native viewport that received an Ash renderer sidecar.
 ///
-/// Dear ImGui may reuse viewport IDs after a viewport is destroyed, so the address is retained
-/// alongside the ID and must match the result of a later internal lookup.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Dear ImGui may change a viewport ID in place during docking. Stable identity is therefore the
+/// owning Context plus the viewport address; numeric IDs remain current routing metadata only.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) struct ViewportIdentity {
-    pub(super) id: sys::ImGuiID,
+    pub(super) context: usize,
     pub(super) address: usize,
 }
 
 impl ViewportIdentity {
-    pub(super) fn from_viewport(viewport: &Viewport) -> Self {
+    pub(super) fn from_viewport(context: *mut sys::ImGuiContext, viewport: &Viewport) -> Self {
         Self {
-            id: viewport.id().raw(),
+            context: context as usize,
             address: viewport.as_raw() as usize,
         }
     }
-}
-
-pub(super) fn resolve_viewport_by_id(
-    identity: ViewportIdentity,
-    find: impl FnOnce(sys::ImGuiID) -> *mut sys::ImGuiViewport,
-) -> Option<*mut sys::ImGuiViewport> {
-    let viewport = find(identity.id);
-    (!viewport.is_null() && viewport as usize == identity.address).then_some(viewport)
 }
 
 /// Resolves a registered viewport through Dear ImGui's internal live-viewport registry.
@@ -59,11 +51,15 @@ pub(super) fn resolve_viewport_by_id(
 /// `PlatformIO.Viewports` is only a public presentation of the viewport set and can omit hidden
 /// viewports, so it must not be used to decide whether a registered sidecar is still live.
 pub(super) fn resolve_viewport(identity: ViewportIdentity) -> Option<*mut sys::ImGuiViewport> {
-    resolve_viewport_by_id(identity, |id| {
-        // SAFETY: the caller runs while the owning Context is current and alive. The returned
-        // pointer is compared only; it is converted to a Viewport by the teardown caller.
-        unsafe { sys::igFindViewportByID(id) }
-    })
+    // SAFETY: the caller runs while the owning Context is current and alive. Native code compares
+    // the integer address against that Context's authoritative internal viewport list.
+    let viewport = unsafe {
+        sys::ImGuiContext_FindLiveViewportByAddress(
+            identity.context as *mut sys::ImGuiContext,
+            identity.address,
+        )
+    };
+    (!viewport.is_null()).then_some(viewport)
 }
 
 pub(super) struct RegisteredViewportData {
@@ -78,7 +74,7 @@ impl RegisteredViewportData {
         !context.is_null()
             && self.context_raw == context as usize
             && binding_has_native_context(&self.binding)
-            && self.identity == ViewportIdentity::from_viewport(viewport)
+            && self.identity == ViewportIdentity::from_viewport(context, viewport)
             && self.pointer == viewport.renderer_user_data() as usize
     }
 

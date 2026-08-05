@@ -9,9 +9,9 @@ use dear_imgui_rs::{
 
 use super::callbacks::{
     renderer_create_window_sys, renderer_destroy_window_sys, renderer_probe_runtime_sys,
-    renderer_render_window_sys, renderer_swap_buffers_sys,
+    renderer_render_window_sys, renderer_swap_buffers_sys, run_work_callback,
 };
-use super::registry::viewport_data_count;
+use super::registry::{SurfaceSupportError, viewport_data_count};
 use super::runtime::{
     AshViewportError, OwningViewportRuntime, RuntimeControl, RuntimeState,
     preflight_attachment_with,
@@ -346,7 +346,13 @@ fn callback_panic_and_reentry_are_deferred_to_rust_entry() {
     let _guard = super::test_context_guard();
     let mut context = Context::create();
     let _platform = attach_test_platform(&mut context);
-    let runtime = OwningViewportRuntime::attach_for_test(&mut context).unwrap();
+    let mut runtime = OwningViewportRuntime::attach_for_test(&mut context).unwrap();
+
+    runtime.trigger_reentrant_entry_for_test();
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(AshViewportError::CallbackReentered { .. })
+    ));
 
     runtime.panic_next_callback_for_test();
     unsafe { renderer_render_window_sys(std::ptr::null_mut(), std::ptr::null_mut()) };
@@ -356,12 +362,192 @@ fn callback_panic_and_reentry_are_deferred_to_rust_entry() {
             callback: "Renderer_RenderWindow"
         })
     ));
+    assert_eq!(runtime.state_for_test(), RuntimeState::ShuttingDown);
+    assert!(
+        !context
+            .io()
+            .backend_flags()
+            .contains(BackendFlags::RENDERER_HAS_VIEWPORTS)
+    );
 
-    runtime.trigger_reentrant_entry_for_test();
+    // Destroy is a cleanup entry and remains callable after a terminal callback fault.
+    unsafe { renderer_destroy_window_sys(std::ptr::null_mut()) };
     assert!(matches!(
         runtime.poll_fault(),
-        Err(AshViewportError::CallbackReentered { .. })
+        Err(AshViewportError::InvalidCallbackArgument {
+            callback: "Renderer_DestroyWindow"
+        })
     ));
+    runtime.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn device_loss_from_each_vulkan_callback_stage_is_terminal() {
+    let _guard = super::test_context_guard();
+
+    for operation in [
+        "wait_for_fences",
+        "acquire_next_image",
+        "queue_submit",
+        "queue_present",
+    ] {
+        let mut context = Context::create();
+        let _platform = attach_test_platform(&mut context);
+        let mut runtime = OwningViewportRuntime::attach_for_test(&mut context).unwrap();
+
+        run_work_callback(operation, |_| {
+            Err(RendererError::Vulkan(ash::vk::Result::ERROR_DEVICE_LOST).into())
+        });
+
+        assert_eq!(runtime.state_for_test(), RuntimeState::ShuttingDown);
+        assert!(
+            !context
+                .io()
+                .backend_flags()
+                .contains(BackendFlags::RENDERER_HAS_VIEWPORTS),
+            "{operation} device loss must revoke renderer viewport capability"
+        );
+        assert!(matches!(
+            runtime.poll_fault(),
+            Err(AshViewportError::Renderer(RendererError::Vulkan(
+                ash::vk::Result::ERROR_DEVICE_LOST
+            )))
+        ));
+
+        unsafe { renderer_probe_runtime_sys() };
+        assert_eq!(
+            runtime.callback_probe_count_for_test(),
+            0,
+            "{operation} device loss allowed another renderer callback after polling"
+        );
+        runtime.shutdown(&mut context).unwrap();
+    }
+}
+
+#[test]
+fn device_loss_wrapped_by_a_surface_query_is_terminal() {
+    let _guard = super::test_context_guard();
+    let mut context = Context::create();
+    let _platform = attach_test_platform(&mut context);
+    let mut runtime = OwningViewportRuntime::attach_for_test(&mut context).unwrap();
+
+    run_work_callback("Renderer_CreateWindow", |_| {
+        Err(AshViewportError::SurfaceUnsupported(
+            SurfaceSupportError::CapabilitiesQuery(ash::vk::Result::ERROR_DEVICE_LOST),
+        ))
+    });
+
+    assert_eq!(runtime.state_for_test(), RuntimeState::ShuttingDown);
+    assert!(
+        !context
+            .io()
+            .backend_flags()
+            .contains(BackendFlags::RENDERER_HAS_VIEWPORTS)
+    );
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(AshViewportError::SurfaceUnsupported(
+            SurfaceSupportError::CapabilitiesQuery(ash::vk::Result::ERROR_DEVICE_LOST)
+        ))
+    ));
+    runtime.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn renderer_state_drift_is_a_terminal_entry_fault() {
+    let _guard = super::test_context_guard();
+    let mut context = Context::create();
+    let _platform = attach_test_platform(&mut context);
+    let mut runtime = OwningViewportRuntime::attach_for_test(&mut context).unwrap();
+
+    run_work_callback("injected renderer state drift", |_| {
+        Err(AshViewportError::Renderer(
+            RendererError::RendererStateDrift {
+                field: "BackendRendererUserData",
+            },
+        ))
+    });
+
+    assert_eq!(runtime.state_for_test(), RuntimeState::ShuttingDown);
+    assert!(
+        !context
+            .io()
+            .backend_flags()
+            .contains(BackendFlags::RENDERER_HAS_VIEWPORTS)
+    );
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(AshViewportError::Renderer(
+            RendererError::RendererStateDrift {
+                field: "BackendRendererUserData"
+            }
+        ))
+    ));
+    unsafe { renderer_probe_runtime_sys() };
+    assert_eq!(runtime.callback_probe_count_for_test(), 0);
+    runtime.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn recoverable_surface_fault_remains_non_terminal() {
+    let _guard = super::test_context_guard();
+    let mut context = Context::create();
+    let _platform = attach_test_platform(&mut context);
+    let mut runtime = OwningViewportRuntime::attach_for_test(&mut context).unwrap();
+
+    run_work_callback("Renderer_CreateWindow", |_| {
+        Err(AshViewportError::SurfaceUnsupported(
+            SurfaceSupportError::CapabilitiesQuery(ash::vk::Result::ERROR_SURFACE_LOST_KHR),
+        ))
+    });
+
+    assert_eq!(runtime.state_for_test(), RuntimeState::Attached);
+    assert!(
+        context
+            .io()
+            .backend_flags()
+            .contains(BackendFlags::RENDERER_HAS_VIEWPORTS)
+    );
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(AshViewportError::SurfaceUnsupported(
+            SurfaceSupportError::CapabilitiesQuery(ash::vk::Result::ERROR_SURFACE_LOST_KHR)
+        ))
+    ));
+
+    unsafe { renderer_probe_runtime_sys() };
+    assert_eq!(runtime.callback_probe_count_for_test(), 1);
+    runtime.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn terminal_fault_preempts_and_preserves_pending_non_terminal_fault() {
+    let _guard = super::test_context_guard();
+    let mut context = Context::create();
+    let _platform = attach_test_platform(&mut context);
+    let mut runtime = OwningViewportRuntime::attach_for_test(&mut context).unwrap();
+    let control = runtime.control_for_test();
+
+    control.record_fault(AshViewportError::CallbackReentered {
+        callback: "earlier recoverable fault",
+    });
+    control.record_runtime_contract_fault(AshViewportError::RendererCallbackReplaced {
+        callback: "terminal contract fault",
+    });
+
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(AshViewportError::RendererCallbackReplaced {
+            callback: "terminal contract fault"
+        })
+    ));
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(AshViewportError::CallbackReentered {
+            callback: "earlier recoverable fault"
+        })
+    ));
+    runtime.shutdown(&mut context).unwrap();
 }
 
 #[test]
@@ -799,6 +985,13 @@ fn foreign_renderer_user_data_is_reported_without_taking_or_typing_it() {
         renderer_destroy_window_sys(viewport);
     }
 
+    assert_eq!(runtime.state_for_test(), RuntimeState::ShuttingDown);
+    assert!(
+        !context
+            .io()
+            .backend_flags()
+            .contains(BackendFlags::RENDERER_HAS_VIEWPORTS)
+    );
     assert!(matches!(
         runtime.poll_fault(),
         Err(AshViewportError::RendererUserDataOwnershipLost {

@@ -161,7 +161,9 @@ impl WgpuApp {
         let main = &mut *main_guard;
         while let Some(event) = events.pop() {
             let backend_result = event.with_imgui_event(|raw| match raw {
-                Some(raw) => main.sdl3_backend.process_event(&mut main.imgui, raw),
+                // SAFETY: the callback handoff reconstructs the active union variant and owns
+                // every pointer payload for the duration of this closure.
+                Some(raw) => unsafe { main.sdl3_backend.process_raw_event(&mut main.imgui, raw) },
                 None => Ok(false),
             });
             if let Err(error) = backend_result {
@@ -261,7 +263,6 @@ impl WgpuApp {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            main.renderer.new_frame()?;
             main.renderer.render_with_fb_size(
                 draw_data,
                 &mut render_pass,
@@ -316,7 +317,8 @@ impl WgpuApp {
     }
 
     fn app_event(&self, raw: &sdl3::sys::events::SDL_Event) -> AppResult {
-        self.events.push(raw);
+        // SAFETY: SDL supplies a valid event whose transient payload remains live for this call.
+        unsafe { self.events.push_from_callback(raw) };
         AppResult::Continue
     }
 

@@ -1058,7 +1058,9 @@ impl GlowApp {
         while let Some(event) = events.pop() {
             event.with_imgui_event(|raw| -> Result<(), Box<dyn Error>> {
                 if let Some(raw) = raw {
-                    let _ = main.sdl3_backend.process_event(&mut main.imgui, raw)?;
+                    // SAFETY: the callback handoff reconstructs the active union variant and owns
+                    // every pointer payload for the duration of this closure.
+                    let _ = unsafe { main.sdl3_backend.process_raw_event(&mut main.imgui, raw)? };
                 }
                 Ok(())
             })?;
@@ -1163,6 +1165,12 @@ impl MainData {
         }
 
         let mut imgui = Context::create();
+        let window_scale = window.display_scale();
+        let window_scale = if window_scale.is_finite() && window_scale > 0.0 {
+            window_scale
+        } else {
+            1.0
+        };
         #[cfg(feature = "test-engine")]
         if run_viewport_smoke {
             imgui.set_ini_filename(None::<String>)?;
@@ -1172,15 +1180,19 @@ impl MainData {
             let mut flags = io.config_flags();
             flags.insert(ConfigFlags::DOCKING_ENABLE | ConfigFlags::VIEWPORTS_ENABLE);
             io.set_config_flags(flags);
+            io.set_config_dpi_scale_fonts(true);
+            io.set_config_dpi_scale_viewports(true);
+        }
+        {
+            let style = imgui.style_mut();
+            style.scale_all_sizes(window_scale);
+            style.set_font_scale_dpi(window_scale);
         }
 
         // SAFETY: `window` and `gl_context` outlive renderer/platform shutdown and Context teardown.
         let sdl3_backend = unsafe {
             Sdl3PlatformBackend::init_platform_for_opengl(&mut imgui, &window, &gl_context)?
         };
-
-        let window_scale = window.display_scale();
-        imgui.style_mut().set_font_scale_dpi(window_scale);
 
         let external_texture = ExternalTexture::create(&gl)?;
         let mut texture_map = SimpleTextureMap::default();
@@ -1607,7 +1619,8 @@ impl GlowApp {
     }
 
     fn app_event(&self, raw: &sdl3::sys::events::SDL_Event) -> AppResult {
-        self.events.push(raw);
+        // SAFETY: SDL supplies a valid event whose transient payload remains live for this call.
+        unsafe { self.events.push_from_callback(raw) };
         AppResult::Continue
     }
 

@@ -129,7 +129,6 @@ fn render_callback_contract_frame(
 
     context.io_mut().set_display_size([64.0, 64.0]);
     context.io_mut().set_delta_time(1.0 / 60.0);
-    renderer.new_frame()?;
     let reset = context
         .platform_io()
         .draw_callback_reset_render_state_raw()
@@ -259,6 +258,62 @@ fn direct_and_explicit_render_paths_execute_raw_callbacks_with_scoped_state() ->
     renderer.shutdown(&mut context)
 }
 
+#[test]
+fn render_opens_its_resource_arena_from_the_rendered_frame_epoch() -> RendererResult<()> {
+    let _guard = callback_test_guard();
+    let Some((device, queue)) = request_test_device() else {
+        return Ok(());
+    };
+    let mut context = Context::create();
+    let mut renderer = WgpuRenderer::new(
+        WgpuInitInfo::new(device.clone(), queue.clone(), TextureFormat::Rgba8Unorm),
+        &mut context,
+    )?;
+    context.io_mut().set_display_size([64.0, 64.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
+    context.frame().text("frame without renderer preparation");
+
+    let target = device.create_texture(&TextureDescriptor {
+        label: Some("dear-imgui-wgpu frame contract target"),
+        size: Extent3d {
+            width: 64,
+            height: 64,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let view = target.create_view(&TextureViewDescriptor::default());
+    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor::default());
+    let color_attachments = [Some(RenderPassColorAttachment {
+        view: &view,
+        resolve_target: None,
+        ops: Operations {
+            load: LoadOp::Clear(Color::BLACK),
+            store: StoreOp::Store,
+        },
+        depth_slice: None,
+    })];
+    let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
+        label: Some("dear-imgui-wgpu frame contract pass"),
+        color_attachments: &color_attachments,
+        depth_stencil_attachment: None,
+        occlusion_query_set: None,
+        #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
+        multiview_mask: None,
+        timestamp_writes: None,
+    });
+    renderer.render(context.render(), &mut render_pass)?;
+    drop(render_pass);
+    queue.submit([encoder.finish()]);
+
+    renderer.shutdown(&mut context)
+}
+
 fn render_test_frame(
     renderer: &mut WgpuRenderer,
     context: &mut Context,
@@ -318,7 +373,6 @@ fn render_test_frame(
             multiview_mask: None,
             timestamp_writes: None,
         });
-        renderer.new_frame()?;
         renderer.render_context(context, &mut render_pass)?;
     }
     queue.submit([encoder.finish()]);

@@ -19,7 +19,6 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  RELEASE_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
 
 jobs:
   build-prebuilt:
@@ -30,32 +29,27 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - cell_id: prebuilt-x86_64-unknown-linux-gnu
-            candidate_arg: '"$RELEASE_CANDIDATE_SHA"'
+          - artifact: x86_64-unknown-linux-gnu
             target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             python: python3
             crt: ''
-          - cell_id: prebuilt-x86_64-apple-darwin
-            candidate_arg: '"$RELEASE_CANDIDATE_SHA"'
+          - artifact: x86_64-apple-darwin
             target: x86_64-apple-darwin
             os: macos-15-intel
             python: python3
             crt: ''
-          - cell_id: prebuilt-aarch64-apple-darwin
-            candidate_arg: '"$RELEASE_CANDIDATE_SHA"'
+          - artifact: aarch64-apple-darwin
             target: aarch64-apple-darwin
             os: macos-latest
             python: python3
             crt: ''
-          - cell_id: prebuilt-x86_64-pc-windows-msvc-md
-            candidate_arg: '"$env:RELEASE_CANDIDATE_SHA"'
+          - artifact: x86_64-pc-windows-msvc-md
             target: x86_64-pc-windows-msvc
             os: windows-latest
             python: python
             crt: md
-          - cell_id: prebuilt-x86_64-pc-windows-msvc-mt
-            candidate_arg: '"$env:RELEASE_CANDIDATE_SHA"'
+          - artifact: x86_64-pc-windows-msvc-mt
             target: x86_64-pc-windows-msvc
             os: windows-latest
             python: python
@@ -68,24 +62,20 @@ jobs:
           submodules: true
           ref: ${{ inputs.candidate_sha }}
 
-      - name: Validate candidate identity
-        run: >-
-          ${{ matrix.python }} tools/ci/release_evidence.py verify-candidate
-          --candidate-sha ${{ matrix.candidate_arg }}
-
       - name: Initialize required nested submodules
         run: ${{ matrix.python }} tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
+          toolchain: '1.95.0'
           targets: ${{ matrix.target }}
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           cache-bin: 'false'
-          key: ${{ format('{0}-{1}', matrix.target, matrix.crt || 'none') }}
+          key: ${{ format('prebuilt-{0}', matrix.artifact) }}
 
       - name: Refresh Linux package metadata
         if: runner.os == 'Linux'
@@ -120,96 +110,27 @@ jobs:
           --runner-temp "$env:RUNNER_TEMP"
           --github-env "$env:GITHUB_ENV"
 
-      - name: Build complete core and extension profile matrix
-        id: build
-        continue-on-error: true
+      - name: Build every supported prebuilt profile
         run: >-
-          ${{ matrix.python }} tools/ci/release_cell.py capture
-          --cell-root "target/release-evidence/${{ matrix.cell_id }}"
-          --execution executions/build.json
-          --stdout-log logs/build.stdout.log
-          --stderr-log logs/build.stderr.log
-          --timeout 4200
-          --
           ${{ matrix.python }} tools/ci/verify_packaged_core.py build-prebuilt
           "${{ github.workspace }}/packages"
           "${{ matrix.target }}"
-          ${{ matrix.candidate_arg }}
+          "${{ inputs.candidate_sha }}"
           "${{ matrix.crt }}"
           --target-dir "${{ runner.temp }}/dear-imgui-prebuilt-target"
 
-      - name: Consume every safe prebuilt profile
-        id: consume
-        if: always()
-        continue-on-error: true
+      - name: Consume every generated prebuilt profile
         run: >-
-          ${{ matrix.python }} tools/ci/release_cell.py capture
-          --cell-root "target/release-evidence/${{ matrix.cell_id }}"
-          --execution executions/consume.json
-          --stdout-log logs/consume.stdout.log
-          --stderr-log logs/consume.stderr.log
-          --timeout 4200
-          --
           ${{ matrix.python }} tools/ci/verify_packaged_core.py prebuilt
           "${{ github.workspace }}/packages"
           "${{ matrix.target }}"
-          ${{ matrix.candidate_arg }}
+          "${{ inputs.candidate_sha }}"
           "${{ matrix.crt }}"
 
-      - name: Materialize prebuilt metadata (non-Windows)
-        if: always() && matrix.crt == ''
-        run: >-
-          ${{ matrix.python }} tools/ci/release_cell.py metadata
-          --repo-root "$GITHUB_WORKSPACE"
-          --candidate-sha "$RELEASE_CANDIDATE_SHA"
-          --cell-id "${{ matrix.cell_id }}"
-          --cell-root "target/release-evidence/${{ matrix.cell_id }}"
-          --target "${{ matrix.target }}"
-          --package-dir "${{ github.workspace }}/packages"
-
-      - name: Materialize prebuilt metadata (Windows)
-        if: always() && matrix.crt != ''
-        run: >-
-          python tools/ci/release_cell.py metadata
-          --repo-root "$env:GITHUB_WORKSPACE"
-          --candidate-sha "$env:RELEASE_CANDIDATE_SHA"
-          --cell-id "${{ matrix.cell_id }}"
-          --cell-root "target/release-evidence/${{ matrix.cell_id }}"
-          --target "${{ matrix.target }}"
-          --crt "${{ matrix.crt }}"
-          --package-dir "${{ github.workspace }}/packages"
-
-      - name: Finalize prebuilt cell (non-Windows)
-        if: always() && matrix.crt == ''
-        run: >-
-          ${{ matrix.python }} tools/ci/release_cell.py finalize
-          --repo-root "$GITHUB_WORKSPACE"
-          --candidate-sha "$RELEASE_CANDIDATE_SHA"
-          --cell-id "${{ matrix.cell_id }}"
-          --cell-root "target/release-evidence/${{ matrix.cell_id }}"
-          --execution executions/build.json
-          --execution executions/consume.json
-          --target "${{ matrix.target }}"
-
-      - name: Finalize prebuilt cell (Windows)
-        if: always() && matrix.crt != ''
-        run: >-
-          python tools/ci/release_cell.py finalize
-          --repo-root "$env:GITHUB_WORKSPACE"
-          --candidate-sha "$env:RELEASE_CANDIDATE_SHA"
-          --cell-id "${{ matrix.cell_id }}"
-          --cell-root "target/release-evidence/${{ matrix.cell_id }}"
-          --execution executions/build.json
-          --execution executions/consume.json
-          --target "${{ matrix.target }}"
-          --crt "${{ matrix.crt }}"
-
-      - name: Retain prebuilt release cell
-        if: always()
+      - name: Retain prebuilt packages
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: release-cell-${{ matrix.cell_id }}-${{ inputs.candidate_sha }}
-          path: target/release-evidence
+          name: prebuilt-${{ matrix.artifact }}-${{ inputs.candidate_sha }}
+          path: packages/*.tar.gz
           if-no-files-found: error
           retention-days: 30
-          overwrite: true

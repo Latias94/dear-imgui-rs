@@ -132,10 +132,15 @@ impl<'ctx> RenderedFrame<'ctx> {
     ///
     /// # Panics
     ///
-    /// Panics when multi-viewport is disabled, the operation is repeated for the same frame, or
-    /// the installed platform/renderer callback contract is incomplete.
+    /// Panics when a managed renderer has not reconciled this frame, multi-viewport is disabled,
+    /// the operation is repeated for the same frame, or the installed platform/renderer callback
+    /// contract is incomplete.
     #[cfg(feature = "multi-viewport")]
     pub fn update_and_render_platform_windows_default(&mut self) {
+        assert!(
+            self.epoch.is_none() || self.reconciled,
+            "RenderedFrame::update_and_render_platform_windows_default() requires managed-texture reconciliation before native renderer callbacks"
+        );
         self.context.update_platform_windows();
         self.context.render_platform_windows_default();
     }

@@ -34,7 +34,7 @@ class BindingTaskTests(unittest.TestCase):
         )
         self.assertNotIn("--check-only", command)
 
-    def test_core_uses_shared_three_profile_xtask(self):
+    def test_binding_task_delegates_to_the_canonical_updater_once(self):
         args = SimpleNamespace(
             crates="dear-imgui-sys,dear-implot-sys",
             update_submodules=False,
@@ -43,16 +43,18 @@ class BindingTaskTests(unittest.TestCase):
         with patch.object(TASKS, "run_command", return_value=0) as run_command:
             self.assertEqual(TASKS.task_bindings(args, REPO_ROOT), 0)
 
-        commands = [call.args[0] for call in run_command.call_args_list]
-        self.assertIn("--skip-core-bindings", commands[0])
         self.assertEqual(
-            commands[1],
+            run_command.call_args.args[0],
             [
-                "cargo", "run", "-p", "xtask", "--", "verify-bindings",
-                "--update", "--allow-dirty",
+                TASKS.sys.executable,
+                "tools/update_submodule_and_bindings.py",
+                "--crates",
+                "dear-imgui-sys,dear-implot-sys",
+                "--submodules",
+                "skip",
             ],
         )
-        self.assertEqual(len(commands), 2)
+        self.assertEqual(run_command.call_count, 1)
 
     def test_extension_only_keeps_the_existing_update_flow(self):
         args = SimpleNamespace(
@@ -65,21 +67,15 @@ class BindingTaskTests(unittest.TestCase):
 
         self.assertEqual(run_command.call_count, 1)
         command = run_command.call_args.args[0]
-        self.assertNotIn("--skip-core-bindings", command)
         self.assertEqual(command[-2:], ["--submodules", "update"])
 
     def test_dry_run_prints_core_commands_without_executing_them(self):
         args = SimpleNamespace(crates=None, update_submodules=False, dry_run=True)
-        output = io.StringIO()
-        with (
-            patch.object(TASKS, "run_command", return_value=0) as run_command,
-            redirect_stdout(output),
-        ):
+        with patch.object(TASKS, "run_command", return_value=0) as run_command:
             self.assertEqual(TASKS.task_bindings(args, REPO_ROOT), 0)
 
         self.assertEqual(run_command.call_count, 1)
         self.assertIn("--dry-run", run_command.call_args.args[0])
-        self.assertEqual(output.getvalue().count("xtask -- verify-bindings"), 1)
 
 
 class ReleaseTaskTests(unittest.TestCase):
@@ -188,21 +184,8 @@ class ReleaseTaskTests(unittest.TestCase):
                     "tools/update_submodule_and_bindings.py",
                     "--crates",
                     "all",
-                    "--profile",
-                    "release",
                     "--submodules",
                     "skip",
-                    "--skip-core-bindings",
-                ],
-                [
-                    "cargo",
-                    "run",
-                    "-p",
-                    "xtask",
-                    "--",
-                    "verify-bindings",
-                    "--update",
-                    "--allow-dirty",
                 ],
                 [
                     TASKS.sys.executable,
@@ -338,13 +321,12 @@ class ReleaseTaskTests(unittest.TestCase):
             cwd=REPO_ROOT,
         )
 
-    def test_publish_forwards_authoritative_gate_result(self):
+    def test_publish_forwards_upload_options(self):
         args = SimpleNamespace(
             dry_run=False,
             cargo_dry_run=False,
             no_verify=False,
             crates="dear-imgui-sys",
-            release_gate_result=Path("artifacts/gate-result.json"),
             yes=True,
             verify_published=False,
             index_timeout=300.0,
@@ -362,8 +344,6 @@ class ReleaseTaskTests(unittest.TestCase):
                 "tools/publish.py",
                 "--crates",
                 "dear-imgui-sys",
-                "--release-gate-result",
-                str(Path("artifacts/gate-result.json")),
                 "--yes",
                 "--index-timeout",
                 "300.0",
@@ -391,7 +371,6 @@ class ReleaseTaskTests(unittest.TestCase):
             cargo_dry_run=False,
             no_verify=False,
             crates=None,
-            release_gate_result=None,
             yes=False,
             verify_published=True,
             index_timeout=None,
@@ -441,8 +420,6 @@ class ReleaseTaskTests(unittest.TestCase):
                     "update_submodule_and_bindings.py",
                     "--crates",
                     "dear-implot-sys",
-                    "--profile",
-                    "release",
                     "--submodules",
                     "skip",
                     "--dry-run",

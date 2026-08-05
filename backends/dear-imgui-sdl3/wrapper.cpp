@@ -831,6 +831,18 @@ void ImGui_ImplSDL3_SetGamepadMode_Manual_Rust(SDL_Gamepad* const* manual_gamepa
     );
 }
 
+void ImGui_ImplSDL3_SetMouseCaptureMode_Enabled_Rust() {
+    ImGui_ImplSDL3_SetMouseCaptureMode(ImGui_ImplSDL3_MouseCaptureMode_Enabled);
+}
+
+void ImGui_ImplSDL3_SetMouseCaptureMode_EnabledAfterDrag_Rust() {
+    ImGui_ImplSDL3_SetMouseCaptureMode(ImGui_ImplSDL3_MouseCaptureMode_EnabledAfterDrag);
+}
+
+void ImGui_ImplSDL3_SetMouseCaptureMode_Disabled_Rust() {
+    ImGui_ImplSDL3_SetMouseCaptureMode(ImGui_ImplSDL3_MouseCaptureMode_Disabled);
+}
+
 #if defined(DEAR_IMGUI_SDL3_ENABLE_SDLRENDERER3)
 bool dear_imgui_sdl3_backend_sdlrenderer3_init(SDL_Renderer* renderer) {
     return ImGui_ImplSDLRenderer3_Init(renderer);

@@ -9,6 +9,7 @@
 mod callbacks;
 mod coordinates;
 mod events;
+mod focus;
 mod native_cursor_hittest;
 mod registry;
 mod runtime;

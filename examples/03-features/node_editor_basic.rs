@@ -180,7 +180,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context)?;
+            .prepare_frame(&mut self.imgui.context, &self.window)?;
         let ui = self.imgui.context.frame();
 
         ui.window("Node Editor")
@@ -266,9 +266,7 @@ impl AppWindow {
                 ));
             });
 
-        self.imgui
-            .platform
-            .prepare_render_with_ui(&ui, &self.window)?;
+        self.imgui.platform.prepare_render(&ui, &self.window)?;
         let draw_data = self.imgui.context.render();
 
         let (output, reconfigure_after_present) = match self.surface.get_current_texture() {

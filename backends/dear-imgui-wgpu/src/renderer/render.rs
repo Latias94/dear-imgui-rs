@@ -43,6 +43,32 @@ fn platform_io_for_current_context() -> RendererResult<*mut sys::ImGuiPlatformIO
 }
 
 impl WgpuRenderer {
+    fn ensure_frame_prepared(&self) -> RendererResult<()> {
+        let native_frame_count = unsafe { sys::igGetFrameCount() };
+        match self.backend_data.as_ref() {
+            Some(backend_data)
+                if backend_data
+                    .frame_cursor
+                    .is_native_frame(native_frame_count) =>
+            {
+                Ok(())
+            }
+            Some(_) => Err(RendererError::FrameNotPrepared),
+            None => Err(RendererError::InvalidRenderState(
+                "Renderer not initialized".to_owned(),
+            )),
+        }
+    }
+
+    fn prepare_frame_bound(&mut self, frame: &RenderedFrame<'_>) -> RendererResult<()> {
+        let epoch = frame.epoch().ok_or_else(|| {
+            RendererError::InvalidRenderState(
+                "WGPU requires a managed-texture renderer epoch".to_owned(),
+            )
+        })?;
+        self.prepare_frame_epoch(epoch.sequence(), unsafe { sys::igGetFrameCount() })
+    }
+
     /// Renders one Context-borrowed Dear ImGui frame.
     ///
     /// Managed texture requests are reconciled before draw commands resolve
@@ -69,6 +95,7 @@ impl WgpuRenderer {
         let binding = self.bound_context()?;
         with_bound_context(&binding, || {
             Self::preflight_draw_callback_support(frame.draw_data())?;
+            self.prepare_frame_bound(&frame)?;
             self.reconcile_frame_bound(&mut frame)?;
             let platform_io = platform_io_for_current_context()?;
             self.render_read_only_draw_data(frame.draw_data(), render_pass, platform_io)
@@ -97,6 +124,7 @@ impl WgpuRenderer {
         let binding = self.bound_context()?;
         with_bound_context(&binding, || {
             Self::preflight_draw_callback_support(frame.draw_data())?;
+            self.prepare_frame_bound(frame)?;
             self.reconcile_frame_bound(frame)
         })
     }
@@ -131,7 +159,7 @@ impl WgpuRenderer {
         let Some(extent) = FramebufferExtent::from_draw_data(draw_data)? else {
             return Ok(());
         };
-        self.render_draw_data_at_extent(draw_data, render_pass, extent, true, platform_io)
+        self.render_draw_data_at_extent(draw_data, render_pass, extent, platform_io)
     }
 
     /// Renders one Context-borrowed frame at explicit framebuffer dimensions.
@@ -159,6 +187,7 @@ impl WgpuRenderer {
         let binding = self.bound_context()?;
         with_bound_context(&binding, || {
             Self::preflight_draw_callback_support(frame.draw_data())?;
+            self.prepare_frame_bound(&frame)?;
             self.reconcile_frame_bound(&mut frame)?;
             let platform_io = platform_io_for_current_context()?;
             self.render_read_only_draw_data_with_fb_size(
@@ -187,22 +216,21 @@ impl WgpuRenderer {
     }
 
     /// Internal explicit-size variant used by renderer-owned secondary viewports.
-    ///
-    /// When `advance_frame` is false, the current frame resources are reused.
     pub(super) fn render_read_only_draw_data_with_fb_size(
         &mut self,
         draw_data: &DrawData,
         render_pass: &mut RenderPass<'_>,
         fb_width: u32,
         fb_height: u32,
-        advance_frame: bool,
+        main_viewport: bool,
         platform_io: *mut sys::ImGuiPlatformIO,
     ) -> RendererResult<()> {
-        self.log_framebuffer_mismatch(draw_data, fb_width, fb_height, advance_frame);
+        self.ensure_frame_prepared()?;
+        self.log_framebuffer_mismatch(draw_data, fb_width, fb_height, main_viewport);
         let Some(extent) = FramebufferExtent::explicit(fb_width, fb_height) else {
             return Ok(());
         };
-        self.render_draw_data_at_extent(draw_data, render_pass, extent, advance_frame, platform_io)
+        self.render_draw_data_at_extent(draw_data, render_pass, extent, platform_io)
     }
 
     fn render_draw_data_at_extent(
@@ -210,7 +238,6 @@ impl WgpuRenderer {
         draw_data: &DrawData,
         render_pass: &mut RenderPass<'_>,
         extent: FramebufferExtent,
-        advance_frame: bool,
         platform_io: *mut sys::ImGuiPlatformIO,
     ) -> RendererResult<()> {
         self.ensure_renderer_contract()?;
@@ -237,10 +264,6 @@ impl WgpuRenderer {
             return Ok(());
         }
 
-        if advance_frame {
-            backend_data.next_frame();
-        }
-        Self::prepare_frame_resources_static(draw_data, backend_data)?;
         let gamma = match self.gamma_mode {
             GammaMode::Auto => Uniforms::gamma_for_format(backend_data.render_target_format),
             GammaMode::Linear => 1.0,
@@ -269,7 +292,7 @@ impl WgpuRenderer {
         draw_data: &DrawData,
         fb_width: u32,
         fb_height: u32,
-        advance_frame: bool,
+        main_viewport: bool,
     ) {
         static LAST_MISMATCH: OnceLock<Mutex<Option<(u32, u32, u32, u32, bool)>>> = OnceLock::new();
         let expected_width = (draw_data.display_size()[0] * draw_data.framebuffer_scale()[0])
@@ -286,7 +309,7 @@ impl WgpuRenderer {
             expected_height,
             fb_width,
             fb_height,
-            advance_frame,
+            main_viewport,
         );
         let mut previous = LAST_MISMATCH
             .get_or_init(|| Mutex::new(None))
@@ -303,7 +326,7 @@ impl WgpuRenderer {
                 draw_data.display_size()[1],
                 draw_data.framebuffer_scale()[0],
                 draw_data.framebuffer_scale()[1],
-                advance_frame
+                main_viewport
             );
             *previous = Some(key);
         }
@@ -315,7 +338,7 @@ impl WgpuRenderer {
         _draw_data: &DrawData,
         _fb_width: u32,
         _fb_height: u32,
-        _advance_frame: bool,
+        _main_viewport: bool,
     ) {
     }
 }

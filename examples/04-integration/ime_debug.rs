@@ -241,7 +241,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context)?;
+            .prepare_frame(&mut self.imgui.context, &self.window)?;
         let ui = self.imgui.context.frame();
 
         let io = ui.io();
@@ -327,9 +327,7 @@ impl AppWindow {
             });
 
         // Let the platform backend update IME/cursor state based on the UI we just built.
-        self.imgui
-            .platform
-            .prepare_render_with_ui(&ui, &self.window)?;
+        self.imgui.platform.prepare_render(&ui, &self.window)?;
         if let Some(error) = ime_error {
             return Err(error.into());
         }
@@ -364,7 +362,6 @@ impl AppWindow {
                 multiview_mask: None,
             });
 
-            self.imgui.renderer.new_frame()?;
             let draw_data = self.imgui.context.render();
             self.imgui.renderer.render_with_fb_size(
                 draw_data,

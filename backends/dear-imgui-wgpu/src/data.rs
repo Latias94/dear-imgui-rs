@@ -3,9 +3,9 @@
 //! This module contains the main backend data structure and initialization info,
 //! following the pattern from imgui_impl_wgpu.cpp
 
-use std::{cell::Cell, ffi::c_void, marker::PhantomData, num::NonZeroU32, ptr::NonNull, rc::Rc};
+use std::{cell::Cell, ffi::c_void, marker::PhantomData, ptr::NonNull, rc::Rc};
 
-use crate::{FrameResources, RenderResources};
+use crate::{FrameResourceArena, FrameResources, RenderResources, RendererError, RendererResult};
 use dear_imgui_rs::sys;
 use thiserror::Error;
 use wgpu::*;
@@ -179,8 +179,6 @@ pub struct WgpuInitInfo {
     pub device: Device,
     /// WGPU queue
     pub queue: Queue,
-    /// Number of frames in flight (default: 3).
-    pub num_frames_in_flight: NonZeroU32,
     /// Render target format
     pub render_target_format: TextureFormat,
     /// Presentation policy for secondary viewport surfaces.
@@ -199,7 +197,6 @@ impl WgpuInitInfo {
             adapter: None,
             device,
             queue,
-            num_frames_in_flight: NonZeroU32::new(3).expect("three is non-zero"),
             render_target_format,
             viewport_surface_config: WgpuViewportSurfaceConfig::default(),
             depth_stencil_format: None,
@@ -209,12 +206,6 @@ impl WgpuInitInfo {
                 alpha_to_coverage_enabled: false,
             },
         }
-    }
-
-    /// Set the number of frames in flight
-    pub fn with_frames_in_flight(mut self, count: NonZeroU32) -> Self {
-        self.num_frames_in_flight = count;
-        self
     }
 
     /// Set the depth stencil format
@@ -266,25 +257,61 @@ pub(crate) struct WgpuBackendData {
     pub(crate) pipeline_state: Option<RenderPipeline>,
     /// Render resources (samplers, uniforms, bind groups)
     pub(crate) render_resources: RenderResources,
-    /// Frame resources (per-frame buffers)
-    pub(crate) frame_resources: Vec<FrameResources>,
-    /// Number of frames in flight
-    pub(crate) num_frames_in_flight: NonZeroU32,
-    /// Current frame index
-    pub(crate) frame_index: u32,
+    /// Upload resources owned by the active Context render epoch.
+    pub(crate) frame_resources: FrameResourceArena,
+    /// Exact Context epoch and native frame currently open for rendering.
+    pub(crate) frame_cursor: FrameEpochCursor,
+}
+
+#[derive(Default)]
+pub(crate) struct FrameEpochCursor {
+    epoch: Option<u64>,
+    native_frame_count: Option<i32>,
+}
+
+enum FrameEpochTransition {
+    Reuse,
+    Advance,
+}
+
+impl FrameEpochCursor {
+    fn enter(
+        &mut self,
+        epoch: u64,
+        native_frame_count: i32,
+    ) -> RendererResult<FrameEpochTransition> {
+        if let Some(active_epoch) = self.epoch {
+            if epoch < active_epoch {
+                return Err(RendererError::FrameEpochOutOfOrder {
+                    active: active_epoch,
+                    received: epoch,
+                });
+            }
+            if epoch == active_epoch {
+                if self.native_frame_count != Some(native_frame_count) {
+                    return Err(RendererError::InvalidRenderState(
+                        "one WGPU render epoch was observed under multiple Dear ImGui frames"
+                            .to_owned(),
+                    ));
+                }
+                return Ok(FrameEpochTransition::Reuse);
+            }
+        }
+
+        self.epoch = Some(epoch);
+        self.native_frame_count = Some(native_frame_count);
+        Ok(FrameEpochTransition::Advance)
+    }
+
+    pub(crate) fn is_native_frame(&self, native_frame_count: i32) -> bool {
+        self.native_frame_count == Some(native_frame_count)
+    }
 }
 
 impl WgpuBackendData {
     /// Create new backend data from initialization info
     pub(crate) fn new(init_info: WgpuInitInfo) -> Self {
         let queue = init_info.queue.clone();
-        let num_frames = init_info.num_frames_in_flight;
-
-        // Create frame resources for each frame in flight
-        let frame_resources = (0..num_frames.get())
-            .map(|_| FrameResources::new())
-            .collect();
-
         Self {
             device: init_info.device.clone(),
             queue,
@@ -292,20 +319,31 @@ impl WgpuBackendData {
             depth_stencil_format: init_info.depth_stencil_format,
             pipeline_state: None,
             render_resources: RenderResources::new(),
-            frame_resources,
-            num_frames_in_flight: num_frames,
-            frame_index: u32::MAX, // Will be set to 0 on first frame
+            frame_resources: FrameResourceArena::new(),
+            frame_cursor: FrameEpochCursor::default(),
             init_info,
         }
     }
 
-    /// Advance to the next frame
-    pub(crate) fn next_frame(&mut self) {
-        if self.frame_index == u32::MAX {
-            self.frame_index = 0;
-        } else {
-            self.frame_index = self.frame_index.wrapping_add(1);
+    /// Open the arena for one exact Context render epoch.
+    pub(crate) fn begin_frame(
+        &mut self,
+        epoch: u64,
+        native_frame_count: i32,
+    ) -> RendererResult<()> {
+        if let FrameEpochTransition::Advance = self.frame_cursor.enter(epoch, native_frame_count)? {
+            self.frame_resources.begin_epoch();
         }
+        Ok(())
+    }
+
+    pub(crate) fn acquire_frame_resources(&mut self) -> RendererResult<&mut FrameResources> {
+        if self.frame_cursor.epoch.is_none() {
+            return Err(RendererError::FrameNotPrepared);
+        }
+        let frame = self.frame_resources.acquire();
+        frame.ensure_render_bindings(&self.device, &self.render_resources)?;
+        Ok(frame)
     }
 
     /// Check if the backend is initialized
@@ -317,6 +355,40 @@ impl WgpuBackendData {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frame_epoch_cursor_is_idempotent_and_rejects_stale_frames() {
+        let mut cursor = FrameEpochCursor::default();
+        assert!(matches!(
+            cursor.enter(4, 12).unwrap(),
+            FrameEpochTransition::Advance
+        ));
+        assert!(matches!(
+            cursor.enter(4, 12).unwrap(),
+            FrameEpochTransition::Reuse
+        ));
+        assert!(matches!(
+            cursor.enter(5, 13).unwrap(),
+            FrameEpochTransition::Advance
+        ));
+        assert!(matches!(
+            cursor.enter(4, 12),
+            Err(RendererError::FrameEpochOutOfOrder {
+                active: 5,
+                received: 4
+            })
+        ));
+    }
+
+    #[test]
+    fn frame_epoch_cursor_rejects_one_epoch_under_two_native_frames() {
+        let mut cursor = FrameEpochCursor::default();
+        cursor.enter(1, 7).unwrap();
+        assert!(matches!(
+            cursor.enter(1, 8),
+            Err(RendererError::InvalidRenderState(_))
+        ));
+    }
 
     #[test]
     fn viewport_surface_defaults_are_explicit_and_throughput_safe() {

@@ -7,7 +7,7 @@ use bevy_app::{App, Update};
 use bevy_asset::{Assets, RenderAssetUsages};
 use bevy_camera::{Camera, CameraOutputMode, ManualTextureViewHandle, RenderTarget, Viewport};
 use bevy_core_pipeline::{Core2d, Core3d};
-use bevy_ecs::{prelude::*, schedule::ScheduleLabel};
+use bevy_ecs::prelude::*;
 use bevy_image::Image;
 use bevy_math::{Rect, UVec2, Vec2};
 use bevy_render::{
@@ -18,7 +18,7 @@ use bevy_render::{
 use bevy_time::{Real, Time};
 use bevy_window::{PrimaryWindow, Window, WindowRef, WindowResolution};
 use dear_imgui_bevy::{
-    ImguiContextConfig, ImguiContexts, ImguiPlugin,
+    ImguiAppExt, ImguiContextConfig, ImguiContexts, ImguiPlugin,
     route::{
         ImguiDiagnosticKind, ImguiDiagnosticOrigin, ImguiDiagnostics, ImguiInputPolicy,
         ImguiInputRoute, ImguiInputSource, ImguiRenderRoute, ImguiRenderRouteSource,
@@ -27,7 +27,6 @@ use dear_imgui_bevy::{
 };
 use dear_imgui_rs::SuspendedContext;
 
-#[derive(ScheduleLabel, Clone, Debug, Eq, Hash, PartialEq)]
 struct SecondaryUi;
 
 fn routing_app() -> App {
@@ -46,10 +45,10 @@ fn primary_context(app: &App) -> dear_imgui_bevy::ContextId {
 }
 
 fn add_secondary_context(app: &mut App) -> dear_imgui_bevy::ContextId {
-    app.init_schedule(SecondaryUi);
+    let pass = app.declare_imgui_pass::<SecondaryUi>();
     app.world_mut()
         .non_send_mut::<ImguiContexts>()
-        .create(ImguiContextConfig::new(SecondaryUi))
+        .create(ImguiContextConfig::new(&pass))
         .expect("secondary Context admission must succeed")
 }
 

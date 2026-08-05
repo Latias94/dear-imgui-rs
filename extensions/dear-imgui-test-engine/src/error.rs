@@ -20,6 +20,7 @@ pub enum TestEngineStatus {
     Exception,
     Unsupported,
     CaptureFailed,
+    BindingOccupied,
     Unknown(i32),
 }
 
@@ -33,6 +34,7 @@ impl TestEngineStatus {
             sys::ImGuiTestEngineStatus_Exception => Self::Exception,
             sys::ImGuiTestEngineStatus_Unsupported => Self::Unsupported,
             sys::ImGuiTestEngineStatus_CaptureFailed => Self::CaptureFailed,
+            sys::ImGuiTestEngineStatus_BindingOccupied => Self::BindingOccupied,
             other => Self::Unknown(other),
         }
     }
@@ -65,6 +67,27 @@ pub enum TestEngineError {
     InvalidNativeData {
         operation: &'static str,
         detail: &'static str,
+    },
+    /// A built-in suite did not match the manifest pinned to this upstream revision.
+    UnexpectedTestSuiteManifest {
+        category: &'static str,
+        expected: &'static [&'static str],
+        actual: Vec<String>,
+    },
+    /// A controlled suite gate did not leave every registered test successful.
+    UnexpectedTestSuiteResult {
+        category: &'static str,
+        expected: usize,
+        tested: usize,
+        succeeded: usize,
+        in_queue: usize,
+        exact_manifest: bool,
+        non_successful: Vec<String>,
+    },
+    /// Registration failed and native rollback also failed.
+    TestSuiteRollback {
+        source: Box<TestEngineError>,
+        rollback: Box<TestEngineError>,
     },
     /// A `Ui` belongs to a Context other than the attached Context.
     ContextMismatch {
@@ -165,6 +188,30 @@ impl fmt::Display for TestEngineError {
             Self::InvalidNativeData { operation, detail } => {
                 write!(f, "{operation} received invalid native data: {detail}")
             }
+            Self::UnexpectedTestSuiteManifest {
+                category,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "built-in test category {category:?} did not match its pinned manifest: expected {expected:?}, found {actual:?}"
+            ),
+            Self::UnexpectedTestSuiteResult {
+                category,
+                expected,
+                tested,
+                succeeded,
+                in_queue,
+                exact_manifest,
+                non_successful,
+            } => write!(
+                f,
+                "built-in test category {category:?} expected {expected} exact successful terminal tests, found exact_manifest={exact_manifest}, tested={tested}, success={succeeded}, in_queue={in_queue}, non_successful={non_successful:?}"
+            ),
+            Self::TestSuiteRollback { source, rollback } => write!(
+                f,
+                "built-in test suite registration failed ({source}) and rollback also failed ({rollback})"
+            ),
             Self::ContextMismatch {
                 operation,
                 expected,
@@ -207,6 +254,7 @@ impl Error for TestEngineError {
             Self::ContextBinding { source, .. } => Some(source),
             Self::Attachment { source, .. } => Some(source),
             Self::AttachmentDetach { source, .. } => Some(source),
+            Self::TestSuiteRollback { source, .. } => Some(source.as_ref()),
             _ => None,
         }
     }

@@ -31,16 +31,11 @@ impl Application for ImPlot3dApp {
         };
         let plot_ui = plot_ctx.get_plot_ui(ui);
 
-        let viewport = ui.main_viewport();
-        let target = DockspaceTarget::new(
-            ui.get_id("ImPlot3dDockspace"),
-            viewport.work_pos(),
-            viewport.work_size(),
-        )
-        .map_err(|error| RunError::application("frame", error.to_string()))?
-        .flags(DockFlags::PASSTHRU_CENTRAL_NODE);
+        let options = DockspaceOptions::new(ui.get_id("ImPlot3dDockspace"))
+            .map_err(|error| RunError::application("frame", error.to_string()))?
+            .flags(DockNodeFlags::PASSTHRU_CENTRAL_NODE);
         ui.dockspace_over_main_viewport_with_layout(
-            &target,
+            &options,
             &implot3d_dock_layout(),
             DockLayoutApply::IfMissing,
         )

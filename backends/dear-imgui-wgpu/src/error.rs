@@ -17,13 +17,19 @@ pub enum RendererError {
     #[error("Bad texture error: {0}")]
     BadTexture(String),
 
-    /// Device lost error
-    #[error("Device lost")]
-    DeviceLost,
-
     /// Invalid render state
     #[error("Invalid render state: {0}")]
     InvalidRenderState(String),
+
+    /// Secondary viewport rendering began before the Context frame was reconciled.
+    #[error(
+        "WGPU secondary viewport rendering requires reconcile_frame(&mut frame) before platform callbacks"
+    )]
+    FrameNotPrepared,
+
+    /// A frame older than the renderer's active resource epoch was supplied.
+    #[error("WGPU frame epoch {received} is older than active epoch {active}")]
+    FrameEpochOutOfOrder { active: u64, received: u64 },
 
     /// The renderer has not been attached to a Dear ImGui context.
     #[error("WGPU renderer is not bound to a Dear ImGui context")]

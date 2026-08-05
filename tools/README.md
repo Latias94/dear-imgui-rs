@@ -12,23 +12,26 @@ The workspace uses a **unified release train** model. All 27 publishable package
 
 ```bash
 # Generate the complete release diff.
-python3 tools/tasks.py release-prepare 0.16.0-alpha.1
+python3 tools/tasks.py release-prepare 0.16.0-alpha.2
 
 # Review and commit versions, bindings, lockfile, changelog, and docs.
 git diff
 git add -A
-git commit -m "chore: prepare release v0.16.0-alpha.1"
+git commit -m "chore: prepare release v0.16.0-alpha.2"
 
 # Validate the committed clean release candidate.
 python3 tools/tasks.py release-check
 
 # After merging to main and normal CI passes, run the complete release.
-gh workflow run release.yml --ref main -f tag=v0.16.0-alpha.1
+gh workflow run release.yml --ref main -f tag=v0.16.0-alpha.2
 ```
 
 `release-prepare` intentionally leaves changes in the working tree. `release-check` runs the strict clean-tree, changelog, locked dependency graph, reproducible binding, package/offline, documentation, and test gates. Keeping these phases separate prevents release preparation from failing its own clean-tree check.
 
-Local success is necessary but not sufficient. `release.yml` binds the tag to the exact `main` commit, runs all 16 release cells, publishes the complete 27-crate train through Trusted Publishing, verifies every exact registry version, and only then creates the tag and GitHub Release.
+Local success is necessary but not sufficient. `release.yml` binds the tag to
+the exact `main` commit, requires successful normal CI, builds and consumes all
+five prebuilt targets, publishes the complete 27-crate train through Trusted
+Publishing, and only then creates the tag and GitHub Release.
 
 ## Available Scripts
 
@@ -43,7 +46,7 @@ python3 tools/tasks.py check
 # Update pregenerated bindings
 python3 tools/tasks.py bindings
 
-# Preview publishing; actual upload also needs --release-gate-result as shown above
+# Preview publishing
 python3 tools/tasks.py publish --dry-run
 
 # Run tests
@@ -56,49 +59,21 @@ python3 tools/tasks.py doc
 python3 tools/tasks.py clean
 
 # Create a release diff, then validate it after commit
-python3 tools/tasks.py release-prepare 0.16.0-alpha.1
+python3 tools/tasks.py release-prepare 0.16.0-alpha.2
 python3 tools/tasks.py release-check
 ```
 
-### 2. `upstream_contract.py` - Reviewed Upstream Delta Contract
-
-Every maintained Dear ImGui or extension source update must classify the complete generated API and
-ABI delta separately from the generated facts. Start from the current pinned source tree with:
-
-```powershell
-python tools/upstream_contract.py --write-review-template
-```
-
-This writes `tools/upstream_contract_decisions.pending.json` and refuses to overwrite existing
-review work. Review every entry in that pending file and attach the required compile and runtime
-evidence. The update command validates it before promoting it to the canonical decisions file:
-
-```powershell
-python tools/upstream_contract.py --update-snapshot
-python tools/upstream_contract.py --check
-python tools/api_surface_report.py --check
-```
-
-The baseline and candidate snapshots are generated evidence; the decisions file is the reviewed
-approval record. The check fails on unclassified or stale deltas, missing evidence, source-pin drift,
-and public declaration, enum, field, layout, or typedef changes. Every maintained source must select
-an API-contract provider: cimgui-style generator metadata includes bitfield/array width and unlocated
-typedef facts, while Dear ImGui Test Engine is audited from its final checked-in Rust raw binding and
-rejects unknown public syntax. Native aggregate layout checks run
-only in compiler-equipped source CI through the `abi-probe` feature, so prebuilt consumers retain the
-no-compiler contract.
-
-### 3. `xtask release-version` - Unified Version Update
+### 2. `xtask release-version` - Unified Version Update
 
 The workspace root is the single version source. Publishable manifests use `version.workspace = true`, and internal dependencies inherit their root workspace declarations. `[workspace.metadata.dear-imgui-release]` is the shared policy for the core package and private package paths/versions; Rust and Python release validators derive package counts from the actual workspace members. Update the release train with:
 
 ```bash
-cargo run -p xtask -- release-version 0.16.0-alpha.1 --allow-prerelease-relabel
+cargo run -p xtask -- release-version 0.16.0-alpha.2 --allow-prerelease-relabel
 ```
 
 The command updates the root release version and inherited internal dependency requirements as one validated workspace operation. It never offers partial crate selection. Documentation remains an explicit review step.
 
-### 4. `publish.py` - Publishing Script
+### 3. `publish.py` - Publishing Script
 
 `release.yml` is the normal publishing entry point. `publish.py` provides previews, exact registry verification, and a manual recovery path for the complete dependency train.
 
@@ -109,16 +84,22 @@ python3 tools/publish.py --dry-run
 # Cargo package dry-run for a selected crate
 python3 tools/publish.py --cargo-dry-run --crates dear-imgui-sys
 
-# Manual full-train upload after authoritative evidence verification
-python3 tools/publish.py \
-  --release-gate-result artifacts/release-gate/gate-result.json \
-  --yes
+# Manual full-train recovery upload from an authorized environment
+python3 tools/publish.py --yes
 
 # Confirm every exact workspace version is available
 python3 tools/publish.py --verify-published
 ```
 
-Print-only `--dry-run` validates metadata without running the expensive gate. `--cargo-dry-run` runs the strict local preflight. Real uploads require the complete same-SHA 16-cell `Go` result, reject partial crate selection, target `crates-io` explicitly, recheck the clean Git fingerprint before every upload, and automatically skip an exact version only when the published Cargo archive records the same clean candidate commit. `--journal PATH` writes resumable machine-readable state.
+Print-only `--dry-run` validates metadata without running the full pre-publish
+check. `--cargo-dry-run` runs the strict local preflight. Real uploads reject
+partial crate selection, target `crates-io` explicitly, recheck the clean Git
+fingerprint before every upload, and automatically skip an exact version only
+when the published Cargo archive records the same clean candidate commit.
+Release authorization belongs to the protected workflow environment and its
+short-lived OIDC token; a local recovery operator must verify the exact commit
+and normal CI before supplying credentials. `--journal PATH` writes resumable
+machine-readable state.
 
 **Publishing Order:**
 1. Build tooling: `dear-imgui-build-support`
@@ -129,7 +110,7 @@ Print-only `--dry-run` validates metadata without running the expensive gate. `-
 6. `dear-imgui-bevy` after its optional ecosystem dependencies
 7. `dear-app`
 
-### 5. `pre_publish_check.py` - Validation
+### 4. `pre_publish_check.py` - Validation
 
 Runs pre-publish validation checks.
 
@@ -151,11 +132,11 @@ python3 tools/pre_publish_check.py \
 - Packaged core crates build from a clean clone and offline consumer
 - Packaged sys crates contain required artifacts and build offline without `.git`
 - Documentation builds in offline mode
-- Python workflow/release contracts and the public API policy pass
+- Python workflow/release contracts and source/binding provenance checks pass
 - Native source and explicit WASM-safe feature routes pass without using workspace `--all-features`
 - Targeted Rust tests pass
 
-### 6. `update_submodule_and_bindings.py` - Bindings Generation
+### 5. `update_submodule_and_bindings.py` - Bindings Generation
 
 Updates third-party submodules and regenerates pregenerated bindings for `-sys` crates (including optional WASM pregenerated bindings).
 
@@ -163,38 +144,26 @@ Updates third-party submodules and regenerates pregenerated bindings for `-sys` 
 # Update all submodules and regenerate native bindings (all -sys crates)
 python3 tools/update_submodule_and_bindings.py \
   --crates all \
-  --submodules update \
-  --profile release
+  --submodules update
 
 # Regenerate bindings only (no submodule updates)
 python3 tools/update_submodule_and_bindings.py \
   --crates all \
-  --submodules skip \
-  --profile release
+  --submodules skip
 
 # Update specific crate (e.g. dear-imgui-sys only)
 python3 tools/update_submodule_and_bindings.py \
   --crates dear-imgui-sys \
-  --submodules auto \
-  --profile release
+  --submodules auto
 
 # Regenerate core binding profiles and compile-check the fixed WASM provider contract
 python3 tools/update_submodule_and_bindings.py \
   --crates dear-imgui-sys \
   --submodules skip \
-  --profile release \
   --wasm
-
-# Regenerate core bindings plus selected extension WASM bindings
-python3 tools/update_submodule_and_bindings.py \
-  --crates dear-imgui-sys,dear-implot-sys,dear-implot3d-sys,dear-imnodes-sys,dear-imguizmo-sys,dear-imguizmo-quat-sys \
-  --submodules skip \
-  --profile release \
-  --wasm \
-  --wasm-ext implot,implot3d,imnodes,imguizmo,imguizmo-quat
 ```
 
-### 7. CI Package and Submodule Helpers
+### 6. CI Package and Submodule Helpers
 
 Repository-maintained CI helpers are Python entry points and run on Windows,
 macOS, and Linux without Bash.
@@ -232,62 +201,41 @@ the exact release commit. The literal `HEAD` is accepted for a local checkout
 and is resolved before validation; release workflows pass the full lowercase
 40-hex SHA explicitly.
 
-The no-argument form remains equivalent to `full`. The legacy
-`--verify-prebuilt-packages PACKAGE_DIR TARGET CANDIDATE_SHA [CRT]` spelling is
-accepted for existing automation, but new callers should use the `prebuilt`
-command.
+The no-argument form remains equivalent to `full`.
 
-### 8. Release Evidence
+### 7. Release Automation
 
-`.github/workflows/release-gate.yml` is the authoritative cross-platform gate.
-It checks out one explicit 40-hex candidate SHA and requires exactly these 14
-cells:
+Normal CI is the release gate. The release workflow accepts only the workspace
+version tag from `main` and requires a successful `ci.yml` run for the exact
+candidate commit. It then invokes `prebuilt-binaries.yml`, where every target
+builds all supported profiles and consumes them through an isolated crate
+before publication can start.
 
-- Linux Test Engine runtime plus real Winit/WGPU and SDL3/Glow multi-viewport
-  smokes
-- Linux `wasm32-unknown-unknown` feature and binding routes
-- Windows vcpkg, MSVC `/MD`, MSVC `/MT`, and MinGW import checks
-- macOS native build
-- five prebuilt producer/consumer cells: Linux x86_64, macOS x86_64/aarch64,
-  and Windows MSVC `/MD`/`/MT`
-
-A failed, skipped, cancelled, timed-out, missing, duplicate, malformed, or
-wrong-SHA cell makes the aggregate `No-Go`. The workflow retains the aggregate,
-stdout/stderr, runtime/display/renderer data, target/CRT/vcpkg/MinGW metadata,
-binding hashes, manifests, candidate SHA, and SHA256 evidence for approximately
-30 days.
-
-Verify a downloaded aggregate against the local committed `HEAD` with:
-
-```bash
-python3 tools/ci/release_evidence.py verify \
-  --repo-root . \
-  --candidate-sha CANDIDATE_SHA \
-  --gate-result artifacts/release-gate/gate-result.json
-```
-
-The production verifier owns the required cell inventory; callers cannot pass
-a smaller list.
+The workflow retains each target's package archives as ordinary Actions
+artifacts. There is no second evidence schema or aggregation layer: a failed CI
+job, prebuilt build, or consumer directly fails the release.
 
 ## Typical Release Workflow
 
 ```bash
 # 1. Generate versions, bindings, provenance, and lockfile changes.
-python3 tools/tasks.py release-prepare 0.16.0-alpha.1
+python3 tools/tasks.py release-prepare 0.16.0-alpha.2
 
 # 2. Review CHANGELOG.md, compatibility docs, generated files, and Cargo.lock.
 git diff
 
 # 3. Commit and validate the exact candidate.
 git add -A
-git commit -m "chore: prepare release v0.16.0-alpha.1"
+git commit -m "chore: prepare release v0.16.0-alpha.2"
 python3 tools/tasks.py release-check
 
 # 4. Merge to main, require normal CI to pass, then run the complete release.
-gh workflow run release.yml --ref main -f tag=v0.16.0-alpha.1
+gh workflow run release.yml --ref main -f tag=v0.16.0-alpha.2
 ```
 
-The release workflow runs the fixed 16-cell gate in the same workflow run, acquires a short-lived crates.io token only after package verification, resumes exact already-published versions automatically, and creates the tag and GitHub Release only after all 27 crates are available.
+The release workflow acquires a short-lived crates.io token only after all
+prebuilt targets pass, resumes exact already-published versions automatically,
+and creates the tag and GitHub Release only after all 27 crates are available.
 
 ## Common Tasks
 
@@ -297,7 +245,6 @@ The release workflow runs the fixed 16-cell gate in the same workflow run, acqui
 python3 tools/update_submodule_and_bindings.py \
   --crates all \
   --submodules update \
-  --profile release \
   --cimgui-branch docking_inter \
   --cimplot-branch master \
   --cimplot3d-branch main \
@@ -341,7 +288,9 @@ Re-run failed jobs in the same release workflow. The publisher queries every exa
 gh run rerun RUN_ID --failed
 ```
 
-Starting a new `release.yml` run is safe but repeats all 16 release cells. Real uploads intentionally do not support `--start-from` or a partial `--crates` list because the release train is one contract.
+Starting a new `release.yml` run is safe but repeats the five-target prebuilt
+matrix. Real uploads intentionally do not support `--start-from` or a partial
+`--crates` list because the release train is one contract.
 
 ### Preview Specific Crates
 
@@ -389,7 +338,7 @@ gh workflow run release.yml --ref main -f tag=v<next-version>
 
 Ensure pregenerated bindings are up-to-date:
 ```bash
-python3 tools/update_submodule_and_bindings.py --crates all --profile release
+python3 tools/update_submodule_and_bindings.py --crates all
 ```
 
 Then verify locally:

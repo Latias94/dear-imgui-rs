@@ -28,13 +28,32 @@ pub(super) struct OwnedAttachment {
     pub(super) view: wgpu::TextureView,
 }
 
+pub(super) fn release_surface_bundle_parts<Frame, Targets, Surface>(
+    pending_frame: &mut Option<Frame>,
+    targets: &mut Option<Targets>,
+    surface: &mut Option<Surface>,
+) {
+    drop(pending_frame.take());
+    drop(targets.take());
+    drop(surface.take());
+}
+
 impl ViewportWgpuData {
     pub(super) fn release_surface_bundle(&mut self) {
-        drop(self.pending_frame.take());
-        drop(self.targets.take());
-        drop(self.surface.take());
+        release_surface_bundle_parts(
+            &mut self.pending_frame,
+            &mut self.targets,
+            &mut self.surface,
+        );
         self.size = [0, 0];
         self.pending_reconfigure = false;
+    }
+}
+
+impl Drop for ViewportWgpuData {
+    fn drop(&mut self) {
+        // SurfaceTexture discard needs the Surface registration to remain alive.
+        self.release_surface_bundle();
     }
 }
 

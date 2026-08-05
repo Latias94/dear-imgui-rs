@@ -1,12 +1,14 @@
 use super::flags::{DockNodeFlags, validate_dock_node_flags};
 use super::validation::{
-    assert_docking_available, assert_finite_vec2, assert_nonzero_id, claim_dockspace_submission,
-    main_viewport_dockspace_host_name, window_skips_items,
+    assert_docking_available, assert_dockspace_has_no_active_content,
+    assert_dockspace_host_name_supported, assert_dockspace_size,
+    assert_existing_dockspace_node_is_root, assert_nonzero_id, claim_dockspace_submission,
+    current_window_skips_items, main_viewport_dockspace_host_name,
 };
 use super::window_class::WindowClass;
 use crate::ui::Ui;
 use crate::{
-    DockLayout, DockLayoutApply, DockLayoutError, DockspaceTarget, Id,
+    DockLayout, DockLayoutApply, DockLayoutError, DockspaceOptions, Id,
     dock_layout::{DockspaceSubmission, submit_and_apply},
     sys,
 };
@@ -31,34 +33,42 @@ fn resolve_main_viewport_dockspace_id(requested: Id, host_name: &std::ffi::CStr)
 impl Ui {
     /// Submit a dockspace at the current cursor and apply a complete declarative layout.
     ///
-    /// The target's initial position is ignored for this submission mode; the dock node follows
-    /// the host window's current cursor position. Initial size, flags, and window class still come
-    /// from the target.
+    /// The dock node follows the host window's current cursor position. `size` must be positive,
+    /// finite, and safely truncatable to a native `i32`. Identity, flags, and the optional window
+    /// class come from `options`. Call this before any window named by `layout` or already hosted
+    /// by the target dock tree; a late layout mutation returns
+    /// [`DockLayoutError::WindowSubmittedBeforeDockspace`].
     pub fn dock_space_with_layout(
         &self,
-        target: &DockspaceTarget,
+        options: &DockspaceOptions,
+        size: [f32; 2],
         layout: &DockLayout,
         apply: DockLayoutApply,
     ) -> Result<Id, DockLayoutError> {
         submit_and_apply(
             self,
-            target,
+            options,
             layout,
             apply,
-            DockspaceSubmission::CurrentWindow,
+            DockspaceSubmission::CurrentWindow { size },
         )
     }
 
     /// Submit a dockspace over the main viewport and apply a complete declarative layout.
+    ///
+    /// Position and size are derived from the main viewport's current work rectangle on every
+    /// call, so callers cannot accidentally submit stale monitor or DPI geometry. Call this before
+    /// any window named by `layout` or already hosted by the target dock tree; a late layout
+    /// mutation returns [`DockLayoutError::WindowSubmittedBeforeDockspace`].
     pub fn dockspace_over_main_viewport_with_layout(
         &self,
-        target: &DockspaceTarget,
+        options: &DockspaceOptions,
         layout: &DockLayout,
         apply: DockLayoutApply,
     ) -> Result<Id, DockLayoutError> {
         submit_and_apply(
             self,
-            target,
+            options,
             layout,
             apply,
             DockspaceSubmission::MainViewport,
@@ -67,8 +77,12 @@ impl Ui {
 
     /// Creates a dockspace over the main viewport
     ///
-    /// This is a convenience function that creates a dockspace covering the entire main viewport.
-    /// It's equivalent to calling `dock_space` with the main viewport's ID and size.
+    /// This creates Dear ImGui's hidden main-viewport host window, applies the viewport work
+    /// rectangle and platform ownership, and submits a dockspace within that host.
+    /// Submit it before every window that can be hosted by this dockspace. A
+    /// `KEEP_ALIVE_ONLY` submission may be made later because it does not create a visible host.
+    /// Without an earlier submission, Dear ImGui may already undock a window when that window is
+    /// begun, before this method can diagnose the ordering error.
     ///
     /// # Parameters
     ///
@@ -81,8 +95,11 @@ impl Ui {
     ///
     /// # Panics
     ///
-    /// Panics when docking was not enabled before the first frame, or when the effective
-    /// dockspace ID was already submitted without `KEEP_ALIVE_ONLY` during this frame.
+    /// Panics when docking was not enabled before the first frame, when the effective dockspace
+    /// ID names a child of another dock tree, when the dockspace was already submitted without
+    /// `KEEP_ALIVE_ONLY` during this frame, or when a hosted window was submitted before a visible
+    /// dockspace submission while that window is still attached. `KEEP_ALIVE_ONLY` remains valid
+    /// after hosted windows.
     ///
     /// # Example
     ///
@@ -107,28 +124,28 @@ impl Ui {
             assert_docking_available(CALLER);
             let host_name = main_viewport_dockspace_host_name(CALLER);
             let effective_id = resolve_main_viewport_dockspace_id(dockspace_id, &host_name);
+            assert_existing_dockspace_node_is_root(CALLER, effective_id);
             let claim = claim_dockspace_submission(self, CALLER, effective_id, flags, false)
                 .unwrap_or_else(|_| {
                     panic!("{CALLER} cannot submit dockspace {effective_id:?} twice in one frame")
                 });
+            if !flags.contains(DockNodeFlags::KEEP_ALIVE_ONLY) {
+                assert_dockspace_has_no_active_content(CALLER, effective_id);
+            }
             let submitted = unsafe {
                 Id::from(sys::igDockSpaceOverViewport(
-                    dockspace_id.into(),
+                    effective_id.into(),
                     sys::igGetMainViewport(),
                     flags.bits(),
                     ptr::null(),
                 ))
             };
             if let Some(claim) = claim {
-                if window_skips_items(&host_name) {
-                    drop(claim);
-                } else {
-                    claim.commit();
-                }
+                claim.commit();
             }
             assert_eq!(
                 submitted, effective_id,
-                "{CALLER} native auto-generated dockspace ID changed unexpectedly"
+                "{CALLER} native submission returned an unexpected dockspace ID"
             );
             submitted
         })
@@ -166,6 +183,11 @@ impl Ui {
 
     /// Creates a dockspace with the specified ID, size, and flags
     ///
+    /// Submit it before every window that can be hosted by this dockspace. A
+    /// `KEEP_ALIVE_ONLY` submission may be made later because it does not create a visible host.
+    /// Without an earlier submission, Dear ImGui may already undock a window when that window is
+    /// begun, before this method can diagnose the ordering error.
+    ///
     /// # Parameters
     ///
     /// * `id` - The non-zero ID for the dockspace. Use [`Ui::get_id`] to create one.
@@ -179,8 +201,10 @@ impl Ui {
     ///
     /// # Panics
     ///
-    /// Panics when docking was not enabled before the first frame, or when `id` was already
-    /// submitted without `KEEP_ALIVE_ONLY` during this frame.
+    /// Panics when docking was not enabled before the first frame, when `id` names a child of
+    /// another dock tree, when `id` was already submitted without `KEEP_ALIVE_ONLY` during this
+    /// frame, or when a hosted window was submitted before a visible dockspace submission while
+    /// that window is still attached. `KEEP_ALIVE_ONLY` remains valid after hosted windows.
     ///
     /// # Example
     ///
@@ -207,7 +231,7 @@ impl Ui {
         const CALLER: &str = "Ui::dock_space_with_class()";
         validate_dock_node_flags(CALLER, flags);
         assert_nonzero_id(CALLER, "id", id);
-        assert_finite_vec2(CALLER, "size", size);
+        assert_dockspace_size(CALLER, "size", size);
         let size_vec = sys::ImVec2 {
             x: size[0],
             y: size[1],
@@ -217,10 +241,16 @@ impl Ui {
             .as_ref()
             .map_or(ptr::null(), |wc| wc as *const _);
         self.run_with_bound_context(|| {
+            assert_dockspace_host_name_supported(CALLER);
+            assert_existing_dockspace_node_is_root(CALLER, id);
+            let host_skipped = current_window_skips_items(CALLER);
             let claim =
                 claim_dockspace_submission(self, CALLER, id, flags, true).unwrap_or_else(|_| {
                     panic!("{CALLER} cannot submit dockspace {id:?} twice in one frame")
                 });
+            if !flags.contains(DockNodeFlags::KEEP_ALIVE_ONLY) && !host_skipped {
+                assert_dockspace_has_no_active_content(CALLER, id);
+            }
             let submitted = unsafe {
                 Id::from(sys::igDockSpace(
                     id.into(),

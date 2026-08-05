@@ -5,10 +5,11 @@
 
 Safe, idiomatic Rust integration for [Dear ImGui Test Engine](https://github.com/ocornut/imgui_test_engine) on top of `dear-imgui-rs`.
 
-- Transactional ownership: one engine attachment per ImGui Context.
+- Transactional ownership: one live engine attachment per process, including suspended Contexts.
 - Typed lifecycle and FFI errors with copied native diagnostics.
 - Test queue helpers with explicit Ready/Queued/Running/Terminal state.
 - A bounded `TestRunner` that reports five product outcomes separately from infrastructure errors.
+- Move-only reports tied to a stable engine ID, run ID, and exact selected-test manifest.
 - Runtime controls: speed, verbosity, capture output, abort.
 - UI integration: show built-in test engine windows in an active ImGui frame.
 
@@ -24,15 +25,15 @@ For native build/link options, see `extensions/dear-imgui-test-engine-sys/README
 
 | Item                        | Version |
 |-----------------------------|---------|
-| Crate                       | 0.16.0-alpha.1  |
-| dear-imgui-rs               | 0.16.0-alpha.1  |
-| dear-imgui-test-engine-sys  | 0.16.0-alpha.1  |
+| Crate                       | 0.16.0-alpha.2  |
+| dear-imgui-rs               | 0.16.0-alpha.2  |
+| dear-imgui-test-engine-sys  | 0.16.0-alpha.2  |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md).
 
 ## Quick Start
 
-Until `0.16.0-alpha.1` is published, use matching Git dependencies from `main`:
+Until `0.16.0-alpha.2` is published, use matching Git dependencies from `main`:
 
 ```toml
 [dependencies]
@@ -44,8 +45,8 @@ After publication, use the exact prerelease requirements:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "=0.16.0-alpha.1"
-dear-imgui-test-engine = "=0.16.0-alpha.1"
+dear-imgui-rs = "=0.16.0-alpha.2"
+dear-imgui-test-engine = "=0.16.0-alpha.2"
 ```
 
 ```rust
@@ -81,6 +82,10 @@ println!(
     report.frames(),
     report.mode(),
 );
+
+for test in report.tests() {
+    println!("{}/{}: {:?}", test.category(), test.name(), test.status());
+}
 
 // Explicit shutdown reports cleanup failures and is idempotent.
 engine.shutdown()?;
@@ -130,14 +135,22 @@ headless run capable of screenshots.
 - Engine-first and Context-first teardown are both supported. Context-first teardown leaves the
   upstream shutdown/settings hooks installed until `ImGui::DestroyContext()`, then marks the Rust
   attachment as Context-destroyed before the wrapper destroys the detached engine.
+- Upstream Test Engine uses process-global state. Starting a second engine, even on a suspended
+  Context, returns `TestEngineStatus::BindingOccupied`. `stop()` retains that ownership because the
+  upstream hooks remain installed; `shutdown()` or Context destruction releases it after unbind.
 - Call `shutdown()` when cleanup errors must be handled. `Drop` is non-panicking and retries
   one-shot native failures on a best-effort basis.
 - A queued/running run rejects another queue request. Consume a terminal summary with
-  `take_terminal_summary()` before queuing again.
+  `take_terminal_summary()` before queuing again. The summary is derived only from that run's exact
+  queue manifest; results from earlier filters cannot affect it.
 - `TestRunner` owns queueing, application UI, frame rendering, renderer invocation, presentation
   boundaries, timeout/abort draining, and terminal-summary validation as one bounded operation.
   Integrations that already own the queue can use `TestEngine::drive_frame`; the raw swap hooks are
   intentionally not public.
+- `register_builtin_test_suite()` returns an engine-generation-bound token. Validate runner output
+  by passing the exact `RunReport` to `validate_registered_test_suite()`. Manually pumped suite
+  integrations should use `take_terminal_test_suite_result()`, which atomically consumes and
+  validates the active run instead of accepting caller-created aggregate counters.
 - `show_windows()` accepts only a `Ui` from the attached Context during an active native frame.
 - Upstream Dear ImGui Test Engine has its own license terms; review `extensions/dear-imgui-test-engine-sys/third-party/imgui_test_engine/imgui_test_engine/LICENSE.txt` before shipping commercial products.
 

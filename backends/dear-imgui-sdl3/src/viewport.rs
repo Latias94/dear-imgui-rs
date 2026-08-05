@@ -72,7 +72,8 @@ pub(crate) fn init_for_opengl_default(
 ///
 /// This is useful when you want to use a Rust renderer (e.g. `dear-imgui-glow`)
 /// instead of the official C++ OpenGL3 renderer. It:
-/// - configures the SDL3 platform backend (including multi-viewport support);
+/// - configures the SDL3 platform backend (including multi-viewport support when the active SDL
+///   video driver provides global mouse state and capture);
 /// - does **not** initialize `imgui_impl_opengl3`.
 ///
 /// This assumes that:

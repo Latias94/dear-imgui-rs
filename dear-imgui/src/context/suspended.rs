@@ -8,8 +8,8 @@ use crate::sys;
 use super::Context;
 use super::attachment::AttachmentRegistry;
 use super::binding::{
-    CTX_MUTEX, ContextBinding, ContextId, ContextState, clear_current_context, no_current_context,
-    set_current_context,
+    CTX_MUTEX, ContextBinding, ContextId, ContextState, ContextThreadLease,
+    bound_context_scope_active, clear_current_context, no_current_context, set_current_context,
 };
 use super::frame::FrameLifecycleState;
 use super::snapshot_hub::SnapshotHub;
@@ -47,43 +47,66 @@ impl SuspendedContext {
 
     /// Runs a closure while this suspended Context is active.
     ///
-    /// Any previously current Context is restored before this method returns. An open frame left
-    /// behind when the closure returns `Err` or panics is ended before propagating that outcome.
+    /// No other Context or Context binding scope may be active. This makes the closure's
+    /// `&mut Context` the only safe live Context owner in the process, so it cannot be exchanged
+    /// with another owner while native `GImGui` points at it. An open frame left behind when the
+    /// closure returns `Err` or panics is ended before propagating that outcome.
     ///
     /// # Panics
     ///
-    /// Resumes any panic raised by the closure with its original payload. This method also panics
-    /// after ending the frame if the closure returns `Ok` while a Dear ImGui frame is still open.
+    /// Panics before calling the closure if another Context or Context binding scope is active.
+    /// Suspend the current Context before entering this scope. This method also resumes any panic
+    /// raised by the closure with its original payload, and panics after ending the frame if the
+    /// closure returns `Ok` while a Dear ImGui frame is still open.
     pub fn try_with_active<T, E>(
         &mut self,
         f: impl FnOnce(&mut Context) -> Result<T, E>,
     ) -> Result<T, E> {
+        let _guard = CTX_MUTEX.lock();
+        assert!(
+            !bound_context_scope_active() && no_current_context(),
+            "SuspendedContext::try_with_active() requires no active Context or Context binding scope; suspend the current Context first"
+        );
+        let expected_id = self.0.id();
+        let expected_raw = self.0.raw;
         let binding = self.0.binding();
-        binding.with_bound_context(|| {
-            let result = panic::catch_unwind(AssertUnwindSafe(|| f(&mut self.0)));
+        binding
+            .try_with_bound_context_guarded(|bound| {
+                let result = panic::catch_unwind(AssertUnwindSafe(|| f(&mut self.0)));
 
-            match result {
-                Ok(Ok(value)) => {
-                    if self.0.end_frame_for_teardown_unlocked() {
-                        panic!(
-                            "SuspendedContext::try_with_active(): closure returned Ok while a Dear ImGui frame was still open"
-                        );
+                debug_assert!(bound.previous_context().is_null());
+                if self.0.id() != expected_id || self.0.raw != expected_raw {
+                    if let Err(payload) = result {
+                        panic::resume_unwind(payload);
                     }
-                    Ok(value)
+                    panic!(
+                        "SuspendedContext::try_with_active(): closure moved or replaced the Context owner"
+                    );
                 }
-                Ok(Err(error)) => {
-                    self.0.end_frame_for_teardown_unlocked();
-                    Err(error)
-                }
-                Err(payload) => {
-                    // Cleanup must not replace the closure's panic payload.
-                    let _ = panic::catch_unwind(AssertUnwindSafe(|| {
+
+                match result {
+                    Ok(Ok(value)) => {
+                        if self.0.end_frame_for_teardown_unlocked() {
+                            panic!(
+                                "SuspendedContext::try_with_active(): closure returned Ok while a Dear ImGui frame was still open"
+                            );
+                        }
+                        Ok(value)
+                    }
+                    Ok(Err(error)) => {
                         self.0.end_frame_for_teardown_unlocked();
-                    }));
-                    panic::resume_unwind(payload)
+                        Err(error)
+                    }
+                    Err(payload) => {
+                        // Cleanup must not replace the closure's panic payload.
+                        let _ = panic::catch_unwind(AssertUnwindSafe(|| {
+                            self.0.end_frame_for_teardown_unlocked();
+                        }));
+                        panic::resume_unwind(payload)
+                    }
                 }
-            }
-        })
+            })
+            .unwrap_or_else(|error| panic!("SuspendedContext::try_with_active(): {error}"))
     }
 
     /// Tries to create a new suspended Dear ImGui context
@@ -124,6 +147,10 @@ impl SuspendedContext {
     fn try_create_internal(
         shared_font_atlas: Option<SharedFontAtlas>,
     ) -> crate::error::ImGuiResult<Self> {
+        if bound_context_scope_active() {
+            return Err(crate::error::ImGuiError::ContextBindingScopeActive);
+        }
+        let thread_lease = ContextThreadLease::acquire()?;
         let _guard = CTX_MUTEX.lock();
         let previous_context = unsafe { sys::igGetCurrentContext() };
 
@@ -162,6 +189,7 @@ impl SuspendedContext {
         let ctx = Context {
             raw,
             state,
+            _thread_lease: thread_lease,
             attachments: AttachmentRegistry::default(),
             snapshot_hub: SnapshotHub::new(id),
             texture_registry,
@@ -185,11 +213,11 @@ impl SuspendedContext {
 
     /// Attempts to activate this suspended context
     ///
-    /// If there is no active context, this suspended context is activated and `Ok` is returned.
-    /// If there is already an active context, nothing happens and `Err` is returned.
+    /// If there is no active Context or Context binding scope, this suspended Context is activated
+    /// and `Ok` is returned. Otherwise, nothing happens and `Err` returns the suspended Context.
     pub fn activate(self) -> Result<Context, SuspendedContext> {
         let _guard = CTX_MUTEX.lock();
-        if no_current_context() {
+        if !bound_context_scope_active() && no_current_context() {
             set_current_context(self.0.raw);
             Ok(self.0)
         } else {

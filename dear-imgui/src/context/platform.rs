@@ -5,6 +5,55 @@ use super::Context;
 use super::attachment::{ContextPlatformWindowTeardown, ContextPlatformWindowTeardownError};
 use super::binding::{CTX_MUTEX, with_bound_context};
 
+#[cfg(feature = "multi-viewport")]
+struct PlatformDrawDataTextureMask {
+    entries: Vec<(
+        std::ptr::NonNull<sys::ImDrawData>,
+        *mut sys::ImVector_ImTextureDataPtr,
+    )>,
+}
+
+#[cfg(feature = "multi-viewport")]
+impl PlatformDrawDataTextureMask {
+    unsafe fn install(platform_io: *mut sys::ImGuiPlatformIO) -> Self {
+        let mut entries = Vec::new();
+        let viewports = unsafe { &(*platform_io).Viewports };
+        if viewports.Size <= 0 {
+            return Self { entries };
+        }
+        assert!(
+            viewports.Capacity >= viewports.Size && !viewports.Data.is_null(),
+            "ImGuiPlatformIO.Viewports has invalid native storage"
+        );
+        for index in 0..viewports.Size as usize {
+            let viewport = unsafe { *viewports.Data.add(index) };
+            let Some(viewport) = std::ptr::NonNull::new(viewport) else {
+                continue;
+            };
+            let Some(draw_data) = std::ptr::NonNull::new(unsafe { viewport.as_ref().DrawData })
+            else {
+                continue;
+            };
+            let textures = unsafe { draw_data.as_ref().Textures };
+            if textures.is_null() {
+                continue;
+            }
+            unsafe { (*draw_data.as_ptr()).Textures = std::ptr::null_mut() };
+            entries.push((draw_data, textures));
+        }
+        Self { entries }
+    }
+}
+
+#[cfg(feature = "multi-viewport")]
+impl Drop for PlatformDrawDataTextureMask {
+    fn drop(&mut self) {
+        for (draw_data, textures) in self.entries.drain(..) {
+            unsafe { (*draw_data.as_ptr()).Textures = textures };
+        }
+    }
+}
+
 impl Context {
     /// Get shared access to the platform IO.
     ///
@@ -121,6 +170,19 @@ impl Context {
                             || (*platform_io).Renderer_RenderWindow.is_some()),
                     "Context::render_platform_windows_default() requires Platform_RenderWindow or Renderer_RenderWindow; render snapshots directly when the renderer does not use default callbacks"
                 );
+                let renderer_has_textures =
+                    (*self.io_ptr("Context::render_platform_windows_default()")).BackendFlags
+                        & sys::ImGuiBackendFlags_RendererHasTextures as i32
+                        != 0;
+                if renderer_has_textures {
+                    assert!(
+                        self.snapshot_hub
+                            .is_synchronous_frame_reconciled(raw.FrameCount),
+                        "Context::render_platform_windows_default() requires managed-texture reconciliation for the current rendered frame"
+                    );
+                }
+                let _texture_mask = renderer_has_textures
+                    .then(|| PlatformDrawDataTextureMask::install(platform_io));
                 sys::igRenderPlatformWindowsDefault(std::ptr::null_mut(), std::ptr::null_mut());
             });
         }
@@ -331,5 +393,39 @@ impl Context {
             backend_flags & sys::ImGuiBackendFlags_PlatformHasViewports != 0
                 && backend_flags & sys::ImGuiBackendFlags_RendererHasViewports != 0
         }
+    }
+}
+
+#[cfg(all(test, feature = "multi-viewport"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn managed_platform_draw_texture_mask_restores_every_pointer() {
+        let mut textures = sys::ImVector_ImTextureDataPtr::default();
+        let textures_ptr = &mut textures as *mut sys::ImVector_ImTextureDataPtr;
+        let mut draw_data = sys::ImDrawData {
+            Textures: textures_ptr,
+            ..Default::default()
+        };
+        let mut viewport = sys::ImGuiViewport {
+            DrawData: &mut draw_data,
+            ..Default::default()
+        };
+        let viewport = &mut viewport as *mut sys::ImGuiViewport;
+        let mut viewports = [viewport, viewport];
+        let mut platform_io = sys::ImGuiPlatformIO {
+            Viewports: sys::ImVector_ImGuiViewportPtr {
+                Size: viewports.len() as i32,
+                Capacity: viewports.len() as i32,
+                Data: viewports.as_mut_ptr(),
+            },
+            ..Default::default()
+        };
+
+        let mask = unsafe { PlatformDrawDataTextureMask::install(&mut platform_io) };
+        assert!(draw_data.Textures.is_null());
+        drop(mask);
+        assert_eq!(draw_data.Textures, textures_ptr);
     }
 }

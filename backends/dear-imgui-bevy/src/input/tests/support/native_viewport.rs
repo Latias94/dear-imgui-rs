@@ -30,7 +30,7 @@ impl CallbackViewport {
                 viewport.set_pos([0.0, 0.0]);
                 viewport.set_size([640.0, 480.0]);
                 viewport.set_dpi_scale(1.0);
-                viewport.set_flags(imgui::ViewportFlags::IS_PLATFORM_WINDOW);
+                viewport.set_raw_flags_unchecked(imgui::ViewportFlags::IS_PLATFORM_WINDOW.bits());
                 (*context.platform_io().as_raw())
                     .Platform_CreateWindow
                     .expect("native viewport bridge should install Platform_CreateWindow")(

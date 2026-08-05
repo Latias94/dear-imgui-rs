@@ -1462,7 +1462,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context)?;
+            .prepare_frame(&mut self.imgui.context, &self.window)?;
         // Apply deferred actions from previous frame before building Ui
         if let Some(t) = self.pending_theme.take() {
             self.apply_theme_now(t);
@@ -1683,9 +1683,7 @@ impl AppWindow {
                 ui.show_style_editor(&mut style_copy);
             });
 
-        self.imgui
-            .platform
-            .prepare_render_with_ui(ui, &self.window)?;
+        self.imgui.platform.prepare_render(ui, &self.window)?;
         let draw_data = self.imgui.context.render();
 
         // Clear + render
