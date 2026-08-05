@@ -36,11 +36,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          submodules: true
           ref: ${{ inputs.candidate_sha }}
 
-      - name: Init required nested submodules (selective)
-        run: python3 tools/ci/update_submodules.py
+      - name: Init core runtime sources
+        if: inputs.contract == 'ash-vulkan-validation-smoke'
+        run: python3 tools/ci/update_submodules.py --profile runtime-core
+
+      - name: Init Test Engine runtime sources
+        if: inputs.contract != 'ash-vulkan-validation-smoke'
+        run: python3 tools/ci/update_submodules.py --profile runtime-test-engine
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
@@ -54,8 +58,20 @@ jobs:
       - name: Refresh native package metadata
         run: sudo apt-get update
 
-      - name: Install native runtime dependencies
-        run: sudo apt-get install -y build-essential cmake pkg-config libasound2-dev libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libudev-dev xvfb x11-utils openbox mesa-vulkan-drivers vulkan-tools vulkan-validationlayers mesa-utils libgl1-mesa-dev libgl1-mesa-dri
+      - name: Install common native runtime dependencies
+        run: sudo apt-get install -y build-essential cmake pkg-config libasound2-dev libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libudev-dev xvfb x11-utils openbox
+
+      - name: Install Vulkan runtime dependencies
+        if: inputs.contract != 'sdl3-glow-multi-viewport-smoke'
+        run: sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
+
+      - name: Install Vulkan validation dependencies
+        if: inputs.contract == 'ash-vulkan-validation-smoke'
+        run: sudo apt-get install -y vulkan-validationlayers
+
+      - name: Install OpenGL runtime dependencies
+        if: inputs.contract == 'sdl3-glow-multi-viewport-smoke'
+        run: sudo apt-get install -y mesa-utils libgl1-mesa-dev libgl1-mesa-dri
 
       - name: Execute native runtime contract
         id: gate

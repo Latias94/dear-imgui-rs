@@ -99,7 +99,36 @@ EXPECTED_COMMANDS = (
 
 class UpdateSubmodulesTests(unittest.TestCase):
     def test_command_list_preserves_selective_checkout_contract(self):
-        self.assertEqual(UPDATE_SUBMODULES.SUBMODULE_COMMANDS, EXPECTED_COMMANDS)
+        self.assertEqual(
+            UPDATE_SUBMODULES.SUBMODULE_PROFILES["all"], EXPECTED_COMMANDS
+        )
+
+    def test_runtime_profiles_initialize_only_required_top_level_sources(self):
+        core = (
+            "git",
+            "submodule",
+            "update",
+            "--init",
+            "--depth=1",
+            "dear-imgui-sys/third-party/cimgui",
+        )
+        test_engine = (
+            "git",
+            "submodule",
+            "update",
+            "--init",
+            "--depth=1",
+            "extensions/dear-imgui-test-engine-sys/third-party/imgui_test_engine",
+        )
+
+        self.assertEqual(
+            UPDATE_SUBMODULES.SUBMODULE_PROFILES["runtime-core"],
+            (core, EXPECTED_COMMANDS[0]),
+        )
+        self.assertEqual(
+            UPDATE_SUBMODULES.SUBMODULE_PROFILES["runtime-test-engine"],
+            (core, test_engine, EXPECTED_COMMANDS[0]),
+        )
 
     def test_retry_uses_exponential_backoff_until_success(self):
         command = ("git", "status")
@@ -139,8 +168,9 @@ class UpdateSubmodulesTests(unittest.TestCase):
         help_text = UPDATE_SUBMODULES._build_parser().format_help()
 
         self.assertIn(
-            "Top-level repository submodules must already be initialized", help_text
+            "default profile expects top-level repository submodules", help_text
         )
+        self.assertIn("runtime-test-engine", help_text)
 
 
 class RepositoryScriptContractTests(unittest.TestCase):

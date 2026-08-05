@@ -17,7 +17,7 @@ WORKSPACE_ROOT = CI_DIR.parents[1]
 if str(CI_DIR) not in sys.path:
     sys.path.insert(0, str(CI_DIR))
 
-from _submodules import SUBMODULE_COMMANDS  # noqa: E402
+from _submodules import SUBMODULE_PROFILES  # noqa: E402
 from _process import github_group  # noqa: E402
 
 
@@ -60,20 +60,28 @@ def retry(
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    return argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         description="Initialize the nested submodules required by repository CI",
         epilog=(
-            "Top-level repository submodules must already be initialized, for "
-            "example by the checkout action or git submodule update --init."
+            "The default profile expects top-level repository submodules to be "
+            "initialized by checkout. Runtime profiles initialize only their own "
+            "top-level sources."
         ),
     )
+    parser.add_argument(
+        "--profile",
+        choices=tuple(SUBMODULE_PROFILES),
+        default="all",
+        help="Submodule source profile to initialize (default: %(default)s)",
+    )
+    return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    _build_parser().parse_args(argv)
+    args = _build_parser().parse_args(argv)
     with github_group("Init nested submodules (selective)"):
         try:
-            for command in SUBMODULE_COMMANDS:
+            for command in SUBMODULE_PROFILES[args.profile]:
                 retry(command)
         except (OSError, subprocess.CalledProcessError) as error:
             print(f"::error::{error}", file=sys.stderr)
