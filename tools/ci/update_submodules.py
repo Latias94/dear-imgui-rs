@@ -32,14 +32,26 @@ def retry(
     sleeper: Sleeper = time.sleep,
     attempts: int = 5,
     initial_delay: int = 5,
+    timeout_seconds: int = 180,
 ) -> None:
-    """Run a command with bounded exponential backoff."""
+    """Run a command with bounded exponential backoff and per-attempt timeout."""
     delay = initial_delay
-    result: subprocess.CompletedProcess | None = None
+    failure: subprocess.CalledProcessError | subprocess.TimeoutExpired | None = None
     for attempt in range(1, attempts + 1):
-        result = runner(list(command), cwd=WORKSPACE_ROOT, check=False)
-        if result.returncode == 0:
-            return
+        try:
+            result = runner(
+                list(command),
+                cwd=WORKSPACE_ROOT,
+                check=False,
+                timeout=timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as error:
+            failure = error
+        else:
+            if result.returncode == 0:
+                return
+            failure = subprocess.CalledProcessError(result.returncode, list(command))
+
         if attempt < attempts:
             rendered = shlex.join(command)
             print(
@@ -50,13 +62,13 @@ def retry(
             sleeper(delay)
             delay *= 2
 
-    assert result is not None
+    assert failure is not None
     rendered = shlex.join(command)
     print(
         f"Command failed after {attempts} attempts: {rendered}",
         file=sys.stderr,
     )
-    raise subprocess.CalledProcessError(result.returncode, list(command))
+    raise failure
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -83,7 +95,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             for command in SUBMODULE_PROFILES[args.profile]:
                 retry(command)
-        except (OSError, subprocess.CalledProcessError) as error:
+        except (OSError, subprocess.SubprocessError) as error:
             print(f"::error::{error}", file=sys.stderr)
             return 1
     return 0

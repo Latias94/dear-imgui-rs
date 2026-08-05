@@ -144,10 +144,34 @@ class UpdateSubmodulesTests(unittest.TestCase):
         UPDATE_SUBMODULES.retry(command, runner=runner, sleeper=sleeper)
 
         self.assertEqual(runner.call_count, 3)
+        self.assertTrue(
+            all(call.kwargs["timeout"] == 180 for call in runner.call_args_list)
+        )
         self.assertEqual(
             [call.args[0] for call in sleeper.call_args_list],
             [5, 10],
         )
+
+    def test_retry_recovers_after_a_timed_out_attempt(self):
+        command = ("git", "status")
+        runner = Mock(
+            side_effect=(
+                subprocess.TimeoutExpired(command, timeout=30),
+                subprocess.CompletedProcess(command, 0),
+            )
+        )
+        sleeper = Mock()
+
+        UPDATE_SUBMODULES.retry(
+            command,
+            runner=runner,
+            sleeper=sleeper,
+            timeout_seconds=30,
+        )
+
+        self.assertEqual(runner.call_count, 2)
+        self.assertEqual(runner.call_args_list[0].kwargs["timeout"], 30)
+        sleeper.assert_called_once_with(5)
 
     def test_retry_propagates_the_final_failure_after_five_attempts(self):
         command = ("git", "status")

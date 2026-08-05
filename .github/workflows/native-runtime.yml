@@ -34,47 +34,78 @@ jobs:
       retry_eligible: ${{ steps.gate.outputs.retry_eligible || steps.preparation.outputs.retry_eligible || (inputs.gate_attempt == 1 && 'true') || 'false' }}
     steps:
       - name: Checkout repository
+        id: checkout
+        continue-on-error: ${{ inputs.gate_attempt == 1 }}
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.candidate_sha }}
 
       - name: Init core runtime sources
-        if: inputs.contract == 'ash-vulkan-validation-smoke'
+        id: core_sources
+        if: steps.checkout.outcome == 'success' && inputs.contract == 'ash-vulkan-validation-smoke'
+        continue-on-error: ${{ inputs.gate_attempt == 1 }}
         run: python3 tools/ci/update_submodules.py --profile runtime-core
 
       - name: Init Test Engine runtime sources
-        if: inputs.contract != 'ash-vulkan-validation-smoke'
+        id: test_engine_sources
+        if: steps.checkout.outcome == 'success' && inputs.contract != 'ash-vulkan-validation-smoke'
+        continue-on-error: ${{ inputs.gate_attempt == 1 }}
         run: python3 tools/ci/update_submodules.py --profile runtime-test-engine
 
       - name: Install Rust toolchain
+        id: toolchain
+        if: >-
+          steps.checkout.outcome == 'success' &&
+          ((inputs.contract == 'ash-vulkan-validation-smoke' && steps.core_sources.outcome == 'success') ||
+           (inputs.contract != 'ash-vulkan-validation-smoke' && steps.test_engine_sources.outcome == 'success'))
+        continue-on-error: ${{ inputs.gate_attempt == 1 }}
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       - name: Cache Rust dependencies
+        if: steps.toolchain.outcome == 'success'
+        continue-on-error: true
         uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           cache-bin: "false"
           key: native-runtime-${{ inputs.contract }}
 
       - name: Refresh native package metadata
+        id: apt_update
+        if: steps.toolchain.outcome == 'success'
+        continue-on-error: ${{ inputs.gate_attempt == 1 }}
         run: sudo apt-get update
 
       - name: Install common native runtime dependencies
+        id: common_deps
+        if: steps.apt_update.outcome == 'success'
+        continue-on-error: ${{ inputs.gate_attempt == 1 }}
         run: sudo apt-get install -y build-essential cmake pkg-config libasound2-dev libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libudev-dev xvfb x11-utils openbox
 
       - name: Install Vulkan runtime dependencies
-        if: inputs.contract != 'sdl3-glow-multi-viewport-smoke'
+        id: vulkan_deps
+        if: steps.common_deps.outcome == 'success' && inputs.contract != 'sdl3-glow-multi-viewport-smoke'
+        continue-on-error: ${{ inputs.gate_attempt == 1 }}
         run: sudo apt-get install -y mesa-vulkan-drivers vulkan-tools
 
       - name: Install Vulkan validation dependencies
-        if: inputs.contract == 'ash-vulkan-validation-smoke'
+        id: validation_deps
+        if: steps.vulkan_deps.outcome == 'success' && inputs.contract == 'ash-vulkan-validation-smoke'
+        continue-on-error: ${{ inputs.gate_attempt == 1 }}
         run: sudo apt-get install -y vulkan-validationlayers
 
       - name: Install OpenGL runtime dependencies
-        if: inputs.contract == 'sdl3-glow-multi-viewport-smoke'
+        id: opengl_deps
+        if: steps.common_deps.outcome == 'success' && inputs.contract == 'sdl3-glow-multi-viewport-smoke'
+        continue-on-error: ${{ inputs.gate_attempt == 1 }}
         run: sudo apt-get install -y mesa-utils libgl1-mesa-dev libgl1-mesa-dri
 
       - name: Execute native runtime contract
         id: gate
+        if: >-
+          steps.common_deps.outcome == 'success' &&
+          ((inputs.contract == 'sdl3-glow-multi-viewport-smoke' && steps.opengl_deps.outcome == 'success') ||
+           (inputs.contract != 'sdl3-glow-multi-viewport-smoke' && steps.vulkan_deps.outcome == 'success')) &&
+          (inputs.contract != 'ash-vulkan-validation-smoke' || steps.validation_deps.outcome == 'success')
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
         run: >-
@@ -100,5 +131,5 @@ jobs:
         with:
           name: native-runtime-${{ inputs.contract }}-${{ inputs.candidate_sha }}-gate-${{ inputs.gate_attempt }}
           path: target/runtime-evidence/${{ inputs.contract }}
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
