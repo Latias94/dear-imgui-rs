@@ -416,7 +416,6 @@ impl WinitPlatformControl {
     }
 
     #[cfg(feature = "multi-viewport")]
-
     pub(crate) fn install_runtime(
         &self,
         runtime: Rc<crate::multi_viewport::RuntimeControl>,
