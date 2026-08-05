@@ -1,6 +1,11 @@
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::rc::Rc;
+#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
+use std::sync::Arc;
+
+#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
+use ash::vk;
 
 use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
@@ -16,9 +21,28 @@ use super::runtime::{
     AshViewportError, OwningViewportRuntime, RuntimeControl, RuntimeState,
     preflight_attachment_with,
 };
+#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
+use super::{SurfaceAdapter, SurfaceCreateError, ViewportSwapchainPolicy, VulkanViewportConfig};
 use crate::RendererError;
+#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
+use crate::renderer::lifecycle::renderer_for_test;
 
 struct TestPlatformMarker;
+
+#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
+struct InertSurfaceAdapter;
+
+#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
+impl SurfaceAdapter for InertSurfaceAdapter {
+    unsafe fn create_surface(
+        &self,
+        _entry: &ash::Entry,
+        _instance: &ash::Instance,
+        _viewport: &mut dear_imgui_rs::platform_io::Viewport,
+    ) -> Result<vk::SurfaceKHR, SurfaceCreateError> {
+        unreachable!("attachment preflight must fail before surface creation")
+    }
+}
 
 struct TestPlatformAttachment;
 
@@ -118,6 +142,27 @@ fn attach_test_platform(context: &mut Context) -> TestPlatformLease {
     }
 }
 
+#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
+fn inert_vulkan_config() -> VulkanViewportConfig {
+    let entry = ash::Entry::from_parts_1_1(
+        ash::StaticFn::load(|_| std::ptr::null()),
+        ash::EntryFnV1_0::load(|_| std::ptr::null()),
+        ash::EntryFnV1_1::load(|_| std::ptr::null()),
+    );
+    let instance = unsafe { ash::Instance::load_with(|_| std::ptr::null(), vk::Instance::null()) };
+    VulkanViewportConfig {
+        entry,
+        instance,
+        physical_device: vk::PhysicalDevice::null(),
+        validation_surface: vk::SurfaceKHR::null(),
+        present_queue: vk::Queue::null(),
+        graphics_queue_family_index: 0,
+        present_queue_family_index: 0,
+        swapchain_policy: ViewportSwapchainPolicy::default(),
+        swapchain_image_usage: vk::ImageUsageFlags::empty(),
+    }
+}
+
 #[test]
 fn attach_requires_registered_platform_role_without_claiming_callbacks() {
     let _guard = super::test_context_guard();
@@ -132,6 +177,42 @@ fn attach_requires_registered_platform_role_without_claiming_callbacks() {
     ));
     assert!(context.platform_io().renderer_callbacks_are_empty());
     clear_test_main_handle_raw();
+}
+
+#[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
+#[test]
+fn failed_real_attach_returns_the_renderer_and_preserves_shutdown_ownership() {
+    let _guard = super::test_context_guard();
+    let mut context = Context::create();
+    let mut renderer = renderer_for_test(&mut context);
+    renderer.default_texture_id = 0xA551;
+
+    let error = unsafe {
+        OwningViewportRuntime::attach(
+            &mut context,
+            renderer,
+            inert_vulkan_config(),
+            Arc::new(InertSurfaceAdapter),
+        )
+    }
+    .unwrap_err();
+
+    assert!(matches!(
+        error.error(),
+        AshViewportError::PlatformBackendUnavailable
+    ));
+    assert!(context.platform_io().renderer_callbacks_are_empty());
+
+    let mut renderer = error.into_renderer();
+    assert_eq!(renderer.default_texture_id, 0xA551);
+    assert!(renderer.consumer.is_some());
+
+    renderer
+        .shutdown_without_vulkan_for_test(&mut context)
+        .unwrap();
+    assert!(renderer.destroyed);
+    assert!(renderer.consumer.is_none());
+    assert!(context.io().backend_renderer_user_data().is_null());
 }
 
 #[test]

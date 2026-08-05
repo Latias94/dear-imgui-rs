@@ -22,6 +22,21 @@ Keep an operation sys-only when a safe contract would be misleading. Current exa
 The sys crates remain the explicit unsafe escape hatch. A wrapper may be added later when its
 ownership and lifetime design is clear.
 
+Every user-relevant native or provisional high-level surface must have one recorded disposition:
+
+- `keep`: the public concept and its invariants are already accurate;
+- `rename`: the contract remains, but the current name teaches the wrong lifecycle state;
+- `replace`: the existing contract is removed in favor of a named ownership or validation model;
+- `unsafe`: the operation remains public only with an explicit native prerequisite that Rust cannot
+  prove; or
+- `delete`: no high-level replacement is justified, so callers use a safer composition or the sys
+  escape hatch.
+
+The single release ledger is [0.16 alpha.2 public API disposition](COMPATIBILITY.md#016-alpha2-public-api-disposition).
+Do not duplicate it in generated coverage reports or infer a `keep` decision merely because a Rust
+method and native symbol share a name. Every removal must identify one replacement or explicitly
+state that the sys API is the intended unsafe route.
+
 ## Reviewing an upstream update
 
 The vendored source and regenerated bindings are the canonical diff. Do not infer Rust safety from

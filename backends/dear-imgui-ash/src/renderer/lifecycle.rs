@@ -16,6 +16,37 @@ pub(super) fn classify_device_idle(
     }
 }
 
+#[cfg(all(test, not(any(feature = "gpu-allocator", feature = "vk-mem"))))]
+pub(super) fn renderer_for_test(context: &mut Context) -> AshRenderer {
+    let device = unsafe { Device::load_with(|_| std::ptr::null(), vk::Device::null()) };
+    let context_state = RendererContextState::prepare(context).unwrap();
+    let consumer = context.create_renderer_consumer().unwrap();
+    // This synthetic renderer has no Vulkan texture map or submitted consumer epoch.
+    let reset = context.prepare_renderer_texture_reset(&consumer).unwrap();
+    let _ = reset.commit();
+    context_state.publish(context).unwrap();
+    AshRenderer {
+        device,
+        allocator: Allocator::new(vk::PhysicalDeviceMemoryProperties::default()),
+        queue: vk::Queue::null(),
+        command_pool: vk::CommandPool::null(),
+        resources: VulkanRendererResources::empty(),
+        textures: TextureManager::new(),
+        consumer: Some(consumer),
+        context_state,
+        default_texture_id: 0,
+        options: Options::default(),
+        frames: Frames::new(0),
+        destroyed: false,
+        in_flight_uploads: VecDeque::new(),
+        managed_uploads: ManagedUploadTracker::default(),
+        #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+        viewport_pipelines: HashMap::new(),
+        #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+        viewport_clear_color: [0.0, 0.0, 0.0, 1.0],
+    }
+}
+
 impl AshRenderer {
     /// Create a new renderer using the internal default allocator.
     ///
@@ -352,6 +383,17 @@ impl AshRenderer {
         self.shutdown_with_destroy(imgui_context, |renderer| renderer.destroy_internal())
     }
 
+    #[cfg(test)]
+    pub(super) fn shutdown_without_vulkan_for_test(
+        &mut self,
+        imgui_context: &mut Context,
+    ) -> RendererResult<()> {
+        self.shutdown_with_destroy(imgui_context, |renderer| {
+            renderer.destroyed = true;
+            Ok(())
+        })
+    }
+
     fn shutdown_with_destroy(
         &mut self,
         imgui_context: &mut Context,
@@ -573,36 +615,6 @@ mod shutdown_transaction_tests {
 
     use super::*;
     use dear_imgui_rs::{BackendFlags, FramePrepareOptions};
-
-    fn renderer_for_test(context: &mut Context) -> AshRenderer {
-        let device = unsafe { Device::load_with(|_| std::ptr::null(), vk::Device::null()) };
-        let context_state = RendererContextState::prepare(context).unwrap();
-        let consumer = context.create_renderer_consumer().unwrap();
-        // This synthetic renderer has no Vulkan texture map or submitted consumer epoch.
-        let reset = context.prepare_renderer_texture_reset(&consumer).unwrap();
-        let _ = reset.commit();
-        context_state.publish(context).unwrap();
-        AshRenderer {
-            device,
-            allocator: Allocator::new(vk::PhysicalDeviceMemoryProperties::default()),
-            queue: vk::Queue::null(),
-            command_pool: vk::CommandPool::null(),
-            resources: VulkanRendererResources::empty(),
-            textures: TextureManager::new(),
-            consumer: Some(consumer),
-            context_state,
-            default_texture_id: 0,
-            options: Options::default(),
-            frames: Frames::new(0),
-            destroyed: false,
-            in_flight_uploads: VecDeque::new(),
-            managed_uploads: ManagedUploadTracker::default(),
-            #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
-            viewport_pipelines: HashMap::new(),
-            #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
-            viewport_clear_color: [0.0, 0.0, 0.0, 1.0],
-        }
-    }
 
     fn seed_external_texture(renderer: &mut AshRenderer) -> TextureId {
         renderer
