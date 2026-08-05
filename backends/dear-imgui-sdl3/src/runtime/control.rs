@@ -1,0 +1,1162 @@
+use super::*;
+
+mod attachments;
+mod registration;
+#[cfg(test)]
+mod tests;
+
+use attachments::{PlatformAttachment, RendererAttachment};
+use registration::unregister_runtime;
+pub(crate) use registration::{RuntimeRegistration, register_runtime, with_current_runtime};
+
+impl RuntimeControl {
+    fn new_with_backend(
+        context: &Context,
+        lifecycle: NativeLifecycle,
+        platform_session: Option<Sdl3PlatformSession>,
+        platform_graphics: PlatformGraphicsKind,
+        native_renderer: NativeRendererKind,
+    ) -> Self {
+        Self {
+            binding: context.binding(),
+            state: Cell::new(RuntimeState::Attached),
+            platform_initialized: Cell::new(false),
+            renderer_initialized: Cell::new(false),
+            renderer_release: Cell::new(if lifecycle.renderer_shutdown.is_none() {
+                ReleaseState::Released
+            } else {
+                ReleaseState::Pending
+            }),
+            platform_release: Cell::new(ReleaseState::Pending),
+            callback_teardown_active: Cell::new(false),
+            platform_io_key: Cell::new(0),
+            platform_graphics,
+            #[cfg(feature = "multi-viewport")]
+            vulkan_surface_provider: Arc::new(VulkanSurfaceProviderState::default()),
+            gl_viewport_swap_interval: Cell::new(Sdl3OpenGlViewportSwapInterval::Immediate),
+            native_renderer,
+            lifecycle,
+            callbacks: RefCell::new(None),
+            renderer_callbacks: RefCell::new(None),
+            renderer_shutdown_restore: RefCell::new(None),
+            renderer_consumer: RefCell::new(None),
+            platform_session: RefCell::new(platform_session),
+            #[cfg(any(
+                feature = "opengl3-renderer",
+                feature = "sdlrenderer3-renderer",
+                feature = "sdlgpu3-renderer"
+            ))]
+            renderer_textures: RefCell::new(RendererTextureStore::default()),
+            owned_viewports: RefCell::new(HashMap::new()),
+            owned_renderer_viewports: RefCell::new(HashMap::new()),
+            failed_viewports: RefCell::new(HashSet::new()),
+            faults: RefCell::new(VecDeque::new()),
+            opengl_viewport_frame_trace: RefCell::new(OpenGlViewportFrameTraceState::default()),
+            reported_replacements: RefCell::new(HashSet::new()),
+            revoked_capabilities: Cell::new(0),
+            foreign_capabilities: Cell::new(0),
+            #[cfg(test)]
+            phase_log: RefCell::new(Vec::new()),
+        }
+    }
+
+    pub(crate) fn binding(&self) -> &ContextBinding {
+        &self.binding
+    }
+
+    pub(crate) fn install_renderer_consumer(&self, consumer: RendererConsumer) {
+        let previous = self.renderer_consumer.borrow_mut().replace(consumer);
+        assert!(
+            previous.is_none(),
+            "SDL3 runtime already owns a renderer consumer"
+        );
+    }
+
+    fn take_renderer_consumer(&self) -> Option<RendererConsumer> {
+        self.renderer_consumer.borrow_mut().take()
+    }
+
+    pub(crate) fn state(&self) -> RuntimeState {
+        self.state.get()
+    }
+
+    pub(crate) fn expects_opengl(&self) -> bool {
+        self.platform_graphics == PlatformGraphicsKind::OpenGl
+    }
+
+    fn begin_opengl_viewport_frame_trace(
+        &self,
+    ) -> Result<Sdl3OpenGlViewportFrameTrace<'_>, Sdl3OpenGlViewportFrameTraceError> {
+        if self.opengl_viewport_frame_trace.borrow().active.is_some() {
+            return Err(Sdl3OpenGlViewportFrameTraceError::AlreadyActive);
+        }
+        self.ensure_bound_entry()?;
+        if !self.expects_opengl() {
+            return Err(Sdl3OpenGlViewportFrameTraceError::RequiresOpenGl);
+        }
+        {
+            let mut trace = self.opengl_viewport_frame_trace.borrow_mut();
+            if trace.active.is_some() {
+                return Err(Sdl3OpenGlViewportFrameTraceError::AlreadyActive);
+            }
+            trace.active = Some(ActiveOpenGlViewportFrameTrace {
+                context_activated_viewports: HashSet::new(),
+                swapped_viewports: HashSet::new(),
+            });
+        }
+        Ok(Sdl3OpenGlViewportFrameTrace {
+            control: self,
+            finished: false,
+        })
+    }
+
+    pub(super) fn finish_opengl_viewport_frame_trace(&self) -> Sdl3OpenGlViewportFrameReport {
+        let active = {
+            let mut trace = self.opengl_viewport_frame_trace.borrow_mut();
+            trace
+                .active
+                .take()
+                .expect("a live SDL3 OpenGL frame-trace guard owns the active trace")
+        };
+        let mut context_activated_viewports = active
+            .context_activated_viewports
+            .into_iter()
+            .collect::<Vec<_>>();
+        context_activated_viewports.sort_unstable_by_key(|id| id.raw());
+        let mut swapped_viewports = active.swapped_viewports.into_iter().collect::<Vec<_>>();
+        swapped_viewports.sort_unstable_by_key(|id| id.raw());
+        Sdl3OpenGlViewportFrameReport {
+            context_activated_viewports,
+            swapped_viewports,
+        }
+    }
+
+    pub(super) fn abort_opengl_viewport_frame_trace(&self) {
+        self.opengl_viewport_frame_trace.borrow_mut().active = None;
+    }
+
+    pub(crate) fn record_opengl_viewport_context_activated(&self, viewport_id: sys::ImGuiID) {
+        if let Some(active) = self
+            .opengl_viewport_frame_trace
+            .borrow_mut()
+            .active
+            .as_mut()
+        {
+            active
+                .context_activated_viewports
+                .insert(Id::from(viewport_id));
+        }
+    }
+
+    pub(crate) fn record_opengl_viewport_swapped(&self, viewport_id: sys::ImGuiID) {
+        if let Some(active) = self
+            .opengl_viewport_frame_trace
+            .borrow_mut()
+            .active
+            .as_mut()
+        {
+            active.swapped_viewports.insert(Id::from(viewport_id));
+        }
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    pub(crate) fn expects_vulkan(&self) -> bool {
+        self.platform_graphics == PlatformGraphicsKind::Vulkan
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    fn acquire_vulkan_surface_provider(
+        &self,
+        context: &Context,
+    ) -> Result<Sdl3VulkanSurfaceProvider, Sdl3BackendError> {
+        let entry = self.enter(context)?;
+        if !self.expects_vulkan() {
+            return Err(Sdl3BackendError::VulkanSurfaceProviderRequiresVulkan);
+        }
+        let callback_available = self.binding.try_with_bound_context(|| {
+            self.validate_platform_ownership_bound()
+                && unsafe {
+                    let platform_io = sys::igGetPlatformIO_Nil();
+                    !platform_io.is_null() && (*platform_io).Platform_CreateVkSurface.is_some()
+                }
+        })?;
+        if !callback_available {
+            entry.finish()?;
+            return Err(Sdl3BackendError::VulkanSurfaceCallbackUnavailable);
+        }
+        self.vulkan_surface_provider
+            .leased
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| Sdl3BackendError::VulkanSurfaceProviderAlreadyLeased)?;
+        let provider = Sdl3VulkanSurfaceProvider {
+            state: Arc::clone(&self.vulkan_surface_provider),
+        };
+        if let Err(error) = entry.finish() {
+            drop(provider);
+            return Err(error);
+        }
+        Ok(provider)
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    fn ensure_vulkan_surface_provider_released(&self) -> Result<(), Sdl3BackendError> {
+        if self.vulkan_surface_provider.leased.load(Ordering::Acquire) {
+            Err(Sdl3BackendError::VulkanSurfaceProviderActive)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn native_renderer(&self) -> NativeRendererKind {
+        self.native_renderer
+    }
+
+    pub(crate) fn native_gl_swap_interval(&self) -> (u32, i32) {
+        self.gl_viewport_swap_interval.get().native_policy()
+    }
+
+    pub(crate) fn set_gl_viewport_swap_interval(&self, policy: Sdl3OpenGlViewportSwapInterval) {
+        debug_assert!(self.expects_opengl());
+        self.gl_viewport_swap_interval.set(policy);
+    }
+
+    fn begin_shutdown(&self) {
+        if self.state.get() == RuntimeState::Attached {
+            self.state.set(RuntimeState::ShuttingDown);
+        }
+    }
+
+    fn finish_shutdown(&self) {
+        if self.renderer_released()
+            && self.platform_released()
+            && self.state.get() != RuntimeState::ResourceDropped
+        {
+            self.state.set(RuntimeState::Detached);
+        }
+    }
+
+    pub(super) fn renderer_released(&self) -> bool {
+        self.renderer_release.get().is_released()
+    }
+
+    pub(super) fn platform_released(&self) -> bool {
+        self.platform_release.get().is_released()
+    }
+
+    fn release_platform_session(&self) {
+        self.platform_session.borrow_mut().take();
+    }
+
+    fn release_renderer_device_objects_bound(&self) -> Result<(), Sdl3BackendError> {
+        if !self.renderer_initialized.get() {
+            return Ok(());
+        }
+        #[cfg(any(
+            feature = "opengl3-renderer",
+            feature = "sdlrenderer3-renderer",
+            feature = "sdlgpu3-renderer"
+        ))]
+        self.destroy_uninstalled_renderer_textures_bound()?;
+        if let Some(destroy) = &self.lifecycle.renderer_device_objects_destroy {
+            destroy();
+        }
+        #[cfg(any(
+            feature = "opengl3-renderer",
+            feature = "sdlrenderer3-renderer",
+            feature = "sdlgpu3-renderer"
+        ))]
+        self.forget_textures_destroyed_by_upstream();
+        Ok(())
+    }
+
+    fn release_renderer_bound(&self) -> Result<bool, Sdl3BackendError> {
+        if self.renderer_released() {
+            return Ok(true);
+        }
+        let Some(release) = ReleaseGuard::begin(&self.renderer_release) else {
+            return Ok(false);
+        };
+        #[cfg(test)]
+        self.phase_log.borrow_mut().push("renderer");
+        #[cfg(any(
+            feature = "opengl3-renderer",
+            feature = "sdlrenderer3-renderer",
+            feature = "sdlgpu3-renderer"
+        ))]
+        if self.renderer_initialized.get() {
+            self.destroy_uninstalled_renderer_textures_bound()?;
+        }
+        let restore = if let Some(restore) = self.renderer_shutdown_restore.borrow_mut().take() {
+            let prepare_result = self
+                .renderer_callbacks
+                .borrow()
+                .as_ref()
+                .map(|callbacks| unsafe { callbacks.switch_from_platform_to_native_shutdown() })
+                .transpose();
+            if let Err(error) = prepare_result {
+                self.renderer_shutdown_restore.borrow_mut().replace(restore);
+                return Err(error);
+            }
+            Some(restore)
+        } else {
+            self.renderer_callbacks
+                .borrow()
+                .as_ref()
+                .map(|callbacks| unsafe { callbacks.prepare_native_shutdown(self) })
+                .transpose()?
+        };
+        let shutdown_result = if self.renderer_initialized.get()
+            && let Some(shutdown) = &self.lifecycle.renderer_shutdown
+        {
+            catch_unwind(AssertUnwindSafe(|| shutdown()))
+        } else {
+            Ok(())
+        };
+        if let Some(restore) = restore {
+            let restore_result = unsafe {
+                self.renderer_callbacks
+                    .borrow()
+                    .as_ref()
+                    .expect("initialized SDL3 renderer lost its callback claim")
+                    .restore_after_shutdown(restore)
+            };
+            if restore_result.is_err() {
+                self.record_platform_state_replaced("renderer callback shutdown state");
+            }
+        }
+        if let Err(payload) = shutdown_result {
+            resume_unwind(payload);
+        }
+        #[cfg(any(
+            feature = "opengl3-renderer",
+            feature = "sdlrenderer3-renderer",
+            feature = "sdlgpu3-renderer"
+        ))]
+        self.renderer_textures
+            .borrow_mut()
+            .forget_destroyed_by_upstream();
+        release.commit();
+        self.renderer_initialized.set(false);
+        self.renderer_callbacks.borrow_mut().take();
+        self.owned_renderer_viewports.borrow_mut().clear();
+        self.finish_shutdown();
+        Ok(true)
+    }
+
+    fn release_platform_bound(&self) -> Result<(), Sdl3BackendError> {
+        if self.platform_released() {
+            self.finish_shutdown();
+            return Ok(());
+        }
+        #[cfg(feature = "multi-viewport")]
+        self.ensure_vulkan_surface_provider_released()?;
+        let Some(release) = ReleaseGuard::begin(&self.platform_release) else {
+            return Ok(());
+        };
+        #[cfg(test)]
+        self.phase_log.borrow_mut().push("platform");
+
+        if !self.platform_initialized.get() {
+            release.commit();
+            self.release_platform_session();
+            self.finish_shutdown();
+            return Ok(());
+        }
+
+        let renderer_restore = self
+            .renderer_callbacks
+            .borrow()
+            .as_ref()
+            .map(|callbacks| unsafe { callbacks.prepare_platform_shutdown(self) })
+            .transpose()?;
+        let restore = {
+            let callbacks = self.callbacks.borrow();
+            match callbacks
+                .as_ref()
+                .map(|callbacks| unsafe { callbacks.prepare_shutdown(self) })
+                .transpose()
+            {
+                Ok(restore) => restore,
+                Err(error) => {
+                    if let Some(renderer_restore) = renderer_restore {
+                        let _ = self
+                            .renderer_callbacks
+                            .borrow()
+                            .as_ref()
+                            .map(|callbacks| unsafe {
+                                callbacks.restore_after_shutdown(renderer_restore)
+                            });
+                    }
+                    return Err(error);
+                }
+            }
+        };
+        self.callback_teardown_active.set(true);
+        struct CallbackTeardownGuard<'a>(&'a Cell<bool>);
+        impl Drop for CallbackTeardownGuard<'_> {
+            fn drop(&mut self) {
+                self.0.set(false);
+            }
+        }
+        let callback_guard = CallbackTeardownGuard(&self.callback_teardown_active);
+        let shutdown_result = catch_unwind(AssertUnwindSafe(|| {
+            (self.lifecycle.platform_shutdown)();
+        }));
+        drop(callback_guard);
+
+        if let Err(payload) = shutdown_result {
+            if let Some(restore) = restore {
+                let callbacks = self.callbacks.borrow();
+                let _ = unsafe {
+                    callbacks
+                        .as_ref()
+                        .expect("initialized SDL3 runtime lost its callback claim")
+                        .restore_after_shutdown(restore)
+                };
+            }
+            if let Some(renderer_restore) = renderer_restore {
+                let _ = self
+                    .renderer_callbacks
+                    .borrow()
+                    .as_ref()
+                    .map(|callbacks| unsafe { callbacks.restore_after_shutdown(renderer_restore) });
+            }
+            resume_unwind(payload);
+        }
+
+        // Native shutdown is the irreversible boundary: never call it twice,
+        // even if restoring foreign callback state reports an error.
+        release.commit();
+        self.platform_initialized.set(false);
+        let restore_result = if let Some(restore) = restore {
+            let callbacks = self.callbacks.borrow();
+            unsafe {
+                callbacks
+                    .as_ref()
+                    .expect("initialized SDL3 runtime lost its callback claim")
+                    .restore_after_shutdown(restore)
+            }
+        } else {
+            Ok(())
+        };
+        unregister_runtime(self.platform_io_key.replace(0));
+        self.callbacks.borrow_mut().take();
+        self.owned_viewports.borrow_mut().clear();
+        self.failed_viewports.borrow_mut().clear();
+        if let Some(renderer_restore) = renderer_restore {
+            self.renderer_shutdown_restore
+                .borrow_mut()
+                .replace(renderer_restore);
+        }
+        self.release_platform_session();
+        self.finish_shutdown();
+        restore_result
+    }
+
+    fn release_renderer_explicit(&self) -> Result<(), Sdl3BackendError> {
+        if self.renderer_released() {
+            return Ok(());
+        }
+        let result = self.binding.try_with_bound_context(|| {
+            catch_unwind(AssertUnwindSafe(|| self.release_renderer_bound()))
+        })?;
+        match result {
+            Ok(Ok(true)) => Ok(()),
+            Ok(Ok(false)) => Err(Sdl3BackendError::ShutdownInProgress {
+                phase: "renderer resources",
+            }),
+            Ok(Err(error)) => Err(error),
+            Err(_) => Err(Sdl3BackendError::ShutdownPanicked {
+                phase: "renderer resources",
+            }),
+        }
+    }
+
+    fn release_platform_explicit(&self) -> Result<(), Sdl3BackendError> {
+        if self.platform_released() {
+            self.finish_shutdown();
+            return Ok(());
+        }
+        let result = self.binding.try_with_bound_context(|| {
+            catch_unwind(AssertUnwindSafe(|| self.release_platform_bound()))
+        })?;
+        result.unwrap_or(Err(Sdl3BackendError::ShutdownPanicked {
+            phase: "platform windows",
+        }))
+    }
+
+    fn shutdown_native_explicit(&self) -> Result<(), Sdl3BackendError> {
+        #[cfg(feature = "multi-viewport")]
+        self.ensure_vulkan_surface_provider_released()?;
+        self.begin_shutdown();
+        let platform_result = self.release_platform_explicit();
+        let platform_retry_result = if self.platform_released() {
+            Ok(())
+        } else {
+            self.release_platform_explicit()
+        };
+        let renderer_result = if self.platform_released() {
+            self.release_renderer_explicit()
+        } else {
+            Ok(())
+        };
+        let renderer_retry_result = if self.platform_released() && !self.renderer_released() {
+            self.release_renderer_explicit()
+        } else {
+            Ok(())
+        };
+        first_error([
+            platform_result.err(),
+            platform_retry_result.err(),
+            renderer_result.err(),
+            renderer_retry_result.err(),
+        ])
+    }
+
+    fn shutdown_bound_for_attachment(&self) -> Result<(), Sdl3BackendError> {
+        let platform_result = match catch_unwind(AssertUnwindSafe(|| self.release_platform_bound()))
+        {
+            Ok(result) => result,
+            Err(_) => Err(Sdl3BackendError::ShutdownPanicked {
+                phase: "platform windows",
+            }),
+        };
+        let renderer_result = if self.platform_released() {
+            match catch_unwind(AssertUnwindSafe(|| self.release_renderer_bound())) {
+                Ok(Ok(true)) => Ok(()),
+                Ok(Ok(false)) => Err(Sdl3BackendError::ShutdownInProgress {
+                    phase: "renderer resources",
+                }),
+                Ok(Err(error)) => Err(error),
+                Err(_) => Err(Sdl3BackendError::ShutdownPanicked {
+                    phase: "renderer resources",
+                }),
+            }
+        } else {
+            Ok(())
+        };
+        first_error([platform_result.err(), renderer_result.err()])
+    }
+
+    fn detect_callback_replacements(&self) {
+        if self.state.get() != RuntimeState::Attached || !self.platform_initialized.get() {
+            return;
+        }
+        let _ = self.binding.try_with_bound_context(|| {
+            if let Some(callbacks) = self.callbacks.borrow().as_ref() {
+                unsafe { callbacks.detect_replacements(self) };
+            }
+            if let Some(callbacks) = self.renderer_callbacks.borrow().as_ref() {
+                unsafe { callbacks.detect_replacements(self) };
+            }
+        });
+    }
+
+    pub(crate) fn poll_fault(&self) -> Result<(), Sdl3BackendError> {
+        self.detect_callback_replacements();
+        match self.faults.borrow_mut().pop_front() {
+            Some(fault) => Err(fault.into_error()),
+            None => Ok(()),
+        }
+    }
+
+    fn take_pending_fault(&self) -> Option<Sdl3BackendError> {
+        self.detect_callback_replacements();
+        self.faults
+            .borrow_mut()
+            .pop_front()
+            .map(RuntimeFault::into_error)
+    }
+
+    pub(crate) fn ensure_entry(&self, context: &Context) -> Result<(), Sdl3BackendError> {
+        self.ensure_context(context)?;
+        self.ensure_bound_entry()
+    }
+
+    pub(crate) fn enter(&self, context: &Context) -> Result<RuntimeEntry<'_>, Sdl3BackendError> {
+        self.ensure_entry(context)?;
+        Ok(RuntimeEntry {
+            control: self,
+            finished: false,
+        })
+    }
+
+    pub(crate) fn ensure_bound_entry(&self) -> Result<(), Sdl3BackendError> {
+        self.request_failed_viewport_closes();
+        self.poll_fault()?;
+        if self.state.get() != RuntimeState::Attached {
+            return Err(Sdl3BackendError::RuntimeDetached);
+        }
+        Ok(())
+    }
+
+    #[cfg(any(
+        feature = "multi-viewport",
+        feature = "opengl3-renderer",
+        feature = "sdlrenderer3-renderer",
+        feature = "sdlgpu3-renderer"
+    ))]
+    pub(crate) fn enter_bound(&self) -> Result<RuntimeEntry<'_>, Sdl3BackendError> {
+        self.ensure_bound_entry()?;
+        Ok(RuntimeEntry {
+            control: self,
+            finished: false,
+        })
+    }
+
+    pub(crate) fn finish_entry(&self) -> Result<(), Sdl3BackendError> {
+        self.poll_fault()
+    }
+
+    pub(super) fn inspect_abandoned_entry(&self) {
+        self.detect_callback_replacements();
+    }
+
+    #[cfg(any(
+        feature = "opengl3-renderer",
+        feature = "sdlrenderer3-renderer",
+        feature = "sdlgpu3-renderer"
+    ))]
+    pub(crate) fn process_texture_requests(
+        &self,
+        requests: &[TextureRequest],
+        request_epoch: u64,
+    ) -> Result<Vec<TextureFeedback>, Sdl3BackendError> {
+        let update_texture = self
+            .lifecycle
+            .renderer_texture_update
+            .as_ref()
+            .expect("initialized SDL3 renderer has no texture updater");
+        self.renderer_textures
+            .borrow_mut()
+            .process_requests(requests, request_epoch, |texture| update_texture(texture))
+    }
+
+    #[cfg(any(
+        feature = "opengl3-renderer",
+        feature = "sdlrenderer3-renderer",
+        feature = "sdlgpu3-renderer"
+    ))]
+    pub(crate) fn mark_textures_reconciled(&self, requests: &[TextureRequest], request_epoch: u64) {
+        self.renderer_textures
+            .borrow_mut()
+            .mark_reconciled(requests, request_epoch);
+    }
+
+    #[cfg(any(
+        feature = "opengl3-renderer",
+        feature = "sdlrenderer3-renderer",
+        feature = "sdlgpu3-renderer"
+    ))]
+    pub(crate) fn reconciled_texture_epoch_is(&self, request_epoch: u64) -> bool {
+        self.renderer_textures
+            .borrow()
+            .reconciled_epoch_is(request_epoch)
+    }
+
+    #[cfg(any(
+        feature = "opengl3-renderer",
+        feature = "sdlrenderer3-renderer",
+        feature = "sdlgpu3-renderer"
+    ))]
+    pub(crate) fn prune_destroyed_textures(&self, completion_watermark: u64) {
+        self.renderer_textures
+            .borrow_mut()
+            .prune_destroyed(completion_watermark);
+    }
+
+    #[cfg(any(
+        feature = "opengl3-renderer",
+        feature = "sdlrenderer3-renderer",
+        feature = "sdlgpu3-renderer"
+    ))]
+    pub(crate) fn clear_destroyed_textures(&self) {
+        self.renderer_textures.borrow_mut().clear_destroyed();
+    }
+
+    #[cfg(any(
+        feature = "opengl3-renderer",
+        feature = "sdlrenderer3-renderer",
+        feature = "sdlgpu3-renderer"
+    ))]
+    pub(crate) fn forget_textures_destroyed_by_upstream(&self) {
+        self.renderer_textures
+            .borrow_mut()
+            .forget_destroyed_by_upstream();
+    }
+
+    #[cfg(any(
+        feature = "opengl3-renderer",
+        feature = "sdlrenderer3-renderer",
+        feature = "sdlgpu3-renderer"
+    ))]
+    pub(crate) fn destroy_uninstalled_renderer_textures_bound(
+        &self,
+    ) -> Result<(), Sdl3BackendError> {
+        let Some(update_texture) = self.lifecycle.renderer_texture_update.as_ref() else {
+            return Ok(());
+        };
+        self.renderer_textures
+            .borrow_mut()
+            .destroy_uninstalled(|texture| update_texture(texture))
+    }
+
+    pub(crate) fn ensure_context(&self, context: &Context) -> Result<(), Sdl3BackendError> {
+        let expected = self.binding.id();
+        let actual = context.id();
+        if expected != actual {
+            return Err(Sdl3BackendError::ContextMismatch { expected, actual });
+        }
+        Ok(())
+    }
+
+    pub(crate) fn original_create_window(
+        &self,
+    ) -> Option<unsafe extern "C" fn(*mut sys::ImGuiViewport)> {
+        self.callbacks
+            .borrow()
+            .as_ref()
+            .and_then(PlatformCallbackOwnership::original_create_window)
+    }
+
+    pub(crate) fn original_destroy_window(
+        &self,
+    ) -> Option<unsafe extern "C" fn(*mut sys::ImGuiViewport)> {
+        self.callbacks
+            .borrow()
+            .as_ref()
+            .and_then(PlatformCallbackOwnership::original_destroy_window)
+    }
+
+    pub(crate) fn original_render_window(
+        &self,
+    ) -> Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut std::ffi::c_void)> {
+        self.callbacks
+            .borrow()
+            .as_ref()
+            .and_then(PlatformCallbackOwnership::original_render_window)
+    }
+
+    pub(crate) fn original_swap_buffers(
+        &self,
+    ) -> Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut std::ffi::c_void)> {
+        self.callbacks
+            .borrow()
+            .as_ref()
+            .and_then(PlatformCallbackOwnership::original_swap_buffers)
+    }
+
+    pub(crate) fn original_renderer_create_window(
+        &self,
+    ) -> Option<unsafe extern "C" fn(*mut sys::ImGuiViewport)> {
+        self.renderer_callbacks
+            .borrow()
+            .as_ref()
+            .and_then(RendererCallbackOwnership::original_create_window)
+    }
+
+    pub(crate) fn original_renderer_destroy_window(
+        &self,
+    ) -> Option<unsafe extern "C" fn(*mut sys::ImGuiViewport)> {
+        self.renderer_callbacks
+            .borrow()
+            .as_ref()
+            .and_then(RendererCallbackOwnership::original_destroy_window)
+    }
+
+    pub(crate) fn original_renderer_render_window(
+        &self,
+    ) -> Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut std::ffi::c_void)> {
+        self.renderer_callbacks
+            .borrow()
+            .as_ref()
+            .and_then(RendererCallbackOwnership::original_render_window)
+    }
+
+    pub(crate) fn invoke_original_renderer_set_window_size(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+        size: *const sys::ImVec2,
+    ) {
+        let invocation = self
+            .renderer_callbacks
+            .borrow()
+            .as_ref()
+            .map(RendererCallbackOwnership::original_set_window_size_invocation);
+        if let Some(invocation) = invocation {
+            invocation.invoke(viewport, size);
+        }
+    }
+
+    pub(crate) fn original_renderer_swap_buffers(
+        &self,
+    ) -> Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut std::ffi::c_void)> {
+        self.renderer_callbacks
+            .borrow()
+            .as_ref()
+            .and_then(RendererCallbackOwnership::original_swap_buffers)
+    }
+
+    pub(crate) fn validate_renderer_ownership_bound(&self) -> bool {
+        if self.native_renderer == NativeRendererKind::None {
+            return true;
+        }
+        let callbacks = self.renderer_callbacks.borrow();
+        let Some(callbacks) = callbacks.as_ref() else {
+            self.record_renderer_state_replaced("renderer callback ownership");
+            return false;
+        };
+        unsafe { callbacks.detect_replacements(self) }
+    }
+
+    pub(crate) fn validate_platform_ownership_bound(&self) -> bool {
+        let callbacks = self.callbacks.borrow();
+        let Some(callbacks) = callbacks.as_ref() else {
+            self.record_platform_state_replaced("platform callback ownership");
+            return false;
+        };
+        unsafe { callbacks.detect_replacements(self) }
+    }
+
+    pub(crate) fn callback_teardown_active(&self) -> bool {
+        self.callback_teardown_active.get()
+    }
+
+    pub(crate) fn refresh_platform_monitors_bound(&self) {
+        if let Some(callbacks) = self.callbacks.borrow().as_ref() {
+            unsafe { callbacks.refresh_owned_monitors() };
+        }
+    }
+
+    pub(crate) fn remember_owned_viewport(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+        state: ViewportPlatformState,
+    ) {
+        self.owned_viewports
+            .borrow_mut()
+            .insert(viewport as usize, state);
+    }
+
+    pub(crate) fn take_owned_viewport(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+    ) -> Option<ViewportPlatformState> {
+        self.owned_viewports
+            .borrow_mut()
+            .remove(&(viewport as usize))
+    }
+
+    pub(crate) fn owned_viewport(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+    ) -> Option<ViewportPlatformState> {
+        self.owned_viewports
+            .borrow()
+            .get(&(viewport as usize))
+            .copied()
+    }
+
+    pub(crate) fn remember_owned_renderer_viewport(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+        user_data: *mut std::ffi::c_void,
+    ) {
+        if !viewport.is_null() && !user_data.is_null() {
+            self.owned_renderer_viewports
+                .borrow_mut()
+                .insert(viewport as usize, user_data);
+        }
+    }
+
+    pub(crate) fn owned_renderer_viewport(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+    ) -> Option<*mut std::ffi::c_void> {
+        self.owned_renderer_viewports
+            .borrow()
+            .get(&(viewport as usize))
+            .copied()
+    }
+
+    pub(crate) fn forget_owned_renderer_viewport(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+    ) -> Option<*mut std::ffi::c_void> {
+        self.owned_renderer_viewports
+            .borrow_mut()
+            .remove(&(viewport as usize))
+    }
+
+    pub(crate) fn mark_viewport_failed(&self, viewport: *mut sys::ImGuiViewport) {
+        if viewport.is_null() {
+            return;
+        }
+        self.failed_viewports.borrow_mut().insert(viewport as usize);
+        unsafe {
+            (*viewport).PlatformRequestClose = true;
+            (*viewport).DrawData = std::ptr::null_mut();
+        }
+    }
+
+    pub(crate) fn viewport_failed(&self, viewport: *mut sys::ImGuiViewport) -> bool {
+        !viewport.is_null()
+            && self
+                .failed_viewports
+                .borrow()
+                .contains(&(viewport as usize))
+    }
+
+    pub(crate) fn forget_failed_viewport(&self, viewport: *mut sys::ImGuiViewport) -> bool {
+        !viewport.is_null()
+            && self
+                .failed_viewports
+                .borrow_mut()
+                .remove(&(viewport as usize))
+    }
+
+    fn request_failed_viewport_closes(&self) {
+        let viewports = self
+            .failed_viewports
+            .borrow()
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+        let _ = self.binding.try_with_bound_context(|| {
+            for viewport in viewports {
+                let viewport = viewport as *mut sys::ImGuiViewport;
+                if !viewport.is_null() {
+                    unsafe {
+                        (*viewport).PlatformRequestClose = true;
+                        (*viewport).DrawData = std::ptr::null_mut();
+                    }
+                }
+            }
+        });
+    }
+
+    fn record_fault(&self, fault: RuntimeFault) {
+        if !self.faults.borrow().contains(&fault) {
+            self.faults.borrow_mut().push_back(fault);
+        }
+    }
+
+    pub(crate) fn record_callback_replaced(&self, callback: &'static str) {
+        if self.reported_replacements.borrow_mut().insert(callback) {
+            self.record_fault(RuntimeFault::CallbackReplaced(callback));
+        }
+        self.revoke_capabilities(SDL_PLATFORM_RESERVED_FLAGS);
+        self.begin_shutdown();
+    }
+
+    pub(crate) fn record_renderer_callback_replaced(&self, callback: &'static str) {
+        if self.reported_replacements.borrow_mut().insert(callback) {
+            self.record_fault(RuntimeFault::RendererCallbackReplaced(callback));
+        }
+        self.revoke_capabilities(SDL_RENDERER_RESERVED_FLAGS);
+        self.begin_shutdown();
+    }
+
+    pub(crate) fn record_platform_state_replaced(&self, field: &'static str) {
+        if self.reported_replacements.borrow_mut().insert(field) {
+            self.record_fault(RuntimeFault::PlatformStateReplaced(field));
+        }
+        self.revoke_capabilities(SDL_PLATFORM_RESERVED_FLAGS);
+        self.begin_shutdown();
+    }
+
+    pub(crate) fn record_renderer_state_replaced(&self, field: &'static str) {
+        if self.reported_replacements.borrow_mut().insert(field) {
+            self.record_fault(RuntimeFault::RendererStateReplaced(field));
+        }
+        self.revoke_capabilities(SDL_RENDERER_RESERVED_FLAGS);
+        self.begin_shutdown();
+    }
+
+    /// Retain renderer capability bits only after a complete foreign renderer publication was
+    /// observed. A single callback or core-field replacement is an incomplete takeover, so its
+    /// untagged capability bits must stay revoked after SDL releases its own renderer.
+    pub(crate) fn preserve_complete_foreign_renderer_capabilities(&self, flags: i32) {
+        self.mark_capabilities_foreign(SDL_RENDERER_RESERVED_FLAGS);
+        unsafe {
+            let io = sys::igGetIO_Nil();
+            if !io.is_null() {
+                (*io).BackendFlags = ((*io).BackendFlags & !SDL_RENDERER_RESERVED_FLAGS)
+                    | (flags & SDL_RENDERER_RESERVED_FLAGS);
+            }
+        }
+    }
+
+    /// Retain platform capability bits only after the entire platform publication has moved to a
+    /// foreign owner. Individual callback, userdata, or viewport-field replacements are partial
+    /// takeovers and must leave SDL's capability bits revoked.
+    pub(crate) fn preserve_complete_foreign_platform_capabilities(&self, flags: i32) {
+        self.mark_capabilities_foreign(SDL_PLATFORM_RESERVED_FLAGS);
+        unsafe {
+            let io = sys::igGetIO_Nil();
+            if !io.is_null() {
+                (*io).BackendFlags = ((*io).BackendFlags & !SDL_PLATFORM_RESERVED_FLAGS)
+                    | (flags & SDL_PLATFORM_RESERVED_FLAGS);
+            }
+        }
+    }
+
+    pub(crate) fn record_callback_panicked(&self, callback: &'static str) {
+        self.record_fault(RuntimeFault::CallbackPanicked(callback));
+        if callback.starts_with("Renderer_") {
+            self.revoke_capabilities(SDL_RENDERER_RESERVED_FLAGS);
+        } else {
+            self.revoke_capabilities(SDL_PLATFORM_RESERVED_FLAGS);
+        }
+        self.begin_shutdown();
+    }
+
+    pub(crate) fn record_foreign_platform_user_data(&self) {
+        self.record_fault(RuntimeFault::ForeignPlatformUserData);
+        self.revoke_capabilities(SDL_PLATFORM_RESERVED_FLAGS);
+        self.begin_shutdown();
+    }
+
+    fn mark_capabilities_foreign(&self, mask: i32) {
+        self.foreign_capabilities
+            .set(self.foreign_capabilities.get() | mask);
+    }
+
+    fn revoke_capabilities(&self, mask: i32) {
+        self.revoked_capabilities
+            .set(self.revoked_capabilities.get() | mask);
+        if self.capabilities_are_foreign(mask) {
+            return;
+        }
+        unsafe {
+            let io = sys::igGetIO_Nil();
+            if !io.is_null() {
+                (*io).BackendFlags &= !mask;
+            }
+        }
+    }
+
+    pub(crate) fn capabilities_were_revoked(&self, mask: i32) -> bool {
+        self.revoked_capabilities.get() & mask == mask
+    }
+
+    pub(crate) fn capabilities_are_foreign(&self, mask: i32) -> bool {
+        self.foreign_capabilities.get() & mask != 0
+    }
+
+    pub(crate) fn record_viewport_creation_failed(&self) {
+        self.record_fault(RuntimeFault::ViewportCreationFailed);
+    }
+
+    pub(crate) fn record_native_faults(&self, faults: u64) {
+        const GL_SHARE_CAPTURE: u64 = 1 << 0;
+        const GL_SHARE_SET: u64 = 1 << 1;
+        const GL_MAIN_CONTEXT: u64 = 1 << 2;
+        const GL_CREATE_CONTEXT: u64 = 1 << 4;
+        const GL_SET_SWAP_INTERVAL: u64 = 1 << 5;
+        const GL_RESTORE_CONTEXT: u64 = 1 << 6;
+        const GL_RESTORE_SHARE: u64 = 1 << 7;
+        const GL_RENDER_CONTEXT: u64 = 1 << 8;
+        const GL_SWAP_CONTEXT: u64 = 1 << 9;
+        const GL_SWAP_WINDOW: u64 = 1 << 10;
+        const SDLGPU_CLAIM: u64 = 1 << 11;
+        const SDLGPU_CONFIGURE: u64 = 1 << 12;
+        const NATIVE_PROTOCOL: u64 = 1 << 13;
+        const SDLGPU_COMMAND_BUFFER: u64 = 1 << 14;
+        const SDLGPU_SWAPCHAIN: u64 = 1 << 15;
+        const SDLGPU_RENDER_PASS: u64 = 1 << 16;
+        const SDLGPU_SUBMIT: u64 = 1 << 17;
+
+        if faults & GL_SHARE_CAPTURE != 0 {
+            self.record_fault(RuntimeFault::ViewportOpenGlStateCaptureFailed);
+        }
+        if faults & (GL_MAIN_CONTEXT | GL_CREATE_CONTEXT) != 0 {
+            self.record_fault(RuntimeFault::ViewportOpenGlContextFailed);
+        }
+        if faults & GL_SET_SWAP_INTERVAL != 0 {
+            self.record_fault(RuntimeFault::ViewportOpenGlSwapIntervalFailed);
+        }
+        if faults & (GL_SHARE_SET | GL_RESTORE_CONTEXT | GL_RESTORE_SHARE) != 0 {
+            self.record_fault(RuntimeFault::ViewportOpenGlStateRestoreFailed);
+        }
+        if faults & GL_RENDER_CONTEXT != 0 {
+            self.record_fault(RuntimeFault::ViewportOpenGlRenderContextFailed);
+        }
+        if faults & (GL_SWAP_CONTEXT | GL_SWAP_WINDOW) != 0 {
+            self.record_fault(RuntimeFault::ViewportOpenGlSwapFailed);
+        }
+        if faults & SDLGPU_CLAIM != 0 {
+            self.record_fault(RuntimeFault::ViewportSdlGpuClaimFailed);
+        }
+        if faults & SDLGPU_CONFIGURE != 0 {
+            self.record_fault(RuntimeFault::ViewportSdlGpuConfigureFailed);
+        }
+        if faults & NATIVE_PROTOCOL != 0 {
+            self.record_fault(RuntimeFault::NativeBridgeProtocolFailed);
+        }
+        if faults & SDLGPU_COMMAND_BUFFER != 0 {
+            self.record_fault(RuntimeFault::ViewportSdlGpuCommandBufferFailed);
+        }
+        if faults & SDLGPU_SWAPCHAIN != 0 {
+            self.record_fault(RuntimeFault::ViewportSdlGpuSwapchainFailed);
+        }
+        if faults & SDLGPU_RENDER_PASS != 0 {
+            self.record_fault(RuntimeFault::ViewportSdlGpuRenderPassFailed);
+        }
+        if faults & SDLGPU_SUBMIT != 0 {
+            self.record_fault(RuntimeFault::ViewportSdlGpuSubmitFailed);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn record_viewport_opengl_context_failed_for_test(&self) {
+        self.record_fault(RuntimeFault::ViewportOpenGlContextFailed);
+    }
+
+    fn context_destroyed(&self) {
+        unregister_runtime(self.platform_io_key.replace(0));
+        self.callbacks.borrow_mut().take();
+        self.renderer_callbacks.borrow_mut().take();
+        self.renderer_shutdown_restore.borrow_mut().take();
+        self.renderer_consumer.borrow_mut().take();
+        self.release_platform_session();
+        self.owned_viewports.borrow_mut().clear();
+        self.owned_renderer_viewports.borrow_mut().clear();
+        self.failed_viewports.borrow_mut().clear();
+        self.platform_initialized.set(false);
+        self.renderer_initialized.set(false);
+        self.renderer_release.set(ReleaseState::Released);
+        self.platform_release.set(ReleaseState::Released);
+        self.state.set(RuntimeState::Detached);
+    }
+
+    fn mark_owner_dropped(&self) {
+        if self.state.get() == RuntimeState::Detached {
+            self.state.set(RuntimeState::ResourceDropped);
+        }
+    }
+
+    #[cfg(test)]
+    fn phase_log(&self) -> Vec<&'static str> {
+        self.phase_log.borrow().clone()
+    }
+
+    fn accepts_current_callback(&self) -> bool {
+        if !self.platform_initialized.get() {
+            return false;
+        }
+        match (self.state.get(), self.binding.lifecycle()) {
+            (RuntimeState::Attached, ContextLifecycle::Alive) => true,
+            (RuntimeState::ShuttingDown, ContextLifecycle::Alive | ContextLifecycle::Dropping) => {
+                self.callback_teardown_active.get()
+            }
+            _ => false,
+        }
+    }
+}
+
+fn first_error<const N: usize>(
+    errors: [Option<Sdl3BackendError>; N],
+) -> Result<(), Sdl3BackendError> {
+    errors.into_iter().flatten().next().map_or(Ok(()), Err)
+}
