@@ -99,8 +99,8 @@ def _validate_test_engine_payload(
 ) -> list[str]:
     errors: list[str] = []
     schema_version = payload.get("schema_version")
-    if type(schema_version) is not int or schema_version != 1:
-        errors.append(f"schema_version expected 1, got {schema_version!r}")
+    if type(schema_version) is not int or schema_version != 2:
+        errors.append(f"schema_version expected 2, got {schema_version!r}")
     outcome = payload.get("outcome")
     if outcome != expectation.outcome:
         errors.append(f"outcome expected {expectation.outcome!r}, got {outcome!r}")
@@ -124,11 +124,82 @@ def _validate_test_engine_payload(
 
     tested = payload.get("tested")
     succeeded = payload.get("success")
+    in_queue = payload.get("in_queue")
+    frames = payload.get("frames")
+    cleanup_frames = payload.get("cleanup_frames")
     count_fields = ("tested", "success", "in_queue", "frames", "cleanup_frames")
     for field_name in count_fields:
         value = payload.get(field_name)
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
             errors.append(f"{field_name} must be a nonnegative integer")
+
+    cleanup_complete = payload.get("cleanup_complete")
+    engine_shutdown_complete = payload.get("engine_shutdown_complete")
+    expected_lifecycle_state = not expectation.infrastructure
+    if cleanup_complete is not expected_lifecycle_state:
+        errors.append(
+            f"cleanup_complete expected {expected_lifecycle_state!r}, "
+            f"got {cleanup_complete!r}"
+        )
+    if engine_shutdown_complete is not expected_lifecycle_state:
+        errors.append(
+            f"engine_shutdown_complete expected {expected_lifecycle_state!r}, "
+            f"got {engine_shutdown_complete!r}"
+        )
+
+    terminal_tests = payload.get("terminal_tests")
+    normalized_tests: list[dict[str, str]] = []
+    allowed_statuses = {"NotRun", "Success", "Error", "Suspended"}
+    if not isinstance(terminal_tests, list):
+        errors.append("terminal_tests must be an array")
+    else:
+        for index, terminal_test in enumerate(terminal_tests):
+            if not isinstance(terminal_test, Mapping):
+                errors.append(f"terminal_tests[{index}] must be an object")
+                continue
+            category = terminal_test.get("category")
+            name = terminal_test.get("name")
+            status = terminal_test.get("status")
+            if not isinstance(category, str) or not category:
+                errors.append(f"terminal_tests[{index}].category must be nonempty")
+            if not isinstance(name, str) or not name:
+                errors.append(f"terminal_tests[{index}].name must be nonempty")
+            if status not in allowed_statuses:
+                errors.append(
+                    f"terminal_tests[{index}].status must be a terminal status"
+                )
+            if (
+                isinstance(category, str)
+                and category
+                and isinstance(name, str)
+                and name
+                and isinstance(status, str)
+                and status in allowed_statuses
+            ):
+                normalized_tests.append(
+                    {"category": category, "name": name, "status": status}
+                )
+
+    derived_tested = sum(
+        test["status"] in {"Success", "Error", "Suspended"}
+        for test in normalized_tests
+    )
+    derived_success = sum(test["status"] == "Success" for test in normalized_tests)
+    derived_in_queue = 0
+    if isinstance(terminal_tests, list) and len(normalized_tests) == len(terminal_tests):
+        if tested != derived_tested:
+            errors.append(
+                f"tested expected {derived_tested} from terminal_tests, got {tested!r}"
+            )
+        if succeeded != derived_success:
+            errors.append(
+                f"success expected {derived_success} from terminal_tests, got {succeeded!r}"
+            )
+        if in_queue != derived_in_queue:
+            errors.append(
+                f"in_queue expected {derived_in_queue} from terminal_tests, got {in_queue!r}"
+            )
+
     if expectation.outcome == "Passed" and (
         not isinstance(tested, int)
         or isinstance(tested, bool)
@@ -136,7 +207,9 @@ def _validate_test_engine_payload(
         or not isinstance(succeeded, int)
         or isinstance(succeeded, bool)
         or succeeded != tested
-        or payload.get("in_queue") != 0
+        or in_queue != 0
+        or not normalized_tests
+        or any(test["status"] != "Success" for test in normalized_tests)
     ):
         errors.append(
             "Passed requires a nonzero tested count, every test successful, "
@@ -149,10 +222,44 @@ def _validate_test_engine_payload(
         or not isinstance(succeeded, int)
         or isinstance(succeeded, bool)
         or succeeded >= tested
+        or not any(
+            test["status"] in {"Error", "Suspended"} for test in normalized_tests
+        )
     ):
         errors.append("Failed requires at least one executed, unsuccessful test")
-    elif expectation.outcome == "NoMatch" and (tested != 0 or succeeded != 0):
-        errors.append("NoMatch requires zero tested and zero successful tests")
+    elif expectation.outcome == "NoMatch" and (
+        tested != 0 or succeeded != 0 or in_queue != 0 or normalized_tests
+    ):
+        errors.append("NoMatch requires an empty terminal test manifest and queue")
+    elif expectation.outcome in {"TimedOut", "Aborted"}:
+        expected_test = {
+            "category": "runtime",
+            "name": "long-running",
+            "status": "NotRun",
+        }
+        if normalized_tests != [expected_test]:
+            errors.append(
+                f"{expectation.outcome} requires the exact runtime/long-running "
+                "NotRun terminal test"
+            )
+        if tested != 0 or succeeded != 0 or in_queue != 0:
+            errors.append(
+                f"{expectation.outcome} requires zero completed tests and an empty queue"
+            )
+        primary_frames = 2 if expectation.outcome == "TimedOut" else 1
+        if (
+            not isinstance(frames, int)
+            or isinstance(frames, bool)
+            or not isinstance(cleanup_frames, int)
+            or isinstance(cleanup_frames, bool)
+            or frames != primary_frames + cleanup_frames
+        ):
+            errors.append(
+                f"{expectation.outcome} requires frames == "
+                f"{primary_frames} + cleanup_frames"
+            )
+    if expectation.infrastructure and normalized_tests:
+        errors.append("an infrastructure result must not contain terminal tests")
     error = payload.get("error")
     if expectation.infrastructure and (not isinstance(error, str) or not error):
         errors.append("an infrastructure result requires a nonempty error diagnostic")

@@ -12,8 +12,8 @@ use dear_app::{
 };
 use dear_imgui_test_engine::{
     AttachmentState, BuiltInTestSuite, HeadlessRunnerError, RegisteredTestSuite, ResultSummary,
-    RunFlags, RunOutcome, RunReport, RunSpeed, RunnerControl, ScriptCount, TestEngine, TestGroup,
-    TestRunner, VerboseLevel, raw,
+    RunFlags, RunOutcome, RunReport, RunSpeed, RunTestStatus, RunnerControl, ScriptCount,
+    TestEngine, TestGroup, TestRunner, VerboseLevel, raw,
 };
 
 #[derive(Debug, Default)]
@@ -226,35 +226,56 @@ impl fmt::Display for AutomatedCallbackError {
 impl std::error::Error for AutomatedCallbackError {}
 
 enum AutomatedResult {
-    Report(RunReport),
+    Report {
+        report: RunReport,
+        engine_shutdown_complete: bool,
+    },
     Infrastructure(String),
 }
 
 impl AutomatedResult {
     fn exit_code(&self) -> i32 {
         match self {
-            Self::Report(report) if report.outcome().is_passed() => 0,
-            Self::Report(_) => 2,
+            Self::Report { report, .. } if report.outcome().is_passed() => 0,
+            Self::Report { .. } => 2,
             Self::Infrastructure(_) => 3,
         }
     }
 
     fn to_json(&self) -> String {
         match self {
-            Self::Report(report) => {
+            Self::Report {
+                report,
+                engine_shutdown_complete,
+            } => {
                 let summary = report.summary();
+                let terminal_tests = report
+                    .tests()
+                    .iter()
+                    .map(|test| {
+                        format!(
+                            "{{\"category\":\"{}\",\"name\":\"{}\",\"status\":\"{}\"}}",
+                            json_escape(test.category()),
+                            json_escape(test.name()),
+                            test_status_name(test.status()),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
                 format!(
-                    "{{\"schema_version\":1,\"outcome\":\"{}\",\"infrastructure\":false,\"tested\":{},\"success\":{},\"in_queue\":{},\"frames\":{},\"cleanup_frames\":{},\"error\":null}}",
+                    "{{\"schema_version\":2,\"outcome\":\"{}\",\"infrastructure\":false,\"tested\":{},\"success\":{},\"in_queue\":{},\"frames\":{},\"cleanup_frames\":{},\"cleanup_complete\":true,\"engine_shutdown_complete\":{},\"terminal_tests\":[{}],\"error\":null}}",
                     outcome_name(report.outcome()),
                     summary.count_tested,
                     summary.count_success,
                     summary.count_in_queue,
                     report.frames(),
                     report.cleanup_frames(),
+                    engine_shutdown_complete,
+                    terminal_tests,
                 )
             }
             Self::Infrastructure(error) => format!(
-                "{{\"schema_version\":1,\"outcome\":\"InfrastructureError\",\"infrastructure\":true,\"tested\":0,\"success\":0,\"in_queue\":0,\"frames\":0,\"cleanup_frames\":0,\"error\":\"{}\"}}",
+                "{{\"schema_version\":2,\"outcome\":\"InfrastructureError\",\"infrastructure\":true,\"tested\":0,\"success\":0,\"in_queue\":0,\"frames\":0,\"cleanup_frames\":0,\"cleanup_complete\":false,\"engine_shutdown_complete\":false,\"terminal_tests\":[],\"error\":\"{}\"}}",
                 json_escape(error),
             ),
         }
@@ -268,6 +289,18 @@ fn outcome_name(outcome: RunOutcome) -> &'static str {
         RunOutcome::NoMatch => "NoMatch",
         RunOutcome::TimedOut => "TimedOut",
         RunOutcome::Aborted => "Aborted",
+        _ => "Unknown",
+    }
+}
+
+fn test_status_name(status: RunTestStatus) -> &'static str {
+    match status {
+        RunTestStatus::NotRun => "NotRun",
+        RunTestStatus::Queued => "Queued",
+        RunTestStatus::Running => "Running",
+        RunTestStatus::Success => "Success",
+        RunTestStatus::Error => "Error",
+        RunTestStatus::Suspended => "Suspended",
         _ => "Unknown",
     }
 }
@@ -368,7 +401,10 @@ fn register_automated_scenario(
 
 fn run_automated(cli: &Cli, scenario: Scenario) -> AutomatedResult {
     match try_run_automated(cli, scenario) {
-        Ok(report) => AutomatedResult::Report(report),
+        Ok(report) => AutomatedResult::Report {
+            report,
+            engine_shutdown_complete: true,
+        },
         Err(error) => AutomatedResult::Infrastructure(error),
     }
 }

@@ -77,6 +77,61 @@ def dear_app_smoke_payload(**overrides):
     return payload
 
 
+def test_engine_payload(expectation, **overrides):
+    if expectation.outcome == "Passed":
+        terminal_tests = [
+            {"category": "fixture", "name": expectation.name, "status": "Success"}
+        ]
+    elif expectation.outcome == "Failed":
+        terminal_tests = [
+            {"category": "fixture", "name": expectation.name, "status": "Error"}
+        ]
+    elif expectation.outcome in {"TimedOut", "Aborted"}:
+        terminal_tests = [
+            {
+                "category": "runtime",
+                "name": "long-running",
+                "status": "NotRun",
+            }
+        ]
+    else:
+        terminal_tests = []
+
+    tested = sum(
+        test["status"] in {"Success", "Error", "Suspended"}
+        for test in terminal_tests
+    )
+    succeeded = sum(test["status"] == "Success" for test in terminal_tests)
+    in_queue = sum(
+        test["status"] in {"Queued", "Running"} for test in terminal_tests
+    )
+    cleanup_frames = 1 if expectation.outcome in {"TimedOut", "Aborted"} else 0
+    if expectation.outcome == "TimedOut":
+        frames = 2 + cleanup_frames
+    elif expectation.outcome == "Aborted":
+        frames = 1 + cleanup_frames
+    else:
+        frames = 1 if terminal_tests else 0
+    payload = {
+        "schema_version": 2,
+        "outcome": expectation.outcome,
+        "infrastructure": expectation.infrastructure,
+        "tested": tested,
+        "success": succeeded,
+        "in_queue": in_queue,
+        "frames": frames,
+        "cleanup_frames": cleanup_frames,
+        "cleanup_complete": not expectation.infrastructure,
+        "engine_shutdown_complete": not expectation.infrastructure,
+        "terminal_tests": terminal_tests,
+        "error": (
+            "injected infrastructure error" if expectation.infrastructure else None
+        ),
+    }
+    payload.update(overrides)
+    return payload
+
+
 def ash_vulkan_smoke_payload(**overrides):
     payload = {
         "schema_version": 2,
@@ -140,27 +195,8 @@ class RuntimeGateTests(unittest.TestCase):
                 name = arguments[arguments.index("--scenario") + 1]
                 result_path = Path(arguments[arguments.index("--json-output") + 1])
                 expectation = expectations[name]
-                tested = 1 if expectation.outcome in {"Passed", "Failed"} else 0
-                succeeded = 1 if expectation.outcome == "Passed" else 0
-                error = (
-                    "injected infrastructure error"
-                    if expectation.infrastructure
-                    else None
-                )
                 result_path.write_text(
-                    json.dumps(
-                        {
-                            "schema_version": 1,
-                            "outcome": expectation.outcome,
-                            "infrastructure": expectation.infrastructure,
-                            "tested": tested,
-                            "success": succeeded,
-                            "in_queue": 0,
-                            "frames": 0,
-                            "cleanup_frames": 0,
-                            "error": error,
-                        }
-                    ),
+                    json.dumps(test_engine_payload(expectation)),
                     encoding="utf-8",
                 )
                 return bounded_result(
@@ -209,6 +245,64 @@ class RuntimeGateTests(unittest.TestCase):
             )
             self.assertEqual(invocation["status"], "Complete")
             self.assertEqual(invocation["candidate_sha"], CANDIDATE_SHA)
+
+    def test_timeout_and_abort_require_exact_terminal_cleanup_evidence(self):
+        expectations = {
+            expectation.name: expectation
+            for expectation in TEST_ENGINE.TEST_ENGINE_SCENARIOS
+        }
+        with TemporaryDirectory() as temporary:
+            evidence = Path(temporary)
+            for scenario in ("timeout", "abort"):
+                expectation = expectations[scenario]
+                result = bounded_result(
+                    stdout_log=evidence / f"{scenario}.stdout.log",
+                    stderr_log=evidence / f"{scenario}.stderr.log",
+                    returncode=expectation.returncode,
+                )
+                valid_payload = test_engine_payload(expectation)
+                self.assertEqual(
+                    TEST_ENGINE._validate_test_engine_payload(
+                        expectation, result, valid_payload
+                    ),
+                    [],
+                )
+
+                invalid_payloads = (
+                    {**valid_payload, "terminal_tests": []},
+                    {
+                        **valid_payload,
+                        "terminal_tests": [
+                            {
+                                "category": "runtime",
+                                "name": "different-test",
+                                "status": "NotRun",
+                            }
+                        ],
+                    },
+                    {
+                        **valid_payload,
+                        "terminal_tests": [
+                            {
+                                "category": "runtime",
+                                "name": "long-running",
+                                "status": "Running",
+                            }
+                        ],
+                    },
+                    {**valid_payload, "in_queue": 1},
+                    {**valid_payload, "frames": valid_payload["frames"] + 1},
+                    {**valid_payload, "cleanup_complete": False},
+                    {**valid_payload, "engine_shutdown_complete": False},
+                    {**valid_payload, "schema_version": 1},
+                )
+                for payload in invalid_payloads:
+                    with self.subTest(scenario=scenario, payload=payload):
+                        self.assertTrue(
+                            TEST_ENGINE._validate_test_engine_payload(
+                                expectation, result, payload
+                            )
+                        )
 
     def test_dear_app_smoke_schema_requires_wiring_terminal_and_teardown_proof(self):
         valid = dear_app_smoke_payload()

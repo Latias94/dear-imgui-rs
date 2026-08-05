@@ -523,7 +523,11 @@ fn runner_distinguishes_timeout_and_explicit_abort_after_cleanup() {
         .expect("timeout cleanup must settle");
     assert_eq!(timed_out.outcome(), RunOutcome::TimedOut);
     assert_eq!(timed_out.summary().count_in_queue, 0);
+    assert_eq!(timed_out.tests().len(), 1);
+    assert_eq!(timed_out.tests()[0].category(), "runner");
+    assert_eq!(timed_out.tests()[0].name(), "timeout");
     assert_eq!(timed_out.tests()[0].status(), RunTestStatus::NotRun);
+    assert_eq!(timed_out.frames(), 1 + timed_out.cleanup_frames());
     timeout_engine.shutdown().expect("timeout shutdown");
     drop(timeout_context);
 
@@ -548,7 +552,11 @@ fn runner_distinguishes_timeout_and_explicit_abort_after_cleanup() {
         .expect("abort cleanup must settle");
     assert_eq!(aborted.outcome(), RunOutcome::Aborted);
     assert_eq!(aborted.summary().count_in_queue, 0);
+    assert_eq!(aborted.tests().len(), 1);
+    assert_eq!(aborted.tests()[0].category(), "runner");
+    assert_eq!(aborted.tests()[0].name(), "abort");
     assert_eq!(aborted.tests()[0].status(), RunTestStatus::NotRun);
+    assert_eq!(aborted.frames(), 1 + aborted.cleanup_frames());
     abort_engine.shutdown().expect("abort shutdown");
     drop(abort_context);
 }
