@@ -14,6 +14,9 @@ if str(CI_DIR) not in sys.path:
     sys.path.insert(0, str(CI_DIR))
 
 RUNTIME = importlib.import_module("_runtime_gate")
+COMMON = importlib.import_module("_runtime_gate_common")
+TEST_ENGINE = importlib.import_module("_runtime_gate_test_engine")
+VIEWPORT = importlib.import_module("_runtime_gate_viewport")
 PROCESS = importlib.import_module("_process")
 CANDIDATE_SHA = "a" * 40
 
@@ -120,7 +123,7 @@ class RuntimeGateTests(unittest.TestCase):
     def test_test_engine_gate_executes_and_classifies_every_contract(self):
         expectations = {
             expectation.name: expectation
-            for expectation in RUNTIME.TEST_ENGINE_SCENARIOS
+            for expectation in TEST_ENGINE.TEST_ENGINE_SCENARIOS
         }
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -167,11 +170,11 @@ class RuntimeGateTests(unittest.TestCase):
                 )
 
             with (
-                patch.object(RUNTIME, "_run_example_build", return_value=build),
-                patch.object(RUNTIME, "_example_binary", return_value=binary),
-                patch.object(RUNTIME, "run_bounded", side_effect=run_scenario),
+                patch.object(TEST_ENGINE, "_run_example_build", return_value=build),
+                patch.object(TEST_ENGINE, "_example_binary", return_value=binary),
+                patch.object(TEST_ENGINE, "run_bounded", side_effect=run_scenario),
                 patch.object(
-                    RUNTIME,
+                    TEST_ENGINE,
                     "_run_dear_app_graphical_smoke",
                     return_value={"result": dear_app_smoke_payload()},
                 ) as graphical_smoke,
@@ -209,7 +212,7 @@ class RuntimeGateTests(unittest.TestCase):
 
     def test_dear_app_smoke_schema_requires_wiring_terminal_and_teardown_proof(self):
         valid = dear_app_smoke_payload()
-        self.assertEqual(RUNTIME._validate_dear_app_smoke_payload(valid), [])
+        self.assertEqual(TEST_ENGINE._validate_dear_app_smoke_payload(valid), [])
 
         invalid = dear_app_smoke_payload(
             test_engine_calls=3,
@@ -219,7 +222,7 @@ class RuntimeGateTests(unittest.TestCase):
             runtime_teardown_complete=False,
             error="incomplete runtime",
         )
-        errors = RUNTIME._validate_dear_app_smoke_payload(invalid)
+        errors = TEST_ENGINE._validate_dear_app_smoke_payload(invalid)
         self.assertIn("terminal_observed expected True, got False", errors)
         self.assertIn("runtime_teardown_complete expected True, got False", errors)
         self.assertIn(
@@ -247,9 +250,9 @@ class RuntimeGateTests(unittest.TestCase):
                 timed_out=True,
             )
             with (
-                patch.object(RUNTIME, "_run_example_build", return_value=build),
-                patch.object(RUNTIME, "_example_binary", return_value=binary),
-                patch.object(RUNTIME, "run_bounded", return_value=timed_out),
+                patch.object(TEST_ENGINE, "_run_example_build", return_value=build),
+                patch.object(TEST_ENGINE, "_example_binary", return_value=binary),
+                patch.object(TEST_ENGINE, "run_bounded", return_value=timed_out),
             ):
                 result = RUNTIME.run_test_engine_runtime(
                     workspace_root=root,
@@ -263,11 +266,11 @@ class RuntimeGateTests(unittest.TestCase):
 
     def test_false_pass_and_retry_policy_cannot_hide_product_failures(self):
         self.assertEqual(
-            RUNTIME._contract_failure_category(RUNTIME.GateCategory.PASSED),
+            TEST_ENGINE._contract_failure_category(RUNTIME.GateCategory.PASSED),
             RUNTIME.GateCategory.PRODUCT_FAILURE,
         )
         self.assertEqual(
-            RUNTIME._contract_failure_category(
+            TEST_ENGINE._contract_failure_category(
                 RUNTIME.GateCategory.INFRASTRUCTURE_UNAVAILABLE
             ),
             RUNTIME.GateCategory.PRODUCT_FAILURE,
@@ -306,7 +309,7 @@ class RuntimeGateTests(unittest.TestCase):
                 "required runtime program is unavailable: Xvfb",
             )
             with patch.object(
-                RUNTIME, "_require_linux_runtime_tools", side_effect=unavailable
+                VIEWPORT, "_require_linux_runtime_tools", side_effect=unavailable
             ):
                 result = RUNTIME.run_multi_viewport_smoke(
                     workspace_root=REPO_ROOT,
@@ -340,16 +343,16 @@ class RuntimeGateTests(unittest.TestCase):
             "main_present_bracketed_by_test_engine": True,
         }
 
-        self.assertEqual(RUNTIME._validate_viewport_payload(valid), [])
+        self.assertEqual(VIEWPORT._validate_viewport_payload(valid), [])
         valid["merge_observed"] = False
         self.assertRegex(
-            "\n".join(RUNTIME._validate_viewport_payload(valid)),
+            "\n".join(VIEWPORT._validate_viewport_payload(valid)),
             "merge_observed",
         )
         valid["merge_observed"] = True
         valid["secondary_present_submitted_before_main_acquire_viewport_ids"] = [99]
         self.assertRegex(
-            "\n".join(RUNTIME._validate_viewport_payload(valid)),
+            "\n".join(VIEWPORT._validate_viewport_payload(valid)),
             "must share a viewport ID",
         )
 
@@ -377,19 +380,19 @@ class RuntimeGateTests(unittest.TestCase):
             },
         }
         self.assertEqual(
-            RUNTIME._validate_upstream_viewport_suite_payload(valid), []
+            VIEWPORT._validate_upstream_viewport_suite_payload(valid), []
         )
 
         invalid_bool = dict(valid)
         invalid_bool["in_queue"] = False
         self.assertIn(
             "in_queue must be a nonnegative integer",
-            RUNTIME._validate_upstream_viewport_suite_payload(invalid_bool),
+            VIEWPORT._validate_upstream_viewport_suite_payload(invalid_bool),
         )
 
         invalid_manifest = dict(valid)
         invalid_manifest["registered_tests"] = ["viewport_basic", "viewport_basic"]
-        errors = RUNTIME._validate_upstream_viewport_suite_payload(invalid_manifest)
+        errors = VIEWPORT._validate_upstream_viewport_suite_payload(invalid_manifest)
         self.assertIn(
             "registered_tests must contain unique, nonempty test names",
             errors,
@@ -397,7 +400,7 @@ class RuntimeGateTests(unittest.TestCase):
 
         incomplete = dict(valid)
         incomplete["success"] = len(registered_tests) - 1
-        errors = RUNTIME._validate_upstream_viewport_suite_payload(incomplete)
+        errors = VIEWPORT._validate_upstream_viewport_suite_payload(incomplete)
         self.assertIn(
             "upstream viewport suite requires every dynamically registered test "
             "to finish successfully",
@@ -407,28 +410,28 @@ class RuntimeGateTests(unittest.TestCase):
     def test_ash_vulkan_success_requires_validation_callbacks_and_teardown(self):
         valid = ash_vulkan_smoke_payload()
 
-        self.assertEqual(RUNTIME._validate_ash_vulkan_viewport_payload(valid), [])
+        self.assertEqual(VIEWPORT._validate_ash_vulkan_viewport_payload(valid), [])
         valid["validation_error_count"] = 1
         self.assertRegex(
-            "\n".join(RUNTIME._validate_ash_vulkan_viewport_payload(valid)),
+            "\n".join(VIEWPORT._validate_ash_vulkan_viewport_payload(valid)),
             "validation_error_count expected 0",
         )
         valid["validation_error_count"] = 0
         valid["validation_warning_count"] = 1
         self.assertRegex(
-            "\n".join(RUNTIME._validate_ash_vulkan_viewport_payload(valid)),
+            "\n".join(VIEWPORT._validate_ash_vulkan_viewport_payload(valid)),
             "validation_warning_count expected 0",
         )
         valid["validation_warning_count"] = 0
         valid["texture_retirement_fence_completion_count"] = 1
         self.assertRegex(
-            "\n".join(RUNTIME._validate_ash_vulkan_viewport_payload(valid)),
+            "\n".join(VIEWPORT._validate_ash_vulkan_viewport_payload(valid)),
             "texture_retirement_fence_completion_count must be at least 2",
         )
         valid["texture_retirement_fence_completion_count"] = 2
         valid["secondary_present_submitted_viewport_ids"] = [99]
         self.assertRegex(
-            "\n".join(RUNTIME._validate_ash_vulkan_viewport_payload(valid)),
+            "\n".join(VIEWPORT._validate_ash_vulkan_viewport_payload(valid)),
             "must share a viewport ID",
         )
 
@@ -455,10 +458,10 @@ class RuntimeGateTests(unittest.TestCase):
             "sampler_strategy": "sampler_objects",
         }
 
-        self.assertEqual(RUNTIME._validate_sdl3_glow_viewport_payload(valid), [])
+        self.assertEqual(VIEWPORT._validate_sdl3_glow_viewport_payload(valid), [])
         valid["secondary_swap_succeeded_before_main_present_viewport_ids"] = [99]
         self.assertRegex(
-            "\n".join(RUNTIME._validate_sdl3_glow_viewport_payload(valid)),
+            "\n".join(VIEWPORT._validate_sdl3_glow_viewport_payload(valid)),
             "must share a viewport ID",
         )
 
@@ -473,7 +476,7 @@ class RuntimeGateTests(unittest.TestCase):
                 '{"outcome":"Passed"}', encoding="utf-8"
             )
 
-            RUNTIME._prepare_evidence(
+            COMMON._prepare_evidence(
                 evidence_dir=evidence,
                 gate="test-engine-runtime",
                 attempt=2,
@@ -494,7 +497,7 @@ class RuntimeGateTests(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
             evidence = root / "evidence"
-            with patch.object(RUNTIME, "_run_example_build") as builder:
+            with patch.object(TEST_ENGINE, "_run_example_build") as builder:
                 result = RUNTIME.run_test_engine_runtime(
                     workspace_root=root,
                     evidence_dir=evidence,
