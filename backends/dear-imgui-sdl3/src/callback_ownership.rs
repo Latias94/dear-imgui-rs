@@ -587,6 +587,7 @@ use for_each_user_data;
 
 #[cfg(all(test, feature = "sdlgpu3-renderer"))]
 pub(super) use native_callbacks::finish_sdlgpu_renderer_create;
+#[cfg(feature = "multi-viewport")]
 pub(super) use native_callbacks::validate_platform_viewport_state;
 #[cfg(test)]
 pub(super) use native_callbacks::{
