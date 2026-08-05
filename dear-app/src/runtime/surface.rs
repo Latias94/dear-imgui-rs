@@ -227,7 +227,6 @@ pub(super) fn render_surface_frame<A: Application>(
         };
         admit_surface_frame(&mut backend)?
     };
-    let ownership = ownership;
     let dispatch =
         dispatch_surface_frame(admitted, admitted_frame_count, |admitted, frame_index| {
             let RuntimeOwnership {
