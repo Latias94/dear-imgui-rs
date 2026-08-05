@@ -22,9 +22,9 @@ use super::common::{
     release_sticky_keys_and_buttons, sanitized_window_display_size,
     sanitized_window_framebuffer_scale,
 };
-use super::event_ingest::{OrderedPointerEvent, append_typed_pointer_event};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use super::event_ingest::collect_raw_winit_pointer_events;
+use super::event_ingest::{OrderedPointerEvent, append_typed_pointer_event};
 use super::events::{ImguiInputMessageReaders, discard_all_unread_messages};
 use super::route::{
     ImguiContextInputMetrics, ImguiInputFrameMetrics, ImguiInputSlot, ImguiRoutedWindowState,

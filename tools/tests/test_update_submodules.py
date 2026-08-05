@@ -202,12 +202,17 @@ class RepositoryScriptContractTests(unittest.TestCase):
         xtask_manifest = (REPO_ROOT / "xtask" / "Cargo.toml").read_text(
             encoding="utf-8"
         )
-        build_support = (
-            REPO_ROOT / "tools" / "build-support" / "src" / "lib.rs"
+        binding_spec = (
+            REPO_ROOT
+            / "tools"
+            / "build-support"
+            / "src"
+            / "binding"
+            / "spec.rs"
         ).read_text(encoding="utf-8")
         dependency = re.search(r'^bindgen = "=([0-9.]+)"$', xtask_manifest, re.MULTILINE)
         contract = re.search(
-            r'CANONICAL_BINDGEN_VERSION: &str = "([0-9.]+)"', build_support
+            r'CANONICAL_BINDGEN_VERSION: &str = "([0-9.]+)"', binding_spec
         )
 
         self.assertIsNotNone(dependency)
