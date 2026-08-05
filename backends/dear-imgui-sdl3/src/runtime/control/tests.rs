@@ -671,5 +671,10 @@ impl ContextAttachment for ActiveExternalRendererAttachment {}
 
 mod lifecycle;
 mod platform_ownership;
+#[cfg(any(
+    feature = "opengl3-renderer",
+    feature = "sdlrenderer3-renderer",
+    feature = "sdlgpu3-renderer"
+))]
 mod renderer_ownership;
 mod viewport_callbacks;

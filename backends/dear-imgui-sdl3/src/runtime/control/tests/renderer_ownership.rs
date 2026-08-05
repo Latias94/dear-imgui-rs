@@ -1,10 +1,5 @@
 use super::*;
 
-#[cfg(any(
-    feature = "opengl3-renderer",
-    feature = "sdlrenderer3-renderer",
-    feature = "sdlgpu3-renderer"
-))]
 #[test]
 fn callback_only_renderer_drift_revokes_reserved_capabilities_without_erasing_foreign_callback() {
     let _guard = crate::tests::test_guard();
@@ -50,11 +45,6 @@ fn callback_only_renderer_drift_revokes_reserved_capabilities_without_erasing_fo
     });
 }
 
-#[cfg(any(
-    feature = "opengl3-renderer",
-    feature = "sdlrenderer3-renderer",
-    feature = "sdlgpu3-renderer"
-))]
 #[test]
 fn core_identity_only_renderer_drift_revokes_reserved_capabilities_without_erasing_foreign_identity()
  {
@@ -101,11 +91,6 @@ fn core_identity_only_renderer_drift_revokes_reserved_capabilities_without_erasi
     });
 }
 
-#[cfg(any(
-    feature = "opengl3-renderer",
-    feature = "sdlrenderer3-renderer",
-    feature = "sdlgpu3-renderer"
-))]
 #[test]
 fn complete_renderer_takeover_preserves_its_capabilities_and_callbacks() {
     let _guard = crate::tests::test_guard();
@@ -173,11 +158,6 @@ fn complete_renderer_takeover_preserves_its_capabilities_and_callbacks() {
     });
 }
 
-#[cfg(any(
-    feature = "opengl3-renderer",
-    feature = "sdlrenderer3-renderer",
-    feature = "sdlgpu3-renderer"
-))]
 #[test]
 fn pointer_callback_replacement_survives_renderer_shutdown() {
     let _guard = crate::tests::test_guard();
@@ -220,11 +200,6 @@ fn pointer_callback_replacement_survives_renderer_shutdown() {
     });
 }
 
-#[cfg(any(
-    feature = "opengl3-renderer",
-    feature = "sdlrenderer3-renderer",
-    feature = "sdlgpu3-renderer"
-))]
 #[test]
 fn pointer_original_callback_is_invoked() {
     let _guard = crate::tests::test_guard();
@@ -268,11 +243,6 @@ fn pointer_original_callback_is_invoked() {
     });
 }
 
-#[cfg(any(
-    feature = "opengl3-renderer",
-    feature = "sdlrenderer3-renderer",
-    feature = "sdlgpu3-renderer"
-))]
 #[test]
 fn native_renderer_shutdown_preserves_foreign_callback_and_backend_replacements() {
     let _guard = crate::tests::test_guard();
