@@ -1,12 +1,13 @@
 use bevy_window::{CompositeAlphaMode, PresentMode, Window, WindowTheme};
 
-#[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
-use super::desktop::{
-    desktop_framebuffer_scale, finite_desktop_size, physical_pos_from_desktop, positive_finite_or,
-    set_window_desktop_size,
-};
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use super::desktop::desktop_framebuffer_scale;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use super::desktop::{finite_desktop_pos, physical_outer_pos_for_client_pos};
+#[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+use super::desktop::{
+    finite_desktop_size, physical_pos_from_desktop, positive_finite_or, set_window_desktop_size,
+};
 #[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
 use super::protocol::ImguiViewportSnapshot;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]

@@ -1,6 +1,8 @@
 use super::*;
 #[cfg(feature = "render")]
 use bevy_camera::{CameraOutputMode, ClearColorConfig};
+use bevy_math::IVec2;
+use bevy_window::WindowLevel;
 
 #[derive(Resource)]
 struct EcsReleaseBeforeDeferredProbe {

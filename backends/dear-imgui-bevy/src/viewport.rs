@@ -28,24 +28,20 @@ use bevy_app::{Last, PreUpdate};
 use bevy_camera::{Camera, Camera2d, RenderTarget, visibility::RenderLayers};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_ecs::message::{MessageReader, Messages};
-#[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_ecs::prelude::*;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_ecs::schedule::{ApplyDeferred, IntoScheduleConfigs};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_ecs::system::SystemParam;
-#[cfg(test)]
-use bevy_math::IVec2;
 #[cfg(all(
     feature = "render",
     feature = "multi-viewport",
     not(target_arch = "wasm32")
 ))]
 use bevy_render::camera::CameraRenderGraph;
-#[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_window::Window;
-#[cfg(test)]
-use bevy_window::WindowLevel;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_window::WindowPosition;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -54,7 +50,7 @@ use bevy_window::{
 };
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_winit::WinitSettings;
-#[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use dear_imgui_rs as imgui;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use dear_imgui_rs::sys;
@@ -116,7 +112,7 @@ pub(crate) use runtime::{
 };
 #[cfg(test)]
 pub(crate) use window::window_from_snapshot;
-#[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use window::window_from_snapshot_with_config;
 pub use window::{ImguiViewportWindowConfig, ImguiViewportWindowConfigError};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
