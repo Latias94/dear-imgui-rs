@@ -36,7 +36,7 @@ jobs:
       - name: Checkout repository
         id: checkout
         continue-on-error: ${{ inputs.gate_attempt == 1 }}
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.candidate_sha }}
 
@@ -64,7 +64,7 @@ jobs:
       - name: Cache Rust dependencies
         if: steps.toolchain.outcome == 'success'
         continue-on-error: true
-        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           cache-bin: "false"
           key: native-runtime-${{ inputs.contract }}
