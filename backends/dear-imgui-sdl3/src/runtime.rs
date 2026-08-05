@@ -476,6 +476,8 @@ pub(super) struct RuntimeControl {
     renderer_textures: RefCell<RendererTextureStore>,
     owned_viewports: RefCell<HashMap<usize, ViewportPlatformState>>,
     owned_renderer_viewports: RefCell<HashMap<usize, *mut std::ffi::c_void>>,
+    deferred_platform_viewports: RefCell<HashMap<usize, DeferredPlatformViewportState>>,
+    deferred_renderer_viewports: RefCell<HashMap<usize, DeferredRendererViewportState>>,
     failed_viewports: RefCell<HashSet<usize>>,
     faults: RefCell<VecDeque<RuntimeFault>>,
     opengl_viewport_frame_trace: RefCell<OpenGlViewportFrameTraceState>,
@@ -484,6 +486,18 @@ pub(super) struct RuntimeControl {
     foreign_capabilities: Cell<i32>,
     #[cfg(test)]
     phase_log: RefCell<Vec<&'static str>>,
+}
+
+#[derive(Clone, Copy)]
+struct DeferredPlatformViewportState {
+    id: sys::ImGuiID,
+    state: ViewportPlatformState,
+}
+
+#[derive(Clone, Copy)]
+struct DeferredRendererViewportState {
+    id: sys::ImGuiID,
+    user_data: *mut std::ffi::c_void,
 }
 
 impl fmt::Debug for RuntimeControl {

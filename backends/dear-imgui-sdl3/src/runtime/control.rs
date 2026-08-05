@@ -49,6 +49,8 @@ impl RuntimeControl {
             renderer_textures: RefCell::new(RendererTextureStore::default()),
             owned_viewports: RefCell::new(HashMap::new()),
             owned_renderer_viewports: RefCell::new(HashMap::new()),
+            deferred_platform_viewports: RefCell::new(HashMap::new()),
+            deferred_renderer_viewports: RefCell::new(HashMap::new()),
             failed_viewports: RefCell::new(HashSet::new()),
             faults: RefCell::new(VecDeque::new()),
             opengl_viewport_frame_trace: RefCell::new(OpenGlViewportFrameTraceState::default()),
@@ -403,6 +405,7 @@ impl RuntimeControl {
             (self.lifecycle.platform_shutdown)();
         }));
         drop(callback_guard);
+        self.restore_deferred_viewport_state();
 
         if let Err(payload) = shutdown_result {
             if let Some(restore) = restore {
@@ -822,6 +825,74 @@ impl RuntimeControl {
         self.callback_teardown_active.get()
     }
 
+    pub(crate) fn defer_platform_viewport_restore(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+        state: ViewportPlatformState,
+    ) {
+        if !self.callback_teardown_active() || viewport.is_null() || state.is_empty() {
+            return;
+        }
+        let id = unsafe { (*viewport).ID };
+        self.deferred_platform_viewports.borrow_mut().insert(
+            viewport as usize,
+            DeferredPlatformViewportState { id, state },
+        );
+    }
+
+    pub(crate) fn defer_renderer_viewport_restore(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+        user_data: *mut std::ffi::c_void,
+    ) {
+        if !self.callback_teardown_active() || viewport.is_null() || user_data.is_null() {
+            return;
+        }
+        if self.owned_renderer_viewport(viewport) == Some(user_data) {
+            return;
+        }
+        let id = unsafe { (*viewport).ID };
+        self.deferred_renderer_viewports.borrow_mut().insert(
+            viewport as usize,
+            DeferredRendererViewportState { id, user_data },
+        );
+    }
+
+    fn restore_deferred_viewport_state(&self) {
+        let platform = std::mem::take(&mut *self.deferred_platform_viewports.borrow_mut());
+        let renderer = std::mem::take(&mut *self.deferred_renderer_viewports.borrow_mut());
+        let platform_keys = platform.keys().copied().collect::<HashSet<_>>();
+        let mut restored_platform = HashSet::new();
+
+        for (address, deferred) in platform {
+            let viewport = address as *mut sys::ImGuiViewport;
+            let can_restore = unsafe {
+                (*viewport).ID == deferred.id && ViewportPlatformState::capture(viewport).is_empty()
+            };
+            if can_restore {
+                unsafe { deferred.state.restore(viewport) };
+                restored_platform.insert(address);
+            }
+        }
+
+        for (address, deferred) in renderer {
+            let viewport = address as *mut sys::ImGuiViewport;
+            let platform_is_compatible = if platform_keys.contains(&address) {
+                restored_platform.contains(&address)
+            } else {
+                unsafe { ViewportPlatformState::capture(viewport).is_empty() }
+            };
+            let can_restore = unsafe {
+                (*viewport).ID == deferred.id
+                    && (*viewport).RendererUserData.is_null()
+                    && platform_is_compatible
+            };
+            if can_restore {
+                unsafe { (*viewport).RendererUserData = deferred.user_data };
+            }
+        }
+    }
+
     pub(crate) fn refresh_platform_monitors_bound(&self) {
         if let Some(callbacks) = self.callbacks.borrow().as_ref() {
             unsafe { callbacks.refresh_owned_monitors() };
@@ -1122,6 +1193,8 @@ impl RuntimeControl {
         self.release_platform_session();
         self.owned_viewports.borrow_mut().clear();
         self.owned_renderer_viewports.borrow_mut().clear();
+        self.deferred_platform_viewports.borrow_mut().clear();
+        self.deferred_renderer_viewports.borrow_mut().clear();
         self.failed_viewports.borrow_mut().clear();
         self.platform_initialized.set(false);
         self.renderer_initialized.set(false);

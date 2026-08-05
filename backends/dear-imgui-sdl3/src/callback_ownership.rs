@@ -300,7 +300,7 @@ impl MonitorState {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub(super) struct ViewportPlatformState {
     user_data: *mut c_void,
     handle: *mut c_void,
@@ -322,6 +322,10 @@ impl ViewportPlatformState {
         viewport.PlatformUserData = self.user_data;
         viewport.PlatformHandle = self.handle;
         viewport.PlatformHandleRaw = self.handle_raw;
+    }
+
+    pub(super) fn is_empty(self) -> bool {
+        self.user_data.is_null() && self.handle.is_null() && self.handle_raw.is_null()
     }
 
     unsafe fn clear(viewport: *mut sys::ImGuiViewport) {
@@ -1473,6 +1477,7 @@ unsafe extern "C" fn sdl3_destroy_window(viewport: *mut sys::ImGuiViewport) {
         let actual = ViewportPlatformState::capture(viewport);
         let Some(expected) = control.take_owned_viewport(viewport) else {
             record_viewport_replacements(control, None, actual);
+            control.defer_platform_viewport_restore(viewport, actual);
             ViewportPlatformState::clear(viewport);
             return true;
         };
@@ -1487,6 +1492,7 @@ unsafe extern "C" fn sdl3_destroy_window(viewport: *mut sys::ImGuiViewport) {
         expected.restore(viewport);
         callback(viewport);
         ViewportPlatformState::clear(viewport);
+        control.defer_platform_viewport_restore(viewport, actual);
         true
     });
     if invoked && !viewport.is_null() {
@@ -1631,15 +1637,18 @@ unsafe extern "C" fn sdl3_renderer_destroy_window(viewport: *mut sys::ImGuiViewp
             return false;
         }
         if !control.validate_renderer_ownership_bound() {
+            control.defer_renderer_viewport_restore(viewport, (*viewport).RendererUserData);
             (*viewport).RendererUserData = std::ptr::null_mut();
             return true;
         }
         let Some(callback) = control.original_renderer_destroy_window() else {
+            control.defer_renderer_viewport_restore(viewport, (*viewport).RendererUserData);
             (*viewport).RendererUserData = std::ptr::null_mut();
             return true;
         };
         let Some(expected_platform) = control.owned_viewport(viewport) else {
             record_viewport_replacements(control, None, ViewportPlatformState::capture(viewport));
+            control.defer_renderer_viewport_restore(viewport, (*viewport).RendererUserData);
             (*viewport).RendererUserData = std::ptr::null_mut();
             return true;
         };
@@ -1651,6 +1660,7 @@ unsafe extern "C" fn sdl3_renderer_destroy_window(viewport: *mut sys::ImGuiViewp
         }
         let Some(expected_renderer) = expected_renderer else {
             control.record_renderer_state_replaced("Viewport.RendererUserData");
+            control.defer_renderer_viewport_restore(viewport, actual_renderer);
             (*viewport).RendererUserData = std::ptr::null_mut();
             return true;
         };
@@ -1658,18 +1668,17 @@ unsafe extern "C" fn sdl3_renderer_destroy_window(viewport: *mut sys::ImGuiViewp
         let platform_was_replaced = !viewport_platform_state_eq(actual_platform, expected_platform);
         if platform_was_replaced {
             record_viewport_replacements(control, Some(expected_platform), actual_platform);
+            control.defer_platform_viewport_restore(viewport, actual_platform);
         }
         if actual_renderer != expected_renderer {
             control.record_renderer_state_replaced("Viewport.RendererUserData");
+            control.defer_renderer_viewport_restore(viewport, actual_renderer);
         }
 
         expected_platform.restore(viewport);
         (*viewport).RendererUserData = expected_renderer;
         callback(viewport);
         (*viewport).RendererUserData = std::ptr::null_mut();
-        if platform_was_replaced {
-            actual_platform.restore(viewport);
-        }
         control.forget_owned_renderer_viewport(viewport);
         true
     });

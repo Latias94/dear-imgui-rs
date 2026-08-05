@@ -7,8 +7,10 @@ use super::*;
 ))]
 #[cfg(debug_assertions)]
 #[test]
-fn real_imgui_destroy_platform_windows_never_resurrects_destroyed_viewport_state() {
+fn real_imgui_destroy_platform_windows_restores_foreign_viewport_state_after_core_cleanup() {
     let _guard = crate::tests::test_guard();
+    DESTROY_OBSERVED_USER_DATA.with(|observed| observed.set(0));
+    RENDERER_DESTROY_OBSERVED_USER_DATA.with(|observed| observed.set(0));
     let mut context = Context::create();
     let viewport_pointer = Rc::new(Cell::new(0_usize));
 
@@ -100,6 +102,7 @@ fn real_imgui_destroy_platform_windows_never_resurrects_destroyed_viewport_state
         .remember_owned_renderer_viewport(raw, viewport._ImGuiViewport.RendererUserData);
     viewport._ImGuiViewport.PlatformUserData = FOREIGN_VIEWPORT_DATA as *mut _;
     viewport._ImGuiViewport.PlatformHandle = FOREIGN_VIEWPORT_HANDLE as *mut _;
+    viewport._ImGuiViewport.PlatformHandleRaw = FOREIGN_VIEWPORT_HANDLE_RAW as *mut _;
     viewport._ImGuiViewport.RendererUserData = FOREIGN_BACKEND_DATA as *mut _;
 
     assert!(matches!(
@@ -108,6 +111,16 @@ fn real_imgui_destroy_platform_windows_never_resurrects_destroyed_viewport_state
     ));
 
     assert!(!viewport._ImGuiViewport.PlatformWindowCreated);
+    assert_eq!(
+        RENDERER_DESTROY_OBSERVED_USER_DATA.with(Cell::get),
+        OWNED_BACKEND_DATA,
+        "the upstream renderer destroy callback must receive SDL's owned sidecar"
+    );
+    assert_eq!(
+        DESTROY_OBSERVED_USER_DATA.with(Cell::get),
+        OWNED_VIEWPORT_DATA,
+        "the upstream platform destroy callback must receive SDL's owned sidecar after renderer teardown"
+    );
     context.binding().with_bound_context(|| unsafe {
         let main_viewport = sys::igGetMainViewport();
         assert_eq!(
@@ -127,9 +140,22 @@ fn real_imgui_destroy_platform_windows_never_resurrects_destroyed_viewport_state
             FOREIGN_BACKEND_DATA
         );
     });
-    assert!(viewport._ImGuiViewport.PlatformUserData.is_null());
-    assert!(viewport._ImGuiViewport.PlatformHandle.is_null());
-    assert!(viewport._ImGuiViewport.RendererUserData.is_null());
+    assert_eq!(
+        viewport._ImGuiViewport.PlatformUserData as usize,
+        FOREIGN_VIEWPORT_DATA
+    );
+    assert_eq!(
+        viewport._ImGuiViewport.PlatformHandle as usize,
+        FOREIGN_VIEWPORT_HANDLE
+    );
+    assert_eq!(
+        viewport._ImGuiViewport.PlatformHandleRaw as usize,
+        FOREIGN_VIEWPORT_HANDLE_RAW
+    );
+    assert_eq!(
+        viewport._ImGuiViewport.RendererUserData as usize,
+        FOREIGN_BACKEND_DATA
+    );
     context.binding().with_bound_context(|| unsafe {
         let main_viewport = sys::igGetMainViewport();
         (*main_viewport).PlatformUserData = std::ptr::null_mut();
@@ -171,6 +197,49 @@ fn real_imgui_destroy_platform_windows_never_resurrects_destroyed_viewport_state
             }
         )
     }));
+}
+
+#[test]
+fn deferred_restore_rejects_a_reused_viewport_address_with_a_new_id() {
+    let _guard = crate::tests::test_guard();
+    let mut context = Context::create();
+    let mut runtime = synthetic_claimed_registration(
+        &mut context,
+        Rc::new(Cell::new(0)),
+        Rc::new(Cell::new(0)),
+        Rc::new(Cell::new(0)),
+        synthetic_create_window,
+    );
+    let mut viewport = sys::ImGuiViewport::default();
+    viewport.ID = 41;
+    viewport.PlatformUserData = FOREIGN_VIEWPORT_DATA as *mut _;
+    viewport.PlatformHandle = FOREIGN_VIEWPORT_HANDLE as *mut _;
+    viewport.PlatformHandleRaw = FOREIGN_VIEWPORT_HANDLE_RAW as *mut _;
+    viewport.RendererUserData = FOREIGN_BACKEND_DATA as *mut _;
+
+    runtime.control.callback_teardown_active.set(true);
+    runtime
+        .control
+        .defer_platform_viewport_restore(&mut viewport, unsafe {
+            ViewportPlatformState::capture(&viewport)
+        });
+    runtime
+        .control
+        .defer_renderer_viewport_restore(&mut viewport, viewport.RendererUserData);
+    runtime.control.callback_teardown_active.set(false);
+
+    viewport.ID = 42;
+    viewport.PlatformUserData = std::ptr::null_mut();
+    viewport.PlatformHandle = std::ptr::null_mut();
+    viewport.PlatformHandleRaw = std::ptr::null_mut();
+    viewport.RendererUserData = std::ptr::null_mut();
+    runtime.control.restore_deferred_viewport_state();
+
+    assert!(viewport.PlatformUserData.is_null());
+    assert!(viewport.PlatformHandle.is_null());
+    assert!(viewport.PlatformHandleRaw.is_null());
+    assert!(viewport.RendererUserData.is_null());
+    runtime.shutdown_platform(&mut context).unwrap();
 }
 
 #[test]
