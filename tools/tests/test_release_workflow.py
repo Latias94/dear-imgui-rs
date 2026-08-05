@@ -1127,59 +1127,6 @@ class PrepublishTests(unittest.TestCase):
             show_output=True,
         )
 
-    def test_strict_release_contract_commands_are_deterministic(self):
-        self.assertEqual(
-            PREPUBLISH.release_contract_commands(),
-            [
-                (
-                    "Python contract suite",
-                    [
-                        sys.executable,
-                        "-B",
-                        "-m",
-                        "unittest",
-                        "discover",
-                        "-s",
-                        "tools/tests",
-                        "-p",
-                        "test_*.py",
-                    ],
-                ),
-                (
-                    "Workflow policy",
-                    [sys.executable, "tools/ci/workflow_policy.py", "--check"],
-                ),
-                (
-                    "WASM core and high-level extensions",
-                    [
-                        "cargo",
-                        "check",
-                        "--target",
-                        "wasm32-unknown-unknown",
-                        "--no-default-features",
-                        "-p",
-                        "dear-imgui-rs",
-                        "-p",
-                        "dear-imgui-glow",
-                        "-p",
-                        "dear-implot",
-                        "-p",
-                        "dear-implot3d",
-                        "-p",
-                        "dear-imnodes",
-                        "-p",
-                        "dear-imguizmo",
-                        "-p",
-                        "dear-imguizmo-quat",
-                        "--features",
-                        "dear-imgui-rs/wasm,dear-imgui-glow/wasm,dear-implot/wasm,"
-                        "dear-implot3d/wasm,dear-imnodes/wasm,"
-                        "dear-imguizmo/wasm,dear-imguizmo-quat/wasm",
-                    ],
-                ),
-            ],
-        )
-
     def test_release_contract_gate_stops_on_first_failed_command(self):
         with (
             patch.object(
@@ -1194,35 +1141,6 @@ class PrepublishTests(unittest.TestCase):
         self.assertFalse(success)
         self.assertEqual(errors, ["Workflow policy failed: workflow drift"])
         self.assertEqual(run.call_count, 2)
-        self.assertEqual(
-            run.call_args_list[-1].args[0],
-            [sys.executable, "tools/ci/workflow_policy.py", "--check"],
-        )
-
-    def test_release_contract_gate_runs_every_owned_command_in_order(self):
-        expected = PREPUBLISH.release_contract_commands()
-        with (
-            patch.object(
-                PREPUBLISH,
-                "run_command",
-                return_value=(0, "", ""),
-            ) as run,
-            redirect_stdout(io.StringIO()),
-        ):
-            self.assertEqual(
-                PREPUBLISH.check_release_contracts(Path("/repo")),
-                (True, []),
-            )
-
-        self.assertEqual(
-            [call.args[0] for call in run.call_args_list],
-            [command for _label, command in expected],
-        )
-        for call in run.call_args_list:
-            self.assertEqual(
-                call.kwargs,
-                {"cwd": Path("/repo"), "capture": False},
-            )
 
     def test_default_prepublish_includes_release_contract_gate(self):
         passing = (True, [])

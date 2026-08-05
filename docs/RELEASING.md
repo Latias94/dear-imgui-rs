@@ -174,9 +174,13 @@ gh workflow run release.yml --ref main -f tag=v0.16.0-alpha.2
 
 `release.yml` binds the tag, workspace version, `main` ref, and exact candidate;
 requires a successful `main` push CI run for that SHA; builds and consumes all
-five prebuilt targets; publishes the complete 27-package train with crates.io
-Trusted Publishing; verifies every exact version; then creates the checksummed
-GitHub Release. See [PUBLISHING.md](./PUBLISHING.md) for setup and recovery.
+five prebuilt targets; atomically creates or verifies the candidate tag inside
+the protected environment before the first upload; publishes the complete
+27-package train with crates.io Trusted Publishing; verifies every exact
+version; then validates asset names and SHA-256 digests before completing the
+checksummed GitHub Release. A rerun accepts only an identical existing asset
+subset and never overwrites a differing same-name asset. See
+[PUBLISHING.md](./PUBLISHING.md) for setup and recovery.
 
 ## Pre-release checklist
 

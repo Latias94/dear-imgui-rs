@@ -10,7 +10,7 @@ The release workflow uses crates.io Trusted Publishing. It does not store a crat
 2. Require maintainer approval for that environment and restrict deployments to `main`.
 3. For each of the 27 crates on crates.io, add the same GitHub Trusted Publisher configuration: repository owner `Latias94`, repository `dear-imgui-rs`, workflow `release.yml`, environment `release`.
 
-The repository workflow token defaults to read-only. Only the crates.io job receives `id-token: write`, and only the final GitHub Release job receives `contents: write`.
+The repository workflow token defaults to read-only. The protected crates.io job receives `id-token: write` and `contents: write` so it can reserve the exact tag before the first upload. The final GitHub Release job receives `contents: write` to publish the verified assets.
 
 ## Prepare a candidate
 
@@ -43,15 +43,18 @@ The workflow binds the tag to the workspace version and the exact `main` commit 
 2. Builds every prebuilt profile on Linux x86_64, macOS x86_64/aarch64,
    and Windows MSVC `/MD`/`/MT`, then consumes every generated archive from an
    isolated crate.
-3. Enters the protected `release` environment and obtains a short-lived
-   crates.io OIDC token.
-4. Publishes the complete 27-crate dependency train, automatically skipping an
+3. Enters the protected `release` environment and atomically creates or
+   verifies the exact candidate tag before publishing any crate.
+4. Obtains a short-lived crates.io OIDC token and publishes the complete
+   27-crate dependency train, automatically skipping an
    exact version only when its published Cargo archive records the same clean
    candidate commit.
 5. Confirms that all 27 exact versions are available through crates.io and
    Cargo.
-6. Generates `SHA256SUMS` and creates the tag and GitHub Release for the same
-   commit with all prebuilt archives.
+6. Generates deterministic `SHA256SUMS`, validates every existing Release
+   asset by name and GitHub-computed digest, and lets the release action upload
+   only missing assets with overwrites disabled. The completed asset set is
+   verified again after publication.
 
 Pushing a tag does not trigger publication. Do not create the tag manually before this workflow; an existing tag is accepted only when it already points to the candidate commit.
 
@@ -64,9 +67,12 @@ gh run rerun RUN_ID --failed
 ```
 
 Starting a new release workflow run is also safe, but it reruns the five-target
-prebuilt matrix. Never bump the version merely because one attempt stopped
-after publishing only part of the train; first resume the same version and
-complete it.
+prebuilt matrix. An existing Release may contain an identical subset of the
+expected assets; the workflow validates their SHA-256 digests, skips those
+names, and uploads only missing files. Any unexpected asset or same-name digest
+mismatch fails closed and is never overwritten. Never bump the version merely
+because one attempt stopped after publishing only part of the train; first
+resume the same version and complete it.
 
 If a published crate is defective, finish or halt the current train deliberately, yank affected versions when appropriate, and prepare a new release version. A crates.io version can never be overwritten.
 

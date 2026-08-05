@@ -44,35 +44,10 @@ jobs:
       - name: Require successful exact-SHA CI
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: python
-        run: |
-          import json
-          import os
-          import subprocess
-          import sys
-
-          response = subprocess.run(
-              [
-                  "gh",
-                  "api",
-                  "-H",
-                  "Accept: application/vnd.github+json",
-                  (
-                      f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/"
-                      f"workflows/ci.yml/runs?branch=main&head_sha="
-                      f"{os.environ['RELEASE_CANDIDATE_SHA']}&event=push&per_page=100"
-                  ),
-              ],
-              check=True,
-              capture_output=True,
-              text=True,
-          )
-          runs = json.loads(response.stdout)["workflow_runs"]
-          if not runs:
-              sys.exit("no exact-SHA CI run found")
-          latest = max(runs, key=lambda run: (run["created_at"], run["id"]))
-          if latest["status"] != "completed" or latest["conclusion"] != "success":
-              sys.exit("latest exact-SHA CI run is not successful")
+        run: >-
+          python3 -B tools/ci/release_workflow.py require-ci
+          --repository "$GITHUB_REPOSITORY"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
 
       - name: Validate release notes
         env:
@@ -94,7 +69,7 @@ jobs:
     timeout-minutes: 120
     environment: release
     permissions:
-      contents: read
+      contents: write
       id-token: write
     steps:
       - name: Checkout exact candidate
@@ -109,6 +84,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: '1.95.0'
 
       - name: Revalidate release identity
         run: >-
@@ -116,6 +93,15 @@ jobs:
           --tag "$RELEASE_TAG_INPUT"
           --candidate-sha "$RELEASE_CANDIDATE_SHA"
           --actual-ref "$GITHUB_REF"
+
+      - name: Reserve release tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 -B tools/ci/release_workflow.py reserve-tag
+          --repository "$GITHUB_REPOSITORY"
+          --tag "$RELEASE_TAG_INPUT"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
 
       - name: Acquire short-lived crates.io token
         id: crates-io
@@ -157,6 +143,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: '1.95.0'
 
       - name: Download prebuilt packages
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -166,22 +154,9 @@ jobs:
           merge-multiple: true
 
       - name: Write package checksums
-        shell: python
-        run: |
-          import hashlib
-          import os
-          from pathlib import Path
-
-          root = Path(os.environ["RUNNER_TEMP"]) / "release-assets"
-          archives = sorted(root.glob("*.tar.gz"))
-          if not archives:
-              raise SystemExit("no prebuilt packages were downloaded")
-          lines = []
-          for path in archives:
-              with path.open("rb") as archive:
-                  digest = hashlib.file_digest(archive, "sha256").hexdigest()
-              lines.append(f"{digest}  {path.name}")
-          (root / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        run: >-
+          python3 -B tools/ci/release_workflow.py write-checksums
+          --asset-root "$RUNNER_TEMP/release-assets"
 
       - name: Revalidate release identity
         run: >-
@@ -202,50 +177,17 @@ jobs:
           --index-timeout 300
           --poll-interval 2
 
-      - name: Reject stale assets on an existing release
+      - name: Validate existing release assets
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: python
-        run: |
-          import json
-          import os
-          import sys
-          import urllib.error
-          import urllib.parse
-          import urllib.request
-          from pathlib import Path
+        run: >-
+          python3 -B tools/ci/release_workflow.py verify-assets
+          --repository "$GITHUB_REPOSITORY"
+          --tag "$RELEASE_TAG_INPUT"
+          --asset-root "$RUNNER_TEMP/release-assets"
+          --allow-absent
 
-          asset_root = Path(os.environ["RUNNER_TEMP"]) / "release-assets"
-          expected = {path.name for path in asset_root.iterdir() if path.is_file()}
-          if not expected:
-              sys.exit("the release asset set is empty")
-
-          repository = os.environ["GITHUB_REPOSITORY"]
-          tag = urllib.parse.quote(os.environ["RELEASE_TAG_INPUT"], safe="")
-          request = urllib.request.Request(
-              f"https://api.github.com/repos/{repository}/releases/tags/{tag}",
-              headers={
-                  "Accept": "application/vnd.github+json",
-                  "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
-                  "X-GitHub-Api-Version": "2022-11-28",
-              },
-          )
-          try:
-              with urllib.request.urlopen(request, timeout=30) as response:
-                  release = json.load(response)
-          except urllib.error.HTTPError as error:
-              if error.code == 404:
-                  release = None
-              else:
-                  raise
-
-          if release is not None:
-              existing = {asset["name"] for asset in release["assets"]}
-              unexpected = sorted(existing - expected)
-              if unexpected:
-                  sys.exit(f"existing release contains stale assets: {unexpected}")
-
-      - name: Create GitHub release
+      - name: Create or complete GitHub release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ inputs.tag }}
@@ -254,6 +196,16 @@ jobs:
           body_path: release-notes.md
           files: ${{ runner.temp }}/release-assets/*
           fail_on_unmatched_files: true
-          overwrite_files: true
+          overwrite_files: false
           prerelease: ${{ contains(inputs.tag, '-') }}
           make_latest: ${{ contains(inputs.tag, '-') && 'false' || 'true' }}
+
+      - name: Verify published release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 -B tools/ci/release_workflow.py verify-assets
+          --repository "$GITHUB_REPOSITORY"
+          --tag "$RELEASE_TAG_INPUT"
+          --asset-root "$RUNNER_TEMP/release-assets"
+          --require-complete
