@@ -282,6 +282,14 @@ fn trace_imgui(_frame: ImguiFrame<'_>, mut trace: ResMut<MainScheduleTrace>) {
     trace.0.push("imgui");
 }
 
+#[cfg(feature = "render")]
+fn force_input_route_epoch_mismatch(
+    routes: Res<crate::route::ImguiResolvedRoutes>,
+    mut input_metrics: ResMut<crate::input::ImguiContextInputMetrics>,
+) {
+    input_metrics.set_epoch_for_test(routes.epoch().wrapping_add(1));
+}
+
 #[test]
 fn private_context_pass_does_not_collide_with_update() {
     let _guard = imgui_context_guard();
@@ -472,6 +480,52 @@ fn driver_defaults_after_pre_update_and_supports_an_explicit_main_schedule_ancho
     assert_eq!(
         anchored_app.world().resource::<MainScheduleTrace>().0,
         ["update", "imgui"]
+    );
+}
+
+#[cfg(feature = "render")]
+#[test]
+fn driver_fails_the_complete_frame_closed_when_input_and_render_epochs_differ() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+    let additional_pass = app.declare_imgui_pass::<ContextPassA>();
+    app.init_resource::<LifecycleTrace>()
+        .add_plugins(ImguiPlugin::default())
+        .add_systems(
+            PreUpdate,
+            force_input_route_epoch_mismatch.after(crate::input::ImguiInputSystems),
+        );
+    let primary_pass = app.imgui_primary_pass();
+    app.add_imgui_systems(
+        &primary_pass,
+        primary_pass.system(record_ui::<ImguiPrimaryPass>),
+    );
+    app.add_imgui_systems(
+        &additional_pass,
+        additional_pass.system(record_ui::<ContextPassA>),
+    );
+
+    let (primary, additional) = {
+        let mut contexts = app.world_mut().non_send_mut::<ImguiContexts>();
+        let primary = contexts.primary_id().unwrap();
+        let additional = contexts
+            .create(ImguiContextConfig::new(&additional_pass))
+            .unwrap();
+        (primary, additional)
+    };
+
+    app.update();
+
+    let contexts = app.world().non_send_resource::<ImguiContexts>();
+    assert_eq!(contexts.frame_index(primary).unwrap(), 0);
+    assert_eq!(contexts.frame_index(additional).unwrap(), 0);
+    assert!(app.world().resource::<LifecycleTrace>().visits.is_empty());
+    assert_eq!(
+        app.world()
+            .resource::<crate::context::ImguiFrameMailbox>()
+            .len(),
+        0,
+        "an epoch mismatch must not publish a partial Context frame"
     );
 }
 

@@ -992,7 +992,7 @@ fn routed_window_input_system(
         crate::viewport::native_window::release_pointer_capture();
     }
     capture.finish_routes();
-    input_metrics.replace(context_metrics);
+    input_metrics.replace(resolved_routes.epoch(), context_metrics);
 }
 
 #[cfg(feature = "render")]

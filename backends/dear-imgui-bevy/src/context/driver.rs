@@ -57,6 +57,20 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
         .get_non_send::<ImguiContexts>()
         .map(ImguiContexts::drive_order)
         .unwrap_or_default();
+    #[cfg(feature = "render")]
+    let routed_input_metrics = world
+        .get_resource::<ImguiContextInputMetrics>()
+        .cloned()
+        .unwrap_or_default();
+    #[cfg(feature = "render")]
+    let render_route_epoch = world
+        .get_resource::<crate::route::ImguiResolvedRoutes>()
+        .map(crate::route::ImguiResolvedRoutes::render_epoch)
+        .unwrap_or_default();
+    #[cfg(feature = "render")]
+    if routed_input_metrics.epoch() != render_route_epoch.epoch() {
+        return;
+    }
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     {
         let native_viewport_contexts = world
@@ -72,16 +86,6 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
         .and_then(ImguiContexts::primary_id);
     let delta_time = frame_delta_time(world);
     let primary_metrics = primary_frame_metrics(world);
-    #[cfg(feature = "render")]
-    let routed_input_metrics = world
-        .get_resource::<ImguiContextInputMetrics>()
-        .cloned()
-        .unwrap_or_default();
-    #[cfg(feature = "render")]
-    let render_route_epoch = world
-        .get_resource::<crate::route::ImguiResolvedRoutes>()
-        .map(crate::route::ImguiResolvedRoutes::render_epoch)
-        .unwrap_or_default();
     #[cfg(feature = "render")]
     let (routed_render_metrics, routed_platform_hosts) = {
         let metrics = render_route_epoch

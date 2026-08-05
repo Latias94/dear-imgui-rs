@@ -21,16 +21,32 @@ pub(crate) struct ImguiInputFrameMetrics {
 
 #[derive(Resource, Clone, Debug, Default)]
 pub(crate) struct ImguiContextInputMetrics {
+    /// Resolver epoch whose input routes produced `contexts`.
+    epoch: u64,
     contexts: HashMap<ContextId, ImguiInputFrameMetrics>,
 }
 
 impl ImguiContextInputMetrics {
+    pub(crate) const fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
     pub(crate) fn get(&self, context_id: ContextId) -> Option<ImguiInputFrameMetrics> {
         self.contexts.get(&context_id).copied()
     }
 
-    pub(super) fn replace(&mut self, contexts: HashMap<ContextId, ImguiInputFrameMetrics>) {
+    pub(super) fn replace(
+        &mut self,
+        epoch: u64,
+        contexts: HashMap<ContextId, ImguiInputFrameMetrics>,
+    ) {
+        self.epoch = epoch;
         self.contexts = contexts;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_epoch_for_test(&mut self, epoch: u64) {
+        self.epoch = epoch;
     }
 }
 

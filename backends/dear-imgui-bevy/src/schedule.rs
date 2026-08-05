@@ -1,4 +1,4 @@
-use bevy_app::{App, MainScheduleOrder, PreUpdate};
+use bevy_app::{App, MainScheduleOrder, PostUpdate, PreUpdate};
 use bevy_ecs::{
     prelude::{IntoScheduleConfigs, SystemSet},
     schedule::{InternedScheduleLabel, ScheduleLabel},
@@ -8,7 +8,8 @@ use bevy_ecs::{
 ///
 /// The default is [`ImguiDriverSchedulePlacement::After`] [`PreUpdate`]. Bevy input is therefore
 /// mapped before Dear ImGui opens its frame, and gameplay systems in `Update` can observe the
-/// current UI output and capture state.
+/// current UI output and capture state. Custom placements must remain after `PreUpdate` completes
+/// and before `PostUpdate` begins so input mapping and route publication cannot straddle a frame.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ImguiDriverSchedulePlacement {
     /// Run the Dear ImGui driver immediately before the anchor schedule.
@@ -87,7 +88,43 @@ pub(crate) fn install_imgui_schedules(app: &mut App, placement: ImguiDriverSched
         .unwrap_or_else(|| {
             panic!("Dear ImGui driver anchor {anchor:?} is not in MainScheduleOrder")
         });
-    order
+    let insertion_index = anchor_index + usize::from(after_anchor);
+    let pre_update_index = order
         .labels
-        .insert(anchor_index + usize::from(after_anchor), driver);
+        .iter()
+        .position(|label| *label == PreUpdate.intern())
+        .expect("PreUpdate must be present in MainScheduleOrder");
+    let post_update_index = order
+        .labels
+        .iter()
+        .position(|label| *label == PostUpdate.intern())
+        .expect("PostUpdate must be present in MainScheduleOrder");
+    assert!(
+        insertion_index > pre_update_index && insertion_index <= post_update_index,
+        "Dear ImGui driver must run after PreUpdate completes and before PostUpdate begins"
+    );
+    order.labels.insert(insertion_index, driver);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic(
+        expected = "Dear ImGui driver must run after PreUpdate completes and before PostUpdate begins"
+    )]
+    fn driver_rejects_placement_before_pre_update() {
+        let mut app = App::new();
+        install_imgui_schedules(&mut app, ImguiDriverSchedulePlacement::before(PreUpdate));
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Dear ImGui driver must run after PreUpdate completes and before PostUpdate begins"
+    )]
+    fn driver_rejects_placement_after_post_update() {
+        let mut app = App::new();
+        install_imgui_schedules(&mut app, ImguiDriverSchedulePlacement::after(PostUpdate));
+    }
 }
