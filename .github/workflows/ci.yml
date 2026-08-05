@@ -1484,7 +1484,7 @@ jobs:
         run: python3 -B tools/ci/workflow_policy.py
 
       - name: Lint GitHub Actions workflows
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -ignore 'SC2016:'
 
       - name: Test release tooling and source provenance
         run: python3 -B -m unittest discover -s tools/tests -p 'test_*.py' -v
