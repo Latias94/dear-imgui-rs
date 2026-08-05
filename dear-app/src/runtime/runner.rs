@@ -14,8 +14,8 @@ use winit::{
 
 use super::{
     admission::{
-        SurfaceAcquisition, SurfaceAdmissionBackend, admit_surface_frame, dispatch_surface_frame,
-        settle_surface_presentation,
+        SurfaceAcquisition, SurfaceAdmissionBackend, SurfaceDispatch, SurfaceRedrawRetry,
+        admit_surface_frame, dispatch_surface_frame, settle_surface_presentation,
     },
     lifecycle::{LifecycleAction, SurfaceEvent},
     recovery::{
@@ -529,7 +529,7 @@ impl Runtime {
         &mut self,
         application: &mut A,
         config: &AppConfig,
-    ) -> Result<bool, RunError> {
+    ) -> Result<SurfaceDispatch<bool>, RunError> {
         let clear_color = self.clear_color;
         let admitted = {
             let RuntimeOwnership {
@@ -638,7 +638,7 @@ impl Runtime {
                 Ok(exit_requested)
             },
         )?;
-        Ok(dispatch.unwrap_or(false))
+        Ok(dispatch)
     }
 
     fn recover<A: Application>(
@@ -827,6 +827,7 @@ struct Runner<A> {
     shutdown: ShutdownCoordinator,
     event_proxy: EventLoopProxy<RuntimeEvent>,
     last_wake: Instant,
+    surface_redraw_retry: SurfaceRedrawRetry,
 }
 
 /// Keeps renderer-side registrations alive no longer than their application-owned resources.
@@ -846,6 +847,7 @@ impl<A: Application> Runner<A> {
             shutdown: ShutdownCoordinator::default(),
             event_proxy,
             last_wake: Instant::now(),
+            surface_redraw_retry: SurfaceRedrawRetry::default(),
         }
     }
 
@@ -1164,8 +1166,21 @@ impl<A: Application + 'static> ApplicationHandler<RuntimeEvent> for Runner<A> {
         if matches!(event, WindowEvent::RedrawRequested) {
             let render_result = runtime.render(&mut self.ownership.application, &self.config);
             match render_result {
-                Ok(true) => self.exit_normally(event_loop),
-                Ok(false) => {
+                Ok(SurfaceDispatch::Presented(true)) => self.exit_normally(event_loop),
+                Ok(SurfaceDispatch::Presented(false)) => {
+                    self.surface_redraw_retry.reset();
+                    if matches!(self.config.redraw, RedrawMode::Poll)
+                        && let Some(runtime) = self.ownership.runtime.as_ref()
+                    {
+                        runtime.window().window.request_redraw();
+                    }
+                }
+                Ok(SurfaceDispatch::Skipped(reason)) => {
+                    if reason.should_retry() {
+                        self.surface_redraw_retry.schedule(Instant::now());
+                    } else {
+                        self.surface_redraw_retry.reset();
+                    }
                     if matches!(self.config.redraw, RedrawMode::Poll)
                         && let Some(runtime) = self.ownership.runtime.as_ref()
                     {
@@ -1178,6 +1193,8 @@ impl<A: Application + 'static> ApplicationHandler<RuntimeEvent> for Runner<A> {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let now = Instant::now();
+        let retry_due = self.surface_redraw_retry.take_due(now);
         match self.config.redraw {
             RedrawMode::Poll => {
                 event_loop.set_control_flow(ControlFlow::Poll);
@@ -1185,17 +1202,30 @@ impl<A: Application + 'static> ApplicationHandler<RuntimeEvent> for Runner<A> {
                     runtime.window().window.request_redraw();
                 }
             }
-            RedrawMode::Wait => event_loop.set_control_flow(ControlFlow::Wait),
+            RedrawMode::Wait => {
+                if retry_due && let Some(runtime) = self.ownership.runtime.as_ref() {
+                    runtime.window().window.request_redraw();
+                }
+                match self.surface_redraw_retry.deadline() {
+                    Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
+                    None => event_loop.set_control_flow(ControlFlow::Wait),
+                }
+            }
             RedrawMode::WaitUntil { fps } => {
                 let frame = frame_duration(fps);
-                let now = Instant::now();
                 let mut next_wake = self.last_wake + frame;
-                if now >= next_wake {
+                let periodic_due = now >= next_wake;
+                if periodic_due {
                     self.last_wake = now;
                     next_wake = now + frame;
-                    if let Some(runtime) = self.ownership.runtime.as_ref() {
-                        runtime.window().window.request_redraw();
-                    }
+                }
+                if (periodic_due || retry_due)
+                    && let Some(runtime) = self.ownership.runtime.as_ref()
+                {
+                    runtime.window().window.request_redraw();
+                }
+                if let Some(retry_deadline) = self.surface_redraw_retry.deadline() {
+                    next_wake = next_wake.min(retry_deadline);
                 }
                 event_loop.set_control_flow(ControlFlow::WaitUntil(next_wake));
             }

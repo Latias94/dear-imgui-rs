@@ -1,7 +1,11 @@
+use std::time::{Duration, Instant};
+
 use super::lifecycle::{LifecycleAction, SurfaceEvent};
 use crate::RunError;
 
 const RECOVERY_RETRY_BUDGET: usize = 1;
+const INITIAL_REDRAW_RETRY_DELAY: Duration = Duration::from_millis(16);
+const MAX_REDRAW_RETRY_DELAY: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SurfaceAcquisition<Frame> {
@@ -35,6 +39,52 @@ pub(crate) enum SurfaceSkipReason {
 pub(crate) enum SurfaceAdmission<Frame> {
     Admitted(AdmittedSurfaceFrame<Frame>),
     Skipped(SurfaceSkipReason),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SurfaceDispatch<Output> {
+    Presented(Output),
+    Skipped(SurfaceSkipReason),
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct SurfaceRedrawRetry {
+    deadline: Option<Instant>,
+    delay: Option<Duration>,
+}
+
+impl SurfaceSkipReason {
+    pub(crate) const fn should_retry(self) -> bool {
+        matches!(self, Self::Timeout | Self::RecoveryRetryExhausted(_))
+    }
+}
+
+impl SurfaceRedrawRetry {
+    pub(crate) fn schedule(&mut self, now: Instant) {
+        let delay = self.delay.map_or(INITIAL_REDRAW_RETRY_DELAY, |delay| {
+            delay.saturating_mul(2).min(MAX_REDRAW_RETRY_DELAY)
+        });
+        self.delay = Some(delay);
+        self.deadline = Some(now + delay);
+    }
+
+    pub(crate) fn deadline(&self) -> Option<Instant> {
+        self.deadline
+    }
+
+    pub(crate) fn take_due(&mut self, now: Instant) -> bool {
+        if self.deadline.is_some_and(|deadline| deadline <= now) {
+            self.deadline = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.deadline = None;
+        self.delay = None;
+    }
 }
 
 pub(crate) trait SurfaceAdmissionBackend {
@@ -112,10 +162,10 @@ pub(crate) fn dispatch_surface_frame<Frame, Output>(
     admission: SurfaceAdmission<Frame>,
     admitted_frame_count: &mut u64,
     drive: impl FnOnce(AdmittedSurfaceFrame<Frame>, u64) -> Result<Output, RunError>,
-) -> Result<Option<Output>, RunError> {
+) -> Result<SurfaceDispatch<Output>, RunError> {
     let admitted = match admission {
         SurfaceAdmission::Admitted(admitted) => admitted,
-        SurfaceAdmission::Skipped(_) => return Ok(None),
+        SurfaceAdmission::Skipped(reason) => return Ok(SurfaceDispatch::Skipped(reason)),
     };
     let frame_index = admitted_frame_count
         .checked_add(1)
@@ -123,7 +173,7 @@ pub(crate) fn dispatch_surface_frame<Frame, Output>(
             message: "admitted frame counter exhausted".to_owned(),
         })?;
     *admitted_frame_count = frame_index;
-    drive(admitted, frame_index).map(Some)
+    drive(admitted, frame_index).map(SurfaceDispatch::Presented)
 }
 
 pub(crate) fn settle_surface_presentation<Output>(
@@ -175,8 +225,8 @@ mod tests {
 
     use super::{
         AdmittedSurfaceFrame, SurfaceAcquisition, SurfaceAdmission, SurfaceAdmissionBackend,
-        SurfaceSkipReason, admit_surface_frame, dispatch_surface_frame,
-        settle_surface_presentation,
+        SurfaceDispatch, SurfaceRedrawRetry, SurfaceSkipReason, admit_surface_frame,
+        dispatch_surface_frame, settle_surface_presentation,
     };
     use crate::RunError;
     use crate::runtime::lifecycle::{LifecycleAction, LifecycleMachine, SurfaceEvent};
@@ -342,7 +392,7 @@ mod tests {
                 },
             )
             .expect("skip dispatch");
-            assert_eq!(dispatch, None);
+            assert_eq!(dispatch, SurfaceDispatch::Skipped(reason));
             assert!(!invoked, "skipped surface entered per-frame work");
             assert_eq!(admitted_frame_count, 17);
         }
@@ -364,7 +414,7 @@ mod tests {
                 Ok(index)
             })
             .expect("admitted dispatch");
-        assert_eq!(dispatch, Some(5));
+        assert_eq!(dispatch, SurfaceDispatch::Presented(5));
         assert_eq!(admitted_frame_count, 5);
         assert_eq!(
             backend.events,
@@ -428,5 +478,51 @@ mod tests {
         let settled = settle_surface_presentation(Ok(7), true, false, || reconfigures += 1);
         assert_eq!(settled.unwrap(), 7);
         assert_eq!(reconfigures, 0);
+    }
+
+    #[test]
+    fn redraw_retry_only_schedules_transient_surface_failures() {
+        assert!(SurfaceSkipReason::Timeout.should_retry());
+        assert!(SurfaceSkipReason::RecoveryRetryExhausted(SurfaceEvent::Lost).should_retry());
+        assert!(!SurfaceSkipReason::Occluded.should_retry());
+    }
+
+    #[test]
+    fn redraw_retry_uses_bounded_exponential_backoff_and_resets_after_success() {
+        let origin = std::time::Instant::now();
+        let mut retry = SurfaceRedrawRetry::default();
+
+        retry.schedule(origin);
+        assert_eq!(
+            retry.deadline(),
+            Some(origin + std::time::Duration::from_millis(16))
+        );
+        assert!(!retry.take_due(origin + std::time::Duration::from_millis(15)));
+        assert!(retry.take_due(origin + std::time::Duration::from_millis(16)));
+        assert_eq!(retry.deadline(), None);
+
+        retry.schedule(origin + std::time::Duration::from_millis(16));
+        assert_eq!(
+            retry.deadline(),
+            Some(origin + std::time::Duration::from_millis(48))
+        );
+
+        for step in 0..8 {
+            retry.schedule(origin + std::time::Duration::from_secs(step));
+        }
+        assert_eq!(
+            retry.deadline(),
+            Some(
+                origin + std::time::Duration::from_secs(7) + std::time::Duration::from_millis(250)
+            )
+        );
+
+        retry.reset();
+        assert_eq!(retry.deadline(), None);
+        retry.schedule(origin);
+        assert_eq!(
+            retry.deadline(),
+            Some(origin + std::time::Duration::from_millis(16))
+        );
     }
 }
