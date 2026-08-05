@@ -516,7 +516,7 @@ fn driver_fails_the_complete_frame_closed_when_input_and_render_epochs_differ() 
 
     app.update();
 
-    let contexts = app.world().non_send_resource::<ImguiContexts>();
+    let contexts = app.world().non_send::<ImguiContexts>();
     assert_eq!(contexts.frame_index(primary).unwrap(), 0);
     assert_eq!(contexts.frame_index(additional).unwrap(), 0);
     assert!(app.world().resource::<LifecycleTrace>().visits.is_empty());
