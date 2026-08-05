@@ -1,8 +1,13 @@
 mod admission;
 mod lifecycle;
+mod ownership;
 mod recovery;
 mod runner;
+#[cfg(test)]
+mod runner_tests;
+mod shutdown;
 mod state;
+mod surface;
 
 pub(crate) use runner::run;
 
