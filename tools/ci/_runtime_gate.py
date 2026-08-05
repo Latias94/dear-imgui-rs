@@ -26,7 +26,7 @@ from _verification import parse_candidate_sha, write_json
 
 
 class GateCategory(str, Enum):
-    """Stable classifications consumed by release aggregation."""
+    """Stable classifications reported by native runtime gates."""
 
     PASSED = "Passed"
     TEST_TIMED_OUT = "TestTimedOut"

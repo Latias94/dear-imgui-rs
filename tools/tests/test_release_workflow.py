@@ -333,14 +333,13 @@ class MetadataTests(unittest.TestCase):
 
 
 class CurrentReleaseTrainTests(unittest.TestCase):
-    def test_alpha_release_train_uses_exact_catalog_requirements(self):
+    def test_release_train_uses_exact_catalog_requirements(self):
         workspace = tomllib.loads(
             REPO_ROOT.joinpath("Cargo.toml").read_text(encoding="utf-8")
         )
         version = workspace["workspace"]["package"]["version"]
         catalog = workspace["workspace"]["dependencies"]
 
-        self.assertEqual(version, "0.16.0-alpha.2")
         self.assertEqual(
             {
                 dependency["version"]
@@ -354,7 +353,11 @@ class CurrentReleaseTrainTests(unittest.TestCase):
         self.assertEqual(metadata.release_version, version)
         self.assertEqual(release_metadata.validate_release_workspace(metadata), [])
 
-    def test_standalone_mobile_locks_use_the_alpha_path_packages(self):
+    def test_standalone_mobile_locks_use_workspace_path_package_versions(self):
+        workspace = tomllib.loads(
+            REPO_ROOT.joinpath("Cargo.toml").read_text(encoding="utf-8")
+        )
+        version = workspace["workspace"]["package"]["version"]
         lockfiles = (
             "examples-android/dear-imgui-android-smoke/Cargo.lock",
             "examples-ios/dear-imgui-ios-smoke/Cargo.lock",
@@ -374,7 +377,7 @@ class CurrentReleaseTrainTests(unittest.TestCase):
                 self.assertTrue(path_packages)
                 self.assertEqual(
                     {package["version"] for package in path_packages},
-                    {"0.16.0-alpha.2"},
+                    {version},
                 )
 
 

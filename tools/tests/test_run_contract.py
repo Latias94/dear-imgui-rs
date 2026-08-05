@@ -311,8 +311,14 @@ class ContractRunnerTests(unittest.TestCase):
                 )
 
             outputs = github_output.read_text(encoding="utf-8")
-            self.assertIn("retry_eligible=true\n", outputs)
-            self.assertIn("gate_category=ProductFailure\n", outputs)
+            self.assertEqual(
+                outputs.splitlines(),
+                [
+                    "retry_eligible=true",
+                    "retry_eligible=false",
+                    "retry_eligible=false",
+                ],
+            )
 
     def test_runtime_preparation_failure_is_structured_and_retryable_once(self):
         with TemporaryDirectory() as temporary:

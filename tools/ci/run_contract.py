@@ -471,10 +471,7 @@ def _runtime_exit_code(result: GateResult, *, defer_infrastructure_retry: bool) 
     github_output = os.environ.get("GITHUB_OUTPUT")
     if github_output:
         with Path(github_output).open("a", encoding="utf-8", newline="\n") as output:
-            output.write(f"gate_success={str(result.success).lower()}\n")
-            output.write(f"gate_category={result.category.value}\n")
             output.write(f"retry_eligible={str(result.retry_eligible).lower()}\n")
-            output.write(f"gate_attempt={result.attempt}\n")
     if result.success or (defer_infrastructure_retry and result.retry_eligible):
         return 0
     print(

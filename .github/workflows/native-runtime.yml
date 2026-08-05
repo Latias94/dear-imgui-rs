@@ -17,9 +17,6 @@ on:
       retry_eligible:
         description: Whether one fresh-runner infrastructure retry is allowed
         value: ${{ jobs.runtime.outputs.retry_eligible }}
-      gate_success:
-        description: Whether the runtime gate passed
-        value: ${{ jobs.runtime.outputs.gate_success }}
 
 permissions:
   contents: read
@@ -35,7 +32,6 @@ jobs:
     timeout-minutes: 30
     outputs:
       retry_eligible: ${{ steps.gate.outputs.retry_eligible || steps.preparation.outputs.retry_eligible || (inputs.gate_attempt == 1 && 'true') || 'false' }}
-      gate_success: ${{ steps.gate.outputs.gate_success || steps.preparation.outputs.gate_success || 'false' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
