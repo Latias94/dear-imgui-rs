@@ -1072,7 +1072,7 @@ fn runner_rejects_wrong_or_open_context_and_restores_nested_current_context() {
     let foreign = Context::create();
     let foreign_binding = foreign.binding();
     let foreign_raw = foreign.as_raw();
-    let foreign_suspended = foreign.suspend();
+    let foreign_suspended = foreign.suspend_or_panic();
 
     let mut owner_context = context();
     let owner_raw = owner_context.as_raw();
@@ -1120,7 +1120,7 @@ fn runner_rejects_wrong_or_open_context_and_restores_nested_current_context() {
 
     let mut attached_context = context();
     let mut mismatch_engine = attached_engine(&mut attached_context);
-    let suspended_attached = attached_context.suspend();
+    let suspended_attached = attached_context.suspend_or_panic();
     let mut wrong_context = context();
     let mismatch = TestRunner::new(&mut mismatch_engine)
         .run_headless(&mut wrong_context, no_error)

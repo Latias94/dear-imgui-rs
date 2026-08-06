@@ -544,7 +544,7 @@ mod tests {
             .expect("the custom rectangle should fit");
         assert!(ctx_a.font_atlas().remove_custom_rect(id));
         assert!(!ctx_a.font_atlas().remove_custom_rect(id));
-        let suspended_a = ctx_a.suspend();
+        let suspended_a = ctx_a.suspend_or_panic();
 
         let ctx_b = crate::Context::create();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

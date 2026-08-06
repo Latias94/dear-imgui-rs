@@ -150,8 +150,10 @@ impl crate::ui::Ui {
             let scoped_storage = unsafe { StateStorage::from_raw(replacement) };
             let previous = unsafe { sys::igGetStateStorage() };
             unsafe { sys::igSetStateStorage(replacement) };
-            let _override = StateStorageOverride { previous };
-            f(scoped_storage)
+            let storage_override = StateStorageOverride { previous };
+            let result = f(scoped_storage);
+            drop(storage_override);
+            result
         })
     }
 

@@ -896,7 +896,7 @@ mod tests {
     fn foreign_and_reused_handles_fail_before_native_access() {
         let mut context_a = Context::create();
         let first_id = context_a.register_texture(texture());
-        let suspended_a = context_a.suspend();
+        let suspended_a = context_a.suspend_or_panic();
         let context_b = Context::create();
         assert!(matches!(
             context_b.with_texture(first_id, |_| ()),

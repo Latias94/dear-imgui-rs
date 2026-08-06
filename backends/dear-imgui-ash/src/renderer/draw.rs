@@ -805,7 +805,7 @@ mod tests {
 
         let mut owner = Context::create();
         let mut renderer = renderer_for_test(&mut owner);
-        let owner = owner.suspend();
+        let owner = owner.suspend_or_panic();
 
         let mut foreign = Context::create();
         foreign.prepare_frame(

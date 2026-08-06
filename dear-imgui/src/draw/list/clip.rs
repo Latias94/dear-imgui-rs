@@ -1,5 +1,4 @@
 use crate::sys;
-use std::marker::PhantomData;
 
 use super::super::util::finite_vec2;
 use super::DrawListMut;
@@ -7,33 +6,52 @@ use super::DrawListMut;
 /// Tracks a clip rectangle pushed onto a draw-list clip stack.
 ///
 /// The clip rectangle is popped when the token is dropped or when [`Self::pop`]
-/// is called.
+/// is called. Tokens for the same draw list must finish in reverse creation order. A token from a
+/// window draw list must also finish in the exact window `Begin` scope that created the draw-list
+/// view. Prefer [`DrawListMut::with_clip_rect`] for ordinary scoped use.
 #[must_use]
 pub struct DrawListClipRectToken<'draw_list> {
-    draw_list: *mut sys::ImDrawList,
-    _phantom: PhantomData<&'draw_list ()>,
+    scope: crate::scope::NativeScopeToken<'draw_list>,
 }
 
 impl<'draw_list> DrawListClipRectToken<'draw_list> {
-    fn new(draw_list: *mut sys::ImDrawList) -> Self {
+    fn new(
+        ui: &'draw_list crate::Ui,
+        draw_list: *mut sys::ImDrawList,
+        window_scoped: bool,
+    ) -> Self {
         Self {
-            draw_list,
-            _phantom: PhantomData,
+            scope: ui.begin_native_scope(
+                crate::scope::NativeScopePop::DrawListPopClipRect {
+                    draw_list,
+                    window_scoped,
+                },
+                "DrawListClipRectToken",
+            ),
         }
     }
 
     /// Pop the clip rectangle immediately instead of waiting for drop.
+    ///
+    /// # Panics
+    ///
+    /// Panics before FFI if a later clip token for the same draw list is active or a window-scoped
+    /// draw list is no longer in its originating window `Begin` scope.
     #[doc(alias = "PopClipRect")]
     pub fn pop(self) {}
 
     /// Pop the clip rectangle immediately instead of waiting for drop.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the same conditions as [`Self::pop`].
     #[doc(alias = "PopClipRect")]
     pub fn end(self) {}
 }
 
 impl Drop for DrawListClipRectToken<'_> {
     fn drop(&mut self) {
-        unsafe { sys::ImDrawList_PopClipRect(self.draw_list) }
+        self.scope.finish();
     }
 }
 
@@ -57,22 +75,26 @@ impl<'ui> DrawListMut<'ui> {
             clip_rect_max,
         );
 
-        unsafe {
+        self.assert_scope("DrawListMut::push_clip_rect()");
+        self.ui().run_with_bound_context(|| unsafe {
             sys::ImDrawList_PushClipRect(
                 self.draw_list,
                 clip_rect_min,
                 clip_rect_max,
                 intersect_with_current,
             )
-        };
-        DrawListClipRectToken::new(self.draw_list)
+        });
+        DrawListClipRectToken::new(self.ui(), self.draw_list, self.is_window_scoped())
     }
 
     /// Push a full-screen clip rectangle.
     #[doc(alias = "PushClipRectFullScreen")]
     pub fn push_clip_rect_full_screen(&self) -> DrawListClipRectToken<'_> {
-        unsafe { sys::ImDrawList_PushClipRectFullScreen(self.draw_list) };
-        DrawListClipRectToken::new(self.draw_list)
+        self.assert_scope("DrawListMut::push_clip_rect_full_screen()");
+        self.ui().run_with_bound_context(|| unsafe {
+            sys::ImDrawList_PushClipRectFullScreen(self.draw_list)
+        });
+        DrawListClipRectToken::new(self.ui(), self.draw_list, self.is_window_scoped())
     }
 
     /// Get current minimum clip rectangle point.
@@ -97,7 +119,9 @@ impl<'ui> DrawListMut<'ui> {
     where
         F: FnOnce() -> R,
     {
-        let _clip_rect = self.push_clip_rect(clip_rect_min, clip_rect_max, false);
-        f()
+        let clip_rect = self.push_clip_rect(clip_rect_min, clip_rect_max, false);
+        let result = f();
+        drop(clip_rect);
+        result
     }
 }

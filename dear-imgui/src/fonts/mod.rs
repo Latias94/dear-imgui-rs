@@ -78,8 +78,10 @@ impl Ui {
     where
         F: FnOnce() -> R,
     {
-        let _token = self.push_font_with_size(font, size);
-        f()
+        let token = self.push_font_with_size(font, size);
+        let result = f();
+        drop(token);
+        result
     }
 
     /// Returns the UV coordinate for a white pixel.

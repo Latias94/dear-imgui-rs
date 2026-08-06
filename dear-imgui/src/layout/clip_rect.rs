@@ -1,14 +1,32 @@
 use super::validation::assert_finite_vec2;
 use crate::Ui;
+use crate::scope::{NativeScopePop, NativeScopeToken};
 use crate::sys;
 
-create_token!(
-    /// Tracks a pushed clip rect that will be popped on drop.
-    pub struct ClipRectToken<'ui>;
+/// Tracks a pushed clip rect that will be popped on drop.
+///
+/// Tokens for the same draw list must be ended in LIFO order. Prefer
+/// [`Ui::with_clip_rect`] for ordinary scoped use.
+#[must_use]
+pub struct ClipRectToken<'ui> {
+    scope: NativeScopeToken<'ui>,
+}
 
+impl ClipRectToken<'_> {
     /// Pops a clip rect pushed with [`Ui::push_clip_rect`].
-    drop { unsafe { sys::igPopClipRect() } }
-);
+    ///
+    /// # Panics
+    ///
+    /// Panics before FFI if a later UI clip token for the same draw list is active or the token is
+    /// no longer in its originating window `Begin` scope.
+    pub fn end(self) {}
+}
+
+impl Drop for ClipRectToken<'_> {
+    fn drop(&mut self) {
+        self.scope.finish();
+    }
+}
 
 impl Ui {
     /// Push a clipping rectangle in screen space.
@@ -31,10 +49,18 @@ impl Ui {
             x: max[0],
             y: max[1],
         };
-        self.run_with_bound_context(|| unsafe {
-            sys::igPushClipRect(min_v, max_v, intersect_with_current)
+        let draw_list = self.run_with_bound_context(|| unsafe {
+            sys::igPushClipRect(min_v, max_v, intersect_with_current);
+            sys::igGetWindowDrawList()
         });
-        ClipRectToken::new(self)
+        assert!(
+            !draw_list.is_null(),
+            "Ui::push_clip_rect() requires a current window draw list"
+        );
+        ClipRectToken {
+            scope: self
+                .begin_native_scope(NativeScopePop::PopUiClipRect(draw_list), "ClipRectToken"),
+        }
     }
 
     /// Run a closure with a clip rect pushed and automatically popped.
@@ -45,8 +71,10 @@ impl Ui {
         intersect_with_current: bool,
         f: impl FnOnce() -> R,
     ) -> R {
-        let _t = self.push_clip_rect(min, max, intersect_with_current);
-        f()
+        let token = self.push_clip_rect(min, max, intersect_with_current);
+        let result = f();
+        drop(token);
+        result
     }
 
     /// Returns true if the specified rectangle (min,max) is visible (not clipped).

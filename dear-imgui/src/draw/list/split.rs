@@ -16,6 +16,12 @@ impl<'ui> DrawListMut<'ui> {
             channels_count,
         );
 
+        let splitter = unsafe { &(*self.draw_list)._Splitter };
+        assert!(
+            splitter._Current == 0 && splitter._Count <= 1,
+            "DrawListMut::channels_split() does not support nested splits for the same draw list"
+        );
+
         unsafe { sys::ImDrawList_ChannelsSplit(self.draw_list, channels_count_i32) };
         let _merge_guard = ChannelsSplitMergeGuard { draw_list: self };
         f(&ChannelsSplit::new(self, channels_count));

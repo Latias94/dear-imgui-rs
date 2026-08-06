@@ -339,7 +339,7 @@ mod tests {
             editor_raw: Some(raw_editor_a),
             _editor_lease: Some(editor_a.inner.clone()),
         };
-        let suspended_a = imgui_a.suspend();
+        let suspended_a = imgui_a.suspend_or_panic();
 
         let mut imgui_b = ImGuiContext::create();
         prepare_imgui(&mut imgui_b);
@@ -407,7 +407,7 @@ mod tests {
         prepare_imgui(&mut imgui_a);
         let nodes_a = ImNodesContext::create(&imgui_a);
         let editor_a = nodes_a.create_editor_context();
-        let suspended_a = imgui_a.suspend();
+        let suspended_a = imgui_a.suspend_or_panic();
 
         let mut imgui_b = ImGuiContext::create();
         prepare_imgui(&mut imgui_b);
@@ -488,7 +488,7 @@ mod tests {
         let mut imgui_a = ImGuiContext::create();
         prepare_imgui(&mut imgui_a);
         let nodes = ImNodesContext::create(&imgui_a);
-        let suspended_a = imgui_a.suspend();
+        let suspended_a = imgui_a.suspend_or_panic();
 
         let mut imgui_b = ImGuiContext::create();
         prepare_imgui(&mut imgui_b);

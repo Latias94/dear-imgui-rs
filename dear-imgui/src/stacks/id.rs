@@ -55,12 +55,18 @@ create_token!(
     #[doc(alias = "PopID")]
     pub struct IdStackToken<'ui>;
 
+    pop crate::scope::NativeScopePop::PopId;
+
     /// Pops a change from the ID stack
     drop { unsafe { sys::igPopID() } }
 );
 
 impl IdStackToken<'_> {
     /// Pops a change from the ID stack.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the same conditions as [`Self::end`].
     pub fn pop(self) {
         self.end()
     }
@@ -73,6 +79,8 @@ impl IdStackToken<'_> {
 create_token!(
     /// Tracks a pushed focus scope, popped on drop.
     pub struct FocusScopeToken<'ui>;
+
+    pop crate::scope::NativeScopePop::PopFocusScope;
 
     /// Pops a focus scope.
     #[doc(alias = "PopFocusScope")]

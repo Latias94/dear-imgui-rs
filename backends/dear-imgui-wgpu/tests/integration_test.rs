@@ -477,7 +477,7 @@ fn device_objects_rebind_after_invalidation_and_shutdown() -> RendererResult<()>
     assert!(!recreated_texture_id.is_null());
     assert_ne!(recreated_texture_id, first_texture_id);
 
-    let suspended_owner = context.suspend();
+    let suspended_owner = context.suspend_or_panic();
     let mut foreign_context = Context::create();
     let foreign_flags = foreign_context.io().backend_flags();
     assert!(matches!(
@@ -524,7 +524,7 @@ fn device_objects_rebind_after_invalidation_and_shutdown() -> RendererResult<()>
     }
     assert_eq!(foreign_context.io().backend_flags(), foreign_flags);
 
-    let suspended_foreign = foreign_context.suspend();
+    let suspended_foreign = foreign_context.suspend_or_panic();
     let mut context = suspended_owner
         .activate()
         .expect("renderer owner context should reactivate");
@@ -547,7 +547,7 @@ fn device_objects_rebind_after_invalidation_and_shutdown() -> RendererResult<()>
     replacement.shutdown(&mut context)?;
     drop(replacement);
 
-    let suspended_owner = context.suspend();
+    let suspended_owner = context.suspend_or_panic();
     let mut context = suspended_foreign
         .activate()
         .expect("replacement context should activate after owner shutdown");
@@ -573,8 +573,7 @@ fn device_objects_rebind_after_invalidation_and_shutdown() -> RendererResult<()>
 }
 
 #[test]
-fn pending_frame_reconciles_managed_lifecycle_and_preserves_external_views() -> RendererResult<()>
-{
+fn pending_frame_reconciles_managed_lifecycle_and_preserves_external_views() -> RendererResult<()> {
     let Some((device, queue)) = request_test_device() else {
         eprintln!("skipping WGPU rendered-frame test because no headless adapter is available");
         return Ok(());

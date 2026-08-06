@@ -9,6 +9,7 @@ mod attachment;
 pub(crate) mod binding;
 mod clipboard;
 mod core;
+mod error;
 mod fonts;
 mod frame;
 mod platform;
@@ -30,6 +31,10 @@ pub use self::binding::{
     ContextAliveToken, ContextBinding, ContextBindingError, ContextId, ContextLifecycle,
 };
 pub use self::core::Context;
+pub use self::error::{
+    ContextActivationError, ContextActivationReason, ContextScopeError, ContextSuspensionError,
+    ContextSuspensionReason, ScopedActivationError,
+};
 pub use self::frame::{FrameLifecycleState, FramePrepareOptions, FrameResult, FrameToken};
 pub use self::snapshot_hub::RendererTextureReset;
 pub use self::suspended::SuspendedContext;

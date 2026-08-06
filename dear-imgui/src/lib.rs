@@ -381,6 +381,7 @@ mod list_clipper;
 mod numeric_format;
 pub mod platform_io;
 pub mod render;
+mod scope;
 mod state_storage;
 mod string;
 mod style;
@@ -424,8 +425,8 @@ pub use dock_layout::*;
 pub use dock_space::*;
 // Export draw-list helpers for extensions and downstream custom drawing.
 pub use draw::{
-    DrawCornerFlags, DrawListFlags, DrawListMut, DrawListTextNoPixelSnapToken,
-    DrawListTextureToken, DrawNgonSegmentCount, DrawSegmentCount, PolylineFlags, RawDrawCallback,
+    DrawCornerFlags, DrawListFlags, DrawListMut, DrawListTextureToken, DrawNgonSegmentCount,
+    DrawSegmentCount, PolylineFlags, RawDrawCallback,
 };
 pub use error::*;
 pub use ini_settings::*;

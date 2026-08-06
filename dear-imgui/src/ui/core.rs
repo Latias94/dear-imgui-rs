@@ -24,6 +24,7 @@ impl Ui {
             ctx,
             ctx_binding,
             texture_registry,
+            native_scopes: std::cell::RefCell::new(crate::scope::NativeScopeTracker::default()),
             buffer: UnsafeCell::new(UiBuffer::new(1024)),
         }
     }
@@ -43,6 +44,7 @@ impl Ui {
     }
 
     pub(crate) fn run_with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
+        self.assert_native_scopes_usable();
         self.ctx_binding.with_bound_context(f)
     }
 

@@ -54,6 +54,8 @@ create_token!(
     #[doc(alias = "PopItemWidth")]
     pub struct ItemWidthStackToken<'ui>;
 
+    pop crate::scope::NativeScopePop::PopItemWidth;
+
     /// Pops an item width change made with [`Ui::push_item_width`].
     #[doc(alias = "PopItemWidth")]
     drop { unsafe { sys::igPopItemWidth() } }
@@ -64,6 +66,8 @@ create_token!(
     /// by calling [`TextWrapPosStackToken::end`] or dropping.
     #[doc(alias = "PopTextWrapPos")]
     pub struct TextWrapPosStackToken<'ui>;
+
+    pop crate::scope::NativeScopePop::PopTextWrap;
 
     /// Pops a text wrap position change made with [`Ui::push_text_wrap_pos`].
     #[doc(alias = "PopTextWrapPos")]

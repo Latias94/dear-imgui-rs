@@ -314,7 +314,7 @@ fn font_id_from_another_atlas_is_rejected_before_push_font_ffi() {
         let fonts = ctx_a.font_atlas();
         fonts.add_font(&[FontSource::default_font()])
     };
-    let suspended_a = ctx_a.suspend();
+    let suspended_a = ctx_a.suspend_or_panic();
 
     let mut ctx_b = crate::Context::create();
     let _ = ctx_b.font_atlas().build();
@@ -674,7 +674,7 @@ fn shared_atlas_updates_once_per_context_frame_and_has_one_owner() {
     let _ = ctx_a.render_legacy();
     assert_eq!(unsafe { (*(*raw).Builder).FrameCount }, 0);
 
-    let suspended_a = ctx_a.suspend();
+    let suspended_a = ctx_a.suspend_or_panic();
     let mut ctx_b = crate::Context::create_with_shared_font_atlas(shared_atlas.clone());
     assert_eq!(unsafe { (*raw).RefCount }, 2);
     ctx_b.io_mut().set_display_size([128.0, 128.0]);
@@ -704,7 +704,7 @@ fn shared_atlas_is_legacy_only_until_one_context_remains() {
     ctx_a.io_mut().set_delta_time(1.0 / 60.0);
     ctx_a.frame().text("legacy context A");
     let _ = ctx_a.render_legacy();
-    let suspended_a = ctx_a.suspend();
+    let suspended_a = ctx_a.suspend_or_panic();
 
     let mut ctx_b = crate::Context::create_with_shared_font_atlas(shared_atlas.clone());
     ctx_b.io_mut().set_display_size([128.0, 128.0]);
@@ -751,7 +751,7 @@ fn managed_shared_atlas_rejects_a_second_context_before_native_creation() {
     let consumer = first
         .create_synchronous_renderer_consumer()
         .expect("the sole Context should attach");
-    let suspended = first.suspend();
+    let suspended = first.suspend_or_panic();
 
     assert!(matches!(
         crate::Context::try_create_with_shared_font_atlas(shared_atlas.clone()),
@@ -920,7 +920,7 @@ fn shared_atlas_rejects_mixed_renderer_texture_capabilities() {
     ctx_a.io_mut().set_delta_time(1.0 / 60.0);
     ctx_a.frame().text("legacy renderer");
     let _ = ctx_a.render_legacy();
-    let suspended_a = ctx_a.suspend();
+    let suspended_a = ctx_a.suspend_or_panic();
 
     let mut ctx_b = crate::Context::create_with_shared_font_atlas(shared_atlas);
     ctx_b.io_mut().set_display_size([128.0, 128.0]);

@@ -1556,7 +1556,7 @@ fn shutdown_rejects_a_foreign_context_before_changing_runtime_state() {
     let _guard = lock_context();
     let mut context = Context::create();
     let mut runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
-    let suspended = context.suspend();
+    let suspended = context.suspend_or_panic();
     let mut foreign = Context::create();
 
     assert_eq!(

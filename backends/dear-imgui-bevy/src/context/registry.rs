@@ -121,6 +121,11 @@ pub enum ImguiContextError {
     TeardownInProgress { context_id: ContextId },
     /// Raw Context mutation was requested while its UI frame was live.
     RawMutationWhileFrameOpen { context_id: ContextId },
+    /// A temporary active-Context scope could not be entered or completed.
+    ScopedActivation {
+        context_id: ContextId,
+        source: super::ownership::ImguiContextScopeError,
+    },
     /// The legacy/headless font atlas could not be built before opening a frame.
     FontAtlasBuildFailed { context_id: ContextId },
     /// Managed renderer admission failed before backend fields were mutated.
@@ -184,6 +189,19 @@ pub enum ImguiContextError {
     },
 }
 
+impl ImguiContextError {
+    pub(crate) fn from_scoped_activation<E>(
+        context_id: ContextId,
+        error: dear_imgui_rs::ScopedActivationError<E>,
+        map_closure: impl FnOnce(E) -> Self,
+    ) -> Self {
+        match super::backend_contract::separate_scoped_error(error) {
+            Ok(source) => Self::ScopedActivation { context_id, source },
+            Err(error) => map_closure(error),
+        }
+    }
+}
+
 impl fmt::Display for ImguiContextError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -219,6 +237,10 @@ impl fmt::Display for ImguiContextError {
             Self::RawMutationWhileFrameOpen { context_id } => write!(
                 formatter,
                 "Context {context_id:?} cannot be configured while its Ui is live"
+            ),
+            Self::ScopedActivation { context_id, source } => write!(
+                formatter,
+                "Context {context_id:?} could not complete an active access scope: {source}"
             ),
             Self::FontAtlasBuildFailed { context_id } => {
                 write!(
@@ -304,6 +326,7 @@ impl std::error::Error for ImguiContextError {
             Self::SnapshotCapture { source, .. } => Some(source),
             #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
             Self::ViewportBridge { source, .. } => Some(source),
+            Self::ScopedActivation { source, .. } => Some(source),
             Self::ContextCreation(error) => Some(error),
             Self::RemovalPending { reason, .. } => Some(reason),
             _ => None,
@@ -643,12 +666,13 @@ impl ImguiContexts {
             .owner
             .as_mut()
             .expect("a ready Context slot must retain its owner");
-        match owner.try_with_active_context(|context| {
-            Ok::<_, std::convert::Infallible>(configure(context))
-        }) {
-            Ok(value) => Ok(value),
-            Err(never) => match never {},
-        }
+        owner
+            .try_with_active_context(|context| {
+                Ok::<_, std::convert::Infallible>(configure(context))
+            })
+            .map_err(|error| {
+                ImguiContextError::from_scoped_activation(context_id, error, |never| match never {})
+            })
     }
 
     /// Retry Context-local backend teardown and remove the Context when it is idle.
@@ -813,6 +837,9 @@ impl ImguiContexts {
             Err(super::ownership::ImguiActiveRendererContextError::Operation(source)) => {
                 Err(ImguiContextError::RendererRecovery { context_id, source })
             }
+            Err(super::ownership::ImguiActiveRendererContextError::ContextScope(source)) => {
+                Err(ImguiContextError::ScopedActivation { context_id, source })
+            }
             Err(super::ownership::ImguiActiveRendererContextError::RendererOwnership(source)) => {
                 slot.state = ContextSlotState::Teardown;
                 Err(ImguiContextError::RendererOwnership { context_id, source })
@@ -969,7 +996,7 @@ impl ImguiContexts {
             slot.owner
                 .as_mut()
                 .expect("renderer admission requires idle Context owners")
-                .commit_renderer_admission(&backend);
+                .commit_renderer_admission(&backend)?;
         }
         for context_id in &self.order {
             let slot = self

@@ -722,7 +722,7 @@ mod tests {
     #[test]
     fn context_teardown_waits_for_render_world_release_before_native_mutation() {
         let context = managed_context();
-        let mut owner = crate::context::ownership::ContextOwner::new(context.suspend());
+        let mut owner = crate::context::ownership::ContextOwner::new(context.suspend_or_panic());
         let releases = ImguiRendererReleases::default();
         let backend = crate::context::ownership::BackendAttachment {
             render_integration_installed: true,
@@ -731,7 +731,7 @@ mod tests {
             renderer_releases: Some(releases.clone()),
         };
         owner.preflight_renderer_admission(&backend).unwrap();
-        owner.commit_renderer_admission(&backend);
+        owner.commit_renderer_admission(&backend).unwrap();
         let renderer_texture = imgui::TextureId::new(0xCAFE);
         let texture = owner
             .try_with_active_renderer_context(false, |context, consumer| {
@@ -804,9 +804,10 @@ mod tests {
         let make_owner = || {
             let context = managed_context();
             let context_id = context.id();
-            let mut owner = crate::context::ownership::ContextOwner::new(context.suspend());
+            let mut owner =
+                crate::context::ownership::ContextOwner::new(context.suspend_or_panic());
             owner.preflight_renderer_admission(&backend).unwrap();
-            owner.commit_renderer_admission(&backend);
+            owner.commit_renderer_admission(&backend).unwrap();
             let texture = owner
                 .try_with_active_renderer_context(false, |context, consumer| {
                     let consumer = consumer.expect("renderer admission must install a consumer");
@@ -1064,14 +1065,14 @@ mod tests {
         let second_a = managed_snapshot(&mut context_a, &consumer_a, None);
         let second_a_feedback = retry_texture_feedback(&second_a);
         let context_a_id = context_a.id();
-        let mut context_a = context_a.suspend();
+        let mut context_a = context_a.suspend_or_panic();
 
         let mut context_b = managed_context();
         let consumer_b = context_b.create_detached_renderer_consumer().unwrap();
         let first_b = managed_snapshot(&mut context_b, &consumer_b, None);
         let first_b_feedback = retry_texture_feedback(&first_b);
         let context_b_id = context_b.id();
-        let mut context_b = context_b.suspend();
+        let mut context_b = context_b.suspend_or_panic();
 
         let mailbox = crate::context::ImguiFrameMailbox::default();
         mailbox.publish(context_a_id, pending_frame(1, first_a));
@@ -1100,7 +1101,7 @@ mod tests {
                 assert_eq!(progress.watermark(), 2);
                 Ok::<_, std::convert::Infallible>(())
             })
-            .unwrap_or_else(|never| match never {});
+            .expect("Context A should activate for completion inspection");
         context_b
             .try_with_active(|context| {
                 let progress = context.poll_snapshot_completions().unwrap();
@@ -1109,7 +1110,7 @@ mod tests {
                 assert_eq!(progress.watermark(), 1);
                 Ok::<_, std::convert::Infallible>(())
             })
-            .unwrap_or_else(|never| match never {});
+            .expect("Context B should activate for completion inspection");
     }
 
     #[test]
@@ -1117,13 +1118,13 @@ mod tests {
         let mut context_a = managed_context();
         let texture_a =
             imgui::render::SnapshotTextureId::User(register_test_texture(&mut context_a));
-        let context_a = context_a.suspend();
+        let context_a = context_a.suspend_or_panic();
         let context_a_id = context_a.id();
 
         let mut context_b_owner = managed_context();
         let texture_b =
             imgui::render::SnapshotTextureId::User(register_test_texture(&mut context_b_owner));
-        let context_b = context_b_owner.suspend();
+        let context_b = context_b_owner.suspend_or_panic();
         let context_b_id = context_b.id();
 
         let mut bindings = ImguiTextureBindGroups::default();

@@ -61,7 +61,7 @@ fn clipboard_callbacks_use_passed_context_not_current_context() {
             .expect("clipboard getter should be installed");
     }
 
-    let suspended_a = ctx_a.suspend();
+    let suspended_a = ctx_a.suspend_or_panic();
 
     let mut ctx_b = imgui::Context::create();
     let shared_b = Arc::new(Mutex::new(Some("b".to_owned())));
@@ -104,7 +104,7 @@ fn clipboard_reentry_into_different_context_is_allowed() {
             .expect("clipboard getter should be installed")
     };
 
-    let suspended_a = ctx_a.suspend();
+    let suspended_a = ctx_a.suspend_or_panic();
 
     struct CrossContextReentrantBackend {
         other_ctx: *mut imgui::sys::ImGuiContext,

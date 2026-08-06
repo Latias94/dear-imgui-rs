@@ -21,7 +21,9 @@ impl Ui {
     /// The flag is popped during unwinding if `f` panics.
     #[doc(alias = "PushButtonRepeat", alias = "PopButtonRepeat")]
     pub fn with_button_repeat<R>(&self, repeat: bool, f: impl FnOnce() -> R) -> R {
-        let _repeat = self.push_button_repeat(repeat);
-        f()
+        let repeat = self.push_button_repeat(repeat);
+        let result = f();
+        drop(repeat);
+        result
     }
 }

@@ -141,7 +141,7 @@ fn managed_images_resolve_only_in_the_owner_context_and_generation() {
         });
     }
     let _ = owner.render_legacy();
-    let suspended_owner = owner.suspend();
+    let suspended_owner = owner.suspend_or_panic();
 
     let mut foreign = imgui::Context::create();
     prepare_context(&mut foreign);

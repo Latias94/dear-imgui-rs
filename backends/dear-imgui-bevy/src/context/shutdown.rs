@@ -76,12 +76,11 @@ pub trait ImguiAppExt {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ImguiShutdownError {
-    /// A Context still owns part of the backend contract, but another integration replaced one of
-    /// the fields needed for deterministic teardown.
+    /// A Context could not enter teardown or another integration replaced an owned backend field.
     ContextTeardownBlocked {
-        /// Context whose teardown ownership validation failed.
+        /// Context whose teardown preflight failed.
         context_id: dear_imgui_rs::ContextId,
-        /// Exact renderer or viewport ownership conflict observed by the preflight.
+        /// Exact active-scope or backend-ownership failure observed by the preflight.
         reason: ImguiContextRemovalPendingReason,
     },
     /// The plugin's private Context driver schedule was removed while retirement work remained.

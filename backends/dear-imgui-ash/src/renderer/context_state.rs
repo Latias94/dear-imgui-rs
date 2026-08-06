@@ -537,7 +537,7 @@ mod tests {
         first
             .io_mut()
             .set_backend_flags(flags & !core_renderer_flags());
-        let suspended = first.suspend();
+        let suspended = first.suspend_or_panic();
         drop(suspended);
 
         let mut later = Context::create();

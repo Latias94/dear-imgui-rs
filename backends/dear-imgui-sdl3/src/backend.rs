@@ -218,7 +218,7 @@ mod renderer_contract_tests {
         let _guard = crate::tests::test_guard();
         let owner = Context::create();
         let owner_binding = owner.binding();
-        let _owner = owner.suspend();
+        let _owner = owner.suspend_or_panic();
         let mut foreign = Context::create();
         foreign.io_mut().set_display_size([128.0, 128.0]);
         foreign.io_mut().set_delta_time(1.0 / 60.0);
@@ -242,7 +242,7 @@ mod renderer_contract_tests {
         let _guard = crate::tests::test_guard();
         let owner = Context::create();
         let owner_binding = owner.binding();
-        let _owner = owner.suspend();
+        let _owner = owner.suspend_or_panic();
         let mut foreign = Context::create();
         foreign.io_mut().set_display_size([128.0, 128.0]);
         foreign.io_mut().set_delta_time(1.0 / 60.0);

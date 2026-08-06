@@ -86,7 +86,7 @@ fn layout_and_scroll_helpers_reject_non_finite_or_invalid_ratios_before_ffi() {
 }
 
 #[test]
-fn indent_token_restores_layout_after_drop_end_and_panic() {
+fn indent_scope_restores_layout_after_return_and_panic() {
     let _guard = test_guard();
 
     let mut ctx = imgui::Context::create();
@@ -96,28 +96,96 @@ fn indent_token_restores_layout_after_drop_end_and_panic() {
     let _ = ui.window("indent token").build(|| {
         let cursor_x = ui.cursor_pos_x();
 
-        {
-            let _indent = ui.begin_indent();
+        ui.with_indent(|| {
             assert!(ui.cursor_pos_x() > cursor_x);
-        }
+        });
         assert_eq!(ui.cursor_pos_x(), cursor_x);
 
-        let indent = ui.begin_indent();
-        let _spacing = ui.push_style_var(imgui::StyleVar::IndentSpacing(73.0));
-        indent.end();
+        ui.with_indent(|| {
+            let _spacing = ui.push_style_var(imgui::StyleVar::IndentSpacing(73.0));
+        });
         assert_eq!(ui.cursor_pos_x(), cursor_x);
-        drop(_spacing);
 
-        let indent = ui.begin_indent_by(17.0);
-        assert_eq!(ui.cursor_pos_x(), cursor_x + 17.0);
-        indent.end();
+        ui.with_indent_by(17.0, || {
+            assert_eq!(ui.cursor_pos_x(), cursor_x + 17.0);
+        });
         assert_eq!(ui.cursor_pos_x(), cursor_x);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _indent = ui.begin_indent();
-            panic!("indent token unwind probe");
+            ui.with_indent(|| panic!("indent scope unwind probe"));
         }));
         assert!(result.is_err());
         assert_eq!(ui.cursor_pos_x(), cursor_x);
+    });
+}
+
+unsafe fn current_window_clip_state() -> ([f32; 4], i32) {
+    let window = unsafe { imgui::sys::igGetCurrentWindow() };
+    assert!(!window.is_null());
+    let draw_list = unsafe { (*window).DrawList };
+    assert!(!draw_list.is_null());
+    let clip = unsafe { (*window).ClipRect };
+    ([clip.Min.x, clip.Min.y, clip.Max.x, clip.Max.y], unsafe {
+        (*draw_list)._ClipRectStack.Size
+    })
+}
+
+#[test]
+fn indent_tokens_restore_out_of_order_without_touching_the_wrong_window() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+
+    let ui = ctx.frame();
+    let _ = ui.window("indent token ordering").build(|| {
+        let cursor_x = ui.cursor_pos_x();
+        let outer = ui.begin_indent_by(17.0);
+        let inner = ui.begin_indent_by(23.0);
+        assert_eq!(ui.cursor_pos_x(), cursor_x + 40.0);
+
+        drop(outer);
+        assert_eq!(ui.cursor_pos_x(), cursor_x + 23.0);
+        ui.text("inner scope remains usable");
+        drop(inner);
+        assert_eq!(ui.cursor_pos_x(), cursor_x);
+
+        let nested_ui: &imgui::Ui = ui;
+        let indent = nested_ui.begin_indent_by(19.0);
+        let nested = nested_ui.window("nested indent window").build(move || {
+            let nested_cursor_x = nested_ui.cursor_pos_x();
+            drop(indent);
+            assert_eq!(nested_ui.cursor_pos_x(), nested_cursor_x);
+        });
+        assert!(nested.is_some());
+        assert_eq!(ui.cursor_pos_x(), cursor_x);
+    });
+}
+
+#[test]
+fn ui_clip_rect_restores_window_state_and_cannot_end_in_another_window() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+
+    let ui = ctx.frame();
+    let _ = ui.window("clip rect owner").build(|| {
+        let owner_ui: &imgui::Ui = ui;
+        let owner_before = unsafe { current_window_clip_state() };
+        let clip = owner_ui.push_clip_rect([4.0, 5.0], [40.0, 50.0], false);
+        let owner_pushed = unsafe { current_window_clip_state() };
+        assert_eq!(owner_pushed.1, owner_before.1 + 1);
+
+        let nested = owner_ui.window("clip rect foreign window").build(move || {
+            let nested_before = unsafe { current_window_clip_state() };
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(clip)));
+            assert!(result.is_err());
+            assert_eq!(unsafe { current_window_clip_state() }, nested_before);
+        });
+
+        assert!(nested.is_some());
+        assert_eq!(unsafe { current_window_clip_state() }, owner_before);
+        owner_ui.text("clip rect scope recovered");
     });
 }

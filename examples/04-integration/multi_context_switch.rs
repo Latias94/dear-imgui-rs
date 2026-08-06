@@ -14,11 +14,11 @@ fn prepare_headless_context(
     Ok(())
 }
 
-fn main() -> imgui::ImGuiResult<()> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut context_a = imgui::Context::create();
     prepare_headless_context(&mut context_a, [640.0, 360.0])?;
 
-    let suspended_a = context_a.suspend();
+    let suspended_a = context_a.suspend()?;
 
     let mut context_b = imgui::Context::create();
     prepare_headless_context(&mut context_b, [320.0, 180.0])?;
@@ -27,10 +27,8 @@ fn main() -> imgui::ImGuiResult<()> {
     frame_b.ui().text("Context B can render its own frame.");
     drop(frame_b.render_legacy());
 
-    let suspended_b = context_b.suspend();
-    let mut context_a = suspended_a
-        .activate()
-        .expect("context B was suspended, so context A can be activated");
+    let suspended_b = context_b.suspend()?;
+    let mut context_a = suspended_a.activate()?;
 
     let frame = context_a.begin_frame();
     let ui = frame.ui();

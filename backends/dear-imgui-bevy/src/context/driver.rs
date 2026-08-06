@@ -389,6 +389,14 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                 clear_context_output(world, context_id);
                 (None, Some(error), None)
             }
+            Ok(Err(ImguiActiveRendererContextError::ContextScope(source))) => {
+                clear_context_output(world, context_id);
+                (
+                    None,
+                    Some(ImguiContextError::ScopedActivation { context_id, source }),
+                    None,
+                )
+            }
             #[cfg(feature = "render")]
             Ok(Err(ImguiActiveRendererContextError::RendererOwnership(source))) => {
                 clear_context_output(world, context_id);

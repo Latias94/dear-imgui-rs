@@ -989,7 +989,7 @@ fn handle_shortcuts(editor: &NodeEditorFrame<'_>, graph: &mut GraphState) {
 }
 
 fn handle_context_popups(ui: &Ui, editor: &NodeEditorFrame<'_>, graph: &mut GraphState) {
-    let suspension = editor.suspend();
+    let suspension = editor.suspend_or_panic();
     if let Some(node) = editor.show_node_context_menu() {
         graph.context_popup = Some(ContextPopup::Node(node));
         ui.open_popup("Blueprint Context");

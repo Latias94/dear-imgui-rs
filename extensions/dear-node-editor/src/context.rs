@@ -223,7 +223,7 @@ mod tests {
         let raw_imgui_a = imgui_a.as_raw();
         let editor_a = EditorContext::create(&imgui_a);
         let raw_editor_a = editor_a.as_raw_native();
-        let suspended_a = imgui_a.suspend();
+        let suspended_a = imgui_a.suspend_or_panic();
 
         let imgui_b = ImGuiContext::create();
         let raw_imgui_b = imgui_b.as_raw();
@@ -275,7 +275,7 @@ mod tests {
         let _guard = test_guard();
         let imgui_a = ImGuiContext::create();
         let editor_a = EditorContext::create(&imgui_a);
-        let suspended_a = imgui_a.suspend();
+        let suspended_a = imgui_a.suspend_or_panic();
 
         let imgui_b = ImGuiContext::create();
         let raw_imgui_b = imgui_b.as_raw();
@@ -340,7 +340,7 @@ mod tests {
         let _guard = test_guard();
         let imgui_a = ImGuiContext::create();
         let editor = EditorContext::create(&imgui_a);
-        let suspended_a = imgui_a.suspend();
+        let suspended_a = imgui_a.suspend_or_panic();
 
         let mut imgui_b = ImGuiContext::create();
         imgui_b.io_mut().set_display_size([640.0, 480.0]);
@@ -395,7 +395,7 @@ mod tests {
 
             assert!(!editor.is_suspended());
             {
-                let suspension = editor.suspend();
+                let suspension = editor.suspend_or_panic();
                 assert!(editor.is_suspended());
                 suspension.resume();
             }

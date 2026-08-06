@@ -110,7 +110,7 @@ pub use dear_imgui_rs::ContextId;
 #[cfg(feature = "render")]
 pub use self::context::ownership::ImguiRendererOwnershipError;
 pub use self::context::ownership::{
-    ImguiContextRemovalPendingReason, ImguiPlugin, ImguiPluginConfig,
+    ImguiContextRemovalPendingReason, ImguiContextScopeError, ImguiPlugin, ImguiPluginConfig,
 };
 pub use self::context::{
     ImguiAppExt, ImguiContextAdmissionError, ImguiContextConfig, ImguiContextError, ImguiContexts,

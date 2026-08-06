@@ -487,7 +487,7 @@ fn show_windows_validates_context_identity_and_native_frame_scope() {
         .expect_err("rendered frame is outside native WithinFrameScope");
     assert!(matches!(error, TestEngineError::FrameNotActive { .. }));
 
-    let suspended_a = context_a.suspend();
+    let suspended_a = context_a.suspend_or_panic();
     let mut context_b = SuspendedContext::create()
         .activate()
         .expect("Context B activation");
@@ -500,7 +500,7 @@ fn show_windows_validates_context_identity_and_native_frame_scope() {
         .expect_err("foreign Ui must be rejected before binding");
     assert!(matches!(error, TestEngineError::ContextMismatch { .. }));
     drop(context_b.render_legacy());
-    let suspended_b = context_b.suspend();
+    let suspended_b = context_b.suspend_or_panic();
     let context_a = suspended_a.activate().expect("Context A activation");
 
     engine.shutdown().expect("shutdown");
@@ -724,12 +724,12 @@ fn public_engine_methods_enforce_the_attachment_and_run_state_matrix() {
     // The stopped engine retains hooks on `stopped_context`. Do not open another native frame on
     // that Context after stopping solely to manufacture a rejected driver capability; use an
     // unattached probe so this assertion exercises only the engine state gate.
-    let suspended_stopped_context = stopped_context.suspend();
+    let suspended_stopped_context = stopped_context.suspend_or_panic();
     let mut inactive_probe = context();
     let inactive_frame = inactive_probe.begin_frame();
     inactive_frame.ui().text("inactive driver state probe");
     assert_frame_driver_invalid_state(&mut detached, inactive_frame);
-    let suspended_inactive_probe = inactive_probe.suspend();
+    let suspended_inactive_probe = inactive_probe.suspend_or_panic();
     let stopped_context = suspended_stopped_context
         .activate()
         .expect("reactivate stopped Context for shutdown");
@@ -783,7 +783,7 @@ fn process_binding_rejects_a_second_suspended_context_until_unbind() {
     let mut context_a = context();
     let mut engine_a = TestEngine::create().expect("engine A");
     engine_a.start(&mut context_a).expect("start A");
-    let suspended_a = context_a.suspend();
+    let suspended_a = context_a.suspend_or_panic();
 
     let mut context_b = SuspendedContext::create().activate().expect("activate B");
     let mut engine_b = TestEngine::create().expect("engine B");
@@ -792,20 +792,20 @@ fn process_binding_rejects_a_second_suspended_context_until_unbind() {
         .expect_err("the process lease must reject B");
     assert_eq!(occupied.status(), Some(TestEngineStatus::BindingOccupied));
 
-    let suspended_b = context_b.suspend();
+    let suspended_b = context_b.suspend_or_panic();
     let context_a = suspended_a.activate().expect("reactivate A");
     engine_a.stop().expect("stop A");
-    let suspended_a = context_a.suspend();
+    let suspended_a = context_a.suspend_or_panic();
     let mut context_b = suspended_b.activate().expect("reactivate B");
     let occupied = engine_b
         .start(&mut context_b)
         .expect_err("stop must retain the process lease");
     assert_eq!(occupied.status(), Some(TestEngineStatus::BindingOccupied));
 
-    let suspended_b = context_b.suspend();
+    let suspended_b = context_b.suspend_or_panic();
     let context_a = suspended_a.activate().expect("activate A for shutdown");
     engine_a.shutdown().expect("unbind A");
-    let suspended_a = context_a.suspend();
+    let suspended_a = context_a.suspend_or_panic();
     let mut context_b = suspended_b.activate().expect("activate B after unbind");
     engine_b.start(&mut context_b).expect("start B");
     engine_b.shutdown().expect("shutdown B");
@@ -819,7 +819,7 @@ fn suspended_context_destruction_releases_the_process_binding() {
     let mut context_a = context();
     let mut engine_a = TestEngine::create().expect("engine A");
     engine_a.start(&mut context_a).expect("start A");
-    let suspended_a = context_a.suspend();
+    let suspended_a = context_a.suspend_or_panic();
 
     let mut context_b = SuspendedContext::create().activate().expect("activate B");
     let mut engine_b = TestEngine::create().expect("engine B");

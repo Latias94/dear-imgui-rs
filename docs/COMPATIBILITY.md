@@ -170,9 +170,9 @@ receive compatibility aliases unless the ledger explicitly says otherwise.
 | Renderer consumer | One `RendererConsumer` selects synchronous or detached mode on first use | replace | Separate `SynchronousRendererConsumer` and `DetachedRendererConsumer` capabilities are selected when created. A generation cannot change modes, and the old type is deleted without an alias. |
 | Detached snapshot | `FrameSnapshot::commit` permits omitted request outcomes and defers some validation | keep + replace contract | Every snapshot request receives exactly one `uploaded`, `destroyed`, `superseded`, or `retry` outcome. Snapshot-local duplicate, foreign, and malformed outcomes fail at submission; remaining Context-state failures use a fallible completion path. |
 | Renderer reset | `RendererTextureReset` is a two-phase permit whose `commit` count is routinely ignored | keep + replace result | Preparation remains fallible and inert when dropped. Successful `commit` returns `()` unless a future result carries an actionable state. |
-| Context activation | `SuspendedContext::activate` returns only the owner on failure | replace | Fallible activation returns a typed reason together with the still-owned Context. Panic convenience is separately and explicitly named. Scoped binding continues to restore the previously active Context. |
+| Context activation | `Context::suspend` is infallible, `SuspendedContext::activate` returns only the owner on failure, and `try_with_active` returns `E` directly | replace | Suspension and activation return owner-retaining typed errors. Scoped activation returns `ScopedActivationError<E>`, separating `ContextScopeError` from `Closure(E)` and cleaning up a left-open frame. Explicit `*_or_panic` methods preserve the old convenience semantics. |
 | Direct draw state | `DrawListTextNoPixelSnapToken` assumes stack-like drop order for directly restored state | delete | `with_text_no_pixel_snap` is the public scope and uses a private guard that remains correct for every Safe Rust drop order. |
-| Native stack scopes | Table, style, font, clip, and other native push/pop tokens | keep selectively | Native stack-backed tokens retain explicit LIFO panic contracts; closure helpers are the canonical teaching path. Low-level table parity remains, with every phase-dependent panic documented. |
+| Native stack scopes | Table, style, font, clip, and other native push/pop tokens; public table channel tokens; unreachable window guard exports | keep selectively | Retained tokens validate per-resource LIFO order plus exact Context, frame, window `Begin`, table instance, and table-cell provenance before FFI. `StyleVar::Alpha` and effective disabled scopes share a restoration-order contract, and a table cannot end while a scope created inside it remains active. Table channels and window/child guards are closure-only; `main_menu_bar`, `menu_bar`, `with_disabled`, and related closure helpers are the canonical teaching path. Low-level table parity remains, with every phase-dependent panic documented. |
 | Texture pixels | `TextureData::set_data` silently accepts the overlapping prefix | replace | Exact full replacement and explicit subresource update APIs validate dimensions, rectangle, row pitch, format, and byte length before changing pixels, revision, status, or dirty rectangles. |
 | Font atlas | One atlas surface mixes managed texture ownership with legacy renderer-built operation | replace | Managed and legacy capabilities are distinct. Safe owned font data exists only for a loader-bound, format-bounded path with a proven read contract; borrowed bytes, compressed data, custom loaders, and unproven parser combinations remain unsafe. |
 | Docking identity | Display strings also act as persistent window and docking identity | replace | `WindowKey` separates the displayed title from the stable Dear ImGui identity, and one `DockspaceBuilder` owns the normal dockspace configuration path. |
@@ -185,6 +185,34 @@ receive compatibility aliases unless the ledger explicitly says otherwise.
 | Bevy installation | Configuration validation occurs through `Plugin::build` | keep + add | `ImguiAppExt::try_install_imgui` is the App-aware fallible transaction. `ImguiPlugin` remains an explicit panic convenience adapter over the same validation. |
 | Bevy retirement | Applications retry synchronous `ImguiContexts::remove` each frame | replace | The existing retirement queue owns asynchronous removal and emits one Context-generation-keyed completion. The synchronous escape hatch is renamed to state its retry semantics. |
 | Host configuration | `AppConfig`, `ImguiPluginConfig`, `ImguiContextConfig`, and platform/backend configuration | keep separate | Types remain host-specific until ownership, defaults, and failure behavior are genuinely identical. Only lossless conversions are added. |
+
+### Context activation and scoped-state migration
+
+Context ownership failures now preserve both the owner and the reason at the operation that failed:
+
+| Alpha.1 flow | Alpha.2 flow | New failure or cleanup state |
+| --- | --- | --- |
+| `let suspended = context.suspend();` | `let suspended = context.suspend()?;` or `context.suspend_or_panic()` | `ContextSuspensionError` retains the active owner; use `reason`, `into_owner`, or `into_parts` to repair and retry. |
+| `let context = suspended.activate().map_err(|owner| ...)?;` | `let context = suspended.activate()?;` or `suspended.activate_or_panic()` | `ContextActivationError` retains the suspended owner and a `ContextActivationReason`. |
+| `suspended.try_with_active(|context| operation(context))?` where the error was `E` | Match `ScopedActivationError::Closure(E)` separately from `ScopedActivationError::Scope(ContextScopeError)` | Admission conflicts do not run the closure. A successful closure that leaves a frame open is cleaned up and reported as `ContextScopeError::FrameLeftOpen`; closure errors and panics also close a left-open frame before propagation. |
+
+Safe native scopes now reject mismatched resource order or provenance before calling Dear ImGui. Style, font, item-flag, ID/tree, focus/multi-select, window-like, table, clip, and draw-list texture stacks are tracked independently where the native stacks are independent, while operations that share an upstream stack share one Rust ordering contract. Window-local tokens must finish in the exact frame and `Begin` instance that created them; table operations additionally retain table instance, row, and column provenance. Additive indentation is not treated as a false LIFO stack: same-window tokens may finish in any order, while cross-window cleanup waits until the source window is current.
+
+| Removed or discouraged surface | Canonical replacement |
+| --- | --- |
+| `DrawListTextNoPixelSnapToken` | `DrawListMut::with_text_no_pixel_snap` |
+| `TableBackgroundChannelToken` / `TableColumnChannelToken` | `Ui::with_table_background_channel` / `Ui::with_table_column_channel` |
+| `WindowToken` / `ChildWindowToken` names that had no public constructor | `Window::build` / `ChildWindow::build` |
+| Manual main-menu-bar, menu-bar, or disabled token pairing | `Ui::main_menu_bar`, `Ui::menu_bar`, `Ui::with_disabled`, or `Ui::with_disabled_if` |
+| Borrowed table-sort view | Owned `TableSortSpecs`; call `clear_dirty(&ui)` only while its source table is current |
+
+The canonical multi-Context example and focused scope tests are reproducible with serial Cargo commands:
+
+```powershell
+cargo run -j 1 -p dear-imgui-examples --bin multi_context_switch
+cargo nextest run -j 1 -p dear-imgui-rs --test style_boundaries
+cargo nextest run -j 1 -p dear-imgui-rs --test layout_scroll_boundaries
+```
 
 ### Lifecycle and ownership axes
 

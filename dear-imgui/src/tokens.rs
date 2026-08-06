@@ -1,9 +1,12 @@
 //! RAII tokens for scoped ImGui state
 //!
-//! Many Dear ImGui operations push/pop state (style, fonts, groups, clip rects,
-//! etc.). In this crate, these are modeled as small RAII tokens that pop the
-//! state when dropped, helping you write exception-safe, early-return friendly
-//! code.
+//! Many Dear ImGui operations push/pop native state. Public tokens remain useful for advanced
+//! control. Tokens backed by the same native resource stack must finish in LIFO order, while
+//! independent stacks may be ended independently. Window- and table-local tokens must also finish
+//! in the exact native scope that created them, and a table cannot end while a native scope created
+//! inside it remains active. Invalid order or provenance is diagnosed before FFI and native
+//! cleanup is deferred when the original scope can be restored safely. Closure helpers are the
+//! canonical path because lexical nesting makes those contracts visible.
 //!
 //! Example:
 //! ```no_run
@@ -28,25 +31,26 @@
 /// This is a macro used internally by dear-imgui to create StackTokens
 /// representing various global state in Dear ImGui.
 ///
-/// These tokens can either be allowed to drop or dropped manually
-/// by calling `end` on them. Preventing this token from dropping,
-/// or moving this token out of the block it was made in can have
-/// unintended side effects, including failed asserts in the Dear ImGui C++.
-///
-/// In general, if you're looking at this, don't overthink these -- just slap
-/// a `_token` as their binding name and allow them to drop.
+/// These tokens may be dropped or ended explicitly. Tokens sharing a native resource stack must
+/// finish in reverse creation order, and window- or table-local tokens must finish in their
+/// originating scope. A table cannot end while a native scope created inside that table remains
+/// active. The shared tracker rejects violations before entering Dear ImGui and defers cleanup
+/// until the original scope is current when that recovery is valid.
 macro_rules! create_token {
     (
         $(#[$struct_meta:meta])*
         $v:vis struct $token_name:ident<'ui>;
+
+        pop $pop:expr;
 
         $(#[$end_meta:meta])*
         drop { $on_drop:expr }
     ) => {
         #[must_use]
         $(#[$struct_meta])*
+        #[doc = "\n# Drop order\n\nTokens sharing this native resource stack must finish in reverse creation order. Window- or table-local tokens must also finish in their originating scope. Prefer the corresponding closure helper when available. Invalid use panics before FFI, with cleanup deferred when the original scope can be restored safely."]
         pub struct $token_name<'a> {
-            ctx_binding: $crate::ContextBinding,
+            scope: $crate::scope::NativeScopeToken<'a>,
             _phantom: std::marker::PhantomData<&'a $crate::Ui>,
         }
 
@@ -54,12 +58,13 @@ macro_rules! create_token {
             /// Creates a new token type.
             pub(crate) fn new(ui: &'a $crate::Ui) -> Self {
                 Self {
-                    ctx_binding: ui.binding(),
+                    scope: ui.begin_native_scope($pop, stringify!($token_name)),
                     _phantom: std::marker::PhantomData,
                 }
             }
 
             $(#[$end_meta])*
+            #[doc = "\n# Panics\n\nPanics before FFI if a later token on the same native resource stack is active or this token is no longer in its originating native scope."]
             #[inline]
             pub fn end(self) {
                 // left empty for drop
@@ -68,7 +73,7 @@ macro_rules! create_token {
 
         impl Drop for $token_name<'_> {
             fn drop(&mut self) {
-                let _ = self.ctx_binding.try_with_bound_context(|| {
+                self.scope.finish_with(|| {
                     // Execute provided drop expression; callers wrap unsafe if needed.
                     $on_drop
                 });

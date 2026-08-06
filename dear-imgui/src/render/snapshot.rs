@@ -1665,7 +1665,7 @@ mod tests {
             &pending.viewports[1].draw
         ));
 
-        let suspended_context = context.suspend();
+        let suspended_context = context.suspend_or_panic();
         let other_context = crate::Context::create();
         assert!(!pending.viewports[0].is_main());
         assert!(pending.viewports[1].is_main());

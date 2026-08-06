@@ -6,9 +6,9 @@
 pub(crate) use super::backend_contract::BackendAttachment;
 #[cfg(feature = "render")]
 pub(crate) use super::backend_contract::ImguiActiveRendererContextError;
-pub use super::backend_contract::ImguiContextRemovalPendingReason;
 #[cfg(feature = "render")]
 pub use super::backend_contract::ImguiRendererOwnershipError;
+pub use super::backend_contract::{ImguiContextRemovalPendingReason, ImguiContextScopeError};
 pub(crate) use super::owner::ContextOwner;
 #[cfg(feature = "render")]
 pub(crate) use super::plugin::ImguiBackendRuntime;

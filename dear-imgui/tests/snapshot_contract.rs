@@ -717,7 +717,7 @@ fn feedback_from_a_foreign_context_is_rejected_before_registry_mutation() {
     context_a.poll_snapshot_completions().unwrap();
     drop(consumer_a);
     context_a.poll_snapshot_completions().unwrap();
-    let suspended_a = context_a.suspend();
+    let suspended_a = context_a.suspend_or_panic();
 
     let mut context_b = imgui::Context::create();
     prepare_context(&mut context_b);
@@ -828,7 +828,7 @@ fn foreign_consumer_is_rejected_before_capture() {
     let mut context_a = imgui::Context::create();
     prepare_context(&mut context_a);
     let consumer_a = context_a.create_detached_renderer_consumer().unwrap();
-    let suspended_a = context_a.suspend();
+    let suspended_a = context_a.suspend_or_panic();
 
     let mut context_b = imgui::Context::create();
     prepare_context(&mut context_b);

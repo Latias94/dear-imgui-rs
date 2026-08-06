@@ -266,7 +266,7 @@ mod retirement_tests {
         let context = context_with_retirement_probe(&destroyed);
 
         let retirements = ImguiContextRetirements::default();
-        let mut owner = ContextOwner::new(context.suspend());
+        let mut owner = ContextOwner::new(context.suspend_or_panic());
         owner
             .attach_backend(&headless_backend_attachment(), &primary_config())
             .unwrap();
@@ -289,7 +289,7 @@ mod retirement_tests {
         let context = context_with_retirement_probe(&destroyed);
 
         let retirements = ImguiContextRetirements::default();
-        let mut owner = ContextOwner::new(context.suspend());
+        let mut owner = ContextOwner::new(context.suspend_or_panic());
         owner
             .attach_backend(
                 &BackendAttachment {

@@ -240,7 +240,7 @@ fn platform_owner_context_mismatch_reports_actual_then_expected() {
     let _guard = lock_context();
     let actual_context = Context::create();
     let actual = actual_context.id();
-    let suspended_actual = actual_context.suspend();
+    let suspended_actual = actual_context.suspend_or_panic();
     let expected_context = Context::create();
     let expected = expected_context.id();
 

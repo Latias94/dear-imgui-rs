@@ -28,7 +28,7 @@ fn nested_plot_bindings_restore_imgui_and_implot_contexts() {
     let imgui_a_raw = imgui_a.as_raw();
     let plot_a = PlotContext::create(&imgui_a);
     let plot_a_raw = unsafe { plot_a.raw() };
-    let suspended_a = imgui_a.suspend();
+    let suspended_a = imgui_a.suspend_or_panic();
 
     let imgui_b = Context::create();
     let imgui_b_raw = imgui_b.as_raw();
@@ -95,7 +95,7 @@ fn nested_plot_binding_never_restores_a_destroyed_outer_context() {
     let imgui_a = Context::create();
     let plot_a = PlotContext::create(&imgui_a);
     let binding_a = plot_a.binding();
-    let mut suspended_a = Some(imgui_a.suspend());
+    let mut suspended_a = Some(imgui_a.suspend_or_panic());
 
     let imgui_b = Context::create();
     let imgui_b_raw = imgui_b.as_raw();

@@ -458,7 +458,7 @@ mod tests {
             );
         }
         drop(first.render_legacy());
-        let first: SuspendedContext = first.suspend();
+        let first: SuspendedContext = first.suspend_or_panic();
 
         let mut second = test_ui_context();
         {

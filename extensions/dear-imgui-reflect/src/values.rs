@@ -208,17 +208,15 @@ where
 
         match (enabled, value.as_mut()) {
             (true, Some(inner)) => {
-                let _indent = ui.begin_indent();
                 let inner_label = format!("{label}##value");
-                changed |= T::imgui_value(inspector, &inner_label, inner);
+                changed |= ui.with_indent(|| T::imgui_value(inspector, &inner_label, inner));
             }
             (true, None) => {
                 *value = Some(T::default());
                 changed = true;
                 if let Some(inner) = value.as_mut() {
-                    let _indent = ui.begin_indent();
                     let inner_label = format!("{label}##value");
-                    changed |= T::imgui_value(inspector, &inner_label, inner);
+                    changed |= ui.with_indent(|| T::imgui_value(inspector, &inner_label, inner));
                 }
             }
             (false, Some(_)) => {

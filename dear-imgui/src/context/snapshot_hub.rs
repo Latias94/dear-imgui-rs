@@ -858,7 +858,7 @@ mod tests {
         let _guard = crate::test_support::imgui_context_guard();
         let atlas = crate::SharedFontAtlas::create();
         let first = Context::create_with_shared_font_atlas(atlas.clone());
-        let suspended = first.suspend();
+        let suspended = first.suspend_or_panic();
         let second = Context::create_with_shared_font_atlas(atlas.clone());
 
         assert_eq!(
@@ -889,7 +889,7 @@ mod tests {
             Err(RendererConsumerError::ConsumerGenerationExhausted)
         ));
 
-        let suspended = context.suspend();
+        let suspended = context.suspend_or_panic();
         let second = Context::try_create_with_shared_font_atlas(atlas.clone())
             .expect("failed consumer admission must not claim the shared font atlas");
         drop(second);

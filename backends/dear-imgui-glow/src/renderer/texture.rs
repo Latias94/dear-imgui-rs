@@ -1283,7 +1283,7 @@ mod tests {
         let mut owner = ImGuiContext::create();
         let mut renderer = make_protocol_renderer(&mut owner);
         let gl = make_fake_gl();
-        let owner = owner.suspend();
+        let owner = owner.suspend_or_panic();
 
         let mut foreign = ImGuiContext::create();
         foreign.prepare_frame(

@@ -350,7 +350,7 @@ fn conditional_aggregate_setter_clear_targets_its_receiver_context() {
         }
         platform_io.as_raw_mut()
     };
-    let first = first.suspend();
+    let first = first.suspend_or_panic();
     let second = crate::Context::create();
     let second_platform_io = second.platform_io().as_raw();
 
@@ -532,7 +532,7 @@ fn get_window_pos_and_size_callbacks_are_context_local() {
         language_user_data_a
     );
 
-    let suspended_a = ctx_a.suspend();
+    let suspended_a = ctx_a.suspend_or_panic();
 
     let mut ctx_b = crate::Context::create();
     let language_user_data_b = std::ptr::NonNull::<u16>::dangling().as_ptr().cast();
@@ -592,7 +592,7 @@ fn get_window_pos_and_size_callbacks_are_context_local() {
         (5.0, 6.0, 7.0, 8.0)
     );
 
-    let suspended_b = ctx_b.suspend();
+    let suspended_b = ctx_b.suspend_or_panic();
     let ctx_a = suspended_a.activate().expect("ctx_a should activate");
 
     let mut a_pos = sys::ImVec2 { x: 0.0, y: 0.0 };
@@ -730,7 +730,7 @@ fn typed_callback_setters_reject_non_current_platform_io() {
 
     let mut ctx_a = crate::Context::create();
     let pio_a = ctx_a.platform_io_mut().as_raw_mut();
-    let suspended_a = ctx_a.suspend();
+    let suspended_a = ctx_a.suspend_or_panic();
 
     let ctx_b = crate::Context::create();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
@@ -755,7 +755,7 @@ fn out_param_callback_setters_reject_non_current_platform_io() {
 
     let mut ctx_a = crate::Context::create();
     let pio_a = ctx_a.platform_io_mut().as_raw_mut();
-    let suspended_a = ctx_a.suspend();
+    let suspended_a = ctx_a.suspend_or_panic();
 
     let ctx_b = crate::Context::create();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
@@ -796,7 +796,7 @@ fn clear_handlers_target_receiver_platform_io_not_current_context() {
             .platform_io_mut()
             .set_renderer_create_window(Some(renderer_window));
     }
-    let suspended_a = ctx_a.suspend();
+    let suspended_a = ctx_a.suspend_or_panic();
 
     let ctx_b = crate::Context::create();
     let raw_b = ctx_b.as_raw();
@@ -879,7 +879,7 @@ fn raw_setters_clear_receiver_typed_callback_slots() {
         1
     );
 
-    let suspended_a = ctx_a.suspend();
+    let suspended_a = ctx_a.suspend_or_panic();
     let ctx_b = crate::Context::create();
     let raw_b = ctx_b.as_raw();
 

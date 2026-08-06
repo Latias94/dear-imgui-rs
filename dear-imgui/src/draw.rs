@@ -16,6 +16,21 @@
 //! dl.add_text([12.0, 12.0], [1.0, 0.8, 0.2, 1.0], "Hello DrawList");
 //! ```
 //!
+//! The old public text pixel-snap token and push method were removed. The closure scope is the
+//! only public form because directly restored draw-list flags cannot be made correct for every
+//! safe Rust drop order.
+//!
+//! ```compile_fail
+//! use dear_imgui_rs::DrawListTextNoPixelSnapToken;
+//! ```
+//!
+//! ```compile_fail
+//! use dear_imgui_rs::DrawListMut;
+//! fn removed_api(draw_list: &DrawListMut<'_>) {
+//!     let _ = draw_list.push_text_no_pixel_snap();
+//! }
+//! ```
+//!
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -37,6 +52,6 @@ pub use counts::{
 };
 #[allow(unused_imports)]
 pub use list::DrawListClipRectToken;
-pub use list::{DrawListMut, DrawListTextNoPixelSnapToken, DrawListTextureToken, RawDrawCallback};
+pub use list::{DrawListMut, DrawListTextureToken, RawDrawCallback};
 #[allow(unused_imports)]
 pub use primitives::{BezierCurve, Circle, Line, Polyline, Rect, Triangle};

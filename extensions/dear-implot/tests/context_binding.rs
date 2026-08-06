@@ -25,7 +25,7 @@ fn plot_ui_rejects_a_ui_from_another_context_by_identity() {
     let _guard = test_guard();
     let imgui_a = Context::create();
     let plot_a = PlotContext::create(&imgui_a);
-    let suspended_a = imgui_a.suspend();
+    let suspended_a = imgui_a.suspend_or_panic();
 
     let mut imgui_b = Context::create();
     prepare_imgui(&mut imgui_b);

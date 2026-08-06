@@ -112,3 +112,31 @@ fn outer_scope_does_not_retain_io_pointer_across_nested_scope() {
         assert!(outer.range_source_reset());
     });
 }
+
+#[test]
+fn multi_select_rejects_escaped_focus_scope_before_end_ffi_and_recovers() {
+    let mut ctx = setup_context();
+    let ui = ctx.frame();
+    let mut escaped_focus = None;
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = ui.window("multi_select_focus_scope_order").build(|| {
+            ui.with_multi_select(MultiSelectOptions::new(), None, 0, |_| {
+                escaped_focus = Some(ui.push_focus_scope(ui.get_id("escaped-focus")));
+            });
+        });
+    }));
+    assert!(result.is_err());
+
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ui.text("recovery is pending");
+        }))
+        .is_err()
+    );
+
+    drop(escaped_focus);
+    let _ = ui.window("multi_select_focus_scope_recovered").build(|| {
+        ui.text("scope tracker recovered");
+    });
+}

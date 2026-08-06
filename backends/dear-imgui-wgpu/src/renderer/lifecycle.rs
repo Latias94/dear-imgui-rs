@@ -653,7 +653,7 @@ mod tests {
         let mut owner = Context::create();
         let mut renderer = configured_test_renderer(&mut owner);
 
-        let suspended_owner = owner.suspend();
+        let suspended_owner = owner.suspend_or_panic();
         let mut foreign = Context::create();
         let foreign_flags = foreign.io().backend_flags();
 
@@ -668,7 +668,7 @@ mod tests {
         assert_eq!(foreign.io().backend_flags(), foreign_flags);
         assert!(renderer.context_state.is_some());
 
-        let suspended_foreign = foreign.suspend();
+        let suspended_foreign = foreign.suspend_or_panic();
         let mut owner = suspended_owner
             .activate()
             .expect("owner context should reactivate");

@@ -116,7 +116,7 @@ impl ContextOwner {
     pub(crate) fn try_with_active_context<T, E>(
         &mut self,
         operation: impl FnOnce(&mut dear_imgui_rs::Context) -> Result<T, E>,
-    ) -> Result<T, E> {
+    ) -> Result<T, dear_imgui_rs::ScopedActivationError<E>> {
         self.context
             .as_mut()
             .expect("Context owner must retain its suspended Context")
@@ -135,6 +135,9 @@ impl ContextOwner {
         match self.try_with_active_renderer_context_checked(multi_viewport, operation) {
             Ok(value) => Ok(value),
             Err(ImguiActiveRendererContextError::Operation(error)) => Err(error),
+            Err(ImguiActiveRendererContextError::ContextScope(error)) => {
+                panic!("dear-imgui-bevy active Context scope failed: {error}")
+            }
             Err(ImguiActiveRendererContextError::RendererOwnership(error)) => {
                 panic!("dear-imgui-bevy renderer ownership changed: {error}")
             }
@@ -213,6 +216,7 @@ impl ContextOwner {
                     }
                 }
             })
+            .map_err(ImguiActiveRendererContextError::from_scoped)
     }
 
     #[cfg(not(feature = "render"))]
@@ -276,6 +280,7 @@ impl ContextOwner {
                     }
                 }
             })
+            .map_err(ImguiActiveRendererContextError::from_scoped)
     }
 
     pub(crate) fn preflight_backend_attachment(
@@ -322,11 +327,15 @@ impl ContextOwner {
                             viewport::preflight_owned_platform_callbacks(context)
                                 .map_err(|_| "PlatformIO")
                         });
-                    if let Err(field) = result {
-                        return Err(ImguiContextError::BackendOwnershipConflict {
+                    if let Err(error) = result {
+                        return Err(ImguiContextError::from_scoped_activation(
                             context_id,
-                            field,
-                        });
+                            error,
+                            |field| ImguiContextError::BackendOwnershipConflict {
+                                context_id,
+                                field,
+                            },
+                        ));
                     }
                 }
             }
@@ -344,7 +353,11 @@ impl ContextOwner {
                     backend.render_integration_installed,
                 )
             });
-        result.map_err(|field| ImguiContextError::BackendOwnershipConflict { context_id, field })
+        result.map_err(|error| {
+            ImguiContextError::from_scoped_activation(context_id, error, |field| {
+                ImguiContextError::BackendOwnershipConflict { context_id, field }
+            })
+        })
     }
 
     #[cfg(feature = "render")]
@@ -364,7 +377,11 @@ impl ContextOwner {
             .as_mut()
             .expect("Context owner must retain its suspended Context")
             .try_with_active(|context| context.preflight_renderer_consumer())
-            .map_err(|source| ImguiContextError::RendererAdmission { context_id, source })
+            .map_err(|error| {
+                ImguiContextError::from_scoped_activation(context_id, error, |source| {
+                    ImguiContextError::RendererAdmission { context_id, source }
+                })
+            })
     }
 
     #[cfg(not(feature = "render"))]
@@ -376,9 +393,12 @@ impl ContextOwner {
     }
 
     #[cfg(feature = "render")]
-    pub(crate) fn commit_renderer_admission(&mut self, backend: &BackendAttachment) {
+    pub(crate) fn commit_renderer_admission(
+        &mut self,
+        backend: &BackendAttachment,
+    ) -> Result<(), ImguiContextError> {
         if !backend.render_integration_installed || self.renderer_consumer.is_some() {
-            return;
+            return Ok(());
         }
         let context_id = self
             .context
@@ -404,23 +424,36 @@ impl ContextOwner {
                 reset.commit();
                 Ok::<_, std::convert::Infallible>(consumer)
             })
-            .unwrap_or_else(|never| match never {});
+            .map_err(|error| {
+                ImguiContextError::from_scoped_activation(context_id, error, |never| match never {})
+            })?;
         self.renderer_consumer = Some(consumer);
         let releases = backend
             .renderer_releases
             .as_ref()
             .expect("installed Bevy rendering must provide a Context release registry");
         self.renderer_release = Some(releases.admit(context_id));
+        Ok(())
     }
 
     #[cfg(not(feature = "render"))]
-    pub(crate) fn commit_renderer_admission(&mut self, _backend: &BackendAttachment) {}
+    pub(crate) fn commit_renderer_admission(
+        &mut self,
+        _backend: &BackendAttachment,
+    ) -> Result<(), ImguiContextError> {
+        Ok(())
+    }
 
     pub(crate) fn commit_backend_attachment(
         &mut self,
         backend: &BackendAttachment,
         config: &ImguiContextConfig,
     ) -> Result<(), ImguiContextError> {
+        let context_id = self
+            .context
+            .as_ref()
+            .expect("Context owner must retain its suspended Context")
+            .id();
         let ownership = &mut self.backend_ownership;
         #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
         let viewport_keepalive = self.viewport_bridge.attached_keepalive();
@@ -435,7 +468,9 @@ impl ContextOwner {
                 }
                 Ok::<_, std::convert::Infallible>(())
             })
-            .unwrap_or_else(|never| match never {});
+            .map_err(|error| {
+                ImguiContextError::from_scoped_activation(context_id, error, |never| match never {})
+            })?;
         Ok(())
     }
 
@@ -457,7 +492,7 @@ impl ContextOwner {
                 })?;
             self.attach_context_viewport_bridge(registration)?;
         }
-        self.commit_renderer_admission(backend);
+        self.commit_renderer_admission(backend)?;
         self.commit_backend_attachment(backend, config)
     }
 
@@ -510,7 +545,11 @@ impl ContextOwner {
                     .map_err(|_| "PlatformIO")?;
                 Ok::<_, &'static str>(attachment)
             })
-            .map_err(|field| ImguiContextError::BackendOwnershipConflict { context_id, field })?;
+            .map_err(|error| {
+                ImguiContextError::from_scoped_activation(context_id, error, |field| {
+                    ImguiContextError::BackendOwnershipConflict { context_id, field }
+                })
+            })?;
 
         registration.register_context(context_id, Rc::clone(&keepalive));
         self.attach_viewport_bridge_with_registration(
@@ -603,6 +642,7 @@ impl ContextOwner {
                 renderer_release.finish_device_recovery();
                 Ok(())
             })
+            .map_err(ImguiActiveRendererContextError::from_scoped)
     }
 
     /// Validate every backend-owned field needed by teardown without starting either renderer or
@@ -639,6 +679,7 @@ impl ContextOwner {
                     }
                     Ok(())
                 })
+                .map_err(ImguiContextRemovalPendingReason::from_scoped)
         }
 
         #[cfg(not(any(
@@ -670,7 +711,8 @@ impl ContextOwner {
                 .try_with_active(|context| {
                     preflight_renderer_teardown_ownership(context, ownership)
                         .map_err(ImguiContextRemovalPendingReason::RendererOwnership)
-                })?;
+                })
+                .map_err(ImguiContextRemovalPendingReason::from_scoped)?;
         }
         #[cfg(feature = "render")]
         // Request release before ECS despawn establishes a fail-closed extraction barrier.
@@ -684,7 +726,8 @@ impl ContextOwner {
             self.context
                 .as_mut()
                 .expect("Context owner must retain its suspended Context")
-                .try_with_active(|context| advance_viewport_drain(context, viewport_bridge))?;
+                .try_with_active(|context| advance_viewport_drain(context, viewport_bridge))
+                .map_err(ImguiContextRemovalPendingReason::from_scoped)?;
         }
         #[cfg(feature = "render")]
         if !renderer_release_acknowledged {
@@ -732,7 +775,8 @@ impl ContextOwner {
                 }
                 clear_backend_data(context, ownership);
                 Ok(())
-            });
+            })
+            .map_err(ImguiContextRemovalPendingReason::from_scoped);
         #[cfg(feature = "render")]
         if result.is_ok()
             && let Some(renderer_release) = self.renderer_release.take()
@@ -805,7 +849,7 @@ mod tests {
         )
         .expect("the viewport fixture should complete the real platform-frame preparation");
 
-        let mut owner = ContextOwner::new(context.suspend());
+        let mut owner = ContextOwner::new(context.suspend_or_panic());
         owner.attach_viewport_bridge(keepalive, attachment);
         owner
     }
@@ -827,7 +871,7 @@ mod tests {
                 assert_eq!(raw.FrameCountPlatformEnded, raw.FrameCount);
                 Ok::<_, std::convert::Infallible>(())
             })
-            .unwrap_or_else(|never| match never {});
+            .expect("the viewport fixture Context should activate for inspection");
     }
 
     #[test]

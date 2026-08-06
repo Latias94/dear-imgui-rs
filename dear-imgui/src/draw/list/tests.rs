@@ -3,7 +3,7 @@ use super::super::counts::{
     DrawCornerFlags, DrawListFlags, DrawNgonSegmentCount, DrawSegmentCount, PolylineFlags,
 };
 use super::super::util::draw_list_counts;
-use super::DrawListMut;
+use super::{DrawListMut, DrawListProvenance};
 use crate::sys;
 
 struct TestDrawList {
@@ -24,6 +24,7 @@ impl TestDrawList {
         DrawListMut {
             draw_list: self.raw,
             ui: None,
+            provenance: DrawListProvenance::Frame,
         }
     }
 
@@ -502,25 +503,19 @@ fn text_no_pixel_snap_scope_is_nested_and_panic_safe() {
     let draw_list = fixture.draw_list();
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _outer = draw_list.push_text_no_pixel_snap();
-        assert!(
-            DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags })
-                .contains(DrawListFlags::TEXT_NO_PIXEL_SNAP)
-        );
-
-        {
-            let _inner = draw_list.push_text_no_pixel_snap();
+        draw_list.with_text_no_pixel_snap(|| {
             assert!(
                 DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags })
                     .contains(DrawListFlags::TEXT_NO_PIXEL_SNAP)
             );
-        }
-
-        assert!(
-            DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags })
-                .contains(DrawListFlags::TEXT_NO_PIXEL_SNAP)
-        );
-        panic!("forced panic inside text flag scope");
+            draw_list.with_text_no_pixel_snap(|| {
+                assert!(
+                    DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags })
+                        .contains(DrawListFlags::TEXT_NO_PIXEL_SNAP)
+                );
+                panic!("forced panic inside text flag scope");
+            });
+        });
     }));
 
     assert!(result.is_err());

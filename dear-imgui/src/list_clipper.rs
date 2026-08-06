@@ -134,13 +134,13 @@ struct ActiveListClipper<'ui> {
 impl<'ui> ActiveListClipper<'ui> {
     fn begin(ui: &'ui Ui, items_count: i32, items_height: f32, caller: &str) -> Self {
         ui.run_with_bound_context(|| unsafe {
-            registry::assert_can_begin(ui.context_raw(), caller);
+            registry::assert_can_begin(ui, caller);
             let ptr = sys::ImGuiListClipper_ImGuiListClipper();
             if ptr.is_null() {
                 panic!("ImGuiListClipper_ImGuiListClipper() returned null");
             }
             sys::ImGuiListClipper_Begin(ptr, items_count, items_height);
-            let handle = registry::register_current(ui.context_raw(), ptr, caller);
+            let handle = registry::register_current(ui, ptr, caller);
             Self {
                 ui,
                 handle,
@@ -154,7 +154,7 @@ impl<'ui> ActiveListClipper<'ui> {
 
     fn include_items_by_index(&mut self, item_begin: i32, item_end: i32, caller: &str) {
         self.ui.run_with_bound_context(|| unsafe {
-            let ptr = registry::assert_current(self.handle, caller);
+            let ptr = registry::assert_current(self.ui, self.handle, caller);
             sys::ImGuiListClipper_IncludeItemsByIndex(ptr, item_begin, item_end);
         });
     }
@@ -162,14 +162,14 @@ impl<'ui> ActiveListClipper<'ui> {
     fn step(&mut self, caller: &str) -> bool {
         self.stepped = true;
         let has_range = self.ui.run_with_bound_context(|| unsafe {
-            let ptr = registry::assert_current(self.handle, caller);
+            let ptr = registry::assert_current(self.ui, self.handle, caller);
             sys::ImGuiListClipper_Step(ptr)
         });
         if !has_range {
             self.ended = true;
             if !self.retain_registration_after_exhaustion {
                 self.ui.run_with_bound_context(|| unsafe {
-                    registry::complete(self.handle);
+                    registry::complete(self.ui, self.handle);
                 });
                 self.registered = false;
             }
@@ -180,12 +180,12 @@ impl<'ui> ActiveListClipper<'ui> {
     fn end(&mut self, caller: &str) {
         if !self.ended {
             self.ui.run_with_bound_context(|| unsafe {
-                let ptr = registry::assert_current(self.handle, caller);
+                let ptr = registry::assert_current(self.ui, self.handle, caller);
                 sys::ImGuiListClipper_End(ptr);
             });
             self.ended = true;
             self.ui.run_with_bound_context(|| unsafe {
-                registry::complete(self.handle);
+                registry::complete(self.ui, self.handle);
             });
             self.registered = false;
         }
@@ -193,14 +193,14 @@ impl<'ui> ActiveListClipper<'ui> {
 
     fn display_start(&self, caller: &str) -> usize {
         self.ui.run_with_bound_context(|| unsafe {
-            let ptr = registry::assert_current(self.handle, caller);
+            let ptr = registry::assert_current(self.ui, self.handle, caller);
             display_index_from_i32((*ptr).DisplayStart, caller)
         })
     }
 
     fn display_end(&self, caller: &str) -> usize {
         self.ui.run_with_bound_context(|| unsafe {
-            let ptr = registry::assert_current(self.handle, caller);
+            let ptr = registry::assert_current(self.ui, self.handle, caller);
             display_index_from_i32((*ptr).DisplayEnd, caller)
         })
     }
@@ -208,9 +208,10 @@ impl<'ui> ActiveListClipper<'ui> {
 
 impl Drop for ActiveListClipper<'_> {
     fn drop(&mut self) {
-        self.ui.run_with_bound_context(|| unsafe {
+        let binding = self.ui.ctx_binding.clone();
+        let _ = binding.try_with_bound_context(|| unsafe {
             if self.registered {
-                registry::release(self.handle);
+                registry::release(self.ui, self.handle);
             } else {
                 sys::ImGuiListClipper_destroy(self.handle.ptr());
             }
@@ -419,6 +420,7 @@ impl UnknownCountListClipperToken<'_> {
 
         let items_height = self.active.ui.run_with_bound_context(|| unsafe {
             let ptr = registry::assert_current(
+                self.active.ui,
                 self.active.handle,
                 "UnknownCountListClipperToken::finish()",
             );
@@ -434,6 +436,7 @@ impl UnknownCountListClipperToken<'_> {
         );
         self.active.ui.run_with_bound_context(|| unsafe {
             let ptr = registry::assert_current(
+                self.active.ui,
                 self.active.handle,
                 "UnknownCountListClipperToken::finish()",
             );
@@ -745,6 +748,31 @@ mod tests {
     }
 
     #[test]
+    fn clipper_drop_does_not_double_panic_during_native_scope_recovery() {
+        let mut ctx = setup_context();
+        let context = ctx.as_raw();
+        let ui = ctx.frame();
+
+        ui.window("list_clipper_scope_recovery").build(|| {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let outer = ui.push_id("outer");
+                let _inner = ui.push_id("inner");
+                let _clipper = ListClipper::new(1).items_height(10.0).begin(ui);
+
+                drop(outer);
+            }));
+
+            assert!(result.is_err());
+            assert_eq!(registry::active_count(context), 0);
+
+            let mut next = ListClipper::new(1).items_height(10.0).begin(ui);
+            assert!(next.step());
+            ui.dummy([1.0, 10.0]);
+            assert!(!next.step());
+        });
+    }
+
+    #[test]
     fn wrong_scope_drop_uses_layout_neutral_cleanup() {
         let mut ctx = setup_context();
         let context = ctx.as_raw();
@@ -835,6 +863,29 @@ mod tests {
         });
 
         assert_eq!(registry::active_count(context), 0);
+        assert!(ctx.render_legacy().valid());
+    }
+
+    #[test]
+    fn internal_window_reentry_preserves_the_active_clipper_scope() {
+        let mut ctx = setup_context();
+        let flags = ctx.io().config_flags() | crate::ConfigFlags::DOCKING_ENABLE;
+        ctx.io_mut().set_config_flags(flags);
+        let ui = ctx.frame();
+        let host_name = format!("WindowOverViewport_{:08X}", ui.main_viewport().id().raw());
+
+        ui.window(host_name).build(|| {
+            let mut clipper = ListClipper::new(1).items_height(10.0).begin(ui);
+
+            let _ =
+                ui.dockspace_over_main_viewport_with_flags(0.into(), crate::DockNodeFlags::NONE);
+
+            clipper.include_item_by_index(0);
+            assert!(clipper.step());
+            ui.dummy([1.0, 10.0]);
+            assert!(!clipper.step());
+        });
+
         assert!(ctx.render_legacy().valid());
     }
 

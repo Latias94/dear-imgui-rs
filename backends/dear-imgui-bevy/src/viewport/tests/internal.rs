@@ -961,7 +961,7 @@ fn destroy_callback_does_not_touch_viewport_for_the_wrong_current_context() {
         platform_create_window_raw_callback(viewport);
     }
     let owned_handle = unsafe { (*viewport).PlatformHandle };
-    let suspended = context.suspend();
+    let suspended = context.suspend_or_panic();
     let other_context = imgui::Context::create();
 
     unsafe { platform_destroy_window_raw_callback(viewport) };

@@ -694,7 +694,7 @@ fn public_drift_check_clears_only_the_runtime_context_capability() {
             .platform_io_mut()
             .set_renderer_destroy_window_raw(Some(foreign_renderer_unary));
     }
-    let suspended_context = context.suspend();
+    let suspended_context = context.suspend_or_panic();
     let mut other_context = Context::create();
     let io = other_context.io_mut();
     io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_VIEWPORTS);
@@ -713,7 +713,7 @@ fn public_drift_check_clears_only_the_runtime_context_capability() {
         "drift cleanup must not mutate the Context restored after validation"
     );
 
-    let suspended_other = other_context.suspend();
+    let suspended_other = other_context.suspend_or_panic();
     let mut context = suspended_context
         .activate()
         .expect("the other Context was suspended");

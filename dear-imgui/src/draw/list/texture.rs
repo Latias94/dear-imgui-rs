@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use crate::sys;
 
 use super::DrawListMut;
@@ -7,33 +5,54 @@ use super::DrawListMut;
 /// Tracks a texture pushed to a draw-list texture stack.
 ///
 /// The texture is popped when the token is dropped or when [`Self::pop`] is
-/// called explicitly.
+/// called explicitly. Tokens for the same draw list must finish in reverse creation order. A token
+/// from a window draw list must also finish in the exact window `Begin` scope that created the
+/// draw-list view. Prefer [`DrawListMut::with_texture`] for ordinary scoped use.
 #[must_use]
 pub struct DrawListTextureToken<'draw_list, 'tex> {
-    draw_list: *mut sys::ImDrawList,
-    _phantom: PhantomData<(&'draw_list (), &'tex ())>,
+    scope: crate::scope::NativeScopeToken<'draw_list>,
+    _texture: std::marker::PhantomData<&'tex ()>,
 }
 
 impl<'draw_list, 'tex> DrawListTextureToken<'draw_list, 'tex> {
-    fn new(draw_list: *mut sys::ImDrawList) -> Self {
+    fn new(
+        ui: &'draw_list crate::Ui,
+        draw_list: *mut sys::ImDrawList,
+        window_scoped: bool,
+    ) -> Self {
         Self {
-            draw_list,
-            _phantom: PhantomData,
+            scope: ui.begin_native_scope(
+                crate::scope::NativeScopePop::DrawListPopTexture {
+                    draw_list,
+                    window_scoped,
+                },
+                "DrawListTextureToken",
+            ),
+            _texture: std::marker::PhantomData,
         }
     }
 
     /// Pop the texture immediately instead of waiting for drop.
+    ///
+    /// # Panics
+    ///
+    /// Panics before FFI if a later texture token for the same draw list is active or a
+    /// window-scoped draw list is no longer in its originating window `Begin` scope.
     #[doc(alias = "PopTexture")]
     pub fn pop(self) {}
 
     /// Pop the texture immediately instead of waiting for drop.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the same conditions as [`Self::pop`].
     #[doc(alias = "PopTexture")]
     pub fn end(self) {}
 }
 
 impl Drop for DrawListTextureToken<'_, '_> {
     fn drop(&mut self) {
-        unsafe { sys::ImDrawList_PopTexture(self.draw_list) }
+        self.scope.finish();
     }
 }
 
@@ -61,6 +80,7 @@ impl<'ui> DrawListMut<'ui> {
         texture: impl Into<crate::texture::TextureRef<'tex>>,
     ) -> DrawListTextureToken<'_, 'tex> {
         let texture = texture.into();
+        self.assert_scope("DrawListMut::push_texture()");
         self.ui().run_with_bound_context(|| {
             let tex_ref = self
                 .ui()
@@ -70,7 +90,7 @@ impl<'ui> DrawListMut<'ui> {
                 });
             unsafe { sys::ImDrawList_PushTexture(self.draw_list, tex_ref) };
         });
-        DrawListTextureToken::new(self.draw_list)
+        DrawListTextureToken::new(self.ui(), self.draw_list, self.is_window_scoped())
     }
 
     /// Push a texture, run `f`, then pop the texture.
@@ -82,7 +102,9 @@ impl<'ui> DrawListMut<'ui> {
         texture: impl Into<crate::texture::TextureRef<'tex>>,
         f: impl FnOnce() -> R,
     ) -> R {
-        let _texture = self.push_texture(texture);
-        f()
+        let texture = self.push_texture(texture);
+        let result = f();
+        drop(texture);
+        result
     }
 }

@@ -397,7 +397,7 @@ fn synchronous_reconciled_frame_completion_binds_its_owner_context() {
     let ctx_b = imgui::Context::create();
     let binding_b = ctx_b.binding();
     let raw_b = ctx_b.as_raw();
-    let suspended_b = ctx_b.suspend();
+    let suspended_b = ctx_b.suspend_or_panic();
 
     let mut ctx_a = imgui::Context::create();
     prepare_context(&mut ctx_a);
@@ -766,7 +766,7 @@ fn renderer_reset_commit_binds_its_owner_context() {
     let foreign = imgui::Context::create();
     let foreign_binding = foreign.binding();
     let foreign_raw = foreign.as_raw();
-    let suspended_foreign = foreign.suspend();
+    let suspended_foreign = foreign.suspend_or_panic();
 
     let mut owner = imgui::Context::create();
     prepare_context(&mut owner);

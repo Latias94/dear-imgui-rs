@@ -50,12 +50,18 @@ create_token!(
     #[doc(alias = "PopFont")]
     pub struct FontStackToken<'ui>;
 
+    pop crate::scope::NativeScopePop::PopFont;
+
     /// Pops a change from the font stack.
     drop { unsafe { sys::igPopFont() } }
 );
 
 impl FontStackToken<'_> {
     /// Pops a change from the font stack.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the same conditions as [`Self::end`].
     pub fn pop(self) {
         self.end()
     }

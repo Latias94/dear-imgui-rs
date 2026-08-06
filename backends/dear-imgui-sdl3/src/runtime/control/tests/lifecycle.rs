@@ -204,7 +204,7 @@ fn platform_session_is_exclusive_and_reusable_across_contexts() {
         Some(id_a)
     );
 
-    let suspended_a = context_a.suspend();
+    let suspended_a = context_a.suspend_or_panic();
     let mut blocked_context = Context::create();
     let error = RuntimeRegistration::prepare_with_backend(
         &mut blocked_context,
