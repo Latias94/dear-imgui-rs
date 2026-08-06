@@ -25,9 +25,7 @@ fn request_test_device() -> Option<(Device, Queue)> {
 }
 
 fn managed_texture_id(context: &mut Context) -> SnapshotTextureId {
-    let mut texture = OwnedTextureData::new();
-    texture.create(TextureFormat::RGBA32, 2, 2);
-    texture.set_data(&[0; 16]);
+    let texture = OwnedTextureData::from_pixels(TextureFormat::RGBA32, 2, 2, &[0; 16]).unwrap();
     SnapshotTextureId::User(context.register_texture(texture))
 }
 

@@ -156,9 +156,13 @@ fn app_with_primary_window() -> (App, Entity, Entity, imgui::ManagedTextureId) {
         Msaa::Off,
     );
 
-    let mut texture = imgui::texture::OwnedTextureData::new();
-    texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
-    texture.set_data(&[255, 0, 255, 255]);
+    let texture = imgui::texture::OwnedTextureData::from_pixels(
+        imgui::texture::TextureFormat::RGBA32,
+        1,
+        1,
+        &[255, 0, 255, 255],
+    )
+    .unwrap();
     let texture_id = configure_primary(&mut app, |context| {
         context.io_mut().set_config_input_trickle_event_queue(false);
         let _ = context.font_atlas().build();

@@ -11,8 +11,8 @@ use crate::render::snapshot::{
 };
 use crate::sys;
 use crate::texture::{
-    ManagedTextureError, ManagedTextureId, ManagedTextureMut, ManagedTextureRef, OwnedTextureData,
-    TextureData, TextureStatus,
+    ManagedTextureError, ManagedTextureId, ManagedTextureMut, ManagedTextureMutationError,
+    ManagedTextureRef, OwnedTextureData, TextureData, TextureDataError, TextureStatus,
 };
 
 use super::binding::CTX_MUTEX;
@@ -92,8 +92,7 @@ impl FontAtlasSnapshotTarget {
         crate::fonts::prune_font_atlas_texture_tombstones(self.atlas, self.context, watermark);
     }
 
-    pub(crate) fn reset_renderer_bindings(&self) -> usize {
-        let mut reset = 0;
+    pub(crate) fn reset_renderer_bindings(&self) {
         for target in &self.textures {
             let texture = unsafe { TextureData::from_raw(target.texture) };
             if texture.ref_count() != 1 || texture.status() == TextureStatus::Destroyed {
@@ -104,10 +103,8 @@ impl FontAtlasSnapshotTarget {
                 // already released the resource represented by its binding.
                 texture.set_status(TextureStatus::Destroyed);
             }
-            reset += 1;
         }
         crate::fonts::mark_font_atlas_renderer_reset(self.atlas);
-        reset
     }
 }
 
@@ -153,6 +150,40 @@ struct TextureEntry {
     last_reference_epoch: u64,
     destroy_ack_epoch: Option<u64>,
     texture: OwnedTextureData,
+}
+
+impl TextureEntry {
+    fn advance_revision(&mut self) {
+        advance_revision(&mut self.revision);
+    }
+}
+
+struct ManagedTextureMutationRevision<'revision> {
+    revision: &'revision mut u64,
+    mutated: bool,
+}
+
+impl ManagedTextureMutationRevision<'_> {
+    fn new(revision: &mut u64) -> ManagedTextureMutationRevision<'_> {
+        ManagedTextureMutationRevision {
+            revision,
+            mutated: false,
+        }
+    }
+}
+
+impl Drop for ManagedTextureMutationRevision<'_> {
+    fn drop(&mut self) {
+        if self.mutated {
+            advance_revision(self.revision);
+        }
+    }
+}
+
+fn advance_revision(revision: &mut u64) {
+    *revision = revision
+        .checked_add(1)
+        .expect("managed texture revision space exhausted");
 }
 
 impl fmt::Debug for ManagedTextureRegistry {
@@ -401,7 +432,15 @@ impl ManagedTextureRegistry {
         f: impl for<'texture> FnOnce(ManagedTextureMut<'texture>) -> R,
     ) -> Result<R, ManagedTextureError> {
         let entry = self.active_entry_mut(id)?;
-        Ok(f(ManagedTextureMut::new(&mut entry.texture)))
+        let TextureEntry {
+            revision, texture, ..
+        } = entry;
+        let mut mutation_revision = ManagedTextureMutationRevision::new(revision);
+        let result = f(ManagedTextureMut::new(
+            texture,
+            &mut mutation_revision.mutated,
+        ));
+        Ok(result)
     }
 
     pub(crate) fn track_snapshot_operations(
@@ -431,10 +470,7 @@ impl ManagedTextureRegistry {
                         .as_deref()
                         .is_none_or(|current| current != request.op.as_ref())
                     {
-                        entry.revision = entry
-                            .revision
-                            .checked_add(1)
-                            .expect("managed texture revision space exhausted");
+                        entry.advance_revision();
                         entry.operation = Some(Arc::clone(&request.op));
                     } else if let Some(current) = &entry.operation {
                         request.op = Arc::clone(current);
@@ -673,8 +709,7 @@ impl ManagedTextureRegistry {
         }
     }
 
-    pub(crate) fn reset_renderer_bindings(&mut self, watermark: u64) -> usize {
-        let mut reset = 0;
+    pub(crate) fn reset_renderer_bindings(&mut self, watermark: u64) {
         for slot in &mut self.slots {
             let (entry, retiring) = match slot {
                 TextureSlot::Active(entry) => (entry, false),
@@ -697,10 +732,8 @@ impl ManagedTextureRegistry {
             if retiring {
                 entry.destroy_ack_epoch = Some(watermark);
             }
-            reset += 1;
         }
         self.reap_destroyed(watermark);
-        reset
     }
 
     fn unregister_and_expose(&mut self, slot_index: usize, mut entry: TextureEntry) {
@@ -851,6 +884,46 @@ impl Context {
         self.texture_registry.borrow_mut().with_texture_mut(id, f)
     }
 
+    /// Mutate an active managed texture with flattened access and pixel-validation errors.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ManagedTextureMutationError::Access`] when `id` is foreign, stale, unknown, or
+    /// retiring. Returns [`ManagedTextureMutationError::Data`] when the closure returns a pixel
+    /// validation error. Each [`ManagedTextureMut`] operation is transactional, but the closure is
+    /// not: successful operations performed before a later error remain applied and immediately
+    /// invalidate older renderer feedback.
+    ///
+    /// ```
+    /// use dear_imgui_rs::{
+    ///     Context, ManagedTextureMutationError, OwnedTextureData, TextureDataError, TextureFormat,
+    /// };
+    ///
+    /// let mut context = Context::create();
+    /// let texture = OwnedTextureData::from_pixels(TextureFormat::RGBA32, 1, 1, &[0; 4])?;
+    /// let id = context.register_texture(texture);
+    /// let error = context
+    ///     .try_with_texture_mut(id, |mut texture| texture.replace_pixels(&[0; 3]))
+    ///     .unwrap_err();
+    /// assert!(matches!(
+    ///     error,
+    ///     ManagedTextureMutationError::Data(TextureDataError::ByteLengthMismatch {
+    ///         expected: 4,
+    ///         actual: 3,
+    ///     })
+    /// ));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn try_with_texture_mut<R>(
+        &mut self,
+        id: ManagedTextureId,
+        f: impl for<'texture> FnOnce(ManagedTextureMut<'texture>) -> Result<R, TextureDataError>,
+    ) -> Result<R, ManagedTextureMutationError> {
+        self.with_texture_mut(id, f)
+            .map_err(ManagedTextureMutationError::Access)?
+            .map_err(ManagedTextureMutationError::Data)
+    }
+
     /// Stop accepting new draw references and retire a managed texture.
     pub fn remove_texture(&mut self, id: ManagedTextureId) -> Result<(), ManagedTextureError> {
         let _guard = CTX_MUTEX.lock();
@@ -872,10 +945,7 @@ mod tests {
     use crate::texture::{TextureFormat, TextureId};
 
     fn texture() -> OwnedTextureData {
-        let mut texture = OwnedTextureData::new();
-        texture.create(TextureFormat::RGBA32, 1, 1);
-        texture.set_data(&[1, 2, 3, 4]);
-        texture
+        OwnedTextureData::from_pixels(TextureFormat::RGBA32, 1, 1, &[1, 2, 3, 4]).unwrap()
     }
 
     #[test]
@@ -897,14 +967,30 @@ mod tests {
         let mut context_a = Context::create();
         let first_id = context_a.register_texture(texture());
         let suspended_a = context_a.suspend_or_panic();
-        let context_b = Context::create();
+        let mut context_b = Context::create();
         assert!(matches!(
             context_b.with_texture(first_id, |_| ()),
             Err(ManagedTextureError::ForeignContext { .. })
         ));
+        assert!(matches!(
+            context_b.try_with_texture_mut(first_id, |mut texture| {
+                texture.replace_pixels(&[4, 3, 2, 1])
+            }),
+            Err(ManagedTextureMutationError::Access(
+                ManagedTextureError::ForeignContext { .. }
+            ))
+        ));
         drop(context_b);
         let mut context_a = suspended_a.activate().expect("Context A should reactivate");
         context_a.remove_texture(first_id).expect("unused texture");
+        assert_eq!(
+            context_a.try_with_texture_mut(first_id, |mut texture| {
+                texture.replace_pixels(&[4, 3, 2, 1])
+            }),
+            Err(ManagedTextureMutationError::Access(
+                ManagedTextureError::AlreadyRemoved(first_id)
+            ))
+        );
         let before_refresh_id = context_a.register_texture(texture());
         assert_ne!(
             before_refresh_id.slot(),

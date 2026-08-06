@@ -1556,9 +1556,13 @@ mod callback_preflight_tests {
         context.io_mut().set_delta_time(1.0 / 60.0);
         let _ = context.font_atlas().build();
 
-        let mut texture = crate::texture::OwnedTextureData::new();
-        texture.create(crate::texture::TextureFormat::RGBA32, 1, 1);
-        texture.set_data(&[255, 255, 255, 255]);
+        let texture = crate::texture::OwnedTextureData::from_pixels(
+            crate::texture::TextureFormat::RGBA32,
+            1,
+            1,
+            &[255, 255, 255, 255],
+        )
+        .unwrap();
         let texture = context.register_texture(texture);
 
         let frame = context.begin_frame();
@@ -1693,9 +1697,13 @@ mod tests {
             unsafe { (*main).ID.wrapping_add(1).max(1) },
             std::ptr::null_mut(),
         );
-        let mut texture = crate::texture::OwnedTextureData::new();
-        texture.create(crate::texture::TextureFormat::RGBA32, 1, 1);
-        texture.set_data(&[255, 255, 255, 255]);
+        let mut texture = crate::texture::OwnedTextureData::from_pixels(
+            crate::texture::TextureFormat::RGBA32,
+            1,
+            1,
+            &[255, 255, 255, 255],
+        )
+        .unwrap();
 
         let mut main_command = sys::ImDrawCmd {
             TexRef: unsafe { sys::ImTextureData_GetTexRef(texture.as_raw_mut()) },

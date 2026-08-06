@@ -117,11 +117,13 @@ impl AppWindow {
         // Create a managed ImGui texture (CPU-side pixels; backend will create GPU texture)
         let tex_w: u32 = 128;
         let tex_h: u32 = 128;
-        let mut img_tex = dear_imgui_rs::texture::OwnedTextureData::new();
-        img_tex.create(dear_imgui_rs::texture::TextureFormat::RGBA32, tex_w, tex_h);
-
         let pixels = animated_rgba_pixels(tex_w, tex_h, Duration::ZERO);
-        img_tex.set_data(&pixels);
+        let img_tex = dear_imgui_rs::texture::OwnedTextureData::from_pixels(
+            dear_imgui_rs::texture::TextureFormat::RGBA32,
+            tex_w,
+            tex_h,
+            &pixels,
+        )?;
 
         // Optionally, create a second managed texture from a user image
         let photo_tex = Self::maybe_load_photo_texture();
@@ -184,11 +186,21 @@ impl AppWindow {
                     let rgba = img.to_rgba8();
                     let (w, h) = rgba.dimensions();
                     let data = rgba.into_raw();
-                    let mut t = dear_imgui_rs::texture::OwnedTextureData::new();
-                    t.create(dear_imgui_rs::texture::TextureFormat::RGBA32, w, h);
-                    t.set_data(&data);
-                    println!("Loaded image for WGPU demo from {:?} ({}x{})", path, w, h);
-                    Some(t)
+                    match dear_imgui_rs::texture::OwnedTextureData::from_pixels(
+                        dear_imgui_rs::texture::TextureFormat::RGBA32,
+                        w,
+                        h,
+                        &data,
+                    ) {
+                        Ok(texture) => {
+                            println!("Loaded image for WGPU demo from {:?} ({}x{})", path, w, h);
+                            Some(texture)
+                        }
+                        Err(error) => {
+                            eprintln!("Failed to create WGPU demo texture {:?}: {error}", path);
+                            None
+                        }
+                    }
                 }
                 Err(e) => {
                     eprintln!("Failed to decode WGPU demo image {:?}: {e}", path);
@@ -210,14 +222,14 @@ impl AppWindow {
         }
     }
 
-    fn update_texture(&mut self) {
+    fn update_texture(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let (w, h) = self.tex_size;
         let pixels = animated_rgba_pixels(w, h, self.imgui.animation_started.elapsed());
 
         self.imgui
             .context
-            .with_texture_mut(self.img_tex, |mut texture| texture.set_data(&pixels))
-            .expect("animated texture should remain active");
+            .try_with_texture_mut(self.img_tex, |mut texture| texture.replace_pixels(&pixels))?;
+        Ok(())
     }
 
     fn render(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -228,7 +240,7 @@ impl AppWindow {
         self.imgui.last_frame = now;
 
         // Update animated texture (marks WantUpdates)
-        self.update_texture();
+        self.update_texture()?;
 
         let (frame, reconfigure_after_present) = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),

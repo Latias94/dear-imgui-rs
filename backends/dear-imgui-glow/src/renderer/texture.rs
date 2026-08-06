@@ -832,9 +832,8 @@ mod tests {
     }
 
     fn register_rgba_texture(context: &mut ImGuiContext) -> ManagedTextureId {
-        let mut texture = OwnedTextureData::new();
-        texture.create(TextureFormat::RGBA32, 2, 2);
-        texture.set_data(&[255; 16]);
+        let texture =
+            OwnedTextureData::from_pixels(TextureFormat::RGBA32, 2, 2, &[255; 16]).unwrap();
         context.register_texture(texture)
     }
 
@@ -1027,7 +1026,7 @@ mod tests {
             .unwrap();
 
         context
-            .with_texture_mut(texture, |mut texture| texture.set_data(&[7; 16]))
+            .try_with_texture_mut(texture, |mut texture| texture.replace_pixels(&[7; 16]))
             .unwrap();
         let frame = render_managed_frame(&mut context, &renderer, Some(texture));
         assert_eq!(

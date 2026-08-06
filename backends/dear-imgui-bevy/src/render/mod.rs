@@ -235,9 +235,13 @@ mod tests {
     }
 
     fn register_test_texture(context: &mut imgui::Context) -> imgui::ManagedTextureId {
-        let mut texture = imgui::texture::OwnedTextureData::new();
-        texture.create(imgui::TextureFormat::RGBA32, 1, 1);
-        texture.set_data(&[255, 255, 255, 255]);
+        let texture = imgui::texture::OwnedTextureData::from_pixels(
+            imgui::TextureFormat::RGBA32,
+            1,
+            1,
+            &[255, 255, 255, 255],
+        )
+        .unwrap();
         context.register_texture(texture)
     }
 
@@ -880,9 +884,13 @@ mod tests {
         let mut context = managed_context();
         let consumer = context.create_detached_renderer_consumer().unwrap();
 
-        let mut texture_data = imgui::texture::OwnedTextureData::new();
-        texture_data.create(imgui::TextureFormat::RGBA32, 1, 1);
-        texture_data.set_data(&[255, 0, 255, 255]);
+        let texture_data = imgui::texture::OwnedTextureData::from_pixels(
+            imgui::TextureFormat::RGBA32,
+            1,
+            1,
+            &[255, 0, 255, 255],
+        )
+        .unwrap();
         let texture = context.register_texture(texture_data);
         let renderer_texture = imgui::TextureId::new(0xBEEF);
         let mut extracted = ImguiExtractedRenderFrame::default();
@@ -909,8 +917,8 @@ mod tests {
             .unwrap();
 
         context
-            .with_texture_mut(texture, |mut texture| {
-                texture.set_data(&[0, 255, 0, 255]);
+            .try_with_texture_mut(texture, |mut texture| {
+                texture.replace_pixels(&[0, 255, 0, 255])
             })
             .unwrap();
         let update = managed_snapshot(&mut context, &consumer, Some(texture));

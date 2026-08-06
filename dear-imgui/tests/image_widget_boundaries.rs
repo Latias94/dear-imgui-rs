@@ -113,10 +113,13 @@ fn image_button_rejects_invalid_geometry_and_colors_before_ffi() {
 }
 
 fn managed_texture() -> imgui::texture::OwnedTextureData {
-    let mut texture = imgui::texture::OwnedTextureData::new();
-    texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
-    texture.set_data(&[255, 255, 255, 255]);
-    texture
+    imgui::texture::OwnedTextureData::from_pixels(
+        imgui::texture::TextureFormat::RGBA32,
+        1,
+        1,
+        &[255, 255, 255, 255],
+    )
+    .unwrap()
 }
 
 #[test]

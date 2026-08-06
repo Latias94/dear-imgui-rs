@@ -58,9 +58,9 @@ impl RendererTextureStore {
     pub(super) fn insert_uninstalled_for_test(&mut self, texture: SnapshotTextureId) {
         use dear_imgui_rs::TextureId;
 
-        let mut data = OwnedTextureData::new();
-        data.create(TextureFormat::RGBA32, 1, 1);
-        data.set_data(&[255, 255, 255, 255]);
+        let mut data =
+            OwnedTextureData::from_pixels(TextureFormat::RGBA32, 1, 1, &[255, 255, 255, 255])
+                .unwrap();
         unsafe {
             data.set_tex_id(TextureId::new(77));
             data.set_status(TextureStatus::OK);
@@ -100,13 +100,16 @@ impl RendererTextureStore {
                     self.destroy_existing(texture, &mut update_texture)?;
                     let pixels =
                         copy_full_upload(texture, *format, *width, *height, *row_pitch, pixels)?;
+                    let data = OwnedTextureData::from_pixels(*format, *width, *height, &pixels)
+                        .map_err(|_| Sdl3BackendError::InvalidTextureRequest {
+                            texture,
+                            reason: "texture payload failed owned texture validation",
+                        })?;
                     let mut proxy = RendererTexture {
-                        data: OwnedTextureData::new(),
+                        data,
                         pixels,
                         installed: false,
                     };
-                    proxy.data.create(*format, *width, *height);
-                    proxy.data.set_data(&proxy.pixels);
                     set_texture_updates(&mut proxy.data, &[]);
                     update_texture(&mut proxy.data);
                     ensure_upload_completed(texture, &proxy.data)?;
@@ -148,7 +151,12 @@ impl RendererTextureStore {
                         rects,
                     )?;
                     if !rects.is_empty() {
-                        proxy.data.set_data(&proxy.pixels);
+                        proxy.data.replace_pixels(&proxy.pixels).map_err(|_| {
+                            Sdl3BackendError::InvalidTextureRequest {
+                                texture,
+                                reason: "updated texture payload failed validation",
+                            }
+                        })?;
                         let update_rects =
                             rects.iter().map(|upload| upload.rect).collect::<Vec<_>>();
                         set_texture_updates(&mut proxy.data, &update_rects);
@@ -526,9 +534,9 @@ mod tests {
             .io_mut()
             .set_backend_flags(BackendFlags::RENDERER_HAS_TEXTURES);
 
-        let mut texture = OwnedTextureData::new();
-        texture.create(TextureFormat::RGBA32, 2, 1);
-        texture.set_data(&[1, 2, 3, 4, 5, 6, 7, 8]);
+        let texture =
+            OwnedTextureData::from_pixels(TextureFormat::RGBA32, 2, 1, &[1, 2, 3, 4, 5, 6, 7, 8])
+                .unwrap();
         let texture_id = context.register_texture(texture);
         let consumer = context.create_synchronous_renderer_consumer().unwrap();
         let mut store = RendererTextureStore::default();
@@ -560,8 +568,8 @@ mod tests {
         );
 
         context
-            .with_texture_mut(texture_id, |mut texture| {
-                texture.set_data(&[8, 7, 6, 5, 4, 3, 2, 1]);
+            .try_with_texture_mut(texture_id, |mut texture| {
+                texture.replace_pixels(&[8, 7, 6, 5, 4, 3, 2, 1])
             })
             .unwrap();
         let frame = context.begin_frame();
@@ -628,9 +636,8 @@ mod tests {
             stamp: 1,
             generation: 1,
         };
-        let mut data = OwnedTextureData::new();
-        data.create(TextureFormat::RGBA32, 1, 1);
-        data.set_data(&[1, 2, 3, 4]);
+        let mut data =
+            OwnedTextureData::from_pixels(TextureFormat::RGBA32, 1, 1, &[1, 2, 3, 4]).unwrap();
         fake_update(&mut data);
         let mut store = RendererTextureStore::default();
         store.textures.insert(
@@ -658,9 +665,8 @@ mod tests {
             stamp: 2,
             generation: 1,
         };
-        let mut data = OwnedTextureData::new();
-        data.create(TextureFormat::RGBA32, 1, 1);
-        data.set_data(&[1, 2, 3, 4]);
+        let mut data =
+            OwnedTextureData::from_pixels(TextureFormat::RGBA32, 1, 1, &[1, 2, 3, 4]).unwrap();
         fake_update(&mut data);
         let mut store = RendererTextureStore::default();
         store.textures.insert(
@@ -695,9 +701,8 @@ mod tests {
         context
             .io_mut()
             .set_backend_flags(BackendFlags::RENDERER_HAS_TEXTURES);
-        let mut texture = OwnedTextureData::new();
-        texture.create(TextureFormat::RGBA32, 1, 1);
-        texture.set_data(&[1, 2, 3, 4]);
+        let texture =
+            OwnedTextureData::from_pixels(TextureFormat::RGBA32, 1, 1, &[1, 2, 3, 4]).unwrap();
         let texture_id = context.register_texture(texture);
         let consumer = context.create_synchronous_renderer_consumer().unwrap();
         let frame = context.begin_frame();
@@ -736,9 +741,8 @@ mod tests {
         context
             .io_mut()
             .set_backend_flags(BackendFlags::RENDERER_HAS_TEXTURES);
-        let mut texture = OwnedTextureData::new();
-        texture.create(TextureFormat::RGBA32, 1, 1);
-        texture.set_data(&[1, 2, 3, 4]);
+        let texture =
+            OwnedTextureData::from_pixels(TextureFormat::RGBA32, 1, 1, &[1, 2, 3, 4]).unwrap();
         let texture_id = context.register_texture(texture);
         let consumer = context.create_detached_renderer_consumer().unwrap();
 
@@ -794,9 +798,8 @@ mod tests {
         context
             .io_mut()
             .set_backend_flags(BackendFlags::RENDERER_HAS_TEXTURES);
-        let mut texture = OwnedTextureData::new();
-        texture.create(TextureFormat::RGBA32, 1, 1);
-        texture.set_data(&[1, 2, 3, 4]);
+        let texture =
+            OwnedTextureData::from_pixels(TextureFormat::RGBA32, 1, 1, &[1, 2, 3, 4]).unwrap();
         let texture_id = context.register_texture(texture);
         let consumer = context.create_detached_renderer_consumer().unwrap();
 
@@ -840,9 +843,9 @@ mod tests {
         let mut store = RendererTextureStore::default();
 
         for byte in 0..64_u8 {
-            let mut texture = OwnedTextureData::new();
-            texture.create(TextureFormat::RGBA32, 1, 1);
-            texture.set_data(&[byte, 0, 0, 255]);
+            let texture =
+                OwnedTextureData::from_pixels(TextureFormat::RGBA32, 1, 1, &[byte, 0, 0, 255])
+                    .unwrap();
             let texture_id = context.register_texture(texture);
             let frame = context.begin_frame();
             frame.ui().image(texture_id, [1.0, 1.0]);
@@ -897,9 +900,7 @@ mod tests {
             .io_mut()
             .set_backend_flags(BackendFlags::RENDERER_HAS_TEXTURES);
 
-        let mut texture = OwnedTextureData::new();
-        texture.create(TextureFormat::Alpha8, 1, 1);
-        texture.set_data(&[42]);
+        let texture = OwnedTextureData::from_pixels(TextureFormat::Alpha8, 1, 1, &[42]).unwrap();
         let texture_id = context.register_texture(texture);
         let consumer = context.create_synchronous_renderer_consumer().unwrap();
         let frame = context.begin_frame();

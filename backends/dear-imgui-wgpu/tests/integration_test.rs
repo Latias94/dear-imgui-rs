@@ -584,9 +584,8 @@ fn pending_frame_reconciles_managed_lifecycle_and_preserves_external_views() -> 
         &mut context,
     )?;
 
-    let mut managed_data = OwnedTextureData::new();
-    managed_data.create(ImGuiTextureFormat::RGBA32, 2, 2);
-    managed_data.set_data(&[7; 16]);
+    let managed_data =
+        OwnedTextureData::from_pixels(ImGuiTextureFormat::RGBA32, 2, 2, &[7; 16]).unwrap();
     let managed = context.register_texture(managed_data);
 
     let external_texture = device.create_texture(&TextureDescriptor {
@@ -621,7 +620,7 @@ fn pending_frame_reconciles_managed_lifecycle_and_preserves_external_views() -> 
     assert!(!first_managed_id.is_null());
 
     context
-        .with_texture_mut(managed, |mut texture| texture.set_data(&[11; 16]))
+        .try_with_texture_mut(managed, |mut texture| texture.replace_pixels(&[11; 16]))
         .expect("managed texture update should be accepted");
     let replacement_view = external_texture.create_view(&TextureViewDescriptor::default());
     renderer.update_external_texture(external, &replacement_view)?;

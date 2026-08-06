@@ -66,7 +66,7 @@ mod tests {
 
     #[test]
     fn texture_update_result_apply_to_sets_status_and_id() {
-        let mut tex = OwnedTextureData::new();
+        let mut tex = OwnedTextureData::from_pixels(TextureFormat::RGBA32, 1, 1, &[0; 4]).unwrap();
 
         unsafe {
             // The test applies transitions produced for its sole unregistered texture.
@@ -95,7 +95,7 @@ mod tests {
         unsafe {
             (*tex.as_raw_mut()).WantDestroyNextFrame = false;
         }
-        tex.create(TextureFormat::RGBA32, 1, 1);
+        tex = OwnedTextureData::from_pixels(TextureFormat::RGBA32, 1, 1, &[0; 4]).unwrap();
         unsafe {
             TextureUpdateResult::Failed.apply_to(&mut tex);
         }

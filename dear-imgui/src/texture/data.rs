@@ -1,9 +1,11 @@
-use super::format::{texture_format_bytes_per_pixel, texture_format_bytes_per_pixel_i32};
 use super::validation::{
-    checked_texture_byte_len, checked_texture_byte_len_if_valid, checked_texture_dimension_to_i32,
-    non_negative_texture_count_from_i32,
+    TextureLayout, non_negative_texture_count_from_i32, require_exact_payload,
+    validate_native_texture_layout,
 };
-use super::{TextureFormat, TextureId, TextureRect, TextureStatus};
+use super::{
+    TextureDataError, TextureFormat, TextureId, TextureRect, TextureRegion, TextureStatus,
+    TextureSubresource,
+};
 use crate::sys;
 use std::cell::UnsafeCell;
 use std::ffi::c_void;
@@ -15,25 +17,47 @@ use std::ffi::c_void;
 /// registration and mutates registered textures only through their owning Context.
 ///
 /// Lifecycle & Backend Flow (ImGui 1.92+)
-/// - Create an instance (e.g. via `OwnedTextureData::new()` + `create()`)
-/// - Mutate pixels, set flags/rects (e.g. call `set_data()` or directly write `Pixels` then
-///   set `UpdateRect`), and set status to `WantCreate`/`WantUpdates`.
+/// - Create an instance with `OwnedTextureData::from_pixels()`.
+/// - Mutate pixels with `replace_pixels()` or `update_subresource()`.
 /// - Transfer user-created owned textures via `Context::register_texture(tex)`.
 /// - A renderer owns one synchronous or detached consumer and processes the pointer-free requests
 ///   exposed by `PendingFrame::texture_requests` or `FrameSnapshot::texture_requests`.
 /// - The renderer returns request-bound `TextureFeedback`; the owning Context validates and
 ///   reconciles it before mutating native texture status or identifiers.
 ///
-/// Context owns every registered user allocation through retirement. Application mutation uses
-/// `Context::with_texture_mut`, so safe code cannot drop the allocation while native draw data or a
-/// renderer still refers to it.
+/// Context owns every registered user allocation through retirement. Application pixel mutation
+/// normally uses `Context::try_with_texture_mut`, so safe code cannot drop the allocation while
+/// native draw data or a renderer still refers to it. `Context::with_texture_mut` is the lower-level
+/// result-composition API; callers must handle any inner pixel-mutation result themselves.
 ///
-/// Construct owned values explicitly through [`super::OwnedTextureData::new`]. `TextureData` is a
-/// borrowed view and therefore has no constructor:
+/// Construct owned values explicitly through [`super::OwnedTextureData::from_pixels`].
+/// `TextureData` is a borrowed view and therefore has no constructor:
 ///
 /// ```compile_fail
 /// use dear_imgui_rs::texture::TextureData;
 /// let _ = TextureData::new();
+/// ```
+///
+/// The former metadata and storage mutators are not safe public operations:
+///
+/// ```compile_fail
+/// use dear_imgui_rs::texture::TextureData;
+/// fn resize(texture: &mut TextureData) { texture.set_width(2); }
+/// ```
+///
+/// ```compile_fail
+/// use dear_imgui_rs::texture::TextureData;
+/// fn resize(texture: &mut TextureData) { texture.set_height(2); }
+/// ```
+///
+/// ```compile_fail
+/// use dear_imgui_rs::texture::{TextureData, TextureFormat};
+/// fn reformat(texture: &mut TextureData) { texture.set_format(TextureFormat::Alpha8); }
+/// ```
+///
+/// ```compile_fail
+/// use dear_imgui_rs::texture::TextureData;
+/// fn destroy_storage(texture: &mut TextureData) { texture.destroy_pixels(); }
 /// ```
 #[repr(transparent)]
 pub struct TextureData {
@@ -59,18 +83,6 @@ impl TextureData {
     pub(super) fn inner_mut(&mut self) -> &mut sys::ImTextureData {
         // Safety: caller has `&mut TextureData`, so this is a unique Rust borrow for this wrapper.
         unsafe { &mut *self.raw.get() }
-    }
-
-    pub(super) fn assert_metadata_mutation_allowed(&self, caller: &str) {
-        let raw = self.inner();
-        assert!(
-            raw.Pixels.is_null(),
-            "{caller} cannot change texture metadata while pixel storage is allocated"
-        );
-        assert!(
-            raw.Status == sys::ImTextureStatus_Destroyed,
-            "{caller} requires Destroyed texture status"
-        );
     }
 
     /// Create a new texture data from raw pointer (crate-internal)
@@ -327,128 +339,91 @@ impl TextureData {
             .expect("TextureData::pitch() byte pitch overflowed usize")
     }
 
-    /// Create a new texture with the specified format and dimensions
+    /// Replace every pixel using an exact, tightly packed payload.
     ///
-    /// This allocates pixel data and sets the status to WantCreate.
-    pub fn create(&mut self, format: TextureFormat, width: u32, height: u32) {
-        assert!(
-            self.status() == TextureStatus::Destroyed,
-            "TextureData::create() requires Destroyed texture status"
-        );
-        let bytes_per_pixel = texture_format_bytes_per_pixel(format);
-        let _ = checked_texture_byte_len("TextureData::create()", width, height, bytes_per_pixel);
-        let width = checked_texture_dimension_to_i32("TextureData::create()", "width", width);
-        let height = checked_texture_dimension_to_i32("TextureData::create()", "height", height);
+    /// Validation is transactional: an error leaves the pixel allocation, contents, status, and
+    /// queued update rectangles unchanged. Live textures queue a full update through Dear ImGui's
+    /// native update list; textures awaiting initial creation keep `WantCreate`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TextureDataError`] when the texture is not mutable, its native layout is invalid,
+    /// the payload length is not exact, or a live full update cannot be represented safely.
+    pub fn replace_pixels(&mut self, pixels: &[u8]) -> Result<(), TextureDataError> {
+        let raw = self.inner();
+        let layout = validate_native_texture_layout(raw.Width, raw.Height, raw.BytesPerPixel)?;
+        require_exact_payload(layout.byte_len, pixels.len())?;
+        let status = validate_mutable_texture(raw)?;
+        let queued_rect = if status == TextureStatus::WantCreate {
+            None
+        } else {
+            let region =
+                TextureRegion::from_validated_dimensions(0, 0, layout.width, layout.height);
+            Some(
+                validate_live_update_region(raw, layout, region).map_err(|error| match error {
+                    TextureDataError::UpdateRegionNotRepresentable(_) => {
+                        TextureDataError::FullUpdateRectOutOfRange {
+                            width: layout.width,
+                            height: layout.height,
+                        }
+                    }
+                    other => other,
+                })?,
+            )
+        };
 
         unsafe {
-            sys::ImTextureData_Create(self.as_raw_mut(), format.into(), width, height);
+            std::ptr::copy_nonoverlapping(
+                pixels.as_ptr(),
+                self.inner().Pixels.cast::<u8>(),
+                layout.byte_len,
+            );
         }
+        if let Some(rect) = queued_rect {
+            queue_texture_upload(self.as_raw_mut(), rect);
+        }
+        Ok(())
     }
 
-    /// Destroy the pixel data
+    /// Copy a strided source payload into one texture region.
     ///
-    /// This frees the CPU-side pixel data but doesn't affect the GPU texture.
-    pub fn destroy_pixels(&mut self) {
-        unsafe {
-            sys::ImTextureData_DestroyPixels(self.as_raw_mut());
-        }
-    }
-
-    /// Set the pixel data for the texture
+    /// The exact payload length is `(height - 1) * row_pitch + tight_row_bytes`. This permits
+    /// padding between rows without accepting unused bytes after the final row. All validation and
+    /// offset checks complete before the first destination byte is written. A texture in
+    /// `WantCreate` changes its initial pixels without queuing an update rectangle or changing
+    /// status. A texture in `OK` or `WantUpdates` queues the region and ends in `WantUpdates`.
     ///
-    /// This copies the provided data into the texture's pixel buffer.
-    pub fn set_data(&mut self, data: &[u8]) {
-        unsafe {
-            let raw = self.as_raw_mut();
-            let Some(needed) = checked_texture_byte_len_if_valid(
-                "TextureData::set_data()",
-                (*raw).Width,
-                (*raw).Height,
-                (*raw).BytesPerPixel,
-            ) else {
-                // Nothing to do without valid dimensions/format.
-                return;
-            };
+    /// # Errors
+    ///
+    /// Returns [`TextureDataError`] when the texture is not mutable, the region is out of bounds,
+    /// the row pitch or payload is invalid, or the queued native rectangle is not representable.
+    pub fn update_subresource(
+        &mut self,
+        update: TextureSubresource<'_>,
+    ) -> Result<(), TextureDataError> {
+        let raw = self.inner();
+        let layout = validate_native_texture_layout(raw.Width, raw.Height, raw.BytesPerPixel)?;
+        let status = validate_mutable_texture(raw)?;
+        let validated = validate_subresource(raw, layout, update, status)?;
 
-            // Ensure pixel buffer exists and has correct size
-            if (*raw).Pixels.is_null() {
-                assert!(
-                    (*raw).Status == sys::ImTextureStatus_Destroyed,
-                    "TextureData::set_data() requires Destroyed texture status when allocating missing pixel storage"
+        let destination = unsafe {
+            std::slice::from_raw_parts_mut(self.inner().Pixels.cast::<u8>(), layout.byte_len)
+        };
+        let region = update.region();
+        let row_count = usize::try_from(region.height()).expect("validated height must fit usize");
+        let y = usize::try_from(region.y()).expect("validated y must fit usize");
+        for row in 0..row_count {
+            let source_start = row * update.row_pitch();
+            let destination_start = (y + row) * layout.row_pitch + validated.x_bytes;
+            destination[destination_start..destination_start + validated.tight_row_bytes]
+                .copy_from_slice(
+                    &update.pixels()[source_start..source_start + validated.tight_row_bytes],
                 );
-                sys::ImTextureData_Create(
-                    self.as_raw_mut(),
-                    (*raw).Format,
-                    (*raw).Width,
-                    (*raw).Height,
-                );
-            }
-
-            let copy_bytes = std::cmp::min(needed, data.len());
-            if copy_bytes == 0 {
-                return;
-            }
-
-            let update_rect = if (*raw).Status == sys::ImTextureStatus_WantCreate {
-                None
-            } else {
-                let width = u16::try_from((*raw).Width).unwrap_or_else(|_| {
-                    panic!(
-                        "TextureData::set_data() cannot represent a full-width update for width {}; use update_subresource() with representable rectangles or recreate the texture",
-                        (*raw).Width
-                    )
-                });
-                let height = u16::try_from((*raw).Height).unwrap_or_else(|_| {
-                    panic!(
-                        "TextureData::set_data() cannot represent a full-height update for height {}; use update_subresource() with representable rectangles or recreate the texture",
-                        (*raw).Height
-                    )
-                });
-                Some(sys::ImTextureRect {
-                    x: 0,
-                    y: 0,
-                    w: width,
-                    h: height,
-                })
-            };
-
-            std::ptr::copy_nonoverlapping(data.as_ptr(), (*raw).Pixels as *mut u8, copy_bytes);
-
-            // Mark the entire texture as updated without downgrading an initial create request.
-            if let Some(update_rect) = update_rect {
-                (*raw).UpdateRect = update_rect;
-                sys::ImTextureData_SetStatus(raw, sys::ImTextureStatus_WantUpdates);
-            }
         }
-    }
-
-    /// Set the width of the texture
-    pub fn set_width(&mut self, width: u32) {
-        self.assert_metadata_mutation_allowed("TextureData::set_width()");
-        assert!(width > 0, "TextureData::set_width() width must be positive");
-        let width =
-            i32::try_from(width).expect("TextureData::set_width() width exceeded i32 range");
-        self.inner_mut().Width = width;
-    }
-
-    /// Set the height of the texture
-    pub fn set_height(&mut self, height: u32) {
-        self.assert_metadata_mutation_allowed("TextureData::set_height()");
-        assert!(
-            height > 0,
-            "TextureData::set_height() height must be positive"
-        );
-        let height =
-            i32::try_from(height).expect("TextureData::set_height() height exceeded i32 range");
-        self.inner_mut().Height = height;
-    }
-
-    /// Set the format of the texture
-    pub fn set_format(&mut self, format: TextureFormat) {
-        self.assert_metadata_mutation_allowed("TextureData::set_format()");
-        let raw = self.inner_mut();
-        raw.Format = format.into();
-        raw.BytesPerPixel = texture_format_bytes_per_pixel_i32(format);
+        if let Some(rect) = validated.queued_rect {
+            queue_texture_upload(self.as_raw_mut(), rect);
+        }
+        Ok(())
     }
 
     pub(crate) fn raw_width_i32(&self) -> i32 {
@@ -461,5 +436,198 @@ impl TextureData {
 
     pub(crate) fn raw_bytes_per_pixel_i32(&self) -> i32 {
         self.inner().BytesPerPixel
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ValidatedSubresource {
+    x_bytes: usize,
+    tight_row_bytes: usize,
+    queued_rect: Option<sys::ImTextureRect>,
+}
+
+fn validate_mutable_texture(raw: &sys::ImTextureData) -> Result<TextureStatus, TextureDataError> {
+    let status = TextureStatus::from(raw.Status);
+    if matches!(
+        status,
+        TextureStatus::Destroyed | TextureStatus::WantDestroy
+    ) {
+        return Err(TextureDataError::InvalidStatus(status));
+    }
+    if raw.Pixels.is_null() {
+        return Err(TextureDataError::MissingPixelStorage(status));
+    }
+    Ok(status)
+}
+
+fn validate_subresource(
+    raw: &sys::ImTextureData,
+    layout: TextureLayout,
+    update: TextureSubresource<'_>,
+    status: TextureStatus,
+) -> Result<ValidatedSubresource, TextureDataError> {
+    let region = update.region();
+    validate_region_bounds(layout, region)?;
+
+    let region_width = usize::try_from(region.width()).expect("validated width must fit usize");
+    let region_height = usize::try_from(region.height()).expect("validated height must fit usize");
+    let tight_row_bytes = region_width.checked_mul(layout.bytes_per_pixel).ok_or(
+        TextureDataError::PayloadSizeOutOfRange {
+            row_pitch: update.row_pitch(),
+            height: region.height(),
+        },
+    )?;
+    if update.row_pitch() < tight_row_bytes {
+        return Err(TextureDataError::RowPitchTooSmall {
+            minimum: tight_row_bytes,
+            actual: update.row_pitch(),
+        });
+    }
+    let expected = update
+        .row_pitch()
+        .checked_mul(region_height - 1)
+        .and_then(|bytes| bytes.checked_add(tight_row_bytes))
+        .ok_or(TextureDataError::PayloadSizeOutOfRange {
+            row_pitch: update.row_pitch(),
+            height: region.height(),
+        })?;
+    require_exact_payload(expected, update.pixels().len())?;
+
+    let x = usize::try_from(region.x()).expect("validated x must fit usize");
+    let y = usize::try_from(region.y()).expect("validated y must fit usize");
+    let x_bytes =
+        x.checked_mul(layout.bytes_per_pixel)
+            .ok_or(TextureDataError::PayloadSizeOutOfRange {
+                row_pitch: update.row_pitch(),
+                height: region.height(),
+            })?;
+    let last_row = y + region_height - 1;
+    let destination_end = last_row
+        .checked_mul(layout.row_pitch)
+        .and_then(|offset| offset.checked_add(x_bytes))
+        .and_then(|offset| offset.checked_add(tight_row_bytes))
+        .ok_or(TextureDataError::PayloadSizeOutOfRange {
+            row_pitch: update.row_pitch(),
+            height: region.height(),
+        })?;
+    debug_assert!(destination_end <= layout.byte_len);
+
+    let queued_rect = if status == TextureStatus::WantCreate {
+        None
+    } else {
+        Some(validate_live_update_region(raw, layout, region)?)
+    };
+    Ok(ValidatedSubresource {
+        x_bytes,
+        tight_row_bytes,
+        queued_rect,
+    })
+}
+
+fn validate_region_bounds(
+    layout: TextureLayout,
+    region: TextureRegion,
+) -> Result<(), TextureDataError> {
+    let right = region.x().checked_add(region.width());
+    let bottom = region.y().checked_add(region.height());
+    if right.is_none_or(|right| right > layout.width)
+        || bottom.is_none_or(|bottom| bottom > layout.height)
+    {
+        return Err(TextureDataError::UpdateRegionOutOfBounds {
+            region,
+            width: layout.width,
+            height: layout.height,
+        });
+    }
+    Ok(())
+}
+
+fn validate_live_update_region(
+    raw: &sys::ImTextureData,
+    layout: TextureLayout,
+    region: TextureRegion,
+) -> Result<sys::ImTextureRect, TextureDataError> {
+    validate_region_bounds(layout, region)?;
+    let right = region
+        .x()
+        .checked_add(region.width())
+        .expect("validated region endpoint must not overflow");
+    let bottom = region
+        .y()
+        .checked_add(region.height())
+        .expect("validated region endpoint must not overflow");
+    let native_endpoint_limit = u32::from(u16::MAX) + 1;
+    if right > native_endpoint_limit || bottom > native_endpoint_limit {
+        return Err(TextureDataError::UpdateRegionNotRepresentable(region));
+    }
+    let rect = sys::ImTextureRect {
+        x: u16::try_from(region.x())
+            .map_err(|_| TextureDataError::UpdateRegionNotRepresentable(region))?,
+        y: u16::try_from(region.y())
+            .map_err(|_| TextureDataError::UpdateRegionNotRepresentable(region))?,
+        w: u16::try_from(region.width())
+            .map_err(|_| TextureDataError::UpdateRegionNotRepresentable(region))?,
+        h: u16::try_from(region.height())
+            .map_err(|_| TextureDataError::UpdateRegionNotRepresentable(region))?,
+    };
+    if !queued_union_is_representable(raw.UpdateRect, rect, true)
+        || !queued_union_is_representable(raw.UsedRect, rect, false)
+    {
+        return Err(TextureDataError::UpdateRegionNotRepresentable(region));
+    }
+    Ok(rect)
+}
+
+fn queued_union_is_representable(
+    existing: sys::ImTextureRect,
+    request: sys::ImTextureRect,
+    empty_axis_starts_at_zero: bool,
+) -> bool {
+    union_axis_is_representable(
+        existing.x,
+        existing.w,
+        request.x,
+        request.w,
+        empty_axis_starts_at_zero,
+    ) && union_axis_is_representable(
+        existing.y,
+        existing.h,
+        request.y,
+        request.h,
+        empty_axis_starts_at_zero,
+    )
+}
+
+fn union_axis_is_representable(
+    existing_start: u16,
+    existing_len: u16,
+    request_start: u16,
+    request_len: u16,
+    empty_axis_starts_at_zero: bool,
+) -> bool {
+    let existing_start = u32::from(existing_start);
+    let existing_end = if empty_axis_starts_at_zero && existing_len == 0 {
+        0
+    } else {
+        existing_start + u32::from(existing_len)
+    };
+    let request_start = u32::from(request_start);
+    let request_end = request_start + u32::from(request_len);
+    let union_start = existing_start.min(request_start);
+    let union_end = existing_end.max(request_end);
+    union_end - union_start <= u32::from(u16::MAX)
+}
+
+fn queue_texture_upload(texture: *mut sys::ImTextureData, rect: sys::ImTextureRect) {
+    unsafe {
+        // All native assertions (status, non-empty 16-bit fields, endpoints, and bounding unions)
+        // were validated before any pixel mutation.
+        sys::igImTextureDataQueueUpload(
+            texture,
+            i32::from(rect.x),
+            i32::from(rect.y),
+            i32::from(rect.w),
+            i32::from(rect.h),
+        );
     }
 }

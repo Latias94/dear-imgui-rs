@@ -366,9 +366,13 @@ fn synchronous_pending_frame_reconciles_request_bound_feedback() {
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
     let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
-    let mut texture = imgui::texture::OwnedTextureData::new();
-    texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
-    texture.set_data(&[255, 255, 255, 255]);
+    let texture = imgui::texture::OwnedTextureData::from_pixels(
+        imgui::texture::TextureFormat::RGBA32,
+        1,
+        1,
+        &[255, 255, 255, 255],
+    )
+    .unwrap();
     let texture_id = ctx.register_texture(texture);
 
     let frame = ctx.begin_frame();
@@ -405,9 +409,13 @@ fn synchronous_reconciled_frame_completion_binds_its_owner_context() {
     let consumer_a = ctx_a.create_synchronous_renderer_consumer().unwrap();
     let user_textures_before = unsafe { (*ctx_a.as_raw()).UserTextures.Size };
 
-    let mut texture = imgui::texture::OwnedTextureData::new();
-    texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
-    texture.set_data(&[255, 255, 255, 255]);
+    let texture = imgui::texture::OwnedTextureData::from_pixels(
+        imgui::texture::TextureFormat::RGBA32,
+        1,
+        1,
+        &[255, 255, 255, 255],
+    )
+    .unwrap();
     let texture_id = ctx_a.register_texture(texture);
     assert_eq!(
         unsafe { (*ctx_a.as_raw()).UserTextures.Size },
@@ -465,9 +473,13 @@ fn synchronous_pending_frame_abandon_reissues_unacknowledged_requests() {
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
     let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
-    let mut texture = imgui::texture::OwnedTextureData::new();
-    texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
-    texture.set_data(&[255, 255, 255, 255]);
+    let texture = imgui::texture::OwnedTextureData::from_pixels(
+        imgui::texture::TextureFormat::RGBA32,
+        1,
+        1,
+        &[255, 255, 255, 255],
+    )
+    .unwrap();
     let texture_id = ctx.register_texture(texture);
 
     let first = ctx.begin_frame();
@@ -506,9 +518,13 @@ fn synchronous_retry_keeps_the_frame_drawable_and_reissues_the_same_upload() {
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
     let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
-    let mut texture = imgui::texture::OwnedTextureData::new();
-    texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
-    texture.set_data(&[255, 255, 255, 255]);
+    let texture = imgui::texture::OwnedTextureData::from_pixels(
+        imgui::texture::TextureFormat::RGBA32,
+        1,
+        1,
+        &[255, 255, 255, 255],
+    )
+    .unwrap();
     let texture_id = ctx.register_texture(texture);
 
     let first = ctx.begin_frame();
@@ -554,9 +570,13 @@ fn invalid_synchronous_feedback_abandons_without_wedging_the_consumer() {
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
     let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
-    let mut texture = imgui::texture::OwnedTextureData::new();
-    texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
-    texture.set_data(&[255, 255, 255, 255]);
+    let texture = imgui::texture::OwnedTextureData::from_pixels(
+        imgui::texture::TextureFormat::RGBA32,
+        1,
+        1,
+        &[255, 255, 255, 255],
+    )
+    .unwrap();
     let texture_id = ctx.register_texture(texture);
 
     let frame = ctx.begin_frame();
@@ -602,9 +622,13 @@ fn synchronous_destroy_retry_does_not_acknowledge_retirement_or_block_drawing() 
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
     let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
-    let mut texture = imgui::texture::OwnedTextureData::new();
-    texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
-    texture.set_data(&[255, 255, 255, 255]);
+    let texture = imgui::texture::OwnedTextureData::from_pixels(
+        imgui::texture::TextureFormat::RGBA32,
+        1,
+        1,
+        &[255, 255, 255, 255],
+    )
+    .unwrap();
     let texture_id = ctx.register_texture(texture);
 
     let first = ctx.begin_frame();
@@ -714,9 +738,13 @@ fn renderer_reset_permit_is_inert_until_committed() {
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
     let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
-    let mut texture = imgui::texture::OwnedTextureData::new();
-    texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
-    texture.set_data(&[255, 255, 255, 255]);
+    let texture = imgui::texture::OwnedTextureData::from_pixels(
+        imgui::texture::TextureFormat::RGBA32,
+        1,
+        1,
+        &[255, 255, 255, 255],
+    )
+    .unwrap();
     let texture_id = ctx.register_texture(texture);
 
     let first = ctx.begin_frame();
@@ -743,7 +771,8 @@ fn renderer_reset_permit_is_inert_until_committed() {
     .unwrap();
 
     let reset = ctx.prepare_renderer_texture_reset(&consumer).unwrap();
-    reset.commit();
+    let committed: () = reset.commit();
+    assert_eq!(committed, ());
     ctx.with_texture(texture_id, |texture| {
         assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
         assert!(texture.texture_id().is_null());
@@ -760,6 +789,17 @@ fn renderer_reset_permit_is_inert_until_committed() {
 }
 
 #[test]
+fn renderer_reset_commit_is_unit_for_an_empty_context() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
+    let reset = ctx.prepare_renderer_texture_reset(&consumer).unwrap();
+    let committed: () = reset.commit();
+    assert_eq!(committed, ());
+}
+
+#[test]
 fn renderer_reset_commit_binds_its_owner_context() {
     let _guard = test_guard();
 
@@ -771,9 +811,13 @@ fn renderer_reset_commit_binds_its_owner_context() {
     let mut owner = imgui::Context::create();
     prepare_context(&mut owner);
     let consumer = owner.create_synchronous_renderer_consumer().unwrap();
-    let mut texture = imgui::texture::OwnedTextureData::new();
-    texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
-    texture.set_data(&[255, 255, 255, 255]);
+    let texture = imgui::texture::OwnedTextureData::from_pixels(
+        imgui::texture::TextureFormat::RGBA32,
+        1,
+        1,
+        &[255, 255, 255, 255],
+    )
+    .unwrap();
     let texture_id = owner.register_texture(texture);
 
     let frame = owner.begin_frame();
@@ -816,9 +860,13 @@ fn renderer_reset_acknowledges_retiring_textures_after_the_last_epoch() {
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
     let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
-    let mut texture = imgui::texture::OwnedTextureData::new();
-    texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
-    texture.set_data(&[255, 255, 255, 255]);
+    let texture = imgui::texture::OwnedTextureData::from_pixels(
+        imgui::texture::TextureFormat::RGBA32,
+        1,
+        1,
+        &[255, 255, 255, 255],
+    )
+    .unwrap();
     let texture_id = ctx.register_texture(texture);
 
     let frame = ctx.begin_frame();
@@ -843,6 +891,73 @@ fn renderer_reset_acknowledges_retiring_textures_after_the_last_epoch() {
         ctx.with_texture(texture_id, |_| ()),
         Err(imgui::ManagedTextureError::AlreadyRemoved(texture_id))
     );
+}
+
+#[test]
+fn renderer_reset_handles_atlas_active_and_retiring_bindings_as_one_transaction() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
+    let active = ctx.register_texture(
+        imgui::texture::OwnedTextureData::from_pixels(
+            imgui::texture::TextureFormat::RGBA32,
+            1,
+            1,
+            &[1, 2, 3, 4],
+        )
+        .unwrap(),
+    );
+    let retiring = ctx.register_texture(
+        imgui::texture::OwnedTextureData::from_pixels(
+            imgui::texture::TextureFormat::RGBA32,
+            1,
+            1,
+            &[4, 3, 2, 1],
+        )
+        .unwrap(),
+    );
+
+    let frame = ctx.begin_frame();
+    frame.ui().image(active, [16.0, 16.0]);
+    frame.ui().image(retiring, [16.0, 16.0]);
+    let frame = reconcile_test_frame(
+        frame.render(&consumer),
+        &[
+            (active, imgui::TextureId::new(131)),
+            (retiring, imgui::TextureId::new(132)),
+        ],
+    );
+    drop(frame);
+    ctx.remove_texture(retiring).unwrap();
+
+    let reset = ctx.prepare_renderer_texture_reset(&consumer).unwrap();
+    let committed: () = reset.commit();
+    assert_eq!(committed, ());
+    ctx.with_texture(active, |texture| {
+        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+        assert!(texture.texture_id().is_null());
+    })
+    .unwrap();
+    assert_eq!(
+        ctx.with_texture(retiring, |_| ()),
+        Err(imgui::ManagedTextureError::AlreadyRemoved(retiring))
+    );
+
+    let frame = ctx.begin_frame();
+    frame.ui().image(active, [16.0, 16.0]);
+    let pending = frame.render(&consumer);
+    assert!(pending.texture_requests().iter().any(|request| {
+        request.texture() == imgui::render::SnapshotTextureId::User(active)
+            && matches!(request.operation(), imgui::render::TextureOp::Create { .. })
+    }));
+    assert!(pending.texture_requests().iter().any(|request| {
+        matches!(
+            request.texture(),
+            imgui::render::SnapshotTextureId::FontAtlas { .. }
+        ) && matches!(request.operation(), imgui::render::TextureOp::Create { .. })
+    }));
 }
 
 #[test]

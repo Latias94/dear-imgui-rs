@@ -20,7 +20,7 @@ use dear_imgui_rs::render::snapshot::{
 };
 use dear_imgui_rs::texture::{TextureFormat, TextureId};
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut ctx = Context::create();
     ctx.set_ini_filename(None::<String>).unwrap();
 
@@ -31,12 +31,15 @@ fn main() {
     ctx.io_mut().set_backend_flags(flags);
 
     // Create and register a managed texture so the renderer receives owned upload requests.
-    let mut managed_tex = dear_imgui_rs::texture::OwnedTextureData::new();
-    managed_tex.create(TextureFormat::RGBA32, 2, 2);
-    managed_tex.set_data(&[
-        255, 0, 0, 255, 0, 255, 0, 255, //
-        0, 0, 255, 255, 255, 255, 255, 255,
-    ]);
+    let managed_tex = dear_imgui_rs::texture::OwnedTextureData::from_pixels(
+        TextureFormat::RGBA32,
+        2,
+        2,
+        &[
+            255, 0, 0, 255, 0, 255, 0, 255, //
+            0, 0, 255, 255, 255, 255, 255, 255,
+        ],
+    )?;
     let managed_tex = ctx.register_texture(managed_tex);
     let consumer = ctx
         .create_detached_renderer_consumer()
@@ -48,15 +51,14 @@ fn main() {
     let render_thread = thread::spawn(move || render_thread_main(snapshot_rx, completion_tx));
 
     for frame_idx in 0..3 {
-        // Frame 1: request a partial update (simulated).
+        // Frame 1: request a full replacement (simulated).
         if frame_idx == 1 {
-            ctx.with_texture_mut(managed_tex, |mut texture| {
-                texture.set_data(&[
+            ctx.try_with_texture_mut(managed_tex, |mut texture| {
+                texture.replace_pixels(&[
                     0, 0, 0, 255, 255, 0, 255, 255, //
                     0, 255, 255, 255, 255, 255, 0, 255,
-                ]);
-            })
-            .expect("managed texture should remain active");
+                ])
+            })?;
         } else if frame_idx == 2 {
             ctx.remove_texture(managed_tex)
                 .expect("the final frame should begin texture retirement");
@@ -95,6 +97,7 @@ fn main() {
     let _ = render_thread.join();
     drop(consumer);
     ctx.poll_snapshot_completions().unwrap();
+    Ok(())
 }
 
 fn render_thread_main(snapshot_rx: mpsc::Receiver<FrameSnapshot>, completion_tx: mpsc::Sender<()>) {

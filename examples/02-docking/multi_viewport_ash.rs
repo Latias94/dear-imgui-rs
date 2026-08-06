@@ -32,8 +32,8 @@ use dear_imgui_ash::{
     multi_viewport as ash_mvp,
 };
 use dear_imgui_rs::{
-    Condition, ConfigFlags, Context, Id, ManagedTextureId, OwnedTextureData, TextureFormat,
-    TextureId, sys,
+    Condition, ConfigFlags, Context, Id, ManagedTextureId, OwnedTextureData, TextureDataError,
+    TextureFormat, TextureId, sys,
 };
 use dear_imgui_winit::{HiDpiMode, WinitPlatform, multi_viewport as winit_mvp};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -93,11 +93,8 @@ fn smoke_texture_pixels(revision: u8) -> Vec<u8> {
     pixels
 }
 
-fn smoke_texture_data(revision: u8) -> OwnedTextureData {
-    let mut texture = OwnedTextureData::new();
-    texture.create(TextureFormat::RGBA32, 8, 8);
-    texture.set_data(&smoke_texture_pixels(revision));
-    texture
+fn smoke_texture_data(revision: u8) -> Result<OwnedTextureData, TextureDataError> {
+    OwnedTextureData::from_pixels(TextureFormat::RGBA32, 8, 8, &smoke_texture_pixels(revision))
 }
 
 #[derive(Debug, Default)]
@@ -1038,8 +1035,11 @@ impl AppWindow {
             .platform_io()
             .draw_callback_reset_render_state_raw()
             .ok_or("Ash did not publish its reset-render-state callback")?;
-        let smoke_managed_texture =
-            run_viewport_smoke.then(|| imgui.register_texture(smoke_texture_data(0)));
+        let smoke_managed_texture = if run_viewport_smoke {
+            Some(imgui.register_texture(smoke_texture_data(0)?))
+        } else {
+            None
+        };
         let renderer = if enable_viewports {
             RendererRuntime::Viewports(unsafe {
                 ash_mvp::WinitViewportRuntime::attach(
@@ -1931,7 +1931,8 @@ impl ViewportSmokeState {
                     .managed_texture
                     .ok_or("Ash smoke managed texture disappeared before its update")?;
                 let pixels = smoke_texture_pixels(37);
-                context.with_texture_mut(texture, |mut texture| texture.set_data(&pixels))?;
+                context
+                    .try_with_texture_mut(texture, |mut texture| texture.replace_pixels(&pixels))?;
                 self.managed_texture_updated = true;
             }
             SmokePhase::Merge if !self.managed_texture_removed => {

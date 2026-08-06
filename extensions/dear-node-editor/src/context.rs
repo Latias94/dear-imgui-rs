@@ -395,7 +395,7 @@ mod tests {
 
             assert!(!editor.is_suspended());
             {
-                let suspension = editor.suspend_or_panic();
+                let suspension = editor.suspend();
                 assert!(editor.is_suspended());
                 suspension.resume();
             }

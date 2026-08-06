@@ -22,9 +22,13 @@ fn prepare_imgui(imgui: &mut Context) {
 }
 
 fn register_texture(imgui: &mut Context) -> ManagedTextureId {
-    let mut texture = dear_imgui_rs::texture::OwnedTextureData::new();
-    texture.create(dear_imgui_rs::texture::TextureFormat::RGBA32, 1, 1);
-    texture.set_data(&[255, 255, 255, 255]);
+    let texture = dear_imgui_rs::texture::OwnedTextureData::from_pixels(
+        dear_imgui_rs::texture::TextureFormat::RGBA32,
+        1,
+        1,
+        &[255, 255, 255, 255],
+    )
+    .unwrap();
     imgui.register_texture(texture)
 }
 

@@ -468,10 +468,13 @@ impl AppWindow {
         // Create a managed ImGui texture (CPU-side pixels; backend will create GPU texture).
         let tex_w: u32 = 128;
         let tex_h: u32 = 128;
-        let mut img_tex = dear_imgui_rs::texture::OwnedTextureData::new();
-        img_tex.create(dear_imgui_rs::texture::TextureFormat::RGBA32, tex_w, tex_h);
         let pixels = animated_rgba_pixels(tex_w, tex_h, Duration::ZERO);
-        img_tex.set_data(&pixels);
+        let img_tex = dear_imgui_rs::texture::OwnedTextureData::from_pixels(
+            dear_imgui_rs::texture::TextureFormat::RGBA32,
+            tex_w,
+            tex_h,
+            &pixels,
+        )?;
 
         let photo_tex = Self::maybe_load_photo_texture();
 
@@ -524,10 +527,18 @@ impl AppWindow {
         let rgba = img.to_rgba8();
         let (w, h) = rgba.dimensions();
 
-        let mut tex = dear_imgui_rs::texture::OwnedTextureData::new();
-        tex.create(dear_imgui_rs::texture::TextureFormat::RGBA32, w, h);
-        tex.set_data(&rgba);
-        Some(tex)
+        match dear_imgui_rs::texture::OwnedTextureData::from_pixels(
+            dear_imgui_rs::texture::TextureFormat::RGBA32,
+            w,
+            h,
+            &rgba,
+        ) {
+            Ok(texture) => Some(texture),
+            Err(error) => {
+                eprintln!("Failed to create Ash demo texture {:?}: {error}", path);
+                None
+            }
+        }
     }
 
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -575,13 +586,15 @@ impl AppWindow {
         Ok(())
     }
 
-    fn update_texture(&mut self) {
+    fn update_texture(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let (w, h) = self.imgui.tex_size;
         let pixels = animated_rgba_pixels(w, h, self.imgui.animation_started.elapsed());
         self.imgui
             .context
-            .with_texture_mut(self.imgui.img_tex, |mut texture| texture.set_data(&pixels))
-            .expect("animated texture should remain active");
+            .try_with_texture_mut(self.imgui.img_tex, |mut texture| {
+                texture.replace_pixels(&pixels)
+            })?;
+        Ok(())
     }
 
     fn render(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -602,7 +615,7 @@ impl AppWindow {
         self.imgui.last_frame = now;
 
         // Update animated texture (marks WantUpdates).
-        self.update_texture();
+        self.update_texture()?;
 
         self.imgui
             .platform

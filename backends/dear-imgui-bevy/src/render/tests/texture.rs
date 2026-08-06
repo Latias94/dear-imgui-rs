@@ -133,9 +133,13 @@ fn install_render_view(app: &mut App, camera: Entity, target: NormalizedRenderTa
 }
 
 fn register_managed_texture(app: &mut App) -> imgui::ManagedTextureId {
-    let mut texture = imgui::texture::OwnedTextureData::new();
-    texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
-    texture.set_data(&[255, 0, 255, 255]);
+    let texture = imgui::texture::OwnedTextureData::from_pixels(
+        imgui::texture::TextureFormat::RGBA32,
+        1,
+        1,
+        &[255, 0, 255, 255],
+    )
+    .unwrap();
     let primary_id = app
         .world()
         .get_non_send::<ImguiContexts>()
@@ -289,9 +293,13 @@ fn managed_texture_requests_and_lifecycles_are_isolated_by_context() {
         .expect("secondary Context admission should succeed");
 
     let register = |app: &mut App, context_id: imgui::ContextId, pixel: [u8; 4]| {
-        let mut texture = imgui::texture::OwnedTextureData::new();
-        texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
-        texture.set_data(&pixel);
+        let texture = imgui::texture::OwnedTextureData::from_pixels(
+            imgui::texture::TextureFormat::RGBA32,
+            1,
+            1,
+            &pixel,
+        )
+        .unwrap();
         app.world_mut()
             .get_non_send_mut::<ImguiContexts>()
             .unwrap()

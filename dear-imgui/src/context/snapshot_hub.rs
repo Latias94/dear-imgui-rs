@@ -723,9 +723,8 @@ impl Context {
     fn commit_renderer_texture_reset_unlocked(&mut self, watermark: u64) {
         self.assert_current_context("RendererTextureReset::commit()");
         let atlas = self.font_atlas_snapshot_target();
-        let _ = atlas.reset_renderer_bindings();
-        let _ = self
-            .texture_registry
+        atlas.reset_renderer_bindings();
+        self.texture_registry
             .borrow_mut()
             .reset_renderer_bindings(watermark);
     }

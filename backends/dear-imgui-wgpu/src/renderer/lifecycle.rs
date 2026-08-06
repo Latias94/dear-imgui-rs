@@ -564,8 +564,7 @@ mod tests {
     #[test]
     fn unbound_device_invalidation_preserves_managed_texture_bindings() {
         let mut context = Context::create();
-        let mut texture = OwnedTextureData::new();
-        texture.create(TextureFormat::RGBA32, 1, 1);
+        let texture = OwnedTextureData::from_pixels(TextureFormat::RGBA32, 1, 1, &[0; 4]).unwrap();
         let texture = context.register_texture(texture);
 
         let mut renderer = WgpuRenderer::empty();

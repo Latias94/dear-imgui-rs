@@ -1197,8 +1197,6 @@ impl App {
         // Create a managed ImGui texture (CPU-side pixels; backend will create GPU texture).
         let tex_w: u32 = 128;
         let tex_h: u32 = 128;
-        let mut img_tex = dear_imgui_rs::texture::OwnedTextureData::new();
-        img_tex.create(dear_imgui_rs::texture::TextureFormat::RGBA32, tex_w, tex_h);
         let mut pixels = vec![0u8; (tex_w * tex_h * 4) as usize];
         for y in 0..tex_h {
             for x in 0..tex_w {
@@ -1209,7 +1207,12 @@ impl App {
                 pixels[i + 3] = 255;
             }
         }
-        img_tex.set_data(&pixels);
+        let img_tex = dear_imgui_rs::texture::OwnedTextureData::from_pixels(
+            dear_imgui_rs::texture::TextureFormat::RGBA32,
+            tex_w,
+            tex_h,
+            &pixels,
+        )?;
 
         let img_tex = context.register_texture(img_tex);
 
@@ -1383,7 +1386,7 @@ impl App {
         Ok(())
     }
 
-    fn update_texture(&mut self) {
+    fn update_texture(&mut self) -> Result<(), Box<dyn Error>> {
         let (w, h) = self.imgui.tex_size;
         let mut pixels = vec![0u8; (w * h * 4) as usize];
         let t = self.imgui.frame as f32 * 0.08;
@@ -1400,9 +1403,11 @@ impl App {
         }
         self.imgui
             .context
-            .with_texture_mut(self.imgui.img_tex, |mut texture| texture.set_data(&pixels))
-            .expect("animated texture should remain active");
+            .try_with_texture_mut(self.imgui.img_tex, |mut texture| {
+                texture.replace_pixels(&pixels)
+            })?;
         self.imgui.frame = self.imgui.frame.wrapping_add(1);
+        Ok(())
     }
 
     fn process_event(
@@ -1443,7 +1448,7 @@ impl App {
         self.imgui.context.io_mut().set_delta_time(dt);
 
         // Update animated texture (marks WantUpdates).
-        self.update_texture();
+        self.update_texture()?;
 
         self.sdl3_backend
             .as_mut()

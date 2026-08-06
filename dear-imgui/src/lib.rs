@@ -62,17 +62,21 @@
 //!
 //! ```no_run
 //! # use dear_imgui_rs::*;
-//! # fn demo(context: &mut Context) {
+//! # fn demo(context: &mut Context) -> Result<(), texture::TextureDataError> {
 //! // 1) Legacy handle
 //! let tex_id = texture::TextureId::new(0x1234);
 //! // 2) Transfer an owned texture into this Context.
-//! let mut tex = texture::OwnedTextureData::new();
-//! tex.create(texture::TextureFormat::RGBA32, 256, 256);
-//! tex.set_data(&vec![255; 256 * 256 * 4]);
+//! let tex = texture::OwnedTextureData::from_pixels(
+//!     texture::TextureFormat::RGBA32,
+//!     256,
+//!     256,
+//!     &vec![255; 256 * 256 * 4],
+//! )?;
 //! let managed = context.register_texture(tex);
 //! let ui = context.frame();
 //! ui.image(tex_id, [64.0, 64.0]);
 //! ui.image(managed, [256.0, 256.0]);
+//! # Ok(())
 //! # }
 //! ```
 //!
@@ -92,13 +96,14 @@
 //!   - `TextureRef<'tex>`: logical image source constructed from `TextureId`, `ManagedTextureId`,
 //!     or an owner-backed font-atlas texture lease.
 //! - Basic flow:
-//!   1. Create `OwnedTextureData` and call `create(format, w, h)` to allocate pixels.
-//!   2. Fill pixels with `set_data()`; registration preserves the initial create request.
-//!   3. Transfer ownership with `Context::register_texture(tex)` and retain its handle.
-//!   4. Mutate before a frame with `Context::with_texture_mut(handle, |tex| ...)`.
-//!   5. Use the handle in UI via `ui.image(handle, size)` or draw-list APIs.
-//!   6. Call `Context::remove_texture(handle)` to begin generation-safe retirement.
-//!   7. A renderer processes request-owned bytes from `PendingFrame::texture_requests()` or
+//!   1. Create `OwnedTextureData` with `from_pixels(format, w, h, pixels)`; the payload length is
+//!      validated exactly before native allocation.
+//!   2. Transfer ownership with `Context::register_texture(tex)` and retain its handle.
+//!   3. Mutate before a frame with `Context::try_with_texture_mut(handle, |tex| ...)`, using
+//!      `replace_pixels()` for a full replacement or `update_subresource()` for a strided region.
+//!   4. Use the handle in UI via `ui.image(handle, size)` or draw-list APIs.
+//!   5. Call `Context::remove_texture(handle)` to begin generation-safe retirement.
+//!   6. A renderer processes request-owned bytes from `PendingFrame::texture_requests()` or
 //!      `FrameSnapshot::texture_requests()` and returns feedback created by each request.
 //! - Alternatives: when you already have a GPU handle, pass `TextureId` directly.
 //!

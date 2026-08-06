@@ -3,7 +3,10 @@
 use dear_app::{
     AppConfig, Application, FrameContext, InitContext, PrepareFrameContext, RunError, run,
 };
-use dear_imgui_rs::{Condition, ManagedTextureId, OwnedTextureData, TextureFormat};
+use dear_imgui_rs::{
+    Condition, ManagedTextureId, OwnedTextureData, TextureDataError, TextureFormat, TextureRegion,
+    TextureSubresource,
+};
 
 const TEXTURE_WIDTH: u32 = 256;
 const TEXTURE_HEIGHT: u32 = 192;
@@ -11,6 +14,7 @@ const TEXTURE_HEIGHT: u32 = 192;
 #[derive(Clone, Copy)]
 enum TextureAction {
     Update,
+    Patch,
     Remove,
     Recreate,
 }
@@ -23,11 +27,13 @@ struct ManagedTextureApp {
 }
 
 impl ManagedTextureApp {
-    fn texture_data(revision: u32) -> OwnedTextureData {
-        let mut texture = OwnedTextureData::new();
-        texture.create(TextureFormat::RGBA32, TEXTURE_WIDTH, TEXTURE_HEIGHT);
-        texture.set_data(&Self::pixels(revision));
-        texture
+    fn texture_data(revision: u32) -> Result<OwnedTextureData, TextureDataError> {
+        OwnedTextureData::from_pixels(
+            TextureFormat::RGBA32,
+            TEXTURE_WIDTH,
+            TEXTURE_HEIGHT,
+            &Self::pixels(revision),
+        )
     }
 
     fn pixels(revision: u32) -> Vec<u8> {
@@ -48,15 +54,21 @@ impl ManagedTextureApp {
         pixels
     }
 
-    fn register(&mut self, context: &mut dear_imgui_rs::Context, revision: u32) {
-        self.texture = Some(context.register_texture(Self::texture_data(revision)));
+    fn register(
+        &mut self,
+        context: &mut dear_imgui_rs::Context,
+        revision: u32,
+    ) -> Result<(), TextureDataError> {
+        self.texture = Some(context.register_texture(Self::texture_data(revision)?));
         self.revision = revision;
+        Ok(())
     }
 }
 
 impl Application for ManagedTextureApp {
     fn configure_imgui(&mut self, context: &mut InitContext<'_>) -> Result<(), RunError> {
-        self.register(context.imgui(), self.revision);
+        self.register(context.imgui(), self.revision)
+            .map_err(|error| RunError::application("configure_imgui", error.to_string()))?;
         Ok(())
     }
 
@@ -74,7 +86,7 @@ impl Application for ManagedTextureApp {
                 let pixels = Self::pixels(revision);
                 context
                     .imgui()
-                    .with_texture_mut(texture, |mut texture| texture.set_data(&pixels))
+                    .try_with_texture_mut(texture, |mut texture| texture.replace_pixels(&pixels))
                     .map_err(|error| {
                         RunError::application(
                             "prepare_frame",
@@ -82,6 +94,39 @@ impl Application for ManagedTextureApp {
                         )
                     })?;
                 self.revision = revision;
+            }
+            TextureAction::Patch => {
+                let Some(texture) = self.texture else {
+                    return Ok(());
+                };
+                let region = TextureRegion::new(32, 32, 64, 48).map_err(|error| {
+                    RunError::application("prepare_frame", format!("invalid patch region: {error}"))
+                })?;
+                let row_pitch = region.width() as usize * 4;
+                let mut pixels = Vec::with_capacity(row_pitch * region.height() as usize);
+                for y in 0..region.height() {
+                    for x in 0..region.width() {
+                        let stripe = (x / 8 + y / 8).is_multiple_of(2);
+                        pixels.extend_from_slice(if stripe {
+                            &[255, 220, 64, 255]
+                        } else {
+                            &[64, 180, 255, 255]
+                        });
+                    }
+                }
+                context
+                    .imgui()
+                    .try_with_texture_mut(texture, |mut texture| {
+                        texture
+                            .update_subresource(TextureSubresource::new(region, row_pitch, &pixels))
+                    })
+                    .map_err(|error| {
+                        RunError::application(
+                            "prepare_frame",
+                            format!("failed to patch managed texture: {error}"),
+                        )
+                    })?;
+                self.revision = self.revision.wrapping_add(1);
             }
             TextureAction::Remove => {
                 let Some(texture) = self.texture else {
@@ -97,7 +142,13 @@ impl Application for ManagedTextureApp {
             }
             TextureAction::Recreate => {
                 if self.texture.is_none() {
-                    self.register(context.imgui(), self.revision.wrapping_add(1));
+                    self.register(context.imgui(), self.revision.wrapping_add(1))
+                        .map_err(|error| {
+                            RunError::application(
+                                "prepare_frame",
+                                format!("failed to recreate managed texture: {error}"),
+                            )
+                        })?;
                 }
             }
         }
@@ -119,6 +170,10 @@ impl Application for ManagedTextureApp {
                     ui.separator();
                     if ui.button("Update pixels") {
                         self.pending_action = Some(TextureAction::Update);
+                    }
+                    ui.same_line();
+                    if ui.button("Patch region") {
+                        self.pending_action = Some(TextureAction::Patch);
                     }
                     ui.same_line();
                     if ui.button("Remove") {

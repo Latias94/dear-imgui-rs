@@ -1440,7 +1440,8 @@ mod operational_gate_tests {
             .unwrap()
             .batch();
         let texture = TextureId::from(1_u64);
-        let texture_data = OwnedTextureData::new();
+        let texture_data =
+            OwnedTextureData::from_pixels(ImGuiTextureFormat::RGBA32, 1, 1, &[0; 4]).unwrap();
 
         assert_destroyed(renderer.pending_texture_retirement());
         assert_destroyed(renderer.wait_for_texture_retirements(batch));

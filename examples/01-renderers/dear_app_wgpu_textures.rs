@@ -31,12 +31,10 @@ struct TexDemoState {
 }
 
 impl TexDemoState {
-    fn new() -> Self {
+    fn new() -> Result<Self, dear_imgui_rs::TextureDataError> {
         // Animated CPU texture
         let tex_w: u32 = 128;
         let tex_h: u32 = 128;
-        let mut img_tex = dear_imgui_rs::texture::OwnedTextureData::new();
-        img_tex.create(dear_imgui_rs::texture::TextureFormat::RGBA32, tex_w, tex_h);
 
         // Seed with a gradient for first frame
         let mut pixels = vec![0u8; (tex_w * tex_h * 4) as usize];
@@ -49,9 +47,14 @@ impl TexDemoState {
                 pixels[i + 3] = 255;
             }
         }
-        img_tex.set_data(&pixels);
+        let img_tex = dear_imgui_rs::texture::OwnedTextureData::from_pixels(
+            dear_imgui_rs::texture::TextureFormat::RGBA32,
+            tex_w,
+            tex_h,
+            &pixels,
+        )?;
 
-        Self {
+        Ok(Self {
             img_tex: None,
             pending_img_tex: Some(img_tex),
             photo_tex: None,
@@ -64,7 +67,7 @@ impl TexDemoState {
             ext_tex: None,
             ext_view: None,
             ext_tex_id: None,
-        }
+        })
     }
 
     fn maybe_load_photo_texture() -> Option<dear_imgui_rs::texture::OwnedTextureData> {
@@ -97,11 +100,21 @@ impl TexDemoState {
                     let rgba = img.to_rgba8();
                     let (w, h) = rgba.dimensions();
                     let data = rgba.into_raw();
-                    let mut t = dear_imgui_rs::texture::OwnedTextureData::new();
-                    t.create(dear_imgui_rs::texture::TextureFormat::RGBA32, w, h);
-                    t.set_data(&data);
-                    println!("Loaded demo image from {:?} ({}x{})", path, w, h);
-                    Some(t)
+                    match dear_imgui_rs::texture::OwnedTextureData::from_pixels(
+                        dear_imgui_rs::texture::TextureFormat::RGBA32,
+                        w,
+                        h,
+                        &data,
+                    ) {
+                        Ok(texture) => {
+                            println!("Loaded demo image from {:?} ({}x{})", path, w, h);
+                            Some(texture)
+                        }
+                        Err(error) => {
+                            eprintln!("Failed to create demo texture {:?}: {error}", path);
+                            None
+                        }
+                    }
                 }
                 Err(e) => {
                     eprintln!("Failed to decode demo image {:?}: {e}", path);
@@ -156,7 +169,7 @@ impl Application for TexDemoState {
             .expect("configure_imgui should register the animated texture");
         context
             .imgui()
-            .with_texture_mut(img_tex, |mut texture| texture.set_data(&pixels))
+            .try_with_texture_mut(img_tex, |mut texture| texture.replace_pixels(&pixels))
             .map_err(|error| RunError::application("prepare_frame", error.to_string()))?;
 
         if self.reload_photo {
@@ -341,7 +354,7 @@ impl Application for TexDemoState {
     }
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     dear_imgui_examples::init_tracing_with_filter(
         "dear_imgui=info,dear_app_wgpu_textures=info,wgpu=warn",
     );
@@ -361,5 +374,6 @@ fn main() {
         theme: Some(Theme::Dark),
     };
 
-    run(config, TexDemoState::new()).unwrap();
+    run(config, TexDemoState::new()?)?;
+    Ok(())
 }

@@ -736,9 +736,9 @@ mod tests {
         reset(FakeFailure::FragmentShaderCreate);
         let gl = fake_gl();
         let mut context = ImGuiContext::create();
-        let mut texture = OwnedTextureData::new();
-        texture.create(TextureFormat::RGBA32, 1, 1);
-        texture.set_data(&[255, 255, 255, 255]);
+        let texture =
+            OwnedTextureData::from_pixels(TextureFormat::RGBA32, 1, 1, &[255, 255, 255, 255])
+                .unwrap();
         let texture = context.register_texture(texture);
         let before_texture = context
             .with_texture(texture, |texture| (texture.status(), texture.texture_id()))

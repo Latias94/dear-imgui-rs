@@ -616,13 +616,12 @@ fn load_header_background_texture() -> Result<texture::OwnedTextureData, Box<dyn
 
     let image = ::image::ImageReader::open(&path)?.decode()?.to_rgba8();
     let (width, height) = image.dimensions();
-    let mut texture = texture::OwnedTextureData::new();
-    texture.create(
+    let texture = texture::OwnedTextureData::from_pixels(
         texture::TextureFormat::RGBA32,
         u32::try_from(width).expect("header texture width fits u32"),
         u32::try_from(height).expect("header texture height fits u32"),
-    );
-    texture.set_data(image.as_raw());
+        image.as_raw(),
+    )?;
     Ok(texture)
 }
 
@@ -989,7 +988,7 @@ fn handle_shortcuts(editor: &NodeEditorFrame<'_>, graph: &mut GraphState) {
 }
 
 fn handle_context_popups(ui: &Ui, editor: &NodeEditorFrame<'_>, graph: &mut GraphState) {
-    let suspension = editor.suspend_or_panic();
+    let suspension = editor.suspend();
     if let Some(node) = editor.show_node_context_menu() {
         graph.context_popup = Some(ContextPopup::Node(node));
         ui.open_popup("Blueprint Context");

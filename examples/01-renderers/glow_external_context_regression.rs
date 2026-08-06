@@ -140,13 +140,12 @@ impl AppWindow {
         renderer.set_framebuffer_srgb_enabled(true)?;
         renderer.create_device_objects(&gl)?;
 
-        let mut managed_texture = OwnedTextureData::new();
-        managed_texture.create(
+        let managed_texture = OwnedTextureData::from_pixels(
             dear_imgui_rs::texture::TextureFormat::RGBA32,
             TEXTURE_WIDTH,
             TEXTURE_HEIGHT,
-        );
-        managed_texture.set_data(&texture_pixels(0));
+            &texture_pixels(0),
+        )?;
 
         let managed_texture = imgui_context.register_texture(managed_texture);
 
@@ -181,16 +180,15 @@ impl AppWindow {
         }
     }
 
-    fn prepare_regression_step(&mut self) {
+    fn prepare_regression_step(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         match self.imgui.stage {
             RegressionStage::SubmitUpdate => {
                 let phase = self.imgui.frame_count;
                 self.imgui
                     .context
-                    .with_texture_mut(self.imgui.managed_texture, |mut texture| {
-                        texture.set_data(&texture_pixels(phase))
-                    })
-                    .expect("managed texture should remain active for update");
+                    .try_with_texture_mut(self.imgui.managed_texture, |mut texture| {
+                        texture.replace_pixels(&texture_pixels(phase))
+                    })?;
                 self.imgui.stage = RegressionStage::AwaitUpdate;
                 println!("Submitted managed texture update request");
             }
@@ -204,6 +202,7 @@ impl AppWindow {
             }
             _ => {}
         }
+        Ok(())
     }
 
     fn verify_regression_step(&mut self) -> Result<Option<String>, Box<dyn std::error::Error>> {
@@ -306,7 +305,7 @@ impl AppWindow {
             .set_delta_time(delta_time.as_secs_f32());
         self.imgui.last_frame = now;
 
-        self.prepare_regression_step();
+        self.prepare_regression_step()?;
 
         let (texture_status, texture_id) = self
             .imgui

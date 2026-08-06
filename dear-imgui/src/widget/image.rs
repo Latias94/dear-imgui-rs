@@ -77,12 +77,17 @@ fn im_vec4(value: [f32; 4]) -> sys::ImVec4 {
 /// - Using an ImGui-managed texture:
 /// ```no_run
 /// # use dear_imgui_rs::*;
-/// # fn demo(context: &mut Context) {
-/// let mut tex = texture::OwnedTextureData::new();
-/// tex.create(texture::TextureFormat::RGBA32, 64, 64);
+/// # fn demo(context: &mut Context) -> Result<(), texture::TextureDataError> {
+/// let tex = texture::OwnedTextureData::from_pixels(
+///     texture::TextureFormat::RGBA32,
+///     64,
+///     64,
+///     &vec![255; 64 * 64 * 4],
+/// )?;
 /// let tex = context.register_texture(tex);
 /// let ui = context.frame();
 /// ui.image(tex, [64.0, 64.0]);
+/// # Ok(())
 /// # }
 /// ```
 impl Ui {
