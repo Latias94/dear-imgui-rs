@@ -114,14 +114,15 @@ is deliberately outside this table: it has no prebuilt or WASM route and always
 enables the source-built core hooks.
 
 Each Context owns its managed texture allocations and permits one non-cloneable
-`RendererConsumer` generation. Synchronous renderers consume a
-`RenderedFrame<'ctx>` by value, reconcile request-bound `TextureFeedback`, and
-read its draw data only while the Context borrow is active. Threaded or render-
-graph integrations move one pointer-free, non-cloneable `FrameSnapshot` across
-the boundary and consume it with `FrameSnapshot::commit`; dropping it records
-an abandoned epoch rather than acknowledging destroy requests. Managed texture
-retirement completes only after matching-generation destroy feedback and the
-ordered completion watermark both permit reclamation.
+renderer-consumer generation. Synchronous renderers retain a
+`SynchronousRendererConsumer`, consume a `PendingFrame<'ctx>`, return exactly one
+request-bound outcome for every texture request, and receive the drawable
+`ReconciledFrame<'ctx>`. Threaded or render-graph integrations retain a
+`DetachedRendererConsumer`, move one pointer-free, non-cloneable `FrameSnapshot`
+across the boundary, and consume it with `FrameSnapshot::commit`; dropping it
+records an abandoned epoch rather than acknowledging destroy requests. Managed
+texture retirement completes only after matching-generation destroy feedback
+and the ordered completion watermark both permit reclamation.
 
 Renderer resource maps keep a tombstone for every accepted Destroy identity
 until a complete idle-consumer reset succeeds. A late Create or Update for a

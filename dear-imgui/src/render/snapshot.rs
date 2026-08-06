@@ -1,9 +1,9 @@
 //! Pointer-free rendering snapshots.
 //!
 //! A [`FrameSnapshot`] is created by an owning [`crate::Context`] for one registered
-//! [`RendererConsumer`]. It can cross threads, but it cannot be cloned or constructed from
-//! arbitrary native draw data. Dropping it reports an abandoned epoch; [`FrameSnapshot::commit`]
-//! reports renderer feedback for ordered reconciliation by the Context.
+//! [`DetachedRendererConsumer`]. It can cross threads, but it cannot be cloned or constructed
+//! from arbitrary native draw data. Dropping it reports an abandoned epoch;
+//! [`FrameSnapshot::commit`] reports renderer feedback for ordered reconciliation by the Context.
 
 use std::collections::HashSet;
 use std::marker::PhantomData;
@@ -91,35 +91,15 @@ impl SnapshotEpoch {
     }
 }
 
-/// The sole renderer capability for one Context.
-///
-/// The first rendered frame claims either the synchronous or detached mode for this generation.
-/// The capability is deliberately non-cloneable and UI-thread bound. Detached snapshots created
-/// with it are `Send + Sync`; the capability itself is neither.
-#[must_use = "keep the consumer alive while rendering managed texture requests"]
-pub struct RendererConsumer {
+struct RendererConsumerState {
     context: ContextId,
     generation: NonZeroU64,
     sender: Sender<SnapshotMessage>,
     _not_send_or_sync: PhantomData<Rc<()>>,
 }
 
-impl std::fmt::Debug for RendererConsumer {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("RendererConsumer")
-            .field("context", &self.context)
-            .field("generation", &self.generation)
-            .finish_non_exhaustive()
-    }
-}
-
-impl RendererConsumer {
-    pub(crate) fn new(
-        context: ContextId,
-        generation: NonZeroU64,
-        sender: Sender<SnapshotMessage>,
-    ) -> Self {
+impl RendererConsumerState {
+    fn new(context: ContextId, generation: NonZeroU64, sender: Sender<SnapshotMessage>) -> Self {
         Self {
             context,
             generation,
@@ -127,30 +107,132 @@ impl RendererConsumer {
             _not_send_or_sync: PhantomData,
         }
     }
-
-    /// Context that owns this consumer.
-    #[must_use]
-    pub const fn context_id(&self) -> ContextId {
-        self.context
-    }
-
-    /// Current consumer generation.
-    #[must_use]
-    pub const fn generation(&self) -> u64 {
-        self.generation.get()
-    }
-
-    pub(crate) const fn generation_raw(&self) -> NonZeroU64 {
-        self.generation
-    }
 }
 
-impl Drop for RendererConsumer {
+impl Drop for RendererConsumerState {
     fn drop(&mut self) {
         let _ = self.sender.send(SnapshotMessage::Detach {
             context: self.context,
             generation: self.generation,
         });
+    }
+}
+
+mod consumer_sealed {
+    pub trait Sealed {}
+}
+
+/// Shared read-only identity implemented by the two renderer consumer capabilities.
+///
+/// This trait is sealed. It exists so lifecycle operations such as renderer texture reset can
+/// accept either consumer kind without erasing the distinction at frame and snapshot entry points.
+pub trait RendererConsumerCapability: consumer_sealed::Sealed {
+    /// Context that owns this consumer.
+    fn context_id(&self) -> ContextId;
+
+    /// Current consumer generation.
+    fn generation(&self) -> u64;
+}
+
+/// Non-cloneable capability for Context-borrowed synchronous rendering.
+///
+/// Create it with [`crate::Context::create_synchronous_renderer_consumer`]. It cannot be used to
+/// create detached snapshots.
+#[must_use = "keep the consumer alive while rendering managed texture requests"]
+pub struct SynchronousRendererConsumer(RendererConsumerState);
+
+impl SynchronousRendererConsumer {
+    pub(crate) fn new(
+        context: ContextId,
+        generation: NonZeroU64,
+        sender: Sender<SnapshotMessage>,
+    ) -> Self {
+        Self(RendererConsumerState::new(context, generation, sender))
+    }
+
+    /// Context that owns this consumer.
+    #[must_use]
+    pub const fn context_id(&self) -> ContextId {
+        self.0.context
+    }
+
+    /// Current consumer generation.
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.0.generation.get()
+    }
+}
+
+impl std::fmt::Debug for SynchronousRendererConsumer {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SynchronousRendererConsumer")
+            .field("context", &self.0.context)
+            .field("generation", &self.0.generation)
+            .finish_non_exhaustive()
+    }
+}
+
+impl consumer_sealed::Sealed for SynchronousRendererConsumer {}
+
+impl RendererConsumerCapability for SynchronousRendererConsumer {
+    fn context_id(&self) -> ContextId {
+        self.context_id()
+    }
+
+    fn generation(&self) -> u64 {
+        self.generation()
+    }
+}
+
+/// Non-cloneable capability for pointer-free detached rendering.
+///
+/// Create it with [`crate::Context::create_detached_renderer_consumer`]. Snapshots created with
+/// this capability are `Send + Sync`; the capability itself remains UI-thread bound.
+#[must_use = "keep the consumer alive while detached snapshots or completions remain active"]
+pub struct DetachedRendererConsumer(RendererConsumerState);
+
+impl DetachedRendererConsumer {
+    pub(crate) fn new(
+        context: ContextId,
+        generation: NonZeroU64,
+        sender: Sender<SnapshotMessage>,
+    ) -> Self {
+        Self(RendererConsumerState::new(context, generation, sender))
+    }
+
+    /// Context that owns this consumer.
+    #[must_use]
+    pub const fn context_id(&self) -> ContextId {
+        self.0.context
+    }
+
+    /// Current consumer generation.
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.0.generation.get()
+    }
+}
+
+impl std::fmt::Debug for DetachedRendererConsumer {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DetachedRendererConsumer")
+            .field("context", &self.0.context)
+            .field("generation", &self.0.generation)
+            .finish_non_exhaustive()
+    }
+}
+
+impl consumer_sealed::Sealed for DetachedRendererConsumer {}
+
+impl RendererConsumerCapability for DetachedRendererConsumer {
+    fn context_id(&self) -> ContextId {
+        self.context_id()
+    }
+
+    fn generation(&self) -> u64 {
+        self.generation()
     }
 }
 
@@ -218,16 +300,25 @@ impl FrameSnapshot {
             .map(|viewport| &viewport.draw)
     }
 
-    /// Commit renderer feedback and complete this epoch.
+    /// Commit exactly one renderer outcome for every request and complete this epoch.
     ///
-    /// Missing feedback is allowed: unacknowledged requests remain pending and are emitted again
-    /// by a later snapshot. Feedback is validated and applied only when this epoch reaches the
-    /// Context's contiguous completion watermark.
+    /// Snapshot-local feedback is validated before it is sent to the owning Context. Use
+    /// [`TextureRequest::retry`] for work that should be emitted again and
+    /// [`TextureRequest::superseded`] for a request the renderer deliberately did not apply.
+    /// Stateful validation and mutation still occur only when this epoch reaches the Context's
+    /// contiguous completion watermark.
     pub fn commit(
         self,
         feedback: impl IntoIterator<Item = TextureFeedback>,
     ) -> Result<(), SnapshotCommitError> {
-        self.completion.commit(feedback.into_iter().collect())
+        let feedback = feedback.into_iter().collect::<Vec<_>>();
+        let expected = self
+            .texture_requests
+            .iter()
+            .map(|request| request.key)
+            .collect::<HashSet<_>>();
+        validate_texture_feedback(self.epoch, &expected, &feedback)?;
+        self.completion.commit(feedback)
     }
 }
 
@@ -461,6 +552,9 @@ impl TextureRequest {
         if self.key.kind == TextureRequestKind::Destroy {
             return Err(TextureFeedbackError::UploadForDestroy);
         }
+        if texture_id.is_null() {
+            return Err(TextureFeedbackError::NullTextureId);
+        }
         Ok(TextureFeedback {
             key: self.key,
             result: TextureFeedbackResult::Uploaded { texture_id },
@@ -476,6 +570,28 @@ impl TextureRequest {
             key: self.key,
             result: TextureFeedbackResult::Destroyed,
         })
+    }
+
+    /// Complete this request without mutating its Context-owned binding.
+    ///
+    /// This is appropriate when renderer-local identity or tombstone state proves the captured
+    /// request no longer applies. If the Context still considers the operation current, it may be
+    /// emitted again in a later frame.
+    #[must_use]
+    pub const fn superseded(&self) -> TextureFeedback {
+        TextureFeedback {
+            key: self.key,
+            result: TextureFeedbackResult::Superseded,
+        }
+    }
+
+    /// Leave this request pending so a later frame can retry it.
+    #[must_use]
+    pub const fn retry(&self) -> TextureFeedback {
+        TextureFeedback {
+            key: self.key,
+            result: TextureFeedbackResult::Retry,
+        }
     }
 }
 
@@ -500,6 +616,65 @@ impl TextureFeedback {
 pub(crate) enum TextureFeedbackResult {
     Uploaded { texture_id: TextureId },
     Destroyed,
+    Superseded,
+    Retry,
+}
+
+pub(crate) fn validate_texture_feedback(
+    epoch: SnapshotEpoch,
+    expected: &HashSet<TextureRequestKey>,
+    feedback: &[TextureFeedback],
+) -> Result<(), RendererConsumerError> {
+    let mut seen = HashSet::with_capacity(feedback.len());
+    for item in feedback {
+        let key = item.key();
+        if key.epoch.context_id() != epoch.context_id() {
+            return Err(RendererConsumerError::ForeignContext {
+                expected: epoch.context_id(),
+                actual: key.epoch.context_id(),
+            });
+        }
+        if key.epoch.consumer_generation_raw() != epoch.consumer_generation_raw() {
+            return Err(RendererConsumerError::StaleConsumerGeneration {
+                expected: epoch.consumer_generation(),
+                actual: key.epoch.consumer_generation(),
+            });
+        }
+        if key.epoch.sequence() != epoch.sequence() || !expected.contains(&key) {
+            return Err(RendererConsumerError::FeedbackNotRequested {
+                epoch: epoch.sequence(),
+                texture: key.texture,
+            });
+        }
+        if !seen.insert(key) {
+            return Err(RendererConsumerError::DuplicateFeedback {
+                epoch: epoch.sequence(),
+                texture: key.texture,
+            });
+        }
+        let transition_is_valid = match (key.kind, item.result()) {
+            (
+                TextureRequestKind::Create | TextureRequestKind::Update,
+                TextureFeedbackResult::Uploaded { texture_id },
+            ) => !texture_id.is_null(),
+            (TextureRequestKind::Destroy, TextureFeedbackResult::Destroyed)
+            | (_, TextureFeedbackResult::Superseded | TextureFeedbackResult::Retry) => true,
+            _ => false,
+        };
+        if !transition_is_valid {
+            return Err(RendererConsumerError::InvalidFeedbackTransition {
+                texture: key.texture,
+            });
+        }
+    }
+    let missing = expected.len().saturating_sub(seen.len());
+    if missing != 0 {
+        return Err(RendererConsumerError::MissingFeedback {
+            epoch: epoch.sequence(),
+            count: missing,
+        });
+    }
+    Ok(())
 }
 
 /// Error returned when feedback does not match the request operation.
@@ -509,6 +684,8 @@ pub enum TextureFeedbackError {
     UploadForDestroy,
     #[error("a destroy result cannot complete a create or update request")]
     DestroyForUpload,
+    #[error("an upload result requires a non-null renderer texture identifier")]
+    NullTextureId,
 }
 
 /// Error returned when a snapshot cannot be captured.
@@ -568,8 +745,8 @@ pub enum RendererConsumerError {
     ConsumerDraining,
     #[error("this Context has no active renderer consumer")]
     NoActiveConsumer,
-    #[error("the active renderer consumer is already committed to a different render path")]
-    ConsumerModeMismatch,
+    #[error("{caller} requires a renderer that advertises RENDERER_HAS_TEXTURES")]
+    RendererTexturesUnavailable { caller: &'static str },
     #[error("renderer consumer belongs to Context {actual:?}, not Context {expected:?}")]
     ForeignContext {
         expected: ContextId,
@@ -585,10 +762,6 @@ pub enum RendererConsumerError {
     UnknownEpoch { epoch: u64 },
     #[error("snapshot epoch {epoch} was completed more than once")]
     EpochAlreadyCompleted { epoch: u64 },
-    #[error(
-        "the synchronous render lease still has {pending_requests} unreconciled texture request(s)"
-    )]
-    FrameNotReconciled { pending_requests: usize },
     #[error("renderer consumer still owns {count} outstanding epoch(s)")]
     OutstandingEpochs { count: usize },
     #[error("snapshot epoch {epoch} contains duplicate feedback for {texture:?}")]
@@ -596,6 +769,8 @@ pub enum RendererConsumerError {
         epoch: u64,
         texture: SnapshotTextureId,
     },
+    #[error("snapshot epoch {epoch} is missing {count} required feedback outcome(s)")]
+    MissingFeedback { epoch: u64, count: usize },
     #[error("snapshot epoch {epoch} did not request feedback for {texture:?}")]
     FeedbackNotRequested {
         epoch: u64,
@@ -612,6 +787,8 @@ pub enum RendererConsumerError {
 /// Failure to deliver completion after the owning Context was destroyed.
 #[derive(Copy, Clone, Debug, Eq, Error, PartialEq)]
 pub enum SnapshotCommitError {
+    #[error(transparent)]
+    InvalidFeedback(#[from] RendererConsumerError),
     #[error("the snapshot's owning Context no longer accepts completion")]
     ContextDropped,
 }
@@ -1393,7 +1570,7 @@ mod callback_preflight_tests {
                 0,
             );
         }
-        let rendered = frame.render();
+        let rendered = frame.render_legacy();
         let mut resolve_calls = 0usize;
         let result = capture_draw_data(rendered.draw_data(), &mut |_| {
             resolve_calls += 1;

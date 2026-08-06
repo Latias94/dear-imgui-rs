@@ -1,5 +1,5 @@
 use dear_imgui_rs::render::{
-    DrawCmd, DrawCmdParams, DrawData, DrawIdx, DrawVert, ReconciledFrame, RenderedFrame,
+    DrawCmd, DrawCmdParams, DrawData, DrawIdx, DrawVert, PendingFrame, ReconciledFrame,
     RendererRenderStateGuard,
 };
 use dear_imgui_rs::sys;
@@ -208,23 +208,34 @@ fn clear_viewport_framebuffer(gl: &Context, color: [f32; 4]) {
 }
 
 impl GlowRenderer {
-    /// Consume and render one Context-borrowed Dear ImGui frame.
-    pub fn render(&mut self, frame: RenderedFrame<'_>) -> RenderResult<()> {
+    /// Finalizes and renders a frame for this renderer's bound Dear ImGui Context.
+    pub fn render_context(&mut self, context: &mut dear_imgui_rs::Context) -> RenderResult<()> {
+        let frame = self.reconcile_context_frame(context)?;
         self.render_reconciled(frame).map(drop)
     }
 
-    /// Renders one frame and returns its texture-reconciliation proof to a presentation owner.
-    pub fn render_reconciled<'frame>(
+    pub(super) fn reconcile_context_frame<'context>(
         &mut self,
-        mut frame: RenderedFrame<'frame>,
-    ) -> RenderResult<ReconciledFrame<'frame>> {
-        self.render_borrowed(&mut frame)?;
-        frame.into_reconciled().map_err(Into::into)
+        context: &'context mut dear_imgui_rs::Context,
+    ) -> RenderResult<ReconciledFrame<'context>> {
+        self.ensure_context_matches(context)?;
+        let frame = context.try_render(self.renderer_consumer()?)?;
+        self.reconcile_frame(frame)
     }
 
-    pub(super) fn render_borrowed(&mut self, frame: &mut RenderedFrame<'_>) -> RenderResult<()> {
+    /// Consume and render one Context-borrowed Dear ImGui frame.
+    pub fn render(&mut self, frame: PendingFrame<'_>) -> RenderResult<()> {
+        let frame = self.reconcile_frame(frame)?;
+        self.render_reconciled(frame).map(drop)
+    }
+
+    /// Reconciles managed textures without reading or drawing the frame's commands.
+    pub fn reconcile_frame<'frame>(
+        &mut self,
+        frame: PendingFrame<'frame>,
+    ) -> RenderResult<ReconciledFrame<'frame>> {
         self.ensure_operational()?;
-        self.validate_rendered_frame(frame)?;
+        self.validate_pending_frame(&frame)?;
         if self.is_destroyed {
             return Err(RenderError::RendererDestroyed);
         }
@@ -232,63 +243,113 @@ impl GlowRenderer {
             .gl_context
             .clone()
             .ok_or(RenderError::MissingGlContext)?;
-        self.prepare_rendered_frame(&gl, frame)?;
-        self.render_draw_data(&gl, frame.draw_data())
+        self.reconcile_pending_frame(&gl, frame)
+    }
+
+    /// Draws one already-reconciled frame and returns its linear presentation capability.
+    pub fn render_reconciled<'frame>(
+        &mut self,
+        frame: ReconciledFrame<'frame>,
+    ) -> RenderResult<ReconciledFrame<'frame>> {
+        self.ensure_operational()?;
+        self.validate_reconciled_frame(&frame)?;
+        if self.is_destroyed {
+            return Err(RenderError::RendererDestroyed);
+        }
+        let gl = self
+            .gl_context
+            .clone()
+            .ok_or(RenderError::MissingGlContext)?;
+        self.render_reconciled_frame(&gl, frame)
     }
 
     /// Consume and render a frame using an externally managed OpenGL context.
     pub fn render_with_context(
         &mut self,
         gl: &Context,
-        frame: RenderedFrame<'_>,
+        frame: PendingFrame<'_>,
     ) -> RenderResult<()> {
+        let frame = self.reconcile_frame_with_context(gl, frame)?;
         self.render_with_context_reconciled(gl, frame).map(drop)
     }
 
-    /// Renders with an external OpenGL context and returns texture-reconciliation proof.
-    pub fn render_with_context_reconciled<'frame>(
+    /// Reconciles managed textures with an externally managed OpenGL context.
+    pub fn reconcile_frame_with_context<'frame>(
         &mut self,
         gl: &Context,
-        mut frame: RenderedFrame<'frame>,
+        frame: PendingFrame<'frame>,
     ) -> RenderResult<ReconciledFrame<'frame>> {
         self.ensure_operational()?;
-        self.validate_rendered_frame(&frame)?;
+        self.validate_pending_frame(&frame)?;
         if self.is_destroyed {
             return Err(RenderError::RendererDestroyed);
         }
-        self.prepare_rendered_frame(gl, &mut frame)?;
-        self.render_draw_data(gl, frame.draw_data())?;
-        frame.into_reconciled().map_err(Into::into)
+        self.reconcile_pending_frame(gl, frame)
     }
 
-    fn prepare_rendered_frame(
+    /// Draws one reconciled frame with an externally managed OpenGL context.
+    pub fn render_with_context_reconciled<'frame>(
         &mut self,
         gl: &Context,
-        frame: &mut RenderedFrame<'_>,
-    ) -> RenderResult<()> {
-        if frame.is_texture_feedback_reconciled() {
-            return Ok(());
+        frame: ReconciledFrame<'frame>,
+    ) -> RenderResult<ReconciledFrame<'frame>> {
+        self.ensure_operational()?;
+        self.validate_reconciled_frame(&frame)?;
+        if self.is_destroyed {
+            return Err(RenderError::RendererDestroyed);
         }
-        let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
-        let feedback =
-            self.process_texture_requests(gl, frame.texture_requests(), request_epoch)?;
-        let progress = frame.reconcile_texture_feedback(feedback)?;
-        self.prune_destroyed_managed_textures(progress.watermark());
-        Ok(())
+        self.render_reconciled_frame(gl, frame)
     }
 
-    fn validate_rendered_frame(&self, frame: &RenderedFrame<'_>) -> RenderResult<()> {
-        let consumer = self
-            .renderer_consumer
-            .as_ref()
-            .ok_or(RenderError::RendererNotAttached)?;
+    fn reconcile_pending_frame<'frame>(
+        &mut self,
+        gl: &Context,
+        frame: PendingFrame<'frame>,
+    ) -> RenderResult<ReconciledFrame<'frame>> {
+        let request_epoch = frame.epoch().sequence();
+        let feedback =
+            self.process_texture_requests(gl, frame.texture_requests(), request_epoch)?;
+        let reconciled = frame.reconcile_texture_feedback(feedback)?;
+        self.prune_destroyed_managed_textures(reconciled.completion_progress().watermark());
+        Ok(reconciled)
+    }
+
+    fn render_reconciled_frame<'frame>(
+        &mut self,
+        gl: &Context,
+        reconciled: ReconciledFrame<'frame>,
+    ) -> RenderResult<ReconciledFrame<'frame>> {
+        self.render_draw_data(gl, reconciled.draw_data())?;
+        Ok(reconciled)
+    }
+
+    fn validate_pending_frame(&self, frame: &PendingFrame<'_>) -> RenderResult<()> {
+        let consumer = self.renderer_consumer()?;
         if frame.context_id() != consumer.context_id() {
             return Err(RenderError::ContextMismatch {
                 expected: consumer.context_id(),
                 actual: frame.context_id(),
             });
         }
-        let epoch = frame.epoch().ok_or(RenderError::MissingRendererEpoch)?;
+        let epoch = frame.epoch();
+        if epoch.consumer_generation() != consumer.generation() {
+            return Err(RenderError::ConsumerGenerationMismatch {
+                expected: consumer.generation(),
+                actual: epoch.consumer_generation(),
+            });
+        }
+        Ok(())
+    }
+
+    fn validate_reconciled_frame(&self, frame: &ReconciledFrame<'_>) -> RenderResult<()> {
+        let consumer = self.renderer_consumer()?;
+        if frame.context_id() != consumer.context_id() {
+            return Err(RenderError::ContextMismatch {
+                expected: consumer.context_id(),
+                actual: frame.context_id(),
+            });
+        }
+        let epoch = frame.epoch().ok_or(RenderError::ManagedFrameRequired)?;
         if epoch.consumer_generation() != consumer.generation() {
             return Err(RenderError::ConsumerGenerationMismatch {
                 expected: consumer.generation(),

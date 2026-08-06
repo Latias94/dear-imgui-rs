@@ -19,8 +19,8 @@ use std::ffi::c_void;
 /// - Mutate pixels, set flags/rects (e.g. call `set_data()` or directly write `Pixels` then
 ///   set `UpdateRect`), and set status to `WantCreate`/`WantUpdates`.
 /// - Transfer user-created owned textures via `Context::register_texture(tex)`.
-/// - A renderer owns one `RendererConsumer` and processes the pointer-free requests exposed by
-///   `RenderedFrame::texture_requests` or `FrameSnapshot::texture_requests`.
+/// - A renderer owns one synchronous or detached consumer and processes the pointer-free requests
+///   exposed by `PendingFrame::texture_requests` or `FrameSnapshot::texture_requests`.
 /// - The renderer returns request-bound `TextureFeedback`; the owning Context validates and
 ///   reconciles it before mutating native texture status or identifiers.
 ///

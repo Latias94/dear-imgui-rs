@@ -1,91 +1,150 @@
-use std::marker::PhantomData;
 use std::ops::Deref;
 use std::ptr::NonNull;
 
 use crate::Context;
-use crate::render::DrawData;
+use crate::render::{DrawData, DrawRequirements};
 
 use super::snapshot::{
     RendererConsumerError, SnapshotCompletionProgress, SnapshotEpoch, TextureFeedback,
     TextureRequest,
 };
 
-/// Context-borrowed synchronous render lease.
+/// Context-borrowed synchronous frame awaiting managed-texture reconciliation.
 ///
-/// Managed texture requests are bound to this frame's consumer generation and epoch. A renderer
-/// must reconcile its feedback before the lease is dropped. Dropping an unreconciled managed
-/// frame abandons the epoch without acknowledging destroy requests.
-#[must_use = "render or explicitly drop the frame; managed requests are abandoned on drop"]
-pub struct RenderedFrame<'ctx> {
+/// This capability intentionally exposes texture requests but not draw data. Reconciliation
+/// consumes it and returns the only drawable capability, [`ReconciledFrame`]. Dropping it reports
+/// an abandoned epoch without acknowledging destroy requests.
+#[must_use = "reconcile the frame before drawing; managed requests are abandoned on drop"]
+pub struct PendingFrame<'ctx> {
+    context: Option<&'ctx mut Context>,
+    draw_data: NonNull<DrawData>,
+    draw_requirements: DrawRequirements,
+    epoch: SnapshotEpoch,
+    texture_requests: Vec<TextureRequest>,
+}
+
+/// Drawable proof that one synchronous frame completed managed-texture reconciliation.
+///
+/// The capability owns the live Context borrow and draw-data pointer. It proves texture
+/// reconciliation, not GPU submission or operating-system presentation.
+#[must_use = "draw or explicitly drop the reconciled frame before presenting"]
+pub struct ReconciledFrame<'ctx> {
     context: &'ctx mut Context,
     draw_data: NonNull<DrawData>,
     epoch: Option<SnapshotEpoch>,
-    texture_requests: Vec<TextureRequest>,
-    reconciled: bool,
+    completion: SnapshotCompletionProgress,
 }
 
-/// Proof that one synchronous render lease completed managed-texture reconciliation.
-///
-/// The proof keeps the originating Context mutably borrowed until it is consumed or dropped. Safe
-/// renderer integrations cannot construct it without consuming the corresponding
-/// [`RenderedFrame`] through [`RenderedFrame::into_reconciled`]. It proves texture reconciliation,
-/// not that a GPU submission or operating-system presentation completed.
-#[must_use = "return the proof to the presentation owner before presenting the frame"]
-pub struct ReconciledFrame<'ctx> {
-    context_id: crate::ContextId,
-    epoch: Option<SnapshotEpoch>,
-    _context_borrow: PhantomData<&'ctx mut Context>,
+impl std::fmt::Debug for PendingFrame<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PendingFrame")
+            .field("context", &self.context_id())
+            .field("epoch", &self.epoch)
+            .field("texture_requests", &self.texture_requests.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl std::fmt::Debug for ReconciledFrame<'_> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("ReconciledFrame")
-            .field("context", &self.context_id)
-            .field("epoch", &self.epoch)
-            .finish()
-    }
-}
-
-impl ReconciledFrame<'_> {
-    /// Context that owned the reconciled render lease.
-    #[must_use]
-    pub const fn context_id(&self) -> crate::ContextId {
-        self.context_id
-    }
-
-    /// Ordered managed-texture epoch, or `None` for a legacy renderer Context.
-    #[must_use]
-    pub const fn epoch(&self) -> Option<SnapshotEpoch> {
-        self.epoch
-    }
-}
-
-impl std::fmt::Debug for RenderedFrame<'_> {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("RenderedFrame")
             .field("context", &self.context.id())
             .field("epoch", &self.epoch)
-            .field("texture_requests", &self.texture_requests.len())
-            .field("reconciled", &self.reconciled)
-            .finish()
+            .field("completion", &self.completion)
+            .finish_non_exhaustive()
     }
 }
 
-impl<'ctx> RenderedFrame<'ctx> {
+impl<'ctx> PendingFrame<'ctx> {
     pub(crate) fn new(
         context: &'ctx mut Context,
         draw_data: NonNull<DrawData>,
-        epoch: Option<SnapshotEpoch>,
+        epoch: SnapshotEpoch,
         texture_requests: Vec<TextureRequest>,
     ) -> Self {
         Self {
-            context,
+            context: Some(context),
             draw_data,
+            draw_requirements: unsafe { draw_data.as_ref() }.requirements(),
             epoch,
             texture_requests,
-            reconciled: false,
+        }
+    }
+
+    /// Context that owns this frame.
+    #[must_use]
+    pub fn context_id(&self) -> crate::ContextId {
+        self.context
+            .as_deref()
+            .expect("pending frame retains its Context until reconciliation")
+            .id()
+    }
+
+    /// Ordered managed-texture epoch.
+    #[must_use]
+    pub const fn epoch(&self) -> SnapshotEpoch {
+        self.epoch
+    }
+
+    /// Managed texture requests that must each receive one explicit outcome.
+    #[must_use]
+    pub fn texture_requests(&self) -> &[TextureRequest] {
+        &self.texture_requests
+    }
+
+    /// Pointer-free renderer capabilities required by this frame's draw commands.
+    ///
+    /// This summary is available before reconciliation so a renderer can reject unsupported work
+    /// without partially applying managed-texture updates.
+    #[must_use]
+    pub const fn draw_requirements(&self) -> DrawRequirements {
+        self.draw_requirements
+    }
+
+    /// Apply request-bound feedback and return the only drawable frame capability.
+    ///
+    /// Every request must receive exactly one outcome. A `retry` outcome completes this epoch
+    /// without changing the binding, and the request remains eligible for a later frame.
+    pub fn reconcile_texture_feedback(
+        mut self,
+        feedback: impl IntoIterator<Item = TextureFeedback>,
+    ) -> Result<ReconciledFrame<'ctx>, RendererConsumerError> {
+        let feedback = feedback.into_iter().collect::<Vec<_>>();
+        let epoch = self.epoch;
+        let progress = self
+            .with_owner_context(|context| context.complete_synchronous_render(epoch, feedback))?;
+
+        let context = self
+            .context
+            .take()
+            .expect("completed pending frame still owns its Context");
+        Ok(ReconciledFrame {
+            context,
+            draw_data: self.draw_data,
+            epoch: Some(self.epoch),
+            completion: progress,
+        })
+    }
+
+    fn with_owner_context<R>(&mut self, f: impl FnOnce(&mut Context) -> R) -> R {
+        let context = self
+            .context
+            .as_deref_mut()
+            .expect("pending frame retains its Context until reconciliation");
+        let binding = context.binding();
+        binding.with_bound_context(|| f(context))
+    }
+}
+
+impl<'ctx> ReconciledFrame<'ctx> {
+    pub(crate) fn new_legacy(context: &'ctx mut Context, draw_data: NonNull<DrawData>) -> Self {
+        Self {
+            context,
+            draw_data,
+            epoch: None,
+            completion: SnapshotCompletionProgress::default(),
         }
     }
 
@@ -95,25 +154,16 @@ impl<'ctx> RenderedFrame<'ctx> {
         self.context.id()
     }
 
-    /// Ordered managed-texture epoch, or `None` for a legacy renderer context.
+    /// Ordered managed-texture epoch, or `None` for an explicit legacy render.
     #[must_use]
     pub const fn epoch(&self) -> Option<SnapshotEpoch> {
         self.epoch
     }
 
-    /// Owned managed texture requests for this synchronous frame.
+    /// Completion progress produced while reconciling this frame.
     #[must_use]
-    pub fn texture_requests(&self) -> &[TextureRequest] {
-        &self.texture_requests
-    }
-
-    /// Returns whether managed-texture feedback for this lease was already reconciled.
-    ///
-    /// Backends with a separate no-surface preparation phase may use this to make that phase
-    /// idempotent before consuming the lease for drawing.
-    #[must_use]
-    pub const fn is_texture_feedback_reconciled(&self) -> bool {
-        self.reconciled
+    pub const fn completion_progress(&self) -> SnapshotCompletionProgress {
+        self.completion
     }
 
     /// Read the native draw data while this Context borrow is active.
@@ -122,81 +172,24 @@ impl<'ctx> RenderedFrame<'ctx> {
         unsafe { self.draw_data.as_ref() }
     }
 
-    /// Updates and renders native platform windows while this rendered-frame lease owns Context.
+    /// Update and render secondary platform windows while this frame owns the Context.
     ///
-    /// This combined operation does not render or present the main viewport. The default platform
-    /// pump may render and present secondary surfaces through installed callbacks. WSI backends can
-    /// call it before acquiring the main surface, while OpenGL integrations can call it after the
-    /// main draw and before the main swap. The installed platform and renderer callbacks must
-    /// satisfy the same contract required by [`Context::render_platform_windows_default`].
+    /// This combined operation does not render or present the main viewport. WSI backends can call
+    /// it before acquiring the main surface, while OpenGL integrations can call it after the main
+    /// draw and before the main swap.
     ///
     /// # Panics
     ///
-    /// Panics when a managed renderer has not reconciled this frame, multi-viewport is disabled,
-    /// the operation is repeated for the same frame, or the installed platform/renderer callback
-    /// contract is incomplete.
+    /// Panics when multi-viewport is disabled, the operation is repeated for the same frame, or
+    /// the installed platform/renderer callback contract is incomplete.
     #[cfg(feature = "multi-viewport")]
     pub fn update_and_render_platform_windows_default(&mut self) {
-        assert!(
-            self.epoch.is_none() || self.reconciled,
-            "RenderedFrame::update_and_render_platform_windows_default() requires managed-texture reconciliation before native renderer callbacks"
-        );
         self.context.update_platform_windows();
         self.context.render_platform_windows_default();
     }
-
-    fn with_owner_context<R>(&mut self, f: impl FnOnce(&mut Context) -> R) -> R {
-        let binding = self.context.binding();
-        binding.with_bound_context(|| f(self.context))
-    }
-
-    /// Apply renderer feedback before drawing commands that depend on new texture identifiers.
-    pub fn reconcile_texture_feedback(
-        &mut self,
-        feedback: impl IntoIterator<Item = TextureFeedback>,
-    ) -> Result<SnapshotCompletionProgress, RendererConsumerError> {
-        if self.reconciled {
-            return Err(RendererConsumerError::EpochAlreadyCompleted {
-                epoch: self.epoch.map_or(0, SnapshotEpoch::sequence),
-            });
-        }
-        let Some(epoch) = self.epoch else {
-            let feedback = feedback.into_iter().collect::<Vec<_>>();
-            if feedback.is_empty() {
-                self.reconciled = true;
-                return Ok(SnapshotCompletionProgress::default());
-            }
-            return Err(RendererConsumerError::NoActiveConsumer);
-        };
-        let feedback = feedback.into_iter().collect();
-        let progress = self
-            .with_owner_context(|context| context.complete_synchronous_render(epoch, feedback))?;
-        self.reconciled = true;
-        Ok(progress)
-    }
-
-    /// Consumes this lease and returns proof that managed-texture feedback was reconciled.
-    ///
-    /// Renderer integrations should return this proof to any owner that separates rendering from
-    /// presentation. Calling this before [`Self::reconcile_texture_feedback`] fails and abandons an
-    /// active managed-texture epoch when the lease is dropped.
-    pub fn into_reconciled(self) -> Result<ReconciledFrame<'ctx>, RendererConsumerError> {
-        if !self.reconciled {
-            return Err(RendererConsumerError::FrameNotReconciled {
-                pending_requests: self.texture_requests.len(),
-            });
-        }
-        let reconciled = ReconciledFrame {
-            context_id: self.context.id(),
-            epoch: self.epoch,
-            _context_borrow: PhantomData,
-        };
-        drop(self);
-        Ok(reconciled)
-    }
 }
 
-impl Deref for RenderedFrame<'_> {
+impl Deref for ReconciledFrame<'_> {
     type Target = DrawData;
 
     fn deref(&self) -> &Self::Target {
@@ -204,14 +197,22 @@ impl Deref for RenderedFrame<'_> {
     }
 }
 
-impl Drop for RenderedFrame<'_> {
+impl Drop for PendingFrame<'_> {
     fn drop(&mut self) {
-        let abandoned_epoch = (!self.reconciled).then_some(self.epoch).flatten();
+        if self.context.is_none() {
+            return;
+        }
+        let epoch = self.epoch;
         self.with_owner_context(|context| {
-            if let Some(epoch) = abandoned_epoch {
-                context.abandon_synchronous_render(epoch);
-            }
+            context.abandon_synchronous_render(epoch);
             context.collect_retired_textures();
         });
+    }
+}
+
+impl Drop for ReconciledFrame<'_> {
+    fn drop(&mut self) {
+        let binding = self.context.binding();
+        binding.with_bound_context(|| self.context.collect_retired_textures());
     }
 }

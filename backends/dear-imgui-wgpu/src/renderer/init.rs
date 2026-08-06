@@ -143,7 +143,7 @@ impl WgpuRenderer {
             Self::clear_unbound_imgui_context(imgui_ctx, renderer_flags_added, renderer_name_ptr);
             return Err(error);
         }
-        let consumer = match imgui_ctx.create_renderer_consumer() {
+        let consumer = match imgui_ctx.create_synchronous_renderer_consumer() {
             Ok(consumer) => consumer,
             Err(error) => {
                 self.clear_bound_imgui_context(imgui_ctx);
@@ -168,7 +168,7 @@ impl WgpuRenderer {
                 return Err(error.into());
             }
         };
-        let _invalidated = reset.commit();
+        reset.commit();
         self.texture_manager.clear_destroyed_managed_textures();
         self.renderer_consumer = Some(consumer);
 
@@ -180,7 +180,7 @@ impl WgpuRenderer {
             let reset_result = match imgui_ctx.prepare_renderer_texture_reset(&consumer) {
                 Ok(reset) => {
                     self.texture_manager.clear_managed_textures();
-                    let _invalidated = reset.commit();
+                    reset.commit();
                     self.texture_manager.clear_destroyed_managed_textures();
                     Ok(())
                 }

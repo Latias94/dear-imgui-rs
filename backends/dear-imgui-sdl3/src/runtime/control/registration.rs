@@ -2,6 +2,7 @@ use super::*;
 
 pub(crate) struct RuntimeRegistration {
     pub(super) control: Rc<RuntimeControl>,
+    pub(super) renderer_consumer: Option<Rc<SynchronousRendererConsumer>>,
     pub(super) baseline: Option<PlatformClaimBaseline>,
     pub(super) platform_attachment: Option<ContextAttachmentLease>,
     pub(super) renderer_attachment: Option<ContextAttachmentLease>,
@@ -12,6 +13,7 @@ impl fmt::Debug for RuntimeRegistration {
         formatter
             .debug_struct("RuntimeRegistration")
             .field("control", &self.control)
+            .field("has_renderer_consumer", &self.renderer_consumer.is_some())
             .field("native_initialization_pending", &self.baseline.is_some())
             .field("platform_attached", &self.platform_attachment.is_some())
             .field("renderer_attached", &self.renderer_attachment.is_some())
@@ -78,6 +80,7 @@ impl RuntimeRegistration {
 
         Ok(Self {
             control,
+            renderer_consumer: None,
             baseline: Some(baseline),
             platform_attachment: Some(platform_attachment),
             renderer_attachment,
@@ -152,6 +155,7 @@ impl RuntimeRegistration {
         self.control.renderer_initialized.set(false);
         self.control.release_platform_session();
         self.control.take_renderer_consumer();
+        self.renderer_consumer.take();
         self.control.renderer_release.set(ReleaseState::Released);
         self.control.platform_release.set(ReleaseState::Released);
         self.control.state.set(RuntimeState::Detached);
@@ -160,6 +164,22 @@ impl RuntimeRegistration {
 
     pub(crate) fn control(&self) -> &RuntimeControl {
         &self.control
+    }
+
+    pub(crate) fn install_renderer_consumer(&mut self, consumer: SynchronousRendererConsumer) {
+        let consumer = Rc::new(consumer);
+        self.control.install_renderer_consumer(Rc::clone(&consumer));
+        let previous = self.renderer_consumer.replace(consumer);
+        assert!(
+            previous.is_none(),
+            "SDL3 runtime registration already owns a renderer consumer"
+        );
+    }
+
+    pub(crate) fn renderer_consumer(&self) -> &SynchronousRendererConsumer {
+        self.renderer_consumer
+            .as_deref()
+            .expect("SDL3 renderer consumer is unavailable after renderer shutdown")
     }
 
     pub(crate) fn poll_fault(&self) -> Result<(), Sdl3BackendError> {
@@ -206,7 +226,7 @@ impl RuntimeRegistration {
         let consumer = consumer_guard
             .as_ref()
             .expect("initialized SDL3 renderer lost its renderer consumer");
-        let reset = context.prepare_renderer_texture_reset(consumer)?;
+        let reset = context.prepare_renderer_texture_reset(consumer.as_ref())?;
 
         self.control.binding.try_with_bound_context(|| {
             self.control.destroy_uninstalled_renderer_textures_bound()?;
@@ -215,7 +235,7 @@ impl RuntimeRegistration {
             Ok::<(), Sdl3BackendError>(())
         })??;
 
-        let _ = reset.commit();
+        reset.commit();
         drop(consumer_guard);
         self.control.clear_destroyed_textures();
         entry.finish()
@@ -283,7 +303,7 @@ impl RuntimeRegistration {
                     let consumer = consumer
                         .as_ref()
                         .expect("initialized SDL3 renderer lost its renderer consumer");
-                    match context.prepare_renderer_texture_reset(consumer) {
+                    match context.prepare_renderer_texture_reset(consumer.as_ref()) {
                         Ok(reset) => Some(reset),
                         Err(error) => return Err(error.into()),
                     }
@@ -294,12 +314,13 @@ impl RuntimeRegistration {
             let shutdown_result = self.control.shutdown_native_explicit();
             let renderer_released = self.control.renderer_released();
             if renderer_released && let Some(reset) = reset {
-                let _ = reset.commit();
+                reset.commit();
             }
             (pending, shutdown_result, renderer_released)
         };
         if renderer_released {
             self.control.take_renderer_consumer();
+            self.renderer_consumer.take();
             self.control.clear_destroyed_textures();
         }
         if matches!(self.control.state(), RuntimeState::Detached) {

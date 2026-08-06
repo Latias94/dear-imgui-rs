@@ -148,7 +148,7 @@ impl GlowRenderer {
             self.renderer_consumer = Some(consumer);
             return Err(error);
         }
-        let _ = reset.commit();
+        reset.commit();
         self.destroyed_managed_textures.clear();
         Ok(())
     }
@@ -289,7 +289,7 @@ impl GlowRenderer {
             self.renderer_consumer = Some(consumer);
             return Err(error);
         }
-        let _ = reset.commit();
+        reset.commit();
         self.destroyed_managed_textures.clear();
         self.renderer_consumer = Some(consumer);
         Ok(())

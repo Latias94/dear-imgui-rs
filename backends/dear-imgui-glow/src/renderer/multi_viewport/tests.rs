@@ -147,13 +147,13 @@ fn test_renderer(
     gl: Option<Rc<glow::Context>>,
     owned_texture: bool,
 ) -> GlowRenderer {
-    let renderer_consumer = context.create_renderer_consumer().unwrap();
+    let renderer_consumer = context.create_synchronous_renderer_consumer().unwrap();
     // The synthetic renderer has not installed a managed texture mapping yet; the fake native
     // texture below is added only after this empty reset transaction commits.
     let reset = context
         .prepare_renderer_texture_reset(&renderer_consumer)
         .unwrap();
-    let _ = reset.commit();
+    reset.commit();
     let mut flags = context.io().backend_flags();
     flags.insert(BackendFlags::RENDERER_HAS_VTX_OFFSET | BackendFlags::RENDERER_HAS_TEXTURES);
     context.io_mut().set_backend_flags(flags);
@@ -829,7 +829,7 @@ fn moving_the_wrapper_keeps_runtime_owned_renderer_storage_stable() {
 }
 
 #[test]
-fn shutdown_with_an_outstanding_snapshot_keeps_the_renderer_for_retry() {
+fn abandoning_a_pending_frame_does_not_block_shutdown() {
     let _guard = test_guard();
     let mut context = Context::create();
     context.io_mut().set_display_size([128.0, 128.0]);
@@ -840,7 +840,7 @@ fn shutdown_with_an_outstanding_snapshot_keeps_the_renderer_for_retry() {
     let renderer = test_renderer(&mut context, Some(Rc::clone(&gl)), true);
     let mut runtime = unsafe { GlowViewportRuntime::attach(&mut context, renderer) }.unwrap();
     let control = runtime.control_for_test();
-    let snapshot = {
+    {
         let renderer = control.borrow_renderer_for_test();
         let consumer = renderer
             .as_ref()
@@ -848,38 +848,10 @@ fn shutdown_with_an_outstanding_snapshot_keeps_the_renderer_for_retry() {
             .renderer_consumer
             .as_ref()
             .unwrap();
-        context.begin_frame().render_snapshot(consumer).unwrap()
-    };
-
-    assert!(matches!(
-        runtime.shutdown(&mut context),
-        Err(GlowViewportError::Renderer(RenderError::RendererConsumer(
-            dear_imgui_rs::render::RendererConsumerError::OutstandingEpochs { count: 1 }
-        )))
-    ));
-    assert_eq!(runtime.state_for_test(), RuntimeState::Attached);
-    assert!(control.has_renderer_for_test());
-    assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 0);
-    assert!(
-        context
-            .io()
-            .backend_flags()
-            .contains(BackendFlags::RENDERER_HAS_VIEWPORTS)
-    );
-    assert!(std::ptr::fn_addr_eq(
-        context.platform_io().renderer_render_window_raw().unwrap(),
-        renderer_render_window_sys as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void)
-    ));
-    {
-        let renderer = control.borrow_renderer_for_test();
-        let renderer = renderer.as_ref().unwrap();
-        assert_eq!(renderer.owned_textures.len(), 1);
-        assert!(!renderer.is_destroyed);
-        assert!(renderer.renderer_consumer.is_some());
+        let pending = context.begin_frame().render(consumer);
+        drop(pending);
     }
 
-    drop(snapshot);
-    context.poll_snapshot_completions().unwrap();
     runtime.shutdown(&mut context).unwrap();
     assert_eq!(runtime.state_for_test(), RuntimeState::ResourceDropped);
     assert!(!control.has_renderer_for_test());

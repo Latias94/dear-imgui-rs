@@ -506,6 +506,12 @@ impl ManagedTextureRegistry {
         let mut applied = 0;
         for item in feedback {
             let key = item.key();
+            if matches!(
+                item.result(),
+                TextureFeedbackResult::Superseded | TextureFeedbackResult::Retry
+            ) {
+                continue;
+            }
             match key.texture {
                 SnapshotTextureId::User(id) => match self.slot(id)? {
                     TextureSlot::Active(_) => {
@@ -544,6 +550,12 @@ impl ManagedTextureRegistry {
 
         for item in feedback {
             let key = item.key();
+            if matches!(
+                item.result(),
+                TextureFeedbackResult::Superseded | TextureFeedbackResult::Retry
+            ) {
+                continue;
+            }
             match key.texture {
                 SnapshotTextureId::User(id) => {
                     let slot = &mut self.slots[id.slot() as usize];
@@ -582,6 +594,9 @@ impl ManagedTextureRegistry {
                             }
                             entry.destroy_ack_epoch = Some(epoch);
                         }
+                        TextureFeedbackResult::Superseded | TextureFeedbackResult::Retry => {
+                            unreachable!("non-mutating outcomes were filtered before slot access")
+                        }
                     }
                     applied += 1;
                 }
@@ -610,6 +625,9 @@ impl ManagedTextureRegistry {
                                 // The matching request-bound destroy was validated above.
                                 texture.set_status(TextureStatus::Destroyed);
                             }
+                        }
+                        TextureFeedbackResult::Superseded | TextureFeedbackResult::Retry => {
+                            unreachable!("non-mutating outcomes were filtered before atlas access")
                         }
                     }
                     applied += 1;
@@ -972,9 +990,9 @@ mod tests {
         let generation = hub
             .validate_consumer_admission()
             .expect("fresh snapshot hub should admit a renderer");
-        let _consumer = hub.commit_consumer_admission(generation);
+        let consumer = hub.commit_synchronous_consumer_admission(generation);
         let (epoch, requests) = hub
-            .begin_synchronous(destroy, &atlas)
+            .begin_synchronous(&consumer, destroy, &atlas)
             .expect("destroy request should enter a synchronous epoch");
         let feedback = requests[0]
             .destroyed()

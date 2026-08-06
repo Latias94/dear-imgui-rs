@@ -38,15 +38,15 @@ use dear_imgui_glow::{
     multi_viewport::GlowViewportRuntime,
 };
 use dear_imgui_rs::{
-    Condition, ConfigFlags, Context, TextureId,
-    render::{ReconciledFrame, RenderedFrame},
+    Condition, ConfigFlags, Context, FrameToken, TextureId, render::ReconciledFrame,
 };
 #[cfg(feature = "test-engine")]
 use dear_imgui_rs::{Id, RawDrawCallback};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, Sdl3PlatformBackend};
 #[cfg(feature = "test-engine")]
 use dear_imgui_test_engine::{
-    RunFlags, RunSpeed, ScriptCount, TestEngine, TestFrameDriver, TestGroup, VerboseLevel,
+    FrameDriveOutcome, MainRenderOutcome, RunFlags, RunSpeed, ScriptCount, TestEngine,
+    TestFrameDriver, TestGroup, VerboseLevel,
 };
 use glow::HasContext;
 use sdl3::video::{GLProfile, SwapInterval, WindowPos};
@@ -872,7 +872,7 @@ impl SecondaryViewportFrameEvidence {
 #[cfg(feature = "test-engine")]
 #[derive(Clone, Copy)]
 struct GlowFrameContractProbe {
-    readback_targets: SamplerReadbackTargets,
+    screen_points: SamplerProbeScreenPoints,
     external_texture: GlTexture,
     gl_version: GlVersion,
     supports_sampler_objects: bool,
@@ -891,26 +891,71 @@ struct SdlGlowFrameDriver<'a> {
     gl: &'a glow::Context,
     window: &'a sdl3::video::Window,
     gl_context: &'a sdl3::video::GLContext,
-    rendered: bool,
+    prepared: bool,
+    main_ready: bool,
     #[cfg(feature = "test-engine")]
     secondary_viewport_evidence: Option<SecondaryViewportFrameEvidence>,
     #[cfg(feature = "test-engine")]
     contract_probe: Option<GlowFrameContractProbe>,
+    #[cfg(feature = "test-engine")]
+    application_state_before: Option<ApplicationGlStateSnapshot>,
     #[cfg(feature = "test-engine")]
     contract_result: Option<GlowFrameContractResult>,
     presented: bool,
 }
 
 impl SdlGlowFrameDriver<'_> {
-    fn render_frame<'frame>(
+    fn prepare_frame<'frame>(
         &mut self,
-        frame: RenderedFrame<'frame>,
+        frame: FrameToken<'frame>,
     ) -> Result<ReconciledFrame<'frame>, SdlGlowFrameError> {
-        if self.rendered {
+        if self.prepared {
             return Err(SdlGlowFrameError::message(
-                "main OpenGL frame was rendered more than once",
+                "OpenGL frame was prepared more than once",
             ));
         }
+        #[cfg(feature = "test-engine")]
+        {
+            self.application_state_before = self.contract_probe.map(|probe| {
+                ApplicationGlStateSnapshot::prepare(
+                    self.gl,
+                    probe.external_texture,
+                    probe.gl_version,
+                    probe.supports_sampler_objects,
+                )
+            });
+        }
+
+        self.renderer.new_frame().map_err(SdlGlowFrameError::new)?;
+        let pending_frame = self
+            .renderer
+            .with_renderer(|renderer| {
+                renderer
+                    .renderer_consumer()
+                    .map(|consumer| frame.render(consumer))
+            })
+            .map_err(SdlGlowFrameError::new)?
+            .map_err(SdlGlowFrameError::new)?;
+        let reconciled = self
+            .renderer
+            .reconcile_frame(pending_frame)
+            .map_err(SdlGlowFrameError::new)?;
+        self.prepared = true;
+        Ok(reconciled)
+    }
+
+    fn render_main_frame(&mut self, frame: ReconciledFrame<'_>) -> Result<(), SdlGlowFrameError> {
+        if !self.prepared {
+            return Err(SdlGlowFrameError::message(
+                "main OpenGL frame reached render-main before preparation",
+            ));
+        }
+        if self.main_ready {
+            return Err(SdlGlowFrameError::message(
+                "main OpenGL frame reached render-main more than once",
+            ));
+        }
+
         unsafe {
             let (width, height) = self.window.size_in_pixels();
             self.gl.viewport(0, 0, width as i32, height as i32);
@@ -919,16 +964,7 @@ impl SdlGlowFrameDriver<'_> {
         }
 
         #[cfg(feature = "test-engine")]
-        let application_state_before = self.contract_probe.map(|probe| {
-            ApplicationGlStateSnapshot::prepare(
-                self.gl,
-                probe.external_texture,
-                probe.gl_version,
-                probe.supports_sampler_objects,
-            )
-        });
-
-        self.renderer.new_frame().map_err(SdlGlowFrameError::new)?;
+        let application_state_before = self.application_state_before.take();
         #[cfg(feature = "test-engine")]
         let sdl3_trace = self
             .sdl3_backend
@@ -939,6 +975,9 @@ impl SdlGlowFrameDriver<'_> {
             .renderer
             .begin_frame_trace()
             .map_err(SdlGlowFrameError::new)?;
+        // OpenGL draws the main viewport first, switches through secondary contexts, restores the
+        // main context, and only then presents the main window. Reconciliation stays in prepare;
+        // every draw required for this presentation stays in render-main.
         let render_result = self
             .renderer
             .render_with_platform_windows_reconciled(frame)
@@ -967,13 +1006,16 @@ impl SdlGlowFrameDriver<'_> {
         let reconciled = render_result?;
         #[cfg(feature = "test-engine")]
         if let (Some(probe), Some(before)) = (self.contract_probe, application_state_before) {
+            let readback_targets = probe
+                .screen_points
+                .map_to_framebuffer(reconciled.draw_data())
+                .map_err(|error| SdlGlowFrameError { source: error })?;
             let after_renderer = ApplicationGlStateSnapshot::capture(
                 self.gl,
                 probe.gl_version,
                 probe.supports_sampler_objects,
             );
-            let readback = probe
-                .readback_targets
+            let readback = readback_targets
                 .read(self.gl, self.window.size_in_pixels())
                 .map_err(|error| SdlGlowFrameError { source: error })?;
             let after_readback = ApplicationGlStateSnapshot::capture(
@@ -994,14 +1036,15 @@ impl SdlGlowFrameDriver<'_> {
                 &sdl3_report,
             ));
         }
-        self.rendered = true;
-        Ok(reconciled)
+        drop(reconciled);
+        self.main_ready = true;
+        Ok(())
     }
 
     fn present_frame(&mut self) -> Result<(), SdlGlowFrameError> {
-        if !self.rendered {
+        if !self.main_ready {
             return Err(SdlGlowFrameError::message(
-                "main OpenGL window was presented before frame and platform rendering completed",
+                "main OpenGL window was presented before render-main completed",
             ));
         }
         #[cfg(feature = "test-engine")]
@@ -1023,15 +1066,25 @@ impl SdlGlowFrameDriver<'_> {
 
 #[cfg(feature = "test-engine")]
 impl TestFrameDriver for SdlGlowFrameDriver<'_> {
+    type PrepareError = SdlGlowFrameError;
     type RenderError = SdlGlowFrameError;
     type PresentError = SdlGlowFrameError;
 
-    fn render<'frame>(
+    fn prepare<'frame>(
         &mut self,
-        frame: RenderedFrame<'frame>,
+        frame: FrameToken<'frame>,
         _frame_index: u64,
-    ) -> Result<ReconciledFrame<'frame>, Self::RenderError> {
-        self.render_frame(frame)
+    ) -> Result<ReconciledFrame<'frame>, Self::PrepareError> {
+        self.prepare_frame(frame)
+    }
+
+    fn render_main(
+        &mut self,
+        frame: ReconciledFrame<'_>,
+        _frame_index: u64,
+    ) -> Result<MainRenderOutcome, Self::RenderError> {
+        self.render_main_frame(frame)?;
+        Ok(MainRenderOutcome::ReadyToPresent)
     }
 
     fn present(&mut self, _frame_index: u64) -> Result<(), Self::PresentError> {
@@ -1327,7 +1380,8 @@ impl MainData {
 
         #[cfg(feature = "test-engine")]
         reset_raw_callback_probe();
-        let ui = self.imgui.frame();
+        let frame = self.imgui.begin_frame();
+        let ui = frame.ui();
         ui.dockspace_over_main_viewport();
         let external_texture_id = self.external_texture.id;
         #[cfg(feature = "test-engine")]
@@ -1367,7 +1421,6 @@ impl MainData {
             )
         });
 
-        let frame = self.imgui.render();
         #[cfg(feature = "test-engine")]
         let contract_probe = if let Some(sampler_probe) = sampler_probe {
             let sampler_strategy = self
@@ -1376,7 +1429,7 @@ impl MainData {
                 .ok_or("contract probe requires viewport smoke state")?
                 .sampler_strategy;
             Some(GlowFrameContractProbe {
-                readback_targets: sampler_probe.map_to_framebuffer(frame.draw_data())?,
+                screen_points: sampler_probe,
                 external_texture: self.external_texture.handle,
                 gl_version: GlVersion::read(&self.gl),
                 supports_sampler_objects: matches!(
@@ -1404,36 +1457,35 @@ impl MainData {
             gl: self.gl.as_ref(),
             window: &self.window,
             gl_context: &self.gl_context,
-            rendered: false,
+            prepared: false,
+            main_ready: false,
             #[cfg(feature = "test-engine")]
             secondary_viewport_evidence: None,
             #[cfg(feature = "test-engine")]
             contract_probe,
             #[cfg(feature = "test-engine")]
+            application_state_before: None,
+            #[cfg(feature = "test-engine")]
             contract_result: None,
             presented: false,
         };
         #[cfg(feature = "test-engine")]
-        let presentation_result: Result<(), Box<dyn Error>> =
-            if let Some(engine) = self.test_engine.as_mut() {
-                engine
-                    .drive_frame(frame, frame_index, &mut driver)
-                    .map_err(|error| Box::new(error) as Box<dyn Error>)
-            } else {
-                let reconciled = driver.render_frame(frame)?;
-                drop(reconciled);
-                driver
-                    .present_frame()
-                    .map_err(|error| Box::new(error) as Box<dyn Error>)
-            };
-        #[cfg(not(feature = "test-engine"))]
-        let presentation_result: Result<(), Box<dyn Error>> = {
-            let reconciled = driver.render_frame(frame)?;
-            drop(reconciled);
-            driver
-                .present_frame()
-                .map_err(|error| Box::new(error) as Box<dyn Error>)
+        let drive_outcome = if let Some(engine) = self.test_engine.as_mut() {
+            engine
+                .drive_frame(frame, frame_index, &mut driver)
+                .map_err(|error| Box::new(error) as Box<dyn Error>)?
+        } else {
+            let reconciled = driver.prepare_frame(frame)?;
+            driver.render_main_frame(reconciled)?;
+            driver.present_frame()?;
+            FrameDriveOutcome::Presented
         };
+        #[cfg(not(feature = "test-engine"))]
+        {
+            let reconciled = driver.prepare_frame(frame)?;
+            driver.render_main_frame(reconciled)?;
+            driver.present_frame()?;
+        }
 
         #[cfg(feature = "test-engine")]
         let secondary_viewport_evidence = driver
@@ -1443,9 +1495,8 @@ impl MainData {
         #[cfg(feature = "test-engine")]
         let contract_result = driver.contract_result.take();
         #[cfg(feature = "test-engine")]
-        let was_presented = driver.presented;
+        let was_presented = matches!(drive_outcome, FrameDriveOutcome::Presented);
         drop(driver);
-        presentation_result?;
 
         #[cfg(feature = "test-engine")]
         let external_texture_filters_preserved =

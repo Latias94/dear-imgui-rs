@@ -9,14 +9,14 @@ use ash::vk;
 
 use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
-    ContextAttachmentTeardownError, ContextBinding, ContextTeardown, FramePrepareOptions, Id, sys,
+    ContextAttachmentTeardownError, ContextBinding, ContextTeardown, Id, sys,
 };
 
 use super::callbacks::{
     renderer_create_window_sys, renderer_destroy_window_sys, renderer_probe_runtime_sys,
     renderer_render_window_sys, renderer_swap_buffers_sys, run_work_callback,
 };
-use super::registry::{SurfaceSupportError, viewport_data_count};
+use super::registry::SurfaceSupportError;
 use super::runtime::{
     AshViewportError, OwningViewportRuntime, RuntimeControl, RuntimeState,
     preflight_attachment_with,
@@ -379,47 +379,6 @@ fn dropping_runtime_while_context_is_alive_defers_cleanup_to_context() {
     drop(context);
 
     assert_eq!(control.state(), RuntimeState::ResourceDropped);
-}
-
-#[test]
-fn outstanding_snapshot_rejects_explicit_shutdown_before_viewport_or_callback_teardown() {
-    let _guard = super::test_context_guard();
-    let mut context = Context::create();
-    let _platform = attach_test_platform(&mut context);
-    let mut runtime = OwningViewportRuntime::attach_for_test(&mut context).unwrap();
-    context.prepare_frame(
-        FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0).renderer_has_textures(),
-    );
-    let snapshot = runtime.snapshot_for_shutdown_test(&mut context);
-    let callbacks_before = context.platform_io().renderer_create_window_raw();
-
-    assert!(matches!(
-        runtime.shutdown(&mut context),
-        Err(AshViewportError::Renderer(RendererError::RendererConsumer(
-            _
-        )))
-    ));
-    assert_eq!(runtime.state_for_test(), RuntimeState::Attached);
-    assert_eq!(viewport_data_count(context.id()), 0);
-    assert!(
-        callbacks_before.is_some_and(|before| {
-            context
-                .platform_io()
-                .renderer_create_window_raw()
-                .is_some_and(|current| std::ptr::fn_addr_eq(current, before))
-        }),
-        "snapshot preflight failure must not release renderer callbacks"
-    );
-    assert!(
-        context
-            .io()
-            .backend_flags()
-            .contains(BackendFlags::RENDERER_HAS_VIEWPORTS)
-    );
-
-    drop(snapshot);
-    context.poll_snapshot_completions().unwrap();
-    runtime.shutdown(&mut context).unwrap();
 }
 
 #[test]

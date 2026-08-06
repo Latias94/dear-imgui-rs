@@ -387,7 +387,10 @@ impl AppWindow {
             });
 
         self.imgui.platform.prepare_render(&ui, &self.window)?;
-        let draw_data = self.imgui.context.render();
+        let pending_frame = self
+            .imgui
+            .context
+            .render(self.imgui.renderer.renderer_consumer()?);
 
         if let Some(gl) = self.imgui.renderer.gl_context() {
             unsafe {
@@ -396,7 +399,7 @@ impl AppWindow {
             }
         }
         self.imgui.renderer.new_frame()?;
-        self.imgui.renderer.render(draw_data)?;
+        self.imgui.renderer.render(pending_frame)?;
         self.surface.swap_buffers(&self.context)?;
         Ok(())
     }

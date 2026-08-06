@@ -98,7 +98,7 @@
 //!   4. Mutate before a frame with `Context::with_texture_mut(handle, |tex| ...)`.
 //!   5. Use the handle in UI via `ui.image(handle, size)` or draw-list APIs.
 //!   6. Call `Context::remove_texture(handle)` to begin generation-safe retirement.
-//!   7. A renderer processes request-owned bytes from `RenderedFrame::texture_requests()` or
+//!   7. A renderer processes request-owned bytes from `PendingFrame::texture_requests()` or
 //!      `FrameSnapshot::texture_requests()` and returns feedback created by each request.
 //! - Alternatives: when you already have a GPU handle, pass `TextureId` directly.
 //!
@@ -106,11 +106,12 @@
 //!
 //! When integrating a renderer backend (WGPU, OpenGL, etc.) with ImGui 1.92+:
 //! - Set `BackendFlags::RENDERER_HAS_TEXTURES` on the ImGui `Io` before building the font atlas.
-//! - Create one `RendererConsumer` from the Context and keep it alive with the renderer.
-//! - Synchronous renderer APIs consume a Context-borrowed `RenderedFrame`; detached renderers
-//!   consume a move-only `FrameSnapshot`.
-//! - Each frame, handle every `TextureOp::Create`, `Update`, and `Destroy`, then create feedback
-//!   through `TextureRequest::uploaded` or `TextureRequest::destroyed`.
+//! - Create one `SynchronousRendererConsumer` or `DetachedRendererConsumer` from the Context and
+//!   keep it alive with that renderer path.
+//! - Synchronous renderer APIs consume a Context-borrowed `PendingFrame`, reconcile it, then draw
+//!   the resulting `ReconciledFrame`; detached renderers consume a move-only `FrameSnapshot`.
+//! - Each frame, give every texture request one explicit `uploaded`, `destroyed`, `superseded`, or
+//!   `retry` outcome.
 //! - Reconcile synchronous feedback before rendering draw commands that depend on new IDs;
 //!   detached snapshots commit feedback when their GPU work is complete.
 //! - Bind [`DrawCmdParams::texture_id`](render::DrawCmdParams::texture_id). Command iteration
@@ -124,10 +125,10 @@
 //! // 1) Configure context
 //! io.backend_flags |= BackendFlags::RENDERER_HAS_TEXTURES;
 //!
-//! let consumer = context.create_renderer_consumer()?;
-//! let mut frame = context.render();
+//! let consumer = context.create_synchronous_renderer_consumer()?;
+//! let pending = context.render(&consumer);
 //! let mut feedback = Vec::new();
-//! for request in frame.texture_requests() {
+//! for request in pending.texture_requests() {
 //!     feedback.push(match request.operation() {
 //!         TextureOp::Create { .. } | TextureOp::Update { .. } =>
 //!             request.uploaded(upload_to_gpu(request))?,
@@ -137,7 +138,7 @@
 //!         }
 //!     });
 //! }
-//! frame.reconcile_texture_feedback(feedback)?;
+//! let frame = pending.reconcile_texture_feedback(feedback)?;
 //!
 //! // Rendering uses IDs resolved by the owning Context.
 //! for draw_list in frame.draw_data().draw_lists() {
@@ -156,7 +157,7 @@
 //! // Shutdown only after every frame and its GPU work has completed.
 //! let reset = context.prepare_renderer_texture_reset(&consumer)?;
 //! destroy_all_gpu_textures();
-//! let _invalidated = reset.commit();
+//! reset.commit();
 //! drop(consumer);
 //! ```
 //!
@@ -171,8 +172,9 @@
 //! - Use `TextureId` for legacy handles and `ManagedTextureId` for Context-owned textures.
 //! - Borrowed `&mut TextureData` is intentionally not an image source; transfer ownership with
 //!   `Context::register_texture` and mutate it through a Context-scoped closure.
-//! - Synchronous renderer backends consume a Context-borrowed `RenderedFrame`; detached renderers
-//!   consume a move-only `FrameSnapshot` and commit request-bound feedback.
+//! - Synchronous renderer backends turn a Context-borrowed `PendingFrame` into a drawable
+//!   `ReconciledFrame`; detached renderers consume a move-only `FrameSnapshot` and commit
+//!   request-bound feedback.
 //! - `FontId` is a persistent, atlas-validated handle. It may be stored in style state, but
 //!   `Ui::push_font`, `DrawListMut::add_text_with_font`, and `Ui::push_font_with_size` validate the
 //!   active atlas before entering FFI. `FontAtlas::clear`,

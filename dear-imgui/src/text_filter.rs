@@ -409,7 +409,7 @@ mod tests {
         }
 
         unsafe { crate::sys::igSetCurrentContext(raw_a) };
-        let _ = ctx_a.render();
+        let _ = ctx_a.render_legacy();
         unsafe { crate::sys::igDestroyContext(raw_b) };
 
         drop(ctx_a);

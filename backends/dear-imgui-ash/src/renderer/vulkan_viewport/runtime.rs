@@ -4,9 +4,9 @@ use std::fmt;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use dear_imgui_rs::render::RenderedFrame;
 #[cfg(test)]
-use dear_imgui_rs::render::{FrameSnapshot, RendererConsumer};
+use dear_imgui_rs::render::SynchronousRendererConsumer;
+use dear_imgui_rs::render::{PendingFrame, ReconciledFrame};
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
     ContextAttachmentRole, ContextBinding, ContextBindingError, ContextId, ContextLifecycle,
@@ -240,7 +240,7 @@ enum RendererStorage {
     #[cfg(test)]
     Fake {
         probe: Box<u8>,
-        consumer: Option<RendererConsumer>,
+        consumer: Option<SynchronousRendererConsumer>,
     },
 }
 
@@ -456,14 +456,14 @@ impl OwningViewportRuntime {
         preflight_callbacks(context)?;
         preflight_runtime(context.id())?;
         let consumer = context
-            .create_renderer_consumer()
+            .create_synchronous_renderer_consumer()
             .map_err(RendererError::from)?;
         // The fake renderer below has no Vulkan texture map and cannot have submitted an epoch.
         // Commit the empty transaction before the test runtime claims callbacks.
         let reset = context
             .prepare_renderer_texture_reset(&consumer)
             .map_err(RendererError::from)?;
-        let _ = reset.commit();
+        reset.commit();
         let control = Rc::new(RuntimeControl::new_with_storage(
             context,
             RendererStorage::Fake {
@@ -497,7 +497,7 @@ impl OwningViewportRuntime {
     pub(crate) unsafe fn cmd_draw(
         &self,
         command_buffer: ash::vk::CommandBuffer,
-        frame: RenderedFrame<'_>,
+        frame: PendingFrame<'_>,
     ) -> Result<Option<TextureRetirementBatch>, AshViewportError> {
         self.control
             .with_renderer_mut("cmd_draw", |renderer| unsafe {
@@ -505,13 +505,38 @@ impl OwningViewportRuntime {
             })
     }
 
-    pub(crate) fn prepare_frame(
+    pub(crate) fn prepare_frame<'ctx>(
         &self,
-        frame: &mut RenderedFrame<'_>,
-    ) -> Result<Option<TextureRetirementBatch>, AshViewportError> {
+        frame: PendingFrame<'ctx>,
+    ) -> Result<(ReconciledFrame<'ctx>, Option<TextureRetirementBatch>), AshViewportError> {
         self.control.with_renderer_mut("prepare_frame", |renderer| {
             renderer.prepare_frame(frame).map_err(Into::into)
         })
+    }
+
+    pub(crate) fn prepare_context<'ctx>(
+        &self,
+        context: &'ctx mut Context,
+    ) -> Result<(ReconciledFrame<'ctx>, Option<TextureRetirementBatch>), AshViewportError> {
+        self.control.ensure_context(context)?;
+        self.control
+            .with_renderer_mut("prepare_context", |renderer| {
+                let frame = context.render(renderer.renderer_consumer()?);
+                renderer.prepare_frame(frame).map_err(Into::into)
+            })
+    }
+
+    pub(crate) unsafe fn cmd_draw_reconciled(
+        &self,
+        command_buffer: ash::vk::CommandBuffer,
+        frame: ReconciledFrame<'_>,
+    ) -> Result<Option<TextureRetirementBatch>, AshViewportError> {
+        self.control
+            .with_renderer_mut("cmd_draw_reconciled", |renderer| unsafe {
+                renderer
+                    .cmd_draw_reconciled(command_buffer, frame)
+                    .map_err(Into::into)
+            })
     }
 
     pub(crate) fn pending_texture_retirement(
@@ -689,11 +714,6 @@ impl OwningViewportRuntime {
     #[cfg(test)]
     pub(super) fn renderer_address_for_test(&self) -> *const () {
         self.control.renderer_address_for_test()
-    }
-
-    #[cfg(test)]
-    pub(super) fn snapshot_for_shutdown_test(&self, context: &mut Context) -> FrameSnapshot {
-        self.control.snapshot_for_shutdown_test(context)
     }
 
     #[cfg(test)]

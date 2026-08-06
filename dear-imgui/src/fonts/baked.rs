@@ -251,8 +251,8 @@ mod tests {
     #[test]
     fn managed_atlas_can_create_an_arbitrary_baked_size_in_frame() {
         let mut ctx = crate::Context::create();
-        let _consumer = ctx
-            .create_renderer_consumer()
+        let consumer = ctx
+            .create_synchronous_renderer_consumer()
             .expect("the managed renderer consumer should attach");
         let font_id = ctx
             .font_atlas()
@@ -270,7 +270,7 @@ mod tests {
             assert_eq!(baked.size(), 18.0);
             assert_eq!(baked.rasterizer_density(), 2.0);
         }
-        let _ = ctx.render();
+        let _ = ctx.render(&consumer);
     }
 
     #[test]

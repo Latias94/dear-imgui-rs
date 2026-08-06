@@ -147,6 +147,12 @@ pub enum ImguiContextError {
         context_id: ContextId,
         source: dear_imgui_rs::render::RendererConsumerError,
     },
+    /// Render-world delivery of a detached snapshot outcome failed for this Context.
+    #[cfg(feature = "render")]
+    SnapshotCommit {
+        context_id: ContextId,
+        source: dear_imgui_rs::render::snapshot::SnapshotCommitError,
+    },
     /// The completed Dear ImGui frame could not be captured for the render world.
     #[cfg(feature = "render")]
     SnapshotCapture {
@@ -243,6 +249,11 @@ impl fmt::Display for ImguiContextError {
                 "Context {context_id:?} stopped because snapshot completion failed: {source}"
             ),
             #[cfg(feature = "render")]
+            Self::SnapshotCommit { context_id, source } => write!(
+                formatter,
+                "Context {context_id:?} stopped because its render-world snapshot outcome could not be committed: {source}"
+            ),
+            #[cfg(feature = "render")]
             Self::SnapshotCapture { context_id, source } => write!(
                 formatter,
                 "Context {context_id:?} stopped because its frame snapshot could not be captured: {source}"
@@ -287,6 +298,8 @@ impl std::error::Error for ImguiContextError {
             Self::RendererOwnership { source, .. } => Some(source),
             #[cfg(feature = "render")]
             Self::RendererCompletion { source, .. } => Some(source),
+            #[cfg(feature = "render")]
+            Self::SnapshotCommit { source, .. } => Some(source),
             #[cfg(feature = "render")]
             Self::SnapshotCapture { source, .. } => Some(source),
             #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -833,6 +846,7 @@ impl ImguiContexts {
             error.as_ref(),
             Some(ImguiContextError::RendererOwnership { .. })
                 | Some(ImguiContextError::RendererCompletion { .. })
+                | Some(ImguiContextError::SnapshotCommit { .. })
         );
         #[cfg(not(feature = "render"))]
         let renderer_contract_failed = false;
@@ -865,6 +879,20 @@ impl ImguiContexts {
             .expect("a polled Context must remain registered");
         debug_assert_ne!(slot.state, ContextSlotState::Driving);
         slot.last_error = Some(ImguiContextError::RendererCompletion { context_id, source });
+        slot.state = ContextSlotState::Teardown;
+    }
+
+    #[cfg(feature = "render")]
+    pub(crate) fn record_snapshot_commit_error(
+        &mut self,
+        context_id: ContextId,
+        source: dear_imgui_rs::render::snapshot::SnapshotCommitError,
+    ) {
+        let Some(slot) = self.slots.get_mut(&context_id) else {
+            return;
+        };
+        debug_assert_ne!(slot.state, ContextSlotState::Driving);
+        slot.last_error = Some(ImguiContextError::SnapshotCommit { context_id, source });
         slot.state = ContextSlotState::Teardown;
     }
 

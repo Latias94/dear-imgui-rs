@@ -648,7 +648,7 @@ mod tests {
                     ui.set_scroll_y(500.0);
                 });
         }
-        let _ = ctx.render();
+        let _ = ctx.render_legacy();
 
         let ui = ctx.frame();
         ui.window("unknown_count_empty_scrolled")
@@ -777,7 +777,7 @@ mod tests {
         drop(clipper.take());
         drop(clipper);
         assert_eq!(registry::active_count(context), 0);
-        assert!(ctx.render().valid());
+        assert!(ctx.render_legacy().valid());
     }
 
     #[test]
@@ -793,7 +793,7 @@ mod tests {
         assert_eq!(registry::active_count(context), 1);
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _ = ctx.render();
+            let _ = ctx.render_legacy();
         }));
         assert!(result.is_err());
         assert_eq!(registry::active_count(context), 0);
@@ -809,7 +809,7 @@ mod tests {
             ui.dummy([1.0, 10.0]);
             assert!(!next.step());
         });
-        assert!(ctx.render().valid());
+        assert!(ctx.render_legacy().valid());
     }
 
     #[test]
@@ -835,7 +835,7 @@ mod tests {
         });
 
         assert_eq!(registry::active_count(context), 0);
-        assert!(ctx.render().valid());
+        assert!(ctx.render_legacy().valid());
     }
 
     #[test]
@@ -864,7 +864,7 @@ mod tests {
             assert_eq!(registry::active_count(context), 0);
         });
 
-        assert!(ctx.render().valid());
+        assert!(ctx.render_legacy().valid());
     }
 
     #[test]

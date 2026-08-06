@@ -45,8 +45,9 @@ Examples:
 - a game framework that exposes raw draw surfaces and input events
 
 Use `dear-imgui-rs` APIs directly. Translate events into `Io`, consume a
-Context-owned `RenderedFrame`, and return request-bound texture feedback. Use a
-move-only `FrameSnapshot` only when rendering must leave the UI thread.
+Context-owned `PendingFrame`, return request-bound texture feedback, and draw
+only the resulting `ReconciledFrame`. Use a move-only `FrameSnapshot` only when
+rendering must leave the UI thread.
 
 ### Official Dear ImGui C++ backend
 
@@ -75,11 +76,11 @@ Every integration has this shape:
 ```rust,no_run
 use dear_imgui_rs::{
     Condition, Context,
-    render::{RenderedFrame, RendererConsumer, RendererConsumerError},
+    render::{PendingFrame, RendererConsumerError, SynchronousRendererConsumer},
 };
 
 # struct MyPlatformBackend;
-# struct MyRendererBackend { _consumer: RendererConsumer }
+# struct MyRendererBackend { consumer: SynchronousRendererConsumer }
 # struct MyWindow;
 # struct MyEvent;
 # impl MyPlatformBackend {
@@ -90,9 +91,10 @@ use dear_imgui_rs::{
 # }
 # impl MyRendererBackend {
 #     fn new(context: &mut Context) -> Result<Self, RendererConsumerError> {
-#         Ok(Self { _consumer: context.create_renderer_consumer()? })
+#         Ok(Self { consumer: context.create_synchronous_renderer_consumer()? })
 #     }
-#     fn render(&mut self, _frame: RenderedFrame<'_>) -> Result<(), RendererConsumerError> {
+#     fn consumer(&self) -> &SynchronousRendererConsumer { &self.consumer }
+#     fn render(&mut self, _frame: PendingFrame<'_>) -> Result<(), RendererConsumerError> {
 #         // Implement the request/reconcile/draw sequence in the complete template below.
 #         todo!()
 #     }
@@ -120,10 +122,13 @@ ui.window("Tools")
 // 4) Let the platform backend apply post-UI state such as cursor shape or IME.
 platform.prepare_render(&mut imgui, &window);
 
-// 5) Move the Context-borrowed lease into the renderer. A real backend must
-// reconcile every texture result before reading dependent draw commands.
-let frame = imgui.render();
-renderer.render(frame).unwrap();
+// 5) Close the frame with this renderer's synchronous capability. PendingFrame
+// exposes requests and requirements, but no draw data.
+let pending = imgui.render(renderer.consumer());
+
+// 6) Move the pending capability into the renderer. A real backend must return
+// exactly one result per request before it can obtain drawable commands.
+renderer.render(pending).unwrap();
 ```
 
 An owning backend should register its callback state as a Context attachment.
@@ -229,8 +234,9 @@ Platform checklist:
 
 ## Renderer Backend Template
 
-A renderer backend owns one renderer consumer, all managed GPU resources, and each
-`RenderedFrame` while it is reconciling and drawing that frame.
+A renderer backend owns one synchronous renderer consumer, all managed GPU
+resources, and each `PendingFrame`/`ReconciledFrame` transition while it is
+reconciling and drawing that frame.
 
 ```rust,no_run
 use std::collections::{HashMap, HashSet};
@@ -238,8 +244,8 @@ use std::collections::{HashMap, HashSet};
 use dear_imgui_rs::{
     BackendFlags, Context, TextureId,
     render::{
-        RenderedFrame, RendererConsumer, RendererConsumerError, SnapshotTextureId,
-        TextureOp, TextureUploadIdentity,
+        PendingFrame, RendererConsumerError, SnapshotTextureId,
+        SynchronousRendererConsumer, TextureOp, TextureUploadIdentity,
     },
 };
 
@@ -249,7 +255,7 @@ struct ManagedResource {
 }
 
 pub struct MyRendererBackend {
-    consumer: Option<RendererConsumer>,
+    consumer: Option<SynchronousRendererConsumer>,
     textures: HashMap<SnapshotTextureId, ManagedResource>,
     destroyed: HashSet<SnapshotTextureId>,
     next_texture: usize,
@@ -268,7 +274,7 @@ impl MyRendererBackend {
 
         // A previous renderer must have completed its own reset transaction before a new
         // renderer consumer is attached to this Context.
-        let consumer = imgui.create_renderer_consumer()?;
+        let consumer = imgui.create_synchronous_renderer_consumer()?;
         Ok(Self {
             consumer: Some(consumer),
             textures: HashMap::new(),
@@ -277,10 +283,11 @@ impl MyRendererBackend {
         })
     }
 
-    pub fn render(
-        &mut self,
-        mut frame: RenderedFrame<'_>,
-    ) -> Result<(), RendererConsumerError> {
+    pub fn consumer(&self) -> &SynchronousRendererConsumer {
+        self.consumer.as_ref().expect("renderer was shut down")
+    }
+
+    pub fn render(&mut self, frame: PendingFrame<'_>) -> Result<(), RendererConsumerError> {
         let consumer = self.consumer.as_ref().expect("renderer was shut down");
         if frame.context_id() != consumer.context_id() {
             return Err(RendererConsumerError::ForeignContext {
@@ -294,6 +301,7 @@ impl MyRendererBackend {
                 TextureOp::Create { format, width, height, row_pitch, pixels } => {
                     if self.destroyed.contains(&request.texture()) {
                         // This upload predates an accepted Destroy for the same opaque identity.
+                        feedback.push(request.superseded());
                         continue;
                     }
                     let upload = request.upload_identity().expect("create has an upload identity");
@@ -322,10 +330,14 @@ impl MyRendererBackend {
                 }
                 TextureOp::Update { format, width, height, rects } => {
                     if self.destroyed.contains(&request.texture()) {
+                        feedback.push(request.superseded());
                         continue;
                     }
                     let upload = request.upload_identity().expect("update has an upload identity");
-                    let resource = &mut self.textures[&request.texture()];
+                    let Some(resource) = self.textures.get_mut(&request.texture()) else {
+                        feedback.push(request.retry());
+                        continue;
+                    };
                     if resource.upload == upload {
                         feedback.push(
                             request
@@ -355,7 +367,7 @@ impl MyRendererBackend {
 
         // This validates Context, consumer generation, epoch, request kind, and revision.
         // It also updates draw-command TextureId values before the commands are read below.
-        frame.reconcile_texture_feedback(feedback)?;
+        let frame = frame.reconcile_texture_feedback(feedback)?;
 
         for draw_list in frame.draw_data().draw_lists() {
             // Upload or bind draw_list vertex/index buffers.
@@ -377,7 +389,7 @@ impl MyRendererBackend {
         // after outstanding work has completed; do not render new frames in between.
         let reset = imgui.prepare_renderer_texture_reset(consumer)?;
         self.textures.clear();
-        let _invalidated = reset.commit();
+        reset.commit();
         self.destroyed.clear();
         drop(self.consumer.take());
         imgui.poll_snapshot_completions()?;
@@ -389,7 +401,7 @@ impl MyRendererBackend {
 Renderer checklist:
 
 - Set `Context::set_renderer_name`.
-- Create exactly one `RendererConsumer` and retain it for the renderer's lifetime.
+- Create exactly one `SynchronousRendererConsumer` and retain it for the renderer's lifetime.
 - Set `BackendFlags::RENDERER_HAS_TEXTURES` only if every `TextureRequest` is handled and
   reconciled with request-bound feedback.
 - Set `BackendFlags::RENDERER_HAS_VTX_OFFSET` if draw commands can use vertex
@@ -398,8 +410,10 @@ Renderer checklist:
 - Pair each resource with `request.upload_identity()`: return its existing ID for an identical
   retry, and retire or update the old GPU resource before accepting a changed identity.
 - On `Destroy`, free the GPU resource before returning `request.destroyed()`.
-- Record the destroy epoch before processing `Destroy`; ignore late `Create` or `Update` for that
-  identity without allocating a resource or returning upload feedback.
+- Record the destroy epoch before processing `Destroy`; complete late `Create` or `Update` for
+  that identity with `request.superseded()` without allocating a resource.
+- Return `request.retry()` when the renderer cannot complete a current request in this frame.
+  Every request must receive exactly one outcome.
 - Reconcile feedback before reading draw commands that depend on newly assigned texture IDs.
 - During reset or shutdown, call `Context::prepare_renderer_texture_reset` while the complete GPU
   map is still intact. Release the map only after preparation succeeds, then commit the permit.
@@ -431,8 +445,8 @@ the renderer:
   `TextureData` pointer.
 - Keep destroyed identities in the renderer until a complete idle-consumer reset; out-of-order
   snapshots may still carry an older upload after a later Destroy was processed.
-- Keep the non-cloneable `RendererConsumer` on the UI thread. One Context permits one active
-  consumer generation, and its first frame fixes that generation to synchronous or detached mode.
+- Keep the non-cloneable `DetachedRendererConsumer` on the UI thread. One Context permits one
+  active consumer generation, and the capability kind is fixed when it is created.
 
 The Bevy backend demonstrates the engine-owned form of this split: a main-thread registry serially binds one Context at a time, a Context-keyed mailbox moves snapshots into the render world, renderer namespaces and completion acknowledgements remain isolated by Context, and routes freeze camera identity for each extraction epoch. Its internal ECS and renderer resources are deliberately private implementation storage rather than a public custom-backend extension API.
 

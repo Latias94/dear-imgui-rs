@@ -279,7 +279,10 @@ impl AppWindow {
 
         // Finalize inputs on platform and build draw data
         self.imgui.platform.prepare_render(&ui, &self.window)?;
-        let draw_data = self.imgui.context.render();
+        let pending_frame = self
+            .imgui
+            .context
+            .render(self.imgui.renderer.renderer_consumer()?);
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
@@ -303,7 +306,7 @@ impl AppWindow {
                 multiview_mask: None,
             });
 
-            self.imgui.renderer.render(draw_data, &mut rpass)?;
+            self.imgui.renderer.render(pending_frame, &mut rpass)?;
         }
 
         self.queue.submit(Some(encoder.finish()));

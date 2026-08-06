@@ -68,9 +68,11 @@ ui.window("Hello")
       ui.text("Hello, world!");
       if ui.button("Click me") { println!("clicked"); }
   });
-let frame = ctx.render();
-// Move `frame` into a backend (e.g. dear-imgui-wgpu or dear-imgui-glow).
-// The backend reconciles managed texture feedback before reading draw commands.
+// This backend-free snippet uses the explicit legacy path. A managed renderer instead retains a
+// SynchronousRendererConsumer, calls `ctx.render(&consumer)`, reconciles every texture request,
+// and draws the resulting ReconciledFrame.
+let frame = ctx.render_legacy();
+let _draw_data = frame.draw_data();
 // Tip: pass `.opened(&mut open)` if you want a title-bar close button (X).
 
 // Tip: For fallible creation, use `Context::try_create()`
@@ -92,8 +94,8 @@ The 0.16 train is intentionally breaking. Alpha.1 introduced the main architectu
 - global reflection helpers to an owned `ReflectSession` and per-frame `Inspector`;
 - borrowed file-browser filesystems to `FileDialogState`-owned blocking or background capabilities;
 - callback access to shared `ContextBinding` and ordered Context attachments;
-- borrowed texture pointers and pseudo-owned draw data to Context-owned `ManagedTextureId`,
-  move-only `RenderedFrame`/`FrameSnapshot`, and request-bound renderer feedback;
+- borrowed texture pointers and pseudo-owned draw data to Context-owned `ManagedTextureId`, a
+  one-use `RenderedFrame`, move-only `FrameSnapshot`, and request-bound renderer feedback;
 - manual Winit/WGPU/Glow/Ash callback registration to owning runtimes with explicit,
   idempotent shutdown (WGPU attach is safe; Glow remains unsafe for current-GL-context and
   share-group lineage; Ash remains unsafe for raw Vulkan handle lineage);
@@ -102,7 +104,7 @@ The 0.16 train is intentionally breaking. Alpha.1 introduced the main architectu
 - implicit WASM target selection to the explicit `wasm32-unknown-unknown` plus `wasm` feature contract; and
 - `dear_imgui_sys::IMGUI_VERSION` to `BINDING_VERSION`, without a compatibility alias.
 
-Alpha.2 further hardens Context, Docking, multi-viewport renderer, and Bevy frame ownership. See the [alpha.2 migration table](CHANGELOG.md#0160-alpha2); applications migrating directly from 0.15 should also read the [alpha.1 migration guide](CHANGELOG.md#0160-alpha1).
+Alpha.2 replaces alpha.1's `RenderedFrame` with the linear `PendingFrame` -> `ReconciledFrame` protocol and replaces the mode-selecting `RendererConsumer` with separate synchronous and detached capabilities. It also hardens Context, Docking, multi-viewport renderer, Test Engine, and Bevy frame ownership. See the [alpha.2 migration table](CHANGELOG.md#0160-alpha2); applications migrating directly from 0.15 should also read the [alpha.1 migration guide](CHANGELOG.md#0160-alpha1).
 
 ## Examples
 

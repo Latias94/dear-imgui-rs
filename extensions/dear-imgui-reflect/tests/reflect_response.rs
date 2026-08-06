@@ -46,7 +46,7 @@ fn reflect_response_tracks_container_events_with_paths() {
     demo.map.insert("a".to_owned(), 1);
 
     // End the first frame to satisfy Dear ImGui's frame lifecycle assertions.
-    drop(ctx.render());
+    drop(ctx.render_legacy());
 
     let ui = ctx.frame();
 
@@ -56,5 +56,5 @@ fn reflect_response_tracks_container_events_with_paths() {
     let _changed = inspector.input("ResponseDemo", &mut demo);
     let resp = inspector.into_response();
     assert!(resp.is_empty());
-    drop(ctx.render());
+    drop(ctx.render_legacy());
 }

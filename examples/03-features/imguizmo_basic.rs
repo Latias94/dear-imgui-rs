@@ -784,8 +784,11 @@ impl AppWindow {
             multiview_mask: None,
         });
 
-        let draw_data = self.imgui.context.render();
-        self.imgui.renderer.render(draw_data, &mut rpass)?;
+        let pending_frame = self
+            .imgui
+            .context
+            .render(self.imgui.renderer.renderer_consumer()?);
+        self.imgui.renderer.render(pending_frame, &mut rpass)?;
         drop(rpass);
         self.queue.submit(Some(encoder.finish()));
         self.queue.present(output);

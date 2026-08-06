@@ -66,7 +66,7 @@ impl RuntimeControl {
         &self.binding
     }
 
-    pub(crate) fn install_renderer_consumer(&self, consumer: RendererConsumer) {
+    pub(crate) fn install_renderer_consumer(&self, consumer: Rc<SynchronousRendererConsumer>) {
         let previous = self.renderer_consumer.borrow_mut().replace(consumer);
         assert!(
             previous.is_none(),
@@ -74,7 +74,7 @@ impl RuntimeControl {
         );
     }
 
-    fn take_renderer_consumer(&self) -> Option<RendererConsumer> {
+    fn take_renderer_consumer(&self) -> Option<Rc<SynchronousRendererConsumer>> {
         self.renderer_consumer.borrow_mut().take()
     }
 
@@ -624,7 +624,7 @@ impl RuntimeControl {
         &self,
         requests: &[TextureRequest],
         request_epoch: u64,
-    ) -> Result<Vec<TextureFeedback>, Sdl3BackendError> {
+    ) -> Result<ProcessedTextureRequests, Sdl3BackendError> {
         let update_texture = self
             .lifecycle
             .renderer_texture_update
@@ -640,21 +640,10 @@ impl RuntimeControl {
         feature = "sdlrenderer3-renderer",
         feature = "sdlgpu3-renderer"
     ))]
-    pub(crate) fn mark_textures_reconciled(&self, requests: &[TextureRequest], request_epoch: u64) {
+    pub(crate) fn mark_textures_reconciled(&self, installed: &[SnapshotTextureId]) {
         self.renderer_textures
             .borrow_mut()
-            .mark_reconciled(requests, request_epoch);
-    }
-
-    #[cfg(any(
-        feature = "opengl3-renderer",
-        feature = "sdlrenderer3-renderer",
-        feature = "sdlgpu3-renderer"
-    ))]
-    pub(crate) fn reconciled_texture_epoch_is(&self, request_epoch: u64) -> bool {
-        self.renderer_textures
-            .borrow()
-            .reconciled_epoch_is(request_epoch)
+            .mark_reconciled(installed);
     }
 
     #[cfg(any(

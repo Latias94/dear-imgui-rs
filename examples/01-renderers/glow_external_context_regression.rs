@@ -1,7 +1,7 @@
 //! Regression example for GlowRenderer::with_external_context + render_with_context.
 //!
-//! This exercises Dear ImGui managed texture create/update/destroy requests through
-//! DrawData::textures() while the OpenGL context is owned by the application.
+//! This exercises Dear ImGui managed texture create/update/destroy requests through a
+//! `PendingFrame` while the OpenGL context is owned by the application.
 
 use std::{num::NonZeroU32, sync::Arc, time::Instant};
 
@@ -377,14 +377,17 @@ impl AppWindow {
         }
 
         self.imgui.platform.prepare_render(&ui, &self.window)?;
-        let draw_data = self.imgui.context.render();
+        let pending_frame = self
+            .imgui
+            .context
+            .render(self.imgui.renderer.renderer_consumer()?);
 
         // Mirror the original issue reproduction, where the application keeps the GL
         // context externally and explicitly ensures device objects exist.
         self.imgui.renderer.create_device_objects(&self.gl)?;
         self.imgui
             .renderer
-            .render_with_context(&self.gl, draw_data)?;
+            .render_with_context(&self.gl, pending_frame)?;
 
         self.surface.swap_buffers(&self.context)?;
 

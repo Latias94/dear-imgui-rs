@@ -1684,7 +1684,10 @@ impl AppWindow {
             });
 
         self.imgui.platform.prepare_render(ui, &self.window)?;
-        let draw_data = self.imgui.context.render();
+        let pending_frame = self
+            .imgui
+            .context
+            .render(self.imgui.renderer.renderer_consumer()?);
 
         // Clear + render
         if let Some(gl) = self.imgui.renderer.gl_context() {
@@ -1694,7 +1697,7 @@ impl AppWindow {
             }
         }
         self.imgui.renderer.new_frame()?;
-        self.imgui.renderer.render(draw_data)?;
+        self.imgui.renderer.render(pending_frame)?;
         self.surface.swap_buffers(&self.context)?;
 
         // Defer actions to next frame to avoid borrowing conflicts during this frame
@@ -1856,8 +1859,8 @@ mod tests {
         context
             .io_mut()
             .set_backend_flags(BackendFlags::RENDERER_HAS_TEXTURES);
-        let _consumer = context
-            .create_renderer_consumer()
+        let consumer = context
+            .create_synchronous_renderer_consumer()
             .expect("the headless renderer consumer should attach");
         context
             .font_atlas()
@@ -1872,19 +1875,19 @@ mod tests {
             let ui = context.frame();
             assert!(ui.image_custom_rect(checker, [32.0, 32.0]));
         }
-        let mut rendered = context.render();
-        assert_eq!(rendered.texture_requests().len(), 1);
+        let pending_frame = context.render(&consumer);
+        assert_eq!(pending_frame.texture_requests().len(), 1);
         assert_eq!(
-            rendered.texture_requests()[0].kind(),
+            pending_frame.texture_requests()[0].kind(),
             TextureRequestKind::Create
         );
-        let feedback = rendered.texture_requests()[0]
+        let feedback = pending_frame.texture_requests()[0]
             .uploaded(TextureId::new(1))
             .expect("the atlas create request should accept upload feedback");
-        rendered
+        let reconciled_frame = pending_frame
             .reconcile_texture_feedback([feedback])
             .expect("the atlas create feedback should complete the frame");
-        drop(rendered);
+        drop(reconciled_frame);
 
         let path = bundled_roboto_path();
         let font_bytes = fs::read(&path).unwrap_or_else(|error| {
@@ -1911,18 +1914,20 @@ mod tests {
             assert!(baked.glyph('R').is_some());
             assert!(ui.image_custom_rect(checker, [32.0, 32.0]));
         }
-        let mut rendered = context.render();
-        assert_eq!(rendered.texture_requests().len(), 1);
+        let pending_frame = context.render(&consumer);
+        assert_eq!(pending_frame.texture_requests().len(), 1);
         assert_eq!(
-            rendered.texture_requests()[0].kind(),
+            pending_frame.texture_requests()[0].kind(),
             TextureRequestKind::Update
         );
-        let feedback = rendered.texture_requests()[0]
+        let feedback = pending_frame.texture_requests()[0]
             .uploaded(TextureId::new(1))
             .expect("the atlas update request should accept upload feedback");
-        rendered
-            .reconcile_texture_feedback([feedback])
-            .expect("the atlas update feedback should complete the frame");
+        drop(
+            pending_frame
+                .reconcile_texture_feedback([feedback])
+                .expect("the atlas update feedback should complete the frame"),
+        );
     }
 }
 

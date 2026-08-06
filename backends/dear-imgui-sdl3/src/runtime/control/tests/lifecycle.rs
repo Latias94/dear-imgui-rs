@@ -523,7 +523,7 @@ fn wrapper_drop_keeps_uninstalled_texture_proxies_alive_until_context_teardown()
         stamp: 1,
         generation: 1,
     };
-    let runtime = registration_with_backend_lifecycle_and_texture_update(
+    let mut runtime = registration_with_backend_lifecycle_and_texture_update(
         &mut context,
         Some({
             let renderer_count = Rc::clone(&renderer_count);
@@ -558,9 +558,7 @@ fn wrapper_drop_keeps_uninstalled_texture_proxies_alive_until_context_teardown()
         .insert_uninstalled_for_test(texture);
     runtime.control.platform_initialized.set(true);
     runtime.control.renderer_initialized.set(true);
-    runtime
-        .control
-        .install_renderer_consumer(context.create_renderer_consumer().unwrap());
+    runtime.install_renderer_consumer(context.create_synchronous_renderer_consumer().unwrap());
 
     drop(runtime);
     assert_eq!(destroy_count.get(), 0);
@@ -676,7 +674,7 @@ fn renderer_shutdown_retries_before_texture_cleanup_after_platform_release() {
     let renderer_count = Rc::new(Cell::new(0));
     let platform_count = Rc::new(Cell::new(0));
     let mut context = Context::create();
-    let consumer = context.create_renderer_consumer().unwrap();
+    let consumer = context.create_synchronous_renderer_consumer().unwrap();
     let mut runtime = registration_with_lifecycle(
         &mut context,
         Some({
@@ -696,7 +694,7 @@ fn renderer_shutdown_retries_before_texture_cleanup_after_platform_release() {
     );
     runtime.control.platform_initialized.set(true);
     runtime.control.renderer_initialized.set(true);
-    runtime.control.install_renderer_consumer(consumer);
+    runtime.install_renderer_consumer(consumer);
 
     let result = runtime.shutdown_renderer(&mut context);
 
@@ -717,43 +715,26 @@ fn renderer_shutdown_retries_before_texture_cleanup_after_platform_release() {
     feature = "sdlgpu3-renderer"
 ))]
 #[test]
-fn device_object_destroy_validates_texture_reset_before_native_destruction() {
+fn device_object_destroy_commits_synchronous_texture_reset_after_native_destruction() {
     let _guard = crate::tests::test_guard();
     let native_destroy_count = Rc::new(Cell::new(0));
     let mut context = Context::create();
-    context.io_mut().set_display_size([128.0, 128.0]);
-    context.io_mut().set_delta_time(1.0 / 60.0);
     context
         .io_mut()
         .set_backend_flags(dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES);
-    let consumer = context.create_renderer_consumer().unwrap();
+    let consumer = context.create_synchronous_renderer_consumer().unwrap();
     let mut runtime = registration_with_lifecycle(&mut context, None, Rc::new(|| {}));
-    let snapshot = context.begin_frame().render_snapshot(&consumer).unwrap();
-    runtime.control.install_renderer_consumer(consumer);
+    runtime.install_renderer_consumer(consumer);
 
-    let result = runtime.destroy_renderer_device_objects(&mut context, {
-        let native_destroy_count = Rc::clone(&native_destroy_count);
-        move || native_destroy_count.set(native_destroy_count.get() + 1)
-    });
-
-    assert!(matches!(
-        result,
-        Err(Sdl3BackendError::RendererConsumer(
-            dear_imgui_rs::render::RendererConsumerError::OutstandingEpochs { count: 1 }
-        ))
-    ));
-    assert_eq!(native_destroy_count.get(), 0);
-    assert_eq!(runtime.control.state(), RuntimeState::Attached);
-
-    drop(snapshot);
     runtime
         .destroy_renderer_device_objects(&mut context, {
             let native_destroy_count = Rc::clone(&native_destroy_count);
             move || native_destroy_count.set(native_destroy_count.get() + 1)
         })
         .unwrap();
-    assert_eq!(native_destroy_count.get(), 1);
 
+    assert_eq!(native_destroy_count.get(), 1);
+    assert!(runtime.renderer_consumer.is_some());
     runtime.shutdown_platform(&mut context).unwrap();
 }
 
@@ -763,17 +744,15 @@ fn device_object_destroy_validates_texture_reset_before_native_destruction() {
     feature = "sdlgpu3-renderer"
 ))]
 #[test]
-fn renderer_shutdown_validates_texture_reset_before_native_teardown() {
+fn renderer_shutdown_releases_the_synchronous_consumer_after_native_teardown() {
     let _guard = crate::tests::test_guard();
     let renderer_count = Rc::new(Cell::new(0));
     let platform_count = Rc::new(Cell::new(0));
     let mut context = Context::create();
-    context.io_mut().set_display_size([128.0, 128.0]);
-    context.io_mut().set_delta_time(1.0 / 60.0);
     context
         .io_mut()
         .set_backend_flags(dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES);
-    let consumer = context.create_renderer_consumer().unwrap();
+    let consumer = context.create_synchronous_renderer_consumer().unwrap();
     let mut runtime = registration_with_lifecycle(
         &mut context,
         Some({
@@ -787,34 +766,13 @@ fn renderer_shutdown_validates_texture_reset_before_native_teardown() {
     );
     runtime.control.platform_initialized.set(true);
     runtime.control.renderer_initialized.set(true);
-    let snapshot = context.begin_frame().render_snapshot(&consumer).unwrap();
-    runtime.control.install_renderer_consumer(consumer);
+    runtime.install_renderer_consumer(consumer);
 
-    let result = runtime.shutdown_renderer(&mut context);
-
-    assert!(matches!(
-        result,
-        Err(Sdl3BackendError::RendererConsumer(
-            dear_imgui_rs::render::RendererConsumerError::OutstandingEpochs { count: 1 }
-        ))
-    ));
-    assert_eq!(renderer_count.get(), 0);
-    assert_eq!(platform_count.get(), 0);
-    assert_eq!(runtime.control.state(), RuntimeState::Attached);
-    assert_eq!(
-        runtime.control.platform_release.get(),
-        ReleaseState::Pending
-    );
-    assert_eq!(
-        runtime.control.renderer_release.get(),
-        ReleaseState::Pending
-    );
-    assert!(runtime.platform_attachment.is_some());
-    assert!(runtime.renderer_attachment.is_some());
-
-    drop(snapshot);
     runtime.shutdown_renderer(&mut context).unwrap();
+
     assert_eq!(renderer_count.get(), 1);
     assert_eq!(platform_count.get(), 1);
+    assert!(runtime.renderer_consumer.is_none());
+    assert!(runtime.control.renderer_consumer.borrow().is_none());
     assert_eq!(runtime.control.state(), RuntimeState::Detached);
 }

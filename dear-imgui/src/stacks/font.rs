@@ -101,7 +101,7 @@ mod tests {
     fn push_font_preserves_current_size_without_a_reference_size() {
         let mut ctx = crate::Context::create();
         let _consumer = ctx
-            .create_renderer_consumer()
+            .create_synchronous_renderer_consumer()
             .expect("the managed renderer consumer should attach");
         let small = ctx
             .font_atlas()

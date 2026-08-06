@@ -195,7 +195,7 @@ fn ordinary_docking_submission_rejects_disabled_docking_before_ffi() {
         Err(imgui::DockLayoutError::DockingDisabled)
     );
 
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 }
 
 #[test]
@@ -223,7 +223,7 @@ fn duplicate_dockspace_ids_are_rejected_before_native_submission() {
             .is_err()
         );
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     {
         let ui = ctx.frame();
@@ -232,7 +232,7 @@ fn duplicate_dockspace_ids_are_rejected_before_native_submission() {
             explicit_id
         );
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     let generated;
     {
@@ -246,7 +246,7 @@ fn duplicate_dockspace_ids_are_rejected_before_native_submission() {
             .is_err()
         );
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     {
         let ui = ctx.frame();
@@ -261,7 +261,7 @@ fn duplicate_dockspace_ids_are_rejected_before_native_submission() {
             .is_err()
         );
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 }
 
 #[test]
@@ -292,7 +292,7 @@ fn keep_alive_only_may_repeat_without_claiming_a_visible_dockspace() {
         root_id
     );
 
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 }
 
 #[test]
@@ -323,7 +323,7 @@ fn ordinary_main_dockspace_rejects_child_ids_and_late_visible_submission() {
         ui.window("Ordinary main right").build(|| ui.text("right"));
         child_id = window_dock_id("Ordinary main left");
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     {
         let ui = ctx.frame();
@@ -365,7 +365,7 @@ fn ordinary_main_dockspace_rejects_child_ids_and_late_visible_submission() {
         assert_ne!(window_dock_id("Ordinary main left").raw(), 0);
         assert_ne!(window_dock_id("Ordinary main right").raw(), 0);
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 }
 
 #[test]
@@ -402,7 +402,7 @@ fn ordinary_current_window_dockspace_rejects_late_visible_submission() {
             .build(|| ui.text("right"));
         child_id = window_dock_id("Ordinary current left");
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     {
         let ui = ctx.frame();
@@ -453,7 +453,7 @@ fn ordinary_current_window_dockspace_rejects_late_visible_submission() {
         assert_ne!(window_dock_id("Ordinary current left").raw(), 0);
         assert_ne!(window_dock_id("Ordinary current right").raw(), 0);
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 }
 
 #[test]
@@ -482,7 +482,7 @@ fn ordinary_late_submission_cannot_recover_a_window_already_undocked_by_imgui() 
         ui.window("Already undocked left").build(|| ui.text("left"));
         ui.window("Still docked right").build(|| ui.text("right"));
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     {
         let ui = ctx.frame();
@@ -496,7 +496,7 @@ fn ordinary_late_submission_cannot_recover_a_window_already_undocked_by_imgui() 
         ui.window("Still docked right").build(|| ui.text("right"));
         assert_ne!(window_dock_id("Still docked right").raw(), 0);
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 }
 
 #[test]
@@ -531,7 +531,7 @@ fn duplicate_declarative_submission_preserves_the_first_layout() {
     let root = unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()) };
     assert!(!root.is_null());
     assert!(unsafe { imgui::sys::ImGuiDockNode_IsSplitNode(root) });
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 }
 
 #[test]
@@ -550,7 +550,7 @@ fn skipped_main_host_still_allows_only_one_layout_application() {
             .collapsed(true, imgui::Condition::Always)
             .build(|| {});
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     let ui = ctx.frame();
     assert!(
@@ -582,7 +582,7 @@ fn skipped_main_host_still_allows_only_one_layout_application() {
     let root = unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()) };
     assert!(!root.is_null());
     assert!(unsafe { imgui::sys::ImGuiDockNode_IsSplitNode(root) });
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 }
 
 #[test]
@@ -592,7 +592,7 @@ fn docking_enable_is_frozen_after_the_first_frame() {
     let mut ctx = imgui::Context::create();
     prepare_context_without_docking(&mut ctx);
     ctx.frame().text("first frame without docking");
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     let flags = ctx.io().config_flags() | imgui::ConfigFlags::DOCKING_ENABLE;
     ctx.io_mut().set_config_flags(flags);
@@ -611,7 +611,7 @@ fn docking_enable_is_frozen_after_the_first_frame() {
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
     ctx.frame().text("first frame with docking");
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     let flags = ctx.io().config_flags() & !imgui::ConfigFlags::DOCKING_ENABLE;
     ctx.io_mut().set_config_flags(flags);
@@ -679,7 +679,7 @@ fn invalid_replace_preserves_and_keeps_the_existing_layout_alive() {
         ui.window("Transactional left").build(|| ui.text("left"));
         ui.window("Transactional right").build(|| ui.text("right"));
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     {
         let ui = ctx.frame();
@@ -693,7 +693,7 @@ fn invalid_replace_preserves_and_keeps_the_existing_layout_alive() {
         ui.window("Transactional left").build(|| ui.text("left"));
         ui.window("Transactional right").build(|| ui.text("right"));
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     let mut before = String::new();
     ctx.save_ini_settings(&mut before);
@@ -718,7 +718,7 @@ fn invalid_replace_preserves_and_keeps_the_existing_layout_alive() {
         ui.window("Transactional left").build(|| ui.text("left"));
         ui.window("Transactional right").build(|| ui.text("right"));
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     let root = unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()) };
     assert!(!root.is_null());
@@ -748,7 +748,7 @@ fn layout_rejects_a_declared_window_already_submitted_on_a_new_root() {
         Err(imgui::DockLayoutError::WindowSubmittedBeforeDockspace { root_id })
     );
     assert!(unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()).is_null() });
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 }
 
 #[test]
@@ -777,7 +777,7 @@ fn every_recoverable_preflight_error_keeps_the_existing_layout_alive() {
         ui.window("Preflight left").build(|| ui.text("left"));
         ui.window("Preflight right").build(|| ui.text("right"));
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     {
         let ui = ctx.frame();
@@ -791,7 +791,7 @@ fn every_recoverable_preflight_error_keeps_the_existing_layout_alive() {
         ui.window("Preflight left").build(|| ui.text("left"));
         ui.window("Preflight right").build(|| ui.text("right"));
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
     let mut before = String::new();
     ctx.save_ini_settings(&mut before);
 
@@ -817,7 +817,7 @@ fn every_recoverable_preflight_error_keeps_the_existing_layout_alive() {
         assert_ne!(window_dock_id("Preflight left").raw(), 0);
         assert_ne!(window_dock_id("Preflight right").raw(), 0);
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     {
         let ui = ctx.frame();
@@ -836,7 +836,7 @@ fn every_recoverable_preflight_error_keeps_the_existing_layout_alive() {
         assert_ne!(window_dock_id("Preflight left").raw(), 0);
         assert_ne!(window_dock_id("Preflight right").raw(), 0);
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     {
         let ui = ctx.frame();
@@ -863,7 +863,7 @@ fn every_recoverable_preflight_error_keeps_the_existing_layout_alive() {
         assert_ne!(window_dock_id("Preflight left").raw(), 0);
         assert_ne!(window_dock_id("Preflight right").raw(), 0);
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     let root = unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()) };
     assert!(!root.is_null());
@@ -899,7 +899,7 @@ fn replacement_is_rejected_after_a_hosted_window_was_submitted() {
         ui.window("Ordered left").build(|| ui.text("left"));
         ui.window("Ordered right").build(|| ui.text("right"));
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     {
         let ui = ctx.frame();
@@ -930,7 +930,7 @@ fn replacement_is_rejected_after_a_hosted_window_was_submitted() {
         assert_ne!(window_dock_id("Ordered left").raw(), 0);
         assert_ne!(window_dock_id("Ordered right").raw(), 0);
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 }
 
 #[test]
@@ -963,7 +963,7 @@ fn declarative_root_id_cannot_alias_an_existing_child_node() {
         assert_ne!(child_id.raw(), 0);
         assert_ne!(child_id, root_id);
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     {
         let ui = ctx.frame();
@@ -977,7 +977,7 @@ fn declarative_root_id_cannot_alias_an_existing_child_node() {
         ui.window("Collision left").build(|| ui.text("left"));
         ui.window("Collision right").build(|| ui.text("right"));
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
     let mut before = String::new();
     ctx.save_ini_settings(&mut before);
 
@@ -1003,7 +1003,7 @@ fn declarative_root_id_cannot_alias_an_existing_child_node() {
         ui.window("Collision left").build(|| ui.text("left"));
         ui.window("Collision right").build(|| ui.text("right"));
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     let root = unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()) };
     assert!(!root.is_null());
@@ -1032,7 +1032,7 @@ fn nested_replacement_remaps_every_leaf_without_leaking_the_staging_root() {
         .unwrap();
         ui.window("Initial").build(|| ui.text("initial"));
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     let nested = imgui::DockLayout::split(
         imgui::DockSplit::Left,
@@ -1083,7 +1083,7 @@ fn nested_replacement_remaps_every_leaf_without_leaking_the_staging_root() {
         assert_ne!(bottom, right);
         assert_ne!(right, center);
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     {
         let ui = ctx.frame();
@@ -1144,7 +1144,7 @@ fn nested_replacement_remaps_every_leaf_without_leaking_the_staging_root() {
             center_rect.Max.x,
         );
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     let mut ini = String::new();
     ctx.save_ini_settings(&mut ini);
@@ -1187,7 +1187,7 @@ fn declarative_layout_preserves_if_missing_and_rebuilds_on_replace() {
         ui.window("Left").build(|| ui.text("left"));
         ui.window("Right").build(|| ui.text("right"));
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     {
         let ui = ctx.frame();
@@ -1205,7 +1205,7 @@ fn declarative_layout_preserves_if_missing_and_rebuilds_on_replace() {
         ui.window("Left").build(|| ui.text("left"));
         ui.window("Right").build(|| ui.text("right"));
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     {
         let ui = ctx.frame();
@@ -1223,7 +1223,7 @@ fn declarative_layout_preserves_if_missing_and_rebuilds_on_replace() {
         assert!(!unsafe { imgui::sys::ImGuiDockNode_IsSplitNode(root) });
         ui.window("Replacement").build(|| ui.text("replacement"));
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 }
 
 #[test]
@@ -1261,7 +1261,7 @@ fn replace_creates_the_submitted_dockspace_geometry() {
         (rect.Max.y - (viewport.work_pos()[1] + viewport.work_size()[1])).abs() <= f32::EPSILON
     );
 
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 }
 
 #[test]
@@ -1292,7 +1292,7 @@ fn current_window_layout_uses_the_actual_cursor_position() {
             assert!((rect.Min.x - cursor[0]).abs() <= f32::EPSILON);
             assert!((rect.Min.y - cursor[1]).abs() <= f32::EPSILON);
         });
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 }
 
 #[test]
@@ -1327,7 +1327,7 @@ fn declarative_layout_binds_its_owner_context_and_restores_the_foreign_context()
         imgui::sys::igSetCurrentContext(owner_raw);
         assert!(!imgui::sys::igDockBuilderGetNode(root_id.raw()).is_null());
     }
-    let _ = owner.render();
+    let _ = owner.render_legacy();
     unsafe {
         imgui::sys::igDestroyContext(foreign_raw);
     }
@@ -1358,7 +1358,7 @@ fn if_missing_preserves_a_layout_restored_from_ini() {
         .unwrap();
         ui.window("Persisted left").build(|| ui.text("left"));
         ui.window("Persisted right").build(|| ui.text("right"));
-        let _ = ctx.render();
+        let _ = ctx.render_legacy();
         ctx.save_ini_settings(&mut ini);
     }
     assert!(ini.contains("[Docking][Data]"));
@@ -1379,7 +1379,7 @@ fn if_missing_preserves_a_layout_restored_from_ini() {
     let root = unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()) };
     assert!(!root.is_null());
     assert!(unsafe { imgui::sys::ImGuiDockNode_IsSplitNode(root) });
-    let _ = restored.render();
+    let _ = restored.render_legacy();
 }
 
 #[test]

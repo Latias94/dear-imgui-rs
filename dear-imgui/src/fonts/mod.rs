@@ -152,7 +152,7 @@ mod tests {
                 ui.text("closure helper is scoped");
             });
         }
-        let _ = ctx.render();
+        let _ = ctx.render_legacy();
 
         let ui = ctx.frame();
 
@@ -193,7 +193,7 @@ mod tests {
             ui.text("frame remains balanced after panic");
         }
 
-        let _ = ctx.render();
+        let _ = ctx.render_legacy();
     }
 
     #[test]

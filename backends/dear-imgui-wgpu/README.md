@@ -16,7 +16,7 @@ let mut renderer = WgpuRenderer::new(WgpuInitInfo::new(device, queue, surface_fo
 renderer.set_gamma_mode(GammaMode::Auto); // Auto | Linear | Gamma22
 
 // per-frame
-let frame = imgui.render();
+let frame = imgui.render(renderer.renderer_consumer()?);
 renderer.render(frame, &mut render_pass)?;
 ```
 
@@ -135,13 +135,16 @@ WGPU exposes Device loss separately through an application-owned, single-slot ca
 callback fires, recreate the Device, Queue, renderer, and all GPU resources before reattaching the
 viewport runtime.
 
-The renderer opens a fresh upload-resource arena for each `RenderedFrame` epoch. Every viewport
+The renderer opens a fresh upload-resource arena for each `PendingFrame` epoch. Every viewport
 draw then uses a separate pass slot with its own vertex, index, uniform, and sampler bindings, so
 command buffers cannot observe data uploaded for another viewport or a later epoch. The renderer
 does not recycle upload buffers across epochs because submission of the application-owned encoder
 is not observable. Before invoking default multi-viewport callbacks, call
-`runtime.reconcile_frame(&mut frame)`; this both prepares the exact frame epoch and applies
-managed-texture feedback. A callback reached without that preparation fails with
+`runtime.reconcile_context(&mut imgui)` and retain the returned `ReconciledFrame`; this both
+prepares the exact frame epoch and applies managed-texture feedback before exposing draw data or
+platform-window rendering. Engine-style frame runners that already own a `FrameToken` can instead
+call `runtime.reconcile_frame(frame)` without reborrowing the Context. A callback reached without
+that preparation fails with
 `RendererError::FrameNotPrepared` instead of reusing the preceding frame's resources.
 
 For SDL3, initialize `Sdl3PlatformBackend` first and then call
@@ -196,19 +199,19 @@ machine in ordered renderer-resource and platform-window phases.
 
 Managed texture shutdown follows the same ownership rule. The runtime first obtains
 `Context::prepare_renderer_texture_reset(&consumer)` while its complete GPU texture map is still
-intact. A pending frame or detached snapshot rejects that preparation without changing either
-side. After preparation succeeds, it destroys the WGPU map and commits the permit, which
+intact. A live renderer epoch rejects that preparation without changing either side. After
+preparation succeeds, it destroys the WGPU map and commits the permit, which
 infallibly clears native bindings before releasing the consumer. This causes live textures to be
 requested again after a device rebuild without acknowledging a destroy that never happened.
 
-Explicit renderer shutdown is idempotent and retryable. In particular, an outstanding detached
-snapshot leaves the runtime attached with its renderer retained; finish or abandon the epoch, poll
-Context completions, and call `shutdown` again. Runtime `Drop` cannot prepare the required
-Context-owned renderer reset, so it defers its attachment unchanged to Context teardown: it does
-not destroy WGPU resources, clear callbacks, or alter native renderer publication while Context is
-alive. Dropping the wrapper therefore does not make the Context available for a replacement runtime;
-use explicit shutdown when the application needs to release renderer ownership before Context
-teardown. Foreign callback and backend-state replacements are preserved rather than overwritten.
+Explicit renderer shutdown is idempotent and retryable. A rejected reset leaves the runtime
+attached with its renderer retained so the caller can settle the epoch and call `shutdown` again.
+Runtime `Drop` cannot prepare the required Context-owned renderer reset, so it defers its
+attachment unchanged to Context teardown: it does not destroy WGPU resources, clear callbacks, or
+alter native renderer publication while Context is alive. Dropping the wrapper therefore does not
+make the Context available for a replacement runtime; use explicit shutdown when the application
+needs to release renderer ownership before Context teardown. Foreign callback and backend-state
+replacements are preserved rather than overwritten.
 
 ## Selecting wgpu version
 

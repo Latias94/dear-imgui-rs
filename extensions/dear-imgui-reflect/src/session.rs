@@ -457,7 +457,7 @@ mod tests {
                 },
             );
         }
-        drop(first.render());
+        drop(first.render_legacy());
         let first: SuspendedContext = first.suspend();
 
         let mut second = test_ui_context();
@@ -474,7 +474,7 @@ mod tests {
                 },
             );
         }
-        drop(second.render());
+        drop(second.render_legacy());
         drop(second);
         drop(first);
     }

@@ -313,7 +313,7 @@ fn table_set_column_width_rejects_invalid_widths_before_ffi() {
             ui.table_next_row();
         });
     }
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     let ui = ctx.frame();
     let _ = ui.window("table_width_bounds").build(|| {

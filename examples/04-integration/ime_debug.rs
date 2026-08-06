@@ -362,9 +362,12 @@ impl AppWindow {
                 multiview_mask: None,
             });
 
-            let draw_data = self.imgui.context.render();
+            let pending_frame = self
+                .imgui
+                .context
+                .render(self.imgui.renderer.renderer_consumer()?);
             self.imgui.renderer.render_with_fb_size(
-                draw_data,
+                pending_frame,
                 &mut rpass,
                 self.surface_desc.width,
                 self.surface_desc.height,

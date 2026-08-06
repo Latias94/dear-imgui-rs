@@ -4,10 +4,9 @@ use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::rc::Rc;
 
-use dear_imgui_rs::render::RenderedFrame;
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole, ContextBinding,
-    ContextId, Ui, with_scratch_txt, with_scratch_txt_two,
+    ContextId, FrameToken, Ui, with_scratch_txt, with_scratch_txt_two,
 };
 use dear_imgui_test_engine_sys as sys;
 
@@ -15,10 +14,10 @@ use crate::attachment::{AttachmentControl, TestEngineAttachmentMarker};
 use crate::error::ffi_status;
 use crate::results::RunCompletion;
 use crate::{
-    AttachmentState, BuiltInTestSuite, CaptureOutput, EngineId, FrameDriverError,
-    RegisteredTestSuite, ResultSummary, RunFlags, RunId, RunOutcome, RunReport, RunSpeed, RunState,
-    RunTestResult, RunTestStatus, Script, ScriptTest, TestEngineError, TestEngineResult,
-    TestFrameDriver, TestGroup, VerboseLevel,
+    AttachmentState, BuiltInTestSuite, CaptureOutput, EngineId, FrameDriveOutcome,
+    FrameDriverError, MainRenderOutcome, RegisteredTestSuite, ResultSummary, RunFlags, RunId,
+    RunOutcome, RunReport, RunSpeed, RunState, RunTestResult, RunTestStatus, Script, ScriptTest,
+    TestEngineError, TestEngineResult, TestFrameDriver, TestGroup, VerboseLevel,
 };
 
 /// Dear ImGui Test Engine context with one transactional process-wide attachment.
@@ -329,18 +328,23 @@ impl TestEngine {
 
     /// Renders and presents one frame through a single ordered backend driver.
     ///
-    /// Consuming [`RenderedFrame`] proves Dear ImGui rendering has completed and prevents the same
-    /// render lease from being driven twice. The attached Context is checked before the driver sees
-    /// the frame. Presentation is then bracketed as `pre-swap -> present -> post-swap`.
+    /// Consuming [`FrameToken`] gives the driver the one-use capability to prepare the open Dear
+    /// ImGui frame before rendering the main target. The attached Context is checked before the
+    /// driver sees the token, and the returned reconciled frame is checked again before main-target
+    /// rendering. Presentation is bracketed as `pre-swap -> present -> post-swap` only when the
+    /// driver reports that the main target is ready.
     ///
     /// If presentation fails or panics, an abort path releases native capture state without
     /// pretending that the surface was presented.
     pub fn drive_frame<Driver>(
         &mut self,
-        frame: RenderedFrame<'_>,
+        frame: FrameToken<'_>,
         frame_index: u64,
         driver: &mut Driver,
-    ) -> Result<(), FrameDriverError<Driver::RenderError, Driver::PresentError>>
+    ) -> Result<
+        FrameDriveOutcome,
+        FrameDriverError<Driver::PrepareError, Driver::RenderError, Driver::PresentError>,
+    >
     where
         Driver: TestFrameDriver,
     {
@@ -352,7 +356,7 @@ impl TestEngine {
                 "frame driving requires a live Test Engine attachment",
             ))
         })?;
-        let actual = frame.context_id();
+        let actual = frame.ui().context_id();
         if actual != expected {
             return Err(FrameDriverError::Context(
                 TestEngineError::ContextMismatch {
@@ -364,18 +368,24 @@ impl TestEngine {
         }
 
         let reconciled = driver
-            .render(frame, frame_index)
-            .map_err(FrameDriverError::Render)?;
+            .prepare(frame, frame_index)
+            .map_err(FrameDriverError::Prepare)?;
         if reconciled.context_id() != expected {
             return Err(FrameDriverError::Context(
                 TestEngineError::ContextMismatch {
-                    operation: "TestEngine::drive_frame render completion",
+                    operation: "TestEngine::drive_frame prepare completion",
                     expected,
                     actual: reconciled.context_id(),
                 },
             ));
         }
-        drop(reconciled);
+        match driver
+            .render_main(reconciled, frame_index)
+            .map_err(FrameDriverError::Render)?
+        {
+            MainRenderOutcome::ReadyToPresent => {}
+            MainRenderOutcome::Skipped => return Ok(FrameDriveOutcome::Skipped),
+        }
         let presentation = ActivePresentation::begin(self).map_err(FrameDriverError::PreSwap)?;
         if let Err(source) = driver.present(frame_index) {
             return Err(FrameDriverError::Present {
@@ -388,7 +398,8 @@ impl TestEngine {
             .map_err(|(source, abort_error)| FrameDriverError::PostSwap {
                 source,
                 abort_error,
-            })
+            })?;
+        Ok(FrameDriveOutcome::Presented)
     }
 
     fn pre_swap_internal(&mut self) -> TestEngineResult<()> {

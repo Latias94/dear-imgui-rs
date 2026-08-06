@@ -9,7 +9,7 @@ use crate::wgpu;
 use crate::{GammaMode, RendererError, RendererResult, Uniforms};
 use dear_imgui_rs::{
     Context, ContextBinding,
-    render::{DrawData, ReconciledFrame, RenderedFrame},
+    render::{DrawData, PendingFrame, ReconciledFrame},
     sys,
 };
 use wgpu::RenderPass;
@@ -60,12 +60,8 @@ impl WgpuRenderer {
         }
     }
 
-    fn prepare_frame_bound(&mut self, frame: &RenderedFrame<'_>) -> RendererResult<()> {
-        let epoch = frame.epoch().ok_or_else(|| {
-            RendererError::InvalidRenderState(
-                "WGPU requires a managed-texture renderer epoch".to_owned(),
-            )
-        })?;
+    fn prepare_frame_bound(&mut self, frame: &PendingFrame<'_>) -> RendererResult<()> {
+        let epoch = frame.epoch();
         self.prepare_frame_epoch(epoch.sequence(), unsafe { sys::igGetFrameCount() })
     }
 
@@ -76,31 +72,29 @@ impl WgpuRenderer {
     /// escaping its owning Context borrow.
     pub fn render(
         &mut self,
-        frame: RenderedFrame<'_>,
+        frame: PendingFrame<'_>,
         render_pass: &mut RenderPass<'_>,
     ) -> RendererResult<()> {
+        let frame = self.reconcile_frame(frame)?;
         self.render_reconciled(frame, render_pass).map(drop)
     }
 
-    /// Renders one frame and returns its texture-reconciliation proof.
+    /// Renders an already reconciled frame and returns its reconciliation proof.
     ///
     /// The proof does not claim that command submission or presentation completed.
     pub fn render_reconciled<'frame>(
         &mut self,
-        mut frame: RenderedFrame<'frame>,
+        frame: ReconciledFrame<'frame>,
         render_pass: &mut RenderPass<'_>,
     ) -> RendererResult<ReconciledFrame<'frame>> {
         self.ensure_renderer_contract()?;
-        self.ensure_frame_matches(&frame)?;
+        self.ensure_reconciled_frame_matches(&frame)?;
         let binding = self.bound_context()?;
         with_bound_context(&binding, || {
-            Self::preflight_draw_callback_support(frame.draw_data())?;
-            self.prepare_frame_bound(&frame)?;
-            self.reconcile_frame_bound(&mut frame)?;
             let platform_io = platform_io_for_current_context()?;
             self.render_read_only_draw_data(frame.draw_data(), render_pass, platform_io)
         })?;
-        frame.into_reconciled().map_err(Into::into)
+        Ok(frame)
     }
 
     /// Finalizes and renders the frame for this renderer's bound Context.
@@ -110,7 +104,7 @@ impl WgpuRenderer {
         render_pass: &mut RenderPass<'_>,
     ) -> RendererResult<()> {
         self.ensure_context_matches(context)?;
-        let frame = context.render();
+        let frame = context.try_render(self.renderer_consumer()?)?;
         self.render(frame, render_pass)
     }
 
@@ -118,22 +112,25 @@ impl WgpuRenderer {
     ///
     /// Callback capability is checked before texture reconciliation, so an
     /// unsupported callback-bearing frame is not consumed partially.
-    pub fn reconcile_frame(&mut self, frame: &mut RenderedFrame<'_>) -> RendererResult<()> {
+    pub fn reconcile_frame<'frame>(
+        &mut self,
+        frame: PendingFrame<'frame>,
+    ) -> RendererResult<ReconciledFrame<'frame>> {
         self.ensure_renderer_contract()?;
-        self.ensure_frame_matches(frame)?;
+        self.ensure_pending_frame_matches(&frame)?;
         let binding = self.bound_context()?;
         with_bound_context(&binding, || {
-            Self::preflight_draw_callback_support(frame.draw_data())?;
-            self.prepare_frame_bound(frame)?;
+            Self::preflight_draw_callback_support(frame.draw_requirements())?;
+            self.prepare_frame_bound(&frame)?;
             self.reconcile_frame_bound(frame)
         })
     }
 
-    fn reconcile_frame_bound(&mut self, frame: &mut RenderedFrame<'_>) -> RendererResult<()> {
-        if frame.is_texture_feedback_reconciled() {
-            return Ok(());
-        }
-        let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
+    fn reconcile_frame_bound<'frame>(
+        &mut self,
+        frame: PendingFrame<'frame>,
+    ) -> RendererResult<ReconciledFrame<'frame>> {
+        let request_epoch = frame.epoch().sequence();
         let backend_data = self.backend_data.as_mut().ok_or_else(|| {
             RendererError::InvalidRenderState("Renderer not initialized".to_owned())
         })?;
@@ -144,10 +141,10 @@ impl WgpuRenderer {
             &backend_data.queue,
             &mut backend_data.render_resources,
         )?;
-        let progress = frame.reconcile_texture_feedback(feedback)?;
+        let frame = frame.reconcile_texture_feedback(feedback)?;
         self.texture_manager
-            .prune_destroyed_managed_textures(progress.watermark());
-        Ok(())
+            .prune_destroyed_managed_textures(frame.completion_progress().watermark());
+        Ok(frame)
     }
 
     pub(super) fn render_read_only_draw_data(
@@ -165,30 +162,28 @@ impl WgpuRenderer {
     /// Renders one Context-borrowed frame at explicit framebuffer dimensions.
     pub fn render_with_fb_size(
         &mut self,
-        frame: RenderedFrame<'_>,
+        frame: PendingFrame<'_>,
         render_pass: &mut RenderPass<'_>,
         fb_width: u32,
         fb_height: u32,
     ) -> RendererResult<()> {
+        let frame = self.reconcile_frame(frame)?;
         self.render_with_fb_size_reconciled(frame, render_pass, fb_width, fb_height)
             .map(drop)
     }
 
-    /// Renders one frame at explicit dimensions and returns its reconciliation proof.
+    /// Renders an already reconciled frame at explicit dimensions and returns its proof.
     pub fn render_with_fb_size_reconciled<'frame>(
         &mut self,
-        mut frame: RenderedFrame<'frame>,
+        frame: ReconciledFrame<'frame>,
         render_pass: &mut RenderPass<'_>,
         fb_width: u32,
         fb_height: u32,
     ) -> RendererResult<ReconciledFrame<'frame>> {
         self.ensure_renderer_contract()?;
-        self.ensure_frame_matches(&frame)?;
+        self.ensure_reconciled_frame_matches(&frame)?;
         let binding = self.bound_context()?;
         with_bound_context(&binding, || {
-            Self::preflight_draw_callback_support(frame.draw_data())?;
-            self.prepare_frame_bound(&frame)?;
-            self.reconcile_frame_bound(&mut frame)?;
             let platform_io = platform_io_for_current_context()?;
             self.render_read_only_draw_data_with_fb_size(
                 frame.draw_data(),
@@ -199,7 +194,7 @@ impl WgpuRenderer {
                 platform_io,
             )
         })?;
-        frame.into_reconciled().map_err(Into::into)
+        Ok(frame)
     }
 
     /// Finalizes and renders a frame for the bound Context at explicit dimensions.
@@ -211,7 +206,7 @@ impl WgpuRenderer {
         fb_height: u32,
     ) -> RendererResult<()> {
         self.ensure_context_matches(context)?;
-        let frame = context.render();
+        let frame = context.try_render(self.renderer_consumer()?)?;
         self.render_with_fb_size(frame, render_pass, fb_width, fb_height)
     }
 
@@ -244,7 +239,7 @@ impl WgpuRenderer {
         if !draw_data.valid() {
             return Ok(());
         }
-        Self::preflight_draw_callback_support(draw_data)?;
+        Self::preflight_draw_callback_support(draw_data.requirements())?;
         unsafe {
             RendererRenderStateGuard::<crate::WgpuRenderStateStorage>::preflight(platform_io)
         }

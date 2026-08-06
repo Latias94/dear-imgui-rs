@@ -32,7 +32,7 @@ impl FontAtlas {
 
     /// Set a legacy renderer-owned atlas texture ID and mark its native status as ready.
     ///
-    /// Managed renderers should process the atlas request from `RenderedFrame` and return
+    /// Managed renderers should process the atlas request from `PendingFrame` and return
     /// request-bound `TextureFeedback` instead. This method also updates `TexRef` so legacy draw
     /// commands continue to follow `ImTextureData` when one is available.
     ///

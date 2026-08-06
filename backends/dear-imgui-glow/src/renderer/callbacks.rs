@@ -80,7 +80,7 @@ mod tests {
             draw_list.add_callback(draw_callback_set_sampler_nearest, std::ptr::null_mut(), 0);
         }
         drop(draw_list);
-        let frame = context.render();
+        let frame = context.render_legacy();
         let commands = frame
             .draw_data()
             .draw_lists()

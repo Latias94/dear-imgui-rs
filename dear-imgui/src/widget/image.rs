@@ -2,7 +2,7 @@
 //!
 //! Draw images from a legacy `TextureId` or a Context-owned `ManagedTextureId`.
 //! Managed pixels reach renderer backends as owned `TextureRequest` values on a
-//! `RenderedFrame` or `FrameSnapshot`; safe renderers never borrow `TextureData`.
+//! `PendingFrame` or `FrameSnapshot`; safe renderers never borrow `TextureData`.
 //!
 //! Quick example (image button):
 //! ```no_run

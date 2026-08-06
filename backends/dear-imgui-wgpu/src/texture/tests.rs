@@ -144,7 +144,7 @@ fn managed_requests_are_idempotent_and_retired_work_cannot_resurrect() -> Render
             &queue,
             &mut render_resources,
         )?,
-        ManagedRequestOutcome::IgnoredRetired
+        ManagedRequestOutcome::Superseded
     );
     assert_eq!(manager.managed_texture_count(), 0);
     manager.clear_managed_textures();
@@ -158,7 +158,7 @@ fn managed_requests_are_idempotent_and_retired_work_cannot_resurrect() -> Render
             &queue,
             &mut render_resources,
         )?,
-        ManagedRequestOutcome::IgnoredRetired
+        ManagedRequestOutcome::Superseded
     );
     manager.prune_destroyed_managed_textures(4);
     assert_eq!(manager.destroyed_managed_texture_count(), 1);

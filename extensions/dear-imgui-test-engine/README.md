@@ -103,26 +103,37 @@ engine.shutdown()?;
 | `Aborted` | The application requested abort and the runner drained the queue. |
 
 All five are product outcomes returned in `Ok(RunReport)`. `HeadlessRunnerError<E>` and
-`RunnerError<ApplicationError, RenderError, PresentError>` are reserved for infrastructure failures
-such as FFI/status errors, a wrong or dead Context, an already-open frame, application/backend
-failures, managed texture requests without a renderer, or a cleanup queue that cannot settle. A CI
-gate should therefore require `RunOutcome::Passed`; it must not interpret every `Ok` report as
-success.
+`RunnerError<ApplicationError, PrepareError, RenderError, PresentError>` are reserved for
+infrastructure failures such as FFI/status errors, a wrong or dead Context, an already-open frame,
+application/backend failures, a managed renderer routed through headless mode, or a cleanup queue
+that cannot settle. A CI gate should therefore require `RunOutcome::Passed`; it must not interpret
+every `Ok` report as success.
 
 Use `run_graphical` for graphical or texture-using tests. Implement `TestFrameDriver` on the object
-that owns both backend rendering and surface presentation. Its `render` method receives a borrowed
-`RenderedFrame` and must reconcile managed texture requests before returning; its `present` method
-performs exactly one surface presentation. The runner enforces this order:
+that owns backend preparation, main-target rendering, and surface presentation:
+
+- `prepare` consumes `FrameToken` and returns `ReconciledFrame`. A managed renderer uses its own
+  `SynchronousRendererConsumer`; a legacy renderer uses `FrameToken::render_legacy`. Multi-viewport
+  WSI drivers finish auxiliary viewport work here when it must precede main-surface acquisition.
+- `render_main` consumes `ReconciledFrame` and returns `MainRenderOutcome::ReadyToPresent` or
+  `MainRenderOutcome::Skipped`. OpenGL-style drivers may draw the main viewport and then complete
+  auxiliary contexts here, as long as all draw work finishes before the method returns.
+- `present` performs exactly one main-surface presentation after the native pre-swap hook succeeds.
+
+The ready path is strictly ordered:
 
 ```text
-application UI -> render -> Test Engine pre-swap -> present -> Test Engine post-swap
+application UI -> prepare -> render main -> Test Engine pre-swap -> present -> Test Engine post-swap
 ```
 
-A failed present never calls post-swap. `RunMode::Graphical` records the selected integration path;
-it is not independent proof that the operating system displayed the swapchain image.
-`run_headless` uses `RunMode::Headless` and is intentionally stricter: because no
-backend exists to upload textures, any managed texture request is an infrastructure error rather
-than an ignored request.
+A skipped main render returns `FrameDriveOutcome::Skipped` without calling pre-swap, `present`, or
+post-swap. This lets timeout, occlusion, surface-loss, and outdated-swapchain recovery remain normal
+backend flow instead of pretending that a presentation occurred. A failed present never calls
+post-swap. `RunMode::Graphical` records the selected integration path; it is not independent proof
+that the operating system displayed the swapchain image.
+`run_headless` uses `RunMode::Headless` and is intentionally stricter: it drives frames through the
+legacy renderer path and rejects Contexts that advertise a managed-texture renderer. Headless mode
+does not create a renderer consumer or silently ignore texture work.
 
 With the optional `capture` feature, implement `CapturingTestFrameDriver` and call
 `run_graphical_with_capture`. The framebuffer provider is installed only for that run, and callback

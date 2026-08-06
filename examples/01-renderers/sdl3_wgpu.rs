@@ -215,13 +215,13 @@ impl WgpuApp {
         if main.show_demo {
             ui.show_demo_window(&mut main.show_demo);
         }
-        let draw_data = main.imgui.render();
+        let pending_frame = main.imgui.render(main.renderer.renderer_consumer()?);
 
         let (frame, reconfigure_after_present) = match main.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
             wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
-                drop(draw_data);
+                drop(pending_frame);
                 Self::reconfigure_surface(main);
                 return Ok(());
             }
@@ -264,7 +264,7 @@ impl WgpuApp {
                 multiview_mask: None,
             });
             main.renderer.render_with_fb_size(
-                draw_data,
+                pending_frame,
                 &mut render_pass,
                 main.surface_config.width,
                 main.surface_config.height,

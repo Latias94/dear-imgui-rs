@@ -679,26 +679,39 @@ impl RendererRuntime {
         Ok(())
     }
 
-    fn cmd_draw(
+    fn cmd_draw_reconciled(
         &mut self,
         command_buffer: vk::CommandBuffer,
-        frame: dear_imgui_rs::render::RenderedFrame<'_>,
+        frame: dear_imgui_rs::render::ReconciledFrame<'_>,
     ) -> Result<Option<dear_imgui_ash::TextureRetirementBatch>, Box<dyn std::error::Error>> {
         // `record_command_buffer` supplies a live command buffer inside the renderer-compatible
         // render scope, and the example submits it only to the renderer's configured queue.
         Ok(match self {
-            Self::Single(renderer) => unsafe { renderer.cmd_draw(command_buffer, frame)? },
-            Self::Viewports(runtime) => unsafe { runtime.cmd_draw(command_buffer, frame)? },
+            Self::Single(renderer) => unsafe {
+                renderer.cmd_draw_reconciled(command_buffer, frame)?
+            },
+            Self::Viewports(runtime) => unsafe {
+                runtime.cmd_draw_reconciled(command_buffer, frame)?
+            },
         })
     }
 
-    fn prepare_frame(
+    fn prepare_context<'ctx>(
         &mut self,
-        frame: &mut dear_imgui_rs::render::RenderedFrame<'_>,
-    ) -> Result<Option<dear_imgui_ash::TextureRetirementBatch>, Box<dyn std::error::Error>> {
+        context: &'ctx mut Context,
+    ) -> Result<
+        (
+            dear_imgui_rs::render::ReconciledFrame<'ctx>,
+            Option<dear_imgui_ash::TextureRetirementBatch>,
+        ),
+        Box<dyn std::error::Error>,
+    > {
         Ok(match self {
-            Self::Single(renderer) => renderer.prepare_frame(frame)?,
-            Self::Viewports(runtime) => runtime.prepare_frame(frame)?,
+            Self::Single(renderer) => {
+                let pending_frame = context.render(renderer.renderer_consumer()?);
+                renderer.prepare_frame(pending_frame)?
+            }
+            Self::Viewports(runtime) => runtime.prepare_context(context)?,
         })
     }
 
@@ -1320,11 +1333,13 @@ impl AppWindow {
         }
 
         self.imgui.platform.prepare_render(&ui, &self.window)?;
-        let mut draw_data = self.imgui.context.render();
+        let (mut reconciled_frame, prepared_texture_retirement) = self
+            .imgui
+            .renderer
+            .prepare_context(&mut self.imgui.context)?;
         let callback_only_zero_geometry = callback_only_frame
-            && draw_data.draw_data().total_vtx_count() == 0
-            && draw_data.draw_data().total_idx_count() == 0;
-        let prepared_texture_retirement = self.imgui.renderer.prepare_frame(&mut draw_data)?;
+            && reconciled_frame.draw_data().total_vtx_count() == 0
+            && reconciled_frame.draw_data().total_idx_count() == 0;
 
         // Secondary swapchains submit and present before the main swapchain is acquired. This
         // avoids overlapping WSI acquisition semaphores across independently owned surfaces. The
@@ -1336,7 +1351,7 @@ impl AppWindow {
                 None
             };
             if self.enable_viewports {
-                draw_data.update_and_render_platform_windows_default();
+                reconciled_frame.update_and_render_platform_windows_default();
             }
             secondary_trace.map(ash_mvp::AshViewportFrameTrace::finish)
         };
@@ -1474,7 +1489,11 @@ impl AppWindow {
                 old_layout,
                 self.vk.swapchain.extent,
                 self.imgui.clear_color,
-                |cmd| self.imgui.renderer.cmd_draw(cmd, draw_data),
+                |cmd| {
+                    self.imgui
+                        .renderer
+                        .cmd_draw_reconciled(cmd, reconciled_frame)
+                },
             )?;
             let texture_retirement = ash_frame_sync::merge_texture_retirement_batches(
                 prepared_texture_retirement,

@@ -2,11 +2,11 @@ use std::cell::{Cell, RefCell};
 use std::fmt;
 use std::rc::Rc;
 
-use dear_imgui_rs::render::{ReconciledFrame, RenderedFrame};
+use dear_imgui_rs::render::ReconciledFrame;
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
     ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding, ContextBindingError,
-    ContextDestroyed, ContextId, ContextLifecycle, ContextTeardown,
+    ContextDestroyed, ContextId, ContextLifecycle, ContextTeardown, FrameToken,
 };
 use thiserror::Error;
 
@@ -696,9 +696,8 @@ impl RuntimeControl {
             return Ok(());
         }
 
-        // An explicit shutdown is retryable. Validate that no live frame or detached snapshot
-        // prevents the renderer reset before mutating viewport sidecars, surfaces, callbacks, or
-        // runtime state.
+        // An explicit shutdown is retryable. Validate that no live renderer epoch prevents the
+        // reset before mutating viewport sidecars, surfaces, callbacks, or runtime state.
         if let ShutdownAction::Explicit(context) = &mut action {
             self.preflight_renderer_shutdown(context)?;
         }
@@ -1010,7 +1009,7 @@ impl OwningViewportRuntime {
             if let Err(error) = renderer.bind_context(context, flags) {
                 return Err(WgpuViewportAttachError::new(error.into(), renderer));
             }
-            renderer.renderer_consumer = match context.create_renderer_consumer() {
+            renderer.renderer_consumer = match context.create_synchronous_renderer_consumer() {
                 Ok(consumer) => Some(consumer),
                 Err(error) => {
                     return Err(WgpuViewportAttachError::new(
@@ -1027,26 +1026,34 @@ impl OwningViewportRuntime {
         self.control.detect_and_take_fault().map_or(Ok(()), Err)
     }
 
-    pub(crate) fn reconcile_frame(
+    pub(crate) fn reconcile_context<'context>(
         &self,
-        frame: &mut RenderedFrame<'_>,
-    ) -> Result<(), WgpuViewportError> {
-        self.control
-            .with_renderer_mut(|renderer| renderer.reconcile_frame(frame).map_err(Into::into))
+        context: &'context mut Context,
+    ) -> Result<ReconciledFrame<'context>, WgpuViewportError> {
+        self.control.ensure_context(context)?;
+        self.control.with_renderer_mut(|renderer| {
+            let frame = context
+                .try_render(renderer.renderer_consumer()?)
+                .map_err(RendererError::from)?;
+            renderer.reconcile_frame(frame).map_err(Into::into)
+        })
     }
 
-    pub(crate) fn render(
+    pub(crate) fn reconcile_frame<'frame>(
         &self,
-        frame: RenderedFrame<'_>,
-        render_pass: &mut wgpu::RenderPass<'_>,
-    ) -> Result<(), WgpuViewportError> {
-        self.control
-            .with_renderer_mut(|renderer| renderer.render(frame, render_pass).map_err(Into::into))
+        frame: FrameToken<'frame>,
+    ) -> Result<ReconciledFrame<'frame>, WgpuViewportError> {
+        self.control.with_renderer_mut(|renderer| {
+            let frame = frame
+                .try_render(renderer.renderer_consumer()?)
+                .map_err(RendererError::from)?;
+            renderer.reconcile_frame(frame).map_err(Into::into)
+        })
     }
 
     pub(crate) fn render_reconciled<'frame>(
         &self,
-        frame: RenderedFrame<'frame>,
+        frame: ReconciledFrame<'frame>,
         render_pass: &mut wgpu::RenderPass<'_>,
     ) -> Result<ReconciledFrame<'frame>, WgpuViewportError> {
         self.control.with_renderer_mut(|renderer| {
@@ -1068,23 +1075,9 @@ impl OwningViewportRuntime {
         })
     }
 
-    pub(crate) fn render_with_fb_size(
-        &self,
-        frame: RenderedFrame<'_>,
-        render_pass: &mut wgpu::RenderPass<'_>,
-        width: u32,
-        height: u32,
-    ) -> Result<(), WgpuViewportError> {
-        self.control.with_renderer_mut(|renderer| {
-            renderer
-                .render_with_fb_size(frame, render_pass, width, height)
-                .map_err(Into::into)
-        })
-    }
-
     pub(crate) fn render_with_fb_size_reconciled<'frame>(
         &self,
-        frame: RenderedFrame<'frame>,
+        frame: ReconciledFrame<'frame>,
         render_pass: &mut wgpu::RenderPass<'_>,
         width: u32,
         height: u32,

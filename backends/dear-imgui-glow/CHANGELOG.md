@@ -30,6 +30,10 @@ The format follows Keep a Changelog and Semantic Versioning.
   `supports_sampler_objects`, `supports_polygon_mode`, and `supports_primitive_restart`.
 - `RenderError::InvalidTexture(String)` was replaced by typed
   `RenderError::UnknownTextureId(TextureId)` and `RenderError::ManagedTextureMissing(SnapshotTextureId)`.
+- The renderer now owns a `SynchronousRendererConsumer`; `Context::render` returns a non-drawable
+  `PendingFrame`, and Glow returns a `ReconciledFrame` only after producing exactly one outcome for
+  every managed texture request. `renderer_consumer` and `render_context` provide the corresponding
+  direct integration paths.
 
 ### Fixed
 
@@ -40,6 +44,9 @@ The format follows Keep a Changelog and Semantic Versioning.
   Glow and WebGL handles.
 - Texture uploads validate the complete byte length before issuing GL calls, preserve unpack-buffer
   state, and keep legacy registrations renderer-owned if a custom `TextureMap` panics during setup.
+- Destroy tombstones remain active until a real `Destroyed` outcome is acknowledged; completion
+  watermarks advanced by retried or superseded work can no longer expose stale create/update
+  requests to OpenGL.
 
 ## [0.16.0-alpha.1]
 

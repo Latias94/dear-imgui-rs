@@ -15,8 +15,6 @@ pub(super) struct RendererTextureStore {
     textures: HashMap<SnapshotTextureId, RendererTexture>,
     /// Identities sealed by Destroy, paired with their latest request epoch.
     destroyed: HashMap<SnapshotTextureId, u64>,
-    /// Latest synchronous frame reconciled through this renderer instance.
-    reconciled_epoch: Option<u64>,
 }
 
 impl std::fmt::Debug for RendererTextureStore {
@@ -25,9 +23,14 @@ impl std::fmt::Debug for RendererTextureStore {
             .debug_struct("RendererTextureStore")
             .field("textures", &self.textures)
             .field("destroyed", &self.destroyed)
-            .field("reconciled_epoch", &self.reconciled_epoch)
             .finish()
     }
+}
+
+#[derive(Debug)]
+pub(super) struct ProcessedTextureRequests {
+    pub(super) feedback: Vec<TextureFeedback>,
+    pub(super) installed: Vec<SnapshotTextureId>,
 }
 
 struct RendererTexture {
@@ -77,8 +80,9 @@ impl RendererTextureStore {
         requests: &[TextureRequest],
         request_epoch: u64,
         mut update_texture: impl FnMut(&mut TextureData),
-    ) -> Result<Vec<TextureFeedback>, Sdl3BackendError> {
+    ) -> Result<ProcessedTextureRequests, Sdl3BackendError> {
         let mut feedback = Vec::with_capacity(requests.len());
+        let mut installed = Vec::new();
         for request in requests {
             match request.operation() {
                 TextureOp::Create {
@@ -90,6 +94,7 @@ impl RendererTextureStore {
                 } => {
                     let texture = request.texture();
                     if self.destroyed.contains_key(&texture) {
+                        feedback.push(request.superseded());
                         continue;
                     }
                     self.destroy_existing(texture, &mut update_texture)?;
@@ -108,6 +113,7 @@ impl RendererTextureStore {
                     let texture_id = proxy.data.tex_id();
                     self.textures.insert(texture, proxy);
                     feedback.push(request.uploaded(texture_id)?);
+                    installed.push(texture);
                 }
                 TextureOp::Update {
                     format,
@@ -117,6 +123,7 @@ impl RendererTextureStore {
                 } => {
                     let texture = request.texture();
                     if self.destroyed.contains_key(&texture) {
+                        feedback.push(request.superseded());
                         continue;
                     }
                     let proxy = self
@@ -149,6 +156,7 @@ impl RendererTextureStore {
                         ensure_upload_completed(texture, &proxy.data)?;
                     }
                     feedback.push(request.uploaded(proxy.data.tex_id())?);
+                    installed.push(texture);
                 }
                 TextureOp::Destroy => {
                     let texture = request.texture();
@@ -163,25 +171,19 @@ impl RendererTextureStore {
                 }
             }
         }
-        Ok(feedback)
+        Ok(ProcessedTextureRequests {
+            feedback,
+            installed,
+        })
     }
 
     /// Mark request-created proxies as visible to Context after feedback was reconciled.
-    pub(super) fn mark_reconciled(&mut self, requests: &[TextureRequest], request_epoch: u64) {
-        for request in requests {
-            if matches!(
-                request.operation(),
-                TextureOp::Create { .. } | TextureOp::Update { .. }
-            ) && let Some(proxy) = self.textures.get_mut(&request.texture())
-            {
+    pub(super) fn mark_reconciled(&mut self, installed: &[SnapshotTextureId]) {
+        for texture in installed {
+            if let Some(proxy) = self.textures.get_mut(texture) {
                 proxy.installed = true;
             }
         }
-        self.reconciled_epoch = Some(request_epoch);
-    }
-
-    pub(super) fn reconciled_epoch_is(&self, request_epoch: u64) -> bool {
-        self.reconciled_epoch == Some(request_epoch)
     }
 
     /// Destroy proxies that were never installed into Context-owned texture data.
@@ -211,7 +213,6 @@ impl RendererTextureStore {
             "uninstalled SDL3 proxy must be explicitly destroyed before upstream teardown"
         );
         self.textures.clear();
-        self.reconciled_epoch = None;
     }
 
     pub(super) fn clear_destroyed(&mut self) {
@@ -470,19 +471,26 @@ mod tests {
         request_epoch: u64,
         texture: SnapshotTextureId,
         mut update_texture: impl FnMut(&mut TextureData),
-    ) -> Result<Vec<TextureFeedback>, Sdl3BackendError> {
+    ) -> Result<ProcessedTextureRequests, Sdl3BackendError> {
         let mut feedback = Vec::new();
-        for request in requests
-            .iter()
-            .filter(|request| request.texture() == texture)
-        {
-            feedback.extend(store.process_requests(
+        let mut installed = Vec::new();
+        for request in requests {
+            if request.texture() != texture {
+                feedback.push(request.superseded());
+                continue;
+            }
+            let processed = store.process_requests(
                 std::slice::from_ref(request),
                 request_epoch,
                 &mut update_texture,
-            )?);
+            )?;
+            feedback.extend(processed.feedback);
+            installed.extend(processed.installed);
         }
-        Ok(feedback)
+        Ok(ProcessedTextureRequests {
+            feedback,
+            installed,
+        })
     }
 
     #[test]
@@ -522,29 +530,28 @@ mod tests {
         texture.create(TextureFormat::RGBA32, 2, 1);
         texture.set_data(&[1, 2, 3, 4, 5, 6, 7, 8]);
         let texture_id = context.register_texture(texture);
-        let _consumer = context.create_renderer_consumer().unwrap();
+        let consumer = context.create_synchronous_renderer_consumer().unwrap();
         let mut store = RendererTextureStore::default();
 
         let frame = context.begin_frame();
         frame.ui().image(texture_id, [2.0, 1.0]);
-        let mut rendered = frame.render();
-        assert!(rendered.texture_requests().iter().any(|request| {
+        let pending = frame.render(&consumer);
+        assert!(pending.texture_requests().iter().any(|request| {
             request.texture() == SnapshotTextureId::User(texture_id)
                 && request.kind() == TextureRequestKind::Create
         }));
-        let feedback = store
+        let processed = store
             .process_requests(
-                rendered.texture_requests(),
-                rendered.epoch().unwrap().sequence(),
+                pending.texture_requests(),
+                pending.epoch().sequence(),
                 fake_update,
             )
             .unwrap();
-        rendered.reconcile_texture_feedback(feedback).unwrap();
-        store.mark_reconciled(
-            rendered.texture_requests(),
-            rendered.epoch().unwrap().sequence(),
-        );
-        drop(rendered);
+        let reconciled = pending
+            .reconcile_texture_feedback(processed.feedback)
+            .unwrap();
+        store.mark_reconciled(&processed.installed);
+        drop(reconciled);
         assert_eq!(
             context
                 .with_texture(texture_id, |texture| texture.texture_id())
@@ -559,24 +566,23 @@ mod tests {
             .unwrap();
         let frame = context.begin_frame();
         frame.ui().image(texture_id, [2.0, 1.0]);
-        let mut rendered = frame.render();
-        assert!(rendered.texture_requests().iter().any(|request| {
+        let pending = frame.render(&consumer);
+        assert!(pending.texture_requests().iter().any(|request| {
             request.texture() == SnapshotTextureId::User(texture_id)
                 && request.kind() == TextureRequestKind::Update
         }));
-        let feedback = store
+        let processed = store
             .process_requests(
-                rendered.texture_requests(),
-                rendered.epoch().unwrap().sequence(),
+                pending.texture_requests(),
+                pending.epoch().sequence(),
                 fake_update,
             )
             .unwrap();
-        rendered.reconcile_texture_feedback(feedback).unwrap();
-        store.mark_reconciled(
-            rendered.texture_requests(),
-            rendered.epoch().unwrap().sequence(),
-        );
-        drop(rendered);
+        let reconciled = pending
+            .reconcile_texture_feedback(processed.feedback)
+            .unwrap();
+        store.mark_reconciled(&processed.installed);
+        drop(reconciled);
         assert_eq!(
             store
                 .textures
@@ -587,24 +593,23 @@ mod tests {
         );
 
         context.remove_texture(texture_id).unwrap();
-        let mut rendered = context.begin_frame().render();
-        assert!(rendered.texture_requests().iter().any(|request| {
+        let pending = context.begin_frame().render(&consumer);
+        assert!(pending.texture_requests().iter().any(|request| {
             request.texture() == SnapshotTextureId::User(texture_id)
                 && request.kind() == TextureRequestKind::Destroy
         }));
-        let feedback = store
+        let processed = store
             .process_requests(
-                rendered.texture_requests(),
-                rendered.epoch().unwrap().sequence(),
+                pending.texture_requests(),
+                pending.epoch().sequence(),
                 fake_update,
             )
             .unwrap();
-        rendered.reconcile_texture_feedback(feedback).unwrap();
-        store.mark_reconciled(
-            rendered.texture_requests(),
-            rendered.epoch().unwrap().sequence(),
-        );
-        drop(rendered);
+        let reconciled = pending
+            .reconcile_texture_feedback(processed.feedback)
+            .unwrap();
+        store.mark_reconciled(&processed.installed);
+        drop(reconciled);
         assert!(
             !store
                 .textures
@@ -640,19 +645,6 @@ mod tests {
         store.forget_destroyed_by_upstream();
 
         assert!(store.textures.is_empty());
-    }
-
-    #[test]
-    fn reconciliation_provenance_is_exact_and_cleared_by_teardown() {
-        let mut store = RendererTextureStore::default();
-
-        assert!(!store.reconciled_epoch_is(7));
-        store.mark_reconciled(&[], 7);
-        assert!(store.reconciled_epoch_is(7));
-        assert!(!store.reconciled_epoch_is(6));
-
-        store.forget_destroyed_by_upstream();
-        assert!(!store.reconciled_epoch_is(7));
     }
 
     #[test]
@@ -695,7 +687,7 @@ mod tests {
     }
 
     #[test]
-    fn destroyed_identity_ignores_late_uploads_until_contiguous_completion() {
+    fn destroyed_identity_supersedes_late_uploads_until_contiguous_completion() {
         let _guard = crate::tests::test_guard();
         let mut context = dear_imgui_rs::Context::create();
         context.io_mut().set_display_size([128.0, 128.0]);
@@ -707,12 +699,12 @@ mod tests {
         texture.create(TextureFormat::RGBA32, 1, 1);
         texture.set_data(&[1, 2, 3, 4]);
         let texture_id = context.register_texture(texture);
-        let _consumer = context.create_renderer_consumer().unwrap();
+        let consumer = context.create_synchronous_renderer_consumer().unwrap();
         let frame = context.begin_frame();
         frame.ui().image(texture_id, [1.0, 1.0]);
-        let rendered = frame.render();
+        let pending = frame.render(&consumer);
         let snapshot_id = SnapshotTextureId::User(texture_id);
-        let request = rendered
+        let request = pending
             .texture_requests()
             .iter()
             .find(|request| request.texture() == snapshot_id)
@@ -720,12 +712,13 @@ mod tests {
         let mut store = RendererTextureStore::default();
         store.destroyed.insert(snapshot_id, 5);
 
-        let feedback = store
+        let processed = store
             .process_requests(std::slice::from_ref(request), 3, |_| {
                 panic!("retired upload reached the native updater")
             })
             .unwrap();
-        assert!(feedback.is_empty());
+        assert_eq!(processed.feedback.len(), 1);
+        assert!(processed.installed.is_empty());
         assert!(store.textures.is_empty());
 
         store.prune_destroyed(4);
@@ -747,7 +740,7 @@ mod tests {
         texture.create(TextureFormat::RGBA32, 1, 1);
         texture.set_data(&[1, 2, 3, 4]);
         let texture_id = context.register_texture(texture);
-        let consumer = context.create_renderer_consumer().unwrap();
+        let consumer = context.create_detached_renderer_consumer().unwrap();
 
         let frame = context.begin_frame();
         frame.ui().image(texture_id, [1.0, 1.0]);
@@ -768,7 +761,7 @@ mod tests {
             fake_update,
         )
         .unwrap();
-        second.commit(destroy_feedback).unwrap();
+        second.commit(destroy_feedback.feedback).unwrap();
         let progress = context.poll_snapshot_completions().unwrap();
         assert_eq!(progress.watermark(), 0);
         store.prune_destroyed(progress.watermark());
@@ -782,8 +775,9 @@ mod tests {
             |_| panic!("out-of-order create reached the native updater"),
         )
         .unwrap();
-        assert!(late_feedback.is_empty());
-        first.commit(late_feedback).unwrap();
+        assert_eq!(late_feedback.feedback.len(), first.texture_requests().len());
+        assert!(late_feedback.installed.is_empty());
+        first.commit(late_feedback.feedback).unwrap();
         let progress = context.poll_snapshot_completions().unwrap();
         assert_eq!(progress.watermark(), 2);
         store.prune_destroyed(progress.watermark());
@@ -804,7 +798,7 @@ mod tests {
         texture.create(TextureFormat::RGBA32, 1, 1);
         texture.set_data(&[1, 2, 3, 4]);
         let texture_id = context.register_texture(texture);
-        let consumer = context.create_renderer_consumer().unwrap();
+        let consumer = context.create_detached_renderer_consumer().unwrap();
 
         let frame = context.begin_frame();
         frame.ui().image(texture_id, [1.0, 1.0]);
@@ -821,7 +815,7 @@ mod tests {
             fake_update,
         )
         .unwrap();
-        destroy.commit(feedback).unwrap();
+        destroy.commit(feedback.feedback).unwrap();
         assert_eq!(context.poll_snapshot_completions().unwrap().watermark(), 0);
 
         drop(old);
@@ -842,7 +836,7 @@ mod tests {
         context
             .io_mut()
             .set_backend_flags(BackendFlags::RENDERER_HAS_TEXTURES);
-        let _consumer = context.create_renderer_consumer().unwrap();
+        let consumer = context.create_synchronous_renderer_consumer().unwrap();
         let mut store = RendererTextureStore::default();
 
         for byte in 0..64_u8 {
@@ -852,37 +846,41 @@ mod tests {
             let texture_id = context.register_texture(texture);
             let frame = context.begin_frame();
             frame.ui().image(texture_id, [1.0, 1.0]);
-            let mut rendered = frame.render();
-            let epoch = rendered.epoch().unwrap().sequence();
+            let pending = frame.render(&consumer);
+            let epoch = pending.epoch().sequence();
             let key = SnapshotTextureId::User(texture_id);
-            let feedback = process_matching_requests(
+            let processed = process_matching_requests(
                 &mut store,
-                rendered.texture_requests(),
+                pending.texture_requests(),
                 epoch,
                 key,
                 fake_update,
             )
             .unwrap();
-            let progress = rendered.reconcile_texture_feedback(feedback).unwrap();
-            store.mark_reconciled(rendered.texture_requests(), epoch);
-            store.prune_destroyed(progress.watermark());
-            drop(rendered);
+            let reconciled = pending
+                .reconcile_texture_feedback(processed.feedback)
+                .unwrap();
+            store.mark_reconciled(&processed.installed);
+            store.prune_destroyed(reconciled.completion_progress().watermark());
+            drop(reconciled);
 
             context.remove_texture(texture_id).unwrap();
-            let mut rendered = context.begin_frame().render();
-            let epoch = rendered.epoch().unwrap().sequence();
-            let feedback = process_matching_requests(
+            let pending = context.begin_frame().render(&consumer);
+            let epoch = pending.epoch().sequence();
+            let processed = process_matching_requests(
                 &mut store,
-                rendered.texture_requests(),
+                pending.texture_requests(),
                 epoch,
                 key,
                 fake_update,
             )
             .unwrap();
-            let progress = rendered.reconcile_texture_feedback(feedback).unwrap();
-            store.mark_reconciled(rendered.texture_requests(), epoch);
-            store.prune_destroyed(progress.watermark());
-            drop(rendered);
+            let reconciled = pending
+                .reconcile_texture_feedback(processed.feedback)
+                .unwrap();
+            store.mark_reconciled(&processed.installed);
+            store.prune_destroyed(reconciled.completion_progress().watermark());
+            drop(reconciled);
 
             assert!(store.destroyed.is_empty());
             assert!(store.textures.is_empty());
@@ -903,16 +901,16 @@ mod tests {
         texture.create(TextureFormat::Alpha8, 1, 1);
         texture.set_data(&[42]);
         let texture_id = context.register_texture(texture);
-        let _consumer = context.create_renderer_consumer().unwrap();
+        let consumer = context.create_synchronous_renderer_consumer().unwrap();
         let frame = context.begin_frame();
         frame.ui().image(texture_id, [1.0, 1.0]);
-        let rendered = frame.render();
+        let pending = frame.render(&consumer);
         let mut store = RendererTextureStore::default();
 
         let error = store
             .process_requests(
-                rendered.texture_requests(),
-                rendered.epoch().unwrap().sequence(),
+                pending.texture_requests(),
+                pending.epoch().sequence(),
                 |texture| {
                     assert_eq!(
                         texture.format(),

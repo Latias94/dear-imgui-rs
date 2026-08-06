@@ -128,7 +128,7 @@ pub enum RunError {
     TestEngineFrame {
         frame: u64,
         #[source]
-        source: Box<dear_imgui_test_engine::FrameDriverError<RunError, RunError>>,
+        source: Box<dear_imgui_test_engine::FrameDriverError<RunError, RunError, RunError>>,
     },
     #[error("application callback failed during {stage}: {message}")]
     Application {

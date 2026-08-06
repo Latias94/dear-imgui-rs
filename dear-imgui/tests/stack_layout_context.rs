@@ -16,7 +16,7 @@ fn context_drop_releases_native_stack_layout_state() {
         ui.text("item");
         layout.end();
     });
-    let _ = context.render();
+    let _ = context.render_legacy();
 
     assert_eq!(unsafe { imgui::sys::ImGuiStack_StateCount() }, baseline + 1);
 

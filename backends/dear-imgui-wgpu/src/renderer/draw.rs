@@ -6,7 +6,7 @@ use super::*;
 use crate::{FrameResources, wgpu};
 use dear_imgui_rs::{
     TextureId,
-    render::{DrawData, DrawIdx, RawCallbackCommand},
+    render::{DrawData, DrawIdx, DrawRequirements, RawCallbackCommand},
 };
 
 // ImGui index type is currently u16 in dear-imgui-rs, but keep this derived so
@@ -145,18 +145,16 @@ pub(super) struct PreparedRenderState {
 }
 
 impl WgpuRenderer {
-    pub(super) fn preflight_draw_callback_support(draw_data: &DrawData) -> RendererResult<()> {
+    pub(super) fn preflight_draw_callback_support(
+        requirements: DrawRequirements,
+    ) -> RendererResult<()> {
         #[cfg(target_arch = "wasm32")]
-        for draw_list in draw_data.draw_lists() {
-            for command in draw_list.commands() {
-                if matches!(command, dear_imgui_rs::render::DrawCmd::RawCallback(_)) {
-                    return Err(RendererError::RawDrawCallbackUnsupported);
-                }
-            }
+        if requirements.requires_raw_callback_support() {
+            return Err(RendererError::RawDrawCallbackUnsupported);
         }
 
         #[cfg(not(target_arch = "wasm32"))]
-        let _ = draw_data;
+        let _ = requirements;
 
         Ok(())
     }
@@ -207,7 +205,7 @@ impl WgpuRenderer {
         extent: FramebufferExtent,
         backend_data: &mut WgpuBackendData,
     ) -> RendererResult<PreparedDrawData<'draw>> {
-        Self::preflight_draw_callback_support(draw_data)?;
+        Self::preflight_draw_callback_support(draw_data.requirements())?;
 
         let mut commands = Vec::new();
         let mut global_idx_offset = 0u32;

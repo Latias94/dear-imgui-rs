@@ -20,10 +20,10 @@ pub(super) fn classify_device_idle(
 pub(super) fn renderer_for_test(context: &mut Context) -> AshRenderer {
     let device = unsafe { Device::load_with(|_| std::ptr::null(), vk::Device::null()) };
     let context_state = RendererContextState::prepare(context).unwrap();
-    let consumer = context.create_renderer_consumer().unwrap();
+    let consumer = context.create_synchronous_renderer_consumer().unwrap();
     // This synthetic renderer has no Vulkan texture map or submitted consumer epoch.
     let reset = context.prepare_renderer_texture_reset(&consumer).unwrap();
-    let _ = reset.commit();
+    reset.commit();
     context_state.publish(context).unwrap();
     AshRenderer {
         device,
@@ -165,7 +165,7 @@ impl AshRenderer {
             viewport_clear_color: [0.0, 0.0, 0.0, 1.0],
         };
 
-        let consumer = match imgui.create_renderer_consumer() {
+        let consumer = match imgui.create_synchronous_renderer_consumer() {
             Ok(consumer) => consumer,
             Err(error) => {
                 renderer.destroy_unsubmitted_internal()?;
@@ -189,7 +189,7 @@ impl AshRenderer {
         // `create_default_texture` is renderer-private and has not created a Context-managed
         // texture mapping. The new consumer has not submitted an epoch, so this is an empty
         // transaction that completes before renderer state is published.
-        let _ = reset.commit();
+        reset.commit();
         if let Err(error) = renderer.context_state.publish(imgui) {
             renderer.destroy_unsubmitted_internal()?;
             renderer.consumer.take();
@@ -220,19 +220,37 @@ impl AshRenderer {
         self.context_state.validate()
     }
 
-    pub(super) fn ensure_frame_matches(&self, frame: &RenderedFrame<'_>) -> RendererResult<()> {
+    pub(super) fn ensure_pending_frame_matches(
+        &self,
+        frame: &PendingFrame<'_>,
+    ) -> RendererResult<()> {
+        self.ensure_frame_matches(frame.context_id(), Some(frame.epoch()))
+    }
+
+    pub(super) fn ensure_reconciled_frame_matches(
+        &self,
+        frame: &ReconciledFrame<'_>,
+    ) -> RendererResult<()> {
+        self.ensure_frame_matches(frame.context_id(), frame.epoch())
+    }
+
+    fn ensure_frame_matches(
+        &self,
+        context_id: dear_imgui_rs::ContextId,
+        epoch: Option<dear_imgui_rs::render::SnapshotEpoch>,
+    ) -> RendererResult<()> {
         self.ensure_operational()?;
         let consumer = self
             .consumer
             .as_ref()
             .ok_or(RendererError::RendererNotAttached)?;
-        if frame.context_id() != consumer.context_id() {
+        if context_id != consumer.context_id() {
             return Err(RendererError::ContextMismatch {
                 expected: consumer.context_id(),
-                actual: frame.context_id(),
+                actual: context_id,
             });
         }
-        let epoch = frame.epoch().ok_or_else(|| {
+        let epoch = epoch.ok_or_else(|| {
             RendererError::InvalidRenderState(
                 "Ash requires a managed-texture renderer epoch".to_string(),
             )
@@ -426,7 +444,7 @@ impl AshRenderer {
 
         // `commit` is infallible after preparation and must happen even when the terminal GPU
         // result is `ERROR_DEVICE_LOST`: the Vulkan map is no longer reachable in either case.
-        let _ = permit.commit();
+        permit.commit();
         self.finalize_shutdown_after_reset(imgui_context);
         destroy_result
     }
@@ -435,13 +453,13 @@ impl AshRenderer {
     ///
     /// The caller must either restore it after every retryable failure or commit a matching reset
     /// permit after the map has been destroyed.
-    pub(super) fn take_shutdown_consumer(&mut self) -> RendererResult<RendererConsumer> {
+    pub(super) fn take_shutdown_consumer(&mut self) -> RendererResult<SynchronousRendererConsumer> {
         self.consumer
             .take()
             .ok_or(RendererError::RendererNotAttached)
     }
 
-    pub(super) fn restore_shutdown_consumer(&mut self, consumer: RendererConsumer) {
+    pub(super) fn restore_shutdown_consumer(&mut self, consumer: SynchronousRendererConsumer) {
         debug_assert!(self.consumer.is_none());
         self.consumer = Some(consumer);
     }
@@ -614,7 +632,7 @@ mod shutdown_transaction_tests {
     use std::cell::Cell;
 
     use super::*;
-    use dear_imgui_rs::{BackendFlags, FramePrepareOptions};
+    use dear_imgui_rs::BackendFlags;
 
     fn seed_external_texture(renderer: &mut AshRenderer) -> TextureId {
         renderer
@@ -631,41 +649,6 @@ mod shutdown_transaction_tests {
         // The injected destroy path deliberately leaves the renderer live. Avoid invoking the
         // real Vulkan teardown from Drop for this pure transaction test.
         renderer.destroyed = true;
-    }
-
-    #[test]
-    fn reset_preparation_failure_does_not_start_gpu_teardown() {
-        let mut context = Context::create();
-        let mut renderer = renderer_for_test(&mut context);
-        let texture = seed_external_texture(&mut renderer);
-        context.prepare_frame(
-            FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0).renderer_has_textures(),
-        );
-        let snapshot = context
-            .begin_frame()
-            .render_snapshot(renderer.consumer.as_ref().unwrap())
-            .unwrap();
-        let destroy_called = Cell::new(false);
-
-        let result = renderer.shutdown_with_destroy(&mut context, |_| {
-            destroy_called.set(true);
-            Ok(())
-        });
-
-        assert!(matches!(result, Err(RendererError::RendererConsumer(_))));
-        assert!(!destroy_called.get());
-        assert!(renderer.consumer.is_some());
-        assert!(
-            renderer
-                .textures
-                .external_textures
-                .contains_key(&texture.id())
-        );
-        assert!(!renderer.destroyed);
-
-        drop(snapshot);
-        context.poll_snapshot_completions().unwrap();
-        finish_retryable_renderer(&mut renderer);
     }
 
     #[test]

@@ -635,7 +635,10 @@ impl AppWindow {
 
         // Finalize inputs on platform and build draw data.
         self.imgui.platform.prepare_render(&ui, &self.window)?;
-        let rendered_frame = self.imgui.context.render();
+        let pending_frame = self
+            .imgui
+            .context
+            .render(self.imgui.renderer.renderer_consumer()?);
 
         let frame_slot = self.vk.frame_index % self.vk.frames.len();
         let frame_fence = self.vk.frames[frame_slot].fence;
@@ -753,7 +756,7 @@ impl AppWindow {
                 self.imgui.clear_color,
                 // SAFETY: cmd is recording inside the compatible render pass and is submitted
                 // before any renderer resource can be retired or destroyed.
-                |cmd| unsafe { self.imgui.renderer.cmd_draw(cmd, rendered_frame) },
+                |cmd| unsafe { self.imgui.renderer.cmd_draw(cmd, pending_frame) },
             )?;
 
             let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];

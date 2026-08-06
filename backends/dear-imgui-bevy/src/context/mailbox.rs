@@ -20,6 +20,14 @@ pub(crate) struct PendingFrame {
 pub(crate) struct ImguiFrameMailbox {
     pending: Arc<Mutex<HashMap<imgui::ContextId, PendingFrame>>>,
     completion_watermarks: Arc<Mutex<HashMap<imgui::ContextId, u64>>>,
+    snapshot_commit_errors: Arc<
+        Mutex<
+            Vec<(
+                imgui::ContextId,
+                imgui::render::snapshot::SnapshotCommitError,
+            )>,
+        >,
+    >,
 }
 
 #[cfg(feature = "render")]
@@ -59,6 +67,31 @@ impl ImguiFrameMailbox {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
+    }
+
+    pub(crate) fn record_snapshot_commit_error(
+        &self,
+        context_id: imgui::ContextId,
+        source: imgui::render::snapshot::SnapshotCommitError,
+    ) {
+        self.snapshot_commit_errors
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((context_id, source));
+    }
+
+    pub(crate) fn take_snapshot_commit_errors(
+        &self,
+    ) -> Vec<(
+        imgui::ContextId,
+        imgui::render::snapshot::SnapshotCommitError,
+    )> {
+        std::mem::take(
+            &mut *self
+                .snapshot_commit_errors
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
     }
 
     pub(crate) fn remove_context(&self, context_id: imgui::ContextId) {

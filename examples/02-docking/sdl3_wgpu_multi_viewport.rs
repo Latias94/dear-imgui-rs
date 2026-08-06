@@ -242,13 +242,11 @@ impl WgpuMultiViewportApp {
                 .io()
                 .config_flags()
                 .contains(ConfigFlags::VIEWPORTS_ENABLE);
-        let mut draw_data = main.imgui.render();
-
         // Reconcile independently of the main surface. Secondary native windows must continue to
         // render while the main surface is occluded, minimized, lost, or being reconfigured.
-        main.renderer.reconcile_frame(&mut draw_data)?;
+        let mut reconciled_frame = main.renderer.reconcile_context(&mut main.imgui)?;
         if viewports_enabled {
-            draw_data.update_and_render_platform_windows_default();
+            reconciled_frame.update_and_render_platform_windows_default();
             main.renderer.poll_fault()?;
             main.sdl3_backend.poll_fault()?;
         }
@@ -257,12 +255,12 @@ impl WgpuMultiViewportApp {
             wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
             wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
-                drop(draw_data);
+                drop(reconciled_frame);
                 Self::reconfigure_surface(main);
                 return Ok(());
             }
             wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
-                drop(draw_data);
+                drop(reconciled_frame);
                 return Ok(());
             }
             wgpu::CurrentSurfaceTexture::Validation => {
@@ -299,12 +297,13 @@ impl WgpuMultiViewportApp {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            main.renderer.render_with_fb_size(
-                draw_data,
+            let reconciled_frame = main.renderer.render_with_fb_size_reconciled(
+                reconciled_frame,
                 &mut render_pass,
                 main.surface_config.width,
                 main.surface_config.height,
             )?;
+            drop(reconciled_frame);
         }
         main.queue.submit(std::iter::once(encoder.finish()));
         main.queue.present(frame);

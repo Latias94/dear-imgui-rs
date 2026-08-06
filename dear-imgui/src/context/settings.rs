@@ -456,7 +456,7 @@ mod retention_tests {
         context.io_mut().set_display_size([128.0, 128.0]);
         context.io_mut().set_delta_time(1.0 / 60.0);
         let _ui = context.frame();
-        drop(context.render());
+        drop(context.render_legacy());
 
         let before = raw_retention(&context);
         assert!(matches!(

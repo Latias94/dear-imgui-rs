@@ -197,7 +197,7 @@ fn draw_context_managed_texture<P: 'static>(
 }
 
 #[test]
-fn managed_texture_create_request_repeats_without_gpu_feedback() {
+fn managed_texture_create_request_repeats_after_gpu_retry() {
     let _guard = imgui_context_guard();
     let mut app = app_with_render_world();
     let texture_id = register_managed_texture(&mut app);
@@ -223,7 +223,7 @@ fn managed_texture_create_request_repeats_without_gpu_feedback() {
     assert_eq!(extracted.frame_index(primary_id), Some(1));
     assert!(
         extracted.snapshot(primary_id).is_none(),
-        "render preparation should commit the one-shot snapshot with empty feedback"
+        "render preparation should commit the one-shot snapshot with explicit retry feedback"
     );
 
     let texture = app.world().get_non_send::<ManagedTexture>().unwrap().0;
@@ -264,7 +264,7 @@ fn managed_texture_create_request_repeats_without_gpu_feedback() {
         .resource::<dear_imgui_bevy::render::ImguiPreparedRenderFrame>();
     assert!(
         prepared.texture_request_count(primary_id) >= 1,
-        "unacknowledged creates must repeat in the next snapshot"
+        "retried creates must repeat in the next snapshot"
     );
 }
 
@@ -370,7 +370,7 @@ fn managed_texture_requests_and_lifecycles_are_isolated_by_context() {
     ] {
         assert!(
             prepared.texture_request_count(context_id) >= 1,
-            "each Context should retain its own unacknowledged create request"
+            "each Context should retain its own retried create request"
         );
         assert!(prepared.draws().iter().any(|draw| {
             draw.context_id == context_id
@@ -439,7 +439,7 @@ fn managed_texture_requests_and_lifecycles_are_isolated_by_context() {
         .resource::<dear_imgui_bevy::render::ImguiPreparedRenderFrame>();
     assert!(
         prepared.texture_request_count(primary_id) >= 1,
-        "the primary Context should retain its unacknowledged destroy request"
+        "the primary Context should retain its retried destroy request"
     );
     assert!(
         prepared.texture_request_count(secondary_id) >= 1,

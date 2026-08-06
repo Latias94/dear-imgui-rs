@@ -168,7 +168,7 @@ mod tests {
 
     fn managed_snapshot(
         context: &mut imgui::Context,
-        consumer: &imgui::render::RendererConsumer,
+        consumer: &imgui::render::DetachedRendererConsumer,
         texture: Option<imgui::ManagedTextureId>,
     ) -> imgui::render::FrameSnapshot {
         context.prepare_frame(
@@ -192,6 +192,46 @@ mod tests {
             .iter()
             .find(|request| request.texture() == imgui::render::SnapshotTextureId::User(texture))
             .expect("snapshot should contain the user texture request")
+    }
+
+    fn successful_texture_feedback(
+        snapshot: &imgui::render::FrameSnapshot,
+        user_texture: Option<(imgui::ManagedTextureId, imgui::TextureId)>,
+    ) -> Vec<imgui::render::snapshot::TextureFeedback> {
+        snapshot
+            .texture_requests()
+            .iter()
+            .enumerate()
+            .map(|(index, request)| match request.operation() {
+                imgui::render::TextureOp::Create { .. }
+                | imgui::render::TextureOp::Update { .. } => {
+                    let texture_id = match (request.texture(), user_texture) {
+                        (imgui::render::SnapshotTextureId::User(actual), Some((expected, id)))
+                            if actual == expected =>
+                        {
+                            id
+                        }
+                        _ => imgui::TextureId::new(
+                            0xF07A
+                                + u64::try_from(index)
+                                    .expect("test texture request index fits in u64"),
+                        ),
+                    };
+                    request.uploaded(texture_id).unwrap()
+                }
+                imgui::render::TextureOp::Destroy => request.destroyed().unwrap(),
+            })
+            .collect()
+    }
+
+    fn retry_texture_feedback(
+        snapshot: &imgui::render::FrameSnapshot,
+    ) -> Vec<imgui::render::snapshot::TextureFeedback> {
+        snapshot
+            .texture_requests()
+            .iter()
+            .map(imgui::render::snapshot::TextureRequest::retry)
+            .collect()
     }
 
     fn register_test_texture(context: &mut imgui::Context) -> imgui::ManagedTextureId {
@@ -698,10 +738,9 @@ mod tests {
                 let consumer = consumer.expect("renderer admission must install a consumer");
                 let texture = register_test_texture(context);
                 let snapshot = managed_snapshot(context, consumer, Some(texture));
-                let feedback = user_texture_request(&snapshot, texture)
-                    .uploaded(renderer_texture)
-                    .unwrap();
-                snapshot.commit([feedback]).unwrap();
+                let feedback =
+                    successful_texture_feedback(&snapshot, Some((texture, renderer_texture)));
+                snapshot.commit(feedback).unwrap();
                 context.poll_snapshot_completions().unwrap();
                 Ok::<_, ()>(texture)
             })
@@ -773,10 +812,11 @@ mod tests {
                     let consumer = consumer.expect("renderer admission must install a consumer");
                     let texture = register_test_texture(context);
                     let snapshot = managed_snapshot(context, consumer, Some(texture));
-                    let feedback = user_texture_request(&snapshot, texture)
-                        .uploaded(imgui::TextureId::new(0xCAFE))
-                        .unwrap();
-                    snapshot.commit([feedback]).unwrap();
+                    let feedback = successful_texture_feedback(
+                        &snapshot,
+                        Some((texture, imgui::TextureId::new(0xCAFE))),
+                    );
+                    snapshot.commit(feedback).unwrap();
                     context.poll_snapshot_completions().unwrap();
                     Ok::<_, std::convert::Infallible>(texture)
                 })
@@ -837,7 +877,7 @@ mod tests {
     #[test]
     fn extracted_frame_commits_request_bound_create_update_and_destroy_feedback() {
         let mut context = managed_context();
-        let consumer = context.create_renderer_consumer().unwrap();
+        let consumer = context.create_detached_renderer_consumer().unwrap();
 
         let mut texture_data = imgui::texture::OwnedTextureData::new();
         texture_data.create(imgui::TextureFormat::RGBA32, 1, 1);
@@ -851,16 +891,15 @@ mod tests {
             user_texture_request(&create, texture).kind(),
             imgui::render::snapshot::TextureRequestKind::Create
         );
-        let feedback = user_texture_request(&create, texture)
-            .uploaded(renderer_texture)
-            .unwrap();
+        let feedback = successful_texture_feedback(&create, Some((texture, renderer_texture)));
+        let feedback_count = feedback.len();
         let context_id = context.id();
         extracted.replace(context_id, pending_frame(1, create), Vec::new());
-        extracted.extend_texture_feedback(context_id, [feedback]);
-        extracted.commit_all();
+        extracted.extend_texture_feedback(context_id, feedback);
+        assert!(extracted.commit_all().is_empty());
         let progress = context.poll_snapshot_completions().unwrap();
         assert_eq!(progress.committed(), 1);
-        assert_eq!(progress.feedback_applied(), 1);
+        assert_eq!(progress.feedback_applied(), feedback_count);
         context
             .with_texture(texture, |texture| {
                 assert_eq!(texture.status(), imgui::TextureStatus::OK);
@@ -878,15 +917,14 @@ mod tests {
             user_texture_request(&update, texture).kind(),
             imgui::render::snapshot::TextureRequestKind::Update
         );
-        let feedback = user_texture_request(&update, texture)
-            .uploaded(renderer_texture)
-            .unwrap();
+        let feedback = successful_texture_feedback(&update, Some((texture, renderer_texture)));
+        let feedback_count = feedback.len();
         extracted.replace(context_id, pending_frame(2, update), Vec::new());
-        extracted.extend_texture_feedback(context_id, [feedback]);
-        extracted.commit_all();
+        extracted.extend_texture_feedback(context_id, feedback);
+        assert!(extracted.commit_all().is_empty());
         let progress = context.poll_snapshot_completions().unwrap();
         assert_eq!(progress.committed(), 1);
-        assert_eq!(progress.feedback_applied(), 1);
+        assert_eq!(progress.feedback_applied(), feedback_count);
 
         context.remove_texture(texture).unwrap();
         let destroy = managed_snapshot(&mut context, &consumer, None);
@@ -894,14 +932,49 @@ mod tests {
             user_texture_request(&destroy, texture).kind(),
             imgui::render::snapshot::TextureRequestKind::Destroy
         );
-        let feedback = user_texture_request(&destroy, texture).destroyed().unwrap();
+        let feedback = successful_texture_feedback(&destroy, None);
+        let feedback_count = feedback.len();
         extracted.replace(context_id, pending_frame(3, destroy), Vec::new());
-        extracted.extend_texture_feedback(context_id, [feedback]);
-        extracted.commit_all();
+        extracted.extend_texture_feedback(context_id, feedback);
+        assert!(extracted.commit_all().is_empty());
         let progress = context.poll_snapshot_completions().unwrap();
         assert_eq!(progress.committed(), 1);
-        assert_eq!(progress.feedback_applied(), 1);
+        assert_eq!(progress.feedback_applied(), feedback_count);
         assert!(context.with_texture(texture, |_| ()).is_err());
+    }
+
+    #[test]
+    fn extracted_frame_reports_snapshot_commit_contract_errors() {
+        let mut context = managed_context();
+        let consumer = context.create_detached_renderer_consumer().unwrap();
+        let texture = register_test_texture(&mut context);
+        let snapshot = managed_snapshot(&mut context, &consumer, Some(texture));
+        let expected_count = snapshot.texture_requests().len();
+        let context_id = context.id();
+        let mut extracted = ImguiExtractedRenderFrame::default();
+        extracted.replace(context_id, pending_frame(1, snapshot), Vec::new());
+
+        let errors = extracted.commit_all();
+        assert!(matches!(
+            errors.as_slice(),
+            [(
+                actual_context,
+                imgui::render::snapshot::SnapshotCommitError::InvalidFeedback(
+                    imgui::render::RendererConsumerError::MissingFeedback { count, .. }
+                )
+            )] if *actual_context == context_id && *count == expected_count
+        ));
+
+        let mailbox = crate::context::ImguiFrameMailbox::default();
+        let expected_error = errors[0];
+        for (context_id, source) in errors {
+            mailbox.record_snapshot_commit_error(context_id, source);
+        }
+        assert_eq!(mailbox.take_snapshot_commit_errors(), vec![expected_error]);
+
+        let progress = context.poll_snapshot_completions().unwrap();
+        assert_eq!(progress.abandoned(), 1);
+        assert_eq!(progress.committed(), 0);
     }
 
     #[test]
@@ -919,21 +992,23 @@ mod tests {
     #[test]
     fn replacing_an_extracted_frame_abandons_only_the_previous_epoch() {
         let mut context = managed_context();
-        let consumer = context.create_renderer_consumer().unwrap();
+        let consumer = context.create_detached_renderer_consumer().unwrap();
         let first = managed_snapshot(&mut context, &consumer, None);
         let second = managed_snapshot(&mut context, &consumer, None);
+        let second_feedback = retry_texture_feedback(&second);
         let mut extracted = ImguiExtractedRenderFrame::default();
         let context_id = context.id();
 
         extracted.replace(context_id, pending_frame(1, first), Vec::new());
         extracted.replace(context_id, pending_frame(2, second), Vec::new());
-        extracted.commit_all();
+        extracted.extend_texture_feedback(context_id, second_feedback);
+        assert!(extracted.commit_all().is_empty());
 
         let progress = context.poll_snapshot_completions().unwrap();
         assert_eq!(progress.abandoned(), 1);
         assert_eq!(progress.committed(), 1);
         assert_eq!(progress.watermark(), 2);
-        extracted.commit_all();
+        assert!(extracted.commit_all().is_empty());
         let progress = context.poll_snapshot_completions().unwrap();
         assert_eq!(progress.watermark(), 2);
         assert_eq!(progress.committed(), 0);
@@ -944,10 +1019,11 @@ mod tests {
     #[test]
     fn mailbox_epoch_jump_abandons_every_skipped_snapshot_before_committing_the_latest() {
         let mut context = managed_context();
-        let consumer = context.create_renderer_consumer().unwrap();
+        let consumer = context.create_detached_renderer_consumer().unwrap();
         let first = managed_snapshot(&mut context, &consumer, None);
         let second = managed_snapshot(&mut context, &consumer, None);
         let third = managed_snapshot(&mut context, &consumer, None);
+        let third_feedback = retry_texture_feedback(&third);
         assert_eq!(first.epoch().sequence(), 1);
         assert_eq!(second.epoch().sequence(), 2);
         assert_eq!(third.epoch().sequence(), 3);
@@ -968,7 +1044,8 @@ mod tests {
             .remove(&context_id)
             .expect("Context snapshot should remain in the mailbox");
         extracted.replace(context_id, third, Vec::new());
-        extracted.commit_all();
+        extracted.extend_texture_feedback(context_id, third_feedback);
+        assert!(extracted.commit_all().is_empty());
 
         let progress = context.poll_snapshot_completions().unwrap();
         assert_eq!(progress.abandoned(), 2);
@@ -982,15 +1059,17 @@ mod tests {
     #[test]
     fn replacing_context_a_mailbox_slot_does_not_touch_context_b() {
         let mut context_a = managed_context();
-        let consumer_a = context_a.create_renderer_consumer().unwrap();
+        let consumer_a = context_a.create_detached_renderer_consumer().unwrap();
         let first_a = managed_snapshot(&mut context_a, &consumer_a, None);
         let second_a = managed_snapshot(&mut context_a, &consumer_a, None);
+        let second_a_feedback = retry_texture_feedback(&second_a);
         let context_a_id = context_a.id();
         let mut context_a = context_a.suspend();
 
         let mut context_b = managed_context();
-        let consumer_b = context_b.create_renderer_consumer().unwrap();
+        let consumer_b = context_b.create_detached_renderer_consumer().unwrap();
         let first_b = managed_snapshot(&mut context_b, &consumer_b, None);
+        let first_b_feedback = retry_texture_feedback(&first_b);
         let context_b_id = context_b.id();
         let mut context_b = context_b.suspend();
 
@@ -1009,7 +1088,9 @@ mod tests {
         for (context_id, frame) in pending {
             extracted.replace(context_id, frame, Vec::new());
         }
-        extracted.commit_all();
+        extracted.extend_texture_feedback(context_a_id, second_a_feedback);
+        extracted.extend_texture_feedback(context_b_id, first_b_feedback);
+        assert!(extracted.commit_all().is_empty());
 
         context_a
             .try_with_active(|context| {
@@ -1098,7 +1179,7 @@ mod tests {
     #[test]
     fn dropping_an_extracted_frame_abandons_its_epoch_once() {
         let mut context = managed_context();
-        let consumer = context.create_renderer_consumer().unwrap();
+        let consumer = context.create_detached_renderer_consumer().unwrap();
         let snapshot = managed_snapshot(&mut context, &consumer, None);
         let mut extracted = ImguiExtractedRenderFrame::default();
         let context_id = context.id();
@@ -1241,7 +1322,7 @@ mod tests {
 
         let mut context = managed_context();
         install_standard_draw_callbacks_for_context(&mut context).unwrap();
-        let consumer = context.create_renderer_consumer().unwrap();
+        let consumer = context.create_detached_renderer_consumer().unwrap();
         context.prepare_frame(
             imgui::FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
         );
@@ -1269,7 +1350,7 @@ mod tests {
         assert_eq!(classes, ["reset", "linear", "nearest"]);
         drop(snapshot);
         context.poll_snapshot_completions().unwrap();
-        let _ = context
+        context
             .prepare_renderer_texture_reset(&consumer)
             .unwrap()
             .commit();

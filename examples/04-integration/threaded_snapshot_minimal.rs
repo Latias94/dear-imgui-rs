@@ -39,7 +39,7 @@ fn main() {
     ]);
     let managed_tex = ctx.register_texture(managed_tex);
     let consumer = ctx
-        .create_renderer_consumer()
+        .create_detached_renderer_consumer()
         .expect("the detached renderer consumer should attach");
 
     let (snapshot_tx, snapshot_rx) = mpsc::channel::<FrameSnapshot>();
@@ -117,6 +117,8 @@ fn render_thread_main(snapshot_rx: mpsc::Receiver<FrameSnapshot>, completion_tx:
                 TextureOp::Update { .. } => {
                     if let Some(tex_id) = managed_map.get(&request.texture()).copied() {
                         feedback.push(request.uploaded(tex_id).unwrap());
+                    } else {
+                        feedback.push(request.retry());
                     }
                 }
                 TextureOp::Destroy => {

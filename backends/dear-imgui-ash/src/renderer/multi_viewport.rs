@@ -16,7 +16,7 @@ mod removed_free_api_contracts {
 use super::AshRenderer;
 use super::vulkan_viewport::{self, OwningViewportRuntime, SurfaceAdapter, SurfaceCreateError};
 use ash::vk;
-use dear_imgui_rs::render::RenderedFrame;
+use dear_imgui_rs::render::{PendingFrame, ReconciledFrame};
 use dear_imgui_rs::{Context, TextureData, TextureId, platform_io::Viewport};
 use dear_imgui_winit::multi_viewport::WinitPlatformRuntime as WinitPlatformOwner;
 use std::sync::Arc;
@@ -147,11 +147,19 @@ impl WinitViewportRuntime {
     }
 
     /// Reconcile managed texture requests before any secondary viewport can draw this frame.
-    pub fn prepare_frame(
+    pub fn prepare_frame<'ctx>(
         &self,
-        frame: &mut RenderedFrame<'_>,
-    ) -> Result<Option<TextureRetirementBatch>, AshViewportError> {
+        frame: PendingFrame<'ctx>,
+    ) -> Result<(ReconciledFrame<'ctx>, Option<TextureRetirementBatch>), AshViewportError> {
         self.inner.prepare_frame(frame)
+    }
+
+    /// Finalize and reconcile the runtime's Context before secondary viewport rendering.
+    pub fn prepare_context<'ctx>(
+        &self,
+        context: &'ctx mut Context,
+    ) -> Result<(ReconciledFrame<'ctx>, Option<TextureRetirementBatch>), AshViewportError> {
+        self.inner.prepare_context(context)
     }
 
     /// Reconcile textures and record one Context-owned frame.
@@ -162,9 +170,23 @@ impl WinitViewportRuntime {
     pub unsafe fn cmd_draw(
         &self,
         command_buffer: vk::CommandBuffer,
-        frame: RenderedFrame<'_>,
+        frame: PendingFrame<'_>,
     ) -> Result<Option<TextureRetirementBatch>, AshViewportError> {
         unsafe { self.inner.cmd_draw(command_buffer, frame) }
+    }
+
+    /// Record a main viewport after [`Self::prepare_frame`] reconciled this frame.
+    ///
+    /// # Safety
+    ///
+    /// `command_buffer` must satisfy [`AshRenderer::cmd_draw`], and `frame` must come from this
+    /// runtime's [`Self::prepare_frame`] call for the current Dear ImGui frame.
+    pub unsafe fn cmd_draw_reconciled(
+        &self,
+        command_buffer: vk::CommandBuffer,
+        frame: ReconciledFrame<'_>,
+    ) -> Result<Option<TextureRetirementBatch>, AshViewportError> {
+        unsafe { self.inner.cmd_draw_reconciled(command_buffer, frame) }
     }
 
     /// Return the highest managed-texture resource retirement batch still pending.

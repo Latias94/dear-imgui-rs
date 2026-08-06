@@ -440,7 +440,7 @@ impl AppWindow {
             });
 
         platform.prepare_render(&ui, &self.window)?;
-        let draw_data = context.render();
+        let pending_frame = context.render(renderer.renderer_consumer()?);
 
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -464,7 +464,7 @@ impl AppWindow {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            renderer.render(draw_data, &mut rpass)?;
+            renderer.render(pending_frame, &mut rpass)?;
         }
 
         self.queue.submit(Some(encoder.finish()));

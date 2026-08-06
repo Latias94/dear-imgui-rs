@@ -673,8 +673,13 @@ impl AppWindow {
                 multiview_mask: None,
             });
 
-            let draw_data = self.imgui.context.render();
-            self.imgui.renderer.render(draw_data, &mut render_pass)?;
+            let pending_frame = self
+                .imgui
+                .context
+                .render(self.imgui.renderer.renderer_consumer()?);
+            self.imgui
+                .renderer
+                .render(pending_frame, &mut render_pass)?;
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));

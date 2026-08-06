@@ -321,7 +321,7 @@ fn render_extract_moves_context_owned_managed_frame_and_commits_once() {
     }));
 
     let progress = configure_primary(&mut app, |context| context.poll_snapshot_completions())
-        .expect("request-bound empty feedback should still complete the snapshot epoch");
+        .expect("request-bound retry feedback should complete the snapshot epoch");
     assert_eq!(progress.committed(), 1);
     assert_eq!(progress.feedback_applied(), 0);
     let _ = (primary_window, camera);

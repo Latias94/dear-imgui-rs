@@ -199,11 +199,11 @@ impl GlowRenderer {
         let pending_device_objects =
             PendingDeviceObjects::create_all(gl, gl_version, has_sampler_object_support)?;
         preflight_renderer_state(imgui_context)?;
-        let renderer_consumer = imgui_context.create_renderer_consumer()?;
+        let renderer_consumer = imgui_context.create_synchronous_renderer_consumer()?;
         // Construction has not emitted a renderer epoch or installed a Context-managed texture
         // mapping. Commit the empty transaction before this renderer can publish either one.
         let reset = imgui_context.prepare_renderer_texture_reset(&renderer_consumer)?;
-        let _ = reset.commit();
+        reset.commit();
         let backend_user_data = Box::<GlowBackendUserData>::default();
         let backend_user_data_ptr = std::ptr::from_ref(backend_user_data.as_ref())
             .cast_mut()
@@ -773,7 +773,7 @@ mod tests {
             before_texture
         );
 
-        let consumer = context.create_renderer_consumer().unwrap();
+        let consumer = context.create_synchronous_renderer_consumer().unwrap();
         assert_eq!(consumer.generation(), 1);
         reset(FakeFailure::None);
     }

@@ -205,15 +205,19 @@ pub enum RenderError {
         actual: dear_imgui_rs::ContextId,
     },
 
-    /// A frame was rendered without the managed-texture consumer epoch Glow requires.
-    #[error("rendered frame does not carry a managed-texture renderer epoch")]
-    MissingRendererEpoch,
-
     /// A rendered frame belongs to an obsolete or foreign consumer generation.
     #[error(
         "rendered frame consumer generation {actual} does not match renderer generation {expected}"
     )]
     ConsumerGenerationMismatch { expected: u64, actual: u64 },
+
+    /// A legacy frame was passed to a renderer that requires managed-texture reconciliation.
+    #[error("Glow requires a reconciled managed-texture frame")]
+    ManagedFrameRequired,
+
+    /// Finalizing the Dear ImGui frame failed before Glow could reconcile it.
+    #[error("failed to finalize the Dear ImGui frame: {0}")]
+    FrameCapture(#[from] dear_imgui_rs::render::SnapshotError),
 
     /// Context-owned renderer epoch validation failed.
     #[error(transparent)]

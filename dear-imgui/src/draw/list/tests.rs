@@ -373,7 +373,7 @@ fn standard_sampler_commands_are_safe_and_preserve_order() {
                     .build();
             });
     }
-    let frame = context.render();
+    let frame = context.render_legacy();
     let commands = binding.with_bound_context(|| {
         frame
             .draw_data()

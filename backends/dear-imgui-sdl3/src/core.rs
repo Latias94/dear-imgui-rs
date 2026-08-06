@@ -306,8 +306,6 @@ pub enum Sdl3BackendError {
     RendererConsumer(#[from] dear_imgui_rs::render::RendererConsumerError),
     #[error(transparent)]
     TextureFeedback(#[from] dear_imgui_rs::render::TextureFeedbackError),
-    #[error("rendered frame epoch {epoch} was reconciled outside the active SDL3 renderer runtime")]
-    ForeignTextureReconciliation { epoch: u64 },
     #[error("managed texture {texture:?} received an update before renderer creation")]
     ManagedTextureNotCreated {
         texture: dear_imgui_rs::render::SnapshotTextureId,

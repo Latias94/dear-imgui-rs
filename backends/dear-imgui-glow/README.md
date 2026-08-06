@@ -18,9 +18,9 @@ let gl = unsafe { glow::Context::from_loader_function(|s| loader.get_proc_addres
 let mut imgui = Context::create();
 let mut renderer = GlowRenderer::new(gl, &mut imgui)?;
 
-// Per frame, after building the UI. Rendering consumes the Context-borrowed frame.
+// Per frame, after building the UI. The renderer owns the synchronous consumer capability.
 renderer.new_frame()?;
-let frame = imgui.render();
+let frame = imgui.render(renderer.renderer_consumer()?);
 renderer.render(frame)?;
 ```
 
@@ -34,16 +34,31 @@ renderer.render(frame)?;
 
 ## Renderer Lifecycle
 
-`GlowRenderer` owns the Context's sole renderer consumer. `render` and `render_with_context`
-therefore take `RenderedFrame` by value, apply every managed texture request, reconcile the
-result with the owning Context, and only then issue draw commands. A frame from another Context or
-consumer generation is rejected before OpenGL is mutated.
+`GlowRenderer` owns the Context's sole synchronous renderer consumer. Obtain that capability with
+`renderer_consumer`, pass it to `Context::render`, and give the resulting `PendingFrame` to
+`render` or `render_with_context`. These methods consume the pending frame, apply exactly one
+feedback outcome to every managed texture request, reconcile the result with the owning Context,
+and only then issue draw commands. A frame from another Context or consumer generation is rejected
+before OpenGL is mutated.
+
+Engine integrations that need an explicit boundary between managed-texture work and drawing can
+use the same protocol in two steps:
+
+```rust
+let pending = imgui.render(renderer.renderer_consumer()?);
+let reconciled = renderer.reconcile_frame(pending)?;
+renderer.render_reconciled(reconciled)?;
+```
+
+`reconcile_frame` performs only managed-texture synchronization. `render_reconciled` consumes the
+resulting linear capability and issues the draw commands. The ordinary `render` entry point is the
+convenience composition of those two operations.
 
 For single-viewport use, explicitly destroy the renderer while its OpenGL context is current.
-Teardown first obtains an idle reset permit from the Context. An outstanding frame or detached
-snapshot therefore returns an error before any GL handle or texture-map entry changes. Once
-validated, teardown deletes renderer-owned GPU textures, commits the Context binding reset, and
-releases the consumer so another renderer can attach:
+Teardown first obtains an idle reset permit from the Context. A pending frame is abandoned by its
+RAII guard if it cannot be reconciled, and teardown only proceeds once the Context has observed
+that completion. Once validated, teardown deletes renderer-owned GPU textures, commits the Context
+binding reset, and releases the consumer so another renderer can attach:
 
 ```rust
 let gl = renderer.gl_context().expect("owned GL context").clone();
@@ -52,8 +67,9 @@ renderer.destroy(&gl, &mut imgui)?;
 
 For a single-viewport renderer created with `with_external_context`, pass the same live GL context
 to `destroy`. `destroy_device_objects` uses the same prepare-delete-commit transaction but keeps the
-consumer attached for later device-object recreation. After an outstanding-work error, finish or
-drop that work, poll completions, and retry teardown with the renderer still intact.
+consumer attached for later device-object recreation. Dropping an unreconciled `PendingFrame`
+records abandonment before the Context becomes mutably available again, so teardown can retry
+without a separate completion-poll step.
 
 ## Runtime Capabilities and Texture Sampling
 
@@ -123,18 +139,34 @@ let mut runtime = unsafe { GlowViewportRuntime::attach(&mut imgui, renderer) }
     .map_err(|failure| failure.into_parts().0)?;
 
 runtime.new_frame()?;
-let frame = imgui.render();
-runtime.render(frame)?;
+runtime.render_context_with_platform_windows(&mut imgui)?;
 
 runtime.shutdown(&mut imgui)?;
 ```
 
+Integrations that own their frame schedule may split this convenience path as well:
+
+```rust
+let pending = runtime.with_renderer(|renderer| {
+    renderer
+        .renderer_consumer()
+        .map(|consumer| imgui.render(consumer))
+})??;
+let reconciled = runtime.reconcile_frame(pending)?;
+let reconciled = runtime.render_with_platform_windows_reconciled(reconciled)?;
+drop(reconciled);
+```
+
+The final call renders the main draw data, invokes the secondary viewport renderer callbacks while
+their OpenGL contexts are current, and finishes all OpenGL draw work before the platform presents
+the main back buffer. This OpenGL ordering intentionally differs from acquire-based WSI renderers:
+there is no separate main-surface acquisition phase to defer.
+
 Attachment preflights the complete renderer callback table and renderer capability bit, and fails
 without publishing partial state. Callback panic, reentry, renderer failure, and foreign callback
 replacement are contained and returned by the next Rust entry or `poll_fault`. Explicit shutdown
-preflights renderer epochs before deleting GL resources and leaves the renderer intact for retry if
-work is still outstanding. Explicit shutdown and Context-first teardown both delete renderer
-resources before platform windows. Every Rust and
+validates the synchronous consumer lifecycle before deleting GL resources. Explicit shutdown and
+Context-first teardown both delete renderer resources before platform windows. Every Rust and
 direct renderer callback entry revalidates the renderer capability, platform capability, required
 platform callbacks, and complete renderer callback table; dependency drift clears Glow's advertised
 capability and skips GL work. Dropping the wrapper defers the renderer attachment to its Context;

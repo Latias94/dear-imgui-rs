@@ -824,7 +824,10 @@ impl AppWindow {
             });
 
         self.imgui.platform.prepare_render(&ui, &self.window)?;
-        let draw_data = self.imgui.context.render();
+        let pending_frame = self
+            .imgui
+            .context
+            .render(self.imgui.renderer.renderer_consumer()?);
         // Persist state after the UI frame ends
         self.rot = rot;
         self.light_dir = light_dir;
@@ -865,7 +868,7 @@ impl AppWindow {
                 multiview_mask: None,
             });
 
-            self.imgui.renderer.render(draw_data, &mut rpass)?;
+            self.imgui.renderer.render(pending_frame, &mut rpass)?;
         }
 
         self.queue.submit(Some(encoder.finish()));

@@ -22,7 +22,7 @@ fn extensions_compose_inside_one_engine_managed_imgui_frame() {
 
     let mut imgui = Context::create();
     prepare_context(&mut imgui);
-    let consumer = imgui.create_renderer_consumer().unwrap();
+    let consumer = imgui.create_detached_renderer_consumer().unwrap();
 
     let plot_ctx = dear_implot::PlotContext::create(&imgui);
     let imnodes_ctx = dear_imnodes::Context::create(&imgui);

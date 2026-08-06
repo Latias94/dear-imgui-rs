@@ -843,7 +843,7 @@ mod tests {
             assert_eq!(gizmo.current_settings(), original);
         }
 
-        drop(imgui.render());
+        drop(imgui.render_legacy());
     }
 
     #[test]
@@ -870,7 +870,7 @@ mod tests {
 
         drop(other);
         unsafe { imgui_sys::igSetCurrentContext(raw) };
-        drop(imgui.render());
+        drop(imgui.render_legacy());
     }
 
     #[test]

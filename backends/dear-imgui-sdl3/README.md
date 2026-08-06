@@ -150,14 +150,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
 
         // 4) Render via OpenGL backend
-        let rendered = frame.render();
+        let pending = frame.render(sdl3_backend.consumer());
         unsafe {
             use sdl3::video::Window;
             use sdl3::video::GLContext;
             // The context passed at initialization must be current for every OpenGL operation.
             window.gl_make_current(&gl_context)?;
         }
-        sdl3_backend.render(rendered)?;
+        sdl3_backend.render(pending)?;
         window.gl_swap_window();
     }
 }
@@ -168,7 +168,11 @@ APIs of interest (see `src/lib.rs` for full docs):
 - `Sdl3OpenGl3Backend` and `Sdl3RendererBackend`:
   RAII renderer owners whose shared runtime retains the Context's renderer consumer through
   explicit or Context-owned teardown, processes request-bound texture feedback, and consumes
-  `RenderedFrame` values. OpenGL users must keep the initialized context current for renderer
+  `PendingFrame` values. Each owner exposes its non-cloneable synchronous consumer through
+  `consumer()`, and reconciliation returns the only drawable `ReconciledFrame` capability.
+  OpenGL multi-viewport routes can call `reconcile_frame(...)`, run secondary platform-window
+  callbacks, then transfer that capability into `render_reconciled(...)` for the main viewport.
+  OpenGL users must keep the initialized context current for renderer
   operations; SDLRenderer rejects a `WindowCanvas` backed by another raw renderer before texture
   or draw work starts.
 - `SdlGpu3RendererBackend`:
@@ -178,8 +182,9 @@ APIs of interest (see `src/lib.rs` for full docs):
   expose enough provenance to verify that the command buffer, render pass, and initialized device
   share one native owner. `reconcile_frame(...)` is a surface-independent preparation step for
   applications that must render secondary viewports before attempting to acquire the main
-  swapchain image. Repeating it is accepted only when the same renderer reconciled that exact
-  frame epoch; feedback produced outside the renderer is rejected.
+  swapchain image. After the secondary callbacks, `prepare_render_reconciled(...)` prepares that
+  same linear capability for the main pass. The methods consume their frame capabilities, so the
+  same epoch cannot be reconciled or rendered twice.
 - `Sdl3PlatformBackend`:
   platform-only RAII owner for applications that provide a separate renderer. It intentionally
   does not claim a renderer consumer. Construct it with unsafe `Sdl3PlatformBackend::init_for_other`,
@@ -197,9 +202,8 @@ APIs of interest (see `src/lib.rs` for full docs):
   because Drop cannot safely normalize a frame without the mutable Context. Managed texture proxy
   state is held by that attachment as well, so uninstalled native allocations remain destroyable
   after the Rust owner is dropped. Official renderer `shutdown(...)` and
-  `destroy_device_objects(...)` first require the Context renderer consumer to be idle: when a
-  detached `FrameSnapshot` is outstanding, they return before changing callbacks or destroying
-  native resources. Commit or drop those snapshots, then retry the operation.
+  `destroy_device_objects(...)` validate their Context-bound synchronous consumer before changing
+  callbacks or native resources, and release that consumer only after teardown succeeds.
   A platform-only owner also rejects explicit shutdown while an external renderer attachment is
   active. This preflight runs before the current frame or native SDL state changes; shut down the
   renderer first, then retry platform shutdown. Context-owned teardown preserves the same ordered
@@ -223,7 +227,7 @@ be reported; otherwise retain the Context so its attachment can complete deferre
 Official renderer teardown is transactional: it first obtains
 `Context::prepare_renderer_texture_reset(&consumer)` while its managed texture map is still
 intact, releases the upstream renderer resources, then commits the permit. An outstanding frame or
-detached snapshot rejects preparation before SDL resources or Context bindings change.
+a consumer mismatch rejects preparation before SDL resources or Context bindings change.
 
 Every owning backend registers its platform role with the Context before native initialization.
 Composite owners also register a renderer role, so Context-first teardown always releases renderer

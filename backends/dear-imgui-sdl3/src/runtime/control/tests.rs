@@ -277,6 +277,7 @@ fn registration_with_backend_lifecycle_and_texture_update(
     });
     RuntimeRegistration {
         control,
+        renderer_consumer: None,
         baseline: Some(baseline),
         platform_attachment: Some(platform_attachment),
         renderer_attachment,

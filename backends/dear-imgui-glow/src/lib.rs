@@ -33,7 +33,7 @@
 //! // In your render loop:
 //! // imgui.new_frame();
 //! // ... build your UI ...
-//! // let frame = imgui.render();
+//! // let frame = imgui.render(renderer.renderer_consumer().unwrap());
 //! // renderer.render(frame).unwrap();
 //! ```
 

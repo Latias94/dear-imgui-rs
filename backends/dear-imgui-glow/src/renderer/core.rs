@@ -1,11 +1,11 @@
 use crate::{GlBuffer, GlTexture, shaders::Shaders, texture::TextureMap, versions::GlVersion};
 use dear_imgui_rs::ContextBinding;
-use dear_imgui_rs::render::{RendererConsumer, SnapshotTextureId};
+use dear_imgui_rs::render::{SnapshotTextureId, SynchronousRendererConsumer};
 use std::collections::HashMap;
 use std::ffi::c_void;
 
 use super::sampler::SamplerObjects;
-use super::texture::ManagedTextureBinding;
+use super::texture::{ManagedTextureBinding, ManagedTextureTombstone};
 
 /// Stable marker stored in `BackendRendererUserData` while Glow owns renderer state.
 #[derive(Debug, Default)]
@@ -59,9 +59,9 @@ pub struct GlowRenderer {
     pub(super) synthetic_test_renderer: bool,
     pub(super) texture_map: Option<Box<dyn TextureMap>>,
     pub(super) managed_textures: HashMap<SnapshotTextureId, ManagedTextureBinding>,
-    /// Identities sealed by Destroy, paired with their latest request epoch.
-    pub(super) destroyed_managed_textures: HashMap<SnapshotTextureId, u64>,
-    pub(super) renderer_consumer: Option<RendererConsumer>,
+    /// Identities sealed by Destroy until a matching `Destroyed` outcome is acknowledged.
+    pub(super) destroyed_managed_textures: HashMap<SnapshotTextureId, ManagedTextureTombstone>,
+    pub(super) renderer_consumer: Option<SynchronousRendererConsumer>,
     // Optional: enable GL_FRAMEBUFFER_SRGB during ImGui rendering
     pub(super) framebuffer_srgb: bool,
     // Optional: override color gamma applied to vertex colors (None = auto)
@@ -72,6 +72,16 @@ pub struct GlowRenderer {
 }
 
 impl GlowRenderer {
+    /// Returns the synchronous consumer capability owned by this renderer.
+    ///
+    /// Pass it to [`dear_imgui_rs::Context::render`] to create the pending frame that this
+    /// renderer consumes.
+    pub fn renderer_consumer(&self) -> crate::RenderResult<&SynchronousRendererConsumer> {
+        self.renderer_consumer
+            .as_ref()
+            .ok_or(crate::RenderError::RendererNotAttached)
+    }
+
     /// Returns the OpenGL version detected from the live context at initialization.
     pub fn gl_version(&self) -> GlVersion {
         self.gl_version

@@ -352,7 +352,7 @@ mod tests {
             let _ = ui.node_editor(&editor, "wrong-context", [320.0, 240.0]);
         }));
         assert!(result.is_err());
-        drop(imgui_b.render());
+        drop(imgui_b.render_legacy());
 
         drop(imgui_b);
         let imgui_a = suspended_a.activate().expect("context A should reactivate");
@@ -371,7 +371,7 @@ mod tests {
         let _editor = EditorContext::create(&imgui);
 
         imgui.frame();
-        drop(imgui.render());
+        drop(imgui.render_legacy());
     }
 
     #[test]
@@ -464,7 +464,7 @@ mod tests {
 
             editor.end();
         });
-        drop(imgui.render());
+        drop(imgui.render_legacy());
     }
 
     #[test]
@@ -498,7 +498,7 @@ mod tests {
             drop(frame);
             assert_eq!(unsafe { sys::dne_get_current_editor_raw() }, raw_b);
         });
-        drop(imgui.render());
+        drop(imgui.render_legacy());
 
         unsafe { sys::dne_set_current_editor_raw(ptr::null_mut()) };
 

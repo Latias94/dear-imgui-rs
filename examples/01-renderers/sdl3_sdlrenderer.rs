@@ -124,8 +124,8 @@ impl SdlRendererApp {
             ui.show_about_window(&mut main.show_about);
         }
 
-        let draw_data = main.imgui.render();
-        main.sdl3_backend.render(draw_data, &main.canvas)?;
+        let pending_frame = main.imgui.render(main.sdl3_backend.consumer());
+        main.sdl3_backend.render(pending_frame, &main.canvas)?;
         main.canvas.present();
 
         Ok(AppResult::Continue)

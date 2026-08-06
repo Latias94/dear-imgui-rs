@@ -13,7 +13,7 @@ use super::callbacks::{
     destroy_renderer_viewport_resources, framebuffer_size_for_reconfigure,
     preflight_renderer_viewport_resources, publish_registered_box, render_callback_matches,
     renderer_create_window_sys, renderer_destroy_window_sys, renderer_render_window_sys,
-    renderer_set_window_size_sys, renderer_swap_buffers_sys, unary_callback_matches,
+    renderer_set_window_size_sys, unary_callback_matches,
 };
 use super::registry::{
     ViewportDataDestroy, ViewportIdentity, destroy_viewport_data, fail_next_viewport_registration,
@@ -435,7 +435,7 @@ fn configured_test_renderer(context: &mut Context) -> (WgpuRenderer, BackendFlag
     let (owned_flags, _) = WgpuRenderer::configure_imgui_context(context).unwrap();
     let mut renderer = WgpuRenderer::empty();
     renderer.bind_context(context, owned_flags).unwrap();
-    renderer.renderer_consumer = Some(context.create_renderer_consumer().unwrap());
+    renderer.renderer_consumer = Some(context.create_synchronous_renderer_consumer().unwrap());
     (renderer, owned_flags)
 }
 
@@ -908,93 +908,22 @@ fn moving_wrapper_keeps_runtime_owned_renderer_storage_stable() {
 }
 
 #[test]
-fn shutdown_with_outstanding_snapshot_keeps_renderer_for_retry() {
+fn reconcile_frame_consumes_a_frame_token_without_reborrowing_context() {
     let _guard = lock_context();
     let mut context = Context::create();
     context.io_mut().set_display_size([128.0, 128.0]);
     context.io_mut().set_delta_time(1.0 / 60.0);
     let _platform = attach_test_platform(&mut context);
-    let (mut runtime, _) = attach_configured_test_runtime(&mut context);
-    let control = runtime.control_for_test();
-    let drops = Rc::new(Cell::new(0));
-    let viewport = unsafe { sys::igGetMainViewport() };
-    publish_drop_probe(&context, unsafe { &mut *viewport }, Rc::clone(&drops));
-    let snapshot = {
-        let renderer = control.borrow_renderer_for_test();
-        let consumer = renderer
-            .as_ref()
-            .unwrap()
-            .renderer_consumer
-            .as_ref()
-            .unwrap();
-        context.begin_frame().render_snapshot(consumer).unwrap()
-    };
+    let runtime =
+        OwningViewportRuntime::attach_for_test(&mut context, WgpuRenderer::empty()).unwrap();
 
+    let frame = context.begin_frame();
     assert!(matches!(
-        runtime.shutdown(&mut context),
+        runtime.reconcile_frame(frame),
         Err(WgpuViewportError::Renderer(
-            crate::RendererError::RendererConsumer(
-                dear_imgui_rs::render::RendererConsumerError::OutstandingEpochs { count: 1 }
-            )
+            crate::RendererError::InvalidRenderState(_)
         ))
     ));
-    assert_eq!(runtime.state_for_test(), RuntimeState::Attached);
-    assert!(control.has_renderer_for_test());
-    assert!(
-        control
-            .borrow_renderer_for_test()
-            .as_ref()
-            .is_some_and(|renderer| renderer.renderer_consumer.is_some()),
-        "a rejected reset permit must leave the renderer consumer available for retry"
-    );
-    assert!(
-        !context.io().backend_renderer_user_data().is_null()
-            && context.io().backend_renderer_name().is_some(),
-        "a rejected reset permit must not detach Context renderer bindings"
-    );
-    assert_eq!(
-        drops.get(),
-        0,
-        "preflight failure must not destroy viewport sidecars"
-    );
-    assert_eq!(viewport_data_count(context.id()), 1);
-    assert!(!unsafe { (*viewport).RendererUserData }.is_null());
-    assert!(
-        context
-            .io()
-            .backend_flags()
-            .contains(BackendFlags::RENDERER_HAS_VIEWPORTS),
-        "preflight failure must keep the runtime capability claimed"
-    );
-    let platform_io = context.platform_io();
-    assert!(unary_callback_matches(
-        platform_io.renderer_create_window_raw(),
-        renderer_create_window_sys
-    ));
-    assert!(unary_callback_matches(
-        platform_io.renderer_destroy_window_raw(),
-        renderer_destroy_window_sys
-    ));
-    assert!(
-        platform_io.renderer_set_window_size_matches_pointer_callback(renderer_set_window_size_sys)
-    );
-    assert!(render_callback_matches(
-        platform_io.renderer_render_window_raw(),
-        renderer_render_window_sys
-    ));
-    assert!(render_callback_matches(
-        platform_io.renderer_swap_buffers_raw(),
-        renderer_swap_buffers_sys
-    ));
-
-    drop(snapshot);
-    context.poll_snapshot_completions().unwrap();
-    runtime.shutdown(&mut context).unwrap();
-    assert_eq!(runtime.state_for_test(), RuntimeState::ResourceDropped);
-    assert!(!control.has_renderer_for_test());
-    assert_eq!(drops.get(), 1);
-    assert!(context.io().backend_renderer_user_data().is_null());
-    assert!(context.io().backend_renderer_name().is_none());
 }
 
 #[test]
@@ -1679,11 +1608,9 @@ fn context_first_shutdown_releases_renderer_before_platform_phase_once() {
 }
 
 #[test]
-fn dropping_wrapper_defers_to_context_with_outstanding_snapshot_and_rejects_replacement() {
+fn dropping_wrapper_defers_to_context_and_rejects_replacement() {
     let _guard = lock_context();
     let mut context = Context::create();
-    context.io_mut().set_display_size([128.0, 128.0]);
-    context.io_mut().set_delta_time(1.0 / 60.0);
     let control_slot = Rc::new(RefCell::new(None));
     let renderer_released_first = Rc::new(Cell::new(false));
     let platform_phase_count = Rc::new(Cell::new(0));
@@ -1700,16 +1627,6 @@ fn dropping_wrapper_defers_to_context_with_outstanding_snapshot_and_rejects_repl
     let drops = Rc::new(Cell::new(0));
     let viewport = unsafe { sys::igGetMainViewport() };
     publish_drop_probe(&context, unsafe { &mut *viewport }, Rc::clone(&drops));
-    let snapshot = {
-        let renderer = control.borrow_renderer_for_test();
-        let consumer = renderer
-            .as_ref()
-            .unwrap()
-            .renderer_consumer
-            .as_ref()
-            .unwrap();
-        context.begin_frame().render_snapshot(consumer).unwrap()
-    };
 
     drop(runtime);
 
@@ -1744,10 +1661,8 @@ fn dropping_wrapper_defers_to_context_with_outstanding_snapshot_and_rejects_repl
     ));
     assert_eq!(platform_phase_count.get(), 0);
 
-    // The snapshot is intentionally outstanding during wrapper Drop. Its release does not grant
-    // a replacement runtime ownership; only Context teardown may complete the deferred cleanup.
-    drop(snapshot);
-    context.poll_snapshot_completions().unwrap();
+    // Wrapper Drop does not grant replacement runtime ownership; only Context teardown may
+    // complete the deferred cleanup.
     assert_eq!(drops.get(), 0);
     assert_eq!(control.state(), RuntimeState::Attached);
 

@@ -631,6 +631,6 @@ mod tests {
         ctx.io_mut().set_delta_time(1.0 / 60.0);
 
         assert!(ctx.frame().image_custom_rect(id, [8.0, 8.0]));
-        let _ = ctx.render();
+        let _ = ctx.render_legacy();
     }
 }

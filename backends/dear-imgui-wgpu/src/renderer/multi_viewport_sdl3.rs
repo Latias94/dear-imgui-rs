@@ -20,8 +20,8 @@ mod removed_free_api_contracts {
     struct NewFrame;
 }
 
-use dear_imgui_rs::Context;
-use dear_imgui_rs::render::{ReconciledFrame, RenderedFrame};
+use dear_imgui_rs::render::ReconciledFrame;
+use dear_imgui_rs::{Context, FrameToken};
 
 use super::WgpuRenderer;
 use super::multi_viewport_runtime::OwningViewportRuntime;
@@ -102,24 +102,26 @@ impl Sdl3ViewportRuntime {
         self.inner.begin_frame_trace()
     }
 
-    /// Prepares frame resources and applies managed-texture requests before platform-window rendering.
-    pub fn reconcile_frame(&self, frame: &mut RenderedFrame<'_>) -> Result<(), WgpuViewportError> {
-        self.inner.reconcile_frame(frame)
+    /// Finalizes and reconciles the bound Context before platform-window rendering.
+    pub fn reconcile_context<'context>(
+        &self,
+        context: &'context mut Context,
+    ) -> Result<ReconciledFrame<'context>, WgpuViewportError> {
+        self.inner.reconcile_context(context)
     }
 
-    /// Consumes and renders one Context-owned frame.
-    pub fn render(
+    /// Consumes an open frame and reconciles it before platform-window rendering.
+    pub fn reconcile_frame<'frame>(
         &self,
-        frame: RenderedFrame<'_>,
-        render_pass: &mut wgpu::RenderPass<'_>,
-    ) -> Result<(), WgpuViewportError> {
-        self.inner.render(frame, render_pass)
+        frame: FrameToken<'frame>,
+    ) -> Result<ReconciledFrame<'frame>, WgpuViewportError> {
+        self.inner.reconcile_frame(frame)
     }
 
     /// Renders one frame and returns its reconciliation proof to a presentation owner.
     pub fn render_reconciled<'frame>(
         &self,
-        frame: RenderedFrame<'frame>,
+        frame: ReconciledFrame<'frame>,
         render_pass: &mut wgpu::RenderPass<'_>,
     ) -> Result<ReconciledFrame<'frame>, WgpuViewportError> {
         self.inner.render_reconciled(frame, render_pass)
@@ -134,22 +136,10 @@ impl Sdl3ViewportRuntime {
         self.inner.render_context(context, render_pass)
     }
 
-    /// Consumes and renders one Context-owned frame with explicit framebuffer dimensions.
-    pub fn render_with_fb_size(
-        &self,
-        frame: RenderedFrame<'_>,
-        render_pass: &mut wgpu::RenderPass<'_>,
-        width: u32,
-        height: u32,
-    ) -> Result<(), WgpuViewportError> {
-        self.inner
-            .render_with_fb_size(frame, render_pass, width, height)
-    }
-
     /// Renders one frame at explicit dimensions and returns its reconciliation proof.
     pub fn render_with_fb_size_reconciled<'frame>(
         &self,
-        frame: RenderedFrame<'frame>,
+        frame: ReconciledFrame<'frame>,
         render_pass: &mut wgpu::RenderPass<'_>,
         width: u32,
         height: u32,

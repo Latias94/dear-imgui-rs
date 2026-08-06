@@ -23,9 +23,9 @@ fn main() -> imgui::ImGuiResult<()> {
     let mut context_b = imgui::Context::create();
     prepare_headless_context(&mut context_b, [320.0, 180.0])?;
 
-    let _ = context_b.frame_with_result(|ui| {
-        ui.text("Context B can render its own frame.");
-    });
+    let frame_b = context_b.begin_frame();
+    frame_b.ui().text("Context B can render its own frame.");
+    drop(frame_b.render_legacy());
 
     let suspended_b = context_b.suspend();
     let mut context_a = suspended_a
@@ -42,7 +42,7 @@ fn main() -> imgui::ImGuiResult<()> {
         ui.text("This style stack entry belongs to context A.");
     }
 
-    let _ = frame.render();
+    drop(frame.render_legacy());
 
     drop(context_a);
     drop(suspended_b);

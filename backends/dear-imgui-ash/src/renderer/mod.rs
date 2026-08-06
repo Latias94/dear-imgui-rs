@@ -122,9 +122,9 @@ use dear_imgui_rs::Context;
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
 use dear_imgui_rs::ViewportFlags;
 use dear_imgui_rs::render::{
-    RenderedFrame, RendererConsumer, RendererRenderStateGuard, RendererRenderStateGuardError,
-    SnapshotTextureId, TextureFeedback, TextureOp, TextureRequest, TextureUploadIdentity,
-    TextureUploadRect,
+    PendingFrame, ReconciledFrame, RendererRenderStateGuard, RendererRenderStateGuardError,
+    SnapshotTextureId, SynchronousRendererConsumer, TextureFeedback, TextureOp, TextureRequest,
+    TextureUploadIdentity, TextureUploadRect,
 };
 use dear_imgui_rs::{TextureData, TextureFormat as ImGuiTextureFormat, TextureId, TextureStatus};
 use std::collections::{HashMap, VecDeque};

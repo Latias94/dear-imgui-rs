@@ -5,13 +5,13 @@ use std::fs;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use dear_imgui_rs::{
-    Condition, Context, ContextLifecycle, SuspendedContext, TableColumnIndex, TableFlags,
-    render::{ReconciledFrame, RenderedFrame},
+    Condition, Context, ContextLifecycle, FrameToken, SuspendedContext, TableColumnIndex,
+    TableFlags, render::ReconciledFrame,
 };
 use dear_imgui_test_engine::{
-    AttachmentState, BuiltInTestSuite, CaptureOutput, FrameDriverError, RunFlags, RunSpeed,
-    RunState, ScriptCount, TestEngine, TestEngineError, TestEngineResult, TestEngineStatus,
-    TestFrameDriver, TestGroup, TestRunner, VerboseLevel, raw,
+    AttachmentState, BuiltInTestSuite, CaptureOutput, FrameDriverError, MainRenderOutcome,
+    RunFlags, RunSpeed, RunState, ScriptCount, TestEngine, TestEngineError, TestEngineResult,
+    TestEngineStatus, TestFrameDriver, TestGroup, TestRunner, VerboseLevel, raw,
 };
 
 static TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -23,18 +23,25 @@ const ALLOCATION_ALIGNMENT: usize = 16;
 struct VirtualFrameDriver;
 
 impl TestFrameDriver for VirtualFrameDriver {
+    type PrepareError = Infallible;
     type RenderError = Infallible;
     type PresentError = Infallible;
 
-    fn render<'frame>(
+    fn prepare<'frame>(
         &mut self,
-        mut frame: RenderedFrame<'frame>,
+        frame: FrameToken<'frame>,
         _frame_index: u64,
-    ) -> Result<ReconciledFrame<'frame>, Self::RenderError> {
-        frame
-            .reconcile_texture_feedback([])
-            .expect("empty texture feedback");
-        Ok(frame.into_reconciled().expect("reconciled virtual frame"))
+    ) -> Result<ReconciledFrame<'frame>, Self::PrepareError> {
+        Ok(frame.render_legacy())
+    }
+
+    fn render_main(
+        &mut self,
+        frame: ReconciledFrame<'_>,
+        _frame_index: u64,
+    ) -> Result<MainRenderOutcome, Self::RenderError> {
+        drop(frame);
+        Ok(MainRenderOutcome::ReadyToPresent)
     }
 
     fn present(&mut self, _frame_index: u64) -> Result<(), Self::PresentError> {
@@ -245,10 +252,7 @@ fn assert_invalid_state<T: std::fmt::Debug>(result: TestEngineResult<T>) {
     assert!(matches!(result, Err(TestEngineError::InvalidState { .. })));
 }
 
-fn assert_frame_driver_invalid_state(
-    engine: &mut TestEngine,
-    frame: dear_imgui_rs::render::RenderedFrame<'_>,
-) {
+fn assert_frame_driver_invalid_state(engine: &mut TestEngine, frame: FrameToken<'_>) {
     let error = engine
         .drive_frame(frame, 0, &mut VirtualFrameDriver)
         .expect_err("frame driver state must be rejected");
@@ -476,7 +480,7 @@ fn show_windows_validates_context_identity_and_native_frame_scope() {
         engine.show_windows(ui, None).expect("valid attached Ui");
         ui as *const dear_imgui_rs::Ui
     };
-    drop(context_a.render());
+    drop(context_a.render_legacy());
     // Ui is stable storage owned by the still-live Context. This intentionally bypasses only the
     // frame borrow so the safe wrapper can prove native WithinFrameScope is checked at runtime.
     let error = unsafe { engine.show_windows(&*stale_ui, None) }
@@ -495,7 +499,7 @@ fn show_windows_validates_context_identity_and_native_frame_scope() {
         .show_windows(ui_b, None)
         .expect_err("foreign Ui must be rejected before binding");
     assert!(matches!(error, TestEngineError::ContextMismatch { .. }));
-    drop(context_b.render());
+    drop(context_b.render_legacy());
     let suspended_b = context_b.suspend();
     let context_a = suspended_a.activate().expect("Context A activation");
 
@@ -530,7 +534,8 @@ fn queued_and_running_runs_reject_requeue_until_terminal_summary_is_consumed() {
 
     let mut observed_running = false;
     for _ in 0..32 {
-        let ui = context.frame();
+        let frame = context.begin_frame();
+        let ui = frame.ui();
         ui.text("run-state host");
         observed_running |= engine.is_running_tests().expect("running query");
         if engine.run_state() == RunState::Running {
@@ -543,7 +548,7 @@ fn queued_and_running_runs_reject_requeue_until_terminal_summary_is_consumed() {
             ));
         }
         engine
-            .drive_frame(context.render(), 0, &mut VirtualFrameDriver)
+            .drive_frame(frame, 0, &mut VirtualFrameDriver)
             .expect("virtual frame");
         if engine.run_state() == RunState::Terminal {
             break;
@@ -592,9 +597,9 @@ fn context_first_teardown_saves_test_engine_settings_once_before_tombstoning() {
     engine
         .set_capture_output(CaptureOutput::Discard)
         .expect("mutate saved Test Engine setting");
-    let ui = context.frame();
-    ui.text("load and dirty settings");
-    drop(context.render());
+    let frame = context.begin_frame();
+    frame.ui().text("load and dirty settings");
+    drop(frame.render_legacy());
 
     drop(context);
     assert_eq!(engine.attachment_state(), AttachmentState::ContextDestroyed);
@@ -668,8 +673,9 @@ fn public_engine_methods_enforce_the_attachment_and_run_state_matrix() {
     assert_invalid_state(detached.add_script_test("state", "detached", |_| Ok(())));
     assert_invalid_state(detached.queue_all_tests());
     let mut detached_probe = context();
-    detached_probe.frame().text("detached driver state probe");
-    assert_frame_driver_invalid_state(&mut detached, detached_probe.render());
+    let detached_frame = detached_probe.begin_frame();
+    detached_frame.ui().text("detached driver state probe");
+    assert_frame_driver_invalid_state(&mut detached, detached_frame);
     drop(detached_probe);
     assert_invalid_state(detached.stop());
     assert_invalid_state(detached.try_abort_engine());
@@ -710,14 +716,23 @@ fn public_engine_methods_enforce_the_attachment_and_run_state_matrix() {
     detached
         .set_capture_output(CaptureOutput::Discard)
         .expect("Ready config");
-    stopped_context.frame().text("inactive driver state probe");
-    let stopped_frame = stopped_context.render();
     detached.stop().expect("Ready to Inactive");
     assert_eq!(detached.run_state(), RunState::Inactive);
     assert_invalid_state(detached.result_summary());
     assert_invalid_state(detached.take_terminal_summary());
     assert_invalid_state(detached.queue_all_tests());
-    assert_frame_driver_invalid_state(&mut detached, stopped_frame);
+    // The stopped engine retains hooks on `stopped_context`. Do not open another native frame on
+    // that Context after stopping solely to manufacture a rejected driver capability; use an
+    // unattached probe so this assertion exercises only the engine state gate.
+    let suspended_stopped_context = stopped_context.suspend();
+    let mut inactive_probe = context();
+    let inactive_frame = inactive_probe.begin_frame();
+    inactive_frame.ui().text("inactive driver state probe");
+    assert_frame_driver_invalid_state(&mut detached, inactive_frame);
+    let suspended_inactive_probe = inactive_probe.suspend();
+    let stopped_context = suspended_stopped_context
+        .activate()
+        .expect("reactivate stopped Context for shutdown");
     assert_invalid_state(detached.stop());
     assert_invalid_state(detached.is_test_queue_empty());
     assert_invalid_state(detached.is_running_tests());
@@ -729,6 +744,7 @@ fn public_engine_methods_enforce_the_attachment_and_run_state_matrix() {
         .shutdown()
         .expect("Destroyed shutdown is idempotent");
     drop(stopped_context);
+    drop(suspended_inactive_probe);
 
     let mut terminal_context = context();
     let mut terminal = TestEngine::create().expect("terminal engine");
@@ -752,10 +768,11 @@ fn public_engine_methods_enforce_the_attachment_and_run_state_matrix() {
     assert_invalid_state(terminal.result_summary());
     assert_invalid_state(terminal.take_terminal_summary());
     let mut destroyed_probe = context();
-    destroyed_probe
-        .frame()
+    let destroyed_frame = destroyed_probe.begin_frame();
+    destroyed_frame
+        .ui()
         .text("context-destroyed driver state probe");
-    assert_frame_driver_invalid_state(&mut terminal, destroyed_probe.render());
+    assert_frame_driver_invalid_state(&mut terminal, destroyed_frame);
     drop(destroyed_probe);
     terminal.shutdown().expect("ContextDestroyed shutdown");
 }
@@ -1007,11 +1024,12 @@ fn missing_table_lookup_is_a_failed_test_not_an_infrastructure_error() {
         .expect("queue missing-table test");
 
     for _ in 0..64 {
-        let ui = context.frame();
+        let frame = context.begin_frame();
+        let ui = frame.ui();
         ui.window("Table Host")
             .build(|| ui.text("No table is intentionally created"));
         engine
-            .drive_frame(context.render(), 0, &mut VirtualFrameDriver)
+            .drive_frame(frame, 0, &mut VirtualFrameDriver)
             .expect("virtual frame remains infrastructure-successful");
         if engine.run_state() == RunState::Terminal {
             break;
@@ -1050,7 +1068,8 @@ fn table_resize_by_label_succeeds_for_a_resizable_table() {
         .expect("queue table resize test");
 
     for _ in 0..64 {
-        let ui = context.frame();
+        let frame = context.begin_frame();
+        let ui = frame.ui();
         ui.window("Table Host")
             .size([420.0, 240.0], Condition::Always)
             .build(|| {
@@ -1072,7 +1091,7 @@ fn table_resize_by_label_succeeds_for_a_resizable_table() {
                     });
             });
         engine
-            .drive_frame(context.render(), 0, &mut VirtualFrameDriver)
+            .drive_frame(frame, 0, &mut VirtualFrameDriver)
             .expect("virtual frame");
         if engine.run_state() == RunState::Terminal {
             break;

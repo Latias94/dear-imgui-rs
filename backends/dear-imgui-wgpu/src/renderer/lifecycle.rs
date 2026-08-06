@@ -15,12 +15,12 @@ use crate::{FrameResourceArena, RenderResources, RendererError, RendererResult, 
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
     ContextAttachmentRole, ContextAttachmentTeardownError, ContextBindingError, ContextDestroyed,
-    ContextTeardown, render::RendererConsumer,
+    ContextTeardown, render::SynchronousRendererConsumer,
 };
 
 struct WgpuRendererDropAttachmentMarker;
 
-/// GPU and snapshot state transferred out of a renderer wrapper that was dropped without an
+/// GPU and consumer state transferred out of a renderer wrapper that was dropped without an
 /// explicit `shutdown`. The Context attachment releases GPU resources in its terminal renderer
 /// phase; a Context that is already dropping retains the raw-publication token until native
 /// destruction has made it inert.
@@ -30,7 +30,7 @@ struct DeferredRendererResources {
     shader_manager: Option<ShaderManager>,
     texture_manager: Option<crate::WgpuTextureManager>,
     default_texture: Option<wgpu::TextureView>,
-    renderer_consumer: Option<RendererConsumer>,
+    renderer_consumer: Option<SynchronousRendererConsumer>,
 }
 
 impl DeferredRendererResources {
@@ -48,15 +48,13 @@ impl DeferredRendererResources {
         // same prepare -> release -> commit transaction as explicit shutdown. If preflight
         // rejects an outstanding epoch, the closure does not run and the consumer is restored so
         // no renderer state is silently released out of order.
-        let result = context
-            .with_renderer_texture_reset(&consumer, || {
-                self.backend_data.take();
-                self.shader_manager.take();
-                self.texture_manager.take();
-                self.default_texture.take();
-                Ok(())
-            })
-            .map(|_| ());
+        let result = context.with_renderer_texture_reset(&consumer, || {
+            self.backend_data.take();
+            self.shader_manager.take();
+            self.texture_manager.take();
+            self.default_texture.take();
+            Ok(())
+        });
         if result.is_err() {
             self.renderer_consumer = Some(consumer);
         }
@@ -236,7 +234,7 @@ impl WgpuRenderer {
         };
 
         self.invalidate_device_objects_only();
-        let _invalidated = reset.commit();
+        reset.commit();
         self.texture_manager.clear_destroyed_managed_textures();
         self.renderer_consumer = Some(consumer);
 
@@ -273,7 +271,7 @@ impl WgpuRenderer {
     /// method until that owning runtime completes teardown.
     pub fn shutdown(&mut self, imgui_context: &mut Context) -> RendererResult<()> {
         self.ensure_context_matches(imgui_context)?;
-        // Reset is the transactional preflight for teardown. Outstanding frames/snapshots leave
+        // Reset is the transactional preflight for teardown. Outstanding epochs leave
         // the renderer, GPU resources, token, and raw Context contract intact for a later retry.
         let consumer = self
             .renderer_consumer
@@ -288,7 +286,7 @@ impl WgpuRenderer {
         };
 
         self.release_all_device_objects_only();
-        let _invalidated = reset.commit();
+        reset.commit();
         self.texture_manager.clear_destroyed_managed_textures();
         self.backend_data = None;
         drop(consumer);
@@ -298,7 +296,7 @@ impl WgpuRenderer {
 
     /// Validates that shutdown can acquire its renderer reset permit without mutating renderer
     /// state. Multi-viewport teardown calls this before it destroys surfaces or releases callback
-    /// slots, so an outstanding frame or detached snapshot leaves the whole runtime retryable.
+    /// slots, so an outstanding renderer epoch leaves the whole runtime retryable.
     #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     pub(super) fn preflight_shutdown(&self, imgui_context: &mut Context) -> RendererResult<()> {
         self.ensure_context_matches(imgui_context)?;
@@ -383,14 +381,12 @@ impl WgpuRenderer {
         // contract exactly: validate the idle consumer, release sidecars and every GPU texture,
         // then commit native binding invalidation. A failed preflight or sidecar release restores
         // the consumer and leaves the renderer fields intact for the fail-stop Context owner.
-        let result = context
-            .with_renderer_texture_reset(&consumer, || {
-                release_viewports()?;
-                self.release_all_device_objects_only();
-                self.backend_data = None;
-                Ok(())
-            })
-            .map(|_| ());
+        let result = context.with_renderer_texture_reset(&consumer, || {
+            release_viewports()?;
+            self.release_all_device_objects_only();
+            self.backend_data = None;
+            Ok(())
+        });
         match result {
             Ok(()) => {
                 self.texture_manager.clear_destroyed_managed_textures();
@@ -495,7 +491,7 @@ mod tests {
             .expect("configured Context should bind once");
         renderer.renderer_consumer = Some(
             context
-                .create_renderer_consumer()
+                .create_synchronous_renderer_consumer()
                 .expect("test Context should create a renderer consumer"),
         );
         renderer
@@ -585,58 +581,31 @@ mod tests {
     }
 
     #[test]
-    fn outstanding_snapshot_rejects_invalidation_without_detaching_renderer() {
+    fn renderer_owns_the_context_synchronous_consumer() {
         let mut context = Context::create();
-        context.io_mut().set_display_size([128.0, 128.0]);
-        context.io_mut().set_delta_time(1.0 / 60.0);
         let mut renderer = configured_test_renderer(&mut context);
-        let snapshot = {
-            let consumer = renderer
-                .renderer_consumer
-                .as_ref()
-                .expect("configured renderer should own a consumer");
-            context.begin_frame().render_snapshot(consumer).unwrap()
-        };
 
+        let consumer = renderer
+            .renderer_consumer()
+            .expect("configured renderer should own a consumer");
+        assert_eq!(consumer.context_id(), context.id());
         assert!(matches!(
-            renderer.invalidate_device_objects(&mut context),
-            Err(RendererError::RendererConsumer(
-                dear_imgui_rs::render::RendererConsumerError::OutstandingEpochs { count: 1 }
-            ))
+            context.create_detached_renderer_consumer(),
+            Err(dear_imgui_rs::render::RendererConsumerError::ConsumerAlreadyActive)
         ));
-        assert!(renderer.renderer_consumer.is_some());
-        assert!(!context.io().backend_renderer_user_data().is_null());
-        assert!(context.io().backend_renderer_name().is_some());
-
-        drop(snapshot);
-        context.poll_snapshot_completions().unwrap();
-        renderer.invalidate_device_objects(&mut context).unwrap();
-        assert!(renderer.renderer_consumer.is_some());
-        assert!(!context.io().backend_renderer_user_data().is_null());
-        assert!(context.io().backend_renderer_name().is_some());
 
         renderer.shutdown(&mut context).unwrap();
     }
 
     #[test]
-    fn dropping_renderer_with_outstanding_snapshot_defers_to_context_teardown() {
+    fn dropping_renderer_defers_resources_to_context_teardown() {
         let mut context = Context::create();
-        context.io_mut().set_display_size([128.0, 128.0]);
-        context.io_mut().set_delta_time(1.0 / 60.0);
         let renderer = configured_test_renderer(&mut context);
         let control = renderer
             .drop_deferral
             .as_ref()
             .expect("bound renderer must install a deferred-drop attachment")
             .control_for_test();
-        let snapshot = {
-            let consumer = renderer
-                .renderer_consumer
-                .as_ref()
-                .expect("configured renderer should own a consumer");
-            context.begin_frame().render_snapshot(consumer).unwrap()
-        };
-
         drop(renderer);
 
         assert!(control.has_deferred_resources());
@@ -651,8 +620,6 @@ mod tests {
             ))
         ));
 
-        drop(snapshot);
-        context.poll_snapshot_completions().unwrap();
         assert!(control.has_deferred_resources());
         assert_eq!(control.renderer_release_count(), 0);
 
@@ -661,45 +628,6 @@ mod tests {
         assert_eq!(control.renderer_release_count(), 1);
         assert!(!control.has_deferred_resources());
         assert!(control.context_was_destroyed());
-    }
-
-    #[test]
-    fn explicit_shutdown_retries_after_outstanding_snapshot_and_releases_deferral() {
-        let mut context = Context::create();
-        context.io_mut().set_display_size([128.0, 128.0]);
-        context.io_mut().set_delta_time(1.0 / 60.0);
-        let mut renderer = configured_test_renderer(&mut context);
-        let control = renderer
-            .drop_deferral
-            .as_ref()
-            .expect("bound renderer must install a deferred-drop attachment")
-            .control_for_test();
-        let snapshot = {
-            let consumer = renderer
-                .renderer_consumer
-                .as_ref()
-                .expect("configured renderer should own a consumer");
-            context.begin_frame().render_snapshot(consumer).unwrap()
-        };
-
-        assert!(matches!(
-            renderer.shutdown(&mut context),
-            Err(RendererError::RendererConsumer(
-                dear_imgui_rs::render::RendererConsumerError::OutstandingEpochs { count: 1 }
-            ))
-        ));
-        assert!(renderer.drop_deferral.is_some());
-        assert!(!control.has_deferred_resources());
-        assert!(!context.io().backend_renderer_user_data().is_null());
-
-        drop(snapshot);
-        context.poll_snapshot_completions().unwrap();
-        renderer.shutdown(&mut context).unwrap();
-        assert!(renderer.drop_deferral.is_none());
-        assert!(!control.has_deferred_resources());
-
-        let mut replacement = configured_test_renderer(&mut context);
-        replacement.shutdown(&mut context).unwrap();
     }
 
     #[test]
@@ -944,11 +872,6 @@ mod tests {
         );
 
         let mut replacement = configured_test_renderer(&mut context);
-        context.io_mut().set_display_size([128.0, 128.0]);
-        context.io_mut().set_delta_time(1.0 / 60.0);
-        let _ui = context.frame();
-        let frame = context.render();
-        drop(frame);
         replacement.shutdown(&mut context).unwrap();
     }
 }

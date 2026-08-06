@@ -1,8 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 
-#[cfg(test)]
-use dear_imgui_rs::render::FrameSnapshot;
 use dear_imgui_rs::{Context, ContextBinding, Id, platform_io::PlatformIo};
 
 use super::super::registry::{GlobalHandles, unregister_runtime};
@@ -346,24 +344,6 @@ impl RuntimeControl {
             .borrow()
             .as_ref()
             .map_or(std::ptr::null(), RendererStorage::address)
-    }
-
-    #[cfg(test)]
-    pub(super) fn snapshot_for_shutdown_test(&self, context: &mut Context) -> FrameSnapshot {
-        let renderer = self.renderer.borrow();
-        let consumer = match renderer.as_ref() {
-            Some(RendererStorage::Fake {
-                consumer: Some(consumer),
-                ..
-            }) => consumer,
-            Some(RendererStorage::Real(_))
-            | Some(RendererStorage::Fake { consumer: None, .. })
-            | None => panic!("test runtime has no active renderer consumer"),
-        };
-        context
-            .begin_frame()
-            .render_snapshot(consumer)
-            .expect("test runtime consumer must capture a snapshot")
     }
 
     #[cfg(test)]

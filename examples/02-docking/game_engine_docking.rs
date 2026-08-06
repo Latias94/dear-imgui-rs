@@ -214,23 +214,36 @@ enum ImguiRenderer {
 }
 
 impl ImguiRenderer {
-    fn render_with_fb_size(
+    fn reconcile_context<'ctx>(
         &mut self,
-        frame: dear_imgui_rs::render::RenderedFrame<'_>,
+        context: &'ctx mut Context,
+    ) -> Result<dear_imgui_rs::render::ReconciledFrame<'ctx>, Box<dyn std::error::Error>> {
+        match self {
+            Self::Single(renderer) => {
+                let pending_frame = context.render(renderer.renderer_consumer()?);
+                Ok(renderer.reconcile_frame(pending_frame)?)
+            }
+            #[cfg(feature = "multi-viewport")]
+            Self::Multi(runtime) => Ok(runtime.reconcile_context(context)?),
+        }
+    }
+
+    fn render_with_fb_size_reconciled<'ctx>(
+        &mut self,
+        frame: dear_imgui_rs::render::ReconciledFrame<'ctx>,
         render_pass: &mut wgpu::RenderPass<'_>,
         width: u32,
         height: u32,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        match self {
+    ) -> Result<dear_imgui_rs::render::ReconciledFrame<'ctx>, Box<dyn std::error::Error>> {
+        Ok(match self {
             Self::Single(renderer) => {
-                renderer.render_with_fb_size(frame, render_pass, width, height)?
+                renderer.render_with_fb_size_reconciled(frame, render_pass, width, height)?
             }
             #[cfg(feature = "multi-viewport")]
             Self::Multi(runtime) => {
-                runtime.render_with_fb_size(frame, render_pass, width, height)?
+                runtime.render_with_fb_size_reconciled(frame, render_pass, width, height)?
             }
-        }
-        Ok(())
+        })
     }
 
     fn shutdown(&mut self, context: &mut Context) -> Result<(), Box<dyn std::error::Error>> {
@@ -1215,7 +1228,7 @@ impl AppWindow {
 
         // Let the platform backend finalize per-frame data (required for viewports)
         imgui.platform.prepare_render(ui, &self.window)?;
-        let draw_data = imgui.context.render();
+        let reconciled_frame = imgui.renderer.reconcile_context(&mut imgui.context)?;
 
         let mut encoder = self
             .device
@@ -1254,7 +1267,7 @@ impl AppWindow {
             imgui.game_state.show_grid,
         );
 
-        {
+        let reconciled_frame = {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1272,13 +1285,16 @@ impl AppWindow {
                 multiview_mask: None,
             });
 
-            imgui.renderer.render_with_fb_size(
-                draw_data,
+            let reconciled_frame = imgui.renderer.render_with_fb_size_reconciled(
+                reconciled_frame,
                 &mut render_pass,
                 self.surface_desc.width,
                 self.surface_desc.height,
             )?;
-        }
+            drop(render_pass);
+
+            reconciled_frame
+        };
 
         self.queue.submit(std::iter::once(encoder.finish()));
         self.queue.present(frame);
@@ -1288,9 +1304,11 @@ impl AppWindow {
 
         #[cfg(feature = "multi-viewport")]
         if imgui.enable_viewports {
-            imgui.context.update_platform_windows();
-            imgui.context.render_platform_windows_default();
+            let mut reconciled_frame = reconciled_frame;
+            reconciled_frame.update_and_render_platform_windows_default();
         }
+        #[cfg(not(feature = "multi-viewport"))]
+        drop(reconciled_frame);
 
         // Handle deferred actions that must happen outside the immediate UI draw.
         if actions.reset_layout {

@@ -182,8 +182,9 @@ impl SdlGpuApp {
             .config_flags()
             .contains(ConfigFlags::VIEWPORTS_ENABLE);
         let main_window_minimized = main.window.is_minimized();
-        let mut frame = main.imgui.render();
-        let is_minimized = frame
+        let pending_frame = main.imgui.render(main.sdl3_backend.consumer());
+        let mut reconciled_frame = main.sdl3_backend.reconcile_frame(pending_frame)?;
+        let is_minimized = reconciled_frame
             .draw_data()
             .display_size()
             .into_iter()
@@ -192,13 +193,12 @@ impl SdlGpuApp {
         // Texture reconciliation and the secondary-window pump cannot depend on the main
         // swapchain. Detached viewports remain interactive while the main window is minimized or
         // temporarily lacks a presentable image.
-        main.sdl3_backend.reconcile_frame(&mut frame)?;
         if viewports_enabled {
-            frame.update_and_render_platform_windows_default();
+            reconciled_frame.update_and_render_platform_windows_default();
             main.sdl3_backend.poll_fault()?;
         }
         if main_window_minimized || is_minimized {
-            drop(frame);
+            drop(reconciled_frame);
             sdl3::timer::delay(10);
             return Ok(AppResult::Continue);
         }
@@ -222,7 +222,10 @@ impl SdlGpuApp {
                 .with_store_op(sdl3::gpu::StoreOp::STORE);
             (|| -> Result<(), Box<dyn Error>> {
                 // SAFETY: this command buffer belongs to the device used to initialize the backend.
-                let prepared = unsafe { main.sdl3_backend.prepare_render(frame, &draw_cmd)? };
+                let prepared = unsafe {
+                    main.sdl3_backend
+                        .prepare_render_reconciled(reconciled_frame, &draw_cmd)?
+                };
                 let mut render_pass =
                     main.gpu
                         .begin_render_pass(&draw_cmd, &[target_info], None)?;
@@ -234,7 +237,7 @@ impl SdlGpuApp {
                 Ok(())
             })()
         } else {
-            drop(frame);
+            drop(reconciled_frame);
             Ok(())
         };
         if let Err(error) = main_render {

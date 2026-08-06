@@ -299,9 +299,9 @@ fn later_renderer_admission_failure_leaves_earlier_font_atlas_unclaimed() {
     contexts
         .configure(primary_id, |context| {
             let consumer = context
-                .create_renderer_consumer()
+                .create_detached_renderer_consumer()
                 .expect("failed registry admission must not bind the snapshot hub");
-            let _ = context
+            context
                 .prepare_renderer_texture_reset(&consumer)
                 .unwrap()
                 .commit();
@@ -549,9 +549,9 @@ fn foreign_renderer_claim_is_rejected_without_mutating_the_context() {
             );
             assert!(context.io().backend_platform_name().is_none());
             let consumer = context
-                .create_renderer_consumer()
+                .create_detached_renderer_consumer()
                 .expect("foreign backend admission failure must not bind the snapshot hub");
-            let _ = context
+            context
                 .prepare_renderer_texture_reset(&consumer)
                 .unwrap()
                 .commit();

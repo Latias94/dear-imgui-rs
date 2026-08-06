@@ -4,9 +4,9 @@
 //! following the pattern from imgui_impl_wgpu.cpp
 //!
 //! Managed texture flow (Dear ImGui 1.92+):
-//! - `Context::render()` returns a Context-borrowed `RenderedFrame` with owned texture requests.
+//! - `Context::render(renderer.renderer_consumer()?)` returns a Context-borrowed `PendingFrame`.
+//! - WGPU consumes every managed-texture request before producing a drawable `ReconciledFrame`.
 //! - WGPU stores managed GPU resources by pointer-free `SnapshotTextureId`.
-//! - The renderer reconciles request-bound feedback before reading draw commands.
 //! - Legacy application textures continue to use `TextureId` without entering this protocol.
 
 mod callbacks;

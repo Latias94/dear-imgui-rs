@@ -29,7 +29,7 @@ use dear_imgui_ash::{
 use dear_imgui_examples::sdl3_callbacks::{
     Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
 };
-use dear_imgui_rs::{Condition, ConfigFlags, Context, render::RenderedFrame};
+use dear_imgui_rs::{Condition, ConfigFlags, Context, render::ReconciledFrame};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
 use sdl3::video::{SwapInterval, WindowPos};
 use sdl3_main::{AppResult, AppResultWithState, MainThreadData, app_impl};
@@ -962,24 +962,31 @@ impl RendererRuntime {
         Ok(())
     }
 
-    unsafe fn cmd_draw(
+    unsafe fn cmd_draw_reconciled(
         &mut self,
         command_buffer: vk::CommandBuffer,
-        frame: RenderedFrame<'_>,
+        frame: ReconciledFrame<'_>,
     ) -> Result<Option<TextureRetirementBatch>, Box<dyn Error>> {
         Ok(match self {
-            Self::Single(renderer) => unsafe { renderer.cmd_draw(command_buffer, frame)? },
-            Self::Viewports(runtime) => unsafe { runtime.cmd_draw(command_buffer, frame)? },
+            Self::Single(renderer) => unsafe {
+                renderer.cmd_draw_reconciled(command_buffer, frame)?
+            },
+            Self::Viewports(runtime) => unsafe {
+                runtime.cmd_draw_reconciled(command_buffer, frame)?
+            },
         })
     }
 
-    fn prepare_frame(
+    fn prepare_context<'ctx>(
         &mut self,
-        frame: &mut RenderedFrame<'_>,
-    ) -> Result<Option<TextureRetirementBatch>, Box<dyn Error>> {
+        context: &'ctx mut Context,
+    ) -> Result<(ReconciledFrame<'ctx>, Option<TextureRetirementBatch>), Box<dyn Error>> {
         Ok(match self {
-            Self::Single(renderer) => renderer.prepare_frame(frame)?,
-            Self::Viewports(runtime) => runtime.prepare_frame(frame)?,
+            Self::Single(renderer) => {
+                let pending_frame = context.render(renderer.renderer_consumer()?);
+                renderer.prepare_frame(pending_frame)?
+            }
+            Self::Viewports(runtime) => runtime.prepare_context(context)?,
         })
     }
 
@@ -1492,13 +1499,15 @@ impl App {
             .renderer
             .set_viewport_clear_color(self.imgui.clear_color)?;
 
-        let mut frame = self.imgui.context.render();
-        let prepared_texture_retirement = self.imgui.renderer.prepare_frame(&mut frame)?;
+        let (mut reconciled_frame, prepared_texture_retirement) = self
+            .imgui
+            .renderer
+            .prepare_context(&mut self.imgui.context)?;
 
         // Reconcile managed textures before any viewport records commands, then submit secondary
         // swapchains before acquiring the main surface to avoid overlapping WSI ownership.
         if self.enable_viewports {
-            frame.update_and_render_platform_windows_default();
+            reconciled_frame.update_and_render_platform_windows_default();
         }
         self.imgui.renderer.poll_fault()?;
 
@@ -1508,7 +1517,7 @@ impl App {
             &mut self.imgui.renderer,
             &self.window,
             clear_color,
-            frame,
+            reconciled_frame,
         )?;
         let texture_retirement = ash_frame_sync::merge_texture_retirement_batches(
             prepared_texture_retirement,
@@ -1562,7 +1571,7 @@ fn render_main_window(
     renderer: &mut RendererRuntime,
     window: &sdl3::video::Window,
     clear_color: [f32; 4],
-    rendered_frame: RenderedFrame<'_>,
+    reconciled_frame: ReconciledFrame<'_>,
 ) -> Result<Option<TextureRetirementBatch>, Box<dyn Error>> {
     let (width, height) = window.size_in_pixels();
     if width == 0 || height == 0 {
@@ -1678,7 +1687,7 @@ fn render_main_window(
                 clear_color,
                 // SAFETY: cmd is recording inside the compatible render pass and is submitted before
                 // any renderer resource can be retired or destroyed.
-                |cmd| unsafe { renderer.cmd_draw(cmd, rendered_frame) },
+                |cmd| unsafe { renderer.cmd_draw_reconciled(cmd, reconciled_frame) },
             )?;
 
             let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];

@@ -485,7 +485,10 @@ impl AppWindow {
         );
 
         self.imgui.platform.prepare_render(&ui, &self.window)?;
-        let draw_data = self.imgui.context.render();
+        let pending_frame = self
+            .imgui
+            .context
+            .render(self.imgui.renderer.renderer_consumer()?);
 
         let (output, reconfigure_after_present) = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
@@ -528,7 +531,9 @@ impl AppWindow {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            self.imgui.renderer.render(draw_data, &mut render_pass)?;
+            self.imgui
+                .renderer
+                .render(pending_frame, &mut render_pass)?;
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));

@@ -22,8 +22,8 @@ use crate::core::{Sdl3BackendError, Sdl3OpenGlViewportSwapInterval, shutdown_pla
     feature = "sdlrenderer3-renderer",
     feature = "sdlgpu3-renderer"
 ))]
-use crate::renderer_textures::RendererTextureStore;
-use dear_imgui_rs::RendererConsumer;
+use crate::renderer_textures::{ProcessedTextureRequests, RendererTextureStore};
+use dear_imgui_rs::SynchronousRendererConsumer;
 #[cfg(feature = "multi-viewport")]
 use dear_imgui_rs::platform_io::Viewport;
 #[cfg(any(
@@ -31,7 +31,7 @@ use dear_imgui_rs::platform_io::Viewport;
     feature = "sdlrenderer3-renderer",
     feature = "sdlgpu3-renderer"
 ))]
-use dear_imgui_rs::render::{TextureFeedback, TextureRequest};
+use dear_imgui_rs::render::{SnapshotTextureId, TextureRequest};
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
     ContextAttachmentTeardownError, ContextBinding, ContextDestroyed, ContextLifecycle,
@@ -466,7 +466,7 @@ pub(super) struct RuntimeControl {
     callbacks: RefCell<Option<PlatformCallbackOwnership>>,
     renderer_callbacks: RefCell<Option<RendererCallbackOwnership>>,
     renderer_shutdown_restore: RefCell<Option<RendererShutdownRestore>>,
-    renderer_consumer: RefCell<Option<RendererConsumer>>,
+    renderer_consumer: RefCell<Option<Rc<SynchronousRendererConsumer>>>,
     platform_session: RefCell<Option<Sdl3PlatformSession>>,
     #[cfg(any(
         feature = "opengl3-renderer",

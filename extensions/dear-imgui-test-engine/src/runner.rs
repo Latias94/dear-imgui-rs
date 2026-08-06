@@ -9,13 +9,16 @@ use std::num::NonZeroU64;
 #[cfg(feature = "capture")]
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use dear_imgui_rs::render::{ReconciledFrame, RenderedFrame, RendererConsumerError};
-use dear_imgui_rs::{Context, ContextBindingError, ContextId, FrameLifecycleState, Ui};
+use dear_imgui_rs::render::ReconciledFrame;
+use dear_imgui_rs::{
+    BackendFlags, Context, ContextBindingError, ContextId, FrameLifecycleState, FrameToken, Ui,
+};
 
 use crate::results::RunCompletion;
 use crate::{
-    AttachmentState, FrameDriverError, FrameDriverPhase, ResultSummary, RunFlags, RunMode,
-    RunOutcome, RunReport, RunState, TestEngine, TestEngineError, TestFrameDriver, TestGroup,
+    AttachmentState, FrameDriverError, FrameDriverPhase, MainRenderOutcome, ResultSummary,
+    RunFlags, RunMode, RunOutcome, RunReport, RunState, TestEngine, TestEngineError,
+    TestFrameDriver, TestGroup,
 };
 #[cfg(feature = "capture")]
 use crate::{
@@ -37,57 +40,57 @@ pub enum RunnerControl {
 /// Failure produced by the virtual/headless render path.
 #[derive(Debug)]
 #[non_exhaustive]
-pub enum HeadlessRenderError {
-    /// A managed texture request requires a real renderer upload.
-    ManagedTextureRequests { count: usize },
-    /// Empty managed-texture feedback was rejected.
-    TextureFeedback(RendererConsumerError),
+pub enum HeadlessPrepareError {
+    /// The Context advertises a managed-texture renderer, which headless mode cannot drive.
+    ManagedRenderer,
 }
 
-impl fmt::Display for HeadlessRenderError {
+impl fmt::Display for HeadlessPrepareError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ManagedTextureRequests { count } => write!(
-                formatter,
-                "virtual presentation cannot satisfy {count} managed texture request(s)"
+            Self::ManagedRenderer => formatter.write_str(
+                "virtual presentation cannot drive a managed-texture renderer; use run_graphical with a renderer-owned synchronous consumer",
             ),
-            Self::TextureFeedback(source) => {
-                write!(formatter, "virtual texture reconciliation failed: {source}")
-            }
         }
     }
 }
 
-impl Error for HeadlessRenderError {
+impl Error for HeadlessPrepareError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::TextureFeedback(source) => Some(source),
-            Self::ManagedTextureRequests { .. } => None,
-        }
+        None
     }
 }
 
 struct VirtualFrameDriver;
 
 impl TestFrameDriver for VirtualFrameDriver {
-    type RenderError = HeadlessRenderError;
+    type PrepareError = HeadlessPrepareError;
+    type RenderError = Infallible;
     type PresentError = Infallible;
 
-    fn render<'frame>(
+    fn prepare<'frame>(
         &mut self,
-        mut frame: RenderedFrame<'frame>,
+        frame: FrameToken<'frame>,
         _frame_index: u64,
-    ) -> Result<ReconciledFrame<'frame>, Self::RenderError> {
-        let count = frame.texture_requests().len();
-        if count != 0 {
-            return Err(HeadlessRenderError::ManagedTextureRequests { count });
+    ) -> Result<ReconciledFrame<'frame>, Self::PrepareError> {
+        if frame
+            .ui()
+            .io()
+            .backend_flags()
+            .contains(BackendFlags::RENDERER_HAS_TEXTURES)
+        {
+            return Err(HeadlessPrepareError::ManagedRenderer);
         }
-        frame
-            .reconcile_texture_feedback([])
-            .map_err(HeadlessRenderError::TextureFeedback)?;
-        frame
-            .into_reconciled()
-            .map_err(HeadlessRenderError::TextureFeedback)
+        Ok(frame.render_legacy())
+    }
+
+    fn render_main(
+        &mut self,
+        frame: ReconciledFrame<'_>,
+        _frame_index: u64,
+    ) -> Result<MainRenderOutcome, Self::RenderError> {
+        drop(frame);
+        Ok(MainRenderOutcome::ReadyToPresent)
     }
 
     fn present(&mut self, _frame_index: u64) -> Result<(), Self::PresentError> {
@@ -269,16 +272,32 @@ impl<Driver> TestFrameDriver for CaptureDriverAdapter<'_, '_, Driver>
 where
     Driver: CapturingTestFrameDriver,
 {
+    type PrepareError = Driver::PrepareError;
     type RenderError = Driver::RenderError;
     type PresentError = Driver::PresentError;
 
-    fn render<'frame>(
+    fn prepare<'frame>(
         &mut self,
-        frame: RenderedFrame<'frame>,
+        frame: FrameToken<'frame>,
         frame_index: u64,
-    ) -> Result<ReconciledFrame<'frame>, Self::RenderError> {
-        self.slot.set_current_frame(frame_index);
-        self.slot.driver.borrow_mut().render(frame, frame_index)
+    ) -> Result<ReconciledFrame<'frame>, Self::PrepareError> {
+        self.slot.driver.borrow_mut().prepare(frame, frame_index)
+    }
+
+    fn render_main(
+        &mut self,
+        frame: ReconciledFrame<'_>,
+        frame_index: u64,
+    ) -> Result<MainRenderOutcome, Self::RenderError> {
+        let outcome = self
+            .slot
+            .driver
+            .borrow_mut()
+            .render_main(frame, frame_index)?;
+        if outcome == MainRenderOutcome::ReadyToPresent {
+            self.slot.set_current_frame(frame_index);
+        }
+        Ok(outcome)
     }
 
     fn present(&mut self, frame_index: u64) -> Result<(), Self::PresentError> {
@@ -307,12 +326,18 @@ where
 
 /// Infrastructure failure produced by [`TestRunner`].
 ///
-/// Application UI, rendering, and presentation retain independent error types. Product outcomes
-/// such as assertion failures, no matches, timeouts, and explicit aborts are returned as
-/// [`RunReport`] instead.
+/// Application UI, frame preparation, main-target rendering, and presentation retain independent
+/// error types. Product outcomes such as assertion failures, no matches, timeouts, and explicit
+/// aborts are returned as [`RunReport`] instead.
 #[derive(Debug)]
 #[non_exhaustive]
-pub enum RunnerError<ApplicationError, RenderError, PresentError, CaptureError = Infallible> {
+pub enum RunnerError<
+    ApplicationError,
+    PrepareError,
+    RenderError,
+    PresentError,
+    CaptureError = Infallible,
+> {
     /// A safe Test Engine operation failed.
     TestEngine(TestEngineError),
     /// The supplied Context is not the Context to which the engine is attached.
@@ -329,10 +354,10 @@ pub enum RunnerError<ApplicationError, RenderError, PresentError, CaptureError =
         frame: u64,
         source: ApplicationError,
     },
-    /// Rendering or one presentation phase failed.
+    /// One backend frame phase or native presentation hook failed.
     FrameDriver {
         frame: u64,
-        source: FrameDriverError<RenderError, PresentError>,
+        source: FrameDriverError<PrepareError, RenderError, PresentError>,
     },
     /// The run-scoped framebuffer provider rejected or could not validate a capture request.
     Capture {
@@ -363,12 +388,23 @@ pub enum RunnerError<ApplicationError, RenderError, PresentError, CaptureError =
 /// Headless runs use the built-in virtual renderer and an infallible virtual presentation step,
 /// so callers only need to name their application UI error.
 pub type HeadlessRunnerError<ApplicationError> =
-    RunnerError<ApplicationError, HeadlessRenderError, Infallible>;
+    RunnerError<ApplicationError, HeadlessPrepareError, Infallible, Infallible>;
 
 /// Infrastructure failure produced by [`TestRunner::run_graphical_with_capture`].
 #[cfg(feature = "capture")]
-pub type CapturingRunnerError<ApplicationError, RenderError, PresentError, CaptureError> =
-    RunnerError<ApplicationError, RenderError, PresentError, CaptureProviderError<CaptureError>>;
+pub type CapturingRunnerError<
+    ApplicationError,
+    PrepareError,
+    RenderError,
+    PresentError,
+    CaptureError,
+> = RunnerError<
+    ApplicationError,
+    PrepareError,
+    RenderError,
+    PresentError,
+    CaptureProviderError<CaptureError>,
+>;
 
 /// Result produced by a capturing graphical run for a concrete frame driver.
 #[cfg(feature = "capture")]
@@ -376,24 +412,26 @@ pub type CapturingDriverRunResult<ApplicationError, Driver> = Result<
     RunReport,
     CapturingRunnerError<
         ApplicationError,
+        <Driver as TestFrameDriver>::PrepareError,
         <Driver as TestFrameDriver>::RenderError,
         <Driver as TestFrameDriver>::PresentError,
         <Driver as CapturingTestFrameDriver>::CaptureError,
     >,
 >;
 
-impl<ApplicationError, RenderError, PresentError, CaptureError> From<TestEngineError>
-    for RunnerError<ApplicationError, RenderError, PresentError, CaptureError>
+impl<ApplicationError, PrepareError, RenderError, PresentError, CaptureError> From<TestEngineError>
+    for RunnerError<ApplicationError, PrepareError, RenderError, PresentError, CaptureError>
 {
     fn from(source: TestEngineError) -> Self {
         Self::TestEngine(source)
     }
 }
 
-impl<ApplicationError, RenderError, PresentError, CaptureError> fmt::Display
-    for RunnerError<ApplicationError, RenderError, PresentError, CaptureError>
+impl<ApplicationError, PrepareError, RenderError, PresentError, CaptureError> fmt::Display
+    for RunnerError<ApplicationError, PrepareError, RenderError, PresentError, CaptureError>
 where
     ApplicationError: fmt::Display,
+    PrepareError: fmt::Display,
     RenderError: fmt::Display,
     PresentError: fmt::Display,
     CaptureError: fmt::Display,
@@ -462,10 +500,11 @@ where
     }
 }
 
-impl<ApplicationError, RenderError, PresentError, CaptureError> Error
-    for RunnerError<ApplicationError, RenderError, PresentError, CaptureError>
+impl<ApplicationError, PrepareError, RenderError, PresentError, CaptureError> Error
+    for RunnerError<ApplicationError, PrepareError, RenderError, PresentError, CaptureError>
 where
     ApplicationError: Error + 'static,
+    PrepareError: Error + 'static,
     RenderError: Error + 'static,
     PresentError: Error + 'static,
     CaptureError: Error + 'static,
@@ -483,8 +522,8 @@ where
     }
 }
 
-impl<ApplicationError, RenderError, PresentError, CaptureError>
-    RunnerError<ApplicationError, RenderError, PresentError, CaptureError>
+impl<ApplicationError, PrepareError, RenderError, PresentError, CaptureError>
+    RunnerError<ApplicationError, PrepareError, RenderError, PresentError, CaptureError>
 {
     /// Returns the presentation phase that surfaced a framebuffer capture failure.
     #[must_use]
@@ -505,19 +544,18 @@ impl<ApplicationError, RenderError, PresentError, CaptureError>
     }
 }
 
-struct FramePump<'run, ApplicationUi, Driver, FrameStarted> {
+struct FramePump<'run, ApplicationUi, Driver> {
     context: &'run mut Context,
     mode: RunMode,
     application_ui: &'run mut ApplicationUi,
     driver: &'run mut Driver,
-    frame_started: &'run mut FrameStarted,
 }
 
 /// One-shot bounded Test Engine pump.
 ///
-/// The runner owns application UI, rendering, pre-swap, presentation, and post-swap ordering. A
-/// single [`TestFrameDriver`] owns both backend phases, allowing it to carry a pending surface frame
-/// without shared-mutability workarounds.
+/// The runner owns application UI, preparation, main-target rendering, pre-swap, presentation, and
+/// post-swap ordering. A single [`TestFrameDriver`] owns all backend phases without
+/// shared-mutability workarounds.
 pub struct TestRunner<'engine> {
     engine: &'engine mut TestEngine,
     group: TestGroup,
@@ -585,19 +623,20 @@ impl<'engine> TestRunner<'engine> {
         context: &mut Context,
         application_ui: ApplicationUi,
         driver: &mut Driver,
-    ) -> Result<RunReport, RunnerError<ApplicationError, Driver::RenderError, Driver::PresentError>>
+    ) -> Result<
+        RunReport,
+        RunnerError<
+            ApplicationError,
+            Driver::PrepareError,
+            Driver::RenderError,
+            Driver::PresentError,
+        >,
+    >
     where
         ApplicationUi: FnMut(&Ui, u64) -> Result<RunnerControl, ApplicationError>,
         Driver: TestFrameDriver,
     {
-        let mut frame_started = |_| {};
-        self.run_impl(
-            context,
-            RunMode::Graphical,
-            application_ui,
-            driver,
-            &mut frame_started,
-        )
+        self.run_impl(context, RunMode::Graphical, application_ui, driver)
     }
 
     /// Runs with an external-surface driver that owns framebuffer readback capability.
@@ -623,13 +662,11 @@ impl<'engine> TestRunner<'engine> {
             .install_capture_provider(Some(capture_driver_trampoline::<Driver>), user_data)?;
         let result = {
             let mut adapter = CaptureDriverAdapter { slot: &slot };
-            let mut frame_started = |frame_index| slot.set_current_frame(frame_index);
             self.run_impl(
                 context,
                 RunMode::GraphicalWithCapture,
                 application_ui,
                 &mut adapter,
-                &mut frame_started,
             )
         };
         let result = match (result, slot.take_failure()) {
@@ -656,8 +693,9 @@ impl<'engine> TestRunner<'engine> {
 
     /// Runs through an explicit virtual/no-surface presentation path.
     ///
-    /// Virtual mode reconciles an empty feedback set for every render lease. A managed texture
-    /// request is rejected because no backend exists to upload it.
+    /// Virtual mode consumes each frame through the explicit legacy renderer path. Contexts that
+    /// advertise a managed-texture renderer are rejected because headless mode does not own a
+    /// renderer consumer or a backend capable of reconciling texture requests.
     pub fn run_headless<ApplicationError, ApplicationUi>(
         self,
         context: &mut Context,
@@ -666,31 +704,33 @@ impl<'engine> TestRunner<'engine> {
     where
         ApplicationUi: FnMut(&Ui, u64) -> Result<RunnerControl, ApplicationError>,
     {
-        let mut frame_started = |_| {};
         self.run_impl(
             context,
             RunMode::Headless,
             application_ui,
             &mut VirtualFrameDriver,
-            &mut frame_started,
         )
     }
 
-    fn run_impl<ApplicationError, ApplicationUi, Driver, CaptureError, FrameStarted>(
+    fn run_impl<ApplicationError, ApplicationUi, Driver, CaptureError>(
         mut self,
         context: &mut Context,
         mode: RunMode,
         mut application_ui: ApplicationUi,
         driver: &mut Driver,
-        frame_started: &mut FrameStarted,
     ) -> Result<
         RunReport,
-        RunnerError<ApplicationError, Driver::RenderError, Driver::PresentError, CaptureError>,
+        RunnerError<
+            ApplicationError,
+            Driver::PrepareError,
+            Driver::RenderError,
+            Driver::PresentError,
+            CaptureError,
+        >,
     >
     where
         ApplicationUi: FnMut(&Ui, u64) -> Result<RunnerControl, ApplicationError>,
         Driver: TestFrameDriver,
-        FrameStarted: FnMut(u64),
     {
         let actual = context.id();
         let expected = self.engine.attached_context_id().ok_or_else(|| {
@@ -706,9 +746,9 @@ impl<'engine> TestRunner<'engine> {
         }
 
         let binding = context.binding();
-        match binding.try_with_bound_context(|| {
-            self.run_bound(context, mode, &mut application_ui, driver, frame_started)
-        }) {
+        match binding
+            .try_with_bound_context(|| self.run_bound(context, mode, &mut application_ui, driver))
+        {
             Ok(Ok(report)) => Ok(report),
             Ok(Err(error)) if matches!(error, RunnerError::FrameAlreadyOpen) => Err(error),
             Ok(Err(error)) => match self.stop_after_failure() {
@@ -722,21 +762,25 @@ impl<'engine> TestRunner<'engine> {
         }
     }
 
-    fn run_bound<ApplicationError, ApplicationUi, Driver, CaptureError, FrameStarted>(
+    fn run_bound<ApplicationError, ApplicationUi, Driver, CaptureError>(
         &mut self,
         context: &mut Context,
         mode: RunMode,
         application_ui: &mut ApplicationUi,
         driver: &mut Driver,
-        frame_started: &mut FrameStarted,
     ) -> Result<
         RunReport,
-        RunnerError<ApplicationError, Driver::RenderError, Driver::PresentError, CaptureError>,
+        RunnerError<
+            ApplicationError,
+            Driver::PrepareError,
+            Driver::RenderError,
+            Driver::PresentError,
+            CaptureError,
+        >,
     >
     where
         ApplicationUi: FnMut(&Ui, u64) -> Result<RunnerControl, ApplicationError>,
         Driver: TestFrameDriver,
-        FrameStarted: FnMut(u64),
     {
         self.require_closed_frame(context)?;
         self.engine
@@ -751,7 +795,6 @@ impl<'engine> TestRunner<'engine> {
             mode,
             application_ui,
             driver,
-            frame_started,
         };
         let mut frames = 0;
         for frame_index in 1..=self.frame_budget.get() {
@@ -770,21 +813,25 @@ impl<'engine> TestRunner<'engine> {
         self.drain_requested(RunOutcome::TimedOut, frames, &mut pump)
     }
 
-    fn pump_frame<ApplicationError, ApplicationUi, Driver, CaptureError, FrameStarted>(
+    fn pump_frame<ApplicationError, ApplicationUi, Driver, CaptureError>(
         &mut self,
         frame_index: u64,
-        pump: &mut FramePump<'_, ApplicationUi, Driver, FrameStarted>,
+        pump: &mut FramePump<'_, ApplicationUi, Driver>,
     ) -> Result<
         RunnerControl,
-        RunnerError<ApplicationError, Driver::RenderError, Driver::PresentError, CaptureError>,
+        RunnerError<
+            ApplicationError,
+            Driver::PrepareError,
+            Driver::RenderError,
+            Driver::PresentError,
+            CaptureError,
+        >,
     >
     where
         ApplicationUi: FnMut(&Ui, u64) -> Result<RunnerControl, ApplicationError>,
         Driver: TestFrameDriver,
-        FrameStarted: FnMut(u64),
     {
         self.require_closed_frame(pump.context)?;
-        (pump.frame_started)(frame_index);
         let frame = pump.context.begin_frame();
         let control = (pump.application_ui)(frame.ui(), frame_index).map_err(|source| {
             RunnerError::ApplicationUi {
@@ -794,7 +841,7 @@ impl<'engine> TestRunner<'engine> {
         })?;
         self.engine.show_windows(frame.ui(), None)?;
         self.engine
-            .drive_frame(frame.render(), frame_index, pump.driver)
+            .drive_frame(frame, frame_index, pump.driver)
             .map_err(|source| RunnerError::FrameDriver {
                 frame: frame_index,
                 source,
@@ -802,19 +849,24 @@ impl<'engine> TestRunner<'engine> {
         Ok(control)
     }
 
-    fn drain_requested<ApplicationError, ApplicationUi, Driver, CaptureError, FrameStarted>(
+    fn drain_requested<ApplicationError, ApplicationUi, Driver, CaptureError>(
         &mut self,
         requested: RunOutcome,
         frames: u64,
-        pump: &mut FramePump<'_, ApplicationUi, Driver, FrameStarted>,
+        pump: &mut FramePump<'_, ApplicationUi, Driver>,
     ) -> Result<
         RunReport,
-        RunnerError<ApplicationError, Driver::RenderError, Driver::PresentError, CaptureError>,
+        RunnerError<
+            ApplicationError,
+            Driver::PrepareError,
+            Driver::RenderError,
+            Driver::PresentError,
+            CaptureError,
+        >,
     >
     where
         ApplicationUi: FnMut(&Ui, u64) -> Result<RunnerControl, ApplicationError>,
         Driver: TestFrameDriver,
-        FrameStarted: FnMut(u64),
     {
         debug_assert!(matches!(
             requested,
@@ -866,15 +918,17 @@ impl<'engine> TestRunner<'engine> {
         })
     }
 
-    fn requested_report<ApplicationError, RenderError, PresentError, CaptureError>(
+    fn requested_report<ApplicationError, PrepareError, RenderError, PresentError, CaptureError>(
         &self,
         outcome: RunOutcome,
         completion: RunCompletion,
         frames: u64,
         cleanup_frames: u64,
         mode: RunMode,
-    ) -> Result<RunReport, RunnerError<ApplicationError, RenderError, PresentError, CaptureError>>
-    {
+    ) -> Result<
+        RunReport,
+        RunnerError<ApplicationError, PrepareError, RenderError, PresentError, CaptureError>,
+    > {
         self.validate_terminal_summary(completion.summary)?;
         Ok(RunReport::new(
             completion,
@@ -885,21 +939,36 @@ impl<'engine> TestRunner<'engine> {
         ))
     }
 
-    fn require_closed_frame<ApplicationError, RenderError, PresentError, CaptureError>(
+    fn require_closed_frame<
+        ApplicationError,
+        PrepareError,
+        RenderError,
+        PresentError,
+        CaptureError,
+    >(
         &self,
         context: &Context,
-    ) -> Result<(), RunnerError<ApplicationError, RenderError, PresentError, CaptureError>> {
+    ) -> Result<
+        (),
+        RunnerError<ApplicationError, PrepareError, RenderError, PresentError, CaptureError>,
+    > {
         match context.frame_lifecycle_state() {
             FrameLifecycleState::Idle | FrameLifecycleState::Rendered => Ok(()),
             FrameLifecycleState::InFrame => Err(RunnerError::FrameAlreadyOpen),
         }
     }
 
-    fn take_terminal_run<ApplicationError, RenderError, PresentError, CaptureError>(
+    fn take_terminal_run<
+        ApplicationError,
+        PrepareError,
+        RenderError,
+        PresentError,
+        CaptureError,
+    >(
         &mut self,
     ) -> Result<
         Option<RunCompletion>,
-        RunnerError<ApplicationError, RenderError, PresentError, CaptureError>,
+        RunnerError<ApplicationError, PrepareError, RenderError, PresentError, CaptureError>,
     > {
         if self.engine.run_state() != RunState::Terminal {
             return Ok(None);
@@ -907,14 +976,16 @@ impl<'engine> TestRunner<'engine> {
         self.engine.take_terminal_run().map_err(Into::into)
     }
 
-    fn natural_report<ApplicationError, RenderError, PresentError, CaptureError>(
+    fn natural_report<ApplicationError, PrepareError, RenderError, PresentError, CaptureError>(
         &self,
         completion: RunCompletion,
         frames: u64,
         cleanup_frames: u64,
         mode: RunMode,
-    ) -> Result<RunReport, RunnerError<ApplicationError, RenderError, PresentError, CaptureError>>
-    {
+    ) -> Result<
+        RunReport,
+        RunnerError<ApplicationError, PrepareError, RenderError, PresentError, CaptureError>,
+    > {
         let summary = completion.summary;
         self.validate_terminal_summary(summary)?;
         let outcome = completion.natural_outcome();
@@ -927,10 +998,19 @@ impl<'engine> TestRunner<'engine> {
         ))
     }
 
-    fn validate_terminal_summary<ApplicationError, RenderError, PresentError, CaptureError>(
+    fn validate_terminal_summary<
+        ApplicationError,
+        PrepareError,
+        RenderError,
+        PresentError,
+        CaptureError,
+    >(
         &self,
         summary: ResultSummary,
-    ) -> Result<(), RunnerError<ApplicationError, RenderError, PresentError, CaptureError>> {
+    ) -> Result<
+        (),
+        RunnerError<ApplicationError, PrepareError, RenderError, PresentError, CaptureError>,
+    > {
         if summary.count_in_queue != 0 {
             return Err(RunnerError::InvalidTerminalSummary {
                 summary,
@@ -956,17 +1036,29 @@ impl<'engine> TestRunner<'engine> {
     }
 
     #[cfg(feature = "capture")]
-    fn replace_capture_failure_marker<ApplicationError, RenderError, PresentError, CaptureError>(
+    fn replace_capture_failure_marker<
+        ApplicationError,
+        PrepareError,
+        RenderError,
+        PresentError,
+        CaptureError,
+    >(
         error: RunnerError<
             ApplicationError,
+            PrepareError,
             RenderError,
             PresentError,
             CaptureProviderError<CaptureError>,
         >,
         frame: u64,
         source: CaptureProviderError<CaptureError>,
-    ) -> RunnerError<ApplicationError, RenderError, PresentError, CaptureProviderError<CaptureError>>
-    {
+    ) -> RunnerError<
+        ApplicationError,
+        PrepareError,
+        RenderError,
+        PresentError,
+        CaptureProviderError<CaptureError>,
+    > {
         match error {
             RunnerError::FrameDriver {
                 source: frame_error,
@@ -998,8 +1090,8 @@ impl<'engine> TestRunner<'engine> {
     }
 
     #[cfg(feature = "capture")]
-    fn frame_driver_is_capture_failure<RenderError, PresentError>(
-        error: &FrameDriverError<RenderError, PresentError>,
+    fn frame_driver_is_capture_failure<PrepareError, RenderError, PresentError>(
+        error: &FrameDriverError<PrepareError, RenderError, PresentError>,
     ) -> bool {
         matches!(
             error,

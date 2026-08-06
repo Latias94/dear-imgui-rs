@@ -17,7 +17,7 @@ This backend is compatible with both `ash` loader modes:
 
 ## Features
 
-- Supports Dear ImGui 1.92+ managed texture create/update/destroy requests through `RenderedFrame`.
+- Supports Dear ImGui 1.92+ managed texture create/update/destroy requests through `PendingFrame`.
 - Sets `ImGuiBackendFlags_RendererHasTextures` and `ImGuiBackendFlags_RendererHasVtxOffset`.
 - Upload path uses in-flight fences to avoid `vkQueueWaitIdle` stalls.
 - Sub-rect texture updates (uses `UpdateRect` bounding box).
@@ -54,14 +54,14 @@ python tools/generate_ash_shaders.py --check --recompile --compiler /path/to/gls
 
 ## Managed textures
 
-`AshRenderer::cmd_draw` consumes a `RenderedFrame`, uploads its owned texture requests, reconciles
-request-bound feedback, and only then reads the frame's immutable draw data.
+`AshRenderer::cmd_draw` consumes a `PendingFrame`, uploads its owned texture requests, reconciles
+request-bound feedback into a `ReconciledFrame`, and only then reads immutable draw data.
 
-Each `AshRenderer` owns the sole `RendererConsumer` generation created for the
-Context passed to its constructor. Create one renderer per Context. `cmd_draw`
-rejects a frame from another Context or consumer generation before recording
-GPU work, and the consumed frame lease prevents native `DrawData` from escaping
-its Context borrow.
+Each `AshRenderer` owns the sole `SynchronousRendererConsumer` generation created for the Context
+passed to its constructor. Create one renderer per Context and pass `renderer.renderer_consumer()?`
+to `Context::render`. `cmd_draw` rejects a frame from another Context or consumer generation before
+recording GPU work, and the consumed frame lease prevents native `DrawData` from escaping its
+Context borrow.
 
 - Font atlas textures are registered by ImGui itself.
 - Register an `OwnedTextureData` with `Context::register_texture(texture)`. Registration transfers
@@ -98,12 +98,13 @@ that each supplied fence is signaled before releasing anything. The call remains
 Vulkan cannot prove fence device lineage or that the supplied fences cover every queue which could
 still reference the batch.
 
-The retirement protocol is identical for classic render passes and dynamic rendering. In multi-
-viewport mode, call the owning runtime's `prepare_frame(&mut frame)` before any renderer callback.
-That no-surface phase reconciles managed textures so secondary viewports never observe the previous
-texture revision merely because platform WSI requires them to submit before the main viewport.
-Establish the completion point only after every relevant secondary and main submission. Merely
-finishing command recording is never sufficient.
+The retirement protocol is identical for classic render passes and dynamic rendering. In
+multi-viewport mode, call the owning runtime's `prepare_context(&mut context)` or consume an existing
+pending frame with `prepare_frame(frame)` before any renderer callback. That no-surface phase returns
+the `ReconciledFrame` used for secondary and main viewport work, so secondary viewports never observe
+the previous texture revision merely because platform WSI requires them to submit before the main
+viewport. Establish the completion point only after every relevant secondary and main submission.
+Merely finishing command recording is never sufficient.
 
 Call `AshRenderer::shutdown(&mut imgui)` before dropping a single-viewport Context or renderer.
 Shutdown waits for device idle, destroys active and retiring GPU textures, resets Context-owned
@@ -324,11 +325,13 @@ integrations may then submit secondary swapchains before acquiring the main surf
 integrations may choose another order. The texture retirement completion point must cover both:
 
 ```rust,ignore
-let mut frame = imgui.render();
-let prepared_retirement = renderer_runtime.prepare_frame(&mut frame)?;
+let (mut frame, prepared_retirement) = renderer_runtime.prepare_context(&mut imgui)?;
 
 frame.update_and_render_platform_windows_default();
-let recorded_retirement = record_and_submit_main_viewport(frame)?;
+let recorded_retirement = unsafe {
+    renderer_runtime.cmd_draw_reconciled(main_command_buffer, frame)?
+};
+submit_main_viewport(main_command_buffer)?;
 
 let retirement = merge_retirement_batches(prepared_retirement, recorded_retirement)?;
 complete_after_all_relevant_submissions(retirement)?;
@@ -451,7 +454,7 @@ let mut renderer = unsafe {
 
 // In your render loop (inside a render pass):
 # let command_buffer = vk::CommandBuffer::null();
-let frame = imgui.render();
+let frame = imgui.render(renderer.renderer_consumer()?);
 // SAFETY: command_buffer is recording inside the compatible render pass and will be submitted
 // before renderer resources referenced by it are changed or destroyed.
 let retirement = unsafe { renderer.cmd_draw(command_buffer, frame)? };

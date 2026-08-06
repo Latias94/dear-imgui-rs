@@ -20,7 +20,7 @@ mod tests {
         RuntimeShutdownErrors, ShutdownCoordinator, finish_runtime_shutdown, resolve_run_result,
     };
     use crate::runtime::state::GpuFaultKind;
-    use crate::runtime::surface::build_and_render_frame;
+    use crate::runtime::surface::build_frame;
     use crate::{AppConfig, GpuGeneration, RunError};
     use dear_imgui_rs::ConfigFlags;
 
@@ -430,7 +430,7 @@ mod tests {
         let _ = context.font_atlas().build();
 
         {
-            let result = build_and_render_frame(&mut context, |_ui| {
+            let result = build_frame(&mut context, |_ui| {
                 Err(RunError::application("frame", "injected frame failure"))
             });
             assert!(result.is_err());

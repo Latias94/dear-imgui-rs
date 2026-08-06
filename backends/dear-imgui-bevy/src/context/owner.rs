@@ -35,7 +35,7 @@ pub(crate) struct ContextOwner {
     #[cfg(feature = "render")]
     snapshot_mailbox: Option<super::ImguiFrameMailbox>,
     #[cfg(feature = "render")]
-    renderer_consumer: Option<dear_imgui_rs::render::RendererConsumer>,
+    renderer_consumer: Option<dear_imgui_rs::render::DetachedRendererConsumer>,
     #[cfg(feature = "render")]
     renderer_release: Option<render::ImguiRendererReleaseLease>,
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -129,7 +129,7 @@ impl ContextOwner {
         multi_viewport: bool,
         operation: impl FnOnce(
             &mut dear_imgui_rs::Context,
-            Option<&dear_imgui_rs::render::RendererConsumer>,
+            Option<&dear_imgui_rs::render::DetachedRendererConsumer>,
         ) -> Result<T, E>,
     ) -> Result<T, E> {
         match self.try_with_active_renderer_context_checked(multi_viewport, operation) {
@@ -151,7 +151,7 @@ impl ContextOwner {
         multi_viewport: bool,
         operation: impl FnOnce(
             &mut dear_imgui_rs::Context,
-            Option<&dear_imgui_rs::render::RendererConsumer>,
+            Option<&dear_imgui_rs::render::DetachedRendererConsumer>,
         ) -> Result<T, E>,
     ) -> Result<T, ImguiActiveRendererContextError<E>> {
         let consumer = self.renderer_consumer.as_ref();
@@ -390,15 +390,18 @@ impl ContextOwner {
             .as_mut()
             .expect("Context owner must retain its suspended Context")
             .try_with_active(|context| {
-                let consumer = context.create_renderer_consumer().unwrap_or_else(|error| {
-                    panic!("renderer admission changed after its global preflight: {error}")
-                });
+                let consumer =
+                    context
+                        .create_detached_renderer_consumer()
+                        .unwrap_or_else(|error| {
+                            panic!("renderer admission changed after its global preflight: {error}")
+                        });
                 let reset = context
                     .prepare_renderer_texture_reset(&consumer)
                     .unwrap_or_else(|error| {
                         panic!("a newly admitted renderer consumer must be idle: {error}")
                     });
-                let _ = reset.commit();
+                reset.commit();
                 Ok::<_, std::convert::Infallible>(consumer)
             })
             .unwrap_or_else(|never| match never {});
@@ -596,7 +599,7 @@ impl ContextOwner {
                     .prepare_renderer_texture_reset(renderer_consumer)
                     .map_err(ImguiActiveRendererContextError::Operation)?;
                 renderer_release.release_renderer_resources();
-                let _invalidated = reset.commit();
+                reset.commit();
                 renderer_release.finish_device_recovery();
                 Ok(())
             })
@@ -718,7 +721,7 @@ impl ContextOwner {
                     renderer_release
                         .expect("an admitted Bevy renderer consumer must retain its release lease")
                         .release_renderer_resources();
-                    let _invalidated = reset.commit();
+                    reset.commit();
                 }
                 #[cfg(feature = "render")]
                 {
@@ -813,7 +816,7 @@ mod tests {
             1.0 / 60.0,
         ));
         let _ = context.frame();
-        let _ = context.render();
+        let _ = context.render_legacy();
     }
 
     fn assert_platform_frame_completed(owner: &mut ContextOwner) {

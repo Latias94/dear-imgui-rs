@@ -186,7 +186,20 @@ impl OpenGlApp {
                 ui.image(game_tex_id, [side, side]);
             });
 
-        let draw_data = main.imgui.render();
+        let viewports_enabled = ENABLE_VIEWPORTS
+            && main
+                .imgui
+                .io()
+                .config_flags()
+                .contains(ConfigFlags::VIEWPORTS_ENABLE);
+        let pending_frame = main.imgui.render(main.sdl3_backend.consumer());
+        let mut reconciled_frame = main.sdl3_backend.reconcile_frame(pending_frame)?;
+
+        if viewports_enabled {
+            reconciled_frame.update_and_render_platform_windows_default();
+            main.window.gl_make_current(&main.gl_context)?;
+        }
+
         unsafe {
             use glow::HasContext;
 
@@ -195,19 +208,7 @@ impl OpenGlApp {
             main.gl.clear_color(0.1, 0.12, 0.15, 1.0);
             main.gl.clear(glow::COLOR_BUFFER_BIT);
         }
-        main.sdl3_backend.render(draw_data)?;
-
-        if ENABLE_VIEWPORTS
-            && main
-                .imgui
-                .io()
-                .config_flags()
-                .contains(ConfigFlags::VIEWPORTS_ENABLE)
-        {
-            main.imgui.update_platform_windows();
-            main.imgui.render_platform_windows_default();
-            main.window.gl_make_current(&main.gl_context)?;
-        }
+        main.sdl3_backend.render_reconciled(reconciled_frame)?;
         main.window.gl_swap_window();
         Ok(())
     }

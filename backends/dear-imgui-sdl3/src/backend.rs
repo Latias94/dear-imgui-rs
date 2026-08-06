@@ -10,7 +10,7 @@ use super::*;
     feature = "sdlrenderer3-renderer",
     feature = "sdlgpu3-renderer"
 ))]
-use dear_imgui_rs::render::RendererConsumer;
+use dear_imgui_rs::render::SynchronousRendererConsumer;
 #[cfg(any(
     feature = "opengl3-renderer",
     feature = "sdlrenderer3-renderer",
@@ -24,13 +24,15 @@ use sdl3::event::Event;
     feature = "sdlrenderer3-renderer",
     feature = "sdlgpu3-renderer"
 ))]
-fn prepare_renderer_consumer(imgui: &mut Context) -> Result<RendererConsumer, Sdl3BackendError> {
-    let consumer = imgui.create_renderer_consumer()?;
+fn prepare_renderer_consumer(
+    imgui: &mut Context,
+) -> Result<SynchronousRendererConsumer, Sdl3BackendError> {
+    let consumer = imgui.create_synchronous_renderer_consumer()?;
     // A new consumer has not submitted an epoch or produced a Context-managed texture mapping.
     // The empty transaction only clears bindings from an already-released predecessor before this
     // renderer can publish new texture requests.
     let reset = imgui.prepare_renderer_texture_reset(&consumer)?;
-    let _ = reset.commit();
+    reset.commit();
     Ok(consumer)
 }
 
@@ -57,7 +59,7 @@ fn prepare_renderer_runtime(
     )?;
     match prepare_renderer_consumer(imgui) {
         Ok(consumer) => {
-            runtime.control().install_renderer_consumer(consumer);
+            runtime.install_renderer_consumer(consumer);
             Ok(runtime)
         }
         Err(error) => {
@@ -86,9 +88,9 @@ fn run_backend_entry<R>(
     feature = "sdlrenderer3-renderer",
     feature = "sdlgpu3-renderer"
 ))]
-fn ensure_matching_rendered_frame(
+fn ensure_matching_pending_frame(
     context: &ContextBinding,
-    frame: &RenderedFrame<'_>,
+    frame: &PendingFrame<'_>,
 ) -> Result<(), Sdl3BackendError> {
     let expected = context.id();
     let actual = frame.context_id();
@@ -103,37 +105,45 @@ fn ensure_matching_rendered_frame(
     feature = "sdlrenderer3-renderer",
     feature = "sdlgpu3-renderer"
 ))]
-fn reconcile_renderer_frame(
-    runtime: &RuntimeRegistration,
-    frame: &mut RenderedFrame<'_>,
+fn ensure_matching_reconciled_frame(
+    context: &ContextBinding,
+    frame: &ReconciledFrame<'_>,
 ) -> Result<(), Sdl3BackendError> {
-    ensure_matching_rendered_frame(runtime.control().binding(), frame)?;
-    let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
-    if frame.is_texture_feedback_reconciled() {
-        return runtime
-            .control()
-            .reconciled_texture_epoch_is(request_epoch)
-            .then_some(())
-            .ok_or(Sdl3BackendError::ForeignTextureReconciliation {
-                epoch: request_epoch,
-            });
+    let expected = context.id();
+    let actual = frame.context_id();
+    if expected != actual {
+        return Err(Sdl3BackendError::ContextMismatch { expected, actual });
     }
+    Ok(())
+}
+
+#[cfg(any(
+    feature = "opengl3-renderer",
+    feature = "sdlrenderer3-renderer",
+    feature = "sdlgpu3-renderer"
+))]
+fn reconcile_renderer_frame<'ctx>(
+    runtime: &RuntimeRegistration,
+    frame: PendingFrame<'ctx>,
+) -> Result<ReconciledFrame<'ctx>, Sdl3BackendError> {
+    ensure_matching_pending_frame(runtime.control().binding(), &frame)?;
+    let request_epoch = frame.epoch().sequence();
 
     let entry = runtime.control().enter_bound()?;
-    let feedback = runtime.control().binding().try_with_bound_context(|| {
+    let processed = runtime.control().binding().try_with_bound_context(|| {
         runtime
             .control()
             .process_texture_requests(frame.texture_requests(), request_epoch)
     })??;
-    let progress = frame.reconcile_texture_feedback(feedback)?;
+    let frame = frame.reconcile_texture_feedback(processed.feedback)?;
     runtime
         .control()
-        .mark_textures_reconciled(frame.texture_requests(), request_epoch);
+        .mark_textures_reconciled(&processed.installed);
     runtime
         .control()
-        .prune_destroyed_textures(progress.watermark());
+        .prune_destroyed_textures(frame.completion_progress().watermark());
     entry.finish()?;
-    Ok(())
+    Ok(frame)
 }
 
 macro_rules! impl_sdl3_input_controls {
@@ -204,7 +214,7 @@ mod renderer_contract_tests {
     use super::*;
 
     #[test]
-    fn rendered_frame_from_foreign_context_is_rejected_before_renderer_work() {
+    fn pending_frame_from_foreign_context_is_rejected_before_renderer_work() {
         let _guard = crate::tests::test_guard();
         let owner = Context::create();
         let owner_binding = owner.binding();
@@ -215,10 +225,40 @@ mod renderer_contract_tests {
         foreign
             .io_mut()
             .set_backend_flags(dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES);
-        let _consumer = foreign.create_renderer_consumer().unwrap();
-        let frame = foreign.begin_frame().render();
+        let consumer = foreign.create_synchronous_renderer_consumer().unwrap();
+        let frame = foreign.begin_frame().render(&consumer);
 
-        let error = ensure_matching_rendered_frame(&owner_binding, &frame).unwrap_err();
+        let error = ensure_matching_pending_frame(&owner_binding, &frame).unwrap_err();
+
+        assert!(matches!(
+            error,
+            Sdl3BackendError::ContextMismatch { expected, actual }
+                if expected == owner_binding.id() && actual == frame.context_id()
+        ));
+    }
+
+    #[test]
+    fn reconciled_frame_from_foreign_context_is_rejected_before_renderer_work() {
+        let _guard = crate::tests::test_guard();
+        let owner = Context::create();
+        let owner_binding = owner.binding();
+        let _owner = owner.suspend();
+        let mut foreign = Context::create();
+        foreign.io_mut().set_display_size([128.0, 128.0]);
+        foreign.io_mut().set_delta_time(1.0 / 60.0);
+        foreign
+            .io_mut()
+            .set_backend_flags(dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES);
+        let consumer = foreign.create_synchronous_renderer_consumer().unwrap();
+        let pending = foreign.begin_frame().render(&consumer);
+        let feedback = pending
+            .texture_requests()
+            .iter()
+            .map(dear_imgui_rs::render::TextureRequest::retry)
+            .collect::<Vec<_>>();
+        let frame = pending.reconcile_texture_feedback(feedback).unwrap();
+
+        let error = ensure_matching_reconciled_frame(&owner_binding, &frame).unwrap_err();
 
         assert!(matches!(
             error,
@@ -585,6 +625,18 @@ impl Sdl3OpenGl3Backend {
         Self { runtime }
     }
 
+    /// Synchronous consumer owned by this renderer.
+    ///
+    /// Pass it to [`Context::render`] to produce the [`PendingFrame`] consumed by this backend.
+    ///
+    /// # Panics
+    ///
+    /// Panics after this renderer has completed explicit shutdown.
+    #[must_use]
+    pub fn consumer(&self) -> &SynchronousRendererConsumer {
+        self.runtime.renderer_consumer()
+    }
+
     /// Initialize the SDL3 platform backend and the official OpenGL3 renderer.
     ///
     /// # Safety
@@ -735,30 +787,44 @@ impl Sdl3OpenGl3Backend {
     }
 
     /// Consume and render one synchronous frame using the official OpenGL3 renderer.
-    pub fn render(&mut self, mut frame: RenderedFrame<'_>) -> Result<(), Sdl3BackendError> {
-        self.reconcile_frame(&mut frame)?;
+    pub fn render(&mut self, frame: PendingFrame<'_>) -> Result<(), Sdl3BackendError> {
+        let frame = self.reconcile_frame(frame)?;
+        self.render_reconciled(frame)
+    }
+
+    /// Render a frame that has already completed managed-texture reconciliation.
+    ///
+    /// This is the main-viewport half of the multi-viewport route: reconcile first, run the
+    /// secondary platform-window callbacks through the returned [`ReconciledFrame`], then pass it
+    /// here while the initialized OpenGL context is current.
+    pub fn render_reconciled(
+        &mut self,
+        frame: ReconciledFrame<'_>,
+    ) -> Result<(), Sdl3BackendError> {
+        ensure_matching_reconciled_frame(self.runtime.control().binding(), &frame)?;
         let entry = self.runtime.control().enter_bound()?;
         self.runtime
             .control()
             .binding()
             .try_with_bound_context(|| {
-                assert_current_draw_data(frame.draw_data(), "Sdl3OpenGl3Backend::render()");
+                assert_current_draw_data(
+                    frame.draw_data(),
+                    "Sdl3OpenGl3Backend::render_reconciled()",
+                );
                 render_opengl3_impl(frame.draw_data());
             })?;
         entry.finish()?;
         Ok(())
     }
 
-    /// Apply managed-texture requests without drawing or acquiring a surface.
+    /// Consume pending managed-texture requests without drawing or acquiring a surface.
     ///
-    /// This operation is idempotent when this renderer already reconciled the same frame epoch;
-    /// feedback applied outside this renderer is rejected. Call it before the native
-    /// platform-window pump when secondary viewports must remain live while the main surface is
-    /// minimized, occluded, or temporarily unavailable.
-    pub fn reconcile_frame(
+    /// Call it before the native platform-window pump when secondary viewports must remain live
+    /// while the main surface is minimized, occluded, or temporarily unavailable.
+    pub fn reconcile_frame<'ctx>(
         &mut self,
-        frame: &mut RenderedFrame<'_>,
-    ) -> Result<(), Sdl3BackendError> {
+        frame: PendingFrame<'ctx>,
+    ) -> Result<ReconciledFrame<'ctx>, Sdl3BackendError> {
         reconcile_renderer_frame(&self.runtime, frame)
     }
 
@@ -769,9 +835,8 @@ impl Sdl3OpenGl3Backend {
 
     /// Destroy OpenGL3 renderer device objects.
     ///
-    /// This validates an idle Context renderer consumer before native destruction begins. If a
-    /// detached [`dear_imgui_rs::render::FrameSnapshot`] is still outstanding, this returns an
-    /// error without destroying any native object. Commit or drop every snapshot, then retry.
+    /// This validates the Context-bound synchronous consumer before native destruction begins.
+    /// The reset is committed only after every renderer-owned texture has been released.
     pub fn destroy_device_objects(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
         self.runtime
             .destroy_renderer_device_objects(imgui, destroy_opengl3_device_objects)
@@ -779,9 +844,8 @@ impl Sdl3OpenGl3Backend {
 
     /// Shut down the official OpenGL3 renderer and SDL3 platform backend.
     ///
-    /// Shutdown validates the Context renderer consumer before changing callbacks or releasing
-    /// native resources. An outstanding detached snapshot must be committed or dropped before
-    /// retrying this operation.
+    /// Shutdown validates the Context-bound synchronous consumer before changing callbacks or
+    /// releasing native resources.
     pub fn shutdown(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
         self.runtime.shutdown_renderer(imgui)
     }
@@ -806,6 +870,18 @@ impl_sdl3_input_controls!(SdlGpu3RendererBackend);
 impl SdlGpu3RendererBackend {
     fn from_initialized_context(runtime: RuntimeRegistration) -> Self {
         Self { runtime }
+    }
+
+    /// Synchronous consumer owned by this renderer.
+    ///
+    /// Pass it to [`Context::render`] to produce the [`PendingFrame`] consumed by this backend.
+    ///
+    /// # Panics
+    ///
+    /// Panics after this renderer has completed explicit shutdown.
+    #[must_use]
+    pub fn consumer(&self) -> &SynchronousRendererConsumer {
+        self.runtime.renderer_consumer()
     }
 
     /// Initialize the SDL3 platform backend and the official SDLGPU3 renderer.
@@ -908,10 +984,29 @@ impl SdlGpu3RendererBackend {
     /// commands. The `sdl3` wrapper does not expose enough provenance to validate this relation.
     pub unsafe fn prepare_render<'renderer, 'ctx, 'command>(
         &'renderer mut self,
-        mut frame: RenderedFrame<'ctx>,
+        frame: PendingFrame<'ctx>,
         command_buffer: &'command CommandBuffer,
     ) -> Result<SdlGpu3PreparedFrame<'renderer, 'ctx, 'command>, Sdl3BackendError> {
-        self.reconcile_frame(&mut frame)?;
+        let frame = self.reconcile_frame(frame)?;
+        unsafe { self.prepare_render_reconciled(frame, command_buffer) }
+    }
+
+    /// Prepare a reconciled frame for the main SDL GPU render pass.
+    ///
+    /// Use this after secondary platform windows have been updated and rendered through the
+    /// returned [`ReconciledFrame`].
+    ///
+    /// # Safety
+    ///
+    /// `command_buffer` must come from the same live `SDL_GPUDevice` supplied at backend
+    /// initialization and must remain in a state that permits render preparation commands. The
+    /// `sdl3` wrapper does not expose enough provenance to validate this relation.
+    pub unsafe fn prepare_render_reconciled<'renderer, 'ctx, 'command>(
+        &'renderer mut self,
+        frame: ReconciledFrame<'ctx>,
+        command_buffer: &'command CommandBuffer,
+    ) -> Result<SdlGpu3PreparedFrame<'renderer, 'ctx, 'command>, Sdl3BackendError> {
+        ensure_matching_reconciled_frame(self.runtime.control().binding(), &frame)?;
         let entry = self.runtime.control().enter_bound()?;
         self.runtime
             .control()
@@ -919,7 +1014,7 @@ impl SdlGpu3RendererBackend {
             .try_with_bound_context(|| {
                 assert_current_draw_data(
                     frame.draw_data(),
-                    "SdlGpu3RendererBackend::prepare_render()",
+                    "SdlGpu3RendererBackend::prepare_render_reconciled()",
                 );
                 prepare_render_sdlgpu3_impl(frame.draw_data(), command_buffer);
             })?;
@@ -931,16 +1026,14 @@ impl SdlGpu3RendererBackend {
         })
     }
 
-    /// Apply managed-texture requests without drawing or acquiring a main swapchain texture.
+    /// Consume pending managed-texture requests without drawing or acquiring a main swapchain.
     ///
-    /// This operation is idempotent when this renderer already reconciled the same frame epoch;
-    /// feedback applied outside this renderer is rejected. It must precede the native
-    /// platform-window pump so secondary viewports can render even when the main window has no
-    /// presentable surface.
-    pub fn reconcile_frame(
+    /// It must precede the native platform-window pump so secondary viewports can render even when
+    /// the main window has no presentable surface.
+    pub fn reconcile_frame<'ctx>(
         &mut self,
-        frame: &mut RenderedFrame<'_>,
-    ) -> Result<(), Sdl3BackendError> {
+        frame: PendingFrame<'ctx>,
+    ) -> Result<ReconciledFrame<'ctx>, Sdl3BackendError> {
         reconcile_renderer_frame(&self.runtime, frame)
     }
 
@@ -956,9 +1049,8 @@ impl SdlGpu3RendererBackend {
 
     /// Destroy SDL GPU3 renderer device objects.
     ///
-    /// This validates an idle Context renderer consumer before native destruction begins. If a
-    /// detached [`dear_imgui_rs::render::FrameSnapshot`] is still outstanding, this returns an
-    /// error without destroying any native object. Commit or drop every snapshot, then retry.
+    /// This validates the Context-bound synchronous consumer before native destruction begins.
+    /// The reset is committed only after every renderer-owned texture has been released.
     pub fn destroy_device_objects(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
         self.runtime
             .destroy_renderer_device_objects(imgui, destroy_sdlgpu3_device_objects)
@@ -966,9 +1058,8 @@ impl SdlGpu3RendererBackend {
 
     /// Shut down the official SDLGPU3 renderer and SDL3 platform backend.
     ///
-    /// Shutdown validates the Context renderer consumer before changing callbacks or releasing
-    /// native resources. An outstanding detached snapshot must be committed or dropped before
-    /// retrying this operation.
+    /// Shutdown validates the Context-bound synchronous consumer before changing callbacks or
+    /// releasing native resources.
     pub fn shutdown(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
         self.runtime.shutdown_renderer(imgui)
     }
@@ -984,7 +1075,7 @@ impl SdlGpu3RendererBackend {
 #[must_use = "call render() while the SDL GPU render pass is active"]
 pub struct SdlGpu3PreparedFrame<'renderer, 'ctx, 'command> {
     backend: &'renderer mut SdlGpu3RendererBackend,
-    frame: RenderedFrame<'ctx>,
+    frame: ReconciledFrame<'ctx>,
     command_buffer: &'command CommandBuffer,
 }
 
@@ -1030,6 +1121,18 @@ impl Sdl3RendererBackend {
         renderer: *mut sdl3_sys::render::SDL_Renderer,
     ) -> Self {
         Self { runtime, renderer }
+    }
+
+    /// Synchronous consumer owned by this renderer.
+    ///
+    /// Pass it to [`Context::render`] to produce the [`PendingFrame`] consumed by this backend.
+    ///
+    /// # Panics
+    ///
+    /// Panics after this renderer has completed explicit shutdown.
+    #[must_use]
+    pub fn consumer(&self) -> &SynchronousRendererConsumer {
+        self.runtime.renderer_consumer()
     }
 
     /// Initialize the SDL3 platform backend and the official SDLRenderer3 renderer.
@@ -1099,11 +1202,11 @@ impl Sdl3RendererBackend {
     /// Consume and render one synchronous frame using the official SDLRenderer3 renderer.
     pub fn render(
         &mut self,
-        mut frame: RenderedFrame<'_>,
+        frame: PendingFrame<'_>,
         canvas: &WindowCanvas,
     ) -> Result<(), Sdl3BackendError> {
         ensure_matching_sdl_renderer(self.renderer, canvas.raw())?;
-        self.reconcile_frame(&mut frame)?;
+        let frame = self.reconcile_frame(frame)?;
         let entry = self.runtime.control().enter_bound()?;
         self.runtime
             .control()
@@ -1116,14 +1219,11 @@ impl Sdl3RendererBackend {
         Ok(())
     }
 
-    /// Apply managed-texture requests without drawing or acquiring a surface.
-    ///
-    /// This operation is idempotent when this renderer already reconciled the same frame epoch;
-    /// feedback applied outside this renderer is rejected.
-    pub fn reconcile_frame(
+    /// Consume pending managed-texture requests without drawing or acquiring a surface.
+    pub fn reconcile_frame<'ctx>(
         &mut self,
-        frame: &mut RenderedFrame<'_>,
-    ) -> Result<(), Sdl3BackendError> {
+        frame: PendingFrame<'ctx>,
+    ) -> Result<ReconciledFrame<'ctx>, Sdl3BackendError> {
         reconcile_renderer_frame(&self.runtime, frame)
     }
 
@@ -1134,9 +1234,8 @@ impl Sdl3RendererBackend {
 
     /// Destroy SDLRenderer3 renderer device objects.
     ///
-    /// This validates an idle Context renderer consumer before native destruction begins. If a
-    /// detached [`dear_imgui_rs::render::FrameSnapshot`] is still outstanding, this returns an
-    /// error without destroying any native object. Commit or drop every snapshot, then retry.
+    /// This validates the Context-bound synchronous consumer before native destruction begins.
+    /// The reset is committed only after every renderer-owned texture has been released.
     pub fn destroy_device_objects(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
         self.runtime
             .destroy_renderer_device_objects(imgui, destroy_sdlrenderer3_device_objects)
@@ -1144,9 +1243,8 @@ impl Sdl3RendererBackend {
 
     /// Shut down the official SDLRenderer3 renderer and SDL3 platform backend.
     ///
-    /// Shutdown validates the Context renderer consumer before changing callbacks or releasing
-    /// native resources. An outstanding detached snapshot must be committed or dropped before
-    /// retrying this operation.
+    /// Shutdown validates the Context-bound synchronous consumer before changing callbacks or
+    /// releasing native resources.
     pub fn shutdown(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
         self.runtime.shutdown_renderer(imgui)
     }

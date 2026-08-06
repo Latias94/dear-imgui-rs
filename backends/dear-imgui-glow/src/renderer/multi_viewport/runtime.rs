@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::fmt;
 use std::rc::Rc;
 
-use dear_imgui_rs::render::{ReconciledFrame, RenderedFrame};
+use dear_imgui_rs::render::{PendingFrame, ReconciledFrame};
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
     ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding, ContextBindingError,
@@ -867,18 +867,57 @@ impl GlowViewportRuntime {
             .with_renderer_mut(|renderer| renderer.new_frame().map_err(Into::into))
     }
 
+    /// Finalizes and renders one frame for the attached Context.
+    pub fn render_context(&self, context: &mut Context) -> Result<(), GlowViewportError> {
+        self.render_context_reconciled(context).map(drop)
+    }
+
+    /// Finalizes and renders the main viewport while retaining the reconciled frame capability.
+    pub fn render_context_reconciled<'context>(
+        &self,
+        context: &'context mut Context,
+    ) -> Result<ReconciledFrame<'context>, GlowViewportError> {
+        self.control.ensure_context(context)?;
+        let frame = self.control.with_renderer_mut(|renderer| {
+            renderer
+                .reconcile_context_frame(context)
+                .map_err(Into::into)
+        })?;
+        self.render_reconciled(frame)
+    }
+
     /// Consumes and renders one Context-owned frame.
-    pub fn render(&self, frame: RenderedFrame<'_>) -> Result<(), GlowViewportError> {
+    pub fn render(&self, frame: PendingFrame<'_>) -> Result<(), GlowViewportError> {
+        let frame = self.reconcile_frame(frame)?;
         self.render_reconciled(frame).map(drop)
     }
 
-    /// Renders one main-viewport frame and returns texture-reconciliation proof.
+    /// Reconciles managed textures without drawing the main viewport.
+    pub fn reconcile_frame<'frame>(
+        &self,
+        frame: PendingFrame<'frame>,
+    ) -> Result<ReconciledFrame<'frame>, GlowViewportError> {
+        self.control
+            .with_renderer_mut(|renderer| renderer.reconcile_frame(frame).map_err(Into::into))
+    }
+
+    /// Draws one reconciled main-viewport frame.
     pub fn render_reconciled<'frame>(
         &self,
-        frame: RenderedFrame<'frame>,
+        frame: ReconciledFrame<'frame>,
     ) -> Result<ReconciledFrame<'frame>, GlowViewportError> {
         self.control
             .with_renderer_mut(|renderer| renderer.render_reconciled(frame).map_err(Into::into))
+    }
+
+    /// Renders the main viewport, then completes every secondary platform viewport.
+    pub fn render_with_platform_windows(
+        &self,
+        frame: PendingFrame<'_>,
+    ) -> Result<(), GlowViewportError> {
+        let frame = self.reconcile_frame(frame)?;
+        self.render_with_platform_windows_reconciled(frame)
+            .map(drop)
     }
 
     /// Renders the main viewport, then completes every secondary platform viewport.
@@ -890,16 +929,36 @@ impl GlowViewportRuntime {
     /// known GL capability even when a native callback fails.
     pub fn render_with_platform_windows_reconciled<'frame>(
         &self,
-        mut frame: RenderedFrame<'frame>,
+        frame: ReconciledFrame<'frame>,
     ) -> Result<ReconciledFrame<'frame>, GlowViewportError> {
-        self.control.with_renderer_mut(|renderer| {
-            renderer.render_borrowed(&mut frame).map_err(Into::into)
-        })?;
+        let mut frame = self.render_reconciled(frame)?;
         frame.update_and_render_platform_windows_default();
-        frame
-            .into_reconciled()
-            .map_err(RenderError::from)
-            .map_err(Into::into)
+        Ok(frame)
+    }
+
+    /// Finalizes the attached Context frame, renders the main viewport, and completes every
+    /// secondary platform viewport.
+    pub fn render_context_with_platform_windows(
+        &self,
+        context: &mut Context,
+    ) -> Result<(), GlowViewportError> {
+        self.render_context_with_platform_windows_reconciled(context)
+            .map(drop)
+    }
+
+    /// Finalizes the attached Context frame, renders the main viewport, and completes every
+    /// secondary platform viewport.
+    pub fn render_context_with_platform_windows_reconciled<'context>(
+        &self,
+        context: &'context mut Context,
+    ) -> Result<ReconciledFrame<'context>, GlowViewportError> {
+        self.control.ensure_context(context)?;
+        let frame = self.control.with_renderer_mut(|renderer| {
+            renderer
+                .reconcile_context_frame(context)
+                .map_err(Into::into)
+        })?;
+        self.render_with_platform_windows_reconciled(frame)
     }
 
     /// Runs a read-only, non-escaping renderer inspection.

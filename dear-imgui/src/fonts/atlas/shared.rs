@@ -37,9 +37,11 @@ impl Drop for SharedFontAtlasInner {
 ///
 /// Multiple contexts may share the atlas only while they use legacy renderer-managed texture
 /// handling. Attaching a managed renderer with
-/// [`Context::create_renderer_consumer`](crate::Context::create_renderer_consumer) requires this
-/// atlas to be registered with exactly one context. After that claim succeeds, attempts to register
-/// another context return [`ImGuiError::SharedFontAtlasManaged`](crate::ImGuiError::SharedFontAtlasManaged).
+/// [`Context::create_synchronous_renderer_consumer`](crate::Context::create_synchronous_renderer_consumer)
+/// or [`Context::create_detached_renderer_consumer`](crate::Context::create_detached_renderer_consumer)
+/// requires this atlas to be registered with exactly one context. After that claim succeeds,
+/// attempts to register another context return
+/// [`ImGuiError::SharedFontAtlasManaged`](crate::ImGuiError::SharedFontAtlasManaged).
 /// Before that managed Context is dropped, its renderer must release its complete GPU texture map
 /// and commit [`Context::prepare_renderer_texture_reset`](crate::Context::prepare_renderer_texture_reset).
 /// Otherwise the atlas preserves its old native bindings and rejects later Context registration

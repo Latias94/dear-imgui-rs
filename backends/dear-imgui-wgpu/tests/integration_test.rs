@@ -198,7 +198,8 @@ fn render_callback_contract_frame(
             multiview_mask: None,
             timestamp_writes: None,
         });
-        let frame = context.render();
+        let frame = context.render(renderer.renderer_consumer()?);
+        let frame = renderer.reconcile_frame(frame)?;
         if !include_geometry {
             assert_eq!(frame.draw_data().total_vtx_count(), 0);
             assert_eq!(frame.draw_data().total_idx_count(), 0);
@@ -214,11 +215,12 @@ fn render_callback_contract_frame(
                 2
             );
         }
-        if explicit_extent {
-            renderer.render_with_fb_size(frame, &mut render_pass, 64, 64)?;
+        let frame = if explicit_extent {
+            renderer.render_with_fb_size_reconciled(frame, &mut render_pass, 64, 64)?
         } else {
-            renderer.render(frame, &mut render_pass)?;
-        }
+            renderer.render_reconciled(frame, &mut render_pass)?
+        };
+        drop(frame);
     }
     queue.submit([encoder.finish()]);
 
@@ -259,7 +261,7 @@ fn direct_and_explicit_render_paths_execute_raw_callbacks_with_scoped_state() ->
 }
 
 #[test]
-fn render_opens_its_resource_arena_from_the_rendered_frame_epoch() -> RendererResult<()> {
+fn render_opens_its_resource_arena_from_the_pending_frame_epoch() -> RendererResult<()> {
     let _guard = callback_test_guard();
     let Some((device, queue)) = request_test_device() else {
         return Ok(());
@@ -307,7 +309,8 @@ fn render_opens_its_resource_arena_from_the_rendered_frame_epoch() -> RendererRe
         multiview_mask: None,
         timestamp_writes: None,
     });
-    renderer.render(context.render(), &mut render_pass)?;
+    let frame = context.render(renderer.renderer_consumer()?);
+    renderer.render(frame, &mut render_pass)?;
     drop(render_pass);
     queue.submit([encoder.finish()]);
 
@@ -570,7 +573,7 @@ fn device_objects_rebind_after_invalidation_and_shutdown() -> RendererResult<()>
 }
 
 #[test]
-fn rendered_frame_reconciles_managed_lifecycle_and_preserves_external_views() -> RendererResult<()>
+fn pending_frame_reconciles_managed_lifecycle_and_preserves_external_views() -> RendererResult<()>
 {
     let Some((device, queue)) = request_test_device() else {
         eprintln!("skipping WGPU rendered-frame test because no headless adapter is available");

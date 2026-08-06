@@ -265,7 +265,7 @@ struct RendererTextureResetObservation {
     release_calls: Cell<usize>,
     release_saw_expected_binding: Cell<bool>,
     reset_rejected: Cell<bool>,
-    invalidated: Cell<Option<usize>>,
+    committed: Cell<bool>,
     binding_after_call: Cell<crate::TextureId>,
     nested_reset_rejected: Cell<bool>,
 }
@@ -276,22 +276,25 @@ impl RendererTextureResetObservation {
             release_calls: Cell::new(0),
             release_saw_expected_binding: Cell::new(false),
             reset_rejected: Cell::new(false),
-            invalidated: Cell::new(None),
+            committed: Cell::new(false),
             binding_after_call: Cell::new(crate::TextureId::null()),
             nested_reset_rejected: Cell::new(false),
         }
     }
 }
 
-struct RendererTextureResetAttachment {
-    consumer: crate::render::RendererConsumer,
+struct RendererTextureResetAttachment<C> {
+    consumer: C,
     expected_binding: crate::TextureId,
     release_fails: bool,
     attempts_reentry: bool,
     observation: Rc<RendererTextureResetObservation>,
 }
 
-impl ContextAttachment for RendererTextureResetAttachment {
+impl<C> ContextAttachment for RendererTextureResetAttachment<C>
+where
+    C: crate::render::RendererConsumerCapability + 'static,
+{
     fn release_renderer_resources(
         &self,
         context: &ContextTeardown<'_>,
@@ -323,7 +326,7 @@ impl ContextAttachment for RendererTextureResetAttachment {
         });
 
         match result {
-            Ok(invalidated) => self.observation.invalidated.set(Some(invalidated)),
+            Ok(()) => self.observation.committed.set(true),
             Err(_) => self.observation.reset_rejected.set(true),
         }
         self.observation
@@ -333,13 +336,16 @@ impl ContextAttachment for RendererTextureResetAttachment {
     }
 }
 
-struct WrongPhaseRendererTextureResetAttachment {
-    consumer: crate::render::RendererConsumer,
+struct WrongPhaseRendererTextureResetAttachment<C> {
+    consumer: C,
     expected_binding: crate::TextureId,
     observation: Rc<RendererTextureResetObservation>,
 }
 
-impl ContextAttachment for WrongPhaseRendererTextureResetAttachment {
+impl<C> ContextAttachment for WrongPhaseRendererTextureResetAttachment<C>
+where
+    C: crate::render::RendererConsumerCapability + 'static,
+{
     fn quiesce(
         &self,
         context: &ContextTeardown<'_>,
@@ -378,20 +384,20 @@ fn font_texture_id_during_teardown(context: &ContextTeardown<'_>) -> crate::Text
 
 fn prepare_managed_font_atlas(
     context: &mut Context,
-) -> (crate::render::RendererConsumer, crate::TextureId) {
+) -> (crate::render::SynchronousRendererConsumer, crate::TextureId) {
     context.prepare_frame(
         super::FramePrepareOptions::new([320.0, 240.0], 1.0 / 60.0).renderer_has_textures(),
     );
     assert!(context.font_atlas().build());
     let consumer = context
-        .create_renderer_consumer()
+        .create_synchronous_renderer_consumer()
         .expect("test Context must create a renderer consumer");
 
     let frame = context.begin_frame();
     frame.ui().text("initialize the managed font atlas");
-    let mut rendered = frame.render();
+    let pending = frame.render(&consumer);
     let binding = crate::TextureId::new(0xC0FFEE);
-    let feedback = rendered
+    let feedback = pending
         .texture_requests()
         .iter()
         .find(|request| {
@@ -403,10 +409,10 @@ fn prepare_managed_font_atlas(
         .expect("first managed frame must request the font atlas")
         .uploaded(binding)
         .expect("font atlas upload feedback must match the request");
-    rendered
+    let reconciled = pending
         .reconcile_texture_feedback([feedback])
         .expect("test font atlas feedback must reconcile");
-    drop(rendered);
+    drop(reconciled);
 
     assert_eq!(context.font_atlas().texture_id(), binding);
     (consumer, binding)
@@ -414,13 +420,13 @@ fn prepare_managed_font_atlas(
 
 fn prepare_managed_font_atlas_for_detached_rendering(
     context: &mut Context,
-) -> (crate::render::RendererConsumer, crate::TextureId) {
+) -> (crate::render::DetachedRendererConsumer, crate::TextureId) {
     context.prepare_frame(
         super::FramePrepareOptions::new([320.0, 240.0], 1.0 / 60.0).renderer_has_textures(),
     );
     assert!(context.font_atlas().build());
     let consumer = context
-        .create_renderer_consumer()
+        .create_detached_renderer_consumer()
         .expect("test Context must create a renderer consumer");
 
     let frame = context.begin_frame();
@@ -492,7 +498,7 @@ fn suspend_rejects_an_open_frame_and_context_drop_recovers() {
     ctx.io_mut().set_display_size([128.0, 128.0]);
     ctx.io_mut().set_delta_time(1.0 / 60.0);
     ctx.frame().text("context recovered after rejected suspend");
-    assert!(ctx.render().valid());
+    assert!(ctx.render_legacy().valid());
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -526,7 +532,7 @@ fn frame_preserves_imgui_fallback_when_backends_decline_multi_viewport_support()
             .config_flags()
             .contains(crate::ConfigFlags::VIEWPORTS_ENABLE)
     );
-    drop(ctx.render());
+    drop(ctx.render_legacy());
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -590,7 +596,7 @@ fn frame_rejects_enabling_multi_viewport_between_the_first_and_second_frames() {
     ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
 
     ctx.frame().text("first frame without viewports");
-    drop(ctx.render());
+    drop(ctx.render_legacy());
     ctx.enable_multi_viewport();
 
     let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -618,7 +624,7 @@ fn frame_prepares_a_completed_disabled_frame_for_late_multi_viewport_enablement(
 
     for label in ["first disabled frame", "second disabled frame"] {
         ctx.frame().text(label);
-        drop(ctx.render());
+        drop(ctx.render_legacy());
         assert_eq!(
             unsafe { (*ctx.platform_io().as_raw()).Platform_CreateWindow }
                 .map(|callback| callback as usize),
@@ -628,7 +634,7 @@ fn frame_prepares_a_completed_disabled_frame_for_late_multi_viewport_enablement(
 
     ctx.enable_multi_viewport();
     ctx.frame().text("late-enabled viewport frame");
-    drop(ctx.render());
+    drop(ctx.render_legacy());
     ctx.update_platform_windows();
     drop(ctx);
     drop(platform_attachment);
@@ -658,7 +664,7 @@ fn platform_window_calls_enforce_the_native_frame_order_in_rust() {
 
     ctx.frame()
         .text("platform lifecycle after normalized teardown");
-    drop(ctx.render());
+    drop(ctx.render_legacy());
     let render_before_update = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         ctx.render_platform_windows_default();
     }));
@@ -783,7 +789,7 @@ fn default_platform_render_requires_a_callback_render_path() {
     assert!(ctx.font_atlas().build());
     ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
     ctx.frame().text("no default renderer callback");
-    drop(ctx.render());
+    drop(ctx.render_legacy());
     ctx.update_platform_windows();
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -808,7 +814,7 @@ fn end_frame_is_idempotent_and_allows_a_new_frame() {
     );
 
     ctx.frame().text("replacement frame");
-    drop(ctx.render());
+    drop(ctx.render_legacy());
     assert_eq!(
         ctx.frame_lifecycle_state(),
         super::FrameLifecycleState::Rendered
@@ -1775,7 +1781,7 @@ fn renderer_attachment_reset_releases_before_commit_and_rejects_reentry() {
     assert_eq!(observation.release_calls.get(), 1);
     assert!(observation.release_saw_expected_binding.get());
     assert!(observation.nested_reset_rejected.get());
-    assert!(observation.invalidated.get().is_some_and(|count| count > 0));
+    assert!(observation.committed.get());
     assert_eq!(
         observation.binding_after_call.get(),
         crate::TextureId::null(),
@@ -1808,7 +1814,7 @@ fn renderer_attachment_reset_preserves_native_bindings_when_release_fails() {
     assert_eq!(observation.release_calls.get(), 1);
     assert!(observation.release_saw_expected_binding.get());
     assert!(observation.reset_rejected.get());
-    assert_eq!(observation.invalidated.get(), None);
+    assert!(!observation.committed.get());
     assert_eq!(
         observation.binding_after_call.get(),
         binding,
@@ -1934,7 +1940,7 @@ fn renderer_attachment_reset_restores_a_foreign_current_context() {
     drop(context);
 
     assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, foreign_raw);
-    assert!(observation.invalidated.get().is_some_and(|count| count > 0));
+    assert!(observation.committed.get());
     assert_eq!(
         observation.binding_after_call.get(),
         crate::TextureId::null()
@@ -2093,7 +2099,7 @@ fn ui_stack_tokens_drop_on_owner_context_and_restore_previous_current_context() 
     }
 
     unsafe { crate::sys::igSetCurrentContext(raw_a) };
-    let _ = ctx_a.render();
+    let _ = ctx_a.render_legacy();
 
     drop(ctx_a);
     drop(suspended_b);
@@ -2168,7 +2174,7 @@ fn ui_methods_run_on_owner_context_and_restore_previous_current_context() {
     }
 
     unsafe { crate::sys::igSetCurrentContext(raw_a) };
-    let _ = ctx_a.render();
+    let _ = ctx_a.render_legacy();
 
     drop(ctx_a);
     drop(suspended_b);
@@ -2198,7 +2204,7 @@ fn font_stack_token_drops_on_owner_context_and_restores_previous_current_context
     assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_b);
 
     unsafe { crate::sys::igSetCurrentContext(raw_a) };
-    let _ = ctx_a.render();
+    let _ = ctx_a.render_legacy();
 
     drop(ctx_a);
     drop(suspended_b);
@@ -2206,13 +2212,13 @@ fn font_stack_token_drops_on_owner_context_and_restores_previous_current_context
 
 #[cfg(feature = "multi-viewport")]
 #[test]
-fn platform_viewport_snapshot_requires_rendered_frame_and_reuses_current_draw_data() {
+fn platform_viewport_snapshot_requires_rendered_lifecycle_state_and_reuses_current_draw_data() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
     ctx.prepare_frame(
         super::FramePrepareOptions::new([320.0, 240.0], 1.0 / 60.0).renderer_has_textures(),
     );
-    let consumer = ctx.create_renderer_consumer().unwrap();
+    let consumer = ctx.create_detached_renderer_consumer().unwrap();
 
     let before_render = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _ = ctx.platform_viewport_snapshot(&consumer);

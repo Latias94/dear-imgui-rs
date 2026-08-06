@@ -48,7 +48,7 @@ fn managed_and_legacy_images_resolve_in_the_owner_context() {
     let managed = register_texture(&mut imgui);
     let plot = PlotContext::create(&imgui);
     let consumer = imgui
-        .create_renderer_consumer()
+        .create_detached_renderer_consumer()
         .expect("renderer consumer should register");
 
     let snapshot = {

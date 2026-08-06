@@ -352,7 +352,7 @@ fn begin_frame_for_context(
     configure_context(app, context_id, |context| {
         let frame = context.begin_frame();
         assert_ui(frame.ui());
-        let _ = frame.render();
+        let _ = frame.render_legacy();
     });
 }
 

@@ -56,9 +56,13 @@ impl winit::application::ApplicationHandler for App {
                     .prepare_render(&ui, &window)
                     .expect("Winit platform contract changed");
 
-                // 5) render via your renderer backend
-                let frame = self.imgui.context.render();
-                /* renderer.render(frame, ...); */
+                // 5) close the frame with your renderer's synchronous consumer, then let that
+                // renderer reconcile every texture request before it reads draw commands
+                let pending = self
+                    .imgui
+                    .context
+                    .render(self.renderer.consumer());
+                self.renderer.render(pending /*, target-specific arguments */);
             }
             _ => {}
         }
