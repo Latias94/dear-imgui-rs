@@ -57,14 +57,15 @@ impl StbTrueTypeFontData {
         bytes: impl AsRef<[u8]> + Into<Arc<[u8]>>,
     ) -> Result<Self, StbTrueTypeFontError> {
         validate_font_data_length(bytes.as_ref().len())?;
-        let bytes = bytes.into();
-        validate_font(&bytes)?;
-        Ok(Self { bytes })
+        Self::from_length_checked_bytes(bytes.into())
     }
 
     /// Copy and validate a borrowed byte slice.
+    ///
+    /// The byte limit is checked before allocating the owned copy.
     pub fn from_slice(bytes: &[u8]) -> Result<Self, StbTrueTypeFontError> {
-        Self::from_bytes(Arc::<[u8]>::from(bytes))
+        validate_font_data_length(bytes.len())?;
+        Self::from_length_checked_bytes(Arc::<[u8]>::from(bytes))
     }
 
     /// Read and validate a standalone TrueType font file.
@@ -108,6 +109,11 @@ impl StbTrueTypeFontData {
     /// Successfully constructed values always return `false`.
     pub fn is_empty(&self) -> bool {
         self.bytes.is_empty()
+    }
+
+    fn from_length_checked_bytes(bytes: Arc<[u8]>) -> Result<Self, StbTrueTypeFontError> {
+        validate_font(&bytes)?;
+        Ok(Self { bytes })
     }
 }
 
