@@ -775,7 +775,7 @@ impl AppWindow {
         let mut dolly_wheel_scale = self.dolly_wheel_scale;
         let ui = self.imgui.context.frame();
         // Create a DockSpace over main viewport so windows can be docked properly
-        let dockspace_id = ui.dockspace_over_main_viewport();
+        let dockspace_id = ui.dockspace().build()?;
         // Prefer to dock the main controls window on first use
         ui.set_next_window_dock_id_with_cond(dockspace_id, Condition::FirstUseEver);
         show_quat_gizmo_window(

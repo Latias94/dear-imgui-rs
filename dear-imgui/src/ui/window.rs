@@ -4,7 +4,7 @@ impl Ui {
     /// Creates a window builder
     pub fn window<'ui>(
         &'ui self,
-        name: impl Into<std::borrow::Cow<'ui, str>>,
+        name: impl Into<crate::WindowLabel<'ui>>,
     ) -> crate::window::Window<'ui> {
         crate::window::Window::new(self, name)
     }

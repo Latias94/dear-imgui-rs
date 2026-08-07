@@ -1111,7 +1111,7 @@ impl AppWindow {
 
         if !running_upstream_suite {
             // Keep a dockspace in the main viewport so it always has content
-            ui.dockspace_over_main_viewport();
+            ui.dockspace().build()?;
 
             // Simple UI that can be torn out into another viewport (when enabled)
             ui.window("Main")

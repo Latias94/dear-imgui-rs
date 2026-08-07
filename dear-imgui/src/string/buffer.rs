@@ -27,6 +27,18 @@ impl UiBuffer {
         unsafe { self.offset(start_of_substr) }
     }
 
+    /// Stages multiple string parts as one NUL-terminated C string.
+    pub(crate) fn scratch_txt_concat(&mut self, parts: &[&str]) -> *const c_char {
+        self.refresh_buffer();
+
+        let start = self.buffer.len();
+        for part in parts {
+            self.extend_c_string_bytes(part.as_bytes());
+        }
+        self.buffer.push(0);
+        unsafe { self.offset(start) }
+    }
+
     /// Stages an explicit text range followed by a readable NUL sentinel.
     ///
     /// Unlike [`Self::scratch_txt`], this preserves interior NUL bytes because
@@ -98,15 +110,21 @@ impl UiBuffer {
     pub fn push(&mut self, txt: impl AsRef<str>) -> usize {
         let txt = txt.as_ref();
         let len = self.buffer.len();
-        let bytes = txt.as_bytes();
-        if bytes.contains(&0) {
-            self.buffer
-                .extend(bytes.iter().map(|&b| if b == 0 { b'?' } else { b }));
-        } else {
-            self.buffer.extend(bytes);
-        }
+        self.extend_c_string_bytes(txt.as_bytes());
         self.buffer.push(b'\0');
 
         len
+    }
+
+    fn extend_c_string_bytes(&mut self, bytes: &[u8]) {
+        if bytes.contains(&0) {
+            self.buffer.extend(
+                bytes
+                    .iter()
+                    .map(|&byte| if byte == 0 { b'?' } else { byte }),
+            );
+        } else {
+            self.buffer.extend(bytes);
+        }
     }
 }

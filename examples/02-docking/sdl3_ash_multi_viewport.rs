@@ -1456,7 +1456,7 @@ impl App {
             .new_frame(&mut self.imgui.context)?;
         let ui = self.imgui.context.frame();
 
-        ui.dockspace_over_main_viewport();
+        ui.dockspace().build()?;
 
         ui.window("SDL3 + Ash (multi-viewport)")
             .size([460.0, 280.0], Condition::FirstUseEver)

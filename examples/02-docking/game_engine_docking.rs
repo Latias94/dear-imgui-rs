@@ -1188,16 +1188,19 @@ impl AppWindow {
         // Submit the stable dockspace and let the declarative compiler own its lifecycle.
         let dock_id_struct = ui.get_id("MainDockSpace");
         imgui.dockspace_id = dock_id_struct.into();
-        let options = dear_imgui_rs::DockspaceOptions::new(dock_id_struct)?.flags(
-            dear_imgui_rs::DockNodeFlags::PASSTHRU_CENTRAL_NODE
-                | dear_imgui_rs::DockNodeFlags::AUTO_HIDE_TAB_BAR,
-        );
         let apply = if imgui.first_frame {
             dear_imgui_rs::DockLayoutApply::Replace
         } else {
             dear_imgui_rs::DockLayoutApply::IfMissing
         };
-        ui.dockspace_over_main_viewport_with_layout(&options, &initial_docking_layout(), apply)?;
+        ui.dockspace()
+            .root_id(dock_id_struct)
+            .flags(
+                dear_imgui_rs::DockNodeFlags::PASSTHRU_CENTRAL_NODE
+                    | dear_imgui_rs::DockNodeFlags::AUTO_HIDE_TAB_BAR,
+            )
+            .layout(&initial_docking_layout(), apply)
+            .build()?;
         imgui.first_frame = false;
 
         let actions = render_main_menu_bar(ui, &mut imgui.game_state);
@@ -1394,8 +1397,8 @@ fn initial_docking_layout() -> dear_imgui_rs::DockLayout {
         DockLayout::split(
             DockSplit::Down,
             0.2,
-            DockLayout::tabs(["Performance"]),
-            DockLayout::tabs(["Inspector"]),
+            DockLayout::tabs([game_engine_window("Performance")]),
+            DockLayout::tabs([game_engine_window("Inspector")]),
         ),
         DockLayout::split(
             DockSplit::Left,
@@ -1403,22 +1406,29 @@ fn initial_docking_layout() -> dear_imgui_rs::DockLayout {
             DockLayout::split(
                 DockSplit::Down,
                 0.313,
-                DockLayout::tabs(["Asset Browser"]),
+                DockLayout::tabs([game_engine_window("Asset Browser")]),
                 DockLayout::split(
                     DockSplit::Down,
                     0.439,
-                    DockLayout::tabs(["Project"]),
-                    DockLayout::tabs(["Hierarchy"]),
+                    DockLayout::tabs([game_engine_window("Project")]),
+                    DockLayout::tabs([game_engine_window("Hierarchy")]),
                 ),
             ),
             DockLayout::split(
                 DockSplit::Down,
                 0.313,
-                DockLayout::tabs(["Console"]),
-                DockLayout::tabs(["Scene View", "Game View"]),
+                DockLayout::tabs([game_engine_window("Console")]),
+                DockLayout::tabs([
+                    game_engine_window("Scene View"),
+                    game_engine_window("Game View"),
+                ]),
             ),
         ),
     )
+}
+
+fn game_engine_window(title: &str) -> dear_imgui_rs::WindowKey {
+    dear_imgui_rs::WindowKey::new(title, title).expect("game engine window keys must be valid")
 }
 
 #[derive(Default, Clone, Copy)]
@@ -1627,7 +1637,7 @@ fn render_main_menu_bar(ui: &Ui, game_state: &mut GameEngineState) -> MenuAction
 
 /// Render the Hierarchy panel (Unity-style)
 fn render_hierarchy(ui: &Ui, game_state: &mut GameEngineState) {
-    ui.window("Hierarchy")
+    ui.window(&game_engine_window("Hierarchy"))
         .size([300.0, 400.0], Condition::FirstUseEver)
         .build(|| {
             // Scene name header
@@ -1750,7 +1760,7 @@ fn render_hierarchy(ui: &Ui, game_state: &mut GameEngineState) {
 
 /// Render the Project panel (Unity-style)
 fn render_project(ui: &Ui, game_state: &mut GameEngineState) {
-    ui.window("Project")
+    ui.window(&game_engine_window("Project"))
         .size([300.0, 200.0], Condition::FirstUseEver)
         .build(|| {
             // Project folder navigation
@@ -1842,7 +1852,7 @@ fn render_project(ui: &Ui, game_state: &mut GameEngineState) {
 
 /// Render the inspector panel
 fn render_inspector(ui: &Ui, game_state: &mut GameEngineState) {
-    ui.window("Inspector")
+    ui.window(&game_engine_window("Inspector"))
         .size([350.0, 500.0], Condition::FirstUseEver)
         .build(|| {
             if let Some(selected_idx) = game_state.selected_entity {
@@ -2101,7 +2111,7 @@ fn pick_cube_entity(entities: &[SceneEntity], ray_origin: Vec3, ray_dir: Vec3) -
 /// Render the Scene View (Unity-style editor view)
 #[cfg(feature = "imguizmo")]
 fn render_scene_view(ui: &Ui, game_state: &mut GameEngineState, scene_tex_id: Option<TextureId>) {
-    ui.window("Scene View")
+    ui.window(&game_engine_window("Scene View"))
         .size([800.0, 600.0], Condition::FirstUseEver)
         .build(|| {
             // Scene view toolbar
@@ -2230,7 +2240,7 @@ fn render_scene_view(ui: &Ui, game_state: &mut GameEngineState, scene_tex_id: Op
 /// Render the Scene View (Unity-style editor view) - No ImGuizmo version
 #[cfg(not(feature = "imguizmo"))]
 fn render_scene_view(ui: &Ui, game_state: &mut GameEngineState, scene_tex_id: Option<TextureId>) {
-    ui.window("Scene View")
+    ui.window(&game_engine_window("Scene View"))
         .size([800.0, 600.0], Condition::FirstUseEver)
         .build(|| {
             // Scene view toolbar
@@ -2320,7 +2330,7 @@ fn render_scene_view(ui: &Ui, game_state: &mut GameEngineState, scene_tex_id: Op
 
 /// Render the Game View (Unity-style play view)
 fn render_game_view(ui: &Ui, game_state: &mut GameEngineState, game_tex_id: Option<TextureId>) {
-    ui.window("Game View")
+    ui.window(&game_engine_window("Game View"))
         .size([800.0, 600.0], Condition::FirstUseEver)
         .build(|| {
             // Game view toolbar
@@ -2383,7 +2393,7 @@ fn render_game_view(ui: &Ui, game_state: &mut GameEngineState, game_tex_id: Opti
 
 /// Render the console panel
 fn render_console(ui: &Ui, game_state: &mut GameEngineState) {
-    ui.window("Console")
+    ui.window(&game_engine_window("Console"))
         .size([800.0, 200.0], Condition::FirstUseEver)
         .build(|| {
             // Console toolbar
@@ -2488,7 +2498,7 @@ fn render_console(ui: &Ui, game_state: &mut GameEngineState) {
 
 /// Render the asset browser panel (already handled by Project panel)
 fn render_asset_browser(ui: &Ui, game_state: &mut GameEngineState) {
-    ui.window("Asset Browser")
+    ui.window(&game_engine_window("Asset Browser"))
         .size([300.0, 300.0], Condition::FirstUseEver)
         .build(|| {
             // Current folder path
@@ -2567,7 +2577,7 @@ fn render_asset_browser(ui: &Ui, game_state: &mut GameEngineState) {
 /// Render the performance stats panel
 #[cfg(feature = "implot")]
 fn render_performance(ui: &Ui, plot_ui: &PlotUi, game_state: &mut GameEngineState) {
-    ui.window("Performance")
+    ui.window(&game_engine_window("Performance"))
         .size([350.0, 600.0], Condition::FirstUseEver) // Increased height to show full graph
         .build(|| {
             ui.text("Performance Statistics");
@@ -2649,7 +2659,7 @@ fn render_performance(ui: &Ui, plot_ui: &PlotUi, game_state: &mut GameEngineStat
 
 #[cfg(not(feature = "implot"))]
 fn render_performance(ui: &Ui, game_state: &mut GameEngineState) {
-    ui.window("Performance")
+    ui.window(&game_engine_window("Performance"))
         .size([250.0, 200.0], Condition::FirstUseEver)
         .build(|| {
             ui.text("Performance Statistics");

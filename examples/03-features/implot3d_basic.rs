@@ -3,9 +3,9 @@
 //! This example is a faithful reproduction of the official C++ ImPlot3D demo,
 //! showcasing all major features of the library.
 //!
-//! The demo shows two windows side-by-side using dockspace:
-//! - Left: Rust implementation (ImPlot3D Demo (Rust))
-//! - Right: Official C++ implementation (ImPlot3D Demo)
+//! The Rust implementation receives a stable declarative dock identity. The official C++ demo
+//! owns its native window name, so it remains user-dockable instead of pretending that safe Rust
+//! controls its identity.
 
 use dear_app::{AddOnsConfig, AppConfig, Application, DockingConfig, FrameContext, RunError, run};
 use dear_imgui_rs::*;
@@ -19,7 +19,9 @@ fn cmap(plot_ui: &Plot3DUi, index: usize) -> [f32; 4] {
     plot_ui.colormap_color(ColormapColorIndex::from(index))
 }
 
-struct ImPlot3dApp;
+struct ImPlot3dApp {
+    rust_demo: WindowKey,
+}
 
 impl Application for ImPlot3dApp {
     fn frame(&mut self, context: &mut FrameContext<'_>) -> Result<(), RunError> {
@@ -31,18 +33,17 @@ impl Application for ImPlot3dApp {
         };
         let plot_ui = plot_ctx.get_plot_ui(ui);
 
-        let options = DockspaceOptions::new(ui.get_id("ImPlot3dDockspace"))
-            .map_err(|error| RunError::application("frame", error.to_string()))?
-            .flags(DockNodeFlags::PASSTHRU_CENTRAL_NODE);
-        ui.dockspace_over_main_viewport_with_layout(
-            &options,
-            &implot3d_dock_layout(),
-            DockLayoutApply::IfMissing,
-        )
-        .map_err(|error| RunError::application("frame", error.to_string()))?;
+        ui.dockspace()
+            .root_id(ui.get_id("ImPlot3dDockspace"))
+            .flags(DockNodeFlags::PASSTHRU_CENTRAL_NODE)
+            .layout(
+                &DockLayout::tabs([&self.rust_demo]),
+                DockLayoutApply::IfMissing,
+            )
+            .build()
+            .map_err(|error| RunError::application("frame", error.to_string()))?;
 
-        // Rust implementation window (will be docked to the left)
-        ui.window("ImPlot3D Demo (Rust)")
+        ui.window(&self.rust_demo)
             .size([750.0, 850.0], Condition::FirstUseEver)
             .build(|| {
                 ui.text(format!("ImPlot3D says olá! (0.3 WIP)"));
@@ -97,8 +98,7 @@ impl Application for ImPlot3dApp {
                 }
             });
 
-        // Official C++ implementation window (will be docked to the right)
-        // Note: show_demo_window() creates a window titled "ImPlot3D Demo"
+        // The upstream demo creates and owns a window titled "ImPlot3D Demo".
         plot_ui.show_demo_window();
         Ok(())
     }
@@ -118,17 +118,14 @@ fn main() {
         ..Default::default()
     };
 
-    run(config, ImPlot3dApp).unwrap();
-}
-
-/// Split the dockspace into the Rust and C++ demo panels.
-fn implot3d_dock_layout() -> DockLayout {
-    DockLayout::split(
-        DockSplit::Left,
-        0.5,
-        DockLayout::tabs(["ImPlot3D Demo (Rust)"]),
-        DockLayout::tabs(["ImPlot3D Demo"]),
+    run(
+        config,
+        ImPlot3dApp {
+            rust_demo: WindowKey::new("implot3d-rust-demo", "ImPlot3D Demo (Rust)")
+                .expect("valid ImPlot3D window key"),
+        },
     )
+    .unwrap();
 }
 
 // Helper function to create collapsible demo sections

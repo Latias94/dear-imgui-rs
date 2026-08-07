@@ -880,8 +880,7 @@ mod tests {
         ui.window(host_name).build(|| {
             let mut clipper = ListClipper::new(1).items_height(10.0).begin(ui);
 
-            let _ =
-                ui.dockspace_over_main_viewport_with_flags(0.into(), crate::DockNodeFlags::NONE);
+            let _ = ui.dock_space_over_main_viewport_raw(0.into(), crate::DockNodeFlags::NONE);
 
             clipper.include_item_by_index(0);
             assert!(clipper.step());

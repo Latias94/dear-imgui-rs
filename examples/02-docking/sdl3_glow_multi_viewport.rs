@@ -1382,7 +1382,7 @@ impl MainData {
         reset_raw_callback_probe();
         let frame = self.imgui.begin_frame();
         let ui = frame.ui();
-        ui.dockspace_over_main_viewport();
+        ui.dockspace().build()?;
         let external_texture_id = self.external_texture.id;
         #[cfg(feature = "test-engine")]
         let reset_render_state_callback = self.reset_render_state_callback;

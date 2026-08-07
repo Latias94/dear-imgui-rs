@@ -35,6 +35,44 @@ struct AppWindow {
     surface: Surface<WindowSurface>,
     context: PossiblyCurrentContext,
     imgui: ImguiState,
+    dock_windows: DockWindows,
+}
+
+struct DockWindows {
+    james_1: WindowKey,
+    james_2: WindowKey,
+    james_3: WindowKey,
+    james_4: WindowKey,
+}
+
+impl DockWindows {
+    fn new() -> Result<Self, WindowKeyError> {
+        Ok(Self {
+            james_1: WindowKey::new("james-1", "James_1")?,
+            james_2: WindowKey::new("james-2", "James_2")?,
+            james_3: WindowKey::new("james-3", "James_3")?,
+            james_4: WindowKey::new("james-4", "James_4")?,
+        })
+    }
+
+    fn layout(&self) -> DockLayout {
+        DockLayout::split(
+            DockSplit::Left,
+            0.20,
+            DockLayout::tabs([&self.james_1]),
+            DockLayout::split(
+                DockSplit::Right,
+                0.20,
+                DockLayout::tabs([&self.james_3]),
+                DockLayout::split(
+                    DockSplit::Down,
+                    0.20,
+                    DockLayout::tabs([&self.james_4]),
+                    DockLayout::tabs([&self.james_2]),
+                ),
+            ),
+        )
+    }
 }
 
 #[derive(Default)]
@@ -116,6 +154,7 @@ impl AppWindow {
             surface,
             context,
             imgui,
+            dock_windows: DockWindows::new()?,
         })
     }
 
@@ -144,10 +183,7 @@ impl AppWindow {
         let ui = self.imgui.context.frame();
 
         // 1) Host a fullscreen window for the DockSpace (mirrors minimal C++ docking example)
-        use dear_imgui_rs::{
-            DockLayout, DockLayoutApply, DockSplit, DockspaceOptions, StyleColor, StyleVar,
-            WindowFlags,
-        };
+        use dear_imgui_rs::{DockLayoutApply, StyleColor, StyleVar, WindowFlags};
 
         let viewport = ui.main_viewport();
         // Ensure this window is associated with the main viewport (safe wrapper)
@@ -168,23 +204,7 @@ impl AppWindow {
         let border = ui.push_style_var(StyleVar::WindowBorderSize(0.0));
         let padding = ui.push_style_var(StyleVar::WindowPadding([0.0, 0.0]));
         let dockspace_id = ui.get_id("MyDockspace");
-        let dockspace_options = DockspaceOptions::new(dockspace_id)?;
-        let dockspace_layout = DockLayout::split(
-            DockSplit::Left,
-            0.20,
-            DockLayout::tabs(["James_1"]),
-            DockLayout::split(
-                DockSplit::Right,
-                0.20,
-                DockLayout::tabs(["James_3"]),
-                DockLayout::split(
-                    DockSplit::Down,
-                    0.20,
-                    DockLayout::tabs(["James_4"]),
-                    DockLayout::tabs(["James_2"]),
-                ),
-            ),
-        );
+        let dockspace_layout = self.dock_windows.layout();
         let mut dockspace_result = Ok(dockspace_id);
 
         ui.window("DockSpace Demo")
@@ -199,21 +219,25 @@ impl AppWindow {
 
                 // Render DockSpace inside the host window
                 let color = ui.push_style_color(StyleColor::DockingEmptyBg, [1.0, 0.0, 0.0, 1.0]);
-                dockspace_result = ui.dock_space_with_layout(
-                    &dockspace_options,
-                    ui.content_region_avail(),
-                    &dockspace_layout,
-                    DockLayoutApply::IfMissing,
-                );
+                dockspace_result = ui
+                    .dockspace()
+                    .root_id(dockspace_id)
+                    .current_window(ui.content_region_avail())
+                    .layout(&dockspace_layout, DockLayoutApply::IfMissing)
+                    .build();
                 color.pop();
             });
         dockspace_result?;
 
         // 2) Create docked windows
-        ui.window("James_1").build(|| ui.text("Text 1"));
-        ui.window("James_2").build(|| ui.text("Text 2"));
-        ui.window("James_3").build(|| ui.text("Text 3"));
-        ui.window("James_4").build(|| ui.text("Text 4"));
+        ui.window(&self.dock_windows.james_1)
+            .build(|| ui.text("Text 1"));
+        ui.window(&self.dock_windows.james_2)
+            .build(|| ui.text("Text 2"));
+        ui.window(&self.dock_windows.james_3)
+            .build(|| ui.text("Text 3"));
+        ui.window(&self.dock_windows.james_4)
+            .build(|| ui.text("Text 4"));
 
         // Clear and render
         if let Some(gl) = self.imgui.renderer.gl_context() {

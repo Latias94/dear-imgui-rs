@@ -29,21 +29,34 @@
 //! #     .expect("legacy renderer font atlas should be available")
 //! #     .build();
 //! # let ui = ctx.frame();
-//! // Create a dockspace over the main viewport
-//! let dockspace_id = ui.dockspace_over_main_viewport();
+//! let tools = WindowKey::new("tools", "Tools")?;
+//! let layout = DockLayout::tabs([&tools]);
+//! ui.dockspace()
+//!     .layout(&layout, DockLayoutApply::IfMissing)
+//!     .build()?;
 //!
-//! // Dock a window to the dockspace
-//! ui.set_next_window_dock_id(dockspace_id);
-//! ui.window("Tool Window").build(|| {
+//! ui.window(&tools).build(|| {
 //!     ui.text("This window is docked!");
 //! });
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! The old parallel convenience methods are intentionally absent:
+//!
+//! ```compile_fail
+//! # use dear_imgui_rs::{Context, Id};
+//! # let mut context = Context::create();
+//! # let ui = context.frame();
+//! let _ = ui.dock_space(Id::from(1_u32), [400.0, 300.0]);
 //! ```
 
+mod builder;
 mod flags;
 mod ui;
 mod validation;
 mod window_class;
 
+pub use builder::DockspaceBuilder;
 pub use flags::{DockNodeFlags, WindowClassDockNodeFlags};
 pub(crate) use validation::{
     MAX_DOCKSPACE_HOST_NAME_BYTES, claim_dockspace_submission, current_dockspace_host_name_len,

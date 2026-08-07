@@ -165,7 +165,7 @@ impl OpenGlApp {
 
         main.sdl3_backend.new_frame(&mut main.imgui)?;
         let ui = main.imgui.frame();
-        ui.dockspace_over_main_viewport();
+        ui.dockspace().build()?;
 
         ui.window("Main")
             .size([420.0, 260.0], Condition::FirstUseEver)

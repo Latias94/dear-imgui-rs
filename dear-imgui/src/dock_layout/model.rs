@@ -1,4 +1,4 @@
-use crate::{DockNodeFlags, Id, WindowClass, WindowClassError};
+use crate::{DockNodeFlags, Id, WindowClass, WindowClassError, WindowKey};
 use thiserror::Error;
 
 /// A complete declarative dock tree.
@@ -8,7 +8,7 @@ pub enum DockLayout {
     ///
     /// An empty list intentionally leaves the leaf available as an empty docking target.
     /// Dear ImGui's builder does not preserve the relative order of these windows.
-    Tabs(Vec<String>),
+    Tabs(Vec<WindowKey>),
     /// Split a node and recursively populate both resulting children.
     Split {
         /// Side occupied by `first`.
@@ -23,8 +23,8 @@ pub enum DockLayout {
 }
 
 impl DockLayout {
-    /// Create one tab leaf from window titles.
-    pub fn tabs(windows: impl IntoIterator<Item = impl Into<String>>) -> Self {
+    /// Create one tab leaf from stable window keys.
+    pub fn tabs(windows: impl IntoIterator<Item = impl Into<WindowKey>>) -> Self {
         Self::Tabs(windows.into_iter().map(Into::into).collect())
     }
 
@@ -39,7 +39,7 @@ impl DockLayout {
     }
 
     /// Validate the complete layout without touching Dear ImGui state.
-    pub fn validate(&self) -> Result<(), DockLayoutError> {
+    pub fn validate(&self) -> Result<(), DockspaceError> {
         super::compile::compile_layout(self).map(|_| ())
     }
 }
@@ -69,84 +69,46 @@ pub enum DockLayoutApply {
     Replace,
 }
 
-/// Stable identity and policy for a declarative dockspace.
-///
-/// The ID must either be unused or identify the explicit root previously owned by these options.
-/// An ID that resolves to another tree's child or to an implicit node is rejected before mutation.
-///
-/// Submission flags and per-window node policies are intentionally distinct types:
-///
-/// ```compile_fail
-/// # use dear_imgui_rs::{DockspaceOptions, Id, WindowClassDockNodeFlags};
-/// let options = DockspaceOptions::new(Id::from(1u32)).unwrap()
-///     .flags(WindowClassDockNodeFlags::NO_RESIZE);
-/// # let _ = options;
-/// ```
 #[derive(Clone, Debug)]
-pub struct DockspaceOptions {
+pub(crate) struct DockspaceConfig {
     root_id: Id,
     flags: DockNodeFlags,
     window_class: Option<WindowClass>,
 }
 
-impl DockspaceOptions {
-    /// Create options with no dock flags or window class.
-    pub fn new(root_id: Id) -> Result<Self, DockLayoutError> {
-        let options = Self {
+impl DockspaceConfig {
+    pub(crate) fn new(
+        root_id: Id,
+        flags: DockNodeFlags,
+        window_class: Option<WindowClass>,
+    ) -> Self {
+        Self {
             root_id,
-            flags: DockNodeFlags::NONE,
-            window_class: None,
-        };
-        options.validate()?;
-        Ok(options)
+            flags,
+            window_class,
+        }
     }
 
-    /// Set the public dock node flags used when submitting the dockspace.
-    #[must_use]
-    pub fn flags(mut self, flags: DockNodeFlags) -> Self {
-        self.flags = flags;
-        self
-    }
-
-    /// Set the optional window class used when submitting the dockspace.
-    #[must_use]
-    pub fn window_class(mut self, window_class: WindowClass) -> Self {
-        self.window_class = Some(window_class);
-        self
-    }
-
-    /// Return the stable root ID.
-    pub fn root_id(&self) -> Id {
+    pub(crate) fn root_id(&self) -> Id {
         self.root_id
     }
 
-    /// Return the dockspace submission flags.
-    pub fn dock_node_flags(&self) -> DockNodeFlags {
+    pub(crate) fn dock_flags(&self) -> DockNodeFlags {
         self.flags
     }
 
-    pub(crate) fn dock_flags(&self) -> DockNodeFlags {
-        self.dock_node_flags()
-    }
-
-    /// Return the configured window class, if any.
-    pub fn configured_window_class(&self) -> Option<&WindowClass> {
+    pub(crate) fn window_class_ref(&self) -> Option<&WindowClass> {
         self.window_class.as_ref()
     }
 
-    pub(crate) fn window_class_ref(&self) -> Option<&WindowClass> {
-        self.configured_window_class()
-    }
-
-    /// Validate identity and all typed policies without touching Dear ImGui state.
-    pub fn validate(&self) -> Result<(), DockLayoutError> {
+    pub(crate) fn validate(&self) -> Result<(), DockspaceError> {
         if self.root_id.raw() == 0 {
-            return Err(DockLayoutError::ZeroRootId);
+            return Err(DockspaceError::ZeroRootId);
         }
 
         let unsupported = self.flags.bits() & !DockNodeFlags::all().bits();
         if unsupported != 0 {
-            return Err(DockLayoutError::UnsupportedDockNodeFlags { bits: unsupported });
+            return Err(DockspaceError::UnsupportedDockNodeFlags { bits: unsupported });
         }
 
         if let Some(window_class) = &self.window_class {
@@ -157,10 +119,12 @@ impl DockspaceOptions {
     }
 }
 
-/// Validation or application failure for a declarative docking layout.
+/// Validation or submission failure for a dockspace.
 #[derive(Clone, Debug, Error, PartialEq)]
 #[non_exhaustive]
-pub enum DockLayoutError {
+pub enum DockspaceError {
+    #[error("a dockspace in the current window requires an explicit non-zero root ID")]
+    MissingRootId,
     #[error("dockspace root ID must be non-zero")]
     ZeroRootId,
     #[error("dockspace flags contain unsupported ImGuiDockNodeFlags bits: 0x{bits:X}")]
@@ -177,18 +141,12 @@ pub enum DockLayoutError {
     InvalidWindowClass(#[from] WindowClassError),
     #[error("dock split ratio must be finite and strictly between 0 and 1: {ratio}")]
     InvalidSplitRatio { ratio: f32 },
-    #[error("dock window title must not be empty")]
-    EmptyWindowTitle,
-    #[error("dock window title contains an interior NUL byte: {title:?}")]
-    WindowTitleContainsNul { title: String },
-    #[error("dock window title {title:?} has an empty stable ID after `###`")]
-    EmptyWindowId { title: String },
     #[error(
-        "dock window titles {first_title:?} and {second_title:?} resolve to the same Dear ImGui ID {id:?}"
+        "dock window keys {first_key:?} and {second_key:?} resolve to the same Dear ImGui ID {id:?}"
     )]
-    DuplicateWindowId {
-        first_title: String,
-        second_title: String,
+    DuplicateWindowKey {
+        first_key: String,
+        second_key: String,
         id: Id,
     },
     #[error("dock layout contains too many nodes")]

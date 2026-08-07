@@ -261,8 +261,7 @@ mod channels_tests {
             let raw = draw_list.draw_list;
             let initial = unsafe { (*raw)._ClipRectStack.Size };
 
-            let _ =
-                ui.dockspace_over_main_viewport_with_flags(0.into(), crate::DockNodeFlags::NONE);
+            let _ = ui.dock_space_over_main_viewport_raw(0.into(), crate::DockNodeFlags::NONE);
 
             drop(draw_list.push_clip_rect([0.0, 0.0], [8.0, 8.0], false));
             assert_eq!(unsafe { (*raw)._ClipRectStack.Size }, initial);

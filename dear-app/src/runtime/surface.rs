@@ -1,7 +1,7 @@
 //! WGPU surface admission, rendering, presentation, and retry settlement.
 
 use dear_imgui_rs::render::ReconciledFrame;
-use dear_imgui_rs::{DockNodeFlags, FrameToken, Id, WindowFlags};
+use dear_imgui_rs::{DockNodeFlags, FrameToken, WindowFlags};
 #[cfg(feature = "test-engine")]
 use dear_imgui_test_engine::{FrameDriveOutcome, MainRenderOutcome, TestFrameDriver};
 
@@ -293,7 +293,7 @@ pub(super) fn render_surface_frame<A: Application>(
                 .map_err(|error| super::state::platform_error("Winit frame preparation", error))?;
             let mut exit_requested = false;
             let frame = build_frame(context, |ui| {
-                draw_dockspace(ui, docking.flags, config);
+                draw_dockspace(ui, docking.flags, config)?;
                 let addons = AddOns {
                     #[cfg(feature = "implot")]
                     implot: implot.as_ref(),
@@ -355,9 +355,13 @@ pub(super) fn build_frame<'ctx>(
     Ok(frame)
 }
 
-fn draw_dockspace(ui: &dear_imgui_rs::Ui, flags: DockNodeFlags, config: &AppConfig) {
+fn draw_dockspace(
+    ui: &dear_imgui_rs::Ui,
+    flags: DockNodeFlags,
+    config: &AppConfig,
+) -> Result<(), RunError> {
     let Some((host_window_name, mut window_flags)) = config.docking.full_viewport_host() else {
-        return;
+        return Ok(());
     };
 
     let viewport = ui.main_viewport();
@@ -365,11 +369,18 @@ fn draw_dockspace(ui: &dear_imgui_rs::Ui, flags: DockNodeFlags, config: &AppConf
     if flags.contains(DockNodeFlags::PASSTHRU_CENTRAL_NODE) {
         window_flags |= WindowFlags::NO_BACKGROUND;
     }
+    let mut dockspace_result = Ok(());
     ui.window(host_window_name)
         .flags(window_flags)
         .position(viewport.pos(), dear_imgui_rs::Condition::Always)
         .size(viewport.size(), dear_imgui_rs::Condition::Always)
         .build(|| {
-            let _ = ui.dockspace_over_main_viewport_with_flags(Id::from(0_u32), flags);
+            dockspace_result = ui
+                .dockspace()
+                .flags(flags)
+                .build()
+                .map(|_| ())
+                .map_err(|error| RunError::application("dockspace", error.to_string()));
         });
+    dockspace_result
 }

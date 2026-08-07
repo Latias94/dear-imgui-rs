@@ -14,6 +14,65 @@ struct DockDemoState {
     show_imgui_demo: bool,
 
     pending_layout: Option<DemoLayout>,
+    windows: DockWindows,
+}
+
+struct DockWindows {
+    main: WindowKey,
+    command: WindowKey,
+    command_2: WindowKey,
+    misc: WindowKey,
+    logs: WindowKey,
+}
+
+impl DockWindows {
+    fn new() -> Self {
+        Self {
+            main: WindowKey::new("main-view", "Main View").expect("valid window key"),
+            command: WindowKey::new("command", "Command").expect("valid window key"),
+            command_2: WindowKey::new("command-2", "Command 2").expect("valid window key"),
+            misc: WindowKey::new("misc", "Misc").expect("valid window key"),
+            logs: WindowKey::new("logs", "Logs").expect("valid window key"),
+        }
+    }
+
+    fn default_layout(&self) -> DockLayout {
+        DockLayout::split(
+            DockSplit::Down,
+            0.25,
+            DockLayout::tabs([&self.misc, &self.logs]),
+            DockLayout::split(
+                DockSplit::Left,
+                0.25,
+                DockLayout::tabs([&self.command]),
+                DockLayout::split(
+                    DockSplit::Down,
+                    0.5,
+                    DockLayout::tabs([&self.command_2]),
+                    DockLayout::tabs([&self.main]),
+                ),
+            ),
+        )
+    }
+
+    fn alternative_layout(&self) -> DockLayout {
+        DockLayout::split(
+            DockSplit::Left,
+            0.30,
+            DockLayout::tabs([&self.misc, &self.logs]),
+            DockLayout::split(
+                DockSplit::Down,
+                0.35,
+                DockLayout::tabs([&self.command]),
+                DockLayout::split(
+                    DockSplit::Right,
+                    0.5,
+                    DockLayout::tabs([&self.command_2]),
+                    DockLayout::tabs([&self.main]),
+                ),
+            ),
+        )
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -33,46 +92,9 @@ impl Default for DockDemoState {
             show_imgui_demo: false,
 
             pending_layout: None,
+            windows: DockWindows::new(),
         }
     }
-}
-
-fn default_layout() -> DockLayout {
-    DockLayout::split(
-        DockSplit::Down,
-        0.25,
-        DockLayout::tabs(["Misc", "Logs"]),
-        DockLayout::split(
-            DockSplit::Left,
-            0.25,
-            DockLayout::tabs(["Command"]),
-            DockLayout::split(
-                DockSplit::Down,
-                0.5,
-                DockLayout::tabs(["Command 2"]),
-                DockLayout::tabs(["Main View"]),
-            ),
-        ),
-    )
-}
-
-fn alternative_layout() -> DockLayout {
-    DockLayout::split(
-        DockSplit::Left,
-        0.30,
-        DockLayout::tabs(["Misc", "Logs"]),
-        DockLayout::split(
-            DockSplit::Down,
-            0.35,
-            DockLayout::tabs(["Command"]),
-            DockLayout::split(
-                DockSplit::Right,
-                0.5,
-                DockLayout::tabs(["Command 2"]),
-                DockLayout::tabs(["Main View"]),
-            ),
-        ),
-    )
 }
 
 impl Application for DockDemoState {
@@ -131,8 +153,8 @@ impl Application for DockDemoState {
         let padding = ui.push_style_var(StyleVar::WindowPadding([0.0, 0.0]));
         let requested_layout = state.pending_layout.take();
         let layout = match requested_layout.unwrap_or(DemoLayout::Default) {
-            DemoLayout::Default => default_layout(),
-            DemoLayout::Alternative => alternative_layout(),
+            DemoLayout::Default => state.windows.default_layout(),
+            DemoLayout::Alternative => state.windows.alternative_layout(),
         };
         let apply = if requested_layout.is_some() {
             DockLayoutApply::Replace
@@ -152,9 +174,13 @@ impl Application for DockDemoState {
                 rounding.pop();
                 let dockspace_id = ui.get_id("MainDockSpace");
                 let avail = ui.content_region_avail();
-                dockspace_result = DockspaceOptions::new(dockspace_id)
-                    .map(|options| options.flags(dock_flags))
-                    .and_then(|options| ui.dock_space_with_layout(&options, avail, &layout, apply));
+                dockspace_result = ui
+                    .dockspace()
+                    .root_id(dockspace_id)
+                    .current_window(avail)
+                    .flags(dock_flags)
+                    .layout(&layout, apply)
+                    .build();
 
                 // Optional: a small toolbar of docking flags toggles (update dear-app runtime flags)
                 if let Some(_bar) = ui.begin_menu_bar() {
@@ -210,35 +236,35 @@ impl Application for DockDemoState {
 
         // Windows content
         if state.show_main {
-            ui.window("Main View").build(|| {
+            ui.window(&state.windows.main).build(|| {
                 ui.text("Main workspace");
                 ui.separator();
                 ui.text("Drag other windows and try layouts from the menu.");
             });
         }
         if state.show_command {
-            ui.window("Command").build(|| {
+            ui.window(&state.windows.command).build(|| {
                 ui.text("Commands and parameters");
                 ui.separator();
                 ui.text("- Option A\n- Option B\n- Option C");
             });
         }
         if state.show_command2 {
-            ui.window("Command 2").build(|| {
+            ui.window(&state.windows.command_2).build(|| {
                 ui.text("More commands");
                 ui.separator();
                 ui.text("- Action 1\n- Action 2\n- Action 3");
             });
         }
         if state.show_misc {
-            ui.window("Misc").build(|| {
+            ui.window(&state.windows.misc).build(|| {
                 ui.text("Miscellaneous tools");
                 ui.separator();
                 ui.text("Use View menu to toggle windows.");
             });
         }
         if state.show_logs {
-            ui.window("Logs").build(|| {
+            ui.window(&state.windows.logs).build(|| {
                 ui.text("Logs window (console output)");
                 ui.separator();
                 ui.text_wrapped("Check your terminal for tracing output.");
