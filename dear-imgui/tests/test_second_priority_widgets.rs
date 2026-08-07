@@ -50,7 +50,10 @@ fn numeric_builder_formats_compile_and_execute() {
     let mut ctx = Context::create();
     ctx.io_mut().set_display_size([800.0, 600.0]);
     ctx.io_mut().set_delta_time(1.0 / 60.0);
-    let _ = ctx.font_atlas().build();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
 
     let mut float_value = 1.25_f32;
     let mut double_value = 2.5_f64;

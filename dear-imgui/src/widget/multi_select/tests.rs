@@ -9,7 +9,10 @@ fn setup_context() -> crate::Context {
         io.set_display_size([128.0, 128.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas().build();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     ctx
 }

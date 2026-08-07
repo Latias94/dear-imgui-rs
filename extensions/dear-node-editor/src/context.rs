@@ -345,7 +345,11 @@ mod tests {
         let mut imgui_b = ImGuiContext::create();
         imgui_b.io_mut().set_display_size([640.0, 480.0]);
         imgui_b.io_mut().set_delta_time(1.0 / 60.0);
-        let _ = imgui_b.font_atlas().build();
+        imgui_b
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("headless test requires the legacy font-atlas capability")
+            .build();
         let ui = imgui_b.frame();
 
         let result = catch_unwind(AssertUnwindSafe(|| {
@@ -366,7 +370,11 @@ mod tests {
         let mut imgui = ImGuiContext::create();
         imgui.io_mut().set_display_size([640.0, 480.0]);
         imgui.io_mut().set_delta_time(1.0 / 60.0);
-        let _ = imgui.font_atlas().build();
+        imgui
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("headless test requires the legacy font-atlas capability")
+            .build();
 
         let _editor = EditorContext::create(&imgui);
 
@@ -380,7 +388,11 @@ mod tests {
         let mut imgui = ImGuiContext::create();
         imgui.io_mut().set_display_size([640.0, 480.0]);
         imgui.io_mut().set_delta_time(1.0 / 60.0);
-        let _ = imgui.font_atlas().build();
+        imgui
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("headless test requires the legacy font-atlas capability")
+            .build();
 
         let editor_context = EditorContext::create(&imgui);
         let node_a = NodeId::new(1);
@@ -473,7 +485,11 @@ mod tests {
         let mut imgui = ImGuiContext::create();
         imgui.io_mut().set_display_size([640.0, 480.0]);
         imgui.io_mut().set_delta_time(1.0 / 60.0);
-        let _ = imgui.font_atlas().build();
+        imgui
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("headless test requires the legacy font-atlas capability")
+            .build();
 
         let editor_a = EditorContext::create(&imgui);
         let editor_b = EditorContext::create(&imgui);

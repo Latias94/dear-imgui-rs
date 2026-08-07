@@ -2,7 +2,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 use std::sync::{Mutex, OnceLock};
 
-use dear_imgui_rs::{BackendFlags, Context};
+use dear_imgui_rs::Context;
 use dear_implot::{PlotContext, PlotItemArrayStyle};
 
 fn test_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -17,7 +17,11 @@ fn prepare_imgui(imgui: &mut Context) {
     let io = imgui.io_mut();
     io.set_display_size([800.0, 600.0]);
     io.set_delta_time(1.0 / 60.0);
-    io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_TEXTURES);
+    imgui
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("headless test requires the legacy font-atlas capability")
+        .build();
 }
 
 #[test]

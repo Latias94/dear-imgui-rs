@@ -311,8 +311,8 @@ impl AppWindow {
 
             let fonts = context_imgui.font_atlas();
             let _id = fonts.add_font(&[FontSource::default_font_with_size(16.0)]);
-            // Do not call `fonts.build()` here: it must not be called before the renderer
-            // sets `ImGuiBackendFlags_RendererHasTextures` on the IO (ImGui 1.92+).
+            // Do not acquire the legacy font-atlas capability here. The managed renderer
+            // builds and uploads the atlas after it claims `RendererHasTextures`.
         }
 
         // Renderer
@@ -1323,29 +1323,33 @@ impl AppWindow {
         Some(fonts.add_font(&[source]))
     }
 
-    /// # Safety
-    ///
-    /// The repository-owned Roboto file must remain a trusted, complete font asset.
-    unsafe fn ensure_roboto_font(&mut self) -> Option<FontId> {
+    fn ensure_roboto_font(&mut self) -> Option<FontId> {
         if let Some(font) = self.roboto_font {
             return Some(font);
         }
 
         let path = bundled_roboto_path();
-        // SAFETY: this exact file is vendored with Dear ImGui and validated before FFI.
-        let font = unsafe { self.try_load_trusted_font_file(&path, 18.0, false) }?;
+        let data = match StbTrueTypeFontData::from_file(&path) {
+            Ok(data) => data,
+            Err(error) => {
+                self.status = format!(
+                    "[WARN] Could not load bundled Roboto from {}: {error}",
+                    path.display()
+                );
+                return None;
+            }
+        };
+        let source = FontSource::stb_truetype_with_size(data, 18.0)
+            .with_config(FontConfig::new().name("Roboto-Medium.ttf"));
+        let font = self.imgui.context.font_atlas().add_font(&[source]);
         self.roboto_font = Some(font);
         self.roboto_source = Some(path);
         Some(font)
     }
 
-    /// # Safety
-    ///
-    /// The repository-owned Roboto file must remain a trusted, complete font asset.
-    unsafe fn load_bundled_roboto(&mut self) {
+    fn load_bundled_roboto(&mut self) {
         let already_loaded = self.roboto_font.is_some();
-        // SAFETY: forwarded from this function's repository-asset precondition.
-        if unsafe { self.ensure_roboto_font() }.is_some() {
+        if self.ensure_roboto_font().is_some() {
             let source = self.roboto_source.as_ref().map_or_else(
                 || "bundled asset".to_owned(),
                 |path| path.display().to_string(),
@@ -1366,8 +1370,7 @@ impl AppWindow {
             self.status = "[OK] CJK font is already merged".to_owned();
             return;
         }
-        // SAFETY: forwarded from this function's repository-asset precondition.
-        if unsafe { self.ensure_roboto_font() }.is_none() {
+        if self.ensure_roboto_font().is_none() {
             return;
         }
 
@@ -1401,8 +1404,7 @@ impl AppWindow {
             self.status = "[OK] Emoji font is already merged".to_owned();
             return;
         }
-        // SAFETY: forwarded from this function's repository-asset precondition.
-        if unsafe { self.ensure_roboto_font() }.is_none() {
+        if self.ensure_roboto_font().is_none() {
             return;
         }
 
@@ -1468,8 +1470,7 @@ impl AppWindow {
             self.apply_theme_now(t);
         }
         if self.pending_load_roboto {
-            // SAFETY: the example loads the exact Roboto file vendored with Dear ImGui.
-            unsafe { self.load_bundled_roboto() };
+            self.load_bundled_roboto();
             self.pending_load_roboto = false;
         }
         if self.pending_load_cjk {
@@ -1796,15 +1797,14 @@ mod tests {
             panic!("failed to read bundled font {}: {error}", path.display())
         });
 
-        for loader in [
-            font_validation::LoaderKind::StbTrueType,
-            font_validation::LoaderKind::FreeType,
-        ] {
-            assert!(
-                font_validation::validate_font_data(&data, loader).is_ok(),
-                "bundled Roboto must remain valid for {loader:?}"
-            );
-        }
+        StbTrueTypeFontData::from_slice(&data)
+            .expect("bundled Roboto must remain inside the safe stb_truetype subset");
+
+        assert!(
+            font_validation::validate_font_data(&data, font_validation::LoaderKind::FreeType)
+                .is_ok(),
+            "bundled Roboto must remain valid for the unsafe FreeType escape hatch"
+        );
     }
 
     #[test]
@@ -1890,13 +1890,9 @@ mod tests {
         drop(reconciled_frame);
 
         let path = bundled_roboto_path();
-        let font_bytes = fs::read(&path).unwrap_or_else(|error| {
-            panic!("failed to read bundled font {}: {error}", path.display())
-        });
-        font_validation::validate_font_data(&font_bytes, font_validation::LoaderKind::StbTrueType)
-            .expect("bundled Roboto should pass structural validation");
-        // SAFETY: these are the complete, structurally validated bytes of the vendored font.
-        let source = unsafe { FontSource::ttf_data_with_size(&font_bytes, 18.0) };
+        let font = StbTrueTypeFontData::from_file(&path)
+            .expect("bundled Roboto should pass the safe stb_truetype proof");
+        let source = FontSource::stb_truetype_with_size(font, 18.0);
         let roboto = context.font_atlas().add_font(&[source]);
 
         let inverted_checker = checker_pixels(true);

@@ -1,7 +1,7 @@
 //! Minimal custom font setup with the high-level `dear-app` runtime.
 
 use dear_app::{AppConfig, Application, FrameContext, InitContext, RunError, run};
-use dear_imgui_rs::{Condition, FontId, FontSource};
+use dear_imgui_rs::{Condition, FontId, FontSource, StbTrueTypeFontData};
 
 const ROBOTO_MEDIUM: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -18,8 +18,13 @@ impl Application for CustomFontApp {
         let fonts = context.imgui().font_atlas();
         fonts.add_font(&[FontSource::default_font_with_size(16.0)]);
 
-        // SAFETY: the vendored Roboto file is a complete TTF accepted by Dear ImGui's loaders.
-        let source = unsafe { FontSource::ttf_data_with_size(ROBOTO_MEDIUM, 20.0) };
+        let roboto = StbTrueTypeFontData::from_slice(ROBOTO_MEDIUM).map_err(|error| {
+            RunError::application(
+                "configure_imgui",
+                format!("invalid bundled Roboto font: {error}"),
+            )
+        })?;
+        let source = FontSource::stb_truetype_with_size(roboto, 20.0);
         self.roboto = Some(fonts.add_font(&[source]));
         Ok(())
     }

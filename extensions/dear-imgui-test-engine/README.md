@@ -57,7 +57,11 @@ use dear_imgui_rs as imgui;
 use dear_imgui_test_engine as test_engine;
 
 let mut imgui_ctx = imgui::Context::create();
-assert!(imgui_ctx.font_atlas().build());
+imgui_ctx
+    .font_atlas()
+    .try_claim_legacy_renderer()
+    .expect("headless tests require the legacy font-atlas capability")
+    .build();
 
 let mut engine = test_engine::TestEngine::create()?;
 engine.start(&mut imgui_ctx)?;

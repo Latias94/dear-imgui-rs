@@ -33,7 +33,7 @@ use dear_imgui_ash::{
 };
 use dear_imgui_rs::{
     Condition, ConfigFlags, Context, Id, ManagedTextureId, OwnedTextureData, TextureDataError,
-    TextureFormat, TextureId, sys,
+    TextureFormat, sys,
 };
 use dear_imgui_winit::{HiDpiMode, WinitPlatform, multi_viewport as winit_mvp};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -826,7 +826,6 @@ struct ImguiState {
     clear_color: [f32; 4],
     demo_open: bool,
     last_frame: Instant,
-    font_texture: TextureId,
     sampler_linear_callback: unsafe extern "C" fn(*const sys::ImDrawList, *const sys::ImDrawCmd),
     sampler_nearest_callback: unsafe extern "C" fn(*const sys::ImDrawList, *const sys::ImDrawCmd),
     reset_render_state_callback:
@@ -1022,7 +1021,6 @@ impl AppWindow {
             )?
         };
         renderer.set_viewport_clear_color([0.1, 0.12, 0.15, 1.0]);
-        let font_texture = imgui.font_atlas().texture_id();
         let sampler_linear_callback = imgui
             .platform_io()
             .draw_callback_set_sampler_linear_raw()
@@ -1109,7 +1107,6 @@ impl AppWindow {
                 clear_color: [0.1, 0.12, 0.15, 1.0],
                 demo_open: !run_viewport_smoke,
                 last_frame: Instant::now(),
-                font_texture,
                 sampler_linear_callback,
                 sampler_nearest_callback,
                 reset_render_state_callback,
@@ -1269,7 +1266,6 @@ impl AppWindow {
             };
             let mut observed_viewport_id = main_viewport_id;
             let mut observed_viewport_size = [0.0, 0.0];
-            let font_texture = self.imgui.font_texture;
             let sampler_nearest = self.imgui.sampler_nearest_callback;
             let sampler_linear = self.imgui.sampler_linear_callback;
             let reset_render_state = self.imgui.reset_render_state_callback;
@@ -1299,7 +1295,7 @@ impl AppWindow {
                     if let Some(texture) = managed_texture {
                         ui.image(texture, [64.0, 64.0]);
                     } else {
-                        ui.image(font_texture, [64.0, 64.0]);
+                        ui.text("Font atlas sampler probe");
                     }
                     {
                         let draw_list = ui.get_window_draw_list();

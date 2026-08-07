@@ -219,7 +219,11 @@ fn test_lock() -> MutexGuard<'static, ()> {
 
 fn context() -> Context {
     let mut context = Context::create();
-    assert!(context.font_atlas().build());
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("headless test requires the legacy font-atlas capability")
+        .build();
     context.io_mut().set_display_size([128.0, 128.0]);
     context.io_mut().set_delta_time(1.0 / 60.0);
     context
@@ -491,7 +495,11 @@ fn show_windows_validates_context_identity_and_native_frame_scope() {
     let mut context_b = SuspendedContext::create()
         .activate()
         .expect("Context B activation");
-    assert!(context_b.font_atlas().build());
+    context_b
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("headless test requires the legacy font-atlas capability")
+        .build();
     context_b.io_mut().set_display_size([128.0, 128.0]);
     context_b.io_mut().set_delta_time(1.0 / 60.0);
     let ui_b = context_b.frame();

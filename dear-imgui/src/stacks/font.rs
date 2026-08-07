@@ -85,7 +85,10 @@ mod tests {
             .add_font(&[crate::FontSource::default_font_with_size(29.0)]);
         assert_eq!(small.reference_size(), Some(13.0));
         assert_eq!(large.reference_size(), Some(29.0));
-        let _ = ctx.font_atlas().build();
+        ctx.font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
         ctx.io_mut().set_display_size([128.0, 128.0]);
         ctx.io_mut().set_delta_time(1.0 / 60.0);
 

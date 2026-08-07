@@ -24,7 +24,10 @@
 //! # ctx.io_mut().set_display_size([1280.0, 720.0]);
 //! # let flags = ctx.io().config_flags() | ConfigFlags::DOCKING_ENABLE;
 //! # ctx.io_mut().set_config_flags(flags);
-//! # let _ = ctx.font_atlas().build();
+//! # ctx.font_atlas()
+//! #     .try_claim_legacy_renderer()
+//! #     .expect("legacy renderer font atlas should be available")
+//! #     .build();
 //! # let ui = ctx.frame();
 //! // Create a dockspace over the main viewport
 //! let dockspace_id = ui.dockspace_over_main_viewport();

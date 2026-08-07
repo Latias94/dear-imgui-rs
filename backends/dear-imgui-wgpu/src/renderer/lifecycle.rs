@@ -251,7 +251,7 @@ impl WgpuRenderer {
             backend_data.frame_cursor = Default::default();
         }
 
-        self.texture_manager.clear_renderer_owned_textures();
+        self.texture_manager.clear_managed_textures();
         self.default_texture = None;
         self.shader_manager = ShaderManager::new();
     }

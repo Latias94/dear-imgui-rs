@@ -117,7 +117,10 @@ impl Ui {
 mod tests {
     fn setup_context() -> crate::Context {
         let mut ctx = crate::Context::create();
-        let _ = ctx.font_atlas().build();
+        ctx.font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
         ctx.io_mut().set_display_size([128.0, 128.0]);
         ctx.io_mut().set_delta_time(1.0 / 60.0);
         ctx
@@ -207,7 +210,10 @@ mod tests {
         let large = ctx
             .font_atlas()
             .add_font(&[crate::FontSource::default_font_with_size(29.0)]);
-        let _ = ctx.font_atlas().build();
+        ctx.font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
         ctx.io_mut().set_display_size([128.0, 128.0]);
         ctx.io_mut().set_delta_time(1.0 / 60.0);
 

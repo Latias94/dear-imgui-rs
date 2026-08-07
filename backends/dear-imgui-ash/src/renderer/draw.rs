@@ -737,7 +737,6 @@ mod tests {
         context.prepare_frame(
             FramePrepareOptions::new([0.0, 0.0], 1.0 / 60.0).renderer_has_textures(),
         );
-        assert!(context.font_atlas().build());
         let initial = context
             .begin_frame()
             .render(renderer.renderer_consumer().unwrap());
@@ -811,7 +810,6 @@ mod tests {
         foreign.prepare_frame(
             FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
         );
-        assert!(foreign.font_atlas().build());
         let consumer = foreign.create_synchronous_renderer_consumer().unwrap();
 
         let pending = foreign.begin_frame().render(&consumer);

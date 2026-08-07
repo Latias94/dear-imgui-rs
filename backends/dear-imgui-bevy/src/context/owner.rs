@@ -817,7 +817,11 @@ mod tests {
     fn viewport_owner() -> ContextOwner {
         let mut context = dear_imgui_rs::Context::create();
         context.io_mut().set_config_input_trickle_event_queue(false);
-        let _ = context.font_atlas().build();
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("the standalone viewport fixture uses legacy rendering")
+            .build();
         let _ = context.set_ini_filename::<std::path::PathBuf>(None);
 
         let keepalive = Rc::new(viewport::ImguiViewportBridgeShared::default());

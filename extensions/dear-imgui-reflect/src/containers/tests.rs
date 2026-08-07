@@ -12,7 +12,10 @@ fn new_test_ctx() -> imgui::Context {
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas().build();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("headless test requires the legacy font-atlas capability")
+        .build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     ctx
 }

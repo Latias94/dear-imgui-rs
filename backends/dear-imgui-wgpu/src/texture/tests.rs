@@ -212,7 +212,7 @@ fn managed_destroy_and_renderer_invalidation_preserve_external_texture_handles()
     assert!(manager.texture_view(external.texture_id()).is_some());
     assert_eq!(manager.texture_count(), 1);
 
-    manager.clear_renderer_owned_textures();
+    manager.clear_managed_textures();
     assert!(manager.contains_texture(external.texture_id()));
     assert_eq!(manager.texture_count(), 1);
 

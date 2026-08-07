@@ -1000,7 +1000,6 @@ mod tests {
         context.prepare_frame(
             FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
         );
-        assert!(context.font_atlas().build());
         let texture = register_rgba_texture(&mut context);
         let mut renderer = make_protocol_renderer(&mut context);
         let gl = make_fake_gl();
@@ -1088,7 +1087,6 @@ mod tests {
         context.prepare_frame(
             FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
         );
-        assert!(context.font_atlas().build());
         let texture = register_rgba_texture(&mut context);
         let mut renderer = make_protocol_renderer(&mut context);
         renderer.texture_map = Some(Box::new(PanicOnceTextureMap {
@@ -1121,7 +1119,6 @@ mod tests {
         context.prepare_frame(
             FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
         );
-        assert!(context.font_atlas().build());
         let mut renderer = make_protocol_renderer(&mut context);
         let gl = make_fake_gl();
 
@@ -1238,7 +1235,6 @@ mod tests {
         context.prepare_frame(
             FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
         );
-        assert!(context.font_atlas().build());
         let texture = register_rgba_texture(&mut context);
         let mut renderer = make_protocol_renderer(&mut context);
         let gl = make_fake_gl();
@@ -1288,7 +1284,7 @@ mod tests {
         foreign.prepare_frame(
             FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
         );
-        assert!(foreign.font_atlas().build());
+        let foreign_consumer = foreign.create_synchronous_renderer_consumer().unwrap();
 
         foreign.frame().text("foreign render_context frame");
         let foreign_id = foreign.id();
@@ -1307,7 +1303,6 @@ mod tests {
         );
         assert!(foreign.end_frame());
 
-        let foreign_consumer = foreign.create_synchronous_renderer_consumer().unwrap();
         let frame = foreign.begin_frame();
         frame.ui().text("foreign frame");
         let frame = frame.render(&foreign_consumer);
@@ -1361,7 +1356,6 @@ mod tests {
         context.prepare_frame(
             FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
         );
-        assert!(context.font_atlas().build());
         let texture = register_rgba_texture(&mut context);
         let mut renderer = make_protocol_renderer(&mut context);
         let gl = make_fake_gl();
@@ -1409,7 +1403,6 @@ mod tests {
         context.prepare_frame(
             FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
         );
-        assert!(context.font_atlas().build());
         let texture = register_rgba_texture(&mut context);
         let mut renderer = make_protocol_renderer(&mut context);
         let gl = make_fake_gl();
@@ -1458,7 +1451,6 @@ mod tests {
         context.prepare_frame(
             FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
         );
-        assert!(context.font_atlas().build());
         let mut renderer = make_protocol_renderer(&mut context);
         let gl = make_fake_gl();
         let texture_id = TextureId::new(77);

@@ -88,25 +88,3 @@ pub(super) fn assert_reference_font_size_for_metrics(
         "{caller} glyph offset/advance overrides require a positive reference size"
     );
 }
-
-pub(super) fn assert_font_source_for_add_font(caller: &str, raw: &sys::ImFontConfig) {
-    let has_font_data = !raw.FontData.is_null() && raw.FontDataSize > 0;
-    let has_font_loader = !raw.FontLoader.is_null();
-    assert!(
-        has_font_data || has_font_loader,
-        "{caller} requires FontData/FontDataSize or FontLoader"
-    );
-    if has_font_loader {
-        unsafe {
-            let stb_loader = sys::igImFontAtlasGetFontLoaderForStbTruetype();
-            assert!(
-                has_font_data || raw.FontLoader != stb_loader,
-                "{caller} cannot use the built-in stb_truetype loader without FontData"
-            );
-            assert!(
-                (*raw.FontLoader).FontBakedLoadGlyph.is_some(),
-                "{caller} FontLoader must provide FontBakedLoadGlyph"
-            );
-        }
-    }
-}

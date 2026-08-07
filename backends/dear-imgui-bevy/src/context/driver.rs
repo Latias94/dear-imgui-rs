@@ -307,8 +307,18 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                         .framebuffer_scale(framebuffer_scale);
                     if renderer_consumer.is_some() {
                         prepare = prepare.renderer_has_textures();
-                    } else if !context.font_atlas().is_built() && !context.font_atlas().build() {
-                        return Err(ImguiContextError::FontAtlasBuildFailed { context_id });
+                    } else {
+                        let legacy =
+                            context
+                                .font_atlas()
+                                .try_claim_legacy_renderer()
+                                .map_err(|source| ImguiContextError::FontAtlasMode {
+                                    context_id,
+                                    source,
+                                })?;
+                        if !legacy.is_built() {
+                            legacy.build();
+                        }
                     }
                     context.prepare_frame(prepare);
                     let context_raw = context.as_raw();

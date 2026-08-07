@@ -13,7 +13,10 @@ fn prepare_context(ctx: &mut imgui::Context) {
     io.set_delta_time(1.0 / 60.0);
     io.set_config_flags(io.config_flags() | imgui::ConfigFlags::DOCKING_ENABLE);
 
-    let _ = ctx.font_atlas().build();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 }
 
@@ -23,7 +26,10 @@ fn prepare_context_without_docking(ctx: &mut imgui::Context) {
     io.set_delta_time(1.0 / 60.0);
     io.set_config_flags(io.config_flags() & !imgui::ConfigFlags::DOCKING_ENABLE);
 
-    let _ = ctx.font_atlas().build();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 }
 

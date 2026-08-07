@@ -168,6 +168,9 @@ fn managed_image_rejects_a_foreign_context_before_plot_ffi() {
 
     let mut foreign = Context::create();
     prepare_imgui(&mut foreign);
+    let _consumer = foreign
+        .create_synchronous_renderer_consumer()
+        .expect("foreign managed renderer capability should register");
     let plot = PlotContext::create(&foreign);
     {
         let frame = foreign.begin_frame();
@@ -204,6 +207,9 @@ fn managed_image_rejects_a_stale_generation_before_plot_ffi() {
     let _guard = test_guard();
     let mut imgui = Context::create();
     prepare_imgui(&mut imgui);
+    let _consumer = imgui
+        .create_synchronous_renderer_consumer()
+        .expect("managed renderer capability should register");
     let stale = register_texture(&mut imgui);
     imgui
         .remove_texture(stale)

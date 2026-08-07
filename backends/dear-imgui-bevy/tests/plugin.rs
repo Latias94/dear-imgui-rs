@@ -12,10 +12,10 @@ use bevy_render::{Render, RenderApp, extract_plugin::ExtractPlugin};
 use bevy_window::{PrimaryWindow, Window};
 use dear_imgui_bevy::{
     BEVY_TARGET_COMMIT, BEVY_TARGET_VERSION, ImguiAppExt, ImguiContextConfig, ImguiContextError,
-    ImguiContexts, ImguiPlugin, ImguiPluginConfig, ImguiShutdownError, WGPU_TARGET_VERSION,
+    ImguiContexts, ImguiPlugin, ImguiPluginConfig, WGPU_TARGET_VERSION,
 };
 #[cfg(feature = "render")]
-use dear_imgui_bevy::{ContextId, ImguiFrame};
+use dear_imgui_bevy::{ContextId, ImguiFrame, ImguiShutdownError};
 
 fn imgui_context_guard() -> std::sync::MutexGuard<'static, ()> {
     static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
@@ -191,18 +191,12 @@ fn managed_shared_font_atlas_admission_fails_before_backend_fields_are_mutated()
     let mut app = app_with_render_schedule();
     let additional_pass = app.declare_imgui_pass::<AdditionalPass>();
     let atlas = dear_imgui_rs::SharedFontAtlas::create();
-    let mut primary =
+    let primary =
         dear_imgui_rs::SuspendedContext::try_create_with_shared_font_atlas(atlas.clone()).unwrap();
     let primary_id = primary.id();
-    let primary_font_texture_id = primary
-        .try_with_active(|context| Ok::<_, ()>(context.font_atlas().texture_id()))
-        .unwrap();
-    let mut additional =
+    let additional =
         dear_imgui_rs::SuspendedContext::try_create_with_shared_font_atlas(atlas).unwrap();
     let additional_id = additional.id();
-    let additional_font_texture_id = additional
-        .try_with_active(|context| Ok::<_, ()>(context.font_atlas().texture_id()))
-        .unwrap();
     app.adopt_imgui_primary_context(primary).unwrap();
     app.world_mut()
         .get_non_send_mut::<ImguiContexts>()
@@ -222,23 +216,21 @@ fn managed_shared_font_atlas_admission_fails_before_backend_fields_are_mutated()
     assert!(message.contains("managed font-atlas rendering requires exactly one"));
 
     let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
-    for (context_id, expected_font_texture_id) in [
-        (primary_id, primary_font_texture_id),
-        (additional_id, additional_font_texture_id),
-    ] {
+    for context_id in [primary_id, additional_id] {
         contexts
             .configure(context_id, |context| {
                 assert!(context.io().backend_platform_name().is_none());
                 assert!(context.io().backend_renderer_name().is_none());
-                assert_eq!(
-                    context.font_atlas().texture_id(),
-                    expected_font_texture_id,
-                    "failed renderer admission must not alter the font-atlas texture ID"
-                );
                 assert!(!context.io().backend_flags().intersects(
                     dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES
                         | dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET
                 ));
+                drop(
+                    context
+                        .font_atlas()
+                        .try_claim_legacy_renderer()
+                        .expect("failed renderer admission must not leave a managed atlas claim"),
+                );
             })
             .unwrap();
     }

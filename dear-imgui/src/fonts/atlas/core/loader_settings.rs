@@ -1,3 +1,4 @@
+use crate::fonts::atlas::FontAtlasLoaderError;
 use crate::fonts::atlas::loader::{FontLoader, FontLoaderFlags};
 use crate::sys;
 
@@ -7,13 +8,24 @@ impl FontAtlas {
     /// Sets the font loader for this atlas.
     ///
     /// This allows using custom font backends like FreeType with additional features.
-    /// Must be called before adding any fonts.
+    /// Returns an error if any font source has already been added, before native state changes.
     /// The loader must be static because Dear ImGui stores the raw `ImFontLoader*`.
-    pub fn set_font_loader(&self, loader: &'static FontLoader) {
+    pub fn set_font_loader(&self, loader: &'static FontLoader) -> Result<(), FontAtlasLoaderError> {
         self.assert_mutation_allowed("FontAtlas::set_font_loader()");
+        let source_count = unsafe { (*self.raw()).Sources.Size };
+        assert!(
+            source_count >= 0,
+            "FontAtlas::set_font_loader() observed a negative native source count"
+        );
+        if source_count != 0 {
+            return Err(FontAtlasLoaderError::SourcesAlreadyAdded {
+                source_count: source_count as usize,
+            });
+        }
         unsafe {
             sys::ImFontAtlas_SetFontLoader(self.raw(), loader.as_ptr());
         }
+        Ok(())
     }
 
     // Note: switching to the FreeType loader at runtime requires access to the

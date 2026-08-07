@@ -1,4 +1,6 @@
 use super::config::FontConfig;
+use super::loader::FontLoader;
+use super::validated::StbTrueTypeFontData;
 
 /// A font source with v1.92+ dynamic font support.
 ///
@@ -10,9 +12,9 @@ use super::config::FontConfig;
 /// source sizes control their metrics relative to that destination font.
 ///
 /// External font parsers used by Dear ImGui do not receive a reliable input
-/// boundary for every format. Consequently, raw font sources can only be
-/// created through the `unsafe` constructors on this type. The embedded
-/// default font remains entirely safe.
+/// boundary for every format. Consequently, raw, compressed, and custom-loader
+/// sources can only be created through the `unsafe` constructors on this type.
+/// The embedded defaults and [`StbTrueTypeFontData`] path are safe.
 #[derive(Clone, Debug)]
 pub struct FontSource<'a> {
     pub(super) kind: FontSourceKind<'a>,
@@ -20,13 +22,15 @@ pub struct FontSource<'a> {
     pub(super) config: Option<FontConfig>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(super) enum FontSourceKind<'a> {
     Default,
+    DefaultVector,
+    DefaultBitmap,
+    StbTrueType(StbTrueTypeFontData),
     TtfData(&'a [u8]),
     CompressedTtfData(&'a [u8]),
     CompressedTtfBase85(&'a str),
-    TtfFile(&'a str),
 }
 
 impl<'a> FontSource<'a> {
@@ -44,6 +48,61 @@ impl<'a> FontSource<'a> {
         Self {
             size_pixels: Some(size),
             ..Self::default_font()
+        }
+    }
+
+    /// Creates the embedded scalable default font with dynamic sizing.
+    pub fn default_vector() -> Self {
+        Self {
+            kind: FontSourceKind::DefaultVector,
+            size_pixels: None,
+            config: None,
+        }
+    }
+
+    /// Creates the embedded scalable default font with a reference size.
+    pub fn default_vector_with_size(size: f32) -> Self {
+        Self {
+            size_pixels: Some(size),
+            ..Self::default_vector()
+        }
+    }
+
+    /// Creates the embedded pixel-clean default font with dynamic sizing.
+    pub fn default_bitmap() -> Self {
+        Self {
+            kind: FontSourceKind::DefaultBitmap,
+            size_pixels: None,
+            config: None,
+        }
+    }
+
+    /// Creates the embedded pixel-clean default font with a reference size.
+    pub fn default_bitmap_with_size(size: f32) -> Self {
+        Self {
+            size_pixels: Some(size),
+            ..Self::default_bitmap()
+        }
+    }
+
+    /// Creates an owned, validated TrueType source for Dear ImGui's stb_truetype loader.
+    ///
+    /// This source pins the native loader and standalone font index covered by
+    /// [`StbTrueTypeFontData`]'s bounded-read proof, even when the crate is built with the
+    /// `freetype` feature.
+    pub fn stb_truetype(data: StbTrueTypeFontData) -> Self {
+        Self {
+            kind: FontSourceKind::StbTrueType(data),
+            size_pixels: None,
+            config: None,
+        }
+    }
+
+    /// Creates an owned, validated stb_truetype source with a reference size.
+    pub fn stb_truetype_with_size(data: StbTrueTypeFontData, size: f32) -> Self {
+        Self {
+            size_pixels: Some(size),
+            ..Self::stb_truetype(data)
         }
     }
 
@@ -137,37 +196,24 @@ impl<'a> FontSource<'a> {
         }
     }
 
-    /// Creates a font-file source with dynamic sizing.
-    ///
-    /// # Safety
-    ///
-    /// If `path` exists when [`crate::FontAtlas::add_font`] is called, it must
-    /// identify a complete font that is valid for the loader selected by this
-    /// source's eventual [`FontConfig`]. The file must not be replaced or
-    /// modified while it is being added.
-    pub unsafe fn ttf_file(path: &'a str) -> Self {
-        Self {
-            kind: FontSourceKind::TtfFile(path),
-            size_pixels: None,
-            config: None,
-        }
-    }
-
-    /// Creates a font-file source with a reference size.
-    ///
-    /// # Safety
-    ///
-    /// The requirements of [`FontSource::ttf_file`] apply.
-    pub unsafe fn ttf_file_with_size(path: &'a str, size: f32) -> Self {
-        Self {
-            size_pixels: Some(size),
-            ..unsafe { Self::ttf_file(path) }
-        }
-    }
-
     /// Sets the font configuration for this source.
     pub fn with_config(mut self, config: FontConfig) -> Self {
+        if matches!(&self.kind, FontSourceKind::StbTrueType(_)) {
+            assert_stb_truetype_config(&config, "FontSource::with_config()");
+        }
         self.config = Some(config);
         self
     }
+}
+
+pub(super) fn assert_stb_truetype_config(config: &FontConfig, caller: &str) {
+    let stb_loader = FontLoader::stb_truetype().as_ptr();
+    assert!(
+        config.raw.FontLoader.is_null() || config.raw.FontLoader == stb_loader,
+        "{caller} cannot override a validated stb_truetype source with another font loader"
+    );
+    assert_eq!(
+        config.raw.FontNo, 0,
+        "{caller} cannot override the standalone font index of a validated stb_truetype source"
+    );
 }

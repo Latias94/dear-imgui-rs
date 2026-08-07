@@ -2,10 +2,11 @@ use std::ffi::CString;
 use std::ptr;
 
 use crate::fonts::atlas::config::FontConfig;
-use crate::fonts::atlas::source::{FontSource, FontSourceKind};
-use crate::fonts::atlas::state::{font_atlas_contains_font, store_font_atlas_glyph_ranges};
+use crate::fonts::atlas::loader::FontLoader;
+use crate::fonts::atlas::source::{FontSource, FontSourceKind, assert_stb_truetype_config};
+use crate::fonts::atlas::state::font_atlas_contains_font;
 use crate::fonts::atlas::validation::{
-    encode_glyph_ranges, validate_font_size_pixels, validate_font_size_pixels_option,
+    validate_font_size_pixels, validate_font_size_pixels_option,
 };
 use crate::sys;
 
@@ -29,14 +30,9 @@ impl FontAtlas {
         }
         self.validate_merged_sources(head, tail);
 
-        let loaded_files: Vec<Option<Vec<u8>>> = font_sources
-            .iter()
-            .map(|source| Self::load_font_file(source, CALLER))
-            .collect();
-
-        let font_id = self.add_font_internal(head, false, loaded_files[0].as_deref());
-        for (source, loaded_file) in tail.iter().zip(loaded_files[1..].iter()) {
-            self.add_font_internal(source, true, loaded_file.as_deref());
+        let font_id = self.add_font_internal(head, false);
+        for source in tail {
+            self.add_font_internal(source, true);
         }
         font_id
     }
@@ -46,8 +42,15 @@ impl FontAtlas {
         let size = validate_font_size_pixels_option(CALLER, "size_pixels", font_source.size_pixels);
         let config = configured_font_source(font_source.config.as_ref(), size, merge_mode);
 
-        match font_source.kind {
-            FontSourceKind::Default => config.validate_for_add_font_default(CALLER),
+        match &font_source.kind {
+            FontSourceKind::Default
+            | FontSourceKind::DefaultVector
+            | FontSourceKind::DefaultBitmap => config.validate_for_add_font_default(CALLER),
+            FontSourceKind::StbTrueType(data) => {
+                assert_stb_truetype_config(&config, CALLER);
+                config.validate_for_add_font_with_size(CALLER, size);
+                validate_ttf_data_length(CALLER, data.as_bytes());
+            }
             FontSourceKind::TtfData(data) => {
                 config.validate_for_add_font_with_size(CALLER, size);
                 validate_ttf_data_length(CALLER, data);
@@ -59,9 +62,6 @@ impl FontAtlas {
             FontSourceKind::CompressedTtfBase85(data) => {
                 config.validate_for_add_font_with_size(CALLER, size);
                 validate_base85_compressed_ttf(CALLER, data);
-            }
-            FontSourceKind::TtfFile(_) => {
-                config.validate_for_add_font_with_size(CALLER, size);
             }
         }
     }
@@ -93,7 +93,10 @@ impl FontAtlas {
     }
 
     fn font_source_creates_implicit_reference_size(source: &FontSource<'_>) -> bool {
-        if !matches!(source.kind, FontSourceKind::Default) {
+        if !matches!(
+            &source.kind,
+            FontSourceKind::Default | FontSourceKind::DefaultVector | FontSourceKind::DefaultBitmap
+        ) {
             return false;
         }
         let size = source.size_pixels.unwrap_or(0.0);
@@ -106,31 +109,15 @@ impl FontAtlas {
     fn font_source_merge_input_size(source: &FontSource<'_>) -> f32 {
         let size = source.size_pixels.unwrap_or(0.0);
         let config = configured_font_source(source.config.as_ref(), size, true);
-        if matches!(source.kind, FontSourceKind::Default) && config.raw.SizePixels <= 0.0 {
+        if matches!(
+            &source.kind,
+            FontSourceKind::Default | FontSourceKind::DefaultVector | FontSourceKind::DefaultBitmap
+        ) && config.raw.SizePixels <= 0.0
+        {
             13.0
         } else {
             config.raw.SizePixels
         }
-    }
-
-    fn load_font_file(source: &FontSource<'_>, caller: &str) -> Option<Vec<u8>> {
-        let FontSourceKind::TtfFile(path) = source.kind else {
-            return None;
-        };
-        let data = std::fs::read(path)
-            .unwrap_or_else(|error| panic!("{caller} failed to read font file {path:?}: {error}"));
-        validate_ttf_data_length(caller, &data);
-        Some(data)
-    }
-
-    fn store_glyph_ranges(
-        &self,
-        ranges: Option<&[(u32, u32)]>,
-        caller: &str,
-    ) -> *const sys::ImWchar {
-        ranges.map_or(ptr::null(), |ranges| {
-            store_font_atlas_glyph_ranges(self.raw(), encode_glyph_ranges(caller, ranges))
-        })
     }
 
     fn font_config_for_ffi(config: &FontConfig) -> sys::ImFontConfig {
@@ -195,129 +182,70 @@ impl FontAtlas {
         &self,
         font_source: &FontSource<'_>,
         merge_mode: bool,
-        loaded_file: Option<&[u8]>,
     ) -> crate::fonts::FontId {
         let size = validate_font_size_pixels_option(
             "FontAtlas::add_font()",
             "size_pixels",
             font_source.size_pixels,
         );
-        let config = configured_font_source(font_source.config.as_ref(), size, merge_mode);
-        let config = match font_source.kind {
-            FontSourceKind::TtfFile(path) => with_default_file_name(config, path),
-            _ => config,
-        };
+        let mut config = configured_font_source(font_source.config.as_ref(), size, merge_mode);
+        if matches!(&font_source.kind, FontSourceKind::StbTrueType(_)) {
+            assert_stb_truetype_config(&config, "FontAtlas::add_font()");
+            config.raw.FontLoader = FontLoader::stb_truetype().as_ptr();
+            config.raw.FontNo = 0;
+        }
 
-        match font_source.kind {
-            FontSourceKind::Default => self.add_font_default(Some(&config)),
+        match &font_source.kind {
+            FontSourceKind::Default => self.add_font_default_internal(Some(&config)),
+            FontSourceKind::DefaultVector => self.add_font_default_vector_internal(Some(&config)),
+            FontSourceKind::DefaultBitmap => self.add_font_default_bitmap_internal(Some(&config)),
+            FontSourceKind::StbTrueType(data) => unsafe {
+                self.add_font_from_memory_ttf_internal(data.as_bytes(), size, Some(&config))
+                    .expect("FontAtlas::add_font() failed to add validated stb_truetype data")
+            },
             FontSourceKind::TtfData(data) => unsafe {
-                self.add_font_from_memory_ttf(data, size, Some(&config), None)
+                self.add_font_from_memory_ttf_internal(data, size, Some(&config))
                     .expect("FontAtlas::add_font() failed to add TTF font data")
             },
             FontSourceKind::CompressedTtfData(data) => unsafe {
-                self.add_font_from_memory_compressed_ttf(data, size, Some(&config), None)
+                self.add_font_from_memory_compressed_ttf_internal(data, size, Some(&config))
                     .expect("FontAtlas::add_font() failed to add compressed TTF font data")
             },
             FontSourceKind::CompressedTtfBase85(data) => unsafe {
-                self.add_font_from_memory_compressed_base85_ttf(data, size, Some(&config), None)
+                self.add_font_from_memory_compressed_base85_ttf_internal(data, size, Some(&config))
                     .expect("FontAtlas::add_font() failed to add base85-compressed TTF font data")
             },
-            FontSourceKind::TtfFile(path) => unsafe {
-                self.add_font_from_memory_ttf(
-                    loaded_file.unwrap_or_else(|| {
-                        panic!("FontAtlas::add_font() did not preload font file {path:?}")
-                    }),
-                    size,
-                    Some(&config),
-                    None,
-                )
-                .expect("FontAtlas::add_font() failed to add preloaded TTF font data")
-            },
         }
     }
 
-    /// Adds a font using a fully configured native font source.
-    #[doc(alias = "AddFont")]
-    pub fn add_font_with_config(&self, font_cfg: &FontConfig) -> crate::fonts::FontId {
-        const CALLER: &str = "FontAtlas::add_font_with_config()";
-        self.assert_mutation_allowed(CALLER);
-        font_cfg.validate_for_add_font(CALLER);
-        self.validate_merge_target(&font_cfg.raw, font_cfg.raw.SizePixels, CALLER);
-
-        unsafe {
-            let raw_config = Self::font_config_for_ffi(font_cfg);
-            let font_ptr = sys::ImFontAtlas_AddFont(self.raw(), &raw_config);
-            assert!(!font_ptr.is_null(), "{CALLER} failed to add the font");
-            if raw_config.MergeMode {
-                self.discard_bakes(0);
-            }
-            self.font_id_for_raw(font_ptr)
-        }
-    }
-
-    /// Adds Dear ImGui's embedded default font.
-    #[doc(alias = "AddFontDefault")]
-    pub fn add_font_default(&self, font_cfg: Option<&FontConfig>) -> crate::fonts::FontId {
+    fn add_font_default_internal(&self, font_cfg: Option<&FontConfig>) -> crate::fonts::FontId {
         self.add_embedded_default_font(
             font_cfg,
-            "FontAtlas::add_font_default()",
+            "FontAtlas::add_font()",
             sys::ImFontAtlas_AddFontDefault,
         )
     }
 
-    /// Adds Dear ImGui's scalable embedded default font.
-    #[doc(alias = "AddFontDefaultVector")]
-    pub fn add_font_default_vector(&self, font_cfg: Option<&FontConfig>) -> crate::fonts::FontId {
+    fn add_font_default_vector_internal(
+        &self,
+        font_cfg: Option<&FontConfig>,
+    ) -> crate::fonts::FontId {
         self.add_embedded_default_font(
             font_cfg,
-            "FontAtlas::add_font_default_vector()",
+            "FontAtlas::add_font()",
             sys::ImFontAtlas_AddFontDefaultVector,
         )
     }
 
-    /// Adds Dear ImGui's pixel-clean embedded default font.
-    #[doc(alias = "AddFontDefaultBitmap")]
-    pub fn add_font_default_bitmap(&self, font_cfg: Option<&FontConfig>) -> crate::fonts::FontId {
+    fn add_font_default_bitmap_internal(
+        &self,
+        font_cfg: Option<&FontConfig>,
+    ) -> crate::fonts::FontId {
         self.add_embedded_default_font(
             font_cfg,
-            "FontAtlas::add_font_default_bitmap()",
+            "FontAtlas::add_font()",
             sys::ImFontAtlas_AddFontDefaultBitmap,
         )
-    }
-
-    /// Adds a font from a TTF/OTF file.
-    ///
-    /// The file is read into Rust-owned memory before the atlas is modified. A
-    /// missing or unreadable file returns `None` without calling native code.
-    ///
-    /// # Safety
-    ///
-    /// If the file exists, it must contain a complete font that is valid for the
-    /// selected loader. Dear ImGui's native font parsers may otherwise read past
-    /// the allocated buffer.
-    #[doc(alias = "AddFontFromFileTTF")]
-    pub unsafe fn add_font_from_file_ttf(
-        &self,
-        filename: &str,
-        size_pixels: f32,
-        font_cfg: Option<&FontConfig>,
-        glyph_ranges: Option<&[(u32, u32)]>,
-    ) -> Option<crate::fonts::FontId> {
-        const CALLER: &str = "FontAtlas::add_font_from_file_ttf()";
-        self.assert_mutation_allowed(CALLER);
-        validate_font_size_pixels(CALLER, "size_pixels", size_pixels);
-        if let Some(config) = font_cfg {
-            config.validate_for_add_font_with_size(CALLER, size_pixels);
-            let effective_size = effective_font_size(config, size_pixels);
-            self.validate_merge_target(&config.raw, effective_size, CALLER);
-        }
-
-        let font_data = std::fs::read(filename).ok()?;
-        validate_ttf_data_length_fallible(&font_data)?;
-        let config = with_default_file_name(font_cfg.cloned().unwrap_or_default(), filename);
-        unsafe {
-            self.add_font_from_memory_ttf(&font_data, size_pixels, Some(&config), glyph_ranges)
-        }
     }
 
     /// Adds a font from TTF/OTF data copied into Dear ImGui-owned memory.
@@ -328,14 +256,13 @@ impl FontAtlas {
     /// loader. Dear ImGui's native font parsers may otherwise read past the
     /// allocated buffer. The slice itself does not need to outlive this call.
     #[doc(alias = "AddFontFromMemoryTTF")]
-    pub unsafe fn add_font_from_memory_ttf(
+    unsafe fn add_font_from_memory_ttf_internal(
         &self,
         font_data: &[u8],
         size_pixels: f32,
         font_cfg: Option<&FontConfig>,
-        glyph_ranges: Option<&[(u32, u32)]>,
     ) -> Option<crate::fonts::FontId> {
-        const CALLER: &str = "FontAtlas::add_font_from_memory_ttf()";
+        const CALLER: &str = "FontAtlas::add_font()";
         self.assert_mutation_allowed(CALLER);
         validate_font_size_pixels(CALLER, "size_pixels", size_pixels);
         if let Some(config) = font_cfg {
@@ -346,8 +273,6 @@ impl FontAtlas {
         let config = font_cfg.cloned().unwrap_or_default();
         let effective_size = effective_font_size(&config, size_pixels);
         self.validate_merge_target(&config.raw, effective_size, CALLER);
-        let encoded_ranges = glyph_ranges.map(|ranges| encode_glyph_ranges(CALLER, ranges));
-
         unsafe {
             let memory = sys::igMemAlloc(font_data.len());
             if memory.is_null() {
@@ -358,9 +283,6 @@ impl FontAtlas {
             let mut raw_config = Self::font_config_for_ffi(&config);
             raw_config.FontDataOwnedByAtlas = true;
             let is_merge = raw_config.MergeMode;
-            let ranges_ptr = encoded_ranges.map_or(ptr::null(), |ranges| {
-                store_font_atlas_glyph_ranges(self.raw(), ranges)
-            });
 
             let font_ptr = sys::ImFontAtlas_AddFontFromMemoryTTF(
                 self.raw(),
@@ -368,7 +290,7 @@ impl FontAtlas {
                 font_data_len,
                 size_pixels,
                 &raw_config,
-                ranges_ptr,
+                ptr::null(),
             );
 
             if font_ptr.is_null() {
@@ -392,14 +314,13 @@ impl FontAtlas {
     /// decompressor ignores the supplied input length, and the font parser may
     /// otherwise read past its allocated buffer.
     #[doc(alias = "AddFontFromMemoryCompressedTTF")]
-    pub unsafe fn add_font_from_memory_compressed_ttf(
+    unsafe fn add_font_from_memory_compressed_ttf_internal(
         &self,
         compressed_font_data: &[u8],
         size_pixels: f32,
         font_cfg: Option<&FontConfig>,
-        glyph_ranges: Option<&[(u32, u32)]>,
     ) -> Option<crate::fonts::FontId> {
-        const CALLER: &str = "FontAtlas::add_font_from_memory_compressed_ttf()";
+        const CALLER: &str = "FontAtlas::add_font()";
         self.assert_mutation_allowed(CALLER);
         validate_font_size_pixels(CALLER, "size_pixels", size_pixels);
         if let Some(config) = font_cfg {
@@ -414,14 +335,13 @@ impl FontAtlas {
         unsafe {
             let raw_config = Self::font_config_for_ffi(&config);
             let is_merge = raw_config.MergeMode;
-            let ranges_ptr = self.store_glyph_ranges(glyph_ranges, CALLER);
             let font_ptr = sys::ImFontAtlas_AddFontFromMemoryCompressedTTF(
                 self.raw(),
                 compressed_font_data.as_ptr().cast(),
                 compressed_len,
                 size_pixels,
                 &raw_config,
-                ranges_ptr,
+                ptr::null(),
             );
 
             if font_ptr.is_null() {
@@ -445,14 +365,13 @@ impl FontAtlas {
     /// selected loader. The native decoder assumes complete groups and an
     /// internally terminated compressed stream.
     #[doc(alias = "AddFontFromMemoryCompressedBase85TTF")]
-    pub unsafe fn add_font_from_memory_compressed_base85_ttf(
+    unsafe fn add_font_from_memory_compressed_base85_ttf_internal(
         &self,
         compressed_font_data_base85: &str,
         size_pixels: f32,
         font_cfg: Option<&FontConfig>,
-        glyph_ranges: Option<&[(u32, u32)]>,
     ) -> Option<crate::fonts::FontId> {
-        const CALLER: &str = "FontAtlas::add_font_from_memory_compressed_base85_ttf()";
+        const CALLER: &str = "FontAtlas::add_font()";
         self.assert_mutation_allowed(CALLER);
         validate_font_size_pixels(CALLER, "size_pixels", size_pixels);
         if let Some(config) = font_cfg {
@@ -468,13 +387,12 @@ impl FontAtlas {
         unsafe {
             let raw_config = Self::font_config_for_ffi(&config);
             let is_merge = raw_config.MergeMode;
-            let ranges_ptr = self.store_glyph_ranges(glyph_ranges, CALLER);
             let font_ptr = sys::ImFontAtlas_AddFontFromMemoryCompressedBase85TTF(
                 self.raw(),
                 base85.as_ptr(),
                 size_pixels,
                 &raw_config,
-                ranges_ptr,
+                ptr::null(),
             );
 
             if font_ptr.is_null() {
@@ -537,14 +455,6 @@ fn configured_font_source(
     }
     if merge_mode {
         config = config.merge_mode(true);
-    }
-    config
-}
-
-fn with_default_file_name(mut config: FontConfig, filename: &str) -> FontConfig {
-    if config.raw.Name[0] == 0 {
-        let basename = filename.rsplit(['/', '\\']).next().unwrap_or(filename);
-        config = config.name(basename);
     }
     config
 }

@@ -17,7 +17,6 @@ mod render;
 
 mod draw;
 mod external_textures;
-mod font_atlas;
 #[cfg(feature = "multi-viewport-winit")]
 pub mod multi_viewport;
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]

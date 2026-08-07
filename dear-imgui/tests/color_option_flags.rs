@@ -50,7 +50,10 @@ fn color_options_reject_raw_option_bits_before_ffi() {
     ctx.io_mut().set_color_edit_options(defaults);
     assert_eq!(ctx.io().color_edit_options(), defaults);
 
-    let _ = ctx.font_atlas().build();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let ui = ctx.frame();
 

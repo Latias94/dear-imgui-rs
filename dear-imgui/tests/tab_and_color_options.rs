@@ -22,7 +22,10 @@ fn tab_and_color_options_helpers_no_panic() {
                 .picker_mode(imgui::ColorPickerMode::HueBar),
         );
     }
-    let _ = ctx.font_atlas().build();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
     let ui = ctx.frame();

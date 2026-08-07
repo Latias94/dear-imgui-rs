@@ -83,7 +83,6 @@ fn add_secondary_context(app: &mut App) -> imgui::ContextId {
         .non_send_mut::<ImguiContexts>()
         .configure(secondary_id, |context| {
             context.io_mut().set_config_input_trickle_event_queue(false);
-            let _ = context.font_atlas().build();
             let _ = context.set_ini_filename::<std::path::PathBuf>(None);
         })
         .expect("the secondary Context should be configurable");
@@ -165,7 +164,6 @@ fn app_with_primary_window() -> (App, Entity, Entity, imgui::ManagedTextureId) {
     .unwrap();
     let texture_id = configure_primary(&mut app, |context| {
         context.io_mut().set_config_input_trickle_event_queue(false);
-        let _ = context.font_atlas().build();
         let _ = context.set_ini_filename::<std::path::PathBuf>(None);
         context.register_texture(texture)
     });
@@ -1209,7 +1207,6 @@ fn renderer_prepare_routes_secondary_viewport_and_rejects_relocated_camera_marke
 
     configure_primary(&mut app, |context| {
         context.io_mut().set_config_input_trickle_event_queue(false);
-        let _ = context.font_atlas().build();
         let _ = context.set_ini_filename::<std::path::PathBuf>(None);
         context.io_mut().set_config_viewports_no_auto_merge(true);
     });

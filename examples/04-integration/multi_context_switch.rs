@@ -10,7 +10,10 @@ fn prepare_headless_context(
     // legacy headless font-atlas path instead of advertising a renderer capability it does not
     // provide.
     ctx.prepare_frame(imgui::FramePrepareOptions::new(display_size, 1.0 / 60.0));
-    let _ = ctx.font_atlas().build();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("headless example requires the legacy font-atlas capability")
+        .build();
     Ok(())
 }
 

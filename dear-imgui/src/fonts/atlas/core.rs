@@ -4,7 +4,6 @@ use crate::sys;
 
 mod add_font;
 mod build;
-mod glyph_ranges;
 mod lifecycle;
 mod loader_settings;
 mod mutation;

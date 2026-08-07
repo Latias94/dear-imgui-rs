@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use dear_imgui_rs::{
-    BackendFlags, Context, FrameLifecycleState, FrameToken, render::ReconciledFrame,
+    BackendFlags, Context, FontSource, FrameLifecycleState, FrameToken, render::ReconciledFrame,
 };
 #[cfg(feature = "capture")]
 use dear_imgui_test_engine::{
@@ -36,7 +36,11 @@ fn test_lock() -> MutexGuard<'static, ()> {
 
 fn context() -> Context {
     let mut context = Context::create();
-    assert!(context.font_atlas().build());
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("headless test requires the legacy font-atlas capability")
+        .build();
     context.io_mut().set_display_size([128.0, 128.0]);
     context.io_mut().set_delta_time(1.0 / 60.0);
     context
@@ -1137,12 +1141,13 @@ fn runner_rejects_wrong_or_open_context_and_restores_nested_current_context() {
 fn headless_runner_rejects_a_managed_renderer_without_panicking_or_abandoning() {
     let _guard = test_lock();
     let mut context = Context::create();
-    let _ = context.font_atlas().add_font_default(None);
+    let _ = context.font_atlas().add_font(&[FontSource::default_font()]);
     context.io_mut().set_display_size([128.0, 128.0]);
     context.io_mut().set_delta_time(1.0 / 60.0);
     context
         .io_mut()
         .set_backend_flags(BackendFlags::RENDERER_HAS_TEXTURES);
+    let _consumer = context.create_synchronous_renderer_consumer().unwrap();
     let mut engine = attached_engine(&mut context);
     engine
         .add_script_test("runner", "texture", |script| {

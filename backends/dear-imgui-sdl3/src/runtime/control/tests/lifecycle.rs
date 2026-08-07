@@ -18,7 +18,11 @@ fn platform_only_shutdown_rejects_an_active_renderer_before_closing_the_frame() 
             Rc::new(ActiveExternalRendererAttachment),
         )
         .unwrap();
-    assert!(context.font_atlas().build());
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("the attachment lifecycle test uses a headless legacy renderer")
+        .build();
     context.prepare_frame(dear_imgui_rs::FramePrepareOptions::new(
         [128.0, 128.0],
         1.0 / 60.0,
@@ -458,7 +462,11 @@ fn explicit_shutdown_normalizes_an_open_frame_before_native_release() {
         [320.0, 240.0],
         1.0 / 60.0,
     ));
-    let _ = context.font_atlas().build();
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("the shutdown lifecycle test uses a headless legacy renderer")
+        .build();
     context.frame().text("close before SDL teardown");
 
     runtime.shutdown_platform(&mut context).unwrap();

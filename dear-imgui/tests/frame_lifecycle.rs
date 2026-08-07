@@ -12,7 +12,6 @@ fn prepare_context(ctx: &mut imgui::Context) {
             .framebuffer_scale([2.0, 2.0])
             .renderer_has_textures(),
     );
-    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 }
 
@@ -229,6 +228,7 @@ fn dropping_frame_token_ends_frame_without_rendering() {
 
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
+    let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
 
     {
         let frame = ctx.begin_frame();
@@ -241,7 +241,6 @@ fn dropping_frame_token_ends_frame_without_rendering() {
         imgui::FrameLifecycleState::Idle
     );
     prepare_context(&mut ctx);
-    let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
     let frame = ctx.begin_frame();
     frame.ui().text("next frame still starts cleanly");
     let pending = frame.render(&consumer);
@@ -267,6 +266,7 @@ fn dropping_frame_token_ends_owner_context_and_restores_previous_current_context
 
     let mut ctx_a = imgui::Context::create();
     prepare_context(&mut ctx_a);
+    let _consumer = ctx_a.create_synchronous_renderer_consumer().unwrap();
     let raw_a = ctx_a.as_raw();
     let raw_b = unsafe { imgui::sys::igCreateContext(std::ptr::null_mut()) };
     assert!(!raw_b.is_null());

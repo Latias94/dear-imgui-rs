@@ -390,7 +390,11 @@ mod tests {
         assert!(!raw_b.is_null());
 
         unsafe { crate::sys::igSetCurrentContext(raw_a) };
-        let _ = ctx_a.font_atlas().build();
+        ctx_a
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
         ctx_a.io_mut().set_display_size([128.0, 128.0]);
         ctx_a.io_mut().set_delta_time(1.0 / 60.0);
 

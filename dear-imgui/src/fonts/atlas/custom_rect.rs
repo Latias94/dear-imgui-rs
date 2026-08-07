@@ -248,7 +248,7 @@ impl FontAtlas {
     pub fn custom_rect(&self, id: CustomRectId) -> Option<CustomRectSnapshot<'_>> {
         let atlas = self.raw();
         let rect = get_native_rect(atlas, id, "FontAtlas::custom_rect()")?;
-        let texture_lease = self.tex_data();
+        let texture_lease = self.tex_data_internal();
         Some(unsafe { snapshot_from_native(atlas, rect, texture_lease) })
     }
 
@@ -424,7 +424,7 @@ mod tests {
         let replacement = [7u8; 16];
         assert!(atlas.write_custom_rect(id, CustomRectData::rgba32([2, 2], &replacement)));
         let updates: Vec<_> = atlas
-            .tex_data()
+            .tex_data_internal()
             .expect("atlas texture should remain available")
             .updates()
             .collect();
@@ -458,9 +458,13 @@ mod tests {
             .font_atlas()
             .add_custom_rect(CustomRectData::alpha8([1, 1], &[0x7f]))
             .expect("the custom rectangle should fit");
+        let legacy = ctx
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("the test models a legacy renderer");
         unsafe {
             // The test models a completed legacy upload for this unshared atlas.
-            ctx.font_atlas().set_texture_id(crate::TextureId::new(17));
+            legacy.set_texture_id(crate::TextureId::new(17));
         }
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -476,9 +480,12 @@ mod tests {
         let ctx = crate::Context::create();
         let atlas = ctx.font_atlas();
         unsafe { (*atlas.raw()).TexDesiredFormat = sys::ImTextureFormat_Alpha8 };
-        assert!(atlas.build());
+        let legacy = atlas
+            .try_claim_legacy_renderer()
+            .expect("the test requires a legacy font atlas");
+        legacy.build();
         assert_eq!(
-            atlas
+            legacy
                 .tex_data()
                 .expect("atlas texture should exist")
                 .format(),
@@ -525,10 +532,11 @@ mod tests {
             .custom_rect(id)
             .expect("the custom rectangle should resolve")
             .pixels();
-        let texture = ctx
+        let legacy = ctx
             .font_atlas()
-            .tex_data()
-            .expect("atlas texture should exist");
+            .try_claim_legacy_renderer()
+            .expect("the test requires a legacy font atlas");
+        let texture = legacy.tex_data().expect("atlas texture should exist");
         let pixel = texture
             .pixels_at(u32::from(rect.x), u32::from(rect.y))
             .expect("custom rectangle pixel should be addressable");
@@ -626,7 +634,10 @@ mod tests {
             .font_atlas()
             .add_custom_rect(CustomRectData::rgba32([1, 1], &[255, 0, 0, 255]))
             .expect("the custom rectangle should fit");
-        let _ = ctx.font_atlas().build();
+        ctx.font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
         ctx.io_mut().set_display_size([128.0, 128.0]);
         ctx.io_mut().set_delta_time(1.0 / 60.0);
 

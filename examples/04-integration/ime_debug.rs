@@ -23,8 +23,6 @@ use winit::{
     window::{Window, WindowId},
 };
 
-#[path = "../support/font_validation.rs"]
-mod font_validation;
 #[path = "../support/wgpu_init.rs"]
 mod wgpu_init;
 
@@ -35,28 +33,14 @@ mod wgpu_init;
 ///   input (e.g. Chinese/Japanese) renders instead of showing `?`.
 /// Load the example's optional, application-controlled CJK font asset.
 ///
-/// # Safety
-///
-/// `examples/assets/NotoSansSC-Regular.ttf` must be trusted application data that remains valid
-/// for the selected native loader. Structural validation rejects malformed containers before the
-/// font bytes cross the FFI boundary, but it cannot make an untrusted asset safe to load.
-unsafe fn try_merge_noto_sans_sc(context: &mut Context) -> Result<(), String> {
+fn try_merge_noto_sans_sc(context: &mut Context) -> Result<(), String> {
     let path = "examples/assets/NotoSansSC-Regular.ttf";
-    let data = std::fs::read(path).map_err(|e| format!("Failed to read {} ({}).", path, e))?;
-
-    let loader = if cfg!(feature = "freetype") {
-        font_validation::LoaderKind::FreeType
-    } else {
-        font_validation::LoaderKind::StbTrueType
-    };
-    font_validation::validate_font_data(&data, loader)
-        .map_err(|error| format!("{} is not a supported CJK font: {error}", path))?;
+    let data = StbTrueTypeFontData::from_file(path)
+        .map_err(|error| format!("{path} is not a safe stb_truetype font: {error}"))?;
 
     let fonts = context.font_atlas();
     let cfg = FontConfig::new().size_pixels(18.0).merge_mode(true);
-    // SAFETY: upheld by this function's explicit trusted-font precondition after structural
-    // validation confirmed a representation accepted by the selected loader.
-    let source = unsafe { FontSource::ttf_data_with_size(&data, 18.0) }.with_config(cfg);
+    let source = FontSource::stb_truetype_with_size(data, 18.0).with_config(cfg);
     let _id = fonts.add_font(&[source]);
     Ok(())
 }
@@ -79,9 +63,7 @@ fn init_fonts(context: &mut Context) -> bool {
 
     // Optional: merge a CJK font if present.
     // If the file is missing or invalid, we skip it and keep ASCII-only rendering.
-    // SAFETY: this example treats its fixed asset path as trusted application data. Do not copy
-    // this pattern for files supplied by an untrusted user.
-    match unsafe { try_merge_noto_sans_sc(context) } {
+    match try_merge_noto_sans_sc(context) {
         Ok(()) => true,
         Err(msg) => {
             eprintln!(
@@ -124,7 +106,7 @@ impl AppWindow {
 
         // SAFETY: this example treats its fixed asset path as trusted application data. Do not
         // pass untrusted font files to the native loader.
-        match unsafe { try_merge_noto_sans_sc(&mut self.imgui.context) } {
+        match try_merge_noto_sans_sc(&mut self.imgui.context) {
             Ok(()) => {
                 self.cjk_merged = true;
                 self.font_status = "[OK] CJK font merged (runtime)".to_string();

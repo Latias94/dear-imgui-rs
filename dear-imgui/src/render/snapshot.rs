@@ -734,7 +734,7 @@ pub enum RendererConsumerError {
     )]
     SharedFontAtlasRequiresExclusiveContext { registered_contexts: usize },
     #[error(
-        "the font atlas contains legacy-preloaded data; clear and repopulate it before attaching a managed renderer"
+        "the font atlas is claimed by a legacy renderer or contains legacy-preloaded data; clear and repopulate it before attaching a managed renderer"
     )]
     FontAtlasRequiresManagedRebuild,
     #[error(
@@ -1554,7 +1554,11 @@ mod callback_preflight_tests {
         let mut context = crate::Context::create();
         context.io_mut().set_display_size([128.0, 128.0]);
         context.io_mut().set_delta_time(1.0 / 60.0);
-        let _ = context.font_atlas().build();
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
 
         let texture = crate::texture::OwnedTextureData::from_pixels(
             crate::texture::TextureFormat::RGBA32,
@@ -1690,7 +1694,11 @@ mod tests {
     fn platform_callback_preflight_precedes_every_viewport_texture_resolution() {
         let _guard = crate::test_support::imgui_context_guard();
         let mut context = crate::Context::create();
-        let _ = context.font_atlas().build();
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
         let main = context.main_viewport().as_raw_mut();
         let previous_main_draw = unsafe { (*main).DrawData };
         let secondary = viewport(

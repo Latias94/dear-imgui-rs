@@ -1063,6 +1063,64 @@ fn empty_pass_is_context_local_and_does_not_stop_later_contexts() {
     );
 }
 
+#[cfg(feature = "render")]
+#[test]
+fn headless_driver_reports_managed_font_atlas_conflicts() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+    app.add_plugins(ImguiPlugin::default());
+    let primary = app
+        .world()
+        .get_non_send::<ImguiContexts>()
+        .unwrap()
+        .primary_id()
+        .unwrap();
+    let consumer = app
+        .world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
+        .configure(primary, |context| {
+            context.create_detached_renderer_consumer()
+        })
+        .unwrap()
+        .expect("the test should acquire a managed renderer consumer");
+
+    crate::context::drive_imgui_contexts(app.world_mut());
+
+    assert!(matches!(
+        app.world()
+            .get_non_send::<ImguiContexts>()
+            .unwrap()
+            .last_error(primary)
+            .unwrap(),
+        Some(ImguiContextError::FontAtlasMode {
+            context_id,
+            source: dear_imgui_rs::FontAtlasModeError::ManagedRendererActive,
+        }) if *context_id == primary
+    ));
+
+    app.world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
+        .configure(primary, |context| {
+            context
+                .prepare_renderer_texture_reset(&consumer)
+                .expect("the idle test consumer should reset immediately")
+                .commit();
+        })
+        .unwrap();
+    drop(consumer);
+    app.world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
+        .configure(primary, |context| {
+            context
+                .poll_snapshot_completions()
+                .expect("the reset test consumer should retire cleanly");
+        })
+        .unwrap();
+}
+
 #[derive(Resource, Default)]
 struct PanicOnce(bool);
 

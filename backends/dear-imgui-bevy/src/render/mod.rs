@@ -161,7 +161,6 @@ mod tests {
         context.prepare_frame(
             imgui::FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
         );
-        let _ = context.font_atlas().build();
         let _ = context.set_ini_filename::<std::path::PathBuf>(None);
         context
     }
@@ -405,13 +404,6 @@ mod tests {
             let context_b = contexts
                 .create(crate::ImguiContextConfig::new(&recovery_pass))
                 .unwrap();
-            for context_id in [context_a, context_b] {
-                contexts
-                    .configure(context_id, |context| {
-                        assert!(context.font_atlas().build());
-                    })
-                    .unwrap();
-            }
             (context_a, context_b)
         };
         let releases = app.world().resource::<ImguiRendererReleases>().clone();
@@ -514,13 +506,6 @@ mod tests {
             .get_non_send::<crate::ImguiContexts>()
             .unwrap()
             .primary_id()
-            .unwrap();
-        app.world_mut()
-            .get_non_send_mut::<crate::ImguiContexts>()
-            .unwrap()
-            .configure(primary_id, |context| {
-                context.font_atlas().build();
-            })
             .unwrap();
         let viewport_id = imgui::Id::from(0xA11);
         assert!(

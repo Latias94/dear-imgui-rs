@@ -23,7 +23,10 @@ fn table_options_reject_non_independent_bits_before_ffi() {
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas().build();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
     let ui = ctx.frame();
@@ -71,7 +74,10 @@ fn table_column_options_reject_non_independent_bits_before_ffi() {
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas().build();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
     let ui = ctx.frame();
@@ -150,7 +156,10 @@ fn table_column_flag_getter_preserves_unknown_raw_bits() {
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas().build();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
     let ui = ctx.frame();

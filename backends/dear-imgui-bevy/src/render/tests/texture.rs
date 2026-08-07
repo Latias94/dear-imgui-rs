@@ -91,7 +91,6 @@ fn app_with_render_world() -> App {
         .unwrap()
         .configure(primary_id, |context| {
             context.io_mut().set_config_input_trickle_event_queue(false);
-            let _ = context.font_atlas().build();
             let _ = context.set_ini_filename::<std::path::PathBuf>(None);
         })
         .unwrap();
@@ -306,7 +305,6 @@ fn managed_texture_requests_and_lifecycles_are_isolated_by_context() {
             .configure(context_id, |context| {
                 context.io_mut().set_config_input_trickle_event_queue(false);
                 context.io_mut().set_display_size([1280.0, 720.0]);
-                let _ = context.font_atlas().build();
                 let _ = context.set_ini_filename::<std::path::PathBuf>(None);
                 context.register_texture(texture)
             })
@@ -558,7 +556,6 @@ fn one_bevy_image_lease_can_draw_from_two_contexts() {
         .configure(secondary_id, |context| {
             context.io_mut().set_config_input_trickle_event_queue(false);
             context.io_mut().set_display_size([1280.0, 720.0]);
-            let _ = context.font_atlas().build();
             let _ = context.set_ini_filename::<std::path::PathBuf>(None);
         })
         .expect("secondary Context configuration should succeed");

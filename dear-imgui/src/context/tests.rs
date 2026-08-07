@@ -388,7 +388,6 @@ fn prepare_managed_font_atlas(
     context.prepare_frame(
         super::FramePrepareOptions::new([320.0, 240.0], 1.0 / 60.0).renderer_has_textures(),
     );
-    assert!(context.font_atlas().build());
     let consumer = context
         .create_synchronous_renderer_consumer()
         .expect("test Context must create a renderer consumer");
@@ -414,7 +413,7 @@ fn prepare_managed_font_atlas(
         .expect("test font atlas feedback must reconcile");
     drop(reconciled);
 
-    assert_eq!(context.font_atlas().texture_id(), binding);
+    assert_eq!(context.font_atlas().texture_id_internal(), binding);
     (consumer, binding)
 }
 
@@ -424,7 +423,6 @@ fn prepare_managed_font_atlas_for_detached_rendering(
     context.prepare_frame(
         super::FramePrepareOptions::new([320.0, 240.0], 1.0 / 60.0).renderer_has_textures(),
     );
-    assert!(context.font_atlas().build());
     let consumer = context
         .create_detached_renderer_consumer()
         .expect("test Context must create a renderer consumer");
@@ -454,7 +452,7 @@ fn prepare_managed_font_atlas_for_detached_rendering(
         .poll_snapshot_completions()
         .expect("test snapshot completion must reconcile");
 
-    assert_eq!(context.font_atlas().texture_id(), binding);
+    assert_eq!(context.font_atlas().texture_id_internal(), binding);
     (consumer, binding)
 }
 
@@ -484,7 +482,10 @@ fn platform_io_shared_and_mut_views_match() {
 fn suspend_rejects_an_open_frame_and_retains_the_context_owner() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
-    assert!(ctx.font_atlas().build());
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx.io_mut().set_display_size([128.0, 128.0]);
     ctx.io_mut().set_delta_time(1.0 / 60.0);
     let raw = ctx.as_raw();
@@ -607,7 +608,10 @@ fn enable_multi_viewport_does_not_enable_docking() {
 fn frame_preserves_imgui_fallback_when_backends_decline_multi_viewport_support() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
-    assert!(ctx.font_atlas().build());
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
     ctx.enable_multi_viewport();
 
@@ -625,7 +629,10 @@ fn frame_preserves_imgui_fallback_when_backends_decline_multi_viewport_support()
 fn frame_rejects_missing_required_platform_callbacks_before_entering_native_code() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
-    assert!(ctx.font_atlas().build());
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
     ctx.enable_multi_viewport();
     let mut backend_flags = ctx.io().backend_flags();
@@ -650,7 +657,10 @@ fn frame_rejects_missing_required_platform_callbacks_before_entering_native_code
 fn frame_rejects_transparent_docking_without_window_alpha_before_native_code() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
-    assert!(ctx.font_atlas().build());
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
     let platform_attachment = install_complete_test_viewport_backend(&mut ctx);
 
@@ -677,7 +687,10 @@ fn frame_rejects_transparent_docking_without_window_alpha_before_native_code() {
 fn frame_rejects_enabling_multi_viewport_between_the_first_and_second_frames() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
-    assert!(ctx.font_atlas().build());
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
 
     ctx.frame().text("first frame without viewports");
@@ -700,7 +713,10 @@ fn frame_rejects_enabling_multi_viewport_between_the_first_and_second_frames() {
 fn frame_prepares_a_completed_disabled_frame_for_late_multi_viewport_enablement() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
-    assert!(ctx.font_atlas().build());
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
     let platform_attachment = install_complete_test_viewport_backend(&mut ctx);
 
@@ -730,7 +746,10 @@ fn frame_prepares_a_completed_disabled_frame_for_late_multi_viewport_enablement(
 fn platform_window_calls_enforce_the_native_frame_order_in_rust() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
-    assert!(ctx.font_atlas().build());
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
     TEST_RENDER_WINDOW_CALLS.store(0, Ordering::SeqCst);
     unsafe {
@@ -871,7 +890,10 @@ fn postflight_platform_window_teardown_error_does_not_leave_the_scope_active() {
 fn default_platform_render_requires_a_callback_render_path() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
-    assert!(ctx.font_atlas().build());
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
     ctx.frame().text("no default renderer callback");
     drop(ctx.render_legacy());
@@ -887,7 +909,10 @@ fn default_platform_render_requires_a_callback_render_path() {
 fn end_frame_is_idempotent_and_allows_a_new_frame() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
-    assert!(ctx.font_atlas().build());
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
 
     ctx.frame().text("first frame");
@@ -1113,7 +1138,11 @@ fn with_active_or_panic_closes_a_left_open_frame_before_panicking() {
 
     let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         suspended.with_active_or_panic(|context| {
-            assert!(context.font_atlas().build());
+            context
+                .font_atlas()
+                .try_claim_legacy_renderer()
+                .expect("legacy renderer font atlas should be available")
+                .build();
             context.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
             context
                 .frame()
@@ -1143,7 +1172,11 @@ fn suspended_context_error_closes_an_open_frame_and_can_reenter() {
     let mut suspended = super::SuspendedContext::create();
 
     let error = suspended.try_with_active(|context| {
-        assert!(context.font_atlas().build());
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
         context.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
         context.frame().text("frame left open by an error");
         Err::<(), _>("stop")
@@ -1173,7 +1206,11 @@ fn suspended_context_success_reports_and_closes_an_open_frame() {
 
     let error = suspended
         .try_with_active::<(), ()>(|context| {
-            assert!(context.font_atlas().build());
+            context
+                .font_atlas()
+                .try_claim_legacy_renderer()
+                .expect("legacy renderer font atlas should be available")
+                .build();
             context.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
             context
                 .frame()
@@ -1207,7 +1244,11 @@ fn suspended_context_panic_closes_an_open_frame_and_preserves_the_payload() {
 
     let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _ = suspended.try_with_active::<(), ()>(|context| {
-            assert!(context.font_atlas().build());
+            context
+                .font_atlas()
+                .try_claim_legacy_renderer()
+                .expect("legacy renderer font atlas should be available")
+                .build();
             context.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
             context.frame().text("panicking frame");
             std::panic::panic_any(0xC0FFEE_u32);
@@ -1737,7 +1778,10 @@ fn attachments_use_phased_teardown_and_reject_ordinary_binding() {
 fn context_drop_ends_an_open_frame_before_attachment_quiesce() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
-    assert!(ctx.font_atlas().build());
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
     let attachment = Rc::new(RecordingAttachment::new(Rc::new(RefCell::new(Vec::new()))));
     let frame_closed = Rc::clone(&attachment.frame_closed_before_quiesce);
@@ -2261,7 +2305,11 @@ fn ui_stack_tokens_drop_on_owner_context_and_restore_previous_current_context() 
     let raw_b = suspended_b.0.raw;
 
     unsafe { crate::sys::igSetCurrentContext(raw_a) };
-    let _ = ctx_a.font_atlas().build();
+    ctx_a
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx_a.io_mut().set_display_size([128.0, 128.0]);
     ctx_a.io_mut().set_delta_time(1.0 / 60.0);
 
@@ -2301,7 +2349,11 @@ fn ui_methods_run_on_owner_context_and_restore_previous_current_context() {
     let raw_b = suspended_b.0.raw;
 
     unsafe { crate::sys::igSetCurrentContext(raw_a) };
-    let _ = ctx_a.font_atlas().build();
+    ctx_a
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx_a.io_mut().set_display_size([128.0, 128.0]);
     ctx_a.io_mut().set_delta_time(1.0 / 60.0);
 
@@ -2376,8 +2428,14 @@ fn font_stack_token_drops_on_owner_context_and_restores_previous_current_context
     let raw_b = suspended_b.0.raw;
 
     unsafe { crate::sys::igSetCurrentContext(raw_a) };
-    let font = ctx_a.font_atlas().add_font_default(None);
-    let _ = ctx_a.font_atlas().build();
+    let font = ctx_a
+        .font_atlas()
+        .add_font(&[crate::FontSource::default_font()]);
+    ctx_a
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx_a.io_mut().set_display_size([128.0, 128.0]);
     ctx_a.io_mut().set_delta_time(1.0 / 60.0);
 

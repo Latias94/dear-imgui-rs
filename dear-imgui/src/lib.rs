@@ -110,9 +110,10 @@
 //! ## Renderer Integration (Modern Textures)
 //!
 //! When integrating a renderer backend (WGPU, OpenGL, etc.) with ImGui 1.92+:
-//! - Set `BackendFlags::RENDERER_HAS_TEXTURES` on the ImGui `Io` before building the font atlas.
 //! - Create one `SynchronousRendererConsumer` or `DetachedRendererConsumer` from the Context and
-//!   keep it alive with that renderer path.
+//!   keep it alive with that renderer path. This explicitly claims managed font-atlas ownership.
+//! - Set `BackendFlags::RENDERER_HAS_TEXTURES` before the first frame. Do not call
+//!   `LegacyFontAtlas::build`; managed renderers build and upload the atlas from texture requests.
 //! - Synchronous renderer APIs consume a Context-borrowed `PendingFrame`, reconcile it, then draw
 //!   the resulting `ReconciledFrame`; detached renderers consume a move-only `FrameSnapshot`.
 //! - Each frame, give every texture request one explicit `uploaded`, `destroyed`, `superseded`, or
@@ -128,9 +129,10 @@
 //! Pseudocode outline:
 //! ```ignore
 //! // 1) Configure context
-//! io.backend_flags |= BackendFlags::RENDERER_HAS_TEXTURES;
-//!
 //! let consumer = context.create_synchronous_renderer_consumer()?;
+//! context.io_mut().set_backend_flags(
+//!     context.io().backend_flags() | BackendFlags::RENDERER_HAS_TEXTURES,
+//! );
 //! let pending = context.render(&consumer);
 //! let mut feedback = Vec::new();
 //! for request in pending.texture_requests() {

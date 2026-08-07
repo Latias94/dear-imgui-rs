@@ -147,17 +147,17 @@ fn configure_fonts(mut contexts: NonSendMut<ImguiContexts>) -> Result {
         .primary_id()
         .ok_or("ImguiPlugin should install a primary Context before Startup")?;
 
-    contexts.configure(primary, |context| {
-        // SAFETY: the embedded bytes contain a complete, valid TTF and remain
-        // unchanged for the duration of this call.
-        let source = unsafe { FontSource::ttf_data_with_size(ROBOTO_MEDIUM, 18.0) };
+    let roboto = StbTrueTypeFontData::from_slice(ROBOTO_MEDIUM)?;
+
+    contexts.configure(primary, move |context| {
+        let source = FontSource::stb_truetype_with_size(roboto, 18.0);
         context.font_atlas().add_font(&[source])
     })?;
     Ok(())
 }
 ```
 
-External TTF/OTF, compressed TTF, and Base85 font sources use `unsafe` constructors because the native font loaders cannot prove that arbitrary input is complete and valid within the supplied buffer. Keep that boundary next to a trusted application asset whose completeness and loader validity the application guarantees. The renderer handles managed font-atlas texture updates; do not call `FontAtlas::build()` manually. Store returned `FontId` values in a non-send Bevy resource when they are needed by later UI systems.
+Use `StbTrueTypeFontData` for owned standalone TrueType fonts that fit the validated stb_truetype subset. OTF/CFF, TTC, compressed, borrowed, FreeType, and custom-loader sources remain explicit `unsafe` escape hatches because their native read boundaries are not proven by that type. `dear-imgui-bevy` owns font-atlas mode selection: the renderer handles managed texture requests, while a headless driver acquires the legacy capability and builds the atlas as needed. Application code should not call `FontAtlas::try_claim_legacy_renderer()` or `LegacyFontAtlas::build()`. Store returned `FontId` values in a non-send Bevy resource when they are needed by later UI systems.
 
 The complete example embeds a custom font, retains its `FontId`, and selects it with `Ui::push_font`:
 

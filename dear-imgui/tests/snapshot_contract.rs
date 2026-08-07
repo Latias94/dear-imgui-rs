@@ -12,7 +12,6 @@ fn prepare_context(ctx: &mut imgui::Context) {
             .framebuffer_scale([1.25, 1.5])
             .renderer_has_textures(),
     );
-    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 }
 
@@ -771,7 +770,6 @@ fn repeated_atlas_destroy_ack_survives_native_garbage_collection() {
             .framebuffer_scale([2.0, 2.0])
             .renderer_has_textures(),
     );
-    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let consumer = ctx.create_detached_renderer_consumer().unwrap();
 
@@ -1078,6 +1076,7 @@ fn foreign_consumer_is_rejected_before_capture() {
 
     let mut context_b = imgui::Context::create();
     prepare_context(&mut context_b);
+    let _consumer_b = context_b.create_detached_renderer_consumer().unwrap();
     let frame = context_b.begin_frame();
     assert!(matches!(
         frame.render_snapshot(&consumer_a),

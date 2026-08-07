@@ -422,9 +422,11 @@ fn try_run_automated(cli: &Cli, scenario: Scenario) -> Result<RunReport, String>
             .set_ini_filename(None::<String>)
             .map_err(|error| error.to_string())?;
     }
-    if !context.font_atlas().build() {
-        return Err("failed to build the default font atlas".to_owned());
-    }
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .map_err(|error| error.to_string())?
+        .build();
     context.io_mut().set_display_size([1280.0, 720.0]);
     context.io_mut().set_delta_time(1.0 / 60.0);
 

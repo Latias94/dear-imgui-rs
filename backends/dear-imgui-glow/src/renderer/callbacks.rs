@@ -69,7 +69,11 @@ mod tests {
                 .set_draw_callback_set_sampler_nearest_raw(Some(draw_callback_set_sampler_nearest));
         }
 
-        assert!(context.font_atlas().build());
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("the callback classification test uses legacy rendering")
+            .build();
         context.prepare_frame(FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0));
         let ui = context.frame();
         let draw_list = ui.get_background_draw_list();

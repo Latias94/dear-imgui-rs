@@ -126,8 +126,11 @@ pub enum ImguiContextError {
         context_id: ContextId,
         source: super::ownership::ImguiContextScopeError,
     },
-    /// The legacy/headless font atlas could not be built before opening a frame.
-    FontAtlasBuildFailed { context_id: ContextId },
+    /// The legacy/headless font-atlas capability could not be acquired before opening a frame.
+    FontAtlasMode {
+        context_id: ContextId,
+        source: dear_imgui_rs::FontAtlasModeError,
+    },
     /// Managed renderer admission failed before backend fields were mutated.
     #[cfg(feature = "render")]
     RendererAdmission {
@@ -242,12 +245,10 @@ impl fmt::Display for ImguiContextError {
                 formatter,
                 "Context {context_id:?} could not complete an active access scope: {source}"
             ),
-            Self::FontAtlasBuildFailed { context_id } => {
-                write!(
-                    formatter,
-                    "Context {context_id:?} could not build its legacy font atlas"
-                )
-            }
+            Self::FontAtlasMode { context_id, source } => write!(
+                formatter,
+                "Context {context_id:?} cannot enter legacy font-atlas mode: {source}"
+            ),
             #[cfg(feature = "render")]
             Self::RendererAdmission { context_id, source } => write!(
                 formatter,
@@ -327,6 +328,7 @@ impl std::error::Error for ImguiContextError {
             #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
             Self::ViewportBridge { source, .. } => Some(source),
             Self::ScopedActivation { source, .. } => Some(source),
+            Self::FontAtlasMode { source, .. } => Some(source),
             Self::ContextCreation(error) => Some(error),
             Self::RemovalPending { reason, .. } => Some(reason),
             _ => None,

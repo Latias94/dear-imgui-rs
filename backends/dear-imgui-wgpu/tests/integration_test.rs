@@ -451,11 +451,8 @@ fn device_objects_rebind_after_invalidation_and_shutdown() -> RendererResult<()>
         None,
         Some(external.texture_id()),
     )?;
-    let first_texture_id = context.font_atlas().texture_id();
-    assert!(!first_texture_id.is_null());
 
     renderer.invalidate_device_objects(&mut context)?;
-    assert!(context.font_atlas().texture_id().is_null());
 
     let (_replacement_texture, replacement_view) =
         external_test_texture(&device, "dear-imgui-wgpu replacement external texture");
@@ -473,9 +470,8 @@ fn device_objects_rebind_after_invalidation_and_shutdown() -> RendererResult<()>
         renderer.unregister_external_texture(external),
         Err(RendererError::ExternalTextureNotFound(id)) if id == external.texture_id()
     ));
-    let recreated_texture_id = context.font_atlas().texture_id();
-    assert!(!recreated_texture_id.is_null());
-    assert_ne!(recreated_texture_id, first_texture_id);
+    // The text draw above succeeds only after the renderer processes the requeued font-atlas
+    // create request. Managed atlas bindings intentionally have no public TextureId bypass.
 
     let suspended_owner = context.suspend_or_panic();
     let mut foreign_context = Context::create();
@@ -536,7 +532,6 @@ fn device_objects_rebind_after_invalidation_and_shutdown() -> RendererResult<()>
             BackendFlags::RENDERER_HAS_TEXTURES | BackendFlags::RENDERER_HAS_VTX_OFFSET
         )
     );
-    assert!(context.font_atlas().texture_id().is_null());
     drop(renderer);
 
     let mut replacement = WgpuRenderer::new(
@@ -565,8 +560,6 @@ fn device_objects_rebind_after_invalidation_and_shutdown() -> RendererResult<()>
         None,
         None,
     )?;
-    let reinitialized_texture_id = context.font_atlas().texture_id();
-    assert!(!reinitialized_texture_id.is_null());
     foreign_renderer.shutdown(&mut context)?;
 
     Ok(())

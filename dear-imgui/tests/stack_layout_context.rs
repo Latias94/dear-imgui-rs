@@ -8,7 +8,11 @@ fn context_drop_releases_native_stack_layout_state() {
     let mut context = imgui::Context::create();
     context.io_mut().set_display_size([320.0, 240.0]);
     context.io_mut().set_delta_time(1.0 / 60.0);
-    let _ = context.font_atlas().build();
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
 
     let ui = context.frame();
     let _ = ui.window("stack-layout context state").build(|| {

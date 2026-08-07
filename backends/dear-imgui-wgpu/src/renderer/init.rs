@@ -37,12 +37,8 @@ impl WgpuRenderer {
     /// # Ok(()) }
     /// ```
     pub fn new(init_info: WgpuInitInfo, imgui_ctx: &mut Context) -> RendererResult<Self> {
-        let prepare_font_atlas = cfg!(any(
-            not(target_arch = "wasm32"),
-            feature = "wasm-font-atlas-experimental"
-        ));
         let mut renderer = Self::empty();
-        renderer.initialize_for_context(init_info, imgui_ctx, prepare_font_atlas)?;
+        renderer.initialize_for_context(init_info, imgui_ctx)?;
         Ok(renderer)
     }
 
@@ -118,13 +114,12 @@ impl WgpuRenderer {
         &mut self,
         init_info: WgpuInitInfo,
         imgui_ctx: &mut Context,
-        prepare_font_atlas: bool,
     ) -> RendererResult<()> {
         self.ensure_uninitialized()?;
         Self::ensure_context_available(imgui_ctx)?;
         self.initialize_device(init_info)?;
 
-        if let Err(error) = self.attach_context(imgui_ctx, prepare_font_atlas) {
+        if let Err(error) = self.attach_context(imgui_ctx) {
             self.invalidate_device_objects_only();
             self.backend_data = None;
             return Err(error);
@@ -133,11 +128,7 @@ impl WgpuRenderer {
         Ok(())
     }
 
-    fn attach_context(
-        &mut self,
-        imgui_ctx: &mut Context,
-        prepare_font_atlas: bool,
-    ) -> RendererResult<()> {
+    fn attach_context(&mut self, imgui_ctx: &mut Context) -> RendererResult<()> {
         let (renderer_flags_added, renderer_name_ptr) = Self::configure_imgui_context(imgui_ctx)?;
         if let Err(error) = self.bind_context(imgui_ctx, renderer_flags_added) {
             Self::clear_unbound_imgui_context(imgui_ctx, renderer_flags_added, renderer_name_ptr);
@@ -171,26 +162,6 @@ impl WgpuRenderer {
         reset.commit();
         self.texture_manager.clear_destroyed_managed_textures();
         self.renderer_consumer = Some(consumer);
-
-        if prepare_font_atlas && let Err(error) = self.prepare_font_atlas(imgui_ctx) {
-            let consumer = self
-                .renderer_consumer
-                .take()
-                .ok_or(RendererError::ContextNotBound)?;
-            let reset_result = match imgui_ctx.prepare_renderer_texture_reset(&consumer) {
-                Ok(reset) => {
-                    self.texture_manager.clear_managed_textures();
-                    reset.commit();
-                    self.texture_manager.clear_destroyed_managed_textures();
-                    Ok(())
-                }
-                Err(error) => Err(error),
-            };
-            drop(consumer);
-            self.clear_bound_imgui_context(imgui_ctx);
-            reset_result?;
-            return Err(error);
-        }
 
         Ok(())
     }
@@ -330,46 +301,6 @@ impl WgpuRenderer {
             state.clear_with_context(imgui_context);
         }
         self.clear_context_state();
-    }
-
-    /// Prepare the bound context's font atlas for rendering.
-    pub(super) fn prepare_font_atlas(&mut self, imgui_ctx: &mut Context) -> RendererResult<()> {
-        self.ensure_context_matches(imgui_ctx)?;
-        if let Some(backend_data) = &self.backend_data {
-            let device = backend_data.device.clone();
-            let queue = backend_data.queue.clone();
-            self.reload_font_texture(imgui_ctx, &device, &queue)?;
-            if imgui_ctx
-                .io()
-                .backend_flags()
-                .contains(BackendFlags::RENDERER_HAS_TEXTURES)
-            {
-                // Managed font textures are produced by Context-owned rendered-frame requests;
-                // do not assign a legacy TexID.
-                return Ok(());
-            }
-
-            // Legacy fallback: only upload when the atlas does not already resolve to a live
-            // WGPU texture. This keeps the backend idempotent without carrying a separate
-            // renderer-side font texture cache now that the managed rendered-frame path is the
-            // primary mode.
-            let existing_tex_id = imgui_ctx.font_atlas().texture_id();
-            let has_live_font_texture = !existing_tex_id.is_null()
-                && self.texture_manager.contains_texture(existing_tex_id);
-
-            if !has_live_font_texture
-                && let Some(_tex_id) =
-                    self.try_upload_font_atlas_legacy(imgui_ctx, &device, &queue)?
-                && cfg!(debug_assertions)
-            {
-                backend_debug!(
-                    target: "dear_imgui_wgpu",
-                    "[dear-imgui-wgpu][debug] Font atlas uploaded via legacy fallback path. tex_id={}",
-                    _tex_id.id()
-                );
-            }
-        }
-        Ok(())
     }
 
     /// Recreate every resource discarded by `invalidate_device_objects()`.

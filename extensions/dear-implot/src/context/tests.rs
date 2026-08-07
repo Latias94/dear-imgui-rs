@@ -1,7 +1,7 @@
 use super::{PlotContext, validation::axis_tick_count_to_i32};
 use crate::sys;
 use crate::{Axis, PlotCond, XAxis, YAxis};
-use dear_imgui_rs::{BackendFlags, Context, ContextBindingError};
+use dear_imgui_rs::{Context, ContextBindingError};
 use std::cell::Cell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Mutex, OnceLock};
@@ -18,7 +18,11 @@ fn prepare_imgui(imgui: &mut Context) {
     let io = imgui.io_mut();
     io.set_display_size([800.0, 600.0]);
     io.set_delta_time(1.0 / 60.0);
-    io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_TEXTURES);
+    imgui
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("headless test requires the legacy font-atlas capability")
+        .build();
 }
 
 #[test]

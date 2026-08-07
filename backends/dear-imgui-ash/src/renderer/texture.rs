@@ -1477,7 +1477,6 @@ mod operational_gate_tests {
         context.prepare_frame(
             FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0).renderer_has_textures(),
         );
-        assert!(context.font_atlas().build());
         context.frame();
         let frame = context.render(&consumer);
         assert_destroyed(unsafe { renderer.cmd_draw(vk::CommandBuffer::null(), frame) });

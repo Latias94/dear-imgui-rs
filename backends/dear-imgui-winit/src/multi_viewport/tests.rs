@@ -1530,7 +1530,11 @@ fn explicit_shutdown_closes_an_open_frame_before_platform_teardown() {
         [320.0, 240.0],
         1.0 / 60.0,
     ));
-    let _ = context.font_atlas().build();
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("the platform teardown test uses headless legacy rendering")
+        .build();
 
     context.frame().text("close before Winit teardown");
     assert_eq!(

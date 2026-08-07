@@ -203,16 +203,6 @@ pub extern crate wgpu29 as wgpu;
 #[cfg(feature = "wgpu-30")]
 pub extern crate wgpu30 as wgpu;
 
-#[cfg(feature = "tracing")]
-macro_rules! backend_debug {
-    ($($arg:tt)*) => { tracing::debug!($($arg)*); };
-}
-
-#[cfg(not(feature = "tracing"))]
-macro_rules! backend_debug {
-    ($($arg:tt)*) => {};
-}
-
 // Module declarations
 mod data;
 mod error;
@@ -324,7 +314,7 @@ pub(crate) use data::{WgpuBackendData, WgpuRenderStateStorage};
 pub(crate) use frame_resources::{FrameResourceArena, FrameResources};
 pub(crate) use render_resources::RenderResources;
 pub(crate) use shaders::ShaderManager;
-pub(crate) use texture::{OwnedWgpuTexture, WgpuTextureManager};
+pub(crate) use texture::WgpuTextureManager;
 pub(crate) use uniforms::{UniformBuffer, Uniforms};
 
 // Re-export multi-viewport helpers when enabled

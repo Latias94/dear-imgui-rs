@@ -236,9 +236,6 @@ fn app_with_multi_viewport_window_config(viewport_window: ImguiViewportWindowCon
             .with_multi_viewport(true)
             .with_viewport_window(viewport_window),
     ));
-    with_primary_context(&mut app, |context| {
-        let _ = context.font_atlas().build();
-    });
     app
 }
 
@@ -659,11 +656,6 @@ fn ensure_primary_window(app: &mut App) -> Entity {
             .spawn((Window::default(), PrimaryWindow))
             .id()
     });
-    if app.world().get_non_send::<ImguiContexts>().is_some() {
-        with_primary_context(app, |context| {
-            let _ = context.font_atlas().build();
-        });
-    }
     entity
 }
 
@@ -1163,13 +1155,6 @@ fn native_viewport_bridge_isolates_equal_ids_across_two_contexts() {
         .expect("plugin should install the Context registry")
         .create(ImguiContextConfig::new(&secondary_pass).with_multi_viewport(true))
         .expect("an additional Context should receive its own viewport bridge");
-    app.world_mut()
-        .get_non_send_mut::<ImguiContexts>()
-        .expect("plugin should install the Context registry")
-        .configure(secondary_id, |context| {
-            assert!(context.font_atlas().build());
-        })
-        .expect("the additional Context should remain configurable");
     let secondary_host = app.world_mut().spawn(Window::default()).id();
     app.world_mut().spawn(ImguiInputRoute::logical(
         secondary_id,
@@ -1672,13 +1657,6 @@ fn viewport_and_render_release_converge_without_pausing_another_context() {
         .get_non_send_mut::<ImguiContexts>()
         .unwrap()
         .create(ImguiContextConfig::new(&secondary_pass).with_multi_viewport(true))
-        .unwrap();
-    app.world_mut()
-        .get_non_send_mut::<ImguiContexts>()
-        .unwrap()
-        .configure(context_b, |context| {
-            assert!(context.font_atlas().build());
-        })
         .unwrap();
     let context_b_host = app.world_mut().spawn(Window::default()).id();
     app.world_mut().spawn(ImguiInputRoute::logical(
@@ -2340,9 +2318,6 @@ fn viewport_platform_feedback_queries_return_mapped_bevy_window_state() {
     let _guard = imgui_context_guard();
     let mut app = app_with_multi_viewport_bridge();
     app.world_mut().spawn((Window::default(), PrimaryWindow));
-    with_primary_context(&mut app, |context| {
-        let _ = context.font_atlas().build();
-    });
 
     let context_id = primary_context_id(&app);
     let (id, entity) = create_live_secondary_viewport(&mut app);

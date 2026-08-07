@@ -560,7 +560,11 @@ mod tests {
         let io = imgui.io_mut();
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
-        let _ = imgui.font_atlas().build();
+        imgui
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("headless test requires the legacy font-atlas capability")
+            .build();
     }
 
     #[test]
