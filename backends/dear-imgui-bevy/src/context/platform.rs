@@ -55,8 +55,8 @@ pub(super) fn prepare_context_platform_frame(
         return Ok(false);
     };
     let render_integration_installed = world
-        .get_resource::<super::ownership::ImguiBackendRuntime>()
-        .is_some_and(super::ownership::ImguiBackendRuntime::render_integration_installed);
+        .get_resource::<super::ImguiBackendRuntime>()
+        .is_some_and(super::ImguiBackendRuntime::render_integration_installed);
     let Some(bridge) = world
         .get_non_send::<crate::ImguiViewportBridge>()
         .and_then(|bridge| bridge.context(context_id))

@@ -42,7 +42,7 @@ fn apply_sort(ui: &Ui, rows: &mut [Row]) {
             }
         });
     }
-    specs.clear_dirty();
+    specs.clear_dirty(ui);
 }
 
 fn main() -> Result<(), RunError> {

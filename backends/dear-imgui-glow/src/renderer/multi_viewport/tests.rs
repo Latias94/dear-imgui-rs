@@ -7,18 +7,19 @@ use std::sync::{Mutex, OnceLock};
 
 use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
-    ContextAttachmentTeardownError, ContextTeardown, sys,
+    ContextAttachmentTeardownError, ContextTeardown, FrameLifecycleState, FramePrepareOptions,
+    TextureFormat, sys,
 };
 
 use super::callbacks::renderer_render_window_sys;
 use super::runtime::RuntimeState;
-use super::{GlowViewportError, GlowViewportRuntime};
+use super::{GlowViewportError, GlowViewportRouteFault, GlowViewportRuntime};
 use crate::renderer::callbacks::{
     draw_callback_reset_render_state, draw_callback_set_sampler_linear,
     draw_callback_set_sampler_nearest,
 };
 use crate::{GlowRenderer, RenderError};
-use crate::{shaders::Shaders, texture::SimpleTextureMap, versions::GlVersion};
+use crate::{shaders::Shaders, texture::TextureRegistry, versions::GlVersion};
 
 static DELETED_TEXTURES: AtomicU32 = AtomicU32::new(0);
 
@@ -147,16 +148,25 @@ fn test_renderer(
     gl: Option<Rc<glow::Context>>,
     owned_texture: bool,
 ) -> GlowRenderer {
-    let renderer_consumer = context.create_renderer_consumer().unwrap();
+    let renderer_consumer = context.create_synchronous_renderer_consumer().unwrap();
     // The synthetic renderer has not installed a managed texture mapping yet; the fake native
     // texture below is added only after this empty reset transaction commits.
     let reset = context
         .prepare_renderer_texture_reset(&renderer_consumer)
         .unwrap();
-    let _ = reset.commit();
+    reset.commit();
     let mut flags = context.io().backend_flags();
     flags.insert(BackendFlags::RENDERER_HAS_VTX_OFFSET | BackendFlags::RENDERER_HAS_TEXTURES);
     context.io_mut().set_backend_flags(flags);
+    let mut texture_registry = TextureRegistry::default();
+    if owned_texture {
+        texture_registry
+            .register_renderer(
+                glow::NativeTexture(NonZeroU32::new(91).unwrap()),
+                TextureFormat::RGBA32,
+            )
+            .unwrap();
+    }
 
     GlowRenderer {
         shaders: Shaders {
@@ -170,10 +180,6 @@ fn test_renderer(
         },
         vbo_handle: None,
         ebo_handle: None,
-        owned_textures: owned_texture
-            .then(|| glow::NativeTexture(NonZeroU32::new(91).unwrap()))
-            .into_iter()
-            .collect(),
         samplers: None,
         gl_version: GlVersion {
             major: 3,
@@ -183,7 +189,6 @@ fn test_renderer(
         has_clip_origin_support: false,
         has_separate_polygon_modes: false,
         has_sampler_object_support: true,
-        is_destroyed: false,
         gl_context: gl,
         context_binding: None,
         backend_user_data: Box::default(),
@@ -191,7 +196,7 @@ fn test_renderer(
         renderer_texture_max: [0, 0],
         renderer_state_fault: None,
         synthetic_test_renderer: true,
-        texture_map: Some(Box::new(SimpleTextureMap::default())),
+        texture_registry,
         managed_textures: std::collections::HashMap::new(),
         destroyed_managed_textures: std::collections::HashMap::new(),
         renderer_consumer: Some(renderer_consumer),
@@ -227,7 +232,7 @@ fn destroy_returned_renderer(
     gl: &glow::Context,
     context: &mut Context,
 ) {
-    renderer.destroy(gl, context).unwrap();
+    renderer.shutdown_with_context(gl, context).unwrap();
 }
 
 #[test]
@@ -347,10 +352,10 @@ fn frame_trace_is_instance_bound_non_nested_and_drop_abortable() {
     let mut runtime = unsafe { GlowViewportRuntime::attach(&mut context, renderer) }.unwrap();
     let control = runtime.control_for_test();
 
-    let trace = runtime.begin_frame_trace().unwrap();
+    let trace = runtime.begin_frame_trace_for_test().unwrap();
     assert!(matches!(
-        runtime.begin_frame_trace(),
-        Err(GlowViewportError::FrameTraceAlreadyActive)
+        runtime.begin_frame_trace_for_test(),
+        Err(GlowViewportError::FrameRouteAlreadyActive)
     ));
     control.record_rendered_viewport(17);
     control.record_rendered_viewport(17);
@@ -361,8 +366,8 @@ fn frame_trace_is_instance_bound_non_nested_and_drop_abortable() {
         &[dear_imgui_rs::Id::from(9), dear_imgui_rs::Id::from(17)]
     );
 
-    drop(runtime.begin_frame_trace().unwrap());
-    let report = runtime.begin_frame_trace().unwrap().finish();
+    drop(runtime.begin_frame_trace_for_test().unwrap());
+    let report = runtime.begin_frame_trace_for_test().unwrap().finish();
     assert!(report.rendered_viewports().is_empty());
 
     runtime.shutdown(&mut context).unwrap();
@@ -443,6 +448,29 @@ fn runtime_texture_entry_fails_closed_on_core_drift() {
 }
 
 #[test]
+fn runtime_external_texture_lifecycle_never_deletes_application_resources() {
+    let _guard = test_guard();
+    DELETED_TEXTURES.store(0, Ordering::SeqCst);
+    let mut context = Context::create();
+    let _platform = attach_test_platform(&mut context);
+    let gl = fake_gl();
+    let renderer = test_renderer(&mut context, Some(Rc::clone(&gl)), false);
+    let mut runtime = unsafe { GlowViewportRuntime::attach(&mut context, renderer) }.unwrap();
+
+    let initial = glow::NativeTexture(NonZeroU32::new(93).unwrap());
+    let replacement = glow::NativeTexture(NonZeroU32::new(94).unwrap());
+    let texture = runtime.register_external_texture(initial).unwrap();
+    runtime
+        .update_external_texture(texture, replacement)
+        .unwrap();
+    runtime.unregister_external_texture(texture).unwrap();
+    assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 0);
+
+    runtime.shutdown(&mut context).unwrap();
+    assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn direct_c_entry_fails_closed_on_first_core_drift() {
     let _guard = test_guard();
     let mut context = Context::create();
@@ -504,7 +532,7 @@ fn ordinary_callback_render_failure_does_not_shutdown_the_runtime() {
 }
 
 #[test]
-fn terminal_fault_preempts_and_preserves_pending_non_terminal_fault() {
+fn deferred_faults_preserve_recording_order() {
     let _guard = test_guard();
     let mut context = Context::create();
     let _platform = attach_test_platform(&mut context);
@@ -522,14 +550,14 @@ fn terminal_fault_preempts_and_preserves_pending_non_terminal_fault() {
 
     assert!(matches!(
         runtime.poll_fault(),
-        Err(GlowViewportError::RendererCallbackReplaced {
-            callback: "terminal dependency fault"
+        Err(GlowViewportError::CallbackReentered {
+            callback: "earlier recoverable fault"
         })
     ));
     assert!(matches!(
         runtime.poll_fault(),
-        Err(GlowViewportError::CallbackReentered {
-            callback: "earlier recoverable fault"
+        Err(GlowViewportError::RendererCallbackReplaced {
+            callback: "terminal dependency fault"
         })
     ));
     runtime.shutdown(&mut context).unwrap();
@@ -783,7 +811,7 @@ fn rust_entry_fail_closes_when_a_platform_callback_disappears() {
 
     assert_dependency_error(
         MissingRuntimeDependency::PlatformRender,
-        runtime.new_frame().unwrap_err(),
+        runtime.set_viewport_clear_color([0.0; 4]).unwrap_err(),
     );
     assert!(
         !context
@@ -829,7 +857,7 @@ fn moving_the_wrapper_keeps_runtime_owned_renderer_storage_stable() {
 }
 
 #[test]
-fn shutdown_with_an_outstanding_snapshot_keeps_the_renderer_for_retry() {
+fn abandoning_a_pending_frame_does_not_block_shutdown() {
     let _guard = test_guard();
     let mut context = Context::create();
     context.io_mut().set_display_size([128.0, 128.0]);
@@ -840,7 +868,7 @@ fn shutdown_with_an_outstanding_snapshot_keeps_the_renderer_for_retry() {
     let renderer = test_renderer(&mut context, Some(Rc::clone(&gl)), true);
     let mut runtime = unsafe { GlowViewportRuntime::attach(&mut context, renderer) }.unwrap();
     let control = runtime.control_for_test();
-    let snapshot = {
+    {
         let renderer = control.borrow_renderer_for_test();
         let consumer = renderer
             .as_ref()
@@ -848,38 +876,10 @@ fn shutdown_with_an_outstanding_snapshot_keeps_the_renderer_for_retry() {
             .renderer_consumer
             .as_ref()
             .unwrap();
-        context.begin_frame().render_snapshot(consumer).unwrap()
-    };
-
-    assert!(matches!(
-        runtime.shutdown(&mut context),
-        Err(GlowViewportError::Renderer(RenderError::RendererConsumer(
-            dear_imgui_rs::render::RendererConsumerError::OutstandingEpochs { count: 1 }
-        )))
-    ));
-    assert_eq!(runtime.state_for_test(), RuntimeState::Attached);
-    assert!(control.has_renderer_for_test());
-    assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 0);
-    assert!(
-        context
-            .io()
-            .backend_flags()
-            .contains(BackendFlags::RENDERER_HAS_VIEWPORTS)
-    );
-    assert!(std::ptr::fn_addr_eq(
-        context.platform_io().renderer_render_window_raw().unwrap(),
-        renderer_render_window_sys as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void)
-    ));
-    {
-        let renderer = control.borrow_renderer_for_test();
-        let renderer = renderer.as_ref().unwrap();
-        assert_eq!(renderer.owned_textures.len(), 1);
-        assert!(!renderer.is_destroyed);
-        assert!(renderer.renderer_consumer.is_some());
+        let pending = context.begin_frame().render(consumer);
+        drop(pending);
     }
 
-    drop(snapshot);
-    context.poll_snapshot_completions().unwrap();
     runtime.shutdown(&mut context).unwrap();
     assert_eq!(runtime.state_for_test(), RuntimeState::ResourceDropped);
     assert!(!control.has_renderer_for_test());
@@ -1146,6 +1146,121 @@ fn dropping_wrapper_defers_resource_release_to_context_teardown() {
         control.transition_log_for_test(),
         ["ShuttingDown", "Detached", "ResourceDropped"]
     );
+}
+
+#[test]
+fn foreign_frame_is_rejected_before_target_faults_or_renderer_state_are_observed() {
+    let _guard = test_guard();
+    let context_a = Context::create();
+    let context_a_id = context_a.id();
+    let suspended_a = context_a.suspend_or_panic();
+
+    let mut context_b = Context::create();
+    let platform_b = attach_test_platform(&mut context_b);
+    let gl_b = fake_gl();
+    let renderer_b = test_renderer(&mut context_b, Some(Rc::clone(&gl_b)), false);
+    let mut runtime_b = unsafe { GlowViewportRuntime::attach(&mut context_b, renderer_b) }.unwrap();
+    let context_b_id = context_b.id();
+    let control_b = runtime_b.control_for_test();
+    control_b.record_fault(GlowViewportError::InvalidViewport);
+    let suspended_b = context_b.suspend_or_panic();
+
+    let mut context_a = suspended_a.activate().unwrap();
+    context_a
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("the foreign frame uses headless legacy font rendering")
+        .build();
+    context_a.prepare_frame(FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0));
+    let raw_a = context_a.as_raw();
+    let rendered_before = unsafe { (*raw_a).FrameCountRendered };
+    let frame = context_a.begin_frame();
+    assert_eq!(frame.lifecycle_state(), FrameLifecycleState::InFrame);
+
+    let error = match runtime_b.prepare_frame(frame) {
+        Ok(_) => panic!("a foreign frame token must be rejected before preparation"),
+        Err(error) => error,
+    };
+
+    assert!(matches!(
+        error,
+        GlowViewportError::ContextMismatch { expected, actual }
+            if expected == context_b_id && actual == context_a_id
+    ));
+    assert_eq!(
+        context_a.frame_lifecycle_state(),
+        FrameLifecycleState::Idle,
+        "the rejected token must close through FrameToken::drop rather than render"
+    );
+    assert_eq!(unsafe { (*raw_a).FrameCountRendered }, rendered_before);
+
+    let suspended_a = context_a.suspend_or_panic();
+    let mut context_b = suspended_b.activate().unwrap();
+    assert!(matches!(
+        runtime_b.poll_fault(),
+        Err(GlowViewportError::InvalidViewport)
+    ));
+    runtime_b.shutdown(&mut context_b).unwrap();
+    drop(platform_b);
+    drop(context_b);
+    drop(suspended_a);
+}
+
+#[test]
+fn prepared_frame_cannot_cross_runtime_owners() {
+    let _guard = test_guard();
+    let mut context_a = Context::create();
+    let _platform_a = attach_test_platform(&mut context_a);
+    let gl_a = fake_gl();
+    let renderer_a = test_renderer(&mut context_a, Some(Rc::clone(&gl_a)), false);
+    let mut runtime_a = unsafe { GlowViewportRuntime::attach(&mut context_a, renderer_a) }.unwrap();
+    let context_a_id = context_a.id();
+    let context_a = context_a.suspend_or_panic();
+
+    let mut context_b = Context::create();
+    let _platform_b = attach_test_platform(&mut context_b);
+    let gl_b = fake_gl();
+    let renderer_b = test_renderer(&mut context_b, Some(Rc::clone(&gl_b)), false);
+    let mut runtime_b = unsafe { GlowViewportRuntime::attach(&mut context_b, renderer_b) }.unwrap();
+    let context_b_id = context_b.id();
+    context_b
+        .prepare_frame(FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures());
+    let frame = context_b.begin_frame();
+    frame.ui().text("foreign prepared frame");
+    let prepared = runtime_b
+        .prepare_frame_with_retry_feedback_for_test(frame)
+        .unwrap();
+    let restored = Cell::new(false);
+    let platform_faults_taken = Cell::new(false);
+
+    let error = match runtime_a.render_main(
+        prepared,
+        || {
+            restored.set(true);
+            Ok::<(), std::io::Error>(())
+        },
+        || {
+            platform_faults_taken.set(true);
+            Vec::<std::io::Error>::new()
+        },
+    ) {
+        Ok(_) => panic!("a prepared frame must remain bound to its owning runtime"),
+        Err(error) => error,
+    };
+
+    assert!(!restored.get());
+    assert!(!platform_faults_taken.get());
+    assert!(matches!(
+        error.faults(),
+        [GlowViewportRouteFault::DeferredRenderer(
+            GlowViewportError::PreparedFrameRuntimeMismatch { expected, actual }
+        )] if *expected == context_a_id && *actual == context_b_id
+    ));
+
+    runtime_b.shutdown(&mut context_b).unwrap();
+    drop(context_b);
+    let mut context_a = context_a.activate().unwrap();
+    runtime_a.shutdown(&mut context_a).unwrap();
 }
 
 #[test]

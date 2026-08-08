@@ -5,7 +5,7 @@ use super::*;
 pub(super) enum ManagedRequestOutcome {
     Uploaded(TextureId),
     Destroyed,
-    IgnoredRetired,
+    Superseded,
 }
 
 impl WgpuTextureManager {
@@ -31,7 +31,7 @@ impl WgpuTextureManager {
                     feedback.push(request.uploaded(texture_id)?);
                 }
                 ManagedRequestOutcome::Destroyed => feedback.push(request.destroyed()?),
-                ManagedRequestOutcome::IgnoredRetired => {}
+                ManagedRequestOutcome::Superseded => feedback.push(request.superseded()),
             }
         }
         Ok(feedback)
@@ -56,7 +56,7 @@ impl WgpuTextureManager {
             } => {
                 if self.destroyed_managed_textures.contains_key(&id) {
                     // A delayed create must not resurrect a resource after its destroy request.
-                    return Ok(ManagedRequestOutcome::IgnoredRetired);
+                    return Ok(ManagedRequestOutcome::Superseded);
                 }
                 let texture_id = if let Some(existing) = self.managed_textures.get(&id) {
                     let texture_id = existing.texture_id;
@@ -95,7 +95,7 @@ impl WgpuTextureManager {
                 rects,
             } => {
                 if self.destroyed_managed_textures.contains_key(&id) {
-                    return Ok(ManagedRequestOutcome::IgnoredRetired);
+                    return Ok(ManagedRequestOutcome::Superseded);
                 }
                 self.update_managed_texture(queue, id, *format, *width, *height, rects)?;
                 let texture_id = self

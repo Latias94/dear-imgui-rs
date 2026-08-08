@@ -29,10 +29,12 @@ use self::frame_sync::{
 };
 pub use self::registry::SurfaceSupportError;
 use self::registry::{GlobalHandles, query_surface_support};
-pub use self::runtime::AshViewportFrameTrace;
 pub(crate) use self::runtime::OwningViewportRuntime;
 pub(crate) use self::runtime::attach_with_adapter;
-pub use self::runtime::{AshViewportAttachError, AshViewportError};
+pub use self::runtime::{
+    AshPreparedViewportFrame, AshViewportAttachError, AshViewportError, AshViewportFrameCompletion,
+    AshViewportRouteError, AshViewportRouteFault,
+};
 use self::surface::{SwapchainResources, ViewportAshData, ViewportRuntimeState};
 pub use self::trace::AshViewportFrameReport;
 

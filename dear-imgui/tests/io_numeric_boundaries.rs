@@ -17,7 +17,10 @@ fn prepare_context(ctx: &mut imgui::Context) {
     io.set_display_size([800.0, 600.0]);
     io.set_delta_time(1.0 / 60.0);
 
-    let _ = ctx.font_atlas().build();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 }
 
@@ -71,7 +74,7 @@ fn io_delta_time_must_be_positive_after_first_frame() {
     prepare_context(&mut ctx);
 
     let _ = ctx.frame();
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     let io = ctx.io_mut();
     let previous = io.delta_time();

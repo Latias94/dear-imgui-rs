@@ -47,6 +47,10 @@ impl Ui {
     /// Returns a `StyleStackToken` that can be popped by calling `.end()`
     /// or by allowing to drop.
     ///
+    /// `StyleVar::Alpha` participates in the same restoration order as an effective disabled
+    /// scope. Keep those two scopes lexically nested, or use a closure helper, so the saved alpha
+    /// value is restored by the operation that owns it.
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -60,8 +64,9 @@ impl Ui {
     #[doc(alias = "PushStyleVar")]
     pub fn push_style_var(&self, style_var: StyleVar) -> StyleStackToken<'_> {
         validate_style_var("Ui::push_style_var()", style_var);
+        let is_alpha = matches!(style_var, StyleVar::Alpha(_));
         self.run_with_bound_context(|| unsafe { push_style_var(style_var) });
-        StyleStackToken::new(self)
+        StyleStackToken::new_for(self, is_alpha)
     }
 
     /// Overrides the X component of a two-component style variable.
@@ -87,12 +92,18 @@ create_token!(
     #[doc(alias = "PopStyleColor")]
     pub struct ColorStackToken<'ui>;
 
+    pop crate::scope::NativeScopePop::PopStyleColor;
+
     /// Pops a change from the color stack.
     drop { unsafe { sys::igPopStyleColor(1) } }
 );
 
 impl ColorStackToken<'_> {
     /// Pops a change from the color stack.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the same conditions as [`Self::end`].
     pub fn pop(self) {
         self.end()
     }
@@ -104,12 +115,28 @@ create_token!(
     #[doc(alias = "PopStyleVar")]
     pub struct StyleStackToken<'ui>;
 
+    pop crate::scope::NativeScopePop::PopStyleVar { is_alpha: false };
+
     /// Pops a change from the style stack.
     drop { unsafe { sys::igPopStyleVar(1) } }
 );
 
-impl StyleStackToken<'_> {
+impl<'ui> StyleStackToken<'ui> {
+    fn new_for(ui: &'ui Ui, is_alpha: bool) -> Self {
+        Self {
+            scope: ui.begin_native_scope(
+                crate::scope::NativeScopePop::PopStyleVar { is_alpha },
+                "StyleStackToken",
+            ),
+            _phantom: std::marker::PhantomData,
+        }
+    }
+
     /// Pops a change from the style stack.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the same conditions as [`Self::end`].
     pub fn pop(self) {
         self.end()
     }
@@ -289,7 +316,10 @@ mod tests {
         let mut ctx = crate::Context::create();
         ctx.io_mut().set_display_size([128.0, 128.0]);
         ctx.io_mut().set_delta_time(1.0 / 60.0);
-        let _ = ctx.font_atlas().build();
+        ctx.font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
         ctx
     }
 

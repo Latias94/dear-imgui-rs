@@ -16,7 +16,6 @@ impl WgpuTextureManager {
     pub(crate) fn new() -> Self {
         Self {
             external_views: HashMap::new(),
-            owned_textures: HashMap::new(),
             managed_textures: HashMap::new(),
             managed_by_texture_id: HashMap::new(),
             destroyed_managed_textures: HashMap::new(),
@@ -57,38 +56,22 @@ impl WgpuTextureManager {
             .ok_or(RendererError::ExternalTextureNotFound(texture_id))
     }
 
-    pub(crate) fn register_owned_texture(
-        &mut self,
-        texture: OwnedWgpuTexture,
-    ) -> RendererResult<TextureId> {
-        let id = allocate_texture_id()?;
-        self.owned_textures.insert(id, texture);
-        Ok(id)
-    }
-
     pub(super) fn allocate_managed_texture_id(&self) -> RendererResult<TextureId> {
         allocate_texture_id()
     }
 
     pub(crate) fn texture_view(&self, id: TextureId) -> Option<&TextureView> {
-        self.external_views
-            .get(&id)
-            .or_else(|| self.owned_textures.get(&id).map(OwnedWgpuTexture::view))
-            .or_else(|| {
-                let managed = self.managed_by_texture_id.get(&id)?;
-                self.managed_textures
-                    .get(managed)
-                    .map(|entry| entry.resource.view())
-            })
+        self.external_views.get(&id).or_else(|| {
+            let managed = self.managed_by_texture_id.get(&id)?;
+            self.managed_textures
+                .get(managed)
+                .map(|entry| entry.resource.view())
+        })
     }
 
+    #[cfg(test)]
     pub(crate) fn contains_texture(&self, id: TextureId) -> bool {
         self.texture_view(id).is_some()
-    }
-
-    pub(crate) fn clear_renderer_owned_textures(&mut self) {
-        self.owned_textures.clear();
-        self.clear_managed_textures();
     }
 
     pub(crate) fn clear_external_views(&mut self) {
@@ -120,7 +103,7 @@ impl WgpuTextureManager {
 
     #[cfg(test)]
     pub(super) fn texture_count(&self) -> usize {
-        self.external_views.len() + self.owned_textures.len() + self.managed_textures.len()
+        self.external_views.len() + self.managed_textures.len()
     }
 
     #[cfg(test)]

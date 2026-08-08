@@ -57,4 +57,9 @@ impl RuntimeControl {
         detect_runtime_contract_drift(self);
         self.faults.borrow_mut().take_next()
     }
+
+    pub(super) fn detect_and_drain_faults(&self) -> Vec<AshViewportError> {
+        detect_runtime_contract_drift(self);
+        self.faults.borrow_mut().drain()
+    }
 }

@@ -50,8 +50,9 @@ use dear_imgui_bevy::route::ImguiInputRoute;
 #[cfg(feature = "multi-viewport")]
 use dear_imgui_bevy::{
     ImguiAppExt, ImguiContextError, ImguiContexts, ImguiFrame, ImguiNativeViewportStatus,
-    ImguiNativeViewportSupport, ImguiPass, ImguiPlugin, ImguiPluginConfig, ImguiShutdownError,
-    ImguiViewportBridge, ImguiViewportFeedback, ImguiViewportWindow, ImguiViewportWindowConfig,
+    ImguiNativeViewportSupport, ImguiPass, ImguiPlugin, ImguiPluginConfig, ImguiPluginInstallError,
+    ImguiShutdownError, ImguiViewportBridge, ImguiViewportFeedback, ImguiViewportWindow,
+    ImguiViewportWindowConfig,
 };
 use dear_imgui_rs as imgui;
 #[cfg(feature = "multi-viewport")]
@@ -209,7 +210,7 @@ fn remove_primary_context(app: &mut App) -> Result<imgui::SuspendedContext, Imgu
     app.world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .expect("plugin should install the ImGui Context registry")
-        .remove(primary_id)
+        .try_remove_immediately(primary_id)
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -236,9 +237,6 @@ fn app_with_multi_viewport_window_config(viewport_window: ImguiViewportWindowCon
             .with_multi_viewport(true)
             .with_viewport_window(viewport_window),
     ));
-    with_primary_context(&mut app, |context| {
-        let _ = context.font_atlas().build();
-    });
     app
 }
 
@@ -287,7 +285,7 @@ fn additional_context_can_enable_native_viewports_when_primary_does_not() {
         .world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .unwrap()
-        .remove(secondary_id)
+        .try_remove_immediately(secondary_id)
         .expect("an unused Context-local viewport bridge should detach immediately");
     assert_eq!(removed.id(), secondary_id);
 }
@@ -659,11 +657,6 @@ fn ensure_primary_window(app: &mut App) -> Entity {
             .spawn((Window::default(), PrimaryWindow))
             .id()
     });
-    if app.world().get_non_send::<ImguiContexts>().is_some() {
-        with_primary_context(app, |context| {
-            let _ = context.font_atlas().build();
-        });
-    }
     entity
 }
 
@@ -1163,13 +1156,6 @@ fn native_viewport_bridge_isolates_equal_ids_across_two_contexts() {
         .expect("plugin should install the Context registry")
         .create(ImguiContextConfig::new(&secondary_pass).with_multi_viewport(true))
         .expect("an additional Context should receive its own viewport bridge");
-    app.world_mut()
-        .get_non_send_mut::<ImguiContexts>()
-        .expect("plugin should install the Context registry")
-        .configure(secondary_id, |context| {
-            assert!(context.font_atlas().build());
-        })
-        .expect("the additional Context should remain configurable");
     let secondary_host = app.world_mut().spawn(Window::default()).id();
     app.world_mut().spawn(ImguiInputRoute::logical(
         secondary_id,
@@ -1388,7 +1374,7 @@ fn native_viewport_bridge_isolates_equal_ids_across_two_contexts() {
         app.world_mut()
             .get_non_send_mut::<ImguiContexts>()
             .unwrap()
-            .remove(secondary_id),
+            .try_remove_immediately(secondary_id),
         Err(ImguiContextError::RemovalPending {
             reason:
                 dear_imgui_bevy::ImguiContextRemovalPendingReason::ViewportCallbackOwnership(
@@ -1403,7 +1389,7 @@ fn native_viewport_bridge_isolates_equal_ids_across_two_contexts() {
         .world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .expect("plugin should install the Context registry")
-        .remove(secondary_id)
+        .try_remove_immediately(secondary_id)
         .expect("callback-fault teardown should complete on retry");
     assert_eq!(removed.id(), secondary_id);
     let bridge = app
@@ -1672,13 +1658,6 @@ fn viewport_and_render_release_converge_without_pausing_another_context() {
         .get_non_send_mut::<ImguiContexts>()
         .unwrap()
         .create(ImguiContextConfig::new(&secondary_pass).with_multi_viewport(true))
-        .unwrap();
-    app.world_mut()
-        .get_non_send_mut::<ImguiContexts>()
-        .unwrap()
-        .configure(context_b, |context| {
-            assert!(context.font_atlas().build());
-        })
         .unwrap();
     let context_b_host = app.world_mut().spawn(Window::default()).id();
     app.world_mut().spawn(ImguiInputRoute::logical(
@@ -2238,20 +2217,18 @@ fn invalid_window_config_is_rejected_before_backend_attachment() {
         ..Default::default()
     };
     let mut app = App::new();
-    let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        app.add_plugins(ImguiPlugin::new(
-            ImguiPluginConfig::default()
-                .with_multi_viewport(true)
-                .with_viewport_window(invalid_window),
-        ));
-    }))
-    .expect_err("an invalid native viewport policy must fail during plugin installation");
-    let message = failure
-        .downcast_ref::<String>()
-        .map(String::as_str)
-        .or_else(|| failure.downcast_ref::<&str>().copied())
-        .unwrap_or_default();
-    assert!(message.contains("invalid Dear ImGui viewport window policy"));
+    let failure = match app.try_install_imgui(ImguiPlugin::new(
+        ImguiPluginConfig::default()
+            .with_multi_viewport(true)
+            .with_viewport_window(invalid_window),
+    )) {
+        Ok(_) => panic!("an invalid native viewport policy must fail during plugin installation"),
+        Err(error) => error,
+    };
+    assert!(matches!(
+        failure,
+        ImguiPluginInstallError::ViewportWindow(_)
+    ));
     assert!(
         app.world().get_non_send::<ImguiContexts>().is_none(),
         "configuration validation must run before the plugin installs backend state"
@@ -2340,9 +2317,6 @@ fn viewport_platform_feedback_queries_return_mapped_bevy_window_state() {
     let _guard = imgui_context_guard();
     let mut app = app_with_multi_viewport_bridge();
     app.world_mut().spawn((Window::default(), PrimaryWindow));
-    with_primary_context(&mut app, |context| {
-        let _ = context.font_atlas().build();
-    });
 
     let context_id = primary_context_id(&app);
     let (id, entity) = create_live_secondary_viewport(&mut app);

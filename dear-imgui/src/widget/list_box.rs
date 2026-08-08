@@ -79,24 +79,38 @@ impl<T: AsRef<str>> ListBox<T> {
     ///
     /// Note: the closure is not called if the list box is not open.
     pub fn build<R, F: FnOnce() -> R>(self, ui: &Ui, f: F) -> Option<R> {
-        self.begin(ui).map(|_list| f())
+        let token = self.begin(ui)?;
+        let result = f();
+        drop(token);
+        Some(result)
     }
 }
 
 /// Tracks a list box that can be ended by calling `.end()`
-/// or by dropping
+/// or by dropping.
+///
+/// The token must finish after every nested window-like scope and in the exact window `Begin`
+/// scope that created it. Prefer [`ListBox::build`] for ordinary use.
+#[must_use]
 #[doc(alias = "EndListBox")]
 pub struct ListBoxToken<'ui> {
-    _ui: &'ui Ui,
+    scope: crate::scope::NativeScopeToken<'ui>,
 }
 
 impl<'ui> ListBoxToken<'ui> {
     /// Creates a new list box token
-    pub fn new(ui: &'ui Ui) -> Self {
-        Self { _ui: ui }
+    pub(crate) fn new(ui: &'ui Ui) -> Self {
+        Self {
+            scope: ui.begin_native_scope(crate::scope::NativeScopePop::EndListBox, "ListBoxToken"),
+        }
     }
 
     /// Ends the list box
+    ///
+    /// # Panics
+    ///
+    /// Panics before FFI if a nested window-like scope is active or this token is no longer in its
+    /// originating window `Begin` scope.
     pub fn end(self) {
         // The drop implementation will handle the actual ending
     }
@@ -104,8 +118,7 @@ impl<'ui> ListBoxToken<'ui> {
 
 impl<'ui> Drop for ListBoxToken<'ui> {
     fn drop(&mut self) {
-        self._ui
-            .run_with_bound_context(|| unsafe { sys::igEndListBox() });
+        self.scope.finish();
     }
 }
 

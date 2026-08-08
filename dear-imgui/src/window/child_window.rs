@@ -140,7 +140,7 @@ impl<'ui> ChildWindow<'ui> {
     }
 
     /// Begins the child window and returns a token
-    fn begin(self, ui: &'ui Ui) -> Option<ChildWindowToken<'ui>> {
+    fn begin(self, ui: &'ui Ui) -> Option<ChildWindowGuard<'ui>> {
         let name_ptr = ui.scratch_txt(self.name);
         validate_child_flags("ChildWindow::begin()", self.child_flags, self.flags);
         assert!(
@@ -167,7 +167,7 @@ impl<'ui> ChildWindow<'ui> {
             // what BeginChild() returns. However, if BeginChild returns false, EndChild must
             // be called immediately and no content should be rendered.
             if result {
-                Some(ChildWindowToken { ui })
+                Some(ChildWindowGuard::new(ui))
             } else {
                 // If BeginChild returns false, call EndChild immediately and return None
                 unsafe {
@@ -179,16 +179,23 @@ impl<'ui> ChildWindow<'ui> {
     }
 }
 
-/// Token representing an active child window
-pub struct ChildWindowToken<'ui> {
-    ui: &'ui Ui,
+/// Internal guard representing an active child window.
+struct ChildWindowGuard<'ui> {
+    scope: crate::scope::NativeScopeToken<'ui>,
 }
 
-impl<'ui> Drop for ChildWindowToken<'ui> {
+impl<'ui> ChildWindowGuard<'ui> {
+    fn new(ui: &'ui Ui) -> Self {
+        Self {
+            scope: ui
+                .begin_native_scope(crate::scope::NativeScopePop::EndChild, "ChildWindowGuard"),
+        }
+    }
+}
+
+impl Drop for ChildWindowGuard<'_> {
     fn drop(&mut self) {
-        self.ui.run_with_bound_context(|| unsafe {
-            sys::igEndChild();
-        });
+        self.scope.finish();
     }
 }
 

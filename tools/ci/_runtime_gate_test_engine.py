@@ -412,7 +412,7 @@ def run_test_engine_runtime(
         build = _run_example_build(
             workspace_root=workspace_root,
             evidence_dir=evidence_dir,
-            binary="imgui_test_engine_basic",
+            binary="test_engine_runtime",
             features="test-engine",
             timeout=build_timeout,
             child_environment=child_environment,
@@ -423,7 +423,7 @@ def run_test_engine_runtime(
             label="Test Engine example build",
             nonzero_category=GateCategory.PRODUCT_FAILURE,
         )
-        binary = _example_binary(workspace_root, "imgui_test_engine_basic")
+        binary = _example_binary(workspace_root, "test_engine_runtime")
         if not binary.is_file():
             raise RuntimeContractError(
                 GateCategory.INFRASTRUCTURE_UNAVAILABLE,

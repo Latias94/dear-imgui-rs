@@ -83,7 +83,6 @@ fn add_secondary_context(app: &mut App) -> imgui::ContextId {
         .non_send_mut::<ImguiContexts>()
         .configure(secondary_id, |context| {
             context.io_mut().set_config_input_trickle_event_queue(false);
-            let _ = context.font_atlas().build();
             let _ = context.set_ini_filename::<std::path::PathBuf>(None);
         })
         .expect("the secondary Context should be configurable");
@@ -156,12 +155,15 @@ fn app_with_primary_window() -> (App, Entity, Entity, imgui::ManagedTextureId) {
         Msaa::Off,
     );
 
-    let mut texture = imgui::texture::OwnedTextureData::new();
-    texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
-    texture.set_data(&[255, 0, 255, 255]);
+    let texture = imgui::texture::OwnedTextureData::from_pixels(
+        imgui::texture::TextureFormat::RGBA32,
+        1,
+        1,
+        &[255, 0, 255, 255],
+    )
+    .unwrap();
     let texture_id = configure_primary(&mut app, |context| {
         context.io_mut().set_config_input_trickle_event_queue(false);
-        let _ = context.font_atlas().build();
         let _ = context.set_ini_filename::<std::path::PathBuf>(None);
         context.register_texture(texture)
     });
@@ -321,7 +323,7 @@ fn render_extract_moves_context_owned_managed_frame_and_commits_once() {
     }));
 
     let progress = configure_primary(&mut app, |context| context.poll_snapshot_completions())
-        .expect("request-bound empty feedback should still complete the snapshot epoch");
+        .expect("request-bound retry feedback should complete the snapshot epoch");
     assert_eq!(progress.committed(), 1);
     assert_eq!(progress.feedback_applied(), 0);
     let _ = (primary_window, camera);
@@ -1205,7 +1207,6 @@ fn renderer_prepare_routes_secondary_viewport_and_rejects_relocated_camera_marke
 
     configure_primary(&mut app, |context| {
         context.io_mut().set_config_input_trickle_event_queue(false);
-        let _ = context.font_atlas().build();
         let _ = context.set_ini_filename::<std::path::PathBuf>(None);
         context.io_mut().set_config_viewports_no_auto_merge(true);
     });

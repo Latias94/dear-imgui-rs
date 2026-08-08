@@ -91,7 +91,6 @@ fn app_with_render_world() -> App {
         .unwrap()
         .configure(primary_id, |context| {
             context.io_mut().set_config_input_trickle_event_queue(false);
-            let _ = context.font_atlas().build();
             let _ = context.set_ini_filename::<std::path::PathBuf>(None);
         })
         .unwrap();
@@ -133,9 +132,13 @@ fn install_render_view(app: &mut App, camera: Entity, target: NormalizedRenderTa
 }
 
 fn register_managed_texture(app: &mut App) -> imgui::ManagedTextureId {
-    let mut texture = imgui::texture::OwnedTextureData::new();
-    texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
-    texture.set_data(&[255, 0, 255, 255]);
+    let texture = imgui::texture::OwnedTextureData::from_pixels(
+        imgui::texture::TextureFormat::RGBA32,
+        1,
+        1,
+        &[255, 0, 255, 255],
+    )
+    .unwrap();
     let primary_id = app
         .world()
         .get_non_send::<ImguiContexts>()
@@ -197,7 +200,7 @@ fn draw_context_managed_texture<P: 'static>(
 }
 
 #[test]
-fn managed_texture_create_request_repeats_without_gpu_feedback() {
+fn managed_texture_create_request_repeats_after_gpu_retry() {
     let _guard = imgui_context_guard();
     let mut app = app_with_render_world();
     let texture_id = register_managed_texture(&mut app);
@@ -223,7 +226,7 @@ fn managed_texture_create_request_repeats_without_gpu_feedback() {
     assert_eq!(extracted.frame_index(primary_id), Some(1));
     assert!(
         extracted.snapshot(primary_id).is_none(),
-        "render preparation should commit the one-shot snapshot with empty feedback"
+        "render preparation should commit the one-shot snapshot with explicit retry feedback"
     );
 
     let texture = app.world().get_non_send::<ManagedTexture>().unwrap().0;
@@ -264,7 +267,7 @@ fn managed_texture_create_request_repeats_without_gpu_feedback() {
         .resource::<dear_imgui_bevy::render::ImguiPreparedRenderFrame>();
     assert!(
         prepared.texture_request_count(primary_id) >= 1,
-        "unacknowledged creates must repeat in the next snapshot"
+        "retried creates must repeat in the next snapshot"
     );
 }
 
@@ -289,16 +292,19 @@ fn managed_texture_requests_and_lifecycles_are_isolated_by_context() {
         .expect("secondary Context admission should succeed");
 
     let register = |app: &mut App, context_id: imgui::ContextId, pixel: [u8; 4]| {
-        let mut texture = imgui::texture::OwnedTextureData::new();
-        texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
-        texture.set_data(&pixel);
+        let texture = imgui::texture::OwnedTextureData::from_pixels(
+            imgui::texture::TextureFormat::RGBA32,
+            1,
+            1,
+            &pixel,
+        )
+        .unwrap();
         app.world_mut()
             .get_non_send_mut::<ImguiContexts>()
             .unwrap()
             .configure(context_id, |context| {
                 context.io_mut().set_config_input_trickle_event_queue(false);
                 context.io_mut().set_display_size([1280.0, 720.0]);
-                let _ = context.font_atlas().build();
                 let _ = context.set_ini_filename::<std::path::PathBuf>(None);
                 context.register_texture(texture)
             })
@@ -370,7 +376,7 @@ fn managed_texture_requests_and_lifecycles_are_isolated_by_context() {
     ] {
         assert!(
             prepared.texture_request_count(context_id) >= 1,
-            "each Context should retain its own unacknowledged create request"
+            "each Context should retain its own retried create request"
         );
         assert!(prepared.draws().iter().any(|draw| {
             draw.context_id == context_id
@@ -439,7 +445,7 @@ fn managed_texture_requests_and_lifecycles_are_isolated_by_context() {
         .resource::<dear_imgui_bevy::render::ImguiPreparedRenderFrame>();
     assert!(
         prepared.texture_request_count(primary_id) >= 1,
-        "the primary Context should retain its unacknowledged destroy request"
+        "the primary Context should retain its retried destroy request"
     );
     assert!(
         prepared.texture_request_count(secondary_id) >= 1,
@@ -550,7 +556,6 @@ fn one_bevy_image_lease_can_draw_from_two_contexts() {
         .configure(secondary_id, |context| {
             context.io_mut().set_config_input_trickle_event_queue(false);
             context.io_mut().set_display_size([1280.0, 720.0]);
-            let _ = context.font_atlas().build();
             let _ = context.set_ini_filename::<std::path::PathBuf>(None);
         })
         .expect("secondary Context configuration should succeed");

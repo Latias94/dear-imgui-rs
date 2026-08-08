@@ -1,5 +1,30 @@
 use super::*;
 
+#[derive(Debug, Eq, PartialEq)]
+struct TextureState {
+    pixels_ptr: usize,
+    pixels: Option<Vec<u8>>,
+    status: TextureStatus,
+    used_rect: TextureRect,
+    update_rect: TextureRect,
+    updates: Vec<TextureRect>,
+}
+
+fn texture_state(texture: &TextureData) -> TextureState {
+    TextureState {
+        pixels_ptr: unsafe { (*texture.as_raw()).Pixels as usize },
+        pixels: texture.pixels().map(<[u8]>::to_vec),
+        status: texture.status(),
+        used_rect: texture.used_rect(),
+        update_rect: texture.update_rect(),
+        updates: texture.updates().collect(),
+    }
+}
+
+fn region(x: u32, y: u32, width: u32, height: u32) -> TextureRegion {
+    TextureRegion::new(x, y, width, height).unwrap()
+}
+
 #[test]
 fn texture_id_try_as_usize_reports_overflow() {
     assert_eq!(TextureId::new(42).try_as_usize(), Some(42));
@@ -10,83 +35,41 @@ fn texture_id_try_as_usize_reports_overflow() {
 }
 
 #[test]
-fn texture_create_rejects_invalid_sizes_and_status_before_ffi() {
-    let mut texture = OwnedTextureData::new();
-
-    assert!(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            texture.create(TextureFormat::RGBA32, 0, 1);
-        }))
-        .is_err()
+fn from_pixels_rejects_invalid_dimensions_and_allocation_sizes() {
+    assert_eq!(
+        OwnedTextureData::from_pixels(TextureFormat::RGBA32, 0, 1, &[]).err(),
+        Some(TextureDataError::InvalidDimensions {
+            width: 0,
+            height: 1,
+        })
     );
-    assert!(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            texture.create(TextureFormat::RGBA32, i32::MAX as u32 + 1, 1);
-        }))
-        .is_err()
+    assert_eq!(
+        OwnedTextureData::from_pixels(TextureFormat::RGBA32, i32::MAX as u32 + 1, 1, &[],).err(),
+        Some(TextureDataError::WidthOutOfRange(i32::MAX as u32 + 1))
     );
-    assert!(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            texture.create(TextureFormat::RGBA32, i32::MAX as u32, 2);
-        }))
-        .is_err()
-    );
-
-    texture.create(TextureFormat::RGBA32, 1, 1);
-    assert_eq!(texture.status(), TextureStatus::WantCreate);
-    assert!(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            texture.create(TextureFormat::RGBA32, 1, 1);
-        }))
-        .is_err()
+    assert_eq!(
+        OwnedTextureData::from_pixels(TextureFormat::RGBA32, i32::MAX as u32, 2, &[]).err(),
+        Some(TextureDataError::ByteSizeOutOfRange {
+            width: i32::MAX as u32,
+            height: 2,
+            bytes_per_pixel: 4,
+        })
     );
 }
 
 #[test]
-fn texture_metadata_setters_are_destroyed_only_and_keep_bpp_in_sync() {
-    let mut texture = OwnedTextureData::new();
-
-    texture.set_width(4);
-    texture.set_height(3);
-    texture.set_format(TextureFormat::Alpha8);
-
+fn from_pixels_initializes_metadata_and_pitch() {
+    let texture = OwnedTextureData::from_pixels(TextureFormat::Alpha8, 4, 3, &[0; 12]).unwrap();
     assert_eq!(texture.width(), 4);
     assert_eq!(texture.height(), 3);
     assert_eq!(texture.format(), TextureFormat::Alpha8);
     assert_eq!(texture.bytes_per_pixel(), 1);
     assert_eq!(texture.pitch(), 4);
-
-    assert!(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            texture.set_width(0);
-        }))
-        .is_err()
-    );
-
-    texture.create(TextureFormat::RGBA32, 1, 1);
-    assert!(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            texture.set_width(2);
-        }))
-        .is_err()
-    );
-    assert!(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            texture.set_height(2);
-        }))
-        .is_err()
-    );
-    assert!(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            texture.set_format(TextureFormat::Alpha8);
-        }))
-        .is_err()
-    );
 }
 
 #[test]
 fn unused_frames_is_a_checked_usize_count() {
-    let mut texture = OwnedTextureData::new();
+    let mut texture = OwnedTextureData::empty();
     unsafe {
         (*texture.as_raw_mut()).UnusedFrames = 7;
     }
@@ -104,8 +87,8 @@ fn unused_frames_is_a_checked_usize_count() {
 }
 
 #[test]
-fn set_data_checks_byte_count_before_allocating_or_copying() {
-    let mut texture = OwnedTextureData::new();
+fn replace_pixels_rejects_invalid_layout_before_allocating_or_copying() {
+    let mut texture = OwnedTextureData::empty();
     unsafe {
         let raw = texture.as_raw_mut();
         (*raw).Format = sys::ImTextureFormat_RGBA32;
@@ -114,14 +97,18 @@ fn set_data_checks_byte_count_before_allocating_or_copying() {
         (*raw).BytesPerPixel = 4;
     }
 
-    assert!(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            texture.set_data(&[0; 4]);
-        }))
-        .is_err()
+    let before = texture_state(&texture);
+    assert_eq!(
+        texture.replace_pixels(&[0; 4]),
+        Err(TextureDataError::ByteSizeOutOfRange {
+            width: i32::MAX as u32,
+            height: 2,
+            bytes_per_pixel: 4,
+        })
     );
+    assert_eq!(texture_state(&texture), before);
 
-    let mut texture = OwnedTextureData::new();
+    let mut texture = OwnedTextureData::empty();
     unsafe {
         let raw = texture.as_raw_mut();
         (*raw).Format = sys::ImTextureFormat_RGBA32;
@@ -131,13 +118,14 @@ fn set_data_checks_byte_count_before_allocating_or_copying() {
         (*raw).Status = sys::ImTextureStatus_WantCreate;
     }
 
-    assert!(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            texture.set_data(&[1, 2, 3, 4]);
-        }))
-        .is_err()
+    let before = texture_state(&texture);
+    assert_eq!(
+        texture.replace_pixels(&[1, 2, 3, 4]),
+        Err(TextureDataError::MissingPixelStorage(
+            TextureStatus::WantCreate
+        ))
     );
-    assert!(unsafe { (*texture.as_raw()).Pixels.is_null() });
+    assert_eq!(texture_state(&texture), before);
 }
 
 #[test]
@@ -158,38 +146,378 @@ fn texture_id_supports_lossless_handle_conversions() {
 
 #[test]
 fn initial_pixel_upload_preserves_the_create_request() {
-    let mut texture = OwnedTextureData::new();
-    texture.create(TextureFormat::RGBA32, 1, 1);
+    let mut texture =
+        OwnedTextureData::from_pixels(TextureFormat::RGBA32, 1, 1, &[1, 2, 3, 4]).unwrap();
     assert_eq!(texture.status(), TextureStatus::WantCreate);
 
-    texture.set_data(&[1, 2, 3, 4]);
+    texture.replace_pixels(&[4, 3, 2, 1]).unwrap();
     assert_eq!(texture.status(), TextureStatus::WantCreate);
 
     unsafe {
         // The test acts as the only renderer owner for this unregistered texture.
         texture.set_status(TextureStatus::OK);
     }
-    texture.set_data(&[4, 3, 2, 1]);
+    texture.replace_pixels(&[1, 2, 3, 4]).unwrap();
     assert_eq!(texture.status(), TextureStatus::WantUpdates);
+    assert_eq!(
+        texture.updates().collect::<Vec<_>>(),
+        vec![TextureRect {
+            x: 0,
+            y: 0,
+            w: 1,
+            h: 1,
+        }]
+    );
 }
 
 #[test]
 fn full_updates_reject_unrepresentable_dimensions_before_copying() {
     let width = u16::MAX as u32 + 1;
-    let mut texture = OwnedTextureData::new();
-    texture.create(TextureFormat::Alpha8, width, 1);
-    texture.set_data(&vec![1; width as usize]);
+    let mut texture =
+        OwnedTextureData::from_pixels(TextureFormat::Alpha8, width, 1, &vec![1; width as usize])
+            .unwrap();
     assert_eq!(texture.status(), TextureStatus::WantCreate);
 
     unsafe {
         // The test acts as the only renderer owner for this unregistered texture.
         texture.set_status(TextureStatus::OK);
     }
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        texture.set_data(&vec![2; width as usize]);
-    }));
+    let before = texture_state(&texture);
+    let result = texture.replace_pixels(&vec![2; width as usize]);
 
-    assert!(result.is_err());
-    assert_eq!(texture.status(), TextureStatus::OK);
-    assert!(texture.pixels().unwrap().iter().all(|pixel| *pixel == 1));
+    assert_eq!(
+        result,
+        Err(TextureDataError::FullUpdateRectOutOfRange { width, height: 1 })
+    );
+    assert_eq!(texture_state(&texture), before);
+}
+
+#[test]
+fn from_pixels_requires_an_exact_payload() {
+    for actual in [0, 1023, 1025] {
+        assert_eq!(
+            OwnedTextureData::from_pixels(TextureFormat::RGBA32, 16, 16, &vec![0; actual])
+                .err()
+                .unwrap(),
+            TextureDataError::ByteLengthMismatch {
+                expected: 1024,
+                actual,
+            }
+        );
+    }
+
+    let texture = OwnedTextureData::from_pixels(TextureFormat::RGBA32, 16, 16, &[7; 1024]).unwrap();
+    assert_eq!(texture.pixels(), Some([7; 1024].as_slice()));
+    assert_eq!(texture.status(), TextureStatus::WantCreate);
+}
+
+#[test]
+fn replace_pixels_is_exact_and_failure_atomic() {
+    let mut texture = OwnedTextureData::from_pixels(TextureFormat::RGBA32, 2, 2, &[1; 16]).unwrap();
+    unsafe {
+        texture.set_status(TextureStatus::OK);
+    }
+
+    for actual in [0, 15, 17] {
+        let before = texture_state(&texture);
+        assert_eq!(
+            texture.replace_pixels(&vec![2; actual]),
+            Err(TextureDataError::ByteLengthMismatch {
+                expected: 16,
+                actual,
+            })
+        );
+        assert_eq!(texture_state(&texture), before);
+    }
+
+    texture.replace_pixels(&[3; 16]).unwrap();
+    assert_eq!(texture.pixels(), Some([3; 16].as_slice()));
+    assert_eq!(texture.status(), TextureStatus::WantUpdates);
+}
+
+#[test]
+fn replace_pixels_rejects_destroy_transitions_atomically() {
+    let mut texture =
+        OwnedTextureData::from_pixels(TextureFormat::RGBA32, 1, 1, &[1, 2, 3, 4]).unwrap();
+    unsafe {
+        (*texture.as_raw_mut()).WantDestroyNextFrame = true;
+        texture.set_status(TextureStatus::WantDestroy);
+    }
+    let before = texture_state(&texture);
+    assert_eq!(
+        texture.replace_pixels(&[4, 3, 2, 1]),
+        Err(TextureDataError::InvalidStatus(TextureStatus::WantDestroy))
+    );
+    assert_eq!(texture_state(&texture), before);
+
+    unsafe {
+        texture.set_status(TextureStatus::Destroyed);
+    }
+    let before = texture_state(&texture);
+    assert_eq!(
+        texture.replace_pixels(&[4, 3, 2, 1]),
+        Err(TextureDataError::InvalidStatus(TextureStatus::Destroyed))
+    );
+    assert_eq!(texture_state(&texture), before);
+}
+
+#[test]
+fn full_replacement_queues_a_full_rect_even_when_old_updates_remain() {
+    let mut texture = OwnedTextureData::from_pixels(TextureFormat::RGBA32, 2, 2, &[0; 16]).unwrap();
+    unsafe {
+        texture.set_status(TextureStatus::OK);
+    }
+    texture
+        .update_subresource(TextureSubresource::new(
+            region(0, 0, 1, 1),
+            4,
+            &[1, 2, 3, 4],
+        ))
+        .unwrap();
+    unsafe {
+        // Renderer feedback does not clear native Updates until the next NewFrame.
+        texture.set_status(TextureStatus::OK);
+    }
+
+    texture.replace_pixels(&[9; 16]).unwrap();
+
+    assert_eq!(texture.status(), TextureStatus::WantUpdates);
+    assert_eq!(
+        texture.updates().collect::<Vec<_>>(),
+        vec![
+            TextureRect {
+                x: 0,
+                y: 0,
+                w: 1,
+                h: 1,
+            },
+            TextureRect {
+                x: 0,
+                y: 0,
+                w: 2,
+                h: 2,
+            },
+        ]
+    );
+}
+
+#[test]
+fn subresource_updates_validate_every_boundary_before_mutation() {
+    let mut texture = OwnedTextureData::from_pixels(TextureFormat::Alpha8, 4, 4, &[0; 16]).unwrap();
+    unsafe {
+        texture.set_status(TextureStatus::OK);
+    }
+
+    assert_eq!(
+        TextureRegion::new(0, 0, 0, 1),
+        Err(TextureDataError::InvalidRegionDimensions {
+            width: 0,
+            height: 1,
+        })
+    );
+
+    let failures = [
+        (
+            region(3, 0, 2, 1),
+            2,
+            vec![1, 2],
+            TextureDataError::UpdateRegionOutOfBounds {
+                region: region(3, 0, 2, 1),
+                width: 4,
+                height: 4,
+            },
+        ),
+        (
+            region(0, 0, 2, 2),
+            1,
+            vec![1, 2],
+            TextureDataError::RowPitchTooSmall {
+                minimum: 2,
+                actual: 1,
+            },
+        ),
+        (
+            region(0, 0, 2, 2),
+            3,
+            vec![1, 2, 3, 4],
+            TextureDataError::ByteLengthMismatch {
+                expected: 5,
+                actual: 4,
+            },
+        ),
+        (
+            region(0, 0, 2, 2),
+            3,
+            vec![1, 2, 3, 4, 5, 6],
+            TextureDataError::ByteLengthMismatch {
+                expected: 5,
+                actual: 6,
+            },
+        ),
+    ];
+
+    for (rect, row_pitch, pixels, expected) in failures {
+        let before = texture_state(&texture);
+        assert_eq!(
+            texture.update_subresource(TextureSubresource::new(rect, row_pitch, &pixels,)),
+            Err(expected)
+        );
+        assert_eq!(texture_state(&texture), before);
+    }
+
+    let rect = region(1, 1, 2, 2);
+    texture
+        .update_subresource(TextureSubresource::new(rect, 3, &[1, 2, 99, 3, 4]))
+        .unwrap();
+
+    assert_eq!(texture.status(), TextureStatus::WantUpdates);
+    assert_eq!(
+        texture.updates().collect::<Vec<_>>(),
+        vec![TextureRect {
+            x: 1,
+            y: 1,
+            w: 2,
+            h: 2,
+        }]
+    );
+    assert_eq!(
+        texture.pixels(),
+        Some([0, 0, 0, 0, 0, 1, 2, 0, 0, 3, 4, 0, 0, 0, 0, 0].as_slice())
+    );
+}
+
+#[test]
+fn subresource_update_rejects_overflow_and_destroy_transitions_atomically() {
+    let mut texture = OwnedTextureData::from_pixels(TextureFormat::Alpha8, 2, 2, &[0; 4]).unwrap();
+    unsafe {
+        texture.set_status(TextureStatus::OK);
+    }
+    let rect = region(0, 0, 1, 2);
+    let before = texture_state(&texture);
+    assert_eq!(
+        texture.update_subresource(TextureSubresource::new(rect, usize::MAX, &[])),
+        Err(TextureDataError::PayloadSizeOutOfRange {
+            row_pitch: usize::MAX,
+            height: 2,
+        })
+    );
+    assert_eq!(texture_state(&texture), before);
+
+    unsafe {
+        (*texture.as_raw_mut()).WantDestroyNextFrame = true;
+        texture.set_status(TextureStatus::WantDestroy);
+    }
+    let before = texture_state(&texture);
+    assert_eq!(
+        texture.update_subresource(TextureSubresource::new(rect, 1, &[1, 2])),
+        Err(TextureDataError::InvalidStatus(TextureStatus::WantDestroy))
+    );
+    assert_eq!(texture_state(&texture), before);
+}
+
+#[test]
+fn subresource_update_during_initial_creation_changes_pixels_without_queueing_update() {
+    let mut texture = OwnedTextureData::from_pixels(TextureFormat::Alpha8, 4, 2, &[0; 8]).unwrap();
+    let before_update_rect = texture.update_rect();
+    let before_used_rect = texture.used_rect();
+
+    texture
+        .update_subresource(TextureSubresource::new(
+            region(1, 0, 2, 2),
+            3,
+            &[1, 2, 99, 3, 4],
+        ))
+        .unwrap();
+
+    assert_eq!(texture.status(), TextureStatus::WantCreate);
+    assert_eq!(texture.update_rect(), before_update_rect);
+    assert_eq!(texture.used_rect(), before_used_rect);
+    assert!(texture.updates().next().is_none());
+    assert_eq!(texture.pixels(), Some([0, 1, 2, 0, 0, 3, 4, 0].as_slice()));
+}
+
+#[test]
+fn live_subresource_updates_enforce_native_rectangle_boundaries_atomically() {
+    let width = u16::MAX as u32 + 1;
+    let mut texture =
+        OwnedTextureData::from_pixels(TextureFormat::Alpha8, width, 1, &vec![0; width as usize])
+            .unwrap();
+    unsafe {
+        texture.set_status(TextureStatus::OK);
+    }
+
+    let representable = region(0, 0, u16::MAX as u32, 1);
+    texture
+        .update_subresource(TextureSubresource::new(
+            representable,
+            u16::MAX as usize,
+            &vec![1; u16::MAX as usize],
+        ))
+        .unwrap();
+
+    let unrepresentable = region(0, 0, width, 1);
+    let before = texture_state(&texture);
+    assert_eq!(
+        texture.update_subresource(TextureSubresource::new(
+            unrepresentable,
+            width as usize,
+            &vec![2; width as usize],
+        )),
+        Err(TextureDataError::UpdateRegionNotRepresentable(
+            unrepresentable
+        ))
+    );
+    assert_eq!(texture_state(&texture), before);
+
+    let overflowing = TextureRegion::new(u32::MAX, 0, 1, 1).unwrap();
+    assert_eq!(
+        texture.update_subresource(TextureSubresource::new(overflowing, 1, &[3])),
+        Err(TextureDataError::UpdateRegionOutOfBounds {
+            region: overflowing,
+            width,
+            height: 1,
+        })
+    );
+    assert_eq!(texture_state(&texture), before);
+}
+
+#[test]
+fn live_subresource_update_accepts_the_native_endpoint_when_bounding_boxes_fit() {
+    let width = u16::MAX as u32 + 1;
+    let mut texture =
+        OwnedTextureData::from_pixels(TextureFormat::Alpha8, width, 1, &vec![0; width as usize])
+            .unwrap();
+    unsafe {
+        let raw = texture.as_raw_mut();
+        (*raw).UsedRect = sys::ImTextureRect {
+            x: u16::MAX,
+            y: 0,
+            w: 0,
+            h: 0,
+        };
+        (*raw).UpdateRect = sys::ImTextureRect {
+            x: u16::MAX,
+            y: 0,
+            w: 0,
+            h: 0,
+        };
+        texture.set_status(TextureStatus::OK);
+    }
+
+    let last_pixel = region(u16::MAX as u32, 0, 1, 1);
+    texture
+        .update_subresource(TextureSubresource::new(last_pixel, 1, &[9]))
+        .unwrap();
+
+    assert_eq!(texture.status(), TextureStatus::WantUpdates);
+    assert_eq!(texture.pixels_at(u16::MAX as u32, 0).unwrap()[0], 9);
+    assert_eq!(
+        texture.updates().collect::<Vec<_>>(),
+        vec![TextureRect {
+            x: u16::MAX,
+            y: 0,
+            w: 1,
+            h: 1,
+        }]
+    );
 }

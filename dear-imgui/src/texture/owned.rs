@@ -1,4 +1,5 @@
-use super::TextureData;
+use super::validation::{require_exact_payload, validate_new_texture_layout};
+use super::{TextureData, TextureDataError, TextureFormat};
 use crate::sys;
 use std::ptr::NonNull;
 
@@ -7,17 +8,71 @@ use std::ptr::NonNull;
 /// This owns an `ImTextureData` instance allocated by Dear ImGui (C++) and will
 /// destroy it on drop. It dereferences to [`TextureData`] while application code owns it.
 /// Registering it with a Context transfers ownership; later access uses
-/// `Context::with_texture` or `Context::with_texture_mut`.
+/// `Context::with_texture` for inspection and normally `Context::try_with_texture_mut` for fallible
+/// pixel changes. `Context::with_texture_mut` remains the lower-level result-composition API, so
+/// callers must handle any inner mutation result.
+///
+/// Empty construction and the former `create`/`set_data` sequence are intentionally unavailable;
+/// use [`Self::from_pixels`] so invalid payloads cannot create a partially initialized texture.
+///
+/// ```compile_fail
+/// use dear_imgui_rs::texture::OwnedTextureData;
+/// let _ = OwnedTextureData::new();
+/// ```
+///
+/// ```compile_fail
+/// use dear_imgui_rs::texture::{OwnedTextureData, TextureFormat};
+/// let mut texture =
+///     OwnedTextureData::from_pixels(TextureFormat::RGBA32, 1, 1, &[0; 4]).unwrap();
+/// texture.create(TextureFormat::RGBA32, 2, 2);
+/// ```
+///
+/// ```compile_fail
+/// use dear_imgui_rs::texture::{OwnedTextureData, TextureFormat};
+/// let mut texture =
+///     OwnedTextureData::from_pixels(TextureFormat::RGBA32, 1, 1, &[0; 4]).unwrap();
+/// texture.set_data(&[255; 4]);
+/// ```
 pub struct OwnedTextureData {
     raw: NonNull<sys::ImTextureData>,
 }
 
 impl OwnedTextureData {
-    /// Create a new empty texture data object (C++ constructed).
-    pub fn new() -> Self {
+    pub(crate) fn empty() -> Self {
         let raw = unsafe { sys::ImTextureData_ImTextureData() };
         let raw = NonNull::new(raw).expect("ImTextureData_ImTextureData() returned null");
         Self { raw }
+    }
+
+    /// Create owned texture data from an exact pixel payload.
+    ///
+    /// Validation completes before the native texture object allocates pixel storage. The payload
+    /// must contain exactly `width * height * bytes_per_pixel(format)` bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TextureDataError`] when the dimensions or allocation size are not representable,
+    /// or when `pixels` does not exactly match the requested layout.
+    pub fn from_pixels(
+        format: TextureFormat,
+        width: u32,
+        height: u32,
+        pixels: &[u8],
+    ) -> Result<Self, TextureDataError> {
+        let layout = validate_new_texture_layout(format, width, height)?;
+        require_exact_payload(layout.byte_len, pixels.len())?;
+
+        let mut texture = Self::empty();
+        unsafe {
+            sys::ImTextureData_Create(
+                texture.raw.as_ptr(),
+                format.into(),
+                i32::try_from(width).expect("validated texture width must fit i32"),
+                i32::try_from(height).expect("validated texture height must fit i32"),
+            );
+        }
+        texture.replace_pixels(pixels)?;
+        Ok(texture)
     }
 
     /// Leak the underlying `ImTextureData*` without destroying it.

@@ -115,6 +115,18 @@ jobs:
           --attempt "$RUNTIME_GATE_ATTEMPT"
           --defer-infrastructure-retry
 
+      - name: Test Glow external-context texture lifecycle
+        if: steps.gate.outcome == 'success' && inputs.contract == 'sdl3-glow-multi-viewport-smoke'
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+          WINIT_UNIX_BACKEND: x11
+        run: >-
+          xvfb-run -a -s "-screen 0 1280x720x24"
+          cargo test -p dear-imgui-glow
+          --test external_context_regression
+          external_context_managed_texture_lifecycle
+          -- --exact --ignored --nocapture
+
       - name: Classify runtime preparation failure
         id: preparation
         if: always() && steps.gate.outcome == 'skipped' && hashFiles('tools/ci/run_contract.py') != ''

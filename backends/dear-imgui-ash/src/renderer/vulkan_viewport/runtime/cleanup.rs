@@ -1,4 +1,4 @@
-use dear_imgui_rs::render::RendererConsumer;
+use dear_imgui_rs::render::SynchronousRendererConsumer;
 use dear_imgui_rs::{Context, ContextAttachmentLease, ContextLifecycle};
 
 use super::super::callbacks::{destroy_renderer_viewport_resources, release_callbacks};
@@ -98,7 +98,7 @@ impl RuntimeControl {
 
         // The renderer's complete texture map is gone, so the already-validated reset can now
         // invalidate Context-owned bindings before we publish the renderer teardown.
-        let _ = permit.commit();
+        permit.commit();
         let renderer = {
             let mut storage = self.renderer.try_borrow_mut().map_err(|_| {
                 AshViewportError::CallbackReentered {
@@ -125,7 +125,7 @@ impl RuntimeControl {
 
     pub(super) fn restore_explicit_shutdown_consumer(
         &self,
-        consumer: RendererConsumer,
+        consumer: SynchronousRendererConsumer,
     ) -> Result<(), AshViewportError> {
         let mut storage =
             self.renderer
@@ -149,7 +149,7 @@ impl RuntimeControl {
 
     pub(super) fn take_context_teardown_consumer(
         &self,
-    ) -> Result<RendererConsumer, AshViewportError> {
+    ) -> Result<SynchronousRendererConsumer, AshViewportError> {
         let mut storage =
             self.renderer
                 .try_borrow_mut()

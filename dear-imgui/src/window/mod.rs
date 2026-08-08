@@ -43,7 +43,6 @@
     clippy::as_conversions
 )]
 use bitflags::bitflags;
-use std::borrow::Cow;
 use std::f32;
 
 use crate::sys;
@@ -53,9 +52,11 @@ use serde::{Deserialize, Serialize};
 
 mod child_window;
 pub(crate) mod content_region;
+mod key;
 pub(crate) mod scroll;
 
-pub use child_window::{ChildFlags, ChildWindow, ChildWindowToken};
+pub use child_window::{ChildFlags, ChildWindow};
+pub use key::{WindowKey, WindowKeyError, WindowLabel};
 
 // Window-focused/hovered helpers are available via utils.rs variants.
 // Window hovered/focused flag helpers are provided by crate::utils.
@@ -154,7 +155,7 @@ impl<'de> Deserialize<'de> for WindowFlags {
 /// Represents a window that can be built
 pub struct Window<'ui> {
     ui: &'ui Ui,
-    name: Cow<'ui, str>,
+    name: WindowLabel<'ui>,
     opened: Option<&'ui mut bool>,
     flags: WindowFlags,
     size: Option<[f32; 2]>,
@@ -172,7 +173,7 @@ pub struct Window<'ui> {
 
 impl<'ui> Window<'ui> {
     /// Creates a new window builder
-    pub fn new(ui: &'ui Ui, name: impl Into<Cow<'ui, str>>) -> Self {
+    pub fn new(ui: &'ui Ui, name: impl Into<WindowLabel<'ui>>) -> Self {
         Self {
             ui,
             name: name.into(),
@@ -278,14 +279,25 @@ impl<'ui> Window<'ui> {
     where
         F: FnOnce() -> R,
     {
-        let _token = self.begin()?;
-        Some(f())
+        let token = self.begin()?;
+        let result = f();
+        drop(token);
+        Some(result)
     }
 
     /// Begins the window and returns a token
-    fn begin(self) -> Option<WindowToken<'ui>> {
+    fn begin(self) -> Option<WindowGuard<'ui>> {
         let name = self.name;
-        let name_ptr = self.ui.scratch_txt(name);
+        let name_ptr = match &name {
+            WindowLabel::Plain(title) => self.ui.scratch_txt(title),
+            WindowLabel::Keyed { key, title } => unsafe {
+                (&mut *self.ui.scratch_buffer().get()).scratch_txt_concat(&[
+                    title,
+                    "###",
+                    key.stable_id(),
+                ])
+            },
+        };
         validate_window_flags("Window::begin()", self.flags);
 
         // Set window properties before beginning
@@ -395,7 +407,7 @@ impl<'ui> Window<'ui> {
             // IMPORTANT: According to ImGui documentation, Begin/End calls must be balanced.
             // If Begin returns false, we need to call End immediately and return None.
             if result && is_open {
-                Some(WindowToken { ui: self.ui })
+                Some(WindowGuard::new(self.ui))
             } else {
                 // If Begin returns false, call End immediately and return None
                 unsafe {
@@ -407,16 +419,22 @@ impl<'ui> Window<'ui> {
     }
 }
 
-/// Token representing an active window
+/// Internal guard representing an active window.
 #[doc(alias = "End")]
-pub struct WindowToken<'ui> {
-    ui: &'ui Ui,
+struct WindowGuard<'ui> {
+    scope: crate::scope::NativeScopeToken<'ui>,
 }
 
-impl<'ui> Drop for WindowToken<'ui> {
+impl<'ui> WindowGuard<'ui> {
+    fn new(ui: &'ui Ui) -> Self {
+        Self {
+            scope: ui.begin_native_scope(crate::scope::NativeScopePop::EndWindow, "WindowGuard"),
+        }
+    }
+}
+
+impl Drop for WindowGuard<'_> {
     fn drop(&mut self) {
-        self.ui.run_with_bound_context(|| unsafe {
-            crate::sys::igEnd();
-        });
+        self.scope.finish();
     }
 }

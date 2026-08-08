@@ -5,10 +5,9 @@ use crate::sys;
 
 use super::loader::{FontLoader, FontLoaderFlags};
 use super::validation::{
-    RASTERIZER_MULTIPLY_MAX, assert_finite_f32, assert_finite_vec2,
-    assert_font_source_for_add_font, assert_non_negative_f32, assert_non_negative_i8,
-    assert_positive_f32, assert_reference_font_size_for_metrics, encode_glyph_ranges,
-    validate_font_size_pixels,
+    RASTERIZER_MULTIPLY_MAX, assert_finite_f32, assert_finite_vec2, assert_non_negative_f32,
+    assert_non_negative_i8, assert_positive_f32, assert_reference_font_size_for_metrics,
+    encode_glyph_ranges, validate_font_size_pixels,
 };
 
 /// Font configuration for loading fonts with v1.92+ features
@@ -86,16 +85,6 @@ impl FontConfig {
         assert_non_negative_i8(caller, "OversampleV", self.raw.OversampleV);
     }
 
-    pub(super) fn validate_for_add_font(&self, caller: &str) {
-        self.validate_common(caller);
-        assert_font_source_for_add_font(caller, &self.raw);
-        assert_reference_font_size_for_metrics(
-            caller,
-            self.raw.SizePixels,
-            self.has_reference_size_dependent_metrics(),
-        );
-    }
-
     pub(super) fn validate_for_add_font_default(&self, caller: &str) {
         self.validate_common(caller);
     }
@@ -163,7 +152,8 @@ impl FontConfig {
     /// Set a custom font loader for this font.
     ///
     /// The loader must be static because Dear ImGui stores the raw `ImFontLoader*` in the
-    /// atlas font source.
+    /// atlas font source. A [`StbTrueTypeFontData`](crate::StbTrueTypeFontData) source rejects
+    /// any loader other than the built-in stb_truetype loader covered by its validation proof.
     pub fn font_loader(mut self, loader: &'static FontLoader) -> Self {
         self.raw.FontLoader = loader.as_ptr();
         self

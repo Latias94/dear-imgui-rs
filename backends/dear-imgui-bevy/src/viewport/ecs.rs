@@ -146,7 +146,7 @@ pub(super) struct ViewportCommandQueries<'w, 's> {
 pub(super) fn apply_viewport_commands_system(
     mut ecs_commands: Commands,
     bridge: NonSend<ImguiViewportBridge>,
-    backend_runtime: Res<crate::context::ownership::ImguiBackendRuntime>,
+    backend_runtime: Res<crate::context::ImguiBackendRuntime>,
     winit_settings: Option<Res<WinitSettings>>,
     mut queries: ViewportCommandQueries,
 ) {

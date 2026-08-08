@@ -560,7 +560,11 @@ mod tests {
         let io = imgui.io_mut();
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
-        let _ = imgui.font_atlas().build();
+        imgui
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("headless test requires the legacy font-atlas capability")
+            .build();
     }
 
     #[test]
@@ -576,7 +580,7 @@ mod tests {
             let id = giz.push_id(7);
             drop(id);
         }
-        drop(imgui.render());
+        drop(imgui.render_legacy());
     }
 
     #[test]
@@ -600,7 +604,7 @@ mod tests {
         unsafe {
             imgui_sys::igSetCurrentContext(raw_a);
         }
-        drop(imgui_a.render());
+        drop(imgui_a.render_legacy());
     }
 
     #[test]
@@ -627,7 +631,7 @@ mod tests {
 
         drop(other);
         unsafe { imgui_sys::igSetCurrentContext(raw) };
-        drop(imgui.render());
+        drop(imgui.render_legacy());
     }
 
     #[test]
@@ -683,6 +687,6 @@ mod tests {
                 unsafe { sys::ImGuizmo_GetID_Ptr((&ptr_value as *const u32).cast()) };
             assert_eq!(ptr_id.raw(), expected_ptr);
         }
-        drop(imgui.render());
+        drop(imgui.render_legacy());
     }
 }

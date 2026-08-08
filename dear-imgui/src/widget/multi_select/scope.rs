@@ -1,3 +1,4 @@
+use crate::scope::{NativeScopePop, NativeScopeToken};
 use crate::{Id, sys};
 
 use super::basic_selection::BasicSelection;
@@ -17,6 +18,7 @@ pub struct MultiSelectScope<'ui> {
     ui: &'ui crate::Ui,
     begin_result: MultiSelectResult,
     range_source_reset: bool,
+    native_scope: NativeScopeToken<'ui>,
     ended: bool,
 }
 
@@ -39,6 +41,12 @@ impl<'ui> MultiSelectScope<'ui> {
             ui,
             begin_result,
             range_source_reset: false,
+            native_scope: ui.begin_native_scope(
+                NativeScopePop::EndMultiSelect {
+                    range_source_reset: false,
+                },
+                "MultiSelectScope",
+            ),
             ended: false,
         }
     }
@@ -86,27 +94,20 @@ impl<'ui> MultiSelectScope<'ui> {
     }
 
     fn end_native(&mut self) -> *mut sys::ImGuiMultiSelectIO {
-        self.ui.run_with_bound_context(|| unsafe {
-            if self.range_source_reset {
-                let context = sys::igGetCurrentContext();
-                let active = context.as_ref().and_then(|context| {
-                    context
-                        .CurrentMultiSelect
-                        .cast::<sys::ImGuiMultiSelectTempData>()
-                        .as_mut()
-                });
-                if let Some(active) = active {
-                    active.IO.RangeSrcReset = true;
-                }
-            }
-            sys::igEndMultiSelect()
-        })
+        let pop = NativeScopePop::EndMultiSelect {
+            range_source_reset: self.range_source_reset,
+        };
+        self.native_scope.replace_pop(pop);
+        let mut native_io = std::ptr::null_mut();
+        self.native_scope
+            .finish_with(|| native_io = unsafe { pop.finish_multi_select() });
+        native_io
     }
 }
 
 impl Drop for MultiSelectScope<'_> {
     fn drop(&mut self) {
-        if self.ended {
+        if self.ended || self.native_scope.is_finished() {
             return;
         }
 

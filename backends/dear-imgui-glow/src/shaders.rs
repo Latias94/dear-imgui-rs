@@ -301,6 +301,8 @@ pub(crate) mod test_support {
         pub(crate) generated_buffers: u32,
         pub(crate) deleted_samplers: u32,
         pub(crate) generated_samplers: u32,
+        pub(crate) deleted_textures: u32,
+        pub(crate) generated_textures: u32,
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -325,6 +327,8 @@ pub(crate) mod test_support {
                 generated_buffers: 0,
                 deleted_samplers: 0,
                 generated_samplers: 0,
+                deleted_textures: 0,
+                generated_textures: 0,
             },
         };
     }
@@ -478,6 +482,36 @@ pub(crate) mod test_support {
 
     unsafe extern "system" fn sampler_parameter_i(_sampler: u32, _parameter: u32, _value: i32) {}
 
+    unsafe extern "system" fn gen_textures(count: i32, textures: *mut u32) {
+        let mut state = FAKE_STATE.lock().unwrap();
+        for index in 0..count.max(0) as usize {
+            state.snapshot.generated_textures += 1;
+            unsafe { *textures.add(index) = 40 + state.snapshot.generated_textures };
+        }
+    }
+
+    unsafe extern "system" fn delete_textures(count: i32, _textures: *const u32) {
+        FAKE_STATE.lock().unwrap().snapshot.deleted_textures += count.max(0) as u32;
+    }
+
+    unsafe extern "system" fn active_texture(_texture: u32) {}
+    unsafe extern "system" fn bind_texture(_target: u32, _texture: u32) {}
+    unsafe extern "system" fn bind_buffer(_target: u32, _buffer: u32) {}
+    unsafe extern "system" fn pixel_store_i(_parameter: u32, _value: i32) {}
+    unsafe extern "system" fn tex_parameter_i(_target: u32, _parameter: u32, _value: i32) {}
+    unsafe extern "system" fn tex_image_2d(
+        _target: u32,
+        _level: i32,
+        _internal_format: i32,
+        _width: i32,
+        _height: i32,
+        _border: i32,
+        _format: u32,
+        _pixel_type: u32,
+        _pixels: *const std::ffi::c_void,
+    ) {
+    }
+
     pub(crate) fn fake_gl() -> glow::Context {
         unsafe {
             glow::Context::from_loader_function(|name| {
@@ -503,6 +537,14 @@ pub(crate) mod test_support {
                     "glGenSamplers" => gen_samplers as *const (),
                     "glDeleteSamplers" => delete_samplers as *const (),
                     "glSamplerParameteri" => sampler_parameter_i as *const (),
+                    "glGenTextures" => gen_textures as *const (),
+                    "glDeleteTextures" => delete_textures as *const (),
+                    "glActiveTexture" => active_texture as *const (),
+                    "glBindTexture" => bind_texture as *const (),
+                    "glBindBuffer" => bind_buffer as *const (),
+                    "glPixelStorei" => pixel_store_i as *const (),
+                    "glTexParameteri" => tex_parameter_i as *const (),
+                    "glTexImage2D" => tex_image_2d as *const (),
                     _ => std::ptr::null(),
                 }
                 .cast()

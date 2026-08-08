@@ -96,7 +96,16 @@ impl<'ui> TableBuilder<'ui> {
         self
     }
 
-    /// Build the table and run a closure to emit rows/cells
+    /// Build the table and run a closure to emit rows/cells.
+    ///
+    /// Configuration setters intentionally defer validation until this method so the builder stays
+    /// cheap and composable. The table is ended during unwinding if validation or `f` panics.
+    ///
+    /// # Panics
+    ///
+    /// Panics for zero/excessive columns, incompatible table or column flags, non-finite sizing or
+    /// width/weight values, invalid horizontal-scroll width, excessive freeze counts, an active
+    /// table draw-channel scope, or any panic raised by `f`.
     pub fn build(self, f: impl FnOnce(&Ui)) {
         let mut options = TableOptions::from(self.flags);
         if let Some(policy) = self.sizing_policy {

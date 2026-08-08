@@ -86,6 +86,8 @@ create_token!(
     /// Tracks item flags pushed with [`Ui::push_item_flag`].
     pub struct ItemFlagStackToken<'ui>;
 
+    pop crate::scope::NativeScopePop::PopItemFlag;
+
     /// Pops item flags pushed with [`Ui::push_item_flag`].
     #[doc(alias = "PopItemFlag")]
     drop { unsafe { sys::igPopItemFlag() } }
@@ -93,6 +95,10 @@ create_token!(
 
 impl ItemFlagStackToken<'_> {
     /// Pops the item flag scope.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the same conditions as [`Self::end`].
     pub fn pop(self) {
         self.end()
     }
@@ -123,8 +129,10 @@ impl Ui {
     /// The previous flags are restored even if `f` panics.
     #[doc(alias = "PushItemFlag", alias = "PopItemFlag")]
     pub fn with_item_flag<R>(&self, flags: ItemFlags, enabled: bool, f: impl FnOnce() -> R) -> R {
-        let _flags = self.push_item_flag(flags, enabled);
-        f()
+        let flags = self.push_item_flag(flags, enabled);
+        let result = f();
+        drop(flags);
+        result
     }
 }
 
@@ -136,7 +144,10 @@ mod tests {
         let mut ctx = crate::Context::create();
         ctx.io_mut().set_display_size([128.0, 128.0]);
         ctx.io_mut().set_delta_time(1.0 / 60.0);
-        let _ = ctx.font_atlas().build();
+        ctx.font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
         ctx
     }
 
@@ -191,6 +202,50 @@ mod tests {
                 ui.button("disabled");
                 assert!(ui.item_flags().contains(ItemStateFlags::DISABLED));
             }
+        });
+    }
+
+    #[test]
+    fn disabled_and_item_flag_tokens_share_one_strict_native_stack() {
+        let mut ctx = setup_context();
+        let ui = ctx.frame();
+
+        ui.window("item_flag_ordering").build(|| {
+            let flag = ui.push_item_flag(ItemFlags::NO_NAV, true);
+            let disabled = ui.begin_disabled();
+
+            assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(flag))).is_err());
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    ui.button("blocked while recovery is pending");
+                }))
+                .is_err()
+            );
+
+            drop(disabled);
+            ui.button("recovered");
+            assert!(!ui.item_flags().contains(ItemStateFlags::NO_NAV));
+            assert!(!ui.item_flags().contains(ItemStateFlags::DISABLED));
+        });
+    }
+
+    #[test]
+    fn closure_scope_drops_its_return_value_before_recovering_an_outer_token() {
+        let mut ctx = setup_context();
+        let ui = ctx.frame();
+
+        ui.window("item_flag_closure_ordering").build(|| {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = ui.with_item_flag(ItemFlags::NO_NAV, true, || {
+                    ui.push_item_flag(ItemFlags::BUTTON_REPEAT, true)
+                });
+            }));
+            assert!(result.is_err());
+
+            ui.button("recovered after closure result cleanup");
+            let flags = ui.item_flags();
+            assert!(!flags.contains(ItemStateFlags::NO_NAV));
+            assert!(!flags.contains(ItemStateFlags::BUTTON_REPEAT));
         });
     }
 }

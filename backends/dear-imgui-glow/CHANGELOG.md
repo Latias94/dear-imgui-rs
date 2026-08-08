@@ -22,14 +22,31 @@ The format follows Keep a Changelog and Semantic Versioning.
   and WebGL rather than issuing a desktop-only GL enum. Its temporary desktop state is restored
   after rendering and re-established after a standard reset callback.
 - `GlowRenderer` GPU handles and capability fields are private. Use `gl_version()`,
-  `supports_clip_origin()`, `supports_framebuffer_srgb_control()`, `supports_sampler_objects()`,
-  and `is_destroyed()` for supported observations.
+  `supports_clip_origin()`, `supports_framebuffer_srgb_control()`, and
+  `supports_sampler_objects()` for supported observations. The ambiguous `is_destroyed()` query
+  was removed because device-object destruction is recoverable while `shutdown` is terminal.
 - `GlVersion::{bind_vertex_array_support,vertex_offset_support,clip_origin_support,
   bind_sampler_support,polygon_mode_support,primitive_restart_support}` were replaced by
   `is_supported`, `supports_vertex_offset`, `supports_clip_origin`,
   `supports_sampler_objects`, `supports_polygon_mode`, and `supports_primitive_restart`.
-- `RenderError::InvalidTexture(String)` was replaced by typed
-  `RenderError::UnknownTextureId(TextureId)` and `RenderError::ManagedTextureMissing(SnapshotTextureId)`.
+- `RenderError::InvalidTexture(String)` was replaced by typed unknown-draw, renderer-owned,
+  external, and managed-texture errors.
+- The renderer now owns a `SynchronousRendererConsumer`; `Context::render` returns a non-drawable
+  `PendingFrame`, and `reconcile_frame` returns a `ReconciledFrame` only after producing exactly one
+  outcome for every managed texture request. Rendering consumes that capability instead of
+  returning it unchanged.
+- `new_frame` and single-window `render_context` were removed. Rendering now recreates destroyed
+  device objects transactionally, and owned/external-context teardown is named `shutdown` and
+  `shutdown_with_context` respectively.
+- The public `TextureMap` extension point and custom-map constructors were removed. Glow now owns a
+  process-unique texture registry and returns distinct `RendererTextureId` and `ExternalTextureId`
+  handles, so managed, renderer-owned, and application-owned resources cannot cross lifecycle APIs.
+  External registration no longer asks for unused dimensions or format metadata.
+- `GlowViewportRuntime` now accepts a `FrameToken` through `prepare_frame` and consumes the
+  resulting `GlowPreparedViewportFrame` through one `render_main` route. That route owns main and
+  secondary drawing, always attempts host-provided main-context restoration, and returns ordered
+  renderer, restoration, and platform faults. Manual frame tracing, `render_context*`,
+  `reconcile_frame`, `render_with_platform_windows*`, and `with_renderer` entry points were removed.
 
 ### Fixed
 
@@ -38,8 +55,13 @@ The format follows Keep a Changelog and Semantic Versioning.
   invalid draw command is issued, while the draw-scope guard restores OpenGL state.
 - Uniform locations are borrowed rather than moved, keeping the same render path valid for native
   Glow and WebGL handles.
-- Texture uploads validate the complete byte length before issuing GL calls, preserve unpack-buffer
-  state, and keep legacy registrations renderer-owned if a custom `TextureMap` panics during setup.
+- Texture uploads validate the complete byte length before issuing GL calls and preserve
+  unpack-buffer state. Device-object reset invalidates renderer-owned handles while preserving
+  external mappings; final shutdown removes external mappings without deleting application GL
+  objects.
+- Destroy tombstones remain active until a real `Destroyed` outcome is acknowledged; completion
+  watermarks advanced by retried or superseded work can no longer expose stale create/update
+  requests to OpenGL.
 
 ## [0.16.0-alpha.1]
 

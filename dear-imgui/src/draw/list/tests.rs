@@ -3,7 +3,7 @@ use super::super::counts::{
     DrawCornerFlags, DrawListFlags, DrawNgonSegmentCount, DrawSegmentCount, PolylineFlags,
 };
 use super::super::util::draw_list_counts;
-use super::DrawListMut;
+use super::{DrawListMut, DrawListProvenance};
 use crate::sys;
 
 struct TestDrawList {
@@ -24,6 +24,7 @@ impl TestDrawList {
         DrawListMut {
             draw_list: self.raw,
             ui: None,
+            provenance: DrawListProvenance::Frame,
         }
     }
 
@@ -345,7 +346,11 @@ fn standard_sampler_commands_are_safe_and_preserve_order() {
     let binding = context.binding();
     context.io_mut().set_display_size([128.0, 128.0]);
     context.io_mut().set_delta_time(1.0 / 60.0);
-    let _ = context.font_atlas().build();
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     unsafe {
         context
             .platform_io_mut()
@@ -373,7 +378,7 @@ fn standard_sampler_commands_are_safe_and_preserve_order() {
                     .build();
             });
     }
-    let frame = context.render();
+    let frame = context.render_legacy();
     let commands = binding.with_bound_context(|| {
         frame
             .draw_data()
@@ -405,7 +410,11 @@ fn standard_sampler_commands_validate_backend_support_before_ffi() {
     let mut context = crate::Context::create();
     context.io_mut().set_display_size([128.0, 128.0]);
     context.io_mut().set_delta_time(1.0 / 60.0);
-    let _ = context.font_atlas().build();
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
 
     let ui = context.frame();
     let draw_list = ui.get_window_draw_list();
@@ -426,7 +435,10 @@ fn text_and_clip_inputs_validate_before_ffi() {
         io.set_display_size([128.0, 128.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas().build();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
     let ui = ctx.frame();
@@ -502,25 +514,19 @@ fn text_no_pixel_snap_scope_is_nested_and_panic_safe() {
     let draw_list = fixture.draw_list();
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _outer = draw_list.push_text_no_pixel_snap();
-        assert!(
-            DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags })
-                .contains(DrawListFlags::TEXT_NO_PIXEL_SNAP)
-        );
-
-        {
-            let _inner = draw_list.push_text_no_pixel_snap();
+        draw_list.with_text_no_pixel_snap(|| {
             assert!(
                 DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags })
                     .contains(DrawListFlags::TEXT_NO_PIXEL_SNAP)
             );
-        }
-
-        assert!(
-            DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags })
-                .contains(DrawListFlags::TEXT_NO_PIXEL_SNAP)
-        );
-        panic!("forced panic inside text flag scope");
+            draw_list.with_text_no_pixel_snap(|| {
+                assert!(
+                    DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags })
+                        .contains(DrawListFlags::TEXT_NO_PIXEL_SNAP)
+                );
+                panic!("forced panic inside text flag scope");
+            });
+        });
     }));
 
     assert!(result.is_err());

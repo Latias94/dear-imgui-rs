@@ -40,9 +40,61 @@ fn main() -> Result<(), RunError> {
 
 Run it with `cargo run`. `dear-app` re-exports the matching core crate as `dear_app::imgui`, so this starter cannot accidentally combine incompatible versions.
 
+## Fallible Frame Closure
+
+Move the same captured state to `run_frame` when a small application needs fallible work, explicit
+exit, compiled add-ons, or the active GPU generation but does not need lifecycle hooks:
+
+```rust
+use std::io;
+
+use dear_app::{AppConfig, RunError, run_frame};
+
+fn main() -> Result<(), RunError> {
+    let mut clicks = 0_u64;
+
+    run_frame(AppConfig::default(), move |context| {
+        let mut exit_requested = false;
+        let mut failure_requested = false;
+        let ui = context.ui();
+        ui.window("Editor").build(|| {
+            if ui.button("Increment") {
+                clicks = clicks.saturating_add(1);
+            }
+            ui.text(format!("Clicks: {clicks}"));
+            exit_requested = ui.button("Exit");
+            failure_requested = ui.button("Return an error");
+        });
+
+        if exit_requested {
+            context.request_exit();
+        }
+        if failure_requested {
+            return Err(io::Error::other("the frame requested a user error"));
+        }
+        Ok(())
+    })
+}
+```
+
+The closure value remains alive across frames and GPU recovery. `FrameContext::addons()` exposes
+the add-ons compiled and enabled by `AppConfig::addons`, while `FrameContext::gpu()` exposes the
+current generation-aware WGPU API. `request_exit()` is normal control flow: the runtime performs
+shutdown exactly once and returns `Ok(())`. A returned error wins even if the same callback also
+requested exit; `RunError::Application` records `ApplicationStage::Frame` and retains the original
+error through `std::error::Error::source`.
+
+The complete runnable example is:
+
+```text
+cargo run -p dear-imgui-examples --bin fallible_frame
+```
+
 ## Application Lifecycle
 
-Implement `Application` when the program needs context initialization, raw window events, GPU resources, device-loss recovery, or deterministic teardown:
+Move from `run_frame` to `Application` only when the program needs context initialization, raw
+window events, GPU resources, device-loss recovery, or deterministic teardown. The frame body can
+move unchanged into `Application::frame`:
 
 ```rust
 use dear_app::{AppConfig, Application, FrameContext, RunError};
@@ -77,6 +129,11 @@ fn main() -> Result<(), RunError> {
 - `gpu_lost` runs before old GPU resources are invalidated.
 - `gpu_recreated` runs after a replacement generation is committed.
 - `shutdown` runs once before add-ons and the Dear ImGui context are destroyed.
+
+Every failing hook is wrapped with its typed `ApplicationStage`, while the hook's original
+`RunError` remains in the source chain. The first actual failure remains primary. Shutdown still
+runs exactly once, and a shutdown or backend-release failure is returned only when no earlier
+runtime or event-loop failure exists.
 
 The feature-free lifecycle example implements every hook and displays real hook activity, persistent state, and the active GPU generation:
 
@@ -119,4 +176,5 @@ Rebuild application-owned GPU resources from `gpu_recreated`. Managed Dear ImGui
 
 ## Add-ons
 
-The `implot`, `imnodes`, and `implot3d` features create extension contexts owned by the stable UI state. Access them through `FrameContext::addons()`.
+The `implot`, `imnodes`, and `implot3d` features create extension contexts owned by the stable UI
+state. Access them through `FrameContext::addons()` from `run_frame` or `Application::frame`.

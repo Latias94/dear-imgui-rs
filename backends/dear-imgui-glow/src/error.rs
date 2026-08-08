@@ -39,10 +39,6 @@ pub enum InitError {
     #[error("Unsupported OpenGL version: {0}")]
     UnsupportedVersion(String),
 
-    /// An owned OpenGL context is required for this operation.
-    #[error("No OpenGL context available")]
-    MissingGlContext,
-
     /// A compiled shader program is missing a required vertex attribute.
     #[error("Could not find shader attribute: {0}")]
     MissingShaderAttribute(&'static str),
@@ -63,17 +59,9 @@ pub enum InitError {
         actual: usize,
     },
 
-    /// TextureId zero/null is not valid for this operation.
-    #[error("TextureId must be non-zero for OpenGL")]
-    NullTextureId,
-
     /// TextureId allocation space was exhausted.
     #[error("TextureId allocation space is exhausted")]
     TextureIdExhausted,
-
-    /// The texture map does not contain the requested texture ID.
-    #[error("TextureId is not registered: {0:?}")]
-    UnknownTextureId(dear_imgui_rs::TextureId),
 
     /// A texture upload row is shorter than the pixels required by its format.
     #[error("{format:?} texture row pitch is too small: expected at least {minimum}, got {actual}")]
@@ -130,6 +118,18 @@ pub enum RenderError {
     /// A draw command references a texture that is not registered with this renderer.
     #[error("texture ID is not registered: {0:?}")]
     UnknownTextureId(dear_imgui_rs::TextureId),
+
+    /// A renderer-owned texture handle is stale or belongs to another renderer.
+    #[error("renderer-owned Glow texture is not registered: {0:?}")]
+    RendererTextureNotFound(dear_imgui_rs::TextureId),
+
+    /// An external texture handle is stale or belongs to another renderer.
+    #[error("external Glow texture is not registered: {0:?}")]
+    ExternalTextureNotFound(dear_imgui_rs::TextureId),
+
+    /// An application-owned mapping attempted to alias a renderer-owned GL texture.
+    #[error("an external texture mapping cannot alias a renderer-owned OpenGL texture")]
+    ExternalTextureAliasesRendererOwned,
 
     /// A managed texture update arrived without its matching GPU allocation.
     #[error("managed texture {0:?} received an update before creation")]
@@ -205,23 +205,23 @@ pub enum RenderError {
         actual: dear_imgui_rs::ContextId,
     },
 
-    /// A frame was rendered without the managed-texture consumer epoch Glow requires.
-    #[error("rendered frame does not carry a managed-texture renderer epoch")]
-    MissingRendererEpoch,
-
     /// A rendered frame belongs to an obsolete or foreign consumer generation.
     #[error(
         "rendered frame consumer generation {actual} does not match renderer generation {expected}"
     )]
     ConsumerGenerationMismatch { expected: u64, actual: u64 },
 
+    /// A legacy frame was passed to a renderer that requires managed-texture reconciliation.
+    #[error("Glow requires a reconciled managed-texture frame")]
+    ManagedFrameRequired,
+
+    /// Finalizing the Dear ImGui frame failed before Glow could reconcile it.
+    #[error("failed to finalize the Dear ImGui frame: {0}")]
+    FrameCapture(#[from] dear_imgui_rs::render::SnapshotError),
+
     /// Context-owned renderer epoch validation failed.
     #[error(transparent)]
     RendererConsumer(#[from] dear_imgui_rs::render::RendererConsumerError),
-
-    /// A custom texture map panicked while preparing renderer-owned resources for release.
-    #[error("custom TextureMap::clear panicked during renderer teardown")]
-    TextureMapCleanupPanicked,
 
     /// A Context-owned renderer state slot changed after Glow published it.
     #[error("Glow renderer state slot `{field}` drifted while attached")]

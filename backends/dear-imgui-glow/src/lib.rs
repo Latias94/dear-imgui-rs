@@ -31,9 +31,9 @@
 //! let mut renderer = GlowRenderer::new(gl, &mut imgui).unwrap();
 //!
 //! // In your render loop:
-//! // imgui.new_frame();
-//! // ... build your UI ...
-//! // let frame = imgui.render();
+//! // let ui = imgui.frame();
+//! // ui.text("Hello, world!");
+//! // let frame = imgui.render(renderer.renderer_consumer().unwrap());
 //! // renderer.render(frame).unwrap();
 //! ```
 

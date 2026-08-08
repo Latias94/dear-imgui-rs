@@ -198,7 +198,7 @@ pub(in super::super) unsafe extern "C" fn winit_create_window(
                     vp_ref.FramebufferScale.y = framebuffer_scale[1];
 
                     // Note: winit does not allow registering per-window event callbacks here.
-                    // The application forwards events through `WinitPlatformRuntime::handle_event`.
+                    // The application forwards events through `WinitPlatform::handle_event`.
                 }
                 Err(error) => {
                     record_viewport_failure(

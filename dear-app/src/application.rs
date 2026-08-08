@@ -1,3 +1,5 @@
+use std::{error::Error as StdError, fmt};
+
 use dear_imgui_rs as imgui;
 use dear_imgui_rs::{DockNodeFlags, TextureId};
 use thiserror::Error;
@@ -79,6 +81,50 @@ pub enum ExternalTextureError {
     Renderer(#[from] dear_imgui_wgpu::RendererError),
 }
 
+/// Lifecycle hook that produced an [`Application`] error.
+///
+/// The runtime assigns this stage at the hook boundary. Applications therefore do not need to
+/// encode callback names in strings, and callers can inspect failures without parsing messages.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum ApplicationStage {
+    ConfigureImgui,
+    Initialized,
+    Event,
+    PrepareFrame,
+    Frame,
+    GpuLost,
+    GpuRecreated,
+    Shutdown,
+}
+
+impl ApplicationStage {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ConfigureImgui => "configure_imgui",
+            Self::Initialized => "initialized",
+            Self::Event => "event",
+            Self::PrepareFrame => "prepare_frame",
+            Self::Frame => "frame",
+            Self::GpuLost => "gpu_lost",
+            Self::GpuRecreated => "gpu_recreated",
+            Self::Shutdown => "shutdown",
+        }
+    }
+}
+
+impl fmt::Display for ApplicationStage {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+#[cfg(test)]
+#[derive(Debug, Error)]
+#[error("{0}")]
+struct ApplicationMessage(String);
+
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum RunError {
@@ -111,6 +157,14 @@ pub enum RunError {
     GpuInvalidation(#[source] dear_imgui_wgpu::RendererError),
     #[error("WGPU renderer release failed: {0}")]
     RendererRelease(#[source] dear_imgui_wgpu::RendererError),
+    #[error("Dear ImGui dockspace submission failed: {0}")]
+    Dockspace(#[source] imgui::DockspaceError),
+    #[error("Winit platform operation `{operation}` failed: {source}")]
+    Platform {
+        operation: &'static str,
+        #[source]
+        source: dear_imgui_winit::WinitPlatformError,
+    },
     #[error(
         "dear-app does not support Dear ImGui platform viewports; remove ConfigFlags::VIEWPORTS_ENABLE"
     )]
@@ -128,28 +182,65 @@ pub enum RunError {
     TestEngineFrame {
         frame: u64,
         #[source]
-        source: Box<dear_imgui_test_engine::FrameDriverError<RunError, RunError>>,
+        source: Box<dear_imgui_test_engine::FrameDriverError<RunError, RunError, RunError>>,
     },
-    #[error("application callback failed during {stage}: {message}")]
+    #[error("application callback failed during {stage}: {source}")]
     Application {
-        stage: &'static str,
-        message: String,
+        stage: ApplicationStage,
+        #[source]
+        source: Box<dyn StdError + 'static>,
     },
     #[error("GPU generation recovery failed: {message}")]
     Recovery { message: String },
 }
 
 impl RunError {
+    /// Wraps an application-owned error with the lifecycle stage that produced it.
     #[must_use]
-    pub fn application(stage: &'static str, message: impl Into<String>) -> Self {
+    pub fn application<E>(stage: ApplicationStage, source: E) -> Self
+    where
+        E: StdError + 'static,
+    {
         Self::Application {
             stage,
-            message: message.into(),
+            source: Box::new(source),
+        }
+    }
+
+    /// Returns the lifecycle stage for an application callback failure.
+    #[must_use]
+    pub const fn application_stage(&self) -> Option<ApplicationStage> {
+        match self {
+            Self::Application { stage, .. } => Some(*stage),
+            _ => None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn application_message(stage: ApplicationStage, message: impl Into<String>) -> Self {
+        Self::application(stage, ApplicationMessage(message.into()))
+    }
+
+    pub(crate) fn during_application_stage(self, stage: ApplicationStage) -> Self {
+        if matches!(
+            &self,
+            Self::Application {
+                stage: existing,
+                ..
+            } if *existing == stage
+        ) {
+            self
+        } else {
+            Self::application(stage, self)
         }
     }
 }
 
 /// Persistent user application. This value survives every GPU recreation.
+///
+/// The runtime wraps every hook failure with the matching [`ApplicationStage`] while retaining
+/// the returned [`RunError`] as its source. Hooks therefore return the most specific error they
+/// have instead of formatting callback names into messages.
 pub trait Application {
     /// Configures the one stable Dear ImGui context before renderer initialization.
     fn configure_imgui(&mut self, _context: &mut InitContext<'_>) -> Result<(), RunError> {
@@ -248,6 +339,7 @@ impl EventContext<'_> {
         self.window
     }
 
+    /// Requests normal event-loop exit after the current event callback completes.
     pub fn request_exit(&mut self) {
         *self.exit_requested = true;
     }
@@ -456,6 +548,10 @@ impl<'a> FrameContext<'a> {
         &mut self.gpu
     }
 
+    /// Requests normal event-loop exit after the current frame is presented.
+    ///
+    /// This is a control signal, not an error. If the same callback returns an error, that error
+    /// remains primary and shutdown still runs exactly once.
     pub fn request_exit(&mut self) {
         *self.exit_requested = true;
     }
@@ -463,7 +559,15 @@ impl<'a> FrameContext<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ExternalTextureError, GpuGeneration};
+    use std::error::Error as _;
+
+    use thiserror::Error;
+
+    use super::{ApplicationStage, ExternalTextureError, GpuGeneration, RunError};
+
+    #[derive(Debug, Error)]
+    #[error("injected user failure")]
+    struct UserError;
 
     #[test]
     fn stale_generation_error_names_both_epochs() {
@@ -488,5 +592,60 @@ mod tests {
             })
         ));
         assert!(GpuGeneration(3).ensure_current(GpuGeneration(3)).is_ok());
+    }
+
+    #[test]
+    fn application_error_retains_typed_stage_and_original_source() {
+        let error = RunError::application(ApplicationStage::Frame, UserError);
+
+        assert!(matches!(
+            &error,
+            RunError::Application {
+                stage: ApplicationStage::Frame,
+                ..
+            }
+        ));
+        assert!(
+            error
+                .source()
+                .and_then(|source| source.downcast_ref::<UserError>())
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn assigning_the_same_stage_does_not_duplicate_the_source_chain() {
+        let error = RunError::application(ApplicationStage::Frame, UserError)
+            .during_application_stage(ApplicationStage::Frame);
+
+        assert!(
+            error
+                .source()
+                .and_then(|source| source.downcast_ref::<UserError>())
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn runtime_assigned_stage_retains_the_hook_run_error_as_source() {
+        let error = RunError::GpuValidation {
+            message: "injected validation failure".to_owned(),
+        }
+        .during_application_stage(ApplicationStage::GpuRecreated);
+
+        assert!(matches!(
+            &error,
+            RunError::Application {
+                stage: ApplicationStage::GpuRecreated,
+                ..
+            }
+        ));
+        assert!(matches!(
+            error
+                .source()
+                .and_then(|source| source.downcast_ref::<RunError>()),
+            Some(RunError::GpuValidation { message })
+                if message == "injected validation failure"
+        ));
     }
 }

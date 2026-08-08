@@ -108,11 +108,14 @@ if let Some(_token) = plot_ui.begin_plot("3D Demo")
 
 ## Examples
 
-See `examples/03-features/implot3d_basic.rs` for a comprehensive demo that replicates the official ImPlot3D C++ demo.
+Start with `examples/03-features/implot3d_minimal.rs` for a copy-ready integration. See
+`examples/03-features/implot3d_showcase.rs` for the comprehensive demo that mirrors the official
+ImPlot3D C++ demo.
 
-Run with:
+Run either target with:
 ```bash
-cargo run -p dear-imgui-examples --bin implot3d_basic --features "implot3d"
+cargo run -p dear-imgui-examples --bin implot3d_minimal --features implot3d
+cargo run -p dear-imgui-examples --bin implot3d_showcase --features implot3d
 ```
 
 ## Predefined Meshes

@@ -19,7 +19,7 @@ pub(crate) fn install_context_lifecycle(app: &mut App) {
     #[cfg(feature = "render")]
     app.init_resource::<ImguiFrameMailbox>()
         .init_resource::<platform::ImguiPlatformFeedback>();
-    super::ownership::install_context_retirements(app);
+    super::install_context_retirements(app);
 }
 
 struct PrimaryFrameMetrics {
@@ -53,6 +53,8 @@ enum PendingFrameOutput {
 
 /// Serially activate, frame, run, render, and suspend every registered Context.
 pub(crate) fn drive_imgui_contexts(world: &mut World) {
+    #[cfg(feature = "render")]
+    drain_snapshot_commit_errors(world);
     let order = world
         .get_non_send::<ImguiContexts>()
         .map(ImguiContexts::drive_order)
@@ -305,8 +307,18 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                         .framebuffer_scale(framebuffer_scale);
                     if renderer_consumer.is_some() {
                         prepare = prepare.renderer_has_textures();
-                    } else if !context.font_atlas().is_built() && !context.font_atlas().build() {
-                        return Err(ImguiContextError::FontAtlasBuildFailed { context_id });
+                    } else {
+                        let legacy =
+                            context
+                                .font_atlas()
+                                .try_claim_legacy_renderer()
+                                .map_err(|source| ImguiContextError::FontAtlasMode {
+                                    context_id,
+                                    source,
+                                })?;
+                        if !legacy.is_built() {
+                            legacy.build();
+                        }
                     }
                     context.prepare_frame(prepare);
                     let context_raw = context.as_raw();
@@ -355,7 +367,7 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                         }
                     }
 
-                    drop(context.render());
+                    drop(context.render_legacy());
                     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
                     if config.multi_viewport() {
                         context.update_platform_windows();
@@ -386,6 +398,14 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
             Ok(Err(ImguiActiveRendererContextError::Operation(error))) => {
                 clear_context_output(world, context_id);
                 (None, Some(error), None)
+            }
+            Ok(Err(ImguiActiveRendererContextError::ContextScope(source))) => {
+                clear_context_output(world, context_id);
+                (
+                    None,
+                    Some(ImguiContextError::ScopedActivation { context_id, source }),
+                    None,
+                )
             }
             #[cfg(feature = "render")]
             Ok(Err(ImguiActiveRendererContextError::RendererOwnership(source))) => {
@@ -421,6 +441,22 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
     }
     #[cfg(feature = "render")]
     platform::finish_platform_feedback(world);
+}
+
+#[cfg(feature = "render")]
+fn drain_snapshot_commit_errors(world: &mut World) {
+    let errors = world
+        .resource::<ImguiFrameMailbox>()
+        .take_snapshot_commit_errors();
+    if errors.is_empty() {
+        return;
+    }
+    let Some(mut contexts) = world.get_non_send_mut::<ImguiContexts>() else {
+        return;
+    };
+    for (context_id, source) in errors {
+        contexts.record_snapshot_commit_error(context_id, source);
+    }
 }
 
 #[cfg(feature = "render")]

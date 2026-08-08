@@ -104,8 +104,6 @@ pub(super) unsafe extern "C" fn sdl3_render_window(
         callback(viewport, render_argument);
         if transaction.finish() != 0 {
             control.mark_viewport_failed(viewport);
-        } else if is_secondary_viewport(viewport) {
-            control.record_opengl_viewport_context_activated((*viewport).ID);
         }
     });
 }
@@ -133,15 +131,8 @@ pub(super) unsafe extern "C" fn sdl3_swap_buffers(
         callback(viewport, render_argument);
         if transaction.finish() != 0 {
             control.mark_viewport_failed(viewport);
-        } else if is_secondary_viewport(viewport) {
-            control.record_opengl_viewport_swapped((*viewport).ID);
         }
     });
-}
-
-unsafe fn is_secondary_viewport(viewport: *mut sys::ImGuiViewport) -> bool {
-    let main_viewport = unsafe { sys::igGetMainViewport() };
-    !main_viewport.is_null() && main_viewport != viewport
 }
 
 pub(super) unsafe extern "C" fn sdl3_renderer_create_window(viewport: *mut sys::ImGuiViewport) {
@@ -285,8 +276,10 @@ pub(super) unsafe extern "C" fn sdl3_renderer_render_window(
         }
         #[cfg(feature = "sdlgpu3-renderer")]
         if control.native_renderer() == NativeRendererKind::SdlGpu3 {
-            let faults = ffi::dear_imgui_sdl3_backend_sdlgpu3_render_viewport(viewport);
-            control.record_native_faults(faults);
+            let mut first_fault = 0;
+            let faults =
+                ffi::dear_imgui_sdl3_backend_sdlgpu3_render_viewport(viewport, &mut first_fault);
+            control.record_native_faults(faults, first_fault);
             if faults != 0 {
                 control.mark_viewport_failed(viewport);
             }
@@ -369,7 +362,7 @@ impl<'a> NativeTransaction<'a> {
                 viewport,
             )
         };
-        control.record_native_faults(faults);
+        control.record_native_faults(faults, faults);
         (faults == 0).then_some(Self {
             control,
             active: true,
@@ -377,9 +370,10 @@ impl<'a> NativeTransaction<'a> {
     }
 
     unsafe fn finish(mut self) -> u64 {
-        let faults = unsafe { ffi::dear_imgui_sdl3_native_end() };
+        let mut first_fault = 0;
+        let faults = unsafe { ffi::dear_imgui_sdl3_native_end(&mut first_fault) };
         self.active = false;
-        self.control.record_native_faults(faults);
+        self.control.record_native_faults(faults, first_fault);
         faults
     }
 }
@@ -387,8 +381,9 @@ impl<'a> NativeTransaction<'a> {
 impl Drop for NativeTransaction<'_> {
     fn drop(&mut self) {
         if self.active {
-            let faults = unsafe { ffi::dear_imgui_sdl3_native_end() };
-            self.control.record_native_faults(faults);
+            let mut first_fault = 0;
+            let faults = unsafe { ffi::dear_imgui_sdl3_native_end(&mut first_fault) };
+            self.control.record_native_faults(faults, first_fault);
         }
     }
 }

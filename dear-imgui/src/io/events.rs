@@ -170,7 +170,10 @@ mod tests {
         let mut ctx = crate::Context::create();
         ctx.io_mut().set_display_size([128.0, 128.0]);
         ctx.io_mut().set_delta_time(1.0 / 60.0);
-        let _ = ctx.font_atlas().build();
+        ctx.font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
 
         ctx.io_mut().set_app_accepting_events(true);
         ctx.io_mut().add_key_analog_event(crate::Key::A, true, 0.5);
@@ -179,17 +182,17 @@ mod tests {
         assert!(ctx.frame().is_key_down(crate::Key::A));
         ctx.io_mut().clear_input_keys();
         assert!(!ctx.io().inner().KeysData[key_data_index(crate::Key::A)].Down);
-        let _ = ctx.render();
+        let _ = ctx.render_legacy();
 
         ctx.io_mut().add_key_event(crate::Key::A, true);
         ctx.io_mut().clear_events_queue();
         assert!(!ctx.frame().is_key_down(crate::Key::A));
-        let _ = ctx.render();
+        let _ = ctx.render_legacy();
 
         ctx.io_mut().set_app_accepting_events(false);
         ctx.io_mut().add_key_event(crate::Key::A, true);
         assert!(!ctx.frame().is_key_down(crate::Key::A));
-        let _ = ctx.render();
+        let _ = ctx.render_legacy();
 
         ctx.io_mut().set_app_accepting_events(true);
         ctx.io_mut().add_input_character_utf16(b'A' as u16);
@@ -202,7 +205,7 @@ mod tests {
         ctx.io_mut().inner_mut().MouseDown[0] = true;
         ctx.io_mut().clear_input_mouse();
         assert!(!ctx.io().inner().MouseDown[0]);
-        let _ = ctx.render();
+        let _ = ctx.render_legacy();
     }
 
     fn key_data_index(key: crate::Key) -> usize {

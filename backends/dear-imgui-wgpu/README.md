@@ -6,7 +6,7 @@ WGPU renderer for Dear ImGui.
 
 ```rust
 use dear_imgui_rs::Context;
-use dear_imgui_wgpu::{WgpuRenderer, WgpuInitInfo, GammaMode};
+use dear_imgui_wgpu::{FramebufferExtent, GammaMode, WgpuInitInfo, WgpuRenderer};
 
 // device, queue, surface_format prepared ahead
 let mut imgui = Context::create();
@@ -16,11 +16,12 @@ let mut renderer = WgpuRenderer::new(WgpuInitInfo::new(device, queue, surface_fo
 renderer.set_gamma_mode(GammaMode::Auto); // Auto | Linear | Gamma22
 
 // per-frame
-let frame = imgui.render();
-renderer.render(frame, &mut render_pass)?;
+let frame = imgui.render(renderer.renderer_consumer()?);
+let framebuffer_extent = FramebufferExtent::from_texture(&surface_texture.texture);
+renderer.render(frame, &mut render_pass, framebuffer_extent)?;
 ```
 
-Each `WgpuRenderer` is fully initialized and bound to the `Context` passed to `new`; there is no public empty or two-phase state. Create one renderer per context in multi-context applications. After `shutdown`, create a replacement renderer instead of reinitializing the old value. `render()` consumes the Context-borrowed frame, processes pointer-free managed texture requests, reconciles feedback, and only then reads draw commands. `render_context()` and `render_context_with_fb_size()` are convenience methods that finalize only the bound context and return `RendererError::ContextMismatch` for another context.
+Each `WgpuRenderer` is fully initialized and bound to the `Context` passed to `new`; there is no public empty or two-phase state. Create one renderer per context in multi-context applications. After `shutdown`, create a replacement renderer instead of reinitializing the old value. `render()` is the normal path: it consumes a `PendingFrame`, processes pointer-free managed texture requests, reconciles feedback, and only then reads draw commands. Integrations that must reconcile before acquiring the main surface can split that work into `reconcile_frame()` followed by `render_reconciled()`. Both render methods require the physical extent of the actual color attachment; when rendering to a surface, derive it from the acquired `SurfaceTexture` instead of assuming the configured size still matches.
 
 ## External texture views
 
@@ -62,8 +63,8 @@ See `wgpu_rtt_gameview` for a runnable linear/nearest switching example.
 
 ## Native multi-viewport
 
-The Winit and SDL3 routes use one shared owning renderer core with platform-specific public
-runtime types. Select exactly one platform adapter:
+The Winit and SDL3 integrations use one shared owning renderer core with platform-specific route
+types. Select exactly one platform adapter:
 
 - `multi-viewport-winit`
 - `multi-viewport-sdl3`
@@ -72,15 +73,15 @@ They are mutually exclusive and native-only. The selected feature enables
 `dear-imgui-rs/multi-viewport`; do not enable both routes through `--all-features`.
 
 Secondary windows need the `Instance` and `Adapter` that created the renderer's `Device`. Keep
-them in `WgpuInitInfo`, attach the owning platform runtime first, and then move the renderer into
-the matching WGPU runtime before Dear ImGui creates a secondary platform window:
+them in `WgpuInitInfo`, enable the owning platform backend first, and then move the renderer into
+the matching WGPU route before Dear ImGui creates a secondary platform window:
 
 ```rust,no_run
 use dear_imgui_rs::Context;
 use std::sync::Arc;
 use dear_imgui_wgpu::{WgpuInitInfo, WgpuRenderer, WgpuViewportSurfaceConfig, wgpu};
-use dear_imgui_wgpu::multi_viewport::WinitViewportRuntime;
-use dear_imgui_winit::{HiDpiMode, WinitPlatform, multi_viewport::WinitPlatformRuntime};
+use dear_imgui_wgpu::multi_viewport::WinitViewportRoute;
+use dear_imgui_winit::{HiDpiMode, WinitPlatform};
 
 # fn enable_viewports(
 #     imgui: &mut Context,
@@ -90,11 +91,11 @@ use dear_imgui_winit::{HiDpiMode, WinitPlatform, multi_viewport::WinitPlatformRu
 #     device: wgpu::Device,
 #     queue: wgpu::Queue,
 #     format: wgpu::TextureFormat,
-# ) -> Result<(WinitPlatform, WinitPlatformRuntime, WinitViewportRuntime), Box<dyn std::error::Error>> {
+# ) -> Result<(WinitPlatform, WinitViewportRoute), Box<dyn std::error::Error>> {
 imgui.enable_multi_viewport();
 let mut platform = WinitPlatform::new(imgui)?;
 platform.attach_window(Arc::clone(&main_window), HiDpiMode::Default, imgui)?;
-let runtime = WinitPlatformRuntime::new(imgui, &platform)?;
+platform.enable_viewports(imgui)?;
 
 let viewport_surface = WgpuViewportSurfaceConfig {
     present_mode: wgpu::PresentMode::AutoNoVsync,
@@ -105,8 +106,8 @@ let init = WgpuInitInfo::new(device, queue, format)
     .with_adapter(adapter)
     .with_viewport_surface_config(viewport_surface);
 let renderer = WgpuRenderer::new(init, imgui)?;
-let renderer = WinitViewportRuntime::attach(imgui, &runtime, renderer)?;
-# Ok((platform, runtime, renderer))
+let route = WinitViewportRoute::attach(imgui, &platform, renderer)?;
+# Ok((platform, route))
 # }
 ```
 
@@ -123,43 +124,50 @@ main surface in the same sRGB contract; HDR or wide-gamut output needs an applic
 conversion pass rather than a different secondary-surface setting.
 
 Secondary viewports inherit the renderer pipeline's multisample and depth-stencil contract. The
-runtime owns matching per-window MSAA resolve and depth-stencil attachments, suspends acquisition
+route owns matching per-window MSAA resolve and depth-stencil attachments, suspends acquisition
 while a native framebuffer has a zero dimension, and rebuilds attachments from the platform
 owner's current physical size after resize or DPI changes. Attachment fails transactionally when
 the adapter cannot support the configured formats and sample count.
 
 A lost secondary surface is rebuilt from that viewport's still-live platform window. Successful
-surface recreation leaves the renderer runtime and every other viewport attached. If recreation
+surface recreation leaves the renderer route and every other viewport attached. If recreation
 fails, the backend requests closure of only the affected viewport and reports the creation error.
 WGPU exposes Device loss separately through an application-owned, single-slot callback; if that
 callback fires, recreate the Device, Queue, renderer, and all GPU resources before reattaching the
-viewport runtime.
+viewport route.
 
-The renderer opens a fresh upload-resource arena for each `RenderedFrame` epoch. Every viewport
+The renderer opens a fresh upload-resource arena for each `PendingFrame` epoch. Every viewport
 draw then uses a separate pass slot with its own vertex, index, uniform, and sampler bindings, so
 command buffers cannot observe data uploaded for another viewport or a later epoch. The renderer
 does not recycle upload buffers across epochs because submission of the application-owned encoder
-is not observable. Before invoking default multi-viewport callbacks, call
-`runtime.reconcile_frame(&mut frame)`; this both prepares the exact frame epoch and applies
-managed-texture feedback. A callback reached without that preparation fails with
-`RendererError::FrameNotPrepared` instead of reusing the preceding frame's resources.
+is not observable.
+
+Finish UI construction with a `FrameToken`, then call `route.prepare(event_loop, frame)` on Winit
+or `route.prepare(frame)` on SDL3 before acquiring the main surface. Preparation reconciles
+managed textures, renders and presents every secondary viewport, and returns one move-only
+`WgpuPreparedViewportFrame` containing the same-scope `secondary_report()`. After successfully
+acquiring the main surface, consume that capability with `route.render_main(prepared,
+&mut render_pass, FramebufferExtent::from_texture(&surface_frame.texture))`. If main-surface
+acquisition is temporarily unavailable, dropping the prepared capability does not undo the
+secondary work that already completed. There is no public manual trace or partially reconciled
+multi-viewport path.
 
 For SDL3, initialize `Sdl3PlatformBackend` first and then call
-`dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRuntime::attach(imgui, &platform, renderer)`.
-The safe constructors require the matching live platform owner and reject Context mismatches,
-shutdown owners, and callback ownership drift before interpreting any native handle. Custom
-platforms can use the explicitly unsafe `attach_unchecked` escape hatch only after proving the
-Winit or SDL3 `PlatformHandle` contract. Both typed constructors consume `WgpuRenderer`; no
-caller-owned stable address is required.
+`dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRoute::attach(imgui, &platform, renderer)`.
+Both route constructors require the matching live platform owner, capture its exact Context
+generation, and reject Context mismatches, shutdown owners, and callback ownership drift before
+interpreting any native handle. They consume `WgpuRenderer`; no caller-owned stable address is
+required and there is no unchecked custom-platform attachment path.
 
 The renderer claims only the five `Renderer_*` slots in `ImGuiPlatformIO`. Registration fails
 instead of replacing foreign renderer callbacks or `RendererUserData`, rejects secondary windows
 that already exist, and requires an active Context `Platform` attachment. Attach is transactional:
-the error returns the unchanged renderer through `WgpuViewportAttachError`. Moving the runtime does
+the error returns the unchanged renderer through `WgpuViewportAttachError`. Moving the route does
 not move callback-visible renderer storage. Callback replacement, panic, reentry, rendering, and
-unrecoverable surface validation failures are contained at the C ABI boundary and returned by
-`poll_fault` or the next Rust runtime entry. A terminal fault revokes renderer viewport capability
-and stops create/resize/render/present work. Its `Renderer_DestroyWindow` callback remains
+unrecoverable surface validation failures are contained at the C ABI boundary. `prepare` returns
+all pending renderer and platform faults without dropping either source's FIFO ordering. A
+terminal fault revokes renderer viewport capability and stops create/resize/render/present work.
+Its `Renderer_DestroyWindow` callback remains
 available only for cleanup: a Context- and viewport-identity sidecar releases the owned WGPU
 surface even when foreign code cleared or replaced `RendererUserData`, before the platform backend
 destroys the native window.
@@ -176,39 +184,39 @@ python3 tools/ci/run_contract.py multi-viewport-smoke
 Linux CI supplies Xvfb and Mesa/Lavapipe. Missing display or software-GPU infrastructure is an
 infrastructure failure, not a skipped success.
 
-Shut down renderer ownership before the platform runtime:
+Shut down renderer ownership before disabling platform viewport ownership:
 
 ```rust,no_run
 # use dear_imgui_rs::Context;
-# use dear_imgui_wgpu::multi_viewport::WinitViewportRuntime;
-# use dear_imgui_winit::multi_viewport::WinitPlatformRuntime;
-# fn shutdown(renderer: &mut WinitViewportRuntime, platform: &mut WinitPlatformRuntime, imgui: &mut Context) -> Result<(), Box<dyn std::error::Error>> {
-renderer.shutdown(imgui)?;
-platform.shutdown(imgui)?;
+# use dear_imgui_wgpu::multi_viewport::WinitViewportRoute;
+# use dear_imgui_winit::WinitPlatform;
+# fn shutdown(route: &mut WinitViewportRoute, platform: &mut WinitPlatform, imgui: &mut Context) -> Result<(), Box<dyn std::error::Error>> {
+route.shutdown(imgui)?;
+platform.disable_viewports(imgui)?;
 # Ok(())
 # }
 ```
 
-The renderer runtime releases `RendererUserData`, surfaces, callbacks, and renderer GPU resources;
+The renderer route releases `RendererUserData`, surfaces, callbacks, and renderer GPU resources;
 it never enters the platform-window phase. The Winit or SDL3 platform owner remains solely
 responsible for destroying native windows. Context-first teardown invokes the same shared state
 machine in ordered renderer-resource and platform-window phases.
 
-Managed texture shutdown follows the same ownership rule. The runtime first obtains
+Managed texture shutdown follows the same ownership rule. The route first obtains
 `Context::prepare_renderer_texture_reset(&consumer)` while its complete GPU texture map is still
-intact. A pending frame or detached snapshot rejects that preparation without changing either
-side. After preparation succeeds, it destroys the WGPU map and commits the permit, which
+intact. A live renderer epoch rejects that preparation without changing either side. After
+preparation succeeds, it destroys the WGPU map and commits the permit, which
 infallibly clears native bindings before releasing the consumer. This causes live textures to be
 requested again after a device rebuild without acknowledging a destroy that never happened.
 
-Explicit renderer shutdown is idempotent and retryable. In particular, an outstanding detached
-snapshot leaves the runtime attached with its renderer retained; finish or abandon the epoch, poll
-Context completions, and call `shutdown` again. Runtime `Drop` cannot prepare the required
-Context-owned renderer reset, so it defers its attachment unchanged to Context teardown: it does
-not destroy WGPU resources, clear callbacks, or alter native renderer publication while Context is
-alive. Dropping the wrapper therefore does not make the Context available for a replacement runtime;
-use explicit shutdown when the application needs to release renderer ownership before Context
-teardown. Foreign callback and backend-state replacements are preserved rather than overwritten.
+Explicit renderer shutdown is idempotent and retryable. A rejected reset leaves the route
+attached with its renderer retained so the caller can settle the epoch and call `shutdown` again.
+Route `Drop` cannot prepare the required Context-owned renderer reset, so it defers its
+attachment unchanged to Context teardown: it does not destroy WGPU resources, clear callbacks, or
+alter native renderer publication while Context is alive. Dropping the wrapper therefore does not
+make the Context available for a replacement route; use explicit shutdown when the application
+needs to release renderer ownership before Context teardown. Foreign callback and backend-state
+replacements are preserved rather than overwritten.
 
 ## Selecting wgpu version
 

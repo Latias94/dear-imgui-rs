@@ -8,6 +8,11 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Make `WinitPlatform` the sole public multi-viewport owner. `with_event_loop` now returns `WinitViewportAttempt`, which preserves the callback output and every deferred platform fault as parallel values instead of dropping one side through nested `Result` precedence.
+- Replace one-at-a-time `poll_viewport_fault` with the advanced `drain_viewport_faults` escape hatch. First-party renderer routes retain an exact-generation platform adapter and aggregate the complete ordered fault batch automatically.
+
 ## [0.16.0-alpha.1]
 
 ### Breaking Changes

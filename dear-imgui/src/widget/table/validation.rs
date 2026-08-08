@@ -123,3 +123,12 @@ pub(crate) fn assert_current_table_row(caller: &str) {
         "{caller} must be called while a table row is current"
     );
 }
+
+pub(crate) fn assert_table_before_first_row(caller: &str) -> *mut sys::ImGuiTable {
+    let table = assert_current_table(caller);
+    assert!(
+        unsafe { (*table).CurrentRow } == -1,
+        "{caller} must be called before the first table row"
+    );
+    table
+}

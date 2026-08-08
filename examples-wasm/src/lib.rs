@@ -442,7 +442,12 @@ impl AppWindow {
             .platform
             .prepare_render(&ui, &self.window)
             .map_err(|e| JsValue::from_str(&format!("prepare platform render: {e}")))?;
-        let rendered_frame = self.imgui.context.render();
+        let pending_frame = self.imgui.context.render(
+            self.imgui
+                .renderer
+                .renderer_consumer()
+                .map_err(|e| JsValue::from_str(&format!("renderer consumer: {e}")))?,
+        );
 
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -464,7 +469,7 @@ impl AppWindow {
 
             self.imgui
                 .renderer
-                .render(rendered_frame, &mut rpass)
+                .render(pending_frame, &mut rpass)
                 .map_err(|e| JsValue::from_str(&format!("render: {e}")))?;
         }
 

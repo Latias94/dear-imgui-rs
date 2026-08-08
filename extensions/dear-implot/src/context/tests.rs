@@ -1,7 +1,7 @@
 use super::{PlotContext, validation::axis_tick_count_to_i32};
 use crate::sys;
 use crate::{Axis, PlotCond, XAxis, YAxis};
-use dear_imgui_rs::{BackendFlags, Context, ContextBindingError};
+use dear_imgui_rs::{Context, ContextBindingError};
 use std::cell::Cell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Mutex, OnceLock};
@@ -18,7 +18,11 @@ fn prepare_imgui(imgui: &mut Context) {
     let io = imgui.io_mut();
     io.set_display_size([800.0, 600.0]);
     io.set_delta_time(1.0 / 60.0);
-    io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_TEXTURES);
+    imgui
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("headless test requires the legacy font-atlas capability")
+        .build();
 }
 
 #[test]
@@ -28,7 +32,7 @@ fn nested_plot_bindings_restore_imgui_and_implot_contexts() {
     let imgui_a_raw = imgui_a.as_raw();
     let plot_a = PlotContext::create(&imgui_a);
     let plot_a_raw = unsafe { plot_a.raw() };
-    let suspended_a = imgui_a.suspend();
+    let suspended_a = imgui_a.suspend_or_panic();
 
     let imgui_b = Context::create();
     let imgui_b_raw = imgui_b.as_raw();
@@ -95,7 +99,7 @@ fn nested_plot_binding_never_restores_a_destroyed_outer_context() {
     let imgui_a = Context::create();
     let plot_a = PlotContext::create(&imgui_a);
     let binding_a = plot_a.binding();
-    let mut suspended_a = Some(imgui_a.suspend());
+    let mut suspended_a = Some(imgui_a.suspend_or_panic());
 
     let imgui_b = Context::create();
     let imgui_b_raw = imgui_b.as_raw();

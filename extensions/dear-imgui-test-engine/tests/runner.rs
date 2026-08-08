@@ -13,18 +13,18 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use dear_imgui_rs::{
-    BackendFlags, Context, FrameLifecycleState,
-    render::{ReconciledFrame, RenderedFrame, RendererConsumerError},
+    BackendFlags, Context, ContextId, FontSource, FrameLifecycleState, FrameToken,
+    render::ReconciledFrame,
 };
 #[cfg(feature = "capture")]
 use dear_imgui_test_engine::{
     CaptureFlags, CaptureOutput, CaptureProviderError, CaptureRequest, CapturingTestFrameDriver,
-    Rgba8, RunFlags, TestGroup,
+    Rgba8,
 };
 use dear_imgui_test_engine::{
-    FrameDriverError, HeadlessRenderError, RunMode, RunOutcome, RunState, RunTestStatus,
-    RunnerControl, RunnerError, ScriptCount, TestEngine, TestEngineError, TestEngineStatus,
-    TestFrameDriver, TestRunner, raw,
+    FrameDriveOutcome, FrameDriverError, HeadlessPrepareError, MainRenderOutcome, RunFlags,
+    RunMode, RunOutcome, RunState, RunTestStatus, RunnerControl, RunnerError, ScriptCount,
+    TestEngine, TestEngineError, TestEngineStatus, TestFrameDriver, TestGroup, TestRunner, raw,
 };
 
 static TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -37,7 +37,11 @@ fn test_lock() -> MutexGuard<'static, ()> {
 
 fn context() -> Context {
     let mut context = Context::create();
-    assert!(context.font_atlas().build());
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("headless test requires the legacy font-atlas capability")
+        .build();
     context.io_mut().set_display_size([128.0, 128.0]);
     context.io_mut().set_delta_time(1.0 / 60.0);
     context
@@ -207,6 +211,7 @@ fn register_immediate_capture_script(engine: &mut TestEngine, name: &str) {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DriverFault {
     None,
+    Prepare,
     Render,
     PreSwap,
     Present,
@@ -217,6 +222,14 @@ struct RecordingDriver {
     events: Rc<RefCell<Vec<(u64, &'static str)>>>,
     fault: DriverFault,
     fault_armed: bool,
+    skip_main: bool,
+    reported_context: Option<ContextId>,
+}
+
+struct RecordingPreparedFrame<'frame> {
+    _frame: ReconciledFrame<'frame>,
+    prepared_frame_index: u64,
+    reported_context: ContextId,
 }
 
 impl RecordingDriver {
@@ -225,6 +238,15 @@ impl RecordingDriver {
             events,
             fault,
             fault_armed: false,
+            skip_main: false,
+            reported_context: None,
+        }
+    }
+
+    fn skipping(events: Rc<RefCell<Vec<(u64, &'static str)>>>) -> Self {
+        Self {
+            skip_main: true,
+            ..Self::new(events, DriverFault::None)
         }
     }
 
@@ -243,25 +265,51 @@ impl RecordingDriver {
 }
 
 impl TestFrameDriver for RecordingDriver {
+    type PreparedFrame<'frame> = RecordingPreparedFrame<'frame>;
+    type PrepareError = io::Error;
     type RenderError = io::Error;
     type PresentError = io::Error;
 
-    fn render<'frame>(
+    fn prepare<'frame>(
         &mut self,
-        mut frame: RenderedFrame<'frame>,
+        frame: FrameToken<'frame>,
         frame_index: u64,
-    ) -> Result<ReconciledFrame<'frame>, Self::RenderError> {
-        self.events.borrow_mut().push((frame_index, "render"));
+    ) -> Result<Self::PreparedFrame<'frame>, Self::PrepareError> {
+        self.events.borrow_mut().push((frame_index, "prepare"));
+        if self.fault == DriverFault::Prepare {
+            return Err(io::Error::other("injected prepare failure"));
+        }
+        let frame = frame.render_legacy();
+        Ok(RecordingPreparedFrame {
+            reported_context: self.reported_context.unwrap_or_else(|| frame.context_id()),
+            _frame: frame,
+            prepared_frame_index: frame_index,
+        })
+    }
+
+    fn prepared_context_id(frame: &Self::PreparedFrame<'_>) -> dear_imgui_rs::ContextId {
+        frame.reported_context
+    }
+
+    fn render_main(
+        &mut self,
+        frame: Self::PreparedFrame<'_>,
+        frame_index: u64,
+    ) -> Result<MainRenderOutcome, Self::RenderError> {
+        assert_eq!(frame.prepared_frame_index, frame_index);
+        self.events.borrow_mut().push((frame_index, "render-main"));
+        drop(frame);
         if self.fault == DriverFault::Render {
             return Err(io::Error::other("injected render failure"));
         }
-        frame
-            .reconcile_texture_feedback([])
-            .expect("empty feedback");
         if self.fault == DriverFault::PreSwap {
             self.arm_upstream_failure();
         }
-        frame.into_reconciled().map_err(io::Error::other)
+        if self.skip_main {
+            Ok(MainRenderOutcome::Skipped)
+        } else {
+            Ok(MainRenderOutcome::ReadyToPresent)
+        }
     }
 
     fn present(&mut self, frame_index: u64) -> Result<(), Self::PresentError> {
@@ -328,24 +376,39 @@ impl CapturingDriver {
 
 #[cfg(feature = "capture")]
 impl TestFrameDriver for CapturingDriver {
+    type PreparedFrame<'frame> = ReconciledFrame<'frame>;
+    type PrepareError = io::Error;
     type RenderError = io::Error;
     type PresentError = io::Error;
 
-    fn render<'frame>(
+    fn prepare<'frame>(
         &mut self,
-        mut frame: RenderedFrame<'frame>,
+        frame: FrameToken<'frame>,
         _frame_index: u64,
-    ) -> Result<ReconciledFrame<'frame>, Self::RenderError> {
+    ) -> Result<Self::PreparedFrame<'frame>, Self::PrepareError> {
+        if self.frame_fault == DriverFault::Prepare {
+            return Err(io::Error::other("capture-run prepare failure"));
+        }
+        Ok(frame.render_legacy())
+    }
+
+    fn prepared_context_id(frame: &Self::PreparedFrame<'_>) -> dear_imgui_rs::ContextId {
+        frame.context_id()
+    }
+
+    fn render_main(
+        &mut self,
+        frame: Self::PreparedFrame<'_>,
+        _frame_index: u64,
+    ) -> Result<MainRenderOutcome, Self::RenderError> {
+        drop(frame);
         if self.frame_fault == DriverFault::Render {
             return Err(io::Error::other("capture-run render failure"));
         }
-        frame
-            .reconcile_texture_feedback([])
-            .expect("empty capture-driver feedback");
         if self.frame_fault == DriverFault::PreSwap {
             self.arm_upstream_failure();
         }
-        frame.into_reconciled().map_err(io::Error::other)
+        Ok(MainRenderOutcome::ReadyToPresent)
     }
 
     fn present(&mut self, frame_index: u64) -> Result<(), Self::PresentError> {
@@ -620,37 +683,37 @@ fn ffi_and_callback_failures_remain_infrastructure_errors() {
     callback_engine.shutdown().expect("callback shutdown");
     drop(callback_context);
 
-    let mut render_context = context();
-    let mut render_engine = attached_engine(&mut render_context);
-    render_engine
-        .add_script_test("runner", "render", |script| {
+    let mut prepare_context = context();
+    let mut prepare_engine = attached_engine(&mut prepare_context);
+    prepare_engine
+        .add_script_test("runner", "prepare", |script| {
             script.yield_frames(ScriptCount::new(10)?)
         })
-        .expect("render script");
+        .expect("prepare script");
     let events = Rc::new(RefCell::new(Vec::new()));
-    let mut driver = RecordingDriver::new(events, DriverFault::Render);
-    let render_error = TestRunner::new(&mut render_engine)
-        .filter("render")
+    let mut driver = RecordingDriver::new(events, DriverFault::Prepare);
+    let prepare_error = TestRunner::new(&mut prepare_engine)
+        .filter("prepare")
         .run_graphical(
-            &mut render_context,
+            &mut prepare_context,
             |_, _| Ok::<_, io::Error>(RunnerControl::Continue),
             &mut driver,
         )
-        .expect_err("render failure must not become an outcome");
+        .expect_err("prepare failure must not become an outcome");
     assert!(matches!(
-        render_error,
+        prepare_error,
         RunnerError::FrameDriver {
             frame: 1,
-            source: FrameDriverError::Render(_),
+            source: FrameDriverError::Prepare(_),
         }
     ));
     assert_eq!(
-        render_context.frame_lifecycle_state(),
-        FrameLifecycleState::Rendered
+        prepare_context.frame_lifecycle_state(),
+        FrameLifecycleState::Idle
     );
-    assert_eq!(render_engine.run_state(), RunState::Inactive);
-    render_engine.shutdown().expect("render shutdown");
-    drop(render_context);
+    assert_eq!(prepare_engine.run_state(), RunState::Inactive);
+    prepare_engine.shutdown().expect("prepare shutdown");
+    drop(prepare_context);
 }
 
 #[test]
@@ -684,14 +747,15 @@ fn runner_pumps_ui_render_and_swap_boundaries_once_per_frame_in_order() {
     assert_eq!(report.mode(), RunMode::Graphical);
 
     let events = events.borrow();
-    assert_eq!(events.len() as u64, report.frames() * 5);
-    for (index, phases) in events.chunks_exact(5).enumerate() {
+    assert_eq!(events.len() as u64, report.frames() * 6);
+    for (index, phases) in events.chunks_exact(6).enumerate() {
         let frame = index as u64 + 1;
         assert_eq!(
             phases,
             [
                 (frame, "ui"),
-                (frame, "render"),
+                (frame, "prepare"),
+                (frame, "render-main"),
                 (0, "pre-swap"),
                 (frame, "present"),
                 (0, "post-swap"),
@@ -701,6 +765,111 @@ fn runner_pumps_ui_render_and_swap_boundaries_once_per_frame_in_order() {
     drop(events);
     set_presentation_trace(&engine, None);
     engine.shutdown().expect("order shutdown");
+    drop(context);
+}
+
+#[test]
+fn drive_frame_reports_presented_and_skipped_without_false_swap_hooks() {
+    let _guard = test_lock();
+    let mut context = context();
+    let mut engine = attached_engine(&mut context);
+    engine
+        .add_script_test("runner", "drive-outcome", |script| {
+            script.yield_frames(ScriptCount::new(10)?)
+        })
+        .expect("drive-outcome script");
+    engine
+        .queue_tests(TestGroup::Tests, Some("drive-outcome"), RunFlags::NONE)
+        .expect("queue drive-outcome script");
+
+    let events = Rc::new(RefCell::new(Vec::new()));
+    set_presentation_trace(&engine, Some(&events));
+
+    let frame = context.begin_frame();
+    engine
+        .show_windows(frame.ui(), None)
+        .expect("show engine windows for presented frame");
+    let mut ready = RecordingDriver::new(events.clone(), DriverFault::None);
+    let presented = engine
+        .drive_frame(frame, 1, &mut ready)
+        .expect("presented frame");
+    assert_eq!(presented, FrameDriveOutcome::Presented);
+
+    let frame = context.begin_frame();
+    engine
+        .show_windows(frame.ui(), None)
+        .expect("show engine windows for skipped frame");
+    let mut skipped_driver = RecordingDriver::skipping(events.clone());
+    let skipped = engine
+        .drive_frame(frame, 2, &mut skipped_driver)
+        .expect("skipped frame");
+    assert_eq!(skipped, FrameDriveOutcome::Skipped);
+
+    assert_eq!(
+        events.borrow().as_slice(),
+        &[
+            (1, "prepare"),
+            (1, "render-main"),
+            (0, "pre-swap"),
+            (1, "present"),
+            (0, "post-swap"),
+            (2, "prepare"),
+            (2, "render-main"),
+        ]
+    );
+    assert_eq!(
+        context.frame_lifecycle_state(),
+        FrameLifecycleState::Rendered
+    );
+
+    set_presentation_trace(&engine, None);
+    engine.stop().expect("stop drive-outcome run");
+    engine.shutdown().expect("drive-outcome shutdown");
+    drop(context);
+}
+
+#[test]
+fn drive_frame_rejects_a_prepared_transaction_that_reports_another_context() {
+    let _guard = test_lock();
+    let foreign_context = Context::create();
+    let foreign_context_id = foreign_context.id();
+    drop(foreign_context);
+
+    let mut context = context();
+    let mut engine = attached_engine(&mut context);
+    engine
+        .add_script_test("runner", "prepared-context", |script| {
+            script.yield_frames(ScriptCount::new(1)?)
+        })
+        .expect("prepared-context script");
+    engine
+        .queue_tests(TestGroup::Tests, Some("prepared-context"), RunFlags::NONE)
+        .expect("queue prepared-context script");
+
+    let frame = context.begin_frame();
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let mut driver = RecordingDriver::new(events.clone(), DriverFault::None);
+    driver.reported_context = Some(foreign_context_id);
+    let error = engine
+        .drive_frame(frame, 1, &mut driver)
+        .expect_err("a foreign prepared transaction must be rejected");
+
+    assert!(matches!(
+        error,
+        FrameDriverError::Context(TestEngineError::ContextMismatch {
+            operation: "TestEngine::drive_frame prepare completion",
+            expected,
+            actual,
+        }) if expected == context.id() && actual == foreign_context_id
+    ));
+    assert_eq!(events.borrow().as_slice(), &[(1, "prepare")]);
+    assert_eq!(
+        context.frame_lifecycle_state(),
+        FrameLifecycleState::Rendered
+    );
+
+    engine.stop().expect("stop prepared-context run");
+    engine.shutdown().expect("prepared-context shutdown");
     drop(context);
 }
 
@@ -740,6 +909,7 @@ fn assert_driver_failure(
     assert_eq!(source.phase(), Some(expected_phase));
     assert!(source.abort_error().is_none());
     match fault {
+        DriverFault::Prepare => assert!(matches!(source, FrameDriverError::Prepare(_))),
         DriverFault::Render => assert!(matches!(source, FrameDriverError::Render(_))),
         DriverFault::PreSwap => assert!(matches!(
             source,
@@ -766,19 +936,32 @@ fn assert_driver_failure(
 
     let events = events.borrow();
     let expected = match fault {
-        DriverFault::Render => vec![(1, "ui"), (1, "render")],
-        DriverFault::PreSwap => vec![(1, "ui"), (1, "render")],
+        DriverFault::Prepare => vec![(1, "ui"), (1, "prepare")],
+        DriverFault::Render | DriverFault::PreSwap => {
+            vec![(1, "ui"), (1, "prepare"), (1, "render-main")]
+        }
         DriverFault::Present | DriverFault::PostSwap => {
-            vec![(1, "ui"), (1, "render"), (0, "pre-swap"), (1, "present")]
+            vec![
+                (1, "ui"),
+                (1, "prepare"),
+                (1, "render-main"),
+                (0, "pre-swap"),
+                (1, "present"),
+            ]
         }
         DriverFault::None => unreachable!(),
     };
     assert_eq!(*events, expected);
     drop(events);
-    assert_eq!(
-        context.frame_lifecycle_state(),
-        FrameLifecycleState::Rendered
-    );
+    let expected_lifecycle = match fault {
+        DriverFault::Prepare => FrameLifecycleState::Idle,
+        DriverFault::Render
+        | DriverFault::PreSwap
+        | DriverFault::Present
+        | DriverFault::PostSwap => FrameLifecycleState::Rendered,
+        DriverFault::None => unreachable!(),
+    };
+    assert_eq!(context.frame_lifecycle_state(), expected_lifecycle);
     assert_eq!(engine.run_state(), RunState::Inactive);
     set_presentation_trace(&engine, None);
     engine.shutdown().expect("phase shutdown");
@@ -794,6 +977,7 @@ fn runner_errors_name_every_frame_driver_phase_and_teardown_deterministically() 
     let _guard = test_lock();
     use dear_imgui_test_engine::FrameDriverPhase;
 
+    assert_driver_failure(DriverFault::Prepare, FrameDriverPhase::Prepare);
     assert_driver_failure(DriverFault::Render, FrameDriverPhase::Render);
     assert_driver_failure(DriverFault::PreSwap, FrameDriverPhase::PreSwap);
     assert_driver_failure(DriverFault::Present, FrameDriverPhase::Present);
@@ -801,21 +985,36 @@ fn runner_errors_name_every_frame_driver_phase_and_teardown_deterministically() 
 }
 
 #[test]
-fn runner_rejects_an_unreconciled_render_lease_before_presentation() {
-    struct UnreconciledDriver {
+fn runner_closes_a_frame_rejected_by_the_driver_before_presentation() {
+    struct RejectingDriver {
         present_calls: Rc<Cell<usize>>,
     }
 
-    impl TestFrameDriver for UnreconciledDriver {
-        type RenderError = RendererConsumerError;
+    impl TestFrameDriver for RejectingDriver {
+        type PreparedFrame<'frame> = ReconciledFrame<'frame>;
+        type PrepareError = io::Error;
+        type RenderError = Infallible;
         type PresentError = Infallible;
 
-        fn render<'frame>(
+        fn prepare<'frame>(
             &mut self,
-            frame: RenderedFrame<'frame>,
+            _frame: FrameToken<'frame>,
             _frame_index: u64,
-        ) -> Result<ReconciledFrame<'frame>, Self::RenderError> {
-            frame.into_reconciled()
+        ) -> Result<Self::PreparedFrame<'frame>, Self::PrepareError> {
+            Err(io::Error::other("driver rejected frame"))
+        }
+
+        fn prepared_context_id(frame: &Self::PreparedFrame<'_>) -> dear_imgui_rs::ContextId {
+            frame.context_id()
+        }
+
+        fn render_main(
+            &mut self,
+            frame: Self::PreparedFrame<'_>,
+            _frame_index: u64,
+        ) -> Result<MainRenderOutcome, Self::RenderError> {
+            drop(frame);
+            Ok(MainRenderOutcome::ReadyToPresent)
         }
 
         fn present(&mut self, _frame_index: u64) -> Result<(), Self::PresentError> {
@@ -828,33 +1027,30 @@ fn runner_rejects_an_unreconciled_render_lease_before_presentation() {
     let mut context = context();
     let mut engine = attached_engine(&mut context);
     engine
-        .add_script_test("runner", "unreconciled", |script| {
+        .add_script_test("runner", "rejected", |script| {
             script.yield_frames(ScriptCount::new(1)?)
         })
-        .expect("unreconciled script");
+        .expect("rejected-frame script");
     let present_calls = Rc::new(Cell::new(0));
-    let mut driver = UnreconciledDriver {
+    let mut driver = RejectingDriver {
         present_calls: present_calls.clone(),
     };
 
     let error = TestRunner::new(&mut engine)
-        .filter("unreconciled")
+        .filter("rejected")
         .run_graphical(&mut context, no_error, &mut driver)
-        .expect_err("an unreconciled lease must fail before presentation");
+        .expect_err("a rejected frame must fail before presentation");
     assert!(matches!(
         error,
         RunnerError::FrameDriver {
             frame: 1,
-            source: FrameDriverError::Render(RendererConsumerError::FrameNotReconciled { .. }),
+            source: FrameDriverError::Prepare(_),
         }
     ));
     assert_eq!(present_calls.get(), 0);
-    assert_eq!(
-        context.frame_lifecycle_state(),
-        FrameLifecycleState::Rendered
-    );
+    assert_eq!(context.frame_lifecycle_state(), FrameLifecycleState::Idle);
     assert_eq!(engine.run_state(), RunState::Inactive);
-    engine.shutdown().expect("unreconciled shutdown");
+    engine.shutdown().expect("rejected-frame shutdown");
 }
 
 #[test]
@@ -918,21 +1114,25 @@ fn direct_frame_drive_clears_capture_abort_after_the_engine_settles() {
         .queue_tests(TestGroup::Tests, Some("direct-abort"), RunFlags::NONE)
         .expect("queue direct-drive script");
 
-    let ui = context.frame();
-    engine.show_windows(ui, None).expect("show engine windows");
+    let frame = context.begin_frame();
+    engine
+        .show_windows(frame.ui(), None)
+        .expect("show engine windows");
     let mut failing = RecordingDriver::new(Rc::new(RefCell::new(Vec::new())), DriverFault::Present);
     assert!(matches!(
-        engine.drive_frame(context.render(), 1, &mut failing),
+        engine.drive_frame(frame, 1, &mut failing),
         Err(FrameDriverError::Present { .. })
     ));
     assert!(capture_state(&engine).CaptureAbortRequested);
 
     let mut recovered = RecordingDriver::new(Rc::new(RefCell::new(Vec::new())), DriverFault::None);
     for frame_index in 2..=65 {
-        let ui = context.frame();
-        engine.show_windows(ui, None).expect("show engine windows");
+        let frame = context.begin_frame();
         engine
-            .drive_frame(context.render(), frame_index, &mut recovered)
+            .show_windows(frame.ui(), None)
+            .expect("show engine windows");
+        engine
+            .drive_frame(frame, frame_index, &mut recovered)
             .expect("cleanup frame settles the aborted presentation");
         if !capture_state(&engine).CaptureAbortRequested {
             break;
@@ -951,7 +1151,7 @@ fn runner_rejects_wrong_or_open_context_and_restores_nested_current_context() {
     let foreign = Context::create();
     let foreign_binding = foreign.binding();
     let foreign_raw = foreign.as_raw();
-    let foreign_suspended = foreign.suspend();
+    let foreign_suspended = foreign.suspend_or_panic();
 
     let mut owner_context = context();
     let owner_raw = owner_context.as_raw();
@@ -968,7 +1168,7 @@ fn runner_rejects_wrong_or_open_context_and_restores_nested_current_context() {
         .run_headless(&mut owner_context, no_error)
         .expect_err("open frame must be rejected");
     assert!(matches!(open_error, RunnerError::FrameAlreadyOpen));
-    drop(owner_context.render());
+    drop(owner_context.render_legacy());
     assert_eq!(engine.run_state(), RunState::Ready);
 
     foreign_binding
@@ -999,7 +1199,7 @@ fn runner_rejects_wrong_or_open_context_and_restores_nested_current_context() {
 
     let mut attached_context = context();
     let mut mismatch_engine = attached_engine(&mut attached_context);
-    let suspended_attached = attached_context.suspend();
+    let suspended_attached = attached_context.suspend_or_panic();
     let mut wrong_context = context();
     let mismatch = TestRunner::new(&mut mismatch_engine)
         .run_headless(&mut wrong_context, no_error)
@@ -1013,18 +1213,16 @@ fn runner_rejects_wrong_or_open_context_and_restores_nested_current_context() {
 }
 
 #[test]
-fn headless_runner_rejects_managed_texture_requests_without_abandoning_silently() {
+fn headless_runner_rejects_a_managed_renderer_without_panicking_or_abandoning() {
     let _guard = test_lock();
     let mut context = Context::create();
-    let _consumer = context
-        .create_renderer_consumer()
-        .expect("renderer consumer");
-    let _ = context.font_atlas().add_font_default(None);
+    let _ = context.font_atlas().add_font(&[FontSource::default_font()]);
     context.io_mut().set_display_size([128.0, 128.0]);
     context.io_mut().set_delta_time(1.0 / 60.0);
     context
         .io_mut()
         .set_backend_flags(BackendFlags::RENDERER_HAS_TEXTURES);
+    let _consumer = context.create_synchronous_renderer_consumer().unwrap();
     let mut engine = attached_engine(&mut context);
     engine
         .add_script_test("runner", "texture", |script| {
@@ -1040,11 +1238,10 @@ fn headless_runner_rejects_managed_texture_requests_without_abandoning_silently(
         error,
         RunnerError::FrameDriver {
             frame: 1,
-            source: FrameDriverError::Render(HeadlessRenderError::ManagedTextureRequests {
-                count: 1..
-            }),
+            source: FrameDriverError::Prepare(HeadlessPrepareError::ManagedRenderer),
         }
     ));
+    assert_eq!(context.frame_lifecycle_state(), FrameLifecycleState::Idle);
     assert_eq!(engine.run_state(), RunState::Inactive);
     engine.shutdown().expect("texture shutdown");
     drop(context);
@@ -1203,6 +1400,7 @@ fn capture_failure_preserves_a_secondary_teardown_error() {
 fn pending_capture_waits_are_cancelled_for_every_frame_driver_failure() {
     let _guard = test_lock();
     for frame_fault in [
+        DriverFault::Prepare,
         DriverFault::Render,
         DriverFault::PreSwap,
         DriverFault::Present,
@@ -1240,6 +1438,12 @@ fn pending_capture_waits_are_cancelled_for_every_frame_driver_failure() {
         assert!(matches!(
             (frame_fault, error),
             (
+                DriverFault::Prepare,
+                RunnerError::FrameDriver {
+                    frame: 1,
+                    source: FrameDriverError::Prepare(_),
+                },
+            ) | (
                 DriverFault::Render,
                 RunnerError::FrameDriver {
                     frame: 1,

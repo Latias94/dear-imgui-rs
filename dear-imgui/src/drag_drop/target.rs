@@ -10,9 +10,16 @@ use crate::{Ui, sys};
 ///
 /// This struct is created by [`Ui::drag_drop_target`] and provides
 /// methods for accepting different types of payloads.
+///
+/// The target must finish after every nested drag-drop target and in its originating window
+/// `Begin` scope.
 #[derive(Debug)]
+#[must_use]
 #[doc(alias = "EndDragDropTarget")]
-pub struct DragDropTarget<'ui>(pub(super) &'ui Ui);
+pub struct DragDropTarget<'ui>(
+    pub(super) &'ui Ui,
+    pub(super) crate::scope::NativeScopeToken<'ui>,
+);
 
 impl<'ui> DragDropTarget<'ui> {
     /// Accept an empty payload
@@ -92,6 +99,11 @@ impl<'ui> DragDropTarget<'ui> {
     /// End the drag drop target
     ///
     /// This is called automatically when the token is dropped.
+    ///
+    /// # Panics
+    ///
+    /// Panics before FFI if a later drag-drop scope is active or this target is outside its
+    /// originating window `Begin` scope.
     pub fn pop(self) {
         // Drop will handle cleanup
     }
@@ -99,8 +111,6 @@ impl<'ui> DragDropTarget<'ui> {
 
 impl Drop for DragDropTarget<'_> {
     fn drop(&mut self) {
-        self.0.run_with_bound_context(|| unsafe {
-            sys::igEndDragDropTarget();
-        });
+        self.1.finish();
     }
 }

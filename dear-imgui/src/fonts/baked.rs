@@ -207,7 +207,10 @@ mod tests {
         let font = ctx
             .font_atlas()
             .add_font(&[crate::FontSource::default_font()]);
-        let _ = ctx.font_atlas().build();
+        ctx.font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
         ctx.io_mut().set_display_size([128.0, 128.0]);
         ctx.io_mut().set_delta_time(1.0 / 60.0);
         (ctx, font)
@@ -251,8 +254,8 @@ mod tests {
     #[test]
     fn managed_atlas_can_create_an_arbitrary_baked_size_in_frame() {
         let mut ctx = crate::Context::create();
-        let _consumer = ctx
-            .create_renderer_consumer()
+        let consumer = ctx
+            .create_synchronous_renderer_consumer()
             .expect("the managed renderer consumer should attach");
         let font_id = ctx
             .font_atlas()
@@ -270,7 +273,7 @@ mod tests {
             assert_eq!(baked.size(), 18.0);
             assert_eq!(baked.rasterizer_density(), 2.0);
         }
-        let _ = ctx.render();
+        let _ = ctx.render(&consumer);
     }
 
     #[test]

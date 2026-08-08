@@ -11,6 +11,8 @@ create_token!(
     /// official Dear ImGui API.
     pub struct HorizontalStackLayoutToken<'ui>;
 
+    pop crate::scope::NativeScopePop::EndHorizontal;
+
     /// Ends the stack-layout horizontal group.
     drop { unsafe { sys::ImGuiStack_EndHorizontal() } }
 );
@@ -23,6 +25,8 @@ create_token!(
     /// official Dear ImGui API.
     pub struct VerticalStackLayoutToken<'ui>;
 
+    pop crate::scope::NativeScopePop::EndVertical;
+
     /// Ends the stack-layout vertical group.
     drop { unsafe { sys::ImGuiStack_EndVertical() } }
 );
@@ -30,6 +34,8 @@ create_token!(
 create_token!(
     /// Tracks a suspended stack layout and resumes it on drop.
     pub struct StackLayoutSuspensionToken<'ui>;
+
+    pop crate::scope::NativeScopePop::ResumeLayout;
 
     /// Resumes a suspended stack layout.
     drop { unsafe { sys::ImGuiStack_ResumeLayout() } }

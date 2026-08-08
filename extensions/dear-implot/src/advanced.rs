@@ -508,7 +508,11 @@ mod tests {
 
     fn setup_context() -> (dear_imgui_rs::Context, PlotContext) {
         let mut imgui = dear_imgui_rs::Context::create();
-        let _ = imgui.font_atlas().build();
+        imgui
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("headless test requires the legacy font-atlas capability")
+            .build();
         imgui.io_mut().set_display_size([256.0, 256.0]);
         imgui.io_mut().set_delta_time(1.0 / 60.0);
         let plot = PlotContext::create(&imgui);

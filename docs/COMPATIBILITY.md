@@ -114,14 +114,15 @@ is deliberately outside this table: it has no prebuilt or WASM route and always
 enables the source-built core hooks.
 
 Each Context owns its managed texture allocations and permits one non-cloneable
-`RendererConsumer` generation. Synchronous renderers consume a
-`RenderedFrame<'ctx>` by value, reconcile request-bound `TextureFeedback`, and
-read its draw data only while the Context borrow is active. Threaded or render-
-graph integrations move one pointer-free, non-cloneable `FrameSnapshot` across
-the boundary and consume it with `FrameSnapshot::commit`; dropping it records
-an abandoned epoch rather than acknowledging destroy requests. Managed texture
-retirement completes only after matching-generation destroy feedback and the
-ordered completion watermark both permit reclamation.
+renderer-consumer generation. Synchronous renderers retain a
+`SynchronousRendererConsumer`, consume a `PendingFrame<'ctx>`, return exactly one
+request-bound outcome for every texture request, and receive the drawable
+`ReconciledFrame<'ctx>`. Threaded or render-graph integrations retain a
+`DetachedRendererConsumer`, move one pointer-free, non-cloneable `FrameSnapshot`
+across the boundary, and consume it with `FrameSnapshot::commit`; dropping it
+records an abandoned epoch rather than acknowledging destroy requests. Managed
+texture retirement completes only after matching-generation destroy feedback
+and the ordered completion watermark both permit reclamation.
 
 Renderer resource maps keep a tombstone for every accepted Destroy identity
 until a complete idle-consumer reset succeeds. A late Create or Update for a
@@ -153,6 +154,83 @@ detachment sequence. Main viewport checks use `Viewport::is_main()` rather than
 an exported numeric ID.
 
 The Bevy backend applies the same ownership model across the engine boundary. A main-thread registry serially drives App-owned private Context passes; each pass injects a lifetime-bound `ImguiFrame<'_, P>` that cannot be installed in an ordinary Bevy schedule. Frame mailboxes, extracted snapshots, render routes, input capture, renderer generations, managed textures, diagnostics, and native viewport state remain keyed by `ContextId`. Render and input routes are separate declarations, so image targets never acquire window input implicitly. Each frame snapshot carries the immutable route epoch and viewport metrics used to create it, while cursor and IME feedback are arbitrated by Context input ownership. Context retirement waits for both RenderWorld and ECS acknowledgements; `Drop` only transfers complete owners into an app-local retirement queue and never reaches into another Bevy world.
+
+### 0.16 alpha.2 public API disposition
+
+The following ledger is the release target for provisional 0.16 APIs. `keep` preserves the public
+concept, `rename` gives an existing concept a lifecycle-accurate name, `replace` removes a misleading
+contract in favor of the listed one, `unsafe` deliberately retains an explicit native prerequisite,
+and `delete` removes a surface whose safe contract cannot be upheld. Provisional alpha APIs do not
+receive compatibility aliases unless the ledger explicitly says otherwise.
+
+| Area | Provisional or current surface | Disposition | Alpha.2 contract |
+| --- | --- | --- | --- |
+| Synchronous frame | `RenderedFrame<'ctx>` exposes draw data before reconciliation | rename + replace | `PendingFrame<'ctx>` owns the unresolved request lease and exposes no draw data. Reconciliation consumes it and returns `ReconciledFrame<'ctx>`, the only drawable capability. No alias is retained. |
+| Reconciled frame | `ReconciledFrame` is only completion proof | keep + strengthen | It owns the frame's Context borrow and draw-data access after successful request-bound reconciliation. |
+| Renderer consumer | One `RendererConsumer` selects synchronous or detached mode on first use | replace | Separate `SynchronousRendererConsumer` and `DetachedRendererConsumer` capabilities are selected when created. A generation cannot change modes, and the old type is deleted without an alias. |
+| Detached snapshot | `FrameSnapshot::commit` permits omitted request outcomes and defers some validation | keep + replace contract | Every snapshot request receives exactly one `uploaded`, `destroyed`, `superseded`, or `retry` outcome. Snapshot-local duplicate, foreign, and malformed outcomes fail at submission; remaining Context-state failures use a fallible completion path. |
+| Renderer reset | `RendererTextureReset` is a two-phase permit whose `commit` count is routinely ignored | keep + replace result | Preparation remains fallible and inert when dropped. Successful `commit` returns `()` unless a future result carries an actionable state. |
+| Context activation | `Context::suspend` is infallible, `SuspendedContext::activate` returns only the owner on failure, and `try_with_active` returns `E` directly | replace | Suspension and activation return owner-retaining typed errors. Scoped activation returns `ScopedActivationError<E>`, separating `ContextScopeError` from `Closure(E)` and cleaning up a left-open frame. Explicit `*_or_panic` methods preserve the old convenience semantics. |
+| Direct draw state | `DrawListTextNoPixelSnapToken` assumes stack-like drop order for directly restored state | delete | `with_text_no_pixel_snap` is the public scope and uses a private guard that remains correct for every Safe Rust drop order. |
+| Native stack scopes | Table, style, font, clip, and other native push/pop tokens; public table channel tokens; unreachable window guard exports | keep selectively | Retained tokens validate per-resource LIFO order plus exact Context, frame, window `Begin`, table instance, and table-cell provenance before FFI. `StyleVar::Alpha` and effective disabled scopes share a restoration-order contract, and a table cannot end while a scope created inside it remains active. Table channels and window/child guards are closure-only; `main_menu_bar`, `menu_bar`, `with_disabled`, and related closure helpers are the canonical teaching path. Low-level table parity remains, with every phase-dependent panic documented. |
+| Texture pixels | `OwnedTextureData::new` plus `create` / `set_data`, public metadata/pixel-storage mutation, and `ManagedTextureMut::set_data` permit partially initialized or truncating updates | replace | Construct with `OwnedTextureData::from_pixels`; use `replace_pixels` for exact full replacement and `TextureRegion` plus `TextureSubresource` for explicit strided updates. `Context::try_with_texture_mut` returns `ManagedTextureMutationError`, separating `ManagedTextureError` access failures from `TextureDataError` validation failures. Manual metadata setters and `destroy_pixels` are no longer safe public operations. Each mutation call is atomic; an earlier successful call remains applied and advances the revision even if a later call in the same closure fails. |
+| Font atlas | One atlas surface mixes managed texture ownership with legacy renderer-built operation | replace | Managed and legacy capabilities are distinct. Safe owned font data exists only for a loader-bound, format-bounded path with a proven read contract; borrowed bytes, compressed data, custom loaders, and unproven parser combinations remain unsafe. |
+| Docking identity | Display strings also act as persistent window and docking identity | replace | `WindowKey` separates the displayed title from the stable Dear ImGui identity, and one `DockspaceBuilder` owns the normal dockspace configuration path. |
+| WGPU viewport frames | Context-finalizing `render_context*` aliases and separately coordinated trace/prepared state | delete + replace | One route-owned prepared viewport-frame transaction reconciles textures, dispatches secondary viewports, and aggregates faults before yielding the main-frame capability. Main-surface acquisition, submission, and presentation remain application-owned. |
+| Ash viewport frames | Separately coordinated trace, prepared state, fault report, and retirement state | replace | One prepared viewport-frame transaction preserves command-buffer lineage and carries retirement state until a covering fence is acknowledged. Unsafe command recording and attachment remain explicit. |
+| Glow lifecycle | Public `new_frame` plus inconsistent owned/external teardown names | delete + rename | Rendering recreates lost renderer objects transactionally while the required GL context is current. Owned teardown is `shutdown`; external-context variants keep names and safety text that expose current-context and share-group requirements. |
+| Winit platform ownership | Normal multi-viewport use coordinates a base platform and a separate runtime | replace | One attached platform owner can be upgraded into viewport ownership and lends event-loop-scoped operations without `Option::take` choreography. `ActiveEventLoop` scope remains explicit. |
+| SDL3 callback handoff | Example code owns callback payload copying and deferred delivery | replace + unsafe | `dear-imgui-sdl3` owns all backend-consumed pointer-bearing payloads and deferred faults. One raw enqueue boundary remains unsafe because SDL lends the event union only for the callback duration. |
+| `dear-app` entry levels | `run_ui` or the full `Application` trait | keep + add | `run_ui` remains the smallest adapter. A fallible, exit-capable `FrameContext` closure is the middle level, and `Application` remains the full lifecycle level. Exit is control flow; the first actual error remains primary and shutdown runs exactly once. |
+| Bevy installation | Configuration validation occurs through `Plugin::build` | keep + add | `ImguiAppExt::try_install_imgui` is the App-aware fallible transaction. `ImguiPlugin` remains an explicit panic convenience adapter over the same validation. |
+| Bevy retirement | Applications retry synchronous `ImguiContexts::remove` each frame | replace | The existing retirement queue owns asynchronous removal and emits one Context-generation-keyed completion. The synchronous escape hatch is renamed to state its retry semantics. |
+| Host configuration | `AppConfig`, `ImguiPluginConfig`, `ImguiContextConfig`, and platform/backend configuration | keep separate | Types remain host-specific until ownership, defaults, and failure behavior are genuinely identical. Only lossless conversions are added. |
+
+### Context activation and scoped-state migration
+
+Context ownership failures now preserve both the owner and the reason at the operation that failed:
+
+| Alpha.1 flow | Alpha.2 flow | New failure or cleanup state |
+| --- | --- | --- |
+| `let suspended = context.suspend();` | `let suspended = context.suspend()?;` or `context.suspend_or_panic()` | `ContextSuspensionError` retains the active owner; use `reason`, `into_owner`, or `into_parts` to repair and retry. |
+| `let context = suspended.activate().map_err(|owner| ...)?;` | `let context = suspended.activate()?;` or `suspended.activate_or_panic()` | `ContextActivationError` retains the suspended owner and a `ContextActivationReason`. |
+| `suspended.try_with_active(|context| operation(context))?` where the error was `E` | Match `ScopedActivationError::Closure(E)` separately from `ScopedActivationError::Scope(ContextScopeError)` | Admission conflicts do not run the closure. A successful closure that leaves a frame open is cleaned up and reported as `ContextScopeError::FrameLeftOpen`; closure errors and panics also close a left-open frame before propagation. |
+
+Safe native scopes now reject mismatched resource order or provenance before calling Dear ImGui. Style, font, item-flag, ID/tree, focus/multi-select, window-like, table, clip, and draw-list texture stacks are tracked independently where the native stacks are independent, while operations that share an upstream stack share one Rust ordering contract. Window-local tokens must finish in the exact frame and `Begin` instance that created them; table operations additionally retain table instance, row, and column provenance. Additive indentation is not treated as a false LIFO stack: same-window tokens may finish in any order, while cross-window cleanup waits until the source window is current.
+
+| Removed or discouraged surface | Canonical replacement |
+| --- | --- |
+| `DrawListTextNoPixelSnapToken` | `DrawListMut::with_text_no_pixel_snap` |
+| `TableBackgroundChannelToken` / `TableColumnChannelToken` | `Ui::with_table_background_channel` / `Ui::with_table_column_channel` |
+| `WindowToken` / `ChildWindowToken` names that had no public constructor | `Window::build` / `ChildWindow::build` |
+| Manual main-menu-bar, menu-bar, or disabled token pairing | `Ui::main_menu_bar`, `Ui::menu_bar`, `Ui::with_disabled`, or `Ui::with_disabled_if` |
+| Borrowed table-sort view | Owned `TableSortSpecs`; call `clear_dirty(&ui)` only while its source table is current |
+
+The canonical multi-Context example and focused scope tests are reproducible with serial Cargo commands:
+
+```powershell
+cargo run -j 1 -p dear-imgui-examples --bin multi_context_switch
+cargo nextest run -j 1 -p dear-imgui-rs --test style_boundaries
+cargo nextest run -j 1 -p dear-imgui-rs --test layout_scroll_boundaries
+```
+
+### Lifecycle and ownership axes
+
+These states are deliberately orthogonal; they are not collapsed into one cross-crate enum. Each
+axis has one owner, and failure either rolls back to the listed retry state or transfers cleanup to
+the listed terminal owner.
+
+| Axis | Contract states | Unique owner and legal transition | Failure, retry, and terminal responsibility | Characterization evidence |
+| --- | --- | --- | --- | --- |
+| Native Context | `Alive -> Dropping -> NativeDestroyed` | `Context` owns the native allocation until teardown transfers only bounded cleanup capabilities to attachments. | Teardown is ordered and idempotent. After `NativeDestroyed`, no owner may dereference the old native pointer. | `dear-imgui/src/context/tests.rs` attachment and teardown tests |
+| Context activation | `Suspended <-> Active`, with a scoped bound overlay | The owning Context or suspension error retains the allocation; a bound scope restores the exact previously active Context. | Foreign-active and open-frame conflicts return ownership and a typed reason; panic adapters must not be the only route. | Context binding and suspension tests in `dear-imgui/src/context/tests.rs` |
+| Synchronous frame | `Idle -> InFrame -> PendingFrame -> ReconciledFrame -> Completed`, plus `Abandoned` | The Context frame borrow and synchronous consumer generation jointly own the epoch. Only reconciliation transfers pending work into drawable proof. | Dropping before reconciliation abandons the epoch and cannot enter renderer or platform callbacks. | `dear-imgui/tests/frame_lifecycle.rs` |
+| Detached frame | `Snapshot -> Submitted -> Applied -> Drained`, plus `Abandoned` | A move-only snapshot owns one epoch until exactly one completion submission or drop. The Context applies submissions in generation order. | Invalid local outcomes reject submission; retries are reissued, superseded work advances without mutation, and reset waits for the completion watermark. | `dear-imgui/tests/snapshot_contract.rs` |
+| Renderer consumer generation | `Absent -> ActiveSync` or `ActiveDetached -> Draining -> ResetPrepared -> Released` | One non-cloneable generation capability owns all request and feedback identities. Sync and detached modes are nominally distinct. | Dropping an uncommitted reset permit is inert. Outstanding epochs keep the generation draining and block replacement. | `frame_lifecycle.rs` reset tests and `snapshot_contract.rs` draining/watermark tests |
+| Attachment graph | `PlatformAttached -> RendererAttached -> ReleasePrepared -> RendererReleased -> PlatformReleased -> Detached` | The Context owns the graph; typed platform and renderer runtimes own their respective attachment leases. | Renderer attachment blocks platform release. Failed preparation or teardown preserves the still-owned runtime for retry; Context-first teardown follows the same order. | Winit, SDL3, WGPU, Glow, and Ash lifecycle tests |
+| Backend runtime | `Constructing -> Attached -> ShuttingDown -> Detached -> ResourceDropped` | The owning backend runtime publishes callbacks only after validation and retains callback-visible storage at a stable address. | Partial attach rolls back and returns the renderer where ownership was transferred. The first terminal contract fault is sticky through shutdown. | Backend multi-viewport contract tests; Ash attach-owner test |
+| `dear-app` GPU generation | `Running(g) -> Recovering(g) -> Running(g+1)`, or `Failed -> Shutdown` | The runtime owns the main surface and GPU generation; application and ImGui Context identity survive recovery. | Old generation handles remain invalid. First real failure stays primary; shutdown runs once and is primary only when no earlier failure exists. | `dear-app/src/runtime/runner_tests.rs` and admission tests |
+| Bevy Context retirement | `Ready -> Driving -> Teardown -> AwaitRenderWorld/AwaitViewportEcs -> Complete` | The main-world registry and existing `ImguiContextRetirements` queue own the Context generation until both worlds acknowledge it. | Acknowledgements may arrive in either order. Completion is generation-keyed and emitted once; `Drop` transfers ownership to retirement instead of destroying cross-world state. | `backends/dear-imgui-bevy/src/context/tests/lifecycle.rs` |
 
 ### PlatformIO callback ABI
 

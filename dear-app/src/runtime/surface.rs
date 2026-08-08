@@ -1,9 +1,9 @@
 //! WGPU surface admission, rendering, presentation, and retry settlement.
 
-use dear_imgui_rs::render::{ReconciledFrame, RenderedFrame};
-use dear_imgui_rs::{DockNodeFlags, Id, WindowFlags};
+use dear_imgui_rs::render::ReconciledFrame;
+use dear_imgui_rs::{DockNodeFlags, FrameToken, WindowFlags};
 #[cfg(feature = "test-engine")]
-use dear_imgui_test_engine::TestFrameDriver;
+use dear_imgui_test_engine::{FrameDriveOutcome, MainRenderOutcome, TestFrameDriver};
 
 use super::admission::{
     SurfaceAcquisition, SurfaceAdmissionBackend, SurfaceDispatch, admit_surface_frame,
@@ -14,7 +14,8 @@ use super::ownership::RuntimeOwnership;
 use super::recovery::RuntimeGenerations;
 use super::state::{RuntimeGeneration, UiState, WindowState};
 use crate::{
-    AddOns, AppConfig, Application, DockingApi, FrameContext, PrepareFrameContext, RunError,
+    AddOns, AppConfig, Application, ApplicationStage, DockingApi, FrameContext,
+    PrepareFrameContext, RunError,
 };
 
 struct RuntimeSurfaceAdmission<'a> {
@@ -95,10 +96,21 @@ impl<'a> AdmittedWgpuFrameDriver<'a> {
         }
     }
 
-    fn render_frame<'frame>(
+    fn prepare_frame<'frame>(
         &mut self,
-        frame: RenderedFrame<'frame>,
+        frame: FrameToken<'frame>,
     ) -> Result<ReconciledFrame<'frame>, RunError> {
+        let pending = frame.render(
+            self.renderer
+                .renderer_consumer()
+                .map_err(RunError::Render)?,
+        );
+        self.renderer
+            .reconcile_frame(pending)
+            .map_err(RunError::Render)
+    }
+
+    fn render_main_frame(&mut self, frame: ReconciledFrame<'_>) -> Result<(), RunError> {
         if self.rendered {
             return Err(RunError::Recovery {
                 message: "admitted surface frame was rendered more than once".to_owned(),
@@ -110,6 +122,8 @@ impl<'a> AdmittedWgpuFrameDriver<'a> {
             .ok_or_else(|| RunError::Recovery {
                 message: "admitted surface frame was consumed before rendering".to_owned(),
             })?;
+        let framebuffer_extent =
+            dear_imgui_wgpu::FramebufferExtent::from_texture(&surface_frame.texture);
         let view = surface_frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -118,7 +132,7 @@ impl<'a> AdmittedWgpuFrameDriver<'a> {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Dear App render encoder"),
             });
-        let reconciled = {
+        {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Dear App render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -136,12 +150,12 @@ impl<'a> AdmittedWgpuFrameDriver<'a> {
                 multiview_mask: None,
             });
             self.renderer
-                .render_reconciled(frame, &mut render_pass)
-                .map_err(RunError::Render)?
-        };
+                .render_reconciled(frame, &mut render_pass, framebuffer_extent)
+                .map_err(RunError::Render)?;
+        }
         self.queue.submit(Some(encoder.finish()));
         self.rendered = true;
-        Ok(reconciled)
+        Ok(())
     }
 
     fn present_frame(&mut self) -> Result<(), RunError> {
@@ -168,15 +182,30 @@ impl<'a> AdmittedWgpuFrameDriver<'a> {
 
 #[cfg(feature = "test-engine")]
 impl TestFrameDriver for AdmittedWgpuFrameDriver<'_> {
+    type PreparedFrame<'frame> = ReconciledFrame<'frame>;
+    type PrepareError = RunError;
     type RenderError = RunError;
     type PresentError = RunError;
 
-    fn render<'frame>(
+    fn prepare<'frame>(
         &mut self,
-        frame: RenderedFrame<'frame>,
+        frame: FrameToken<'frame>,
         _frame_index: u64,
-    ) -> Result<ReconciledFrame<'frame>, Self::RenderError> {
-        self.render_frame(frame)
+    ) -> Result<Self::PreparedFrame<'frame>, Self::PrepareError> {
+        self.prepare_frame(frame)
+    }
+
+    fn prepared_context_id(frame: &Self::PreparedFrame<'_>) -> dear_imgui_rs::ContextId {
+        frame.context_id()
+    }
+
+    fn render_main(
+        &mut self,
+        frame: Self::PreparedFrame<'_>,
+        _frame_index: u64,
+    ) -> Result<MainRenderOutcome, Self::RenderError> {
+        self.render_main_frame(frame)?;
+        Ok(MainRenderOutcome::ReadyToPresent)
     }
 
     fn present(&mut self, _frame_index: u64) -> Result<(), Self::PresentError> {
@@ -186,24 +215,32 @@ impl TestFrameDriver for AdmittedWgpuFrameDriver<'_> {
 
 fn drive_admitted_frame<A: Application>(
     application: &mut A,
-    rendered: RenderedFrame<'_>,
+    frame: FrameToken<'_>,
     frame_index: u64,
     driver: &mut AdmittedWgpuFrameDriver<'_>,
 ) -> Result<(), RunError> {
     #[cfg(feature = "test-engine")]
     if let Some(engine) = application.test_engine() {
-        return engine
-            .drive_frame(rendered, frame_index, driver)
+        return match engine
+            .drive_frame(frame, frame_index, driver)
             .map_err(|source| RunError::TestEngineFrame {
                 frame: frame_index,
                 source: Box::new(source),
-            });
+            })? {
+            FrameDriveOutcome::Presented => Ok(()),
+            FrameDriveOutcome::Skipped => Err(RunError::Recovery {
+                message: "an admitted surface frame was unexpectedly skipped".to_owned(),
+            }),
+            _ => Err(RunError::Recovery {
+                message: "Test Engine returned an unsupported frame-drive outcome".to_owned(),
+            }),
+        };
     }
 
     #[cfg(not(feature = "test-engine"))]
     let _ = (application, frame_index);
-    let reconciled = driver.render_frame(rendered)?;
-    drop(reconciled);
+    let reconciled = driver.prepare_frame(frame)?;
+    driver.render_main_frame(reconciled)?;
     driver.present_frame()
 }
 
@@ -255,14 +292,16 @@ pub(super) fn render_surface_frame<A: Application>(
                 imgui: context,
                 window: &window.window,
             };
-            application.prepare_frame(&mut prepare_frame)?;
+            application
+                .prepare_frame(&mut prepare_frame)
+                .map_err(|error| error.during_application_stage(ApplicationStage::PrepareFrame))?;
             super::state::validate_supported_imgui_config(context)?;
             platform
                 .prepare_frame(context, &window.window)
                 .map_err(|error| super::state::platform_error("Winit frame preparation", error))?;
             let mut exit_requested = false;
-            let draw_data = build_and_render_frame(context, |ui| {
-                draw_dockspace(ui, docking.flags, config);
+            let frame = build_frame(context, |ui| {
+                draw_dockspace(ui, docking.flags, config)?;
                 let addons = AddOns {
                     #[cfg(feature = "implot")]
                     implot: implot.as_ref(),
@@ -280,7 +319,9 @@ pub(super) fn render_surface_frame<A: Application>(
                     gpu: generation.api(),
                     exit_requested: &mut exit_requested,
                 };
-                application.frame(&mut frame)?;
+                application
+                    .frame(&mut frame)
+                    .map_err(|error| error.during_application_stage(ApplicationStage::Frame))?;
                 platform
                     .prepare_render(ui, &window.window)
                     .map_err(|error| {
@@ -304,7 +345,7 @@ pub(super) fn render_surface_frame<A: Application>(
                 admitted.frame,
                 clear_color,
             );
-            let result = drive_admitted_frame(application, draw_data, frame_index, &mut driver);
+            let result = drive_admitted_frame(application, frame, frame_index, &mut driver);
             let was_presented = driver.was_presented();
             drop(driver);
             settle_surface_presentation(result, was_presented, reconfigure_after_present, || {
@@ -315,18 +356,22 @@ pub(super) fn render_surface_frame<A: Application>(
     Ok(dispatch)
 }
 
-pub(super) fn build_and_render_frame<'ctx>(
+pub(super) fn build_frame<'ctx>(
     context: &'ctx mut dear_imgui_rs::Context,
     build: impl FnOnce(&dear_imgui_rs::Ui) -> Result<(), RunError>,
-) -> Result<dear_imgui_rs::render::RenderedFrame<'ctx>, RunError> {
+) -> Result<FrameToken<'ctx>, RunError> {
     let frame = context.begin_frame();
     build(frame.ui())?;
-    Ok(frame.render())
+    Ok(frame)
 }
 
-fn draw_dockspace(ui: &dear_imgui_rs::Ui, flags: DockNodeFlags, config: &AppConfig) {
+fn draw_dockspace(
+    ui: &dear_imgui_rs::Ui,
+    flags: DockNodeFlags,
+    config: &AppConfig,
+) -> Result<(), RunError> {
     let Some((host_window_name, mut window_flags)) = config.docking.full_viewport_host() else {
-        return;
+        return Ok(());
     };
 
     let viewport = ui.main_viewport();
@@ -334,11 +379,18 @@ fn draw_dockspace(ui: &dear_imgui_rs::Ui, flags: DockNodeFlags, config: &AppConf
     if flags.contains(DockNodeFlags::PASSTHRU_CENTRAL_NODE) {
         window_flags |= WindowFlags::NO_BACKGROUND;
     }
+    let mut dockspace_result = Ok(());
     ui.window(host_window_name)
         .flags(window_flags)
         .position(viewport.pos(), dear_imgui_rs::Condition::Always)
         .size(viewport.size(), dear_imgui_rs::Condition::Always)
         .build(|| {
-            let _ = ui.dockspace_over_main_viewport_with_flags(Id::from(0_u32), flags);
+            dockspace_result = ui
+                .dockspace()
+                .flags(flags)
+                .build()
+                .map(|_| ())
+                .map_err(RunError::Dockspace);
         });
+    dockspace_result
 }

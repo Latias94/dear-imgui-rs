@@ -362,7 +362,7 @@ impl Viewport {
     ///
     /// The pointer may be null and is invalidated by later Dear ImGui frame or viewport work.
     /// Custom renderers must dereference it only inside the render operation that obtained this
-    /// viewport. Prefer a renderer-owned [`crate::render::RenderedFrame`] or
+    /// viewport. Prefer a renderer-owned [`crate::render::ReconciledFrame`] or
     /// [`crate::render::FrameSnapshot`] in application code.
     #[cfg(feature = "multi-viewport")]
     pub fn draw_data(&self) -> *mut sys::ImDrawData {

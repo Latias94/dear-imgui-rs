@@ -390,7 +390,7 @@ impl FromWorld for ImguiPipelineGpuResources {
             usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        write_texture_rows(
+        assert!(write_texture_rows(
             render_queue,
             &fallback_texture,
             Origin3d::ZERO,
@@ -398,7 +398,7 @@ impl FromWorld for ImguiPipelineGpuResources {
             1,
             4,
             &[255, 255, 255, 255],
-        );
+        ));
         let fallback_view = fallback_texture.create_view(&TextureViewDescriptor::default());
         let fallback_bind_group = create_texture_sampler_bind_group(
             render_device,
@@ -1091,13 +1091,22 @@ impl ImguiExtractedRenderFrame {
         }
     }
 
-    pub(super) fn commit_all(&mut self) {
-        for frame in self.frames.values_mut() {
+    pub(super) fn commit_all(
+        &mut self,
+    ) -> Vec<(
+        imgui::ContextId,
+        imgui::render::snapshot::SnapshotCommitError,
+    )> {
+        let mut errors = Vec::new();
+        for (context_id, frame) in &mut self.frames {
             let feedback = std::mem::take(&mut frame.texture_feedback);
-            if let Some(snapshot) = frame.snapshot.take() {
-                let _ = snapshot.commit(feedback);
+            if let Some(snapshot) = frame.snapshot.take()
+                && let Err(source) = snapshot.commit(feedback)
+            {
+                errors.push((*context_id, source));
             }
         }
+        errors
     }
 
     pub(super) fn has_pending_snapshots(&self) -> bool {

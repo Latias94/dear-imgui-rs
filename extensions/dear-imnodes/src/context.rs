@@ -232,8 +232,8 @@ struct MiniMapCallbackHolder<'a> {
 mod tests {
     use super::{Context as ImNodesContext, EditorContext, ImNodesScope, sys};
     use crate::ImNodesExt;
+    use dear_imgui_rs::Context as ImGuiContext;
     use dear_imgui_rs::sys as imgui_sys;
-    use dear_imgui_rs::{BackendFlags, Context as ImGuiContext};
     use std::cell::{Cell, RefCell};
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::ptr;
@@ -252,7 +252,11 @@ mod tests {
         let io = imgui.io_mut();
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
-        io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_TEXTURES);
+        imgui
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("headless test requires the legacy font-atlas capability")
+            .build();
     }
 
     #[test]
@@ -339,7 +343,7 @@ mod tests {
             editor_raw: Some(raw_editor_a),
             _editor_lease: Some(editor_a.inner.clone()),
         };
-        let suspended_a = imgui_a.suspend();
+        let suspended_a = imgui_a.suspend_or_panic();
 
         let mut imgui_b = ImGuiContext::create();
         prepare_imgui(&mut imgui_b);
@@ -407,7 +411,7 @@ mod tests {
         prepare_imgui(&mut imgui_a);
         let nodes_a = ImNodesContext::create(&imgui_a);
         let editor_a = nodes_a.create_editor_context();
-        let suspended_a = imgui_a.suspend();
+        let suspended_a = imgui_a.suspend_or_panic();
 
         let mut imgui_b = ImGuiContext::create();
         prepare_imgui(&mut imgui_b);
@@ -488,7 +492,7 @@ mod tests {
         let mut imgui_a = ImGuiContext::create();
         prepare_imgui(&mut imgui_a);
         let nodes = ImNodesContext::create(&imgui_a);
-        let suspended_a = imgui_a.suspend();
+        let suspended_a = imgui_a.suspend_or_panic();
 
         let mut imgui_b = ImGuiContext::create();
         prepare_imgui(&mut imgui_b);

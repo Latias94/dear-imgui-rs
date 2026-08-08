@@ -187,6 +187,10 @@ pub(super) fn prepare_imgui_texture_bind_groups(
         params.render_queue,
         params.pipeline_cache,
     ) else {
+        retry_or_abandon_extracted_texture_requests(
+            &mut params.extracted,
+            &params.renderer_releases,
+        );
         retain_extracted_bevy_image_bindings(
             &params.extracted_bevy_textures,
             &mut texture_bind_groups,
@@ -207,6 +211,7 @@ pub(super) fn prepare_imgui_texture_bind_groups(
     context_ids.sort_by_key(|context_id| context_id.get().get());
     for context_id in context_ids {
         if params.renderer_releases.release_requested(context_id) {
+            params.extracted.remove_context(context_id);
             continue;
         }
         let mut texture_feedback = Vec::new();
@@ -218,6 +223,7 @@ pub(super) fn prepare_imgui_texture_bind_groups(
             if !matches!(request.operation(), imgui::render::TextureOp::Destroy)
                 && !texture_bind_groups.accepts_managed_texture_upload(snapshot_texture)
             {
+                texture_feedback.push(request.superseded());
                 continue;
             }
             match request.operation() {
@@ -229,6 +235,7 @@ pub(super) fn prepare_imgui_texture_bind_groups(
                     pixels,
                 } => {
                     if !validate_managed_texture_extent(&render_device, *width, *height) {
+                        texture_feedback.push(request.retry());
                         continue;
                     }
                     if let Some(render_texture) = create_imgui_render_texture(
@@ -249,9 +256,10 @@ pub(super) fn prepare_imgui_texture_bind_groups(
                             TextureBinding::Managed(snapshot_texture),
                             render_texture,
                         );
-                        if let Ok(feedback) = request.uploaded(tex_id) {
-                            texture_feedback.push(feedback);
-                        }
+                        texture_feedback
+                            .push(request.uploaded(tex_id).unwrap_or_else(|_| request.retry()));
+                    } else {
+                        texture_feedback.push(request.retry());
                     }
                 }
                 imgui::render::TextureOp::Update {
@@ -261,53 +269,61 @@ pub(super) fn prepare_imgui_texture_bind_groups(
                     rects,
                 } => {
                     if !validate_managed_texture_extent(&render_device, *width, *height) {
+                        texture_feedback.push(request.retry());
                         continue;
                     }
-                    if let Some(render_texture) = texture_bind_groups
+                    let Some(render_texture) = texture_bind_groups
                         .textures
                         .get(&TextureBinding::Managed(snapshot_texture))
-                    {
-                        let Some(texture_extent) = render_texture.extent else {
-                            continue;
-                        };
-                        if texture_extent != [*width, *height] {
-                            continue;
-                        }
-                        let Some(texture) = render_texture.texture.as_ref() else {
-                            continue;
-                        };
-                        let Some(updates) =
-                            convert_imgui_texture_update_rects(*format, *width, *height, rects)
-                        else {
-                            continue;
-                        };
-                        for update in updates {
-                            write_texture_rows(
-                                &render_queue,
-                                texture,
-                                update.origin,
-                                update.width,
-                                update.height,
-                                update.row_pitch,
-                                &update.pixels,
-                            );
-                        }
-                        if let Some(texture_id) = texture_bind_groups
-                            .managed_texture_ids
-                            .get(&snapshot_texture)
-                            .copied()
-                            && let Ok(feedback) = request.uploaded(texture_id)
-                        {
-                            texture_feedback.push(feedback);
-                        }
+                    else {
+                        texture_feedback.push(request.retry());
+                        continue;
+                    };
+                    let Some(texture_extent) = render_texture.extent else {
+                        texture_feedback.push(request.retry());
+                        continue;
+                    };
+                    if texture_extent != [*width, *height] {
+                        texture_feedback.push(request.retry());
+                        continue;
                     }
+                    let Some(texture) = render_texture.texture.as_ref() else {
+                        texture_feedback.push(request.retry());
+                        continue;
+                    };
+                    let Some(updates) =
+                        convert_imgui_texture_update_rects(*format, *width, *height, rects)
+                    else {
+                        texture_feedback.push(request.retry());
+                        continue;
+                    };
+                    let uploaded = updates.into_iter().all(|update| {
+                        write_texture_rows(
+                            &render_queue,
+                            texture,
+                            update.origin,
+                            update.width,
+                            update.height,
+                            update.row_pitch,
+                            &update.pixels,
+                        )
+                    });
+                    if !uploaded {
+                        texture_feedback.push(request.retry());
+                        continue;
+                    }
+                    let feedback = texture_bind_groups
+                        .managed_texture_ids
+                        .get(&snapshot_texture)
+                        .copied()
+                        .and_then(|texture_id| request.uploaded(texture_id).ok())
+                        .unwrap_or_else(|| request.retry());
+                    texture_feedback.push(feedback);
                 }
                 imgui::render::TextureOp::Destroy => {
                     texture_bind_groups
                         .destroy_managed_texture(snapshot_texture, snapshot.epoch().sequence());
-                    if let Ok(feedback) = request.destroyed() {
-                        texture_feedback.push(feedback);
-                    }
+                    texture_feedback.push(request.destroyed().unwrap_or_else(|_| request.retry()));
                 }
             }
         }
@@ -329,6 +345,30 @@ pub(super) fn prepare_imgui_texture_bind_groups(
         &params.extracted_bevy_textures,
         unavailable_images,
     );
+}
+
+fn retry_or_abandon_extracted_texture_requests(
+    extracted: &mut ImguiExtractedRenderFrame,
+    renderer_releases: &ImguiRendererReleases,
+) {
+    let context_ids = extracted.context_ids().collect::<Vec<_>>();
+    for context_id in context_ids {
+        if renderer_releases.release_requested(context_id) {
+            extracted.remove_context(context_id);
+            continue;
+        }
+        let feedback = extracted
+            .snapshot(context_id)
+            .map(|snapshot| {
+                snapshot
+                    .texture_requests()
+                    .iter()
+                    .map(imgui::render::snapshot::TextureRequest::retry)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        extracted.extend_texture_feedback(context_id, feedback);
+    }
 }
 
 pub(super) fn release_imgui_renderer_resources(
@@ -355,6 +395,7 @@ pub(super) fn release_imgui_renderer_resources(
 }
 
 pub(super) fn commit_imgui_render_frame(
+    snapshot_mailbox: Res<crate::context::ImguiFrameMailbox>,
     mut extracted: ResMut<ImguiExtractedRenderFrame>,
     mut texture_bind_groups: ResMut<ImguiTextureBindGroups>,
 ) {
@@ -362,7 +403,9 @@ pub(super) fn commit_imgui_render_frame(
         .context_ids()
         .map(|context_id| (context_id, extracted.completion_watermark(context_id)))
         .collect::<HashMap<_, _>>();
-    extracted.commit_all();
+    for (context_id, source) in extracted.commit_all() {
+        snapshot_mailbox.record_snapshot_commit_error(context_id, source);
+    }
     texture_bind_groups.prune_destroyed_managed_textures(&completion_watermarks);
 }
 
@@ -449,7 +492,7 @@ fn create_imgui_render_texture(
         usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
         view_formats: &[],
     });
-    write_texture_rows(
+    if !write_texture_rows(
         render_queue,
         &texture,
         Origin3d::ZERO,
@@ -457,7 +500,9 @@ fn create_imgui_render_texture(
         upload.height,
         row_pitch,
         &pixels,
-    );
+    ) {
+        return None;
+    }
     let view = texture.create_view(&TextureViewDescriptor::default());
     let layout = pipeline_cache.get_bind_group_layout(pipeline.texture_layout());
     let linear_sampler = create_standard_imgui_sampler(render_device, ImguiSampler::Linear);
@@ -737,13 +782,28 @@ pub(super) fn write_texture_rows(
     height: u32,
     row_pitch: u32,
     pixels: &[u8],
-) {
+) -> bool {
     if width == 0 || height == 0 || row_pitch == 0 {
-        return;
+        return false;
+    }
+
+    let Ok(row_pitch_usize) = usize::try_from(row_pitch) else {
+        return false;
+    };
+    let Ok(height_usize) = usize::try_from(height) else {
+        return false;
+    };
+    let Some(required) = row_pitch_usize.checked_mul(height_usize) else {
+        return false;
+    };
+    if pixels.len() < required {
+        return false;
     }
 
     let alignment = COPY_BYTES_PER_ROW_ALIGNMENT;
-    let padded_row_pitch = row_pitch.div_ceil(alignment) * alignment;
+    let Some(padded_row_pitch) = row_pitch.div_ceil(alignment).checked_mul(alignment) else {
+        return false;
+    };
     if padded_row_pitch == row_pitch {
         render_queue.write_texture(
             TexelCopyTextureInfo {
@@ -752,7 +812,7 @@ pub(super) fn write_texture_rows(
                 origin,
                 aspect: TextureAspect::All,
             },
-            pixels,
+            &pixels[..required],
             TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(row_pitch),
@@ -764,31 +824,20 @@ pub(super) fn write_texture_rows(
                 depth_or_array_layers: 1,
             },
         );
-        return;
+        return true;
     }
 
-    let row_pitch = usize::try_from(row_pitch).ok();
-    let padded_row_pitch = usize::try_from(padded_row_pitch).ok();
-    let height_usize = usize::try_from(height).ok();
-    let (Some(row_pitch), Some(padded_row_pitch), Some(height_usize)) =
-        (row_pitch, padded_row_pitch, height_usize)
-    else {
-        return;
+    let Ok(padded_row_pitch) = usize::try_from(padded_row_pitch) else {
+        return false;
     };
-    let Some(required) = row_pitch.checked_mul(height_usize) else {
-        return;
-    };
-    if pixels.len() < required {
-        return;
-    }
     let Some(padded_len) = padded_row_pitch.checked_mul(height_usize) else {
-        return;
+        return false;
     };
     let mut padded = vec![0; padded_len];
     for row in 0..height_usize {
-        let src = row * row_pitch;
+        let src = row * row_pitch_usize;
         let dst = row * padded_row_pitch;
-        padded[dst..dst + row_pitch].copy_from_slice(&pixels[src..src + row_pitch]);
+        padded[dst..dst + row_pitch_usize].copy_from_slice(&pixels[src..src + row_pitch_usize]);
     }
     render_queue.write_texture(
         TexelCopyTextureInfo {
@@ -809,6 +858,7 @@ pub(super) fn write_texture_rows(
             depth_or_array_layers: 1,
         },
     );
+    true
 }
 
 fn prepare_snapshot_draw_data(

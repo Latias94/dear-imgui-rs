@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
-use dear_imgui_wgpu::{WgpuInitInfo, WgpuRenderer, wgpu};
+use dear_imgui_wgpu::{FramebufferExtent, WgpuInitInfo, WgpuRenderer, wgpu};
 use pollster::block_on;
 use sdl3::event::Event;
 use sdl3::keyboard::Keycode;
@@ -189,7 +189,7 @@ fn run_inner(_argc: c_int, _argv: *mut *mut c_char) -> Result<c_int, Box<dyn std
             ui.show_demo_window(&mut show_demo_window);
         }
 
-        let draw_data = imgui.render();
+        let pending_frame = imgui.try_render(renderer.renderer_consumer()?)?;
         let (frame, reconfigure_after_present) = match surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
@@ -232,12 +232,8 @@ fn run_inner(_argc: c_int, _argv: *mut *mut c_char) -> Result<c_int, Box<dyn std
                 multiview_mask: None,
             });
 
-            renderer.render_with_fb_size(
-                draw_data,
-                &mut render_pass,
-                surface_config.width,
-                surface_config.height,
-            )?;
+            let framebuffer_extent = FramebufferExtent::from_texture(&frame.texture);
+            renderer.render(pending_frame, &mut render_pass, framebuffer_extent)?;
         }
 
         queue.submit(std::iter::once(encoder.finish()));

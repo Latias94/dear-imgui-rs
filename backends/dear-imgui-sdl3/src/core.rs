@@ -88,7 +88,7 @@ pub(super) mod ffi {
             explicit_swap_interval: i32,
             viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
         ) -> u64;
-        pub fn dear_imgui_sdl3_native_end() -> u64;
+        pub fn dear_imgui_sdl3_native_end(first_fault: *mut u64) -> u64;
         pub fn dear_imgui_sdl3_backend_clear_platform_monitors();
         #[cfg(any(
             feature = "opengl3-renderer",
@@ -123,8 +123,6 @@ pub(super) mod ffi {
             renderer: *mut SDL_Renderer,
         );
         #[cfg(feature = "sdlrenderer3-renderer")]
-        pub fn dear_imgui_sdl3_backend_sdlrenderer3_create_device_objects();
-        #[cfg(feature = "sdlrenderer3-renderer")]
         pub fn dear_imgui_sdl3_backend_sdlrenderer3_destroy_device_objects();
         #[cfg(feature = "sdlrenderer3-renderer")]
         pub fn dear_imgui_sdl3_backend_sdlrenderer3_update_texture(
@@ -152,6 +150,7 @@ pub(super) mod ffi {
         #[cfg(feature = "sdlgpu3-renderer")]
         pub fn dear_imgui_sdl3_backend_sdlgpu3_render_viewport(
             viewport: *mut sys::ImGuiViewport,
+            first_fault: *mut u64,
         ) -> u64;
         #[cfg(feature = "sdlgpu3-renderer")]
         pub fn dear_imgui_sdl3_backend_sdlgpu3_create_device_objects();
@@ -197,16 +196,16 @@ impl Sdl3OpenGlViewportSwapInterval {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Sdl3BackendError {
-    #[error("ImGui_ImplSDL3_InitForOpenGL returned false")]
-    Sdl3InitFailed,
+    #[error("{entry_point} returned false")]
+    PlatformInitFailed { entry_point: &'static str },
     #[error("ImGui_ImplOpenGL3_Init returned false")]
-    OpenGlInitFailed,
+    OpenGlRendererInitFailed,
     #[error("Invalid GLSL version string")]
     InvalidGlslVersion,
     #[error("ImGui_ImplSDLRenderer3_Init returned false")]
-    Renderer3InitFailed,
+    SdlRenderer3InitFailed,
     #[error("ImGui_ImplSDLGPU3_Init returned false")]
-    Gpu3InitFailed,
+    SdlGpu3InitFailed,
     #[error("SDL3 runtime belongs to Context {expected:?}, but received Context {actual:?}")]
     ContextMismatch {
         expected: dear_imgui_rs::ContextId,
@@ -252,6 +251,8 @@ pub enum Sdl3BackendError {
     ViewportCreationFailed,
     #[error("SDL3 failed to capture the OpenGL state required for viewport creation")]
     ViewportOpenGlStateCaptureFailed,
+    #[error("SDL3 failed to enable OpenGL context sharing for a secondary viewport")]
+    ViewportOpenGlShareConfigurationFailed,
     #[error("SDL3 failed to create or activate a distinct OpenGL context for a secondary viewport")]
     ViewportOpenGlContextFailed,
     #[error(
@@ -272,6 +273,10 @@ pub enum Sdl3BackendError {
     ViewportSdlGpuCommandBufferFailed,
     #[error("SDL3 failed to acquire a swapchain texture for a secondary viewport")]
     ViewportSdlGpuSwapchainFailed,
+    #[error(
+        "SDL3 failed to cancel a command buffer after secondary viewport swapchain acquisition failed"
+    )]
+    ViewportSdlGpuCommandBufferCancelFailed,
     #[error("SDL3 failed to begin a render pass for a secondary viewport")]
     ViewportSdlGpuRenderPassFailed,
     #[error("SDL3 failed to submit a command buffer for a secondary viewport")]
@@ -305,9 +310,9 @@ pub enum Sdl3BackendError {
     #[error(transparent)]
     RendererConsumer(#[from] dear_imgui_rs::render::RendererConsumerError),
     #[error(transparent)]
+    FrameCapture(#[from] dear_imgui_rs::render::SnapshotError),
+    #[error(transparent)]
     TextureFeedback(#[from] dear_imgui_rs::render::TextureFeedbackError),
-    #[error("rendered frame epoch {epoch} was reconciled outside the active SDL3 renderer runtime")]
-    ForeignTextureReconciliation { epoch: u64 },
     #[error("managed texture {texture:?} received an update before renderer creation")]
     ManagedTextureNotCreated {
         texture: dear_imgui_rs::render::SnapshotTextureId,
@@ -355,7 +360,7 @@ pub(super) fn init_opengl3_impl(
     unsafe {
         if !opengl3_backend::dear_imgui_backend_opengl3_init(glsl_version) {
             ffi::ImGui_ImplSDL3_Shutdown_Rust();
-            return Err(Sdl3BackendError::OpenGlInitFailed);
+            return Err(Sdl3BackendError::OpenGlRendererInitFailed);
         }
     }
     Ok(())
@@ -375,7 +380,7 @@ pub(super) fn init_sdlgpu3_impl(
     unsafe {
         if !ffi::dear_imgui_sdl3_backend_sdlgpu3_init(&mut init_info) {
             ffi::ImGui_ImplSDL3_Shutdown_Rust();
-            return Err(Sdl3BackendError::Gpu3InitFailed);
+            return Err(Sdl3BackendError::SdlGpu3InitFailed);
         }
     }
     Ok(())

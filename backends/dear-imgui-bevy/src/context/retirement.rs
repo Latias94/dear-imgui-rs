@@ -8,11 +8,11 @@ use std::{
 };
 
 use bevy_app::App;
-use bevy_ecs::prelude::World;
+use bevy_ecs::{message::Messages, prelude::World};
 
-use super::ImguiContexts;
 use super::backend_contract::ImguiContextRemovalPendingReason;
 use super::owner::ContextOwner;
+use super::{ImguiContextRetired, ImguiContextRetirementId, ImguiContexts};
 
 struct ImguiContextRetirementQueue {
     pending: RefCell<VecDeque<ContextRetirement>>,
@@ -42,7 +42,11 @@ impl Default for ImguiContextRetirementSink {
 }
 
 impl ImguiContextRetirementSink {
-    fn enqueue_or_leak(&self, owner: ManuallyDrop<ContextOwner>) {
+    fn enqueue_or_leak(
+        &self,
+        owner: ManuallyDrop<ContextOwner>,
+        retirement: Option<ImguiContextRetirementId>,
+    ) {
         let Some(queue) = self.queue.upgrade() else {
             return;
         };
@@ -52,7 +56,27 @@ impl ImguiContextRetirementSink {
         pending.push_back(ContextRetirement {
             owner: Some(owner),
             sink: self.clone(),
+            retirement,
         });
+    }
+
+    pub(crate) fn try_enqueue(
+        &self,
+        owner: ContextOwner,
+        retirement: ImguiContextRetirementId,
+    ) -> Result<(), ContextOwner> {
+        let Some(queue) = self.queue.upgrade() else {
+            return Err(owner);
+        };
+        let Ok(mut pending) = queue.pending.try_borrow_mut() else {
+            return Err(owner);
+        };
+        pending.push_back(ContextRetirement {
+            owner: Some(ManuallyDrop::new(owner)),
+            sink: self.clone(),
+            retirement: Some(retirement),
+        });
+        Ok(())
     }
 
     fn try_pop_front(&self) -> Option<ContextRetirement> {
@@ -115,9 +139,11 @@ impl ImguiContextRetirements {
 pub(super) struct ContextRetirement {
     owner: Option<ManuallyDrop<ContextOwner>>,
     sink: ImguiContextRetirementSink,
+    retirement: Option<ImguiContextRetirementId>,
 }
 
 pub(crate) fn install_context_retirements(app: &mut App) {
+    app.add_message::<ImguiContextRetired>();
     if app
         .world()
         .get_non_send::<ImguiContextRetirements>()
@@ -150,7 +176,14 @@ fn maintain_context_retirements(world: &mut World) {
             break;
         };
         if retirement.advance().is_ok() {
-            retirement.finish();
+            if let Some(completed) = retirement.finish() {
+                if let Some(mut contexts) = world.get_non_send_mut::<ImguiContexts>() {
+                    let _ = contexts.complete_retirement(completed);
+                }
+                world
+                    .resource_mut::<Messages<ImguiContextRetired>>()
+                    .write(ImguiContextRetired::new(completed));
+            }
         }
     }
 }
@@ -167,6 +200,7 @@ impl ContextRetirement {
         Self {
             owner: Some(ManuallyDrop::new(owner)),
             sink,
+            retirement: None,
         }
     }
 
@@ -177,7 +211,7 @@ impl ContextRetirement {
             .try_detach_backend()
     }
 
-    fn finish(mut self) {
+    fn finish(mut self) -> Option<ImguiContextRetirementId> {
         let owner = self
             .owner
             .take()
@@ -189,6 +223,7 @@ impl ContextRetirement {
             .expect("a completed Context retirement must retain its Context");
         drop(owner);
         drop(context);
+        self.retirement
     }
 }
 
@@ -197,15 +232,16 @@ impl Drop for ContextRetirement {
         let Some(owner) = self.owner.take() else {
             return;
         };
-        // A failed enqueue intentionally leaks the complete owner. Releasing only part of it
-        // would invalidate renderer or PlatformIO pointers still owned by another Bevy world.
-        self.sink.enqueue_or_leak(owner);
+        // An unavailable or re-entrantly borrowed queue intentionally leaks the complete owner.
+        // Releasing only part of it would invalidate renderer or PlatformIO pointers still owned
+        // by another Bevy world.
+        self.sink.enqueue_or_leak(owner, self.retirement);
     }
 }
 
 #[cfg(test)]
 mod retirement_tests {
-    use std::{cell::Cell, rc::Rc};
+    use std::{cell::Cell, mem::ManuallyDrop, num::NonZeroU64, rc::Rc};
 
     use bevy_app::App;
 
@@ -266,7 +302,7 @@ mod retirement_tests {
         let context = context_with_retirement_probe(&destroyed);
 
         let retirements = ImguiContextRetirements::default();
-        let mut owner = ContextOwner::new(context.suspend());
+        let mut owner = ContextOwner::new(context.suspend_or_panic());
         owner
             .attach_backend(&headless_backend_attachment(), &primary_config())
             .unwrap();
@@ -281,6 +317,34 @@ mod retirement_tests {
         );
     }
 
+    #[test]
+    fn requeued_managed_retirement_preserves_its_completion_ticket() {
+        let _guard = context_guard();
+        let context = dear_imgui_rs::SuspendedContext::create();
+        let retirement = super::super::ImguiContextRetirementId::new(context.id(), NonZeroU64::MIN);
+        let retirements = ImguiContextRetirements::default();
+        let sink = retirements.sink();
+        let owner = ContextOwner::new(context);
+
+        drop(super::ContextRetirement {
+            owner: Some(ManuallyDrop::new(owner)),
+            sink: sink.clone(),
+            retirement: Some(retirement),
+        });
+
+        let mut queued = sink
+            .try_pop_front()
+            .expect("dropping a pending retirement must requeue its owner");
+        assert_eq!(queued.retirement, Some(retirement));
+        let owner = ManuallyDrop::into_inner(
+            queued
+                .owner
+                .take()
+                .expect("the requeued retirement must retain its owner"),
+        );
+        drop(owner);
+    }
+
     #[cfg(feature = "render")]
     #[test]
     fn vanished_retirement_sink_leaks_renderer_ownership_awaiting_acknowledgement() {
@@ -289,7 +353,7 @@ mod retirement_tests {
         let context = context_with_retirement_probe(&destroyed);
 
         let retirements = ImguiContextRetirements::default();
-        let mut owner = ContextOwner::new(context.suspend());
+        let mut owner = ContextOwner::new(context.suspend_or_panic());
         owner
             .attach_backend(
                 &BackendAttachment {

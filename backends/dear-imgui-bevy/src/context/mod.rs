@@ -5,7 +5,6 @@ mod driver;
 mod lifecycle;
 mod mailbox;
 mod owner;
-pub(crate) mod ownership;
 mod pass;
 mod platform;
 mod plugin;
@@ -14,17 +13,28 @@ mod retirement;
 mod shutdown;
 mod viewport_attachment;
 
-pub(crate) use backend_contract::ImguiActiveRendererContextError;
+#[cfg(feature = "render")]
+pub use backend_contract::ImguiRendererOwnershipError;
+pub(crate) use backend_contract::{BackendAttachment, ImguiActiveRendererContextError};
+pub use backend_contract::{ImguiContextRemovalPendingReason, ImguiContextScopeError};
 pub(crate) use driver::{drive_imgui_contexts, install_context_lifecycle};
 #[cfg(feature = "render")]
 pub(crate) use mailbox::{ImguiFrameMailbox, PendingFrame};
+pub(crate) use owner::ContextOwner;
 pub use pass::{ImguiFrame, ImguiPass, ImguiPrimaryPass, ImguiSystem};
 #[doc(hidden)]
 pub use pass::{ImguiFrameAdapter, ImguiSystemMarker};
 pub(crate) use pass::{PassIdentity, run_pass};
+#[cfg(feature = "render")]
+pub(crate) use plugin::ImguiBackendRuntime;
+pub use plugin::{ImguiPlugin, ImguiPluginConfig, ImguiPluginInstallError};
 pub use registry::{
-    ImguiContextAdmissionError, ImguiContextConfig, ImguiContextError, ImguiContexts,
-    ImguiPrimaryChange,
+    ImguiContextAdmissionError, ImguiContextConfig, ImguiContextError, ImguiContextRetired,
+    ImguiContextRetirementId, ImguiContexts, ImguiPrimaryChange,
+};
+pub(crate) use retirement::{
+    ImguiContextRetirementSink, ImguiContextRetirements, begin_context_retirements,
+    finish_context_retirements, install_context_retirements,
 };
 pub use shutdown::{ImguiAppExt, ImguiShutdownError};
 

@@ -1,6 +1,7 @@
 use std::sync::{Mutex, OnceLock};
 
-use bevy_app::App;
+use bevy_app::{App, MainScheduleOrder, PreUpdate};
+use bevy_ecs::message::Messages;
 #[cfg(feature = "render")]
 use bevy_ecs::prelude::{ResMut, Resource};
 #[cfg(feature = "render")]
@@ -12,10 +13,11 @@ use bevy_render::{Render, RenderApp, extract_plugin::ExtractPlugin};
 use bevy_window::{PrimaryWindow, Window};
 use dear_imgui_bevy::{
     BEVY_TARGET_COMMIT, BEVY_TARGET_VERSION, ImguiAppExt, ImguiContextConfig, ImguiContextError,
-    ImguiContexts, ImguiPlugin, ImguiPluginConfig, ImguiShutdownError, WGPU_TARGET_VERSION,
+    ImguiContextRetired, ImguiContexts, ImguiDriverScheduleError, ImguiPlugin, ImguiPluginConfig,
+    ImguiPluginInstallError, ImguiViewportWindowConfig, WGPU_TARGET_VERSION,
 };
 #[cfg(feature = "render")]
-use dear_imgui_bevy::{ContextId, ImguiFrame};
+use dear_imgui_bevy::{ContextId, ImguiFrame, ImguiShutdownError};
 
 fn imgui_context_guard() -> std::sync::MutexGuard<'static, ()> {
     static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
@@ -26,6 +28,26 @@ fn imgui_context_guard() -> std::sync::MutexGuard<'static, ()> {
 }
 
 struct AdditionalPass;
+
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    match payload.downcast::<String>() {
+        Ok(message) => *message,
+        Err(payload) => payload
+            .downcast::<&'static str>()
+            .map(|message| (*message).to_owned())
+            .unwrap_or_else(|_| "non-string panic payload".to_owned()),
+    }
+}
+
+fn install_error(
+    result: Result<&mut App, ImguiPluginInstallError>,
+    message: &'static str,
+) -> ImguiPluginInstallError {
+    match result {
+        Ok(_) => panic!("{message}"),
+        Err(error) => error,
+    }
+}
 
 #[cfg(feature = "render")]
 #[derive(Resource, Default)]
@@ -69,6 +91,168 @@ fn plugin_registers_the_primary_registry_and_private_driver_schedule() {
         "c6f634ca9f406d68ba5109d921247b654cb42c10"
     );
     assert_eq!(WGPU_TARGET_VERSION, "29.0.3");
+}
+
+#[test]
+fn fallible_installation_registers_the_plugin_and_rejects_a_duplicate_transaction() {
+    let _guard = imgui_context_guard();
+    let mut app = App::new();
+    app.try_install_imgui(ImguiPlugin::default())
+        .expect("the default integration must install successfully");
+    let primary = app
+        .world()
+        .get_non_send::<ImguiContexts>()
+        .and_then(ImguiContexts::primary_id)
+        .expect("successful installation must retain its primary Context");
+
+    let error = install_error(
+        app.try_install_imgui(ImguiPlugin::default()),
+        "a second installation transaction must be rejected",
+    );
+
+    assert!(matches!(error, ImguiPluginInstallError::AlreadyInstalled));
+    assert!(app.is_plugin_added::<ImguiPlugin>());
+    assert_eq!(
+        app.world()
+            .get_non_send::<ImguiContexts>()
+            .and_then(ImguiContexts::primary_id),
+        Some(primary),
+        "duplicate validation must leave the installed registry unchanged"
+    );
+
+    app.shutdown_imgui()
+        .expect("the duplicate-install fixture must still shut down cleanly");
+    let terminal = install_error(
+        app.try_install_imgui(ImguiPlugin::default()),
+        "a terminal App must reject reinstallation",
+    );
+    assert!(matches!(terminal, ImguiPluginInstallError::AppTerminated));
+}
+
+#[test]
+fn fallible_installation_rejects_schedule_placement_before_app_mutation() {
+    let _guard = imgui_context_guard();
+    let mut app = App::new();
+    let error = install_error(
+        app.try_install_imgui(ImguiPlugin::new(
+            ImguiPluginConfig::default().with_driver_before(PreUpdate),
+        )),
+        "invalid schedule placement must be reported without panic",
+    );
+
+    assert!(matches!(
+        error,
+        ImguiPluginInstallError::DriverSchedule(ImguiDriverScheduleError::OutsideFrameInterval)
+    ));
+    assert!(app.world().get_non_send::<ImguiContexts>().is_none());
+    assert!(!app.is_plugin_added::<ImguiPlugin>());
+    assert!(
+        !app.world()
+            .contains_resource::<Messages<ImguiContextRetired>>(),
+        "failed validation must not install retirement resources"
+    );
+}
+
+#[test]
+fn fallible_installation_reports_a_missing_main_schedule_order_without_mutation() {
+    let _guard = imgui_context_guard();
+    let mut app = App::new();
+    assert!(
+        app.world_mut()
+            .remove_resource::<MainScheduleOrder>()
+            .is_some()
+    );
+
+    let error = install_error(
+        app.try_install_imgui(ImguiPlugin::default()),
+        "a missing main schedule order must be reported without panic",
+    );
+
+    assert!(matches!(
+        error,
+        ImguiPluginInstallError::DriverSchedule(ImguiDriverScheduleError::MainScheduleOrderMissing)
+    ));
+    assert!(app.world().get_non_send::<ImguiContexts>().is_none());
+    assert!(!app.is_plugin_added::<ImguiPlugin>());
+}
+
+#[test]
+fn fallible_installation_rejects_a_closed_bevy_plugin_lifecycle_without_mutation() {
+    let _guard = imgui_context_guard();
+    let mut app = App::new();
+    app.finish();
+
+    let error = install_error(
+        app.try_install_imgui(ImguiPlugin::default()),
+        "a finished Bevy App must reject new plugins",
+    );
+
+    assert!(matches!(
+        error,
+        ImguiPluginInstallError::PluginLifecycleClosed
+    ));
+    assert!(app.world().get_non_send::<ImguiContexts>().is_none());
+    assert!(!app.is_plugin_added::<ImguiPlugin>());
+}
+
+#[test]
+fn plugin_convenience_panics_with_the_fallible_installation_cause() {
+    let _guard = imgui_context_guard();
+    let config = ImguiPluginConfig::default().with_driver_before(PreUpdate);
+    let mut fallible_app = App::new();
+    let expected = install_error(
+        fallible_app.try_install_imgui(ImguiPlugin::new(config.clone())),
+        "the fallible path must reject the fixture",
+    )
+    .to_string();
+    let mut app = App::new();
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        app.add_plugins(ImguiPlugin::new(config));
+    }))
+    .expect_err("the Plugin adapter intentionally panics on invalid configuration");
+
+    assert_eq!(
+        panic_message(panic),
+        format!("ImguiPlugin installation failed: {expected}")
+    );
+    assert!(app.world().get_non_send::<ImguiContexts>().is_none());
+}
+
+#[test]
+fn fallible_installation_rejects_invalid_viewport_policy_before_app_mutation() {
+    let _guard = imgui_context_guard();
+    let mut app = App::new();
+    let mut viewport = ImguiViewportWindowConfig::default();
+    viewport.transparent = true;
+    viewport.composite_alpha_mode = bevy_window::CompositeAlphaMode::Opaque;
+    let error = install_error(
+        app.try_install_imgui(ImguiPlugin::new(
+            ImguiPluginConfig::default().with_viewport_window(viewport),
+        )),
+        "invalid secondary-window alpha policy must be rejected",
+    );
+
+    assert!(matches!(error, ImguiPluginInstallError::ViewportWindow(_)));
+    assert!(app.world().get_non_send::<ImguiContexts>().is_none());
+}
+
+#[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+#[test]
+fn fallible_installation_rejects_unavailable_native_viewports_before_app_mutation() {
+    let _guard = imgui_context_guard();
+    let mut app = App::new();
+    let error = install_error(
+        app.try_install_imgui(ImguiPlugin::new(
+            ImguiPluginConfig::default().with_multi_viewport(true),
+        )),
+        "native viewport availability must be validated before installation",
+    );
+
+    assert!(matches!(
+        error,
+        ImguiPluginInstallError::NativeMultiViewportUnavailable
+    ));
+    assert!(app.world().get_non_send::<ImguiContexts>().is_none());
 }
 
 #[test]
@@ -128,7 +312,7 @@ fn removing_a_context_clears_only_backend_state_owned_by_bevy() {
         .world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .unwrap()
-        .remove(primary_id)
+        .try_remove_immediately(primary_id)
         .expect("headless backend teardown should complete immediately");
     removed
         .try_with_active(|context| {
@@ -191,18 +375,12 @@ fn managed_shared_font_atlas_admission_fails_before_backend_fields_are_mutated()
     let mut app = app_with_render_schedule();
     let additional_pass = app.declare_imgui_pass::<AdditionalPass>();
     let atlas = dear_imgui_rs::SharedFontAtlas::create();
-    let mut primary =
+    let primary =
         dear_imgui_rs::SuspendedContext::try_create_with_shared_font_atlas(atlas.clone()).unwrap();
     let primary_id = primary.id();
-    let primary_font_texture_id = primary
-        .try_with_active(|context| Ok::<_, ()>(context.font_atlas().texture_id()))
-        .unwrap();
-    let mut additional =
+    let additional =
         dear_imgui_rs::SuspendedContext::try_create_with_shared_font_atlas(atlas).unwrap();
     let additional_id = additional.id();
-    let additional_font_texture_id = additional
-        .try_with_active(|context| Ok::<_, ()>(context.font_atlas().texture_id()))
-        .unwrap();
     app.adopt_imgui_primary_context(primary).unwrap();
     app.world_mut()
         .get_non_send_mut::<ImguiContexts>()
@@ -210,35 +388,37 @@ fn managed_shared_font_atlas_admission_fails_before_backend_fields_are_mutated()
         .insert_suspended(additional, ImguiContextConfig::new(&additional_pass))
         .unwrap();
 
-    let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        app.add_plugins(ImguiPlugin::default());
-    }))
-    .expect_err("a managed renderer must reject a shared multi-Context font atlas");
-    let message = failure
-        .downcast_ref::<String>()
-        .map(String::as_str)
-        .or_else(|| failure.downcast_ref::<&str>().copied())
-        .unwrap_or_default();
-    assert!(message.contains("managed font-atlas rendering requires exactly one"));
+    let failure = install_error(
+        app.try_install_imgui(ImguiPlugin::default()),
+        "a managed renderer must reject a shared multi-Context font atlas",
+    );
+    assert!(matches!(
+        &failure,
+        ImguiPluginInstallError::ContextPreflight(_)
+    ));
+    assert!(
+        failure
+            .to_string()
+            .contains("managed font-atlas rendering requires exactly one")
+    );
+    assert!(!app.is_plugin_added::<ImguiPlugin>());
 
     let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
-    for (context_id, expected_font_texture_id) in [
-        (primary_id, primary_font_texture_id),
-        (additional_id, additional_font_texture_id),
-    ] {
+    for context_id in [primary_id, additional_id] {
         contexts
             .configure(context_id, |context| {
                 assert!(context.io().backend_platform_name().is_none());
                 assert!(context.io().backend_renderer_name().is_none());
-                assert_eq!(
-                    context.font_atlas().texture_id(),
-                    expected_font_texture_id,
-                    "failed renderer admission must not alter the font-atlas texture ID"
-                );
                 assert!(!context.io().backend_flags().intersects(
                     dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES
                         | dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET
                 ));
+                drop(
+                    context
+                        .font_atlas()
+                        .try_claim_legacy_renderer()
+                        .expect("failed renderer admission must not leave a managed atlas claim"),
+                );
             })
             .unwrap();
     }
@@ -270,16 +450,20 @@ fn later_renderer_admission_failure_leaves_earlier_font_atlas_unclaimed() {
         .insert_suspended(additional, ImguiContextConfig::new(&additional_pass))
         .unwrap();
 
-    let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        app.add_plugins(ImguiPlugin::default());
-    }))
-    .expect_err("the later shared atlas must reject managed renderer admission");
-    let message = failure
-        .downcast_ref::<String>()
-        .map(String::as_str)
-        .or_else(|| failure.downcast_ref::<&str>().copied())
-        .unwrap_or_default();
-    assert!(message.contains("managed font-atlas rendering requires exactly one"));
+    let failure = install_error(
+        app.try_install_imgui(ImguiPlugin::default()),
+        "the later shared atlas must reject managed renderer admission",
+    );
+    assert!(matches!(
+        &failure,
+        ImguiPluginInstallError::ContextPreflight(_)
+    ));
+    assert!(
+        failure
+            .to_string()
+            .contains("managed font-atlas rendering requires exactly one")
+    );
+    assert!(!app.is_plugin_added::<ImguiPlugin>());
 
     let primary_peer =
         dear_imgui_rs::SuspendedContext::try_create_with_shared_font_atlas(primary_atlas)
@@ -299,9 +483,9 @@ fn later_renderer_admission_failure_leaves_earlier_font_atlas_unclaimed() {
     contexts
         .configure(primary_id, |context| {
             let consumer = context
-                .create_renderer_consumer()
+                .create_detached_renderer_consumer()
                 .expect("failed registry admission must not bind the snapshot hub");
-            let _ = context
+            context
                 .prepare_renderer_texture_reset(&consumer)
                 .unwrap()
                 .commit();
@@ -383,11 +567,33 @@ fn renderer_ownership_drift_fails_closed_and_removal_can_be_repaired() {
         "a rejected primary frame must not become the latest completed frame"
     );
 
-    let removal = match app
+    let managed_removal = match app
         .world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .unwrap()
         .remove(primary_id)
+    {
+        Ok(_) => panic!("managed removal must not hide repairable renderer ownership drift"),
+        Err(error) => error,
+    };
+    assert!(matches!(
+        managed_removal,
+        ImguiContextError::RemovalPending {
+            context_id,
+            reason:
+                dear_imgui_bevy::ImguiContextRemovalPendingReason::RendererOwnership(
+                    dear_imgui_bevy::ImguiRendererOwnershipError::FieldReplaced {
+                        field: "BackendFlags"
+                    }
+                ),
+        } if context_id == primary_id
+    ));
+
+    let removal = match app
+        .world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
+        .try_remove_immediately(primary_id)
     {
         Ok(_) => panic!("partial renderer ownership must fail closed"),
         Err(error) => error,
@@ -427,7 +633,7 @@ fn renderer_ownership_drift_fails_closed_and_removal_can_be_repaired() {
             })
             .expect("a pending removal must permit ownership repair");
         assert!(matches!(
-            contexts.remove(primary_id),
+            contexts.try_remove_immediately(primary_id),
             Err(ImguiContextError::RemovalPending {
                 context_id,
                 reason:
@@ -441,7 +647,7 @@ fn renderer_ownership_drift_fails_closed_and_removal_can_be_repaired() {
         .world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .unwrap()
-        .remove(primary_id)
+        .try_remove_immediately(primary_id)
         .expect("renderer acknowledgement must complete the repaired teardown");
     assert_eq!(removed.id(), primary_id);
 }
@@ -549,9 +755,9 @@ fn foreign_renderer_claim_is_rejected_without_mutating_the_context() {
             );
             assert!(context.io().backend_platform_name().is_none());
             let consumer = context
-                .create_renderer_consumer()
+                .create_detached_renderer_consumer()
                 .expect("foreign backend admission failure must not bind the snapshot hub");
-            let _ = context
+            context
                 .prepare_renderer_texture_reset(&consumer)
                 .unwrap()
                 .commit();

@@ -18,9 +18,8 @@ let gl = unsafe { glow::Context::from_loader_function(|s| loader.get_proc_addres
 let mut imgui = Context::create();
 let mut renderer = GlowRenderer::new(gl, &mut imgui)?;
 
-// Per frame, after building the UI. Rendering consumes the Context-borrowed frame.
-renderer.new_frame()?;
-let frame = imgui.render();
+// Per frame, after building the UI. The renderer owns the synchronous consumer capability.
+let frame = imgui.render(renderer.renderer_consumer()?);
 renderer.render(frame)?;
 ```
 
@@ -34,26 +33,52 @@ renderer.render(frame)?;
 
 ## Renderer Lifecycle
 
-`GlowRenderer` owns the Context's sole renderer consumer. `render` and `render_with_context`
-therefore take `RenderedFrame` by value, apply every managed texture request, reconcile the
-result with the owning Context, and only then issue draw commands. A frame from another Context or
-consumer generation is rejected before OpenGL is mutated.
+`GlowRenderer` owns the Context's sole synchronous renderer consumer. Obtain that capability with
+`renderer_consumer`, pass it to `Context::render`, and give the resulting `PendingFrame` to
+`render` or `render_with_context`. These methods consume the pending frame, apply exactly one
+feedback outcome to every managed texture request, reconcile the result with the owning Context,
+and only then issue draw commands. A frame from another Context or consumer generation is rejected
+before OpenGL is mutated.
 
-For single-viewport use, explicitly destroy the renderer while its OpenGL context is current.
-Teardown first obtains an idle reset permit from the Context. An outstanding frame or detached
-snapshot therefore returns an error before any GL handle or texture-map entry changes. Once
-validated, teardown deletes renderer-owned GPU textures, commits the Context binding reset, and
-releases the consumer so another renderer can attach:
+Engine integrations that need an explicit boundary between managed-texture work and drawing can
+use the same protocol in two steps:
 
 ```rust
-let gl = renderer.gl_context().expect("owned GL context").clone();
-renderer.destroy(&gl, &mut imgui)?;
+let pending = imgui.render(renderer.renderer_consumer()?);
+let reconciled = renderer.reconcile_frame(pending)?;
+renderer.render_reconciled(reconciled)?;
 ```
 
-For a single-viewport renderer created with `with_external_context`, pass the same live GL context
-to `destroy`. `destroy_device_objects` uses the same prepare-delete-commit transaction but keeps the
-consumer attached for later device-object recreation. After an outstanding-work error, finish or
-drop that work, poll completions, and retry teardown with the renderer still intact.
+`reconcile_frame` performs only managed-texture synchronization. `render_reconciled` consumes the
+resulting linear capability and issues the draw commands. The ordinary `render` entry point is the
+convenience composition of those two operations.
+
+For single-viewport use, explicitly shut down the renderer while its OpenGL context is current.
+Teardown first obtains an idle reset permit from the Context. A pending frame is abandoned by its
+RAII guard if it cannot be reconciled, and teardown only proceeds once the Context has observed
+that completion. Once validated, teardown deletes renderer-owned GPU textures, commits the Context
+binding reset, and releases the consumer so another renderer can attach:
+
+```rust
+renderer.shutdown(&mut imgui)?;
+```
+
+For a renderer created with `with_external_context`, call `shutdown_with_context` with the same
+live function table while its OpenGL context is current. `destroy_device_objects` and
+`destroy_device_objects_with_context` use the same prepare-delete-commit transaction but keep the
+consumer attached. The next owned or external render recreates device objects transactionally
+before managed-texture reconciliation. Renderer-owned texture handles become stale during this
+reset because their GL objects are deleted; registered external texture mappings remain valid and
+their GL objects remain application-owned. Final shutdown removes those external mappings without
+deleting the application resources. Dropping an unreconciled `PendingFrame` records abandonment
+before the Context becomes mutably available again, so teardown can retry without a separate
+completion-poll step.
+
+Manual texture APIs preserve their ownership at the type level. `register_texture` returns a
+`RendererTextureId`, while `register_external_texture` returns an `ExternalTextureId`. Convert
+either handle with `texture_id()` only when submitting an image widget; keep the typed handle for
+updates and removal. The renderer allocates all IDs and does not expose a mutable texture map, so a
+managed, renderer-owned, or external texture cannot be removed through another ownership route.
 
 ## Runtime Capabilities and Texture Sampling
 
@@ -105,36 +130,45 @@ with the Context:
 
 ```rust
 use std::rc::Rc;
-use dear_imgui_glow::{GlowRenderer, SimpleTextureMap, multi_viewport::GlowViewportRuntime};
+use dear_imgui_glow::{GlowRenderer, multi_viewport::GlowViewportRuntime};
 
 // Attach an OpenGL-aware platform runtime first.
 let gl = Rc::new(unsafe {
     glow::Context::from_loader_function(|name| loader.get_proc_address(name) as *const _)
 });
-let renderer = GlowRenderer::with_shared_context(
-    Rc::clone(&gl),
-    &mut imgui,
-    Box::new(SimpleTextureMap::default()),
-)?;
+let renderer = GlowRenderer::with_shared_context(Rc::clone(&gl), &mut imgui)?;
 // SAFETY: the platform creates every secondary GL context in `gl`'s share group, makes the
 // viewport context current before Platform_RenderWindow, and keeps a compatible context current
 // for runtime GL work and teardown.
 let mut runtime = unsafe { GlowViewportRuntime::attach(&mut imgui, renderer) }
     .map_err(|failure| failure.into_parts().0)?;
 
-runtime.new_frame()?;
-let frame = imgui.render();
-runtime.render(frame)?;
+let frame = imgui.begin_frame();
+frame.ui().text("Hello from the main viewport");
+let prepared = runtime.prepare_frame(frame)?;
+let rendered = runtime.render_main(
+    prepared,
+    || restore_main_gl_context(),
+    || platform.drain_faults(),
+)?;
+drop(rendered);
 
 runtime.shutdown(&mut imgui)?;
 ```
 
+`prepare_frame` reconciles managed textures and returns a linear capability that only
+`render_main` can consume. The final call renders the main draw data, invokes secondary viewport
+callbacks while their OpenGL contexts are current, always attempts to restore the main context,
+and combines renderer, restoration, and platform faults before the application presents the main
+back buffer. This OpenGL ordering intentionally differs from acquire-based WSI renderers: there is
+no separate main-surface acquisition phase to defer.
+
 Attachment preflights the complete renderer callback table and renderer capability bit, and fails
 without publishing partial state. Callback panic, reentry, renderer failure, and foreign callback
-replacement are contained and returned by the next Rust entry or `poll_fault`. Explicit shutdown
-preflights renderer epochs before deleting GL resources and leaves the renderer intact for retry if
-work is still outstanding. Explicit shutdown and Context-first teardown both delete renderer
-resources before platform windows. Every Rust and
+replacement are contained and returned by the owning render route. `poll_fault` remains available
+for native lifecycle callbacks that run outside a frame route. Explicit shutdown
+validates the synchronous consumer lifecycle before deleting GL resources. Explicit shutdown and
+Context-first teardown both delete renderer resources before platform windows. Every Rust and
 direct renderer callback entry revalidates the renderer capability, platform capability, required
 platform callbacks, and complete renderer callback table; dependency drift clears Glow's advertised
 capability and skips GL work. Dropping the wrapper defers the renderer attachment to its Context;
@@ -218,7 +252,15 @@ describe how the crate was compiled, but not what the active OpenGL context supp
   `debug_message_insert_support` from dependency features.
 - Renderer GPU handles and capability fields are private implementation details. Use
   `gl_version()`, `supports_clip_origin()`, `supports_framebuffer_srgb_control()`,
-  `supports_sampler_objects()`, and `is_destroyed()` for the supported observations.
+  and `supports_sampler_objects()` for the supported observations. Device-object destruction is
+  recoverable at the next render, while `shutdown` terminates the renderer, so there is no shared
+  boolean state for both operations.
+- The public `TextureMap`/`SimpleTextureMap` extension point, `GlowRenderer::texture_map`, and
+  `GlowRenderer::with_texture_map` were removed. `with_external_context` and
+  `with_shared_context` no longer take a texture-map argument. Use
+  `register_texture`/`update_texture`/`unregister_texture` with `RendererTextureId` for
+  renderer-owned GL textures, or the corresponding `register_external_texture` operations with
+  `ExternalTextureId` for application-owned mappings.
 - `GlVersion` capability queries now use explicit runtime names:
   `bind_vertex_array_support` -> `is_supported`, `vertex_offset_support` ->
   `supports_vertex_offset`, `clip_origin_support` -> `supports_clip_origin`,
@@ -226,6 +268,8 @@ describe how the crate was compiled, but not what the active OpenGL context supp
   `supports_polygon_mode`, and `primitive_restart_support` ->
   `supports_primitive_restart`. The last query now correctly reports `false` for OpenGL ES,
   where fixed-index restart is not the desktop toggle restored by this backend.
-- Match `RenderError::UnknownTextureId(TextureId)` for a legacy texture ID that is not in the
-  renderer map, or `RenderError::ManagedTextureMissing(SnapshotTextureId)` for a managed update
-  received before its matching GPU create request, instead of parsing `RenderError::InvalidTexture(String)`.
+- Match `RenderError::UnknownTextureId(TextureId)` when draw data references an unregistered raw
+  ID. `RenderError::RendererTextureNotFound(TextureId)` and
+  `RenderError::ExternalTextureNotFound(TextureId)` identify stale or foreign typed handles.
+  `RenderError::ManagedTextureMissing(SnapshotTextureId)` identifies a managed update received
+  before its matching GPU create request.

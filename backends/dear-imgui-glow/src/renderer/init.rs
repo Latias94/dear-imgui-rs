@@ -14,7 +14,7 @@ use super::{
 };
 use crate::{
     error::{InitError, InitResult, RenderError, RenderResult},
-    texture::{SimpleTextureMap, TextureMap},
+    texture::TextureRegistry,
     versions::GlVersion,
 };
 
@@ -33,13 +33,14 @@ fn core_renderer_flags(gl_version: GlVersion) -> i32 {
 }
 
 impl GlowRenderer {
-    /// Create a new Glow renderer with owned OpenGL context (recommended)
+    /// Create a new Glow renderer with a retained Glow function table (recommended).
     ///
     /// This is the preferred way to create a Glow renderer as it handles all resource
-    /// management automatically and provides a simple API similar to the WGPU backend.
+    /// management automatically and provides a simple API similar to the WGPU backend. The native
+    /// context behind `gl` must be current during construction and every renderer operation.
     ///
     /// # Arguments
-    /// * `gl` - OpenGL context (will be owned by the renderer)
+    /// * `gl` - Glow function table retained by the renderer
     /// * `imgui_context` - Dear ImGui context to configure
     ///
     /// # Example
@@ -53,115 +54,61 @@ impl GlowRenderer {
     /// let mut renderer = GlowRenderer::new(gl_context, &mut imgui_context).unwrap();
     /// ```
     pub fn new(gl: glow::Context, imgui_context: &mut ImGuiContext) -> InitResult<Self> {
-        let texture_map = Box::new(SimpleTextureMap::default());
-        Self::with_texture_map(Some(gl), imgui_context, texture_map)
+        let gl = std::rc::Rc::new(gl);
+        Self::init_internal(Some(gl.clone()), &gl, imgui_context)
     }
 
-    /// Create a new Glow renderer with custom texture management (advanced)
+    /// Create a new Glow renderer with an externally retained function table (advanced).
     ///
-    /// This method allows you to provide your own texture management implementation
-    /// and optionally manage the OpenGL context externally.
-    ///
-    /// # Arguments
-    /// * `gl` - OpenGL context (Some = owned, None = externally managed)
-    /// * `imgui_context` - Dear ImGui context to configure
-    /// * `texture_map` - Custom texture map implementation
-    ///
-    /// # Example
-    /// ```rust,no_run
-    /// use dear_imgui_glow::{GlowRenderer, SimpleTextureMap};
-    /// # use dear_imgui_glow::glow;
-    /// # use dear_imgui_rs::Context as ImGuiContext;
-    ///
-    /// let texture_map = Box::new(SimpleTextureMap::default());
-    /// # let gl_context = unsafe { glow::Context::from_loader_function(|_| std::ptr::null()) };
-    /// # let mut imgui_context = ImGuiContext::create();
-    /// let mut renderer = GlowRenderer::with_texture_map(
-    ///     Some(gl_context),
-    ///     &mut imgui_context,
-    ///     texture_map
-    /// ).unwrap();
-    /// ```
-    pub fn with_texture_map(
-        gl: Option<glow::Context>,
-        imgui_context: &mut ImGuiContext,
-        texture_map: Box<dyn TextureMap>,
-    ) -> InitResult<Self> {
-        match gl {
-            Some(context) => {
-                let gl_rc = std::rc::Rc::new(context);
-                Self::init_internal(Some(gl_rc.clone()), &gl_rc, imgui_context, texture_map)
-            }
-            None => Err(InitError::MissingGlContext),
-        }
-    }
-
-    /// Create a new Glow renderer with external OpenGL context (advanced)
-    ///
-    /// This method is for advanced users who want to manage the OpenGL context
-    /// externally while still using custom texture management.
+    /// This method is for advanced users who want to manage the OpenGL context externally. The
+    /// table must remain valid, and its native context or a compatible share-group context must be
+    /// current for initialization and every later `*_with_context` operation.
     ///
     /// # Arguments
     /// * `gl` - Reference to externally managed OpenGL context
     /// * `imgui_context` - Dear ImGui context to configure
-    /// * `texture_map` - Custom texture map implementation
-    ///
     /// # Example
     /// ```rust,no_run
-    /// use dear_imgui_glow::{GlowRenderer, SimpleTextureMap};
+    /// use dear_imgui_glow::GlowRenderer;
     /// # use dear_imgui_glow::glow;
     /// # use dear_imgui_rs::Context as ImGuiContext;
     ///
-    /// let texture_map = Box::new(SimpleTextureMap::default());
     /// # let gl_context = unsafe { glow::Context::from_loader_function(|_| std::ptr::null()) };
     /// # let mut imgui_context = ImGuiContext::create();
-    /// let mut renderer = GlowRenderer::with_external_context(
-    ///     &gl_context,
-    ///     &mut imgui_context,
-    ///     texture_map
-    /// ).unwrap();
+    /// let mut renderer =
+    ///     GlowRenderer::with_external_context(&gl_context, &mut imgui_context).unwrap();
     /// ```
     pub fn with_external_context(
         gl: &Context,
         imgui_context: &mut ImGuiContext,
-        texture_map: Box<dyn TextureMap>,
     ) -> InitResult<Self> {
-        Self::init_internal(None, gl, imgui_context, texture_map)
+        Self::init_internal(None, gl, imgui_context)
     }
 
     /// Create a renderer that shares ownership of its Glow function table.
     ///
     /// Unlike [`Self::with_external_context`], the renderer retains the exact `Rc` used to create
     /// its GL objects. This is the supported construction path when the renderer will later be
-    /// consumed by `GlowViewportRuntime`.
+    /// consumed by `GlowViewportRuntime`. Retaining the table does not make its native context
+    /// current; the application/platform runtime must still activate a compatible context.
     ///
     /// ```rust,no_run
     /// use std::rc::Rc;
-    /// use dear_imgui_glow::{GlowRenderer, SimpleTextureMap, glow};
+    /// use dear_imgui_glow::{GlowRenderer, glow};
     /// use dear_imgui_rs::Context as ImGuiContext;
     ///
     /// let gl = Rc::new(unsafe {
     ///     glow::Context::from_loader_function(|_| std::ptr::null())
     /// });
     /// let mut imgui = ImGuiContext::create();
-    /// let renderer = GlowRenderer::with_shared_context(
-    ///     Rc::clone(&gl),
-    ///     &mut imgui,
-    ///     Box::new(SimpleTextureMap::default()),
-    /// )?;
+    /// let renderer = GlowRenderer::with_shared_context(Rc::clone(&gl), &mut imgui)?;
     /// # Ok::<(), dear_imgui_glow::InitError>(())
     /// ```
     pub fn with_shared_context(
         gl: std::rc::Rc<Context>,
         imgui_context: &mut ImGuiContext,
-        texture_map: Box<dyn TextureMap>,
     ) -> InitResult<Self> {
-        Self::init_internal(
-            Some(std::rc::Rc::clone(&gl)),
-            &gl,
-            imgui_context,
-            texture_map,
-        )
+        Self::init_internal(Some(std::rc::Rc::clone(&gl)), &gl, imgui_context)
     }
 
     /// Internal initialization method
@@ -169,7 +116,6 @@ impl GlowRenderer {
         owned_gl: Option<std::rc::Rc<glow::Context>>,
         gl: &Context,
         imgui_context: &mut ImGuiContext,
-        texture_map: Box<dyn TextureMap>,
     ) -> InitResult<Self> {
         preflight_renderer_state(imgui_context)?;
         let gl_version = GlVersion::read(gl);
@@ -199,11 +145,11 @@ impl GlowRenderer {
         let pending_device_objects =
             PendingDeviceObjects::create_all(gl, gl_version, has_sampler_object_support)?;
         preflight_renderer_state(imgui_context)?;
-        let renderer_consumer = imgui_context.create_renderer_consumer()?;
+        let renderer_consumer = imgui_context.create_synchronous_renderer_consumer()?;
         // Construction has not emitted a renderer epoch or installed a Context-managed texture
         // mapping. Commit the empty transaction before this renderer can publish either one.
         let reset = imgui_context.prepare_renderer_texture_reset(&renderer_consumer)?;
-        let _ = reset.commit();
+        reset.commit();
         let backend_user_data = Box::<GlowBackendUserData>::default();
         let backend_user_data_ptr = std::ptr::from_ref(backend_user_data.as_ref())
             .cast_mut()
@@ -220,13 +166,11 @@ impl GlowRenderer {
             shaders,
             vbo_handle: Some(vbo_handle),
             ebo_handle: Some(ebo_handle),
-            owned_textures: Vec::new(),
             samplers,
             gl_version,
             has_clip_origin_support,
             has_separate_polygon_modes,
             has_sampler_object_support,
-            is_destroyed: false,
             gl_context: owned_gl,
             context_binding: Some(imgui_context.binding()),
             backend_user_data,
@@ -235,7 +179,7 @@ impl GlowRenderer {
             renderer_state_fault: None,
             #[cfg(test)]
             synthetic_test_renderer: false,
-            texture_map: Some(texture_map),
+            texture_registry: TextureRegistry::default(),
             managed_textures: std::collections::HashMap::new(),
             destroyed_managed_textures: std::collections::HashMap::new(),
             renderer_consumer: Some(renderer_consumer),
@@ -709,11 +653,7 @@ mod tests {
         let gl = unsupported_gl();
         let mut context = ImGuiContext::create();
 
-        let result = GlowRenderer::with_external_context(
-            &gl,
-            &mut context,
-            Box::new(SimpleTextureMap::default()),
-        );
+        let result = GlowRenderer::with_external_context(&gl, &mut context);
 
         assert!(matches!(result, Err(InitError::UnsupportedVersion(_))));
         assert!(context.io().backend_renderer_user_data().is_null());
@@ -736,19 +676,15 @@ mod tests {
         reset(FakeFailure::FragmentShaderCreate);
         let gl = fake_gl();
         let mut context = ImGuiContext::create();
-        let mut texture = OwnedTextureData::new();
-        texture.create(TextureFormat::RGBA32, 1, 1);
-        texture.set_data(&[255, 255, 255, 255]);
+        let texture =
+            OwnedTextureData::from_pixels(TextureFormat::RGBA32, 1, 1, &[255, 255, 255, 255])
+                .unwrap();
         let texture = context.register_texture(texture);
         let before_texture = context
             .with_texture(texture, |texture| (texture.status(), texture.texture_id()))
             .unwrap();
 
-        let result = GlowRenderer::with_external_context(
-            &gl,
-            &mut context,
-            Box::new(SimpleTextureMap::default()),
-        );
+        let result = GlowRenderer::with_external_context(&gl, &mut context);
         assert!(matches!(result, Err(InitError::CreateShader(_))));
 
         assert!(context.io().backend_renderer_user_data().is_null());
@@ -773,7 +709,7 @@ mod tests {
             before_texture
         );
 
-        let consumer = context.create_renderer_consumer().unwrap();
+        let consumer = context.create_synchronous_renderer_consumer().unwrap();
         assert_eq!(consumer.generation(), 1);
         reset(FakeFailure::None);
     }

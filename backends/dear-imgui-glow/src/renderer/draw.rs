@@ -1,5 +1,5 @@
 use dear_imgui_rs::render::{
-    DrawCmd, DrawCmdParams, DrawData, DrawIdx, DrawVert, ReconciledFrame, RenderedFrame,
+    DrawCmd, DrawCmdParams, DrawData, DrawIdx, DrawVert, PendingFrame, ReconciledFrame,
     RendererRenderStateGuard,
 };
 use dear_imgui_rs::sys;
@@ -15,7 +15,7 @@ use crate::{
         FramebufferSrgbScope, GlStateGuard, GlowRenderStateStorage, GlowSamplerStrategy,
         map_renderer_render_state_error,
     },
-    texture::TextureMap,
+    texture::TextureRegistry,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -34,7 +34,7 @@ struct FramebufferExtent {
 
 struct DrawListRenderScope<'draw> {
     gl: &'draw Context,
-    texture_map: &'draw dyn TextureMap,
+    texture_registry: &'draw TextureRegistry,
     display_pos: [f32; 2],
     framebuffer_scale: [f32; 2],
     extent: FramebufferExtent,
@@ -207,88 +207,197 @@ fn clear_viewport_framebuffer(gl: &Context, color: [f32; 4]) {
     }
 }
 
+#[derive(Copy, Clone)]
+enum DeviceObjectReadiness {
+    Ready,
+    #[cfg(feature = "multi-viewport")]
+    EnsureIfDrawing,
+}
+
 impl GlowRenderer {
     /// Consume and render one Context-borrowed Dear ImGui frame.
-    pub fn render(&mut self, frame: RenderedFrame<'_>) -> RenderResult<()> {
-        self.render_reconciled(frame).map(drop)
-    }
-
-    /// Renders one frame and returns its texture-reconciliation proof to a presentation owner.
-    pub fn render_reconciled<'frame>(
-        &mut self,
-        mut frame: RenderedFrame<'frame>,
-    ) -> RenderResult<ReconciledFrame<'frame>> {
-        self.render_borrowed(&mut frame)?;
-        frame.into_reconciled().map_err(Into::into)
-    }
-
-    pub(super) fn render_borrowed(&mut self, frame: &mut RenderedFrame<'_>) -> RenderResult<()> {
+    ///
+    /// The native context for the retained Glow function table, or a compatible share-group
+    /// context, must be current on this thread.
+    pub fn render(&mut self, frame: PendingFrame<'_>) -> RenderResult<()> {
         self.ensure_operational()?;
-        self.validate_rendered_frame(frame)?;
-        if self.is_destroyed {
-            return Err(RenderError::RendererDestroyed);
-        }
+        self.validate_pending_frame(&frame)?;
         let gl = self
             .gl_context
             .clone()
             .ok_or(RenderError::MissingGlContext)?;
-        self.prepare_rendered_frame(&gl, frame)?;
-        self.render_draw_data(&gl, frame.draw_data())
+        self.render_preflighted_pending_frame(&gl, frame)
     }
 
-    /// Consume and render a frame using an externally managed OpenGL context.
+    /// Reconciles managed textures without reading or drawing the frame's commands.
+    ///
+    /// The native context for the retained Glow function table, or a compatible share-group
+    /// context, must be current on this thread.
+    pub fn reconcile_frame<'frame>(
+        &mut self,
+        frame: PendingFrame<'frame>,
+    ) -> RenderResult<ReconciledFrame<'frame>> {
+        self.ensure_operational()?;
+        self.validate_pending_frame(&frame)?;
+        let gl = self
+            .gl_context
+            .clone()
+            .ok_or(RenderError::MissingGlContext)?;
+        self.reconcile_preflighted_pending_frame(&gl, frame)
+    }
+
+    /// Consumes and draws one already-reconciled frame.
+    ///
+    /// The native context for the retained Glow function table, or a compatible share-group
+    /// context, must be current on this thread.
+    pub fn render_reconciled(&mut self, frame: ReconciledFrame<'_>) -> RenderResult<()> {
+        self.render_reconciled_preserving_frame(frame).map(drop)
+    }
+
+    pub(super) fn render_reconciled_preserving_frame<'frame>(
+        &mut self,
+        frame: ReconciledFrame<'frame>,
+    ) -> RenderResult<ReconciledFrame<'frame>> {
+        self.draw_reconciled_frame(&frame)?;
+        Ok(frame)
+    }
+
+    pub(super) fn draw_reconciled_frame(
+        &mut self,
+        frame: &ReconciledFrame<'_>,
+    ) -> RenderResult<()> {
+        self.ensure_operational()?;
+        self.validate_reconciled_frame(frame)?;
+        let gl = self
+            .gl_context
+            .clone()
+            .ok_or(RenderError::MissingGlContext)?;
+        self.ensure_device_objects_preflighted(&gl)?;
+        self.render_draw_data_with_ready_device_objects(&gl, frame.draw_data())
+    }
+
+    /// Consume and render a frame using an externally managed Glow function table.
+    ///
+    /// The table must remain live, and the native context/share group that owns this renderer's
+    /// resources must be current on this thread for the duration of the call.
     pub fn render_with_context(
         &mut self,
         gl: &Context,
-        frame: RenderedFrame<'_>,
+        frame: PendingFrame<'_>,
     ) -> RenderResult<()> {
-        self.render_with_context_reconciled(gl, frame).map(drop)
+        self.ensure_operational()?;
+        self.validate_pending_frame(&frame)?;
+        self.render_preflighted_pending_frame(gl, frame)
     }
 
-    /// Renders with an external OpenGL context and returns texture-reconciliation proof.
-    pub fn render_with_context_reconciled<'frame>(
+    /// Reconciles managed textures with an externally managed Glow function table.
+    ///
+    /// The table must remain live, and the native context/share group that owns this renderer's
+    /// resources must be current on this thread for the duration of the call.
+    pub fn reconcile_frame_with_context<'frame>(
         &mut self,
         gl: &Context,
-        mut frame: RenderedFrame<'frame>,
+        frame: PendingFrame<'frame>,
     ) -> RenderResult<ReconciledFrame<'frame>> {
         self.ensure_operational()?;
-        self.validate_rendered_frame(&frame)?;
-        if self.is_destroyed {
-            return Err(RenderError::RendererDestroyed);
-        }
-        self.prepare_rendered_frame(gl, &mut frame)?;
-        self.render_draw_data(gl, frame.draw_data())?;
-        frame.into_reconciled().map_err(Into::into)
+        self.validate_pending_frame(&frame)?;
+        self.reconcile_preflighted_pending_frame(gl, frame)
     }
 
-    fn prepare_rendered_frame(
+    /// Draws one reconciled frame with an externally managed Glow function table.
+    ///
+    /// The table must remain live, and the native context/share group that owns this renderer's
+    /// resources must be current on this thread for the duration of the call.
+    pub fn render_with_context_reconciled(
         &mut self,
         gl: &Context,
-        frame: &mut RenderedFrame<'_>,
+        frame: ReconciledFrame<'_>,
     ) -> RenderResult<()> {
-        if frame.is_texture_feedback_reconciled() {
-            return Ok(());
-        }
-        let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
-        let feedback =
-            self.process_texture_requests(gl, frame.texture_requests(), request_epoch)?;
-        let progress = frame.reconcile_texture_feedback(feedback)?;
-        self.prune_destroyed_managed_textures(progress.watermark());
-        Ok(())
+        self.ensure_operational()?;
+        self.validate_reconciled_frame(&frame)?;
+        self.render_preflighted_reconciled_frame(gl, frame)
+            .map(drop)
     }
 
-    fn validate_rendered_frame(&self, frame: &RenderedFrame<'_>) -> RenderResult<()> {
-        let consumer = self
-            .renderer_consumer
-            .as_ref()
-            .ok_or(RenderError::RendererNotAttached)?;
+    fn render_preflighted_pending_frame(
+        &mut self,
+        gl: &Context,
+        frame: PendingFrame<'_>,
+    ) -> RenderResult<()> {
+        let frame = self.reconcile_preflighted_pending_frame(gl, frame)?;
+        self.render_reconciled_frame(gl, frame).map(drop)
+    }
+
+    fn reconcile_preflighted_pending_frame<'frame>(
+        &mut self,
+        gl: &Context,
+        frame: PendingFrame<'frame>,
+    ) -> RenderResult<ReconciledFrame<'frame>> {
+        self.ensure_device_objects_preflighted(gl)?;
+        self.reconcile_pending_frame(gl, frame)
+    }
+
+    fn render_preflighted_reconciled_frame<'frame>(
+        &mut self,
+        gl: &Context,
+        frame: ReconciledFrame<'frame>,
+    ) -> RenderResult<ReconciledFrame<'frame>> {
+        self.ensure_device_objects_preflighted(gl)?;
+        self.render_reconciled_frame(gl, frame)
+    }
+
+    fn reconcile_pending_frame<'frame>(
+        &mut self,
+        gl: &Context,
+        frame: PendingFrame<'frame>,
+    ) -> RenderResult<ReconciledFrame<'frame>> {
+        let request_epoch = frame.epoch().sequence();
+        let feedback =
+            self.process_texture_requests(gl, frame.texture_requests(), request_epoch)?;
+        let reconciled = frame.reconcile_texture_feedback(feedback)?;
+        self.prune_destroyed_managed_textures(reconciled.completion_progress().watermark());
+        Ok(reconciled)
+    }
+
+    fn render_reconciled_frame<'frame>(
+        &mut self,
+        gl: &Context,
+        reconciled: ReconciledFrame<'frame>,
+    ) -> RenderResult<ReconciledFrame<'frame>> {
+        self.render_draw_data_with_ready_device_objects(gl, reconciled.draw_data())?;
+        Ok(reconciled)
+    }
+
+    fn validate_pending_frame(&self, frame: &PendingFrame<'_>) -> RenderResult<()> {
+        let consumer = self.renderer_consumer()?;
         if frame.context_id() != consumer.context_id() {
             return Err(RenderError::ContextMismatch {
                 expected: consumer.context_id(),
                 actual: frame.context_id(),
             });
         }
-        let epoch = frame.epoch().ok_or(RenderError::MissingRendererEpoch)?;
+        let epoch = frame.epoch();
+        if epoch.consumer_generation() != consumer.generation() {
+            return Err(RenderError::ConsumerGenerationMismatch {
+                expected: consumer.generation(),
+                actual: epoch.consumer_generation(),
+            });
+        }
+        Ok(())
+    }
+
+    pub(super) fn validate_reconciled_frame(
+        &self,
+        frame: &ReconciledFrame<'_>,
+    ) -> RenderResult<()> {
+        let consumer = self.renderer_consumer()?;
+        if frame.context_id() != consumer.context_id() {
+            return Err(RenderError::ContextMismatch {
+                expected: consumer.context_id(),
+                actual: frame.context_id(),
+            });
+        }
+        let epoch = frame.epoch().ok_or(RenderError::ManagedFrameRequired)?;
         if epoch.consumer_generation() != consumer.generation() {
             return Err(RenderError::ConsumerGenerationMismatch {
                 expected: consumer.generation(),
@@ -299,7 +408,7 @@ impl GlowRenderer {
     }
 
     /// Draw already-reconciled data. Multi-viewport callbacks use this for secondary viewports.
-    pub(super) fn render_draw_data(
+    fn render_draw_data_with_ready_device_objects(
         &mut self,
         gl: &Context,
         draw_data: &DrawData,
@@ -310,7 +419,12 @@ impl GlowRenderer {
             .ok_or(RenderError::RendererNotAttached)?;
         binding
             .try_with_bound_context(|| {
-                self.render_draw_data_transaction(gl, Some(draw_data), false)
+                self.render_draw_data_transaction(
+                    gl,
+                    Some(draw_data),
+                    false,
+                    DeviceObjectReadiness::Ready,
+                )
             })
             .map_err(RenderError::ContextBinding)?
     }
@@ -328,7 +442,14 @@ impl GlowRenderer {
             .clone()
             .ok_or(RenderError::RendererNotAttached)?;
         binding
-            .try_with_bound_context(|| self.render_draw_data_transaction(gl, draw_data, clear))
+            .try_with_bound_context(|| {
+                self.render_draw_data_transaction(
+                    gl,
+                    draw_data,
+                    clear,
+                    DeviceObjectReadiness::EnsureIfDrawing,
+                )
+            })
             .map_err(RenderError::ContextBinding)?
     }
 
@@ -337,11 +458,8 @@ impl GlowRenderer {
         gl: &Context,
         draw_data: Option<&DrawData>,
         clear: bool,
+        _device_objects: DeviceObjectReadiness,
     ) -> RenderResult<()> {
-        if self.is_destroyed {
-            return Err(RenderError::RendererDestroyed);
-        }
-
         let framebuffer_extent = draw_data
             .map(FramebufferExtent::from_draw_data)
             .transpose()?
@@ -349,6 +467,10 @@ impl GlowRenderer {
         let drawable = framebuffer_extent.is_some();
         if !clear && !drawable {
             return Ok(());
+        }
+        #[cfg(feature = "multi-viewport")]
+        if matches!(_device_objects, DeviceObjectReadiness::EnsureIfDrawing) {
+            self.ensure_device_objects_preflighted(gl)?;
         }
 
         let platform_io = drawable.then(platform_io_for_current_context).transpose()?;
@@ -400,10 +522,10 @@ impl GlowRenderer {
             &vertex_array,
             framebuffer_srgb.as_ref(),
         )?;
-        let texture_map = self.texture_map_for_draw();
+        let texture_registry = &self.texture_registry;
         self.render_draw_lists(
             gl,
-            texture_map,
+            texture_registry,
             draw_data,
             extent,
             &vertex_array,
@@ -414,12 +536,6 @@ impl GlowRenderer {
             .finish()
             .map_err(map_renderer_render_state_error)?;
         Ok(())
-    }
-
-    fn texture_map_for_draw(&self) -> &dyn TextureMap {
-        self.texture_map
-            .as_deref()
-            .expect("GlowRenderer texture_map missing (internal invariant)")
     }
 
     /// Set up OpenGL render state for ImGui rendering
@@ -561,7 +677,7 @@ impl GlowRenderer {
     fn render_draw_lists(
         &self,
         gl: &Context,
-        texture_map: &dyn TextureMap,
+        texture_registry: &TextureRegistry,
         draw_data: &DrawData,
         extent: FramebufferExtent,
         vertex_array: &VertexArrayGuard<'_>,
@@ -577,7 +693,7 @@ impl GlowRenderer {
 
             let scope = DrawListRenderScope {
                 gl,
-                texture_map,
+                texture_registry,
                 display_pos: draw_data.display_pos(),
                 framebuffer_scale: draw_data.framebuffer_scale(),
                 extent,
@@ -755,7 +871,7 @@ impl GlowRenderer {
             return Ok(());
         };
         let texture = scope
-            .texture_map
+            .texture_registry
             .get(cmd_params.texture_id)
             .ok_or(RenderError::UnknownTextureId(cmd_params.texture_id))?;
 
@@ -805,15 +921,11 @@ mod tests {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicU32, Ordering};
 
-    use dear_imgui_rs::{TextureFormat, TextureId};
     use glow::HasContext;
 
-    use super::{
-        FramebufferExtent, GlowRenderer, clear_viewport_framebuffer, project_scissor_rect,
-    };
+    use super::{FramebufferExtent, clear_viewport_framebuffer, project_scissor_rect};
     use super::{SamplerBinding, VertexArrayGuard};
     use crate::renderer::sampler::SamplerFilter;
-    use crate::{GlTexture, GlVersion, InitResult, shaders::Shaders, texture::TextureMap};
 
     static CLEAR_EVENTS: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
     static BOUND_VERTEX_ARRAY: AtomicU32 = AtomicU32::new(0);
@@ -989,81 +1101,6 @@ mod tests {
         }
     }
 
-    struct PanicTextureMap;
-
-    impl TextureMap for PanicTextureMap {
-        fn get(&self, _texture_id: TextureId) -> Option<GlTexture> {
-            panic!("injected texture map panic")
-        }
-
-        fn set(&mut self, _texture_id: TextureId, _gl_texture: GlTexture) {}
-        fn remove(&mut self, _texture_id: TextureId) -> Option<GlTexture> {
-            None
-        }
-        fn clear(&mut self) {}
-        fn register_texture(
-            &mut self,
-            _gl_texture: GlTexture,
-            _width: u32,
-            _height: u32,
-            _format: TextureFormat,
-        ) -> InitResult<TextureId> {
-            unreachable!()
-        }
-        fn update_texture(
-            &mut self,
-            _texture_id: TextureId,
-            _gl_texture: GlTexture,
-            _width: u32,
-            _height: u32,
-        ) {
-        }
-        fn texture_format(&self, _texture_id: TextureId) -> Option<TextureFormat> {
-            None
-        }
-    }
-
-    fn test_renderer(texture_map: Box<dyn TextureMap>) -> GlowRenderer {
-        GlowRenderer {
-            shaders: Shaders {
-                program: None,
-                attrib_location_tex: None,
-                attrib_location_proj_mtx: None,
-                attrib_location_color_gamma: None,
-                attrib_location_vtx_pos: 0,
-                attrib_location_vtx_uv: 0,
-                attrib_location_vtx_color: 0,
-            },
-            vbo_handle: None,
-            ebo_handle: None,
-            owned_textures: Vec::new(),
-            samplers: None,
-            gl_version: GlVersion {
-                major: 3,
-                minor: 3,
-                is_es: false,
-            },
-            has_clip_origin_support: false,
-            has_separate_polygon_modes: false,
-            has_sampler_object_support: true,
-            is_destroyed: false,
-            gl_context: None,
-            context_binding: None,
-            backend_user_data: Box::default(),
-            renderer_name_ptr: std::ptr::null(),
-            renderer_texture_max: [0, 0],
-            renderer_state_fault: None,
-            synthetic_test_renderer: true,
-            texture_map: Some(texture_map),
-            managed_textures: std::collections::HashMap::new(),
-            destroyed_managed_textures: std::collections::HashMap::new(),
-            renderer_consumer: None,
-            framebuffer_srgb: false,
-            color_gamma_override: None,
-            viewport_clear_color: [0.0, 0.0, 0.0, 1.0],
-        }
-    }
-
     #[test]
     fn viewport_clear_is_unclipped_and_writes_every_color_channel() {
         CLEAR_EVENTS.lock().unwrap().clear();
@@ -1072,16 +1109,6 @@ mod tests {
             *CLEAR_EVENTS.lock().unwrap(),
             ["disable-scissor", "color-mask", "clear-color", "clear"]
         );
-    }
-
-    #[test]
-    fn texture_map_remains_owned_when_lookup_panics() {
-        let renderer = test_renderer(Box::new(PanicTextureMap));
-        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            renderer.texture_map_for_draw().get(TextureId::new(1));
-        }));
-        assert!(panic.is_err());
-        assert!(renderer.texture_map.is_some());
     }
 
     #[test]

@@ -1,5 +1,6 @@
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
+use std::fmt;
 use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
@@ -11,8 +12,9 @@ use web_time::Instant;
 
 use dear_imgui_rs::{
     Context, ContextAttachmentTeardownError, ContextBinding, ContextBindingError, ContextDestroyed,
-    ContextId, ContextTeardown,
+    ContextTeardown,
 };
+#[cfg(test)]
 use winit::event::Event;
 use winit::event_loop::ActiveEventLoop;
 #[cfg(target_os = "linux")]
@@ -45,7 +47,8 @@ mod lifecycle;
 #[cfg(test)]
 pub(super) use self::input_state::ReleasedInput;
 pub(super) use self::input_state::{InputOwnership, MouseLeaveState};
-pub use self::lifecycle::WinitPlatformRuntime;
+#[cfg(test)]
+pub(super) use self::lifecycle::WinitPlatformRuntime;
 #[cfg(test)]
 pub(super) use self::lifecycle::validate_multi_viewport_hidpi_mode;
 #[cfg(test)]
@@ -83,6 +86,11 @@ pub(super) enum RuntimeState {
     ShuttingDown,
     Detached,
     ContextDestroyed,
+}
+
+struct QueuedPlatformFault {
+    error: WinitPlatformError,
+    terminal: bool,
 }
 
 fn invalidate_mouse_coordinate_cache(io: &mut dear_imgui_rs::Io) {
@@ -131,7 +139,7 @@ fn apply_raw_io_coordinate_contract(
 
 /// A closure-scoped view of Winit's active event loop.
 ///
-/// The lifetime is introduced by [`WinitPlatformRuntime::with_event_loop`], so this token and the
+/// The lifetime is introduced by [`crate::WinitPlatform::with_event_loop`], so this token and the
 /// `ActiveEventLoop` reference it exposes cannot be returned from the closure.
 pub struct EventLoopScope<'scope> {
     event_loop: &'scope ActiveEventLoop,
@@ -145,6 +153,61 @@ impl<'scope> EventLoopScope<'scope> {
     }
 }
 
+/// Result of one Winit viewport attempt.
+///
+/// The callback is skipped when the exact platform generation already has pending faults. When
+/// it runs, its output is retained even if native callbacks report additional faults while the
+/// event-loop capability is active. This keeps callback and platform failures as parallel outputs
+/// instead of imposing nested `Result` precedence.
+#[must_use = "split the callback output and deferred platform faults with into_parts"]
+#[derive(Debug)]
+pub struct WinitViewportAttempt<R> {
+    output: Option<R>,
+    faults: Vec<WinitPlatformError>,
+}
+
+impl<R> WinitViewportAttempt<R> {
+    fn skipped(faults: Vec<WinitPlatformError>) -> Self {
+        debug_assert!(!faults.is_empty());
+        Self {
+            output: None,
+            faults,
+        }
+    }
+
+    fn completed(output: R, faults: Vec<WinitPlatformError>) -> Self {
+        Self {
+            output: Some(output),
+            faults,
+        }
+    }
+
+    /// Splits the retained callback output from deferred platform faults.
+    #[must_use]
+    pub fn into_parts(self) -> (Option<R>, Vec<WinitPlatformError>) {
+        (self.output, self.faults)
+    }
+}
+
+/// Exact-generation Winit adapter retained by a first-party renderer route.
+///
+/// This is implementation plumbing between published backend crates, not a second platform
+/// lifecycle owner. Applications continue to own and use [`crate::WinitPlatform`].
+#[doc(hidden)]
+pub struct WinitViewportRendererAdapter {
+    control: Rc<RuntimeControl>,
+    platform: Rc<WinitPlatformControl>,
+}
+
+impl fmt::Debug for WinitViewportRendererAdapter {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WinitViewportRendererAdapter")
+            .field("context", &self.control.binding().id())
+            .finish_non_exhaustive()
+    }
+}
+
 pub(crate) struct RuntimeControl {
     context_raw: *mut dear_imgui_rs::sys::ImGuiContext,
     binding: ContextBinding,
@@ -155,7 +218,8 @@ pub(crate) struct RuntimeControl {
     core_teardown_owns_callback_guard: Cell<bool>,
     platform_callback_contract: Cell<Option<PlatformCallbackContract>>,
     platform_callback_drift: Cell<Option<&'static str>>,
-    fault: RefCell<Option<WinitPlatformError>>,
+    faults: RefCell<VecDeque<QueuedPlatformFault>>,
+    terminal_fault_recorded: Cell<bool>,
     monitor_ownership: RefCell<Option<MonitorOwnership>>,
     main_window: RefCell<Option<Arc<Window>>>,
     mouse_leave: Cell<MouseLeaveState>,
@@ -184,7 +248,8 @@ impl RuntimeControl {
             core_teardown_owns_callback_guard: Cell::new(false),
             platform_callback_contract: Cell::new(None),
             platform_callback_drift: Cell::new(None),
-            fault: RefCell::new(None),
+            faults: RefCell::new(VecDeque::new()),
+            terminal_fault_recorded: Cell::new(false),
             monitor_ownership: RefCell::new(None),
             main_window: RefCell::new(Some(main_window)),
             mouse_leave: Cell::new(MouseLeaveState::default()),
@@ -207,7 +272,8 @@ impl RuntimeControl {
             core_teardown_owns_callback_guard: Cell::new(false),
             platform_callback_contract: Cell::new(None),
             platform_callback_drift: Cell::new(None),
-            fault: RefCell::new(None),
+            faults: RefCell::new(VecDeque::new()),
+            terminal_fault_recorded: Cell::new(false),
             monitor_ownership: RefCell::new(None),
             main_window: RefCell::new(None),
             mouse_leave: Cell::new(MouseLeaveState::default()),
@@ -224,6 +290,14 @@ impl RuntimeControl {
 
     pub(super) fn binding(&self) -> &ContextBinding {
         &self.binding
+    }
+
+    pub(super) fn ensure_context(&self, context: &Context) -> Result<(), WinitPlatformError> {
+        if context.id() == self.binding.id() {
+            Ok(())
+        } else {
+            Err(WinitPlatformError::ContextMismatch)
+        }
     }
 
     pub(super) fn platform_control(&self) -> Result<Rc<WinitPlatformControl>, WinitPlatformError> {
@@ -310,10 +384,10 @@ impl RuntimeControl {
     }
 
     pub(super) fn record_fault(&self, fault: WinitPlatformError) {
-        let mut slot = self.fault.borrow_mut();
-        if slot.is_none() {
-            *slot = Some(fault);
-        }
+        self.faults.borrow_mut().push_back(QueuedPlatformFault {
+            error: fault,
+            terminal: false,
+        });
     }
 
     pub(crate) fn mark_faulted(&self) {
@@ -327,22 +401,62 @@ impl RuntimeControl {
     }
 
     pub(super) fn record_terminal_fault(&self, fault: WinitPlatformError) {
+        if self.terminal_fault_recorded.get() {
+            return;
+        }
+        if let Ok(platform) = self.platform_control()
+            && platform.terminal_fault().is_some()
+        {
+            self.terminal_fault_recorded.set(true);
+            self.mark_faulted();
+            return;
+        }
+        self.terminal_fault_recorded.set(true);
+        self.faults.borrow_mut().push_back(QueuedPlatformFault {
+            error: fault.clone(),
+            terminal: true,
+        });
         self.mark_faulted();
         if let Ok(platform) = self.platform_control() {
             platform.fail_current_contract(fault);
         }
     }
 
-    fn poll_fault(&self) -> Result<(), WinitPlatformError> {
+    pub(crate) fn poll_fault(&self) -> Result<(), WinitPlatformError> {
+        if let Some(fault) = self.faults.borrow_mut().pop_front() {
+            return Err(fault.error);
+        }
         if let Ok(platform) = self.platform_control()
             && let Some(fault) = platform.terminal_fault()
         {
             return Err(fault);
         }
-        match self.fault.borrow_mut().take() {
-            Some(fault) => Err(fault),
-            None => Ok(()),
+        Ok(())
+    }
+
+    pub(crate) fn take_retryable_shutdown_fault(&self) -> Option<WinitPlatformError> {
+        let mut faults = self.faults.borrow_mut();
+        if faults.front().is_some_and(|fault| !fault.terminal) {
+            faults.pop_front().map(|fault| fault.error)
+        } else {
+            None
         }
+    }
+
+    pub(crate) fn drain_faults(&self) -> Vec<WinitPlatformError> {
+        let queued = self.faults.borrow_mut().drain(..).collect::<Vec<_>>();
+        let terminal_was_queued = queued.iter().any(|fault| fault.terminal);
+        let mut faults = queued
+            .into_iter()
+            .map(|fault| fault.error)
+            .collect::<Vec<_>>();
+        if let Ok(platform) = self.platform_control()
+            && let Some(terminal) = platform.terminal_fault()
+            && !terminal_was_queued
+        {
+            faults.push(terminal);
+        }
+        faults
     }
 
     fn enter_event_loop<R>(
@@ -450,9 +564,16 @@ impl RuntimeControl {
         }
     }
 
-    fn shutdown_native(&self) -> Result<(), WinitPlatformError> {
+    fn shutdown_native_with_fault_policy(
+        &self,
+        report_deferred_fault: bool,
+    ) -> Result<(), WinitPlatformError> {
         let callback_error = release_platform_callbacks(self);
-        let deferred_fault = self.poll_fault();
+        let deferred_fault = if report_deferred_fault {
+            self.poll_fault()
+        } else {
+            Ok(())
+        };
         // `DestroyPlatformWindows` has already visited the complete internal viewport list.
         // Residual entries may refer to viewports that were filtered out of the public
         // `PlatformIO.Viewports` snapshot or have since been deleted, so release only their Rust
@@ -470,6 +591,14 @@ impl RuntimeControl {
             .and(input_error)
             .and(monitor_error)
             .and(io_error)
+    }
+
+    fn shutdown_native(&self) -> Result<(), WinitPlatformError> {
+        self.shutdown_native_with_fault_policy(true)
+    }
+
+    fn shutdown_native_for_context_drop(&self) -> Result<(), WinitPlatformError> {
+        self.shutdown_native_with_fault_policy(false)
     }
 
     fn shutdown_explicit(&self, context: &mut Context) -> Result<(), WinitPlatformError> {
@@ -557,7 +686,7 @@ impl RuntimeControl {
         self.viewports.borrow_mut().clear();
     }
 
-    pub(super) fn main_window(&self) -> Option<Arc<Window>> {
+    pub(crate) fn main_window(&self) -> Option<Arc<Window>> {
         self.main_window.borrow().clone()
     }
 
@@ -845,7 +974,7 @@ impl RuntimeControl {
                 self.teardown_callbacks_active.set(true);
                 let _restore = TeardownCallbackRestore { control: self };
                 unsafe { dear_imgui_rs::sys::igDestroyPlatformWindows() };
-                self.shutdown_native()
+                self.shutdown_native_for_context_drop()
             })
             .map_err(|error| {
                 let message = error.to_string();
@@ -870,6 +999,9 @@ impl RuntimeControl {
         &self,
         context: &mut Context,
     ) -> Result<(), WinitPlatformError> {
+        if let Some(fault) = self.take_retryable_shutdown_fault() {
+            return Err(fault);
+        }
         self.shutdown_explicit(context)
     }
 
@@ -899,5 +1031,31 @@ struct TeardownCallbackRestore<'a> {
 impl Drop for TeardownCallbackRestore<'_> {
     fn drop(&mut self) {
         self.control.teardown_callbacks_active.set(false);
+    }
+}
+
+#[cfg(test)]
+mod viewport_attempt_tests {
+    use super::*;
+
+    #[test]
+    fn callback_result_and_platform_faults_remain_parallel_outputs() {
+        let faults = vec![WinitPlatformError::WindowOperation {
+            operation: "test callback",
+            message: "platform failed".to_owned(),
+        }];
+        let attempt = WinitViewportAttempt::completed(Err::<(), _>("renderer failed"), faults);
+
+        let (output, faults) = attempt.into_parts();
+
+        assert_eq!(output, Some(Err("renderer failed")));
+        assert_eq!(faults.len(), 1);
+        assert!(matches!(
+            faults[0],
+            WinitPlatformError::WindowOperation {
+                operation: "test callback",
+                ..
+            }
+        ));
     }
 }

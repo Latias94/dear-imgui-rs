@@ -15,7 +15,6 @@ mod texture;
 
 pub use clip::DrawListClipRectToken;
 pub use raw::RawDrawCallback;
-pub use text::DrawListTextNoPixelSnapToken;
 pub use texture::DrawListTextureToken;
 
 thread_local! {
@@ -31,6 +30,13 @@ thread_local! {
 pub struct DrawListMut<'ui> {
     pub(super) draw_list: *mut sys::ImDrawList,
     pub(super) ui: Option<&'ui crate::Ui>,
+    pub(super) provenance: DrawListProvenance,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum DrawListProvenance {
+    Frame,
+    Window(crate::scope::WindowScope),
 }
 
 pub(super) struct ChannelsSplitMergeGuard<'ui> {
@@ -73,11 +79,16 @@ impl<'ui> DrawListMut<'ui> {
         });
     }
 
-    fn from_raw(ui: &'ui crate::Ui, draw_list: *mut sys::ImDrawList) -> Self {
+    fn from_raw(
+        ui: &'ui crate::Ui,
+        draw_list: *mut sys::ImDrawList,
+        provenance: DrawListProvenance,
+    ) -> Self {
         Self::borrow_draw_list(draw_list);
         Self {
             draw_list,
             ui: Some(ui),
+            provenance,
         }
     }
 
@@ -88,33 +99,66 @@ impl<'ui> DrawListMut<'ui> {
     /// `draw_list` must be a valid mutable draw-list pointer owned by the active
     /// Dear ImGui frame and remain valid for `'ui`. The caller must also ensure
     /// the pointer is not independently mutated while the returned wrapper is
-    /// alive.
+    /// alive. Raw wrappers are treated as frame-scoped; the caller must enforce any narrower
+    /// window or viewport provenance required by the native draw list.
     pub unsafe fn from_raw_mut(ui: &'ui crate::Ui, draw_list: *mut sys::ImDrawList) -> Self {
-        Self::from_raw(ui, draw_list)
+        Self::from_raw(ui, draw_list, DrawListProvenance::Frame)
     }
 
     pub(crate) fn window(ui: &'ui crate::Ui) -> Self {
-        ui.run_with_bound_context(|| Self::from_raw(ui, unsafe { sys::igGetWindowDrawList() }))
+        ui.run_with_bound_context(|| unsafe {
+            let scope = ui
+                .current_native_scope()
+                .window()
+                .expect("Ui::get_window_draw_list() requires a current window");
+            Self::from_raw(
+                ui,
+                sys::igGetWindowDrawList(),
+                DrawListProvenance::Window(scope),
+            )
+        })
     }
 
     pub(crate) fn background(ui: &'ui crate::Ui) -> Self {
         ui.run_with_bound_context(|| {
             let viewport = unsafe { sys::igGetMainViewport() };
-            Self::from_raw(ui, unsafe { sys::igGetBackgroundDrawList(viewport) })
+            Self::from_raw(
+                ui,
+                unsafe { sys::igGetBackgroundDrawList(viewport) },
+                DrawListProvenance::Frame,
+            )
         })
     }
 
     pub(crate) fn foreground(ui: &'ui crate::Ui) -> Self {
         ui.run_with_bound_context(|| {
             let viewport = unsafe { sys::igGetMainViewport() };
-            Self::from_raw(ui, unsafe {
-                sys::igGetForegroundDrawList_ViewportPtr(viewport)
-            })
+            Self::from_raw(
+                ui,
+                unsafe { sys::igGetForegroundDrawList_ViewportPtr(viewport) },
+                DrawListProvenance::Frame,
+            )
         })
     }
 
     pub(super) fn ui(&self) -> &crate::Ui {
         self.ui
             .expect("this draw-list operation requires a DrawListMut borrowed from Ui")
+    }
+
+    pub(super) fn assert_scope(&self, operation: &'static str) {
+        let DrawListProvenance::Window(scope) = self.provenance else {
+            return;
+        };
+        self.ui().run_with_bound_context(|| {
+            assert!(
+                self.ui().current_native_scope().window() == Some(scope),
+                "{operation} requires the window Begin scope that created this DrawListMut"
+            );
+        });
+    }
+
+    pub(super) fn is_window_scoped(&self) -> bool {
+        matches!(self.provenance, DrawListProvenance::Window(_))
     }
 }

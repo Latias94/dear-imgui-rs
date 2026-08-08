@@ -1,7 +1,7 @@
 use crate::fonts::FontId;
 use crate::fonts::atlas::id::validate_font_id_for_atlas;
 use crate::fonts::atlas::state::{
-    bump_custom_rect_generation, bump_font_atlas_generation, clear_font_atlas_glyph_ranges,
+    bump_custom_rect_generation, bump_font_atlas_generation, reset_font_atlas_mode_after_full_clear,
 };
 use crate::sys;
 
@@ -23,14 +23,17 @@ impl FontAtlas {
     /// Clear all fonts and texture data.
     ///
     /// Existing [`FontId`] handles from this atlas are invalidated.
+    /// A legacy renderer claim is released only when no [`LegacyFontAtlas`](crate::LegacyFontAtlas)
+    /// capability remains alive. Drop every legacy capability before calling this method when
+    /// preparing the atlas for a managed renderer.
     #[doc(alias = "Clear")]
     pub fn clear(&self) {
         self.assert_mutation_allowed("FontAtlas::clear()");
         let raw = self.raw();
         unsafe { sys::ImFontAtlas_Clear(raw) }
-        clear_font_atlas_glyph_ranges(raw);
         bump_font_atlas_generation(raw);
         bump_custom_rect_generation(raw);
+        reset_font_atlas_mode_after_full_clear(raw);
     }
 
     /// Clear only the fonts (keep texture data).
@@ -41,20 +44,20 @@ impl FontAtlas {
         self.assert_mutation_allowed("FontAtlas::clear_fonts()");
         let raw = self.raw();
         unsafe { sys::ImFontAtlas_ClearFonts(raw) }
-        clear_font_atlas_glyph_ranges(raw);
         bump_font_atlas_generation(raw);
         bump_custom_rect_generation(raw);
     }
+}
 
-    /// Clear only the texture data (keep fonts)
+impl crate::fonts::atlas::LegacyFontAtlas<'_> {
+    /// Clear only the CPU atlas texture data while keeping font sources.
+    ///
+    /// This does not release any renderer-owned GPU texture. The legacy renderer remains
+    /// responsible for retiring that resource after its last use.
     #[doc(alias = "ClearTexData")]
-    pub fn clear_tex_data(&self) {
-        self.assert_mutation_allowed("FontAtlas::clear_tex_data()");
-        let raw = self.raw();
-        assert!(
-            !unsafe { (*raw).RendererHasTextures },
-            "FontAtlas::clear_tex_data() is only available to legacy renderers without RENDERER_HAS_TEXTURES"
-        );
-        unsafe { sys::ImFontAtlas_ClearTexData(raw) }
+    pub fn clear_cpu_texture_data(&self) {
+        self.atlas
+            .assert_mutation_allowed("LegacyFontAtlas::clear_cpu_texture_data()");
+        unsafe { sys::ImFontAtlas_ClearTexData(self.atlas.raw()) }
     }
 }

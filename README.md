@@ -68,9 +68,11 @@ ui.window("Hello")
       ui.text("Hello, world!");
       if ui.button("Click me") { println!("clicked"); }
   });
-let frame = ctx.render();
-// Move `frame` into a backend (e.g. dear-imgui-wgpu or dear-imgui-glow).
-// The backend reconciles managed texture feedback before reading draw commands.
+// This backend-free snippet uses the explicit legacy path. A managed renderer instead retains a
+// SynchronousRendererConsumer, calls `ctx.render(&consumer)`, reconciles every texture request,
+// and draws the resulting ReconciledFrame.
+let frame = ctx.render_legacy();
+let _draw_data = frame.draw_data();
 // Tip: pass `.opened(&mut open)` if you want a title-bar close button (X).
 
 // Tip: For fallible creation, use `Context::try_create()`
@@ -92,8 +94,8 @@ The 0.16 train is intentionally breaking. Alpha.1 introduced the main architectu
 - global reflection helpers to an owned `ReflectSession` and per-frame `Inspector`;
 - borrowed file-browser filesystems to `FileDialogState`-owned blocking or background capabilities;
 - callback access to shared `ContextBinding` and ordered Context attachments;
-- borrowed texture pointers and pseudo-owned draw data to Context-owned `ManagedTextureId`,
-  move-only `RenderedFrame`/`FrameSnapshot`, and request-bound renderer feedback;
+- borrowed texture pointers and pseudo-owned draw data to Context-owned `ManagedTextureId`, a
+  one-use `RenderedFrame`, move-only `FrameSnapshot`, and request-bound renderer feedback;
 - manual Winit/WGPU/Glow/Ash callback registration to owning runtimes with explicit,
   idempotent shutdown (WGPU attach is safe; Glow remains unsafe for current-GL-context and
   share-group lineage; Ash remains unsafe for raw Vulkan handle lineage);
@@ -102,88 +104,63 @@ The 0.16 train is intentionally breaking. Alpha.1 introduced the main architectu
 - implicit WASM target selection to the explicit `wasm32-unknown-unknown` plus `wasm` feature contract; and
 - `dear_imgui_sys::IMGUI_VERSION` to `BINDING_VERSION`, without a compatibility alias.
 
-Alpha.2 further hardens Context, Docking, multi-viewport renderer, and Bevy frame ownership. See the [alpha.2 migration table](CHANGELOG.md#0160-alpha2); applications migrating directly from 0.15 should also read the [alpha.1 migration guide](CHANGELOG.md#0160-alpha1).
+Alpha.2 replaces alpha.1's `RenderedFrame` with the linear `PendingFrame` -> `ReconciledFrame` protocol and replaces the mode-selecting `RendererConsumer` with separate synchronous and detached capabilities. It also hardens Context, Docking, multi-viewport renderer, Test Engine, and Bevy frame ownership. See the [alpha.2 migration table](CHANGELOG.md#0160-alpha2); applications migrating directly from 0.15 should also read the [alpha.1 migration guide](CHANGELOG.md#0160-alpha1).
 
 ## Examples
 
-```bash
+```text
 # Fresh source checkout. The native -sys crates need vendored submodules.
 git clone --recursive https://github.com/Latias94/dear-imgui-rs
 cd dear-imgui-rs
 
 # If you already cloned without --recursive, run this inside the repo.
 git submodule update --init --recursive
+```
 
-# Core & docking examples
-cargo run --bin game_engine_docking
-cargo run --bin dockspace_minimal
-cargo run -p dear-imgui-examples --bin dear_app_docking
+Start with the application APIs, then move down to backend integration only when the application
+needs to own its window, surface, render pass, or native multi-viewport route:
 
-# Normal application path (UI-only closure, then the full lifecycle API)
+```text
 cargo run -p dear-app --example hello
 cargo run -p dear-imgui-examples --bin hello_world
+cargo run -p dear-imgui-examples --bin fallible_frame
 cargo run -p dear-imgui-examples --bin application_lifecycle
+```
 
-# Focused safe API recipes
+Focused safe API examples keep the host runtime out of the way:
+
+```text
 cargo run -p dear-imgui-examples --bin custom_font_minimal
 cargo run -p dear-imgui-examples --bin managed_texture_minimal
+cargo run -p dear-imgui-examples --bin dockspace_minimal
 cargo run -p dear-imgui-examples --bin task_organizer
+```
 
-# Extension examples (using wgpu + winit directly)
-cargo run --bin imguizmo_basic --features imguizmo
-cargo run --bin imnodes_basic --features imnodes
-# imgui-node-editor: basic uses the normal core; showcase opts into blueprint stack layout
-cargo run -p dear-imgui-examples --bin node_editor_basic --features node-editor
-cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-editor-blueprints
-cargo run --bin implot_basic --features implot
-cargo run --bin imguizmo_quat_basic --features imguizmo-quat
-cargo run --bin reflect_demo --features reflect
-cargo run --bin imgui_test_engine_basic --features test-engine
-  # Smoke test (auto-run + exit)
-  cargo run --bin imgui_test_engine_basic --features test-engine -- --exit-when-done --group tests
+Each optional extension has a small copyable entry point; larger `*_showcase` binaries are kept
+separate:
 
-# implot3d example (uses dear-app)
-cargo run --bin implot3d_basic --features implot3d
+```text
+cargo run -p dear-imgui-examples --bin implot_minimal --features implot
+cargo run -p dear-imgui-examples --bin implot3d_minimal --features implot3d
+cargo run -p dear-imgui-examples --bin imnodes_minimal --features imnodes
+cargo run -p dear-imgui-examples --bin imguizmo_minimal --features imguizmo
+cargo run -p dear-imgui-examples --bin imguizmo_quat_minimal --features imguizmo-quat
+cargo run -p dear-imgui-examples --bin node_editor_minimal --features node-editor
+```
 
-# Vulkan (Ash) renderer examples (native)
-cargo run --bin ash_basic
-cargo run --bin ash_textures
-# Multi-viewport (winit + Vulkan/Ash, native only)
-cargo run -p dear-imgui-examples --bin multi_viewport_ash --features multi-viewport
-# SDL3 + Vulkan/Ash multi-viewport (native only)
-cargo run -p dear-imgui-examples --bin sdl3_ash_multi_viewport --features sdl3-ash-multi-viewport
+The low-level renderer references expose the complete native lifecycle deliberately:
 
-# WebAssembly web demo (import-style, ImGui + optional extensions)
-# See the "WebAssembly support" section below and docs/WASM.md for the exact target/feature contract.
-
-# SDL3 backends (native)
-# SDL3 + OpenGL3 with official C++ backends (multi-viewport via imgui_impl_sdl3/imgui_impl_opengl3)
-cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport,sdl3-opengl3
-# SDL3 + Glow (experimental multi-viewport using Rust Glow renderer)
-cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features sdl3-glow-multi-viewport
-# SDL3 + WGPU (single-window)
-cargo run -p dear-imgui-examples --bin sdl3_wgpu --features sdl3-platform
-# SDL3 + WGPU (experimental multi-viewport, native only)
-cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport
-
-# winit + WGPU (experimental multi-viewport testbed, native only)
-# Enabled on Windows/macOS/Linux. Release CI exercises the Linux path under Xvfb + Mesa/Lavapipe.
+```text
+cargo run -p dear-imgui-examples --bin winit_wgpu
+cargo run -p dear-imgui-examples --bin winit_glow
+cargo run -p dear-imgui-examples --bin winit_ash
 cargo run -p dear-imgui-examples --bin multi_viewport_wgpu --features multi-viewport
+cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features sdl3-glow-multi-viewport
 ```
 
-Tip: The ImNodes example includes multiple tabs (Hello, Multi-Editor, Style, Advanced Style, Save/Load, Color Editor, Shader Graph, MiniMap Callback).
-
-See `examples/README.md` for the curated quick-start, renderer, feature, docking, and integration tracks.
-
-### File Browser
-
-```bash
-# OS-native dialogs (rfd)
-cargo run --bin file_dialog_native --features file-browser
-
-# Pure ImGui in-UI file browser
-cargo run --bin file_browser_imgui --features file-browser
-```
+See [`examples/README.md`](examples/README.md) for the complete four-level catalog, including
+feature flags, prerequisites, and the next example for every public binary. Private runtime probes
+under `examples/ci/` are release evidence and are intentionally excluded from that learning path.
 
 ## Installation
 
@@ -240,7 +217,12 @@ For the checked-in iOS smoke templates and a quick route-selection index, see
 Most users should stay on the safe backends (`dear-imgui-winit`,
 `dear-imgui-sdl3`, `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-ash`).
 If you need to integrate a custom engine or renderer, start with
-[`docs/CUSTOM_BACKENDS.md`](docs/CUSTOM_BACKENDS.md).
+[`docs/CUSTOM_BACKENDS.md`](docs/CUSTOM_BACKENDS.md). The dependency-light synchronous contract is
+also executable:
+
+```text
+cargo run -j 1 -p dear-imgui-rs --example custom_renderer_headless
+```
 
 For engine integrations or platform stacks that are not wrapped by a dedicated
 crate yet, `dear-imgui-sys` can expose selected official backend pieces behind
@@ -519,7 +501,7 @@ For binding verification, provider construction, feature-forwarding checks, and 
     - Winit example: `cargo run -p dear-imgui-examples --bin multi_viewport_wgpu --features multi-viewport`
     - SDL3 example: `cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport`
   - **Winit/SDL3 + Ash**: native-only Vulkan adapters share one owning callback/swapchain runtime for classic render-pass and dynamic-rendering routes. Attachment is unsafe only because raw Vulkan handle/device lineage cannot be proven; the runtime owns callback address stability and ordered shutdown.
-    - Winit example: `cargo run -p dear-imgui-examples --bin multi_viewport_ash --features multi-viewport`
+    - Winit example: `cargo run -p dear-imgui-examples --bin multi_viewport_ash --features ash-winit-multi-viewport`
     - SDL3 example: `cargo run -p dear-imgui-examples --bin sdl3_ash_multi_viewport --features sdl3-ash-multi-viewport`
   - Call `Context::enable_multi_viewport()` for viewports. Enable `ConfigFlags::DOCKING_ENABLE` separately when the application also needs docking.
   - Bevy native viewports are enabled only when Winit can provide global desktop client coordinates; query `ImguiNativeViewportSupport::get(context_id)` for the per-Context `ImguiNativeViewportStatus`. On Wayland the status is `GlobalDesktopCoordinatesUnavailable` and docking stays inside the host window.

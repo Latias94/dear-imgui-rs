@@ -4,9 +4,9 @@
 //! following the pattern from imgui_impl_wgpu.cpp
 //!
 //! Managed texture flow (Dear ImGui 1.92+):
-//! - `Context::render()` returns a Context-borrowed `RenderedFrame` with owned texture requests.
+//! - `Context::render(renderer.renderer_consumer()?)` returns a Context-borrowed `PendingFrame`.
+//! - WGPU consumes every managed-texture request before producing a drawable `ReconciledFrame`.
 //! - WGPU stores managed GPU resources by pointer-free `SnapshotTextureId`.
-//! - The renderer reconciles request-bound feedback before reading draw commands.
 //! - Legacy application textures continue to use `TextureId` without entering this protocol.
 
 mod callbacks;
@@ -17,7 +17,6 @@ mod render;
 
 mod draw;
 mod external_textures;
-mod font_atlas;
 #[cfg(feature = "multi-viewport-winit")]
 pub mod multi_viewport;
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
@@ -35,6 +34,7 @@ mod sdl3_raw_window_handle;
 use crate::{RendererError, RendererResult, Uniforms, WgpuBackendData, WgpuTextureManager};
 pub use core::WgpuRenderer;
 use dear_imgui_rs::render::{RendererRenderStateGuard, RendererRenderStateGuardError};
+pub use draw::FramebufferExtent;
 
 pub(super) fn map_renderer_render_state_error(
     error: RendererRenderStateGuardError,

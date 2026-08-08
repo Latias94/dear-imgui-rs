@@ -56,9 +56,13 @@ impl winit::application::ApplicationHandler for App {
                     .prepare_render(&ui, &window)
                     .expect("Winit platform contract changed");
 
-                // 5) render via your renderer backend
-                let frame = self.imgui.context.render();
-                /* renderer.render(frame, ...); */
+                // 5) close the frame with your renderer's synchronous consumer, then let that
+                // renderer reconcile every texture request before it reads draw commands
+                let pending = self
+                    .imgui
+                    .context
+                    .render(self.renderer.consumer());
+                self.renderer.render(pending /*, target-specific arguments */);
             }
             _ => {}
         }
@@ -83,8 +87,8 @@ APIs of interest:
 - `Rounded`: round the winit factor to the nearest integer to avoid blurry scaling.
 - `Locked(f64)`: force a custom factor (e.g. 1.0).
 
-Choose the mode before creating `WinitPlatformRuntime`. While that runtime is attached,
-`set_hidpi_mode` and `attach_window` return
+Choose the mode before calling `WinitPlatform::enable_viewports`. While native viewports are
+enabled, `set_hidpi_mode` and `attach_window` return
 `WinitPlatformError::RuntimeConfigurationLocked` without modifying the main-window or coordinate
 state. This preserves the single platform-native desktop coordinate model shared by primary and
 secondary viewports.
@@ -166,8 +170,8 @@ When software cursor is enabled:
 
 This backend sets (when appropriate):
 - `BackendFlags::HAS_MOUSE_CURSORS`
-- `BackendFlags::PLATFORM_HAS_VIEWPORTS` while `WinitPlatformRuntime` is attached
-- `BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT` on Windows while `WinitPlatformRuntime` is attached
+- `BackendFlags::PLATFORM_HAS_VIEWPORTS` while viewports are enabled on `WinitPlatform`
+- `BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT` on Windows while viewports are enabled
 
 For diagnostics, the backend also sets `BackendPlatformName` to `"dear-imgui-winit {version}"`.
 
@@ -181,41 +185,33 @@ Multi-viewport support is available behind the `multi-viewport` feature and is
 - A renderer backend must also opt into viewports (e.g. `dear-imgui-wgpu/multi-viewport-winit`)
   to create per-viewport render targets and draw them.
 
-The platform side is an owning runtime. `WinitPlatformControl` keeps the main `Arc<Window>` and
-is the Context's sole platform attachment; `WinitPlatformRuntime` shares that owner, keeps every
-secondary window alive, and owns only the callbacks it installs. Moving a wrapper does not move
-callback-visible state. Winit's
-`ActiveEventLoop` is available to native callbacks only inside a non-escaping closure:
-
-```rust,ignore
-let mut platform = WinitPlatform::new(&mut imgui)?;
-platform.attach_window(Arc::clone(&window), HiDpiMode::Default, &mut imgui)?;
-let mut viewport_runtime =
-    WinitPlatformRuntime::new(&mut imgui, &platform)?;
-
-viewport_runtime.with_event_loop(event_loop, |_| {
-    imgui.update_platform_windows();
-    imgui.render_platform_windows_default();
-})?;
-
-// Optional when shutdown failures must be handled. Shut down the renderer runtime first;
-// the Context closes any open frame before Winit releases platform windows.
-viewport_runtime.shutdown(&mut imgui)?;
-platform.shutdown(&mut imgui)?;
-```
+`WinitPlatform` is the sole public platform owner. Its Context attachment retains the main
+`Arc<Window>`, every secondary window, and the exact callback generation it installs; moving the
+Rust wrapper does not move callback-visible state. First-party renderer routes retain an internal,
+non-clone adapter for that exact generation, so renderer preparation and deferred platform-fault
+collection form one transaction. Winit's `ActiveEventLoop` is available to native callbacks only
+inside a non-escaping closure. A first-party renderer route owns that scope, secondary rendering,
+and fault aggregation as one prepared-frame transaction. See
+[`multi_viewport_wgpu`](../../examples/02-docking/multi_viewport_wgpu.rs) or
+[`multi_viewport_ash`](../../examples/02-docking/multi_viewport_ash.rs) for the complete frame and
+shutdown order. Do not call Dear ImGui's platform-window phases separately when using those routes.
 
 Callback panics and window-creation failures are contained before returning
-through C++. `with_event_loop`, `handle_event`, and `poll_fault` report the
-deferred `WinitPlatformError` on the Rust side. Explicit `shutdown` is
-idempotent and reports cleanup failures. Dropping the runtime without the
-mutable Context leaves native cleanup with the Context attachment, so teardown
-still passes through the core open-frame normalization path.
+through C++. For custom renderer integrations only, `with_event_loop` returns a
+`WinitViewportAttempt` that keeps the callback output and every deferred `WinitPlatformError` as
+parallel values; a callback `Result` is never discarded by a later platform failure. Such
+integrations may call `drain_viewport_faults()` after a native pass that is not already wrapped by
+`with_event_loop`. First-party routes perform both steps automatically. Ordinary `handle_event` and
+owner methods surface the oldest pending fault before entering Winit. Explicit shutdown is
+idempotent and reports cleanup failures.
+Dropping the owner without the mutable Context leaves native cleanup with the Context attachment,
+so teardown still passes through the core open-frame normalization path.
 Explicit shutdown returns `WinitPlatformError::RendererShutdownRequired` while a renderer callback
 or viewport renderer state is still installed, preventing Winit-owned viewport data from being
 passed to an unknown renderer callback. Context-owned teardown enforces this renderer-before-platform
 order automatically. The Context attachment graph also returns
 `WinitPlatformError::PlatformAttachmentRelease(RendererActive)` when platform or
-viewport-runtime shutdown finds an active renderer attachment, before an open frame or native
+viewport shutdown finds an active renderer attachment, before an open frame or native
 state changes. Shut down the owning renderer runtime and retry the same Winit shutdown call.
 
 The runtime only advertises callbacks it can implement. In particular, winit has no portable

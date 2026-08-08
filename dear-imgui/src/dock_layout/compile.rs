@@ -1,7 +1,6 @@
-use super::model::{DockLayout, DockLayoutApply, DockLayoutError, DockSplit, DockspaceOptions};
+use super::model::{DockLayout, DockLayoutApply, DockSplit, DockspaceConfig, DockspaceError};
 use crate::{ConfigFlags, Id, sys, ui::Ui};
 use std::collections::HashMap;
-use std::ffi::CString;
 use std::ptr;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,7 +18,7 @@ pub(super) struct SplitCommand {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct WindowAssignment {
     pub(super) node: NodeIndex,
-    pub(super) title: CString,
+    pub(super) key: crate::WindowKey,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -29,7 +28,7 @@ pub(super) struct CompiledLayout {
     pub(super) assignments: Vec<WindowAssignment>,
 }
 
-pub(super) fn compile_layout(layout: &DockLayout) -> Result<CompiledLayout, DockLayoutError> {
+pub(super) fn compile_layout(layout: &DockLayout) -> Result<CompiledLayout, DockspaceError> {
     let mut splits = Vec::new();
     let mut assignments = Vec::new();
     let mut window_ids = HashMap::new();
@@ -39,33 +38,18 @@ pub(super) fn compile_layout(layout: &DockLayout) -> Result<CompiledLayout, Dock
     while let Some((layout, node)) = pending.pop() {
         match layout {
             DockLayout::Tabs(windows) => {
-                for title in windows {
-                    if title.is_empty() {
-                        return Err(DockLayoutError::EmptyWindowTitle);
-                    }
-                    let native_title = CString::new(title.as_str()).map_err(|_| {
-                        DockLayoutError::WindowTitleContainsNul {
-                            title: title.clone(),
-                        }
-                    })?;
-                    // SAFETY: `native_title` is readable and NUL-terminated. ImHashStr is a
-                    // context-free helper and receives the same arguments as DockBuilderDockWindow.
-                    let window_id = unsafe { sys::igImHashStr(native_title.as_ptr(), 0, 0) };
-                    if window_id == 0 {
-                        return Err(DockLayoutError::EmptyWindowId {
-                            title: title.clone(),
-                        });
-                    }
-                    if let Some(first_title) = window_ids.insert(window_id, title.as_str()) {
-                        return Err(DockLayoutError::DuplicateWindowId {
-                            first_title: first_title.to_owned(),
-                            second_title: title.clone(),
-                            id: Id::from(window_id),
+                for key in windows {
+                    let window_id = key.native_id();
+                    if let Some(first_key) = window_ids.insert(window_id, key) {
+                        return Err(DockspaceError::DuplicateWindowKey {
+                            first_key: first_key.stable_id().to_owned(),
+                            second_key: key.stable_id().to_owned(),
+                            id: window_id,
                         });
                     }
                     assignments.push(WindowAssignment {
                         node,
-                        title: native_title,
+                        key: key.clone(),
                     });
                 }
             }
@@ -76,15 +60,15 @@ pub(super) fn compile_layout(layout: &DockLayout) -> Result<CompiledLayout, Dock
                 second,
             } => {
                 if !ratio.is_finite() || *ratio <= 0.0 || *ratio >= 1.0 {
-                    return Err(DockLayoutError::InvalidSplitRatio { ratio: *ratio });
+                    return Err(DockspaceError::InvalidSplitRatio { ratio: *ratio });
                 }
 
                 let second_index = node_count
                     .checked_add(1)
-                    .ok_or(DockLayoutError::LayoutTooLarge)?;
+                    .ok_or(DockspaceError::LayoutTooLarge)?;
                 let next_count = node_count
                     .checked_add(2)
-                    .ok_or(DockLayoutError::LayoutTooLarge)?;
+                    .ok_or(DockspaceError::LayoutTooLarge)?;
                 let first_node = NodeIndex(node_count);
                 let second_node = NodeIndex(second_index);
                 node_count = next_count;
@@ -110,22 +94,22 @@ pub(super) fn compile_layout(layout: &DockLayout) -> Result<CompiledLayout, Dock
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum DockspaceSubmission {
+pub(crate) enum DockspaceHost {
     CurrentWindow { size: [f32; 2] },
     MainViewport,
 }
 
 pub(crate) fn submit_and_apply(
     ui: &Ui,
-    options: &DockspaceOptions,
+    options: &DockspaceConfig,
     layout: &DockLayout,
     apply: DockLayoutApply,
-    submission: DockspaceSubmission,
-) -> Result<Id, DockLayoutError> {
+    submission: DockspaceHost,
+) -> Result<Id, DockspaceError> {
     let preflight = (|| {
         options.validate()?;
         if !ui.io().config_flags().contains(ConfigFlags::DOCKING_ENABLE) {
-            return Err(DockLayoutError::DockingDisabled);
+            return Err(DockspaceError::DockingDisabled);
         }
         let compiled = compile_layout(layout)?;
         let window_class = options
@@ -150,7 +134,7 @@ pub(crate) fn submit_and_apply(
                     || !sys::ImGuiDockNode_IsDockSpace(existing_node)
             }
         {
-            return Err(DockLayoutError::ExistingNodeIsNotDockspaceRoot {
+            return Err(DockspaceError::ExistingNodeIsNotDockspaceRoot {
                 id: options.root_id(),
             });
         }
@@ -170,12 +154,12 @@ pub(crate) fn submit_and_apply(
             .map_or(ptr::null(), |class| class as *const _);
         let visible_claim = crate::dock_space::claim_dockspace_submission(
             ui,
-            "Ui dock layout submission",
+            "DockspaceBuilder::build()",
             options.root_id(),
             options.dock_flags(),
-            matches!(submission, DockspaceSubmission::CurrentWindow { .. }),
+            matches!(submission, DockspaceHost::CurrentWindow { .. }),
         )
-        .map_err(|_| DockLayoutError::DuplicateDockspaceSubmission {
+        .map_err(|_| DockspaceError::DuplicateDockspaceSubmission {
             root_id: options.root_id(),
         })?;
         let keep_alive_without_layout_changes = apply == DockLayoutApply::IfMissing
@@ -186,7 +170,7 @@ pub(crate) fn submit_and_apply(
                 || compiled_layout_has_active_window(&compiled))
         {
             keep_existing_root_alive(root_id, existed_before_submission);
-            return Err(DockLayoutError::WindowSubmittedBeforeDockspace {
+            return Err(DockspaceError::WindowSubmittedBeforeDockspace {
                 root_id: options.root_id(),
             });
         }
@@ -207,7 +191,7 @@ pub(crate) fn submit_and_apply(
         let layout_claim = ui
             .binding()
             .claim_dock_layout_application(frame, root_id)
-            .ok_or(DockLayoutError::DuplicateDockspaceSubmission {
+            .ok_or(DockspaceError::DuplicateDockspaceSubmission {
                 root_id: options.root_id(),
             })?;
         let result = apply_compiled_layout(
@@ -236,6 +220,79 @@ pub(crate) fn submit_and_apply(
     })
 }
 
+pub(crate) fn submit_without_layout(
+    ui: &Ui,
+    config: &DockspaceConfig,
+    submission: DockspaceHost,
+) -> Result<Id, DockspaceError> {
+    let preflight = (|| {
+        config.validate()?;
+        if !ui.io().config_flags().contains(ConfigFlags::DOCKING_ENABLE) {
+            return Err(DockspaceError::DockingDisabled);
+        }
+        let window_class = config
+            .window_class_ref()
+            .map(crate::WindowClass::try_to_imgui)
+            .transpose()?;
+        Ok(window_class)
+    })();
+
+    ui.run_with_bound_context(|| {
+        let root_id = config.root_id().raw();
+        let existing_node = unsafe { sys::igDockBuilderGetNode(root_id) };
+        let existed_before_submission = !existing_node.is_null();
+        if existed_before_submission
+            && unsafe {
+                !sys::ImGuiDockNode_IsRootNode(existing_node)
+                    || !sys::ImGuiDockNode_IsDockSpace(existing_node)
+            }
+        {
+            return Err(DockspaceError::ExistingNodeIsNotDockspaceRoot {
+                id: config.root_id(),
+            });
+        }
+
+        let (window_class, size) = match preflight.and_then(|window_class| {
+            resolve_host_geometry(ui, submission).map(|(_, size)| (window_class, size))
+        }) {
+            Ok(preflight) => preflight,
+            Err(error) => {
+                keep_existing_root_alive(root_id, existed_before_submission);
+                return Err(error);
+            }
+        };
+        let window_class_ptr = window_class
+            .as_ref()
+            .map_or(ptr::null(), |class| class as *const _);
+        let visible_claim = crate::dock_space::claim_dockspace_submission(
+            ui,
+            "DockspaceBuilder::build()",
+            config.root_id(),
+            config.dock_flags(),
+            matches!(submission, DockspaceHost::CurrentWindow { .. }),
+        )
+        .map_err(|_| DockspaceError::DuplicateDockspaceSubmission {
+            root_id: config.root_id(),
+        })?;
+        if visible_claim.is_some() && root_has_active_content_window(root_id) {
+            keep_existing_root_alive(root_id, existed_before_submission);
+            return Err(DockspaceError::WindowSubmittedBeforeDockspace {
+                root_id: config.root_id(),
+            });
+        }
+
+        submit_dockspace(
+            submission,
+            root_id,
+            size,
+            config.dock_flags().bits(),
+            window_class_ptr,
+        );
+        commit_visible_claim(visible_claim);
+        Ok(config.root_id())
+    })
+}
+
 fn keep_existing_root_alive(root_id: sys::ImGuiID, existed_before_submission: bool) {
     if !existed_before_submission {
         return;
@@ -255,29 +312,28 @@ fn root_has_active_content_window(root_id: sys::ImGuiID) -> bool {
 fn compiled_layout_has_active_window(compiled: &CompiledLayout) -> bool {
     let frame = unsafe { sys::igGetFrameCount() };
     compiled.assignments.iter().any(|assignment| {
-        let id = unsafe { sys::igImHashStr(assignment.title.as_ptr(), 0, 0) };
-        let window = unsafe { sys::igFindWindowByID(id) };
+        let window = unsafe { sys::igFindWindowByID(assignment.key.native_id().raw()) };
         !window.is_null() && unsafe { (*window).LastFrameActive == frame }
     })
 }
 
 fn resolve_host_geometry(
     ui: &Ui,
-    submission: DockspaceSubmission,
-) -> Result<([f32; 2], [f32; 2]), DockLayoutError> {
+    submission: DockspaceHost,
+) -> Result<([f32; 2], [f32; 2]), DockspaceError> {
     let (position, size) = match submission {
-        DockspaceSubmission::CurrentWindow { size } => {
+        DockspaceHost::CurrentWindow { size } => {
             let bytes =
-                crate::dock_space::current_dockspace_host_name_len("Ui::dock_space_with_layout()");
+                crate::dock_space::current_dockspace_host_name_len("DockspaceBuilder::build()");
             if bytes > crate::dock_space::MAX_DOCKSPACE_HOST_NAME_BYTES {
-                return Err(DockLayoutError::HostWindowNameTooLong {
+                return Err(DockspaceError::HostWindowNameTooLong {
                     bytes,
                     max_bytes: crate::dock_space::MAX_DOCKSPACE_HOST_NAME_BYTES,
                 });
             }
             (ui.cursor_screen_pos(), size)
         }
-        DockspaceSubmission::MainViewport => unsafe {
+        DockspaceHost::MainViewport => unsafe {
             let viewport = sys::igGetMainViewport();
             assert!(
                 !viewport.is_null(),
@@ -291,13 +347,13 @@ fn resolve_host_geometry(
     };
 
     if !position.iter().all(|value| value.is_finite()) {
-        return Err(DockLayoutError::InvalidHostPosition { position });
+        return Err(DockspaceError::InvalidHostPosition { position });
     }
     if !size
         .iter()
         .all(|value| *value > 0.0 && crate::dock_space::is_valid_dockspace_size_component(*value))
     {
-        return Err(DockLayoutError::InvalidHostSize { size });
+        return Err(DockspaceError::InvalidHostSize { size });
     }
     Ok((position, size))
 }
@@ -309,7 +365,7 @@ fn apply_compiled_layout(
     size: [f32; 2],
     compiled: &CompiledLayout,
     replacing_existing: bool,
-) -> Result<(), DockLayoutError> {
+) -> Result<(), DockspaceError> {
     let final_nodes = if replacing_existing {
         replace_existing_tree(root_id, flags, position, size, compiled)?
     } else {
@@ -325,7 +381,7 @@ fn apply_compiled_layout(
             "compiled window assignment resolved to node zero"
         );
         unsafe {
-            sys::igDockBuilderDockWindow(assignment.title.as_ptr(), node_id);
+            sys::igDockBuilderDockWindow(assignment.key.docking_name().as_ptr(), node_id);
         }
     }
     unsafe {
@@ -340,7 +396,7 @@ fn build_new_tree(
     position: [f32; 2],
     size: [f32; 2],
     compiled: &CompiledLayout,
-) -> Result<Vec<sys::ImGuiID>, DockLayoutError> {
+) -> Result<Vec<sys::ImGuiID>, DockspaceError> {
     let mut tree = NativeDockTree::create(root_id.raw(), flags)?;
     tree.set_geometry(position, size);
     let nodes = build_topology(tree.root(), compiled)?;
@@ -354,7 +410,7 @@ fn replace_existing_tree(
     position: [f32; 2],
     size: [f32; 2],
     compiled: &CompiledLayout,
-) -> Result<Vec<sys::ImGuiID>, DockLayoutError> {
+) -> Result<Vec<sys::ImGuiID>, DockspaceError> {
     let context = unsafe { sys::igGetCurrentContext() };
     assert!(
         !context.is_null(),
@@ -388,8 +444,8 @@ fn replace_existing_tree(
     let remap_len = compiled
         .node_count
         .checked_mul(2)
-        .ok_or(DockLayoutError::LayoutTooLarge)?;
-    let remap_capacity = i32::try_from(remap_len).map_err(|_| DockLayoutError::LayoutTooLarge)?;
+        .ok_or(DockspaceError::LayoutTooLarge)?;
+    let remap_capacity = i32::try_from(remap_len).map_err(|_| DockspaceError::LayoutTooLarge)?;
     let mut remap = vec![0; remap_len];
     let copied = unsafe {
         sys::dear_imgui_rs_dock_builder_copy_node(
@@ -411,7 +467,7 @@ fn replace_existing_tree(
 fn build_topology(
     root_id: sys::ImGuiID,
     compiled: &CompiledLayout,
-) -> Result<Vec<sys::ImGuiID>, DockLayoutError> {
+) -> Result<Vec<sys::ImGuiID>, DockspaceError> {
     let mut nodes = vec![0; compiled.node_count];
     nodes[0] = root_id;
 
@@ -432,7 +488,7 @@ fn build_topology(
             );
         }
         if first == 0 || second == 0 {
-            return Err(DockLayoutError::SplitFailed {
+            return Err(DockspaceError::SplitFailed {
                 direction: split.direction,
                 ratio: split.ratio,
             });
@@ -478,7 +534,7 @@ fn decode_node_remap(
 }
 
 fn submit_dockspace(
-    submission: DockspaceSubmission,
+    submission: DockspaceHost,
     root_id: sys::ImGuiID,
     size: [f32; 2],
     flags: i32,
@@ -486,7 +542,7 @@ fn submit_dockspace(
 ) {
     let submitted_id = unsafe {
         match submission {
-            DockspaceSubmission::CurrentWindow { .. } => sys::igDockSpace(
+            DockspaceHost::CurrentWindow { .. } => sys::igDockSpace(
                 root_id,
                 sys::ImVec2 {
                     x: size[0],
@@ -495,7 +551,7 @@ fn submit_dockspace(
                 flags,
                 window_class,
             ),
-            DockspaceSubmission::MainViewport => {
+            DockspaceHost::MainViewport => {
                 sys::igDockSpaceOverViewport(root_id, sys::igGetMainViewport(), flags, window_class)
             }
         }
@@ -523,11 +579,11 @@ struct NativeDockTree {
 }
 
 impl NativeDockTree {
-    fn create(root: sys::ImGuiID, flags: i32) -> Result<Self, DockLayoutError> {
+    fn create(root: sys::ImGuiID, flags: i32) -> Result<Self, DockspaceError> {
         let builder_flags = flags | sys::ImGuiDockNodeFlags_DockSpace;
         let added = unsafe { sys::igDockBuilderAddNode(root, builder_flags) };
         if added == 0 {
-            return Err(DockLayoutError::NodeCreationFailed { id: Id::from(root) });
+            return Err(DockspaceError::NodeCreationFailed { id: Id::from(root) });
         }
         assert_eq!(
             added, root,

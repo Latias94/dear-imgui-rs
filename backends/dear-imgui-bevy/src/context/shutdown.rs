@@ -10,8 +10,9 @@ use bevy_render::RenderApp;
 use bevy_render::pipelined_rendering::RenderExtractApp;
 
 use super::{
-    ImguiContextAdmissionError, ImguiContextError, ImguiContexts, ImguiPass, ImguiPrimaryPass,
-    ownership::{ImguiContextRemovalPendingReason, ImguiContextRetirements},
+    ImguiContextAdmissionError, ImguiContextError, ImguiContextRemovalPendingReason,
+    ImguiContextRetirements, ImguiContexts, ImguiPass, ImguiPrimaryPass,
+    plugin::{ImguiPlugin, ImguiPluginInstallError},
 };
 use crate::schedule::ImguiContextDriver;
 
@@ -19,6 +20,17 @@ const MAX_SHUTDOWN_PASSES: usize = 8;
 
 /// Application-level pass registration and shutdown operations for the Dear ImGui integration.
 pub trait ImguiAppExt {
+    /// Validate and install the complete Dear ImGui integration as one App-aware transaction.
+    ///
+    /// Cargo-feature availability, native viewport-window policy, Context ownership, and driver
+    /// schedule placement are checked before installation mutates the App. Use
+    /// `app.add_plugins(ImguiPlugin::default())` only when a panic-on-invalid-configuration
+    /// convenience path is desired.
+    fn try_install_imgui(
+        &mut self,
+        plugin: ImguiPlugin,
+    ) -> Result<&mut Self, ImguiPluginInstallError>;
+
     /// Declare a new private Dear ImGui pass branded by `P`.
     ///
     /// Each call creates a distinct runtime pass. `P` prevents accidental cross-brand
@@ -76,12 +88,11 @@ pub trait ImguiAppExt {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum ImguiShutdownError {
-    /// A Context still owns part of the backend contract, but another integration replaced one of
-    /// the fields needed for deterministic teardown.
+    /// A Context could not enter teardown or another integration replaced an owned backend field.
     ContextTeardownBlocked {
-        /// Context whose teardown ownership validation failed.
+        /// Context whose teardown preflight failed.
         context_id: dear_imgui_rs::ContextId,
-        /// Exact renderer or viewport ownership conflict observed by the preflight.
+        /// Exact active-scope or backend-ownership failure observed by the preflight.
         reason: ImguiContextRemovalPendingReason,
     },
     /// The plugin's private Context driver schedule was removed while retirement work remained.
@@ -126,6 +137,13 @@ impl std::error::Error for ImguiShutdownError {
 }
 
 impl ImguiAppExt for App {
+    fn try_install_imgui(
+        &mut self,
+        plugin: ImguiPlugin,
+    ) -> Result<&mut Self, ImguiPluginInstallError> {
+        super::plugin::try_install_imgui(self, plugin)
+    }
+
     fn declare_imgui_pass<P: 'static>(&mut self) -> ImguiPass<P> {
         super::pass::declare_pass::<P>(self)
     }

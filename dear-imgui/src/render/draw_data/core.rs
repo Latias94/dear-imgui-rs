@@ -1,4 +1,4 @@
-use super::DrawListIterator;
+use super::{DrawCmd, DrawListIterator};
 use crate::internal::{RawCast, RawWrapper};
 use crate::sys;
 use std::slice;
@@ -6,6 +6,23 @@ use std::slice;
 /// All draw data to render a Dear ImGui frame.
 #[repr(transparent)]
 pub struct DrawData(pub(super) sys::ImDrawData);
+
+/// Pointer-free capabilities required to consume one frame's draw commands.
+///
+/// Renderers can inspect this summary before applying managed-texture side effects. It does not
+/// borrow draw lists or expose Context-owned native pointers.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub struct DrawRequirements {
+    raw_callbacks: bool,
+}
+
+impl DrawRequirements {
+    /// Whether the frame contains at least one non-standard native draw callback.
+    #[must_use]
+    pub const fn requires_raw_callback_support(self) -> bool {
+        self.raw_callbacks
+    }
+}
 
 unsafe impl RawCast<sys::ImDrawData> for DrawData {}
 
@@ -52,6 +69,17 @@ impl DrawData {
     #[inline]
     pub fn draw_lists_count(&self) -> usize {
         unsafe { self.cmd_lists().len() }
+    }
+
+    /// Summarizes renderer capabilities needed by this draw data without exposing native borrows.
+    #[must_use]
+    pub fn requirements(&self) -> DrawRequirements {
+        let raw_callbacks = self.draw_lists().any(|draw_list| {
+            draw_list
+                .commands()
+                .any(|command| matches!(command, DrawCmd::RawCallback(_)))
+        });
+        DrawRequirements { raw_callbacks }
     }
 
     /// Returns the total number of index-buffer elements across all draw lists.

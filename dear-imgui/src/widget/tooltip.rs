@@ -226,19 +226,29 @@ impl Ui {
     }
 }
 
-/// Tracks a tooltip that can be ended by calling `.end()` or by dropping
+/// Tracks a tooltip that can be ended by calling `.end()` or by dropping.
+///
+/// The token must finish after every nested window-like scope and in its originating window
+/// `Begin` scope. Prefer [`Ui::tooltip`] for ordinary use.
 #[must_use]
 pub struct TooltipToken<'ui> {
-    _ui: &'ui Ui,
+    scope: crate::scope::NativeScopeToken<'ui>,
 }
 
 impl<'ui> TooltipToken<'ui> {
     /// Creates a new tooltip token
     fn new(ui: &'ui Ui) -> Self {
-        TooltipToken { _ui: ui }
+        Self {
+            scope: ui.begin_native_scope(crate::scope::NativeScopePop::EndTooltip, "TooltipToken"),
+        }
     }
 
     /// Ends the tooltip
+    ///
+    /// # Panics
+    ///
+    /// Panics before FFI if a nested window-like scope is active or this token is outside its
+    /// originating window `Begin` scope.
     pub fn end(self) {
         // The drop implementation will handle the actual ending
     }
@@ -246,7 +256,6 @@ impl<'ui> TooltipToken<'ui> {
 
 impl<'ui> Drop for TooltipToken<'ui> {
     fn drop(&mut self) {
-        self._ui
-            .run_with_bound_context(|| unsafe { sys::igEndTooltip() });
+        self.scope.finish();
     }
 }

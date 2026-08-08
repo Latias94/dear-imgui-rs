@@ -322,10 +322,10 @@ mod tests {
         let mut ctx = Context::create();
         let io = ctx.io_mut();
         io.set_display_size([1.0, 1.0]);
-        io.set_backend_flags(
-            io.backend_flags() | dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES,
-        );
-        ctx.font_atlas().build();
+        ctx.font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("the input-event test uses headless legacy rendering")
+            .build();
 
         let macos_behaviors = ctx.io().config_macosx_behaviors();
         let modifiers: winit::event::Modifiers = ModifiersState::CONTROL.into();

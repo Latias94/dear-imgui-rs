@@ -428,7 +428,7 @@ fn draw_file_table_view(
                     state.core.sort_ascending = asc;
                     state.tick_scan();
                 }
-                specs.clear_dirty();
+                specs.clear_dirty(ui);
             }
         }
 

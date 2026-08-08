@@ -1,20 +1,28 @@
-use crate::sys;
+use crate::scope::{NativeScopePop, NativeScopeToken};
 use crate::ui::Ui;
 
 /// Tracks a table that can be ended by calling `.end()` or by dropping
 #[must_use]
 #[doc(alias = "EndTable")]
 pub struct TableToken<'ui> {
-    _ui: &'ui Ui,
+    scope: NativeScopeToken<'ui>,
 }
 
 impl<'ui> TableToken<'ui> {
     /// Creates a new table token
     pub(crate) fn new(ui: &'ui Ui) -> Self {
-        TableToken { _ui: ui }
+        Self {
+            scope: ui.begin_native_scope(NativeScopePop::EndTable, "TableToken"),
+        }
     }
 
-    /// Ends the table
+    /// Ends the table.
+    ///
+    /// # Panics
+    ///
+    /// Panics before FFI if a nested table or any native scope created inside this table is still
+    /// active, or if this table is no longer the current native table instance. Create scopes
+    /// outside the table when they intentionally need to span the table lifetime.
     pub fn end(self) {
         // The drop implementation will handle the actual ending
     }
@@ -22,57 +30,36 @@ impl<'ui> TableToken<'ui> {
 
 impl<'ui> Drop for TableToken<'ui> {
     fn drop(&mut self) {
-        self._ui
-            .run_with_bound_context(|| unsafe { sys::igEndTable() });
+        self.scope.finish();
     }
 }
 
-/// Tracks a pushed table background draw channel.
-#[must_use = "dropping the token pops the table background draw channel immediately"]
-pub struct TableBackgroundChannelToken<'ui> {
-    _ui: &'ui Ui,
+pub(super) struct TableChannelGuard<'ui> {
+    scope: NativeScopeToken<'ui>,
 }
 
-impl<'ui> TableBackgroundChannelToken<'ui> {
-    pub(crate) fn new(ui: &'ui Ui) -> Self {
-        Self { _ui: ui }
+impl<'ui> TableChannelGuard<'ui> {
+    pub(super) fn background(ui: &'ui Ui) -> Self {
+        Self {
+            scope: ui.begin_native_scope(
+                NativeScopePop::PopTableBackgroundChannel,
+                "table background channel",
+            ),
+        }
     }
 
-    /// Pops the table background draw channel.
-    pub fn pop(self) {}
-
-    /// Pops the table background draw channel.
-    pub fn end(self) {}
+    pub(super) fn column(ui: &'ui Ui) -> Self {
+        Self {
+            scope: ui.begin_native_scope(
+                NativeScopePop::PopTableColumnChannel,
+                "table column channel",
+            ),
+        }
+    }
 }
 
-impl Drop for TableBackgroundChannelToken<'_> {
+impl Drop for TableChannelGuard<'_> {
     fn drop(&mut self) {
-        self._ui
-            .run_with_bound_context(|| unsafe { sys::igTablePopBackgroundChannel() });
-    }
-}
-
-/// Tracks a pushed table column draw channel.
-#[must_use = "dropping the token pops the table column draw channel immediately"]
-pub struct TableColumnChannelToken<'ui> {
-    _ui: &'ui Ui,
-}
-
-impl<'ui> TableColumnChannelToken<'ui> {
-    pub(crate) fn new(ui: &'ui Ui) -> Self {
-        Self { _ui: ui }
-    }
-
-    /// Pops the table column draw channel.
-    pub fn pop(self) {}
-
-    /// Pops the table column draw channel.
-    pub fn end(self) {}
-}
-
-impl Drop for TableColumnChannelToken<'_> {
-    fn drop(&mut self) {
-        self._ui
-            .run_with_bound_context(|| unsafe { sys::igTablePopColumnChannel() });
+        self.scope.finish();
     }
 }

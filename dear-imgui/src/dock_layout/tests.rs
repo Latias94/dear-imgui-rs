@@ -1,30 +1,29 @@
 use super::compile::{NodeIndex, SplitCommand, WindowAssignment, compile_layout};
-use super::{DockLayout, DockLayoutError, DockSplit, DockspaceOptions};
-use crate::{DockNodeFlags, Id, sys};
-use std::ffi::CString;
+use super::{DockLayout, DockSplit, DockspaceConfig, DockspaceError};
+use crate::{DockNodeFlags, Id, WindowKey, sys};
 
-fn native_window_id(title: &str) -> Id {
-    let title = CString::new(title).expect("test title must not contain an interior NUL");
-    // SAFETY: `title` is readable and NUL-terminated. ImHashStr does not require a Context.
-    Id::from(unsafe { sys::igImHashStr(title.as_ptr(), 0, 0) })
+fn key(stable_id: &str) -> WindowKey {
+    WindowKey::new(stable_id, stable_id).unwrap()
 }
 
 #[test]
-fn options_reject_zero_root_and_unknown_flags() {
+fn config_rejects_zero_root_and_unknown_flags() {
     assert!(matches!(
-        DockspaceOptions::new(Id::from(0)),
-        Err(DockLayoutError::ZeroRootId)
+        DockspaceConfig::new(Id::from(0), DockNodeFlags::NONE, None).validate(),
+        Err(DockspaceError::ZeroRootId)
     ));
 
     let unknown_bits = sys::ImGuiDockNodeFlags_DockSpace;
     assert_eq!(unknown_bits & DockNodeFlags::all().bits(), 0);
-    let options = DockspaceOptions::new(Id::from(1))
-        .unwrap()
-        .flags(DockNodeFlags::from_bits_retain(unknown_bits));
-    assert_eq!(
-        options.validate(),
-        Err(DockLayoutError::UnsupportedDockNodeFlags { bits: unknown_bits })
-    );
+    assert!(matches!(
+        DockspaceConfig::new(
+            Id::from(1),
+            DockNodeFlags::from_bits_retain(unknown_bits),
+            None,
+        )
+        .validate(),
+        Err(DockspaceError::UnsupportedDockNodeFlags { bits }) if bits == unknown_bits
+    ));
 }
 
 #[test]
@@ -33,12 +32,12 @@ fn split_ratios_must_be_finite_and_strictly_inside_unit_interval() {
         let layout = DockLayout::split(
             DockSplit::Left,
             ratio,
-            DockLayout::tabs(["Left"]),
-            DockLayout::tabs(["Right"]),
+            DockLayout::tabs([key("left")]),
+            DockLayout::tabs([key("right")]),
         );
         assert!(matches!(
             layout.validate(),
-            Err(DockLayoutError::InvalidSplitRatio { ratio: actual })
+            Err(DockspaceError::InvalidSplitRatio { ratio: actual })
                 if actual.to_bits() == ratio.to_bits()
         ));
     }
@@ -46,47 +45,27 @@ fn split_ratios_must_be_finite_and_strictly_inside_unit_interval() {
     DockLayout::split(
         DockSplit::Left,
         0.5,
-        DockLayout::tabs(["Left"]),
-        DockLayout::tabs(["Right"]),
+        DockLayout::tabs([key("left")]),
+        DockLayout::tabs([key("right")]),
     )
     .validate()
     .unwrap();
 }
 
 #[test]
-fn window_titles_reject_empty_nul_and_empty_stable_ids() {
-    assert_eq!(
-        DockLayout::tabs([""]).validate(),
-        Err(DockLayoutError::EmptyWindowTitle)
-    );
-    assert_eq!(
-        DockLayout::tabs(["bad\0title"]).validate(),
-        Err(DockLayoutError::WindowTitleContainsNul {
-            title: "bad\0title".to_owned()
-        })
-    );
-    assert_eq!(
-        DockLayout::tabs(["Visible title###"]).validate(),
-        Err(DockLayoutError::EmptyWindowId {
-            title: "Visible title###".to_owned()
-        })
-    );
-}
-
-#[test]
-fn window_titles_reject_stable_id_and_real_hash_collisions() {
+fn window_keys_reject_duplicate_stable_ids_and_real_hash_collisions() {
     let duplicate = DockLayout::split(
         DockSplit::Right,
         0.4,
-        DockLayout::tabs(["Left###Shared"]),
-        DockLayout::tabs(["Other", "Right###Shared"]),
+        DockLayout::tabs([WindowKey::new("shared", "Left").unwrap()]),
+        DockLayout::tabs([key("other"), WindowKey::new("shared", "Right").unwrap()]),
     );
     assert_eq!(
         duplicate.validate(),
-        Err(DockLayoutError::DuplicateWindowId {
-            first_title: "Left###Shared".to_owned(),
-            second_title: "Right###Shared".to_owned(),
-            id: native_window_id("###Shared"),
+        Err(DockspaceError::DuplicateWindowKey {
+            first_key: "shared".to_owned(),
+            second_key: "shared".to_owned(),
+            id: key("shared").native_id(),
         })
     );
 
@@ -94,14 +73,14 @@ fn window_titles_reject_stable_id_and_real_hash_collisions() {
     // portable lookup-table implementation and the optional SSE4.2 implementation.
     const FIRST_COLLISION: &str = "Dock_31B880E0DEB60BA1";
     const SECOND_COLLISION: &str = "Dock_FF90DC3128AFC905";
-    let collision_id = native_window_id(FIRST_COLLISION);
+    let collision_id = key(FIRST_COLLISION).native_id();
     assert_ne!(collision_id.raw(), 0);
-    assert_eq!(native_window_id(SECOND_COLLISION), collision_id);
+    assert_eq!(key(SECOND_COLLISION).native_id(), collision_id);
     assert_eq!(
-        DockLayout::tabs([FIRST_COLLISION, SECOND_COLLISION]).validate(),
-        Err(DockLayoutError::DuplicateWindowId {
-            first_title: FIRST_COLLISION.to_owned(),
-            second_title: SECOND_COLLISION.to_owned(),
+        DockLayout::tabs([key(FIRST_COLLISION), key(SECOND_COLLISION)]).validate(),
+        Err(DockspaceError::DuplicateWindowKey {
+            first_key: FIRST_COLLISION.to_owned(),
+            second_key: SECOND_COLLISION.to_owned(),
             id: collision_id,
         })
     );
@@ -109,7 +88,7 @@ fn window_titles_reject_stable_id_and_real_hash_collisions() {
 
 #[test]
 fn empty_tabs_compile_to_an_unassigned_leaf() {
-    let compiled = compile_layout(&DockLayout::tabs(std::iter::empty::<String>())).unwrap();
+    let compiled = compile_layout(&DockLayout::tabs(std::iter::empty::<WindowKey>())).unwrap();
     assert_eq!(compiled.node_count, 1);
     assert!(compiled.splits.is_empty());
     assert!(compiled.assignments.is_empty());
@@ -123,10 +102,10 @@ fn nested_splits_and_owned_titles_compile_in_stable_preorder() {
         DockLayout::split(
             DockSplit::Down,
             0.4,
-            DockLayout::tabs(["Bottom Left"]),
-            DockLayout::tabs(["Top Left"]),
+            DockLayout::tabs([key("bottom-left")]),
+            DockLayout::tabs([key("top-left")]),
         ),
-        DockLayout::tabs(["Center", "Inspector"]),
+        DockLayout::tabs([key("center"), key("inspector")]),
     );
 
     let compiled = compile_layout(&layout).unwrap();
@@ -155,24 +134,27 @@ fn nested_splits_and_owned_titles_compile_in_stable_preorder() {
         vec![
             WindowAssignment {
                 node: NodeIndex(3),
-                title: CString::new("Bottom Left").unwrap(),
+                key: key("bottom-left"),
             },
             WindowAssignment {
                 node: NodeIndex(4),
-                title: CString::new("Top Left").unwrap(),
+                key: key("top-left"),
             },
             WindowAssignment {
                 node: NodeIndex(2),
-                title: CString::new("Center").unwrap(),
+                key: key("center"),
             },
             WindowAssignment {
                 node: NodeIndex(2),
-                title: CString::new("Inspector").unwrap(),
+                key: key("inspector"),
             },
         ]
     );
     assert_eq!(
-        compiled.assignments[0].title.as_bytes_with_nul(),
-        b"Bottom Left\0"
+        compiled.assignments[0]
+            .key
+            .docking_name()
+            .to_bytes_with_nul(),
+        b"###bottom-left\0"
     );
 }

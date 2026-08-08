@@ -20,6 +20,17 @@
 //!     });
 //! ```
 //!
+//! Table draw channels are intentionally closure-only because the upstream operations are
+//! internal, cell-sensitive APIs. The former movable token types are unavailable:
+//!
+//! ```compile_fail
+//! use dear_imgui_rs::TableBackgroundChannelToken;
+//! ```
+//!
+//! ```compile_fail
+//! use dear_imgui_rs::TableColumnChannelToken;
+//! ```
+//!
 //! Quick example (manual API):
 //! ```no_run
 //! # use dear_imgui_rs::*;
@@ -62,14 +73,14 @@ pub use options::{
     TableOptions, TableSizingPolicy,
 };
 pub use setup::{TableColumnSetup, TableColumnUserData};
-pub use sort::{SortDirection, TableColumnSortSpec, TableSortSpecs, TableSortSpecsIter};
-pub use tokens::{TableBackgroundChannelToken, TableColumnChannelToken, TableToken};
+pub use sort::{SortDirection, TableColumnSortSpec, TableSortSpecs};
+pub use tokens::TableToken;
 
 pub(crate) use indices::TABLE_MAX_COLUMNS;
 pub(crate) use validation::{
     assert_current_table, assert_current_table_cell, assert_current_table_has_flags,
-    assert_current_table_row, assert_non_negative_finite_f32, assert_table_column_width_phase,
-    assert_table_setup_phase, assert_valid_table_column, assert_valid_table_column_in,
-    assert_valid_table_column_raw_in, current_table_if_any, resolve_table_column,
-    table_column_count_to_i32, table_freeze_count_to_i32,
+    assert_current_table_row, assert_non_negative_finite_f32, assert_table_before_first_row,
+    assert_table_column_width_phase, assert_table_setup_phase, assert_valid_table_column,
+    assert_valid_table_column_in, assert_valid_table_column_raw_in, current_table_if_any,
+    resolve_table_column, table_column_count_to_i32, table_freeze_count_to_i32,
 };

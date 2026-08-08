@@ -183,7 +183,7 @@ class RuntimeGateTests(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
             evidence = root / "evidence"
-            binary = root / "imgui_test_engine_basic"
+            binary = root / "test_engine_runtime"
             binary.touch()
             build = bounded_result(
                 stdout_log=evidence / "build.stdout.log",
@@ -206,8 +206,12 @@ class RuntimeGateTests(unittest.TestCase):
                 )
 
             with (
-                patch.object(TEST_ENGINE, "_run_example_build", return_value=build),
-                patch.object(TEST_ENGINE, "_example_binary", return_value=binary),
+                patch.object(
+                    TEST_ENGINE, "_run_example_build", return_value=build
+                ) as builder,
+                patch.object(
+                    TEST_ENGINE, "_example_binary", return_value=binary
+                ) as binary_lookup,
                 patch.object(TEST_ENGINE, "run_bounded", side_effect=run_scenario),
                 patch.object(
                     TEST_ENGINE,
@@ -223,6 +227,8 @@ class RuntimeGateTests(unittest.TestCase):
 
             self.assertTrue(result.success)
             self.assertEqual(result.category, RUNTIME.GateCategory.PASSED)
+            self.assertEqual(builder.call_args.kwargs["binary"], "test_engine_runtime")
+            binary_lookup.assert_called_once_with(root, "test_engine_runtime")
             categories = {
                 scenario["scenario"]: scenario["category"]
                 for scenario in result.details["scenarios"]
@@ -331,7 +337,7 @@ class RuntimeGateTests(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
             evidence = root / "evidence"
-            binary = root / "imgui_test_engine_basic"
+            binary = root / "test_engine_runtime"
             binary.touch()
             build = bounded_result(
                 stdout_log=evidence / "build.stdout.log",
@@ -419,6 +425,20 @@ class RuntimeGateTests(unittest.TestCase):
                 (evidence / "gate-result.json").read_text(encoding="utf-8")
             )
             self.assertEqual(aggregate["category"], "InfrastructureUnavailable")
+
+    def test_viewport_gates_target_private_contract_binaries(self):
+        self.assertEqual(
+            VIEWPORT._WGPU_VIEWPORT_SMOKE.binary,
+            "wgpu_multi_viewport_smoke",
+        )
+        self.assertEqual(
+            VIEWPORT._SDL3_GLOW_VIEWPORT_SMOKE.binary,
+            "sdl3_glow_multi_viewport_smoke",
+        )
+        self.assertEqual(
+            VIEWPORT._ASH_VULKAN_VIEWPORT_SMOKE.binary,
+            "ash_vulkan_validation_smoke",
+        )
 
     def test_viewport_success_requires_lavapipe_and_full_lifecycle(self):
         valid = {
@@ -529,9 +549,9 @@ class RuntimeGateTests(unittest.TestCase):
             "must share a viewport ID",
         )
 
-    def test_sdl3_glow_success_requires_llvmpipe_rendering_and_full_lifecycle(self):
+    def test_sdl3_glow_success_requires_llvmpipe_and_owning_route_evidence(self):
         valid = {
-            "schema_version": 5,
+            "schema_version": 6,
             "renderer": {
                 "backend": "OpenGL",
                 "vendor": "Mesa",
@@ -539,9 +559,7 @@ class RuntimeGateTests(unittest.TestCase):
                 "version": "4.5 Mesa 25",
             },
             "merge_observed": True,
-            "secondary_context_ready_before_main_present_viewport_ids": [7, 8],
             "secondary_draw_issued_before_main_present_viewport_ids": [7, 9],
-            "secondary_swap_succeeded_before_main_present_viewport_ids": [7, 10],
             "main_present_bracketed_by_test_engine": True,
             "external_texture_filters_preserved": True,
             "sampler_pixels_prove_isolation": True,
@@ -553,10 +571,10 @@ class RuntimeGateTests(unittest.TestCase):
         }
 
         self.assertEqual(VIEWPORT._validate_sdl3_glow_viewport_payload(valid), [])
-        valid["secondary_swap_succeeded_before_main_present_viewport_ids"] = [99]
+        valid["secondary_draw_issued_before_main_present_viewport_ids"] = []
         self.assertRegex(
             "\n".join(VIEWPORT._validate_sdl3_glow_viewport_payload(valid)),
-            "must share a viewport ID",
+            "must be a nonempty u32 array",
         )
 
     def test_new_invocation_invalidates_owned_stale_success_evidence(self):

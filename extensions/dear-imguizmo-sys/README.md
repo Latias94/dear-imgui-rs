@@ -73,4 +73,4 @@ cargo build -p dear-imguizmo-sys
 - Linking to the base ImGui static library is provided by `dear-imgui-sys`; this crate does not duplicate `cargo:rustc-link-lib` for it.
 - MSVC (Windows) builds align CRT and exception flags with `dear-imgui-sys`.
 - `docs.rs` builds generate bindings only and export include paths for downstream crates.
-- Higher-level Rust APIs live in `extensions/dear-imguizmo/`. See that crate and `examples/03-features/imguizmo_basic.rs` for usage.
+- Higher-level Rust APIs live in `extensions/dear-imguizmo/`. See that crate and `examples/03-features/imguizmo_minimal.rs` for a copy-ready integration.

@@ -54,7 +54,7 @@ impl ContextAttachment for RendererAttachment {
         // OpenGL3 and SDLGPU3 call DestroyPlatformWindows() from full shutdown. Destroy only
         // their device objects here, then keep the callback tables alive until the platform phase.
         let reset = context.with_bound_context(|| {
-            context.with_renderer_texture_reset(&consumer, || {
+            context.with_renderer_texture_reset(consumer.as_ref(), || {
                 self.control
                     .release_renderer_device_objects_bound()
                     .map_err(|error| {

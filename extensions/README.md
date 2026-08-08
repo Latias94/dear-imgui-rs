@@ -77,29 +77,38 @@ Guidance on build scripts, bitflags vs enums, and data interop (mint/glam):
 
 ## Examples
 
-Examples are in the top-level `examples/` crate and are feature-gated per extension:
+Examples are in the top-level `examples/` crate and are feature-gated per extension. Start
+with a `*_minimal` target for a copy-ready integration, then use the matching `*_showcase`
+target to explore the complete API surface:
 
-- `implot_basic` -> `--features implot`
-- `implot3d_basic` -> `--features implot3d`
-- `imguizmo_basic` -> `--features imguizmo`
-- `imnodes_basic` -> `--features imnodes`
-- `node_editor_basic` -> `--features node-editor`
+- `implot_minimal` / `implot_showcase` -> `--features implot`
+- `implot3d_minimal` / `implot3d_showcase` -> `--features implot3d`
+- `imguizmo_minimal` / `imguizmo_showcase` -> `--features imguizmo`
+- `imguizmo_quat_minimal` / `imguizmo_quat_showcase` -> `--features imguizmo-quat`
+- `imnodes_minimal` / `imnodes_showcase` -> `--features imnodes`
+- `node_editor_minimal` -> `--features node-editor`
 - `node_editor_showcase` -> `--features node-editor-blueprints` (native only)
 - `reflect_demo` -> `--features reflect`
 - `file_dialog_native` / `file_browser_imgui` -> `--features file-browser`
-- `imgui_test_engine_basic` -> `--features test-engine`
+- `test_engine_integration` -> `--features test-engine`
 
 Run:
 
 ```bash
-cargo run -p dear-imgui-examples --bin implot_basic --features implot
-cargo run -p dear-imgui-examples --bin implot3d_basic --features implot3d
-cargo run -p dear-imgui-examples --bin imguizmo_basic --features imguizmo
-cargo run -p dear-imgui-examples --bin imnodes_basic --features imnodes
-cargo run -p dear-imgui-examples --bin node_editor_basic --features node-editor
+cargo run -p dear-imgui-examples --bin implot_minimal --features implot
+cargo run -p dear-imgui-examples --bin implot_showcase --features implot
+cargo run -p dear-imgui-examples --bin implot3d_minimal --features implot3d
+cargo run -p dear-imgui-examples --bin implot3d_showcase --features implot3d
+cargo run -p dear-imgui-examples --bin imguizmo_minimal --features imguizmo
+cargo run -p dear-imgui-examples --bin imguizmo_showcase --features imguizmo
+cargo run -p dear-imgui-examples --bin imguizmo_quat_minimal --features imguizmo-quat
+cargo run -p dear-imgui-examples --bin imguizmo_quat_showcase --features imguizmo-quat
+cargo run -p dear-imgui-examples --bin imnodes_minimal --features imnodes
+cargo run -p dear-imgui-examples --bin imnodes_showcase --features imnodes
+cargo run -p dear-imgui-examples --bin node_editor_minimal --features node-editor
 cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-editor-blueprints
 cargo run -p dear-imgui-examples --bin reflect_demo --features reflect
-cargo run -p dear-imgui-examples --bin imgui_test_engine_basic --features test-engine
+cargo run -p dear-imgui-examples --bin test_engine_integration --features test-engine
 
 # File Browser (new)
 # Native dialog (rfd):

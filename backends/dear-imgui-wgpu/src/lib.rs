@@ -23,7 +23,7 @@
 //!
 //! ```rust,no_run
 //! use dear_imgui_rs::Context;
-//! use dear_imgui_wgpu::{WgpuRenderer, WgpuInitInfo, wgpu};
+//! use dear_imgui_wgpu::{FramebufferExtent, WgpuInitInfo, WgpuRenderer, wgpu};
 //!
 //! # fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! # let (device, queue) = todo!("initialize a WGPU Device/Queue");
@@ -38,8 +38,9 @@
 //! // In your render loop:
 //! // imgui.new_frame();
 //! // ... build your UI ...
-//! // let frame = imgui.render();
-//! // renderer.render(frame, &mut render_pass)?;
+//! // let frame = imgui.render(renderer.renderer_consumer()?);
+//! // let extent = FramebufferExtent::from_texture(&surface_texture.texture);
+//! // renderer.render(frame, &mut render_pass, extent)?;
 //! # Ok(())
 //! # }
 //! ```
@@ -203,16 +204,6 @@ pub extern crate wgpu29 as wgpu;
 #[cfg(feature = "wgpu-30")]
 pub extern crate wgpu30 as wgpu;
 
-#[cfg(feature = "tracing")]
-macro_rules! backend_debug {
-    ($($arg:tt)*) => { tracing::debug!($($arg)*); };
-}
-
-#[cfg(not(feature = "tracing"))]
-macro_rules! backend_debug {
-    ($($arg:tt)*) => {};
-}
-
 // Module declarations
 mod data;
 mod error;
@@ -317,14 +308,14 @@ pub use data::{
     WgpuInitInfo, WgpuRenderState, WgpuRenderStateAccessError, WgpuViewportSurfaceConfig,
 };
 pub use error::{RendererError, RendererResult};
-pub use renderer::WgpuRenderer;
+pub use renderer::{FramebufferExtent, WgpuRenderer};
 pub use texture::ExternalTextureId;
 
 pub(crate) use data::{WgpuBackendData, WgpuRenderStateStorage};
 pub(crate) use frame_resources::{FrameResourceArena, FrameResources};
 pub(crate) use render_resources::RenderResources;
 pub(crate) use shaders::ShaderManager;
-pub(crate) use texture::{OwnedWgpuTexture, WgpuTextureManager};
+pub(crate) use texture::WgpuTextureManager;
 pub(crate) use uniforms::{UniformBuffer, Uniforms};
 
 // Re-export multi-viewport helpers when enabled

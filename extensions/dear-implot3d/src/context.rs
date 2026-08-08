@@ -228,7 +228,7 @@ mod tests {
         let imgui_a = Context::create();
         let plot_a = Plot3DContext::create(&imgui_a);
         let imgui_a_raw = imgui_a.as_raw();
-        let suspended_a = imgui_a.suspend();
+        let suspended_a = imgui_a.suspend_or_panic();
         let imgui_b = Context::create();
 
         assert_eq!(

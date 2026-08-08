@@ -22,9 +22,13 @@ fn prepare_imgui(imgui: &mut Context) {
 }
 
 fn register_texture(imgui: &mut Context) -> ManagedTextureId {
-    let mut texture = dear_imgui_rs::texture::OwnedTextureData::new();
-    texture.create(dear_imgui_rs::texture::TextureFormat::RGBA32, 1, 1);
-    texture.set_data(&[255, 255, 255, 255]);
+    let texture = dear_imgui_rs::texture::OwnedTextureData::from_pixels(
+        dear_imgui_rs::texture::TextureFormat::RGBA32,
+        1,
+        1,
+        &[255, 255, 255, 255],
+    )
+    .unwrap();
     imgui.register_texture(texture)
 }
 
@@ -48,7 +52,7 @@ fn managed_and_legacy_images_resolve_in_the_owner_context() {
     let managed = register_texture(&mut imgui);
     let plot = Plot3DContext::create(&imgui);
     let consumer = imgui
-        .create_renderer_consumer()
+        .create_detached_renderer_consumer()
         .expect("renderer consumer should register");
 
     let snapshot = {
@@ -171,7 +175,7 @@ fn managed_image_rejects_a_foreign_context_before_plot_ffi() {
     let _guard = test_guard();
     let mut owner = Context::create();
     let managed = register_texture(&mut owner);
-    let owner = owner.suspend();
+    let owner = owner.suspend_or_panic();
 
     let mut foreign = Context::create();
     prepare_imgui(&mut foreign);

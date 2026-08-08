@@ -14,22 +14,49 @@ use super::binding::{
 use super::frame::FrameLifecycleState;
 use super::snapshot_hub::SnapshotHub;
 use super::texture_registry::ManagedTextureRegistry;
+use super::{
+    ContextActivationError, ContextActivationReason, ContextScopeError, ContextSuspensionError,
+    ContextSuspensionReason, ScopedActivationError,
+};
 
 impl Context {
-    /// Suspends this context so another context can be the active context
-    pub fn suspend(self) -> SuspendedContext {
+    /// Suspends this Context so another Context can become active.
+    ///
+    /// Rejection retains this Context in [`ContextSuspensionError`], allowing the caller to end an
+    /// open frame, leave a binding scope, or otherwise repair the conflict and retry.
+    pub fn suspend(self) -> Result<SuspendedContext, ContextSuspensionError> {
         let _guard = CTX_MUTEX.lock();
-        assert!(
-            self.is_current_context(),
-            "context to be suspended is not the active context"
-        );
-        assert_ne!(
-            self.frame_lifecycle_state_unlocked(),
-            FrameLifecycleState::InFrame,
-            "cannot suspend a context while a Dear ImGui frame is open"
-        );
+        if bound_context_scope_active() {
+            return Err(ContextSuspensionError::new(
+                self,
+                ContextSuspensionReason::BindingScopeActive,
+            ));
+        }
+        if !self.is_current_context() {
+            return Err(ContextSuspensionError::new(
+                self,
+                ContextSuspensionReason::NotCurrent,
+            ));
+        }
+        if self.frame_lifecycle_state_unlocked() == FrameLifecycleState::InFrame {
+            return Err(ContextSuspensionError::new(
+                self,
+                ContextSuspensionReason::FrameOpen,
+            ));
+        }
         clear_current_context();
-        SuspendedContext(self)
+        Ok(SuspendedContext(self))
+    }
+
+    /// Suspends this Context or panics with the rejection reason.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a Context binding scope is active, this Context is not current, or a frame is
+    /// still open. Use [`Context::suspend`] when any of those states is recoverable.
+    pub fn suspend_or_panic(self) -> SuspendedContext {
+        self.suspend()
+            .unwrap_or_else(|error| panic!("Context::suspend_or_panic(): {error}"))
     }
 }
 
@@ -52,21 +79,32 @@ impl SuspendedContext {
     /// with another owner while native `GImGui` points at it. An open frame left behind when the
     /// closure returns `Err` or panics is ended before propagating that outcome.
     ///
+    /// Admission conflicts and a successful closure that leaves a frame open are returned as
+    /// [`ScopedActivationError::Scope`] containing a [`ContextScopeError`]. A closure error is
+    /// wrapped in [`ScopedActivationError::Closure`]. The borrowed suspended owner remains
+    /// available for every returned error.
+    ///
     /// # Panics
     ///
-    /// Panics before calling the closure if another Context or Context binding scope is active.
-    /// Suspend the current Context before entering this scope. This method also resumes any panic
-    /// raised by the closure with its original payload, and panics after ending the frame if the
-    /// closure returns `Ok` while a Dear ImGui frame is still open.
+    /// Resumes a panic raised by the closure with its original payload. It also panics if the
+    /// closure replaces the complete Context owner while native `GImGui` still points at the
+    /// original Context; ordinary safe code should not attempt that owner exchange.
     pub fn try_with_active<T, E>(
         &mut self,
         f: impl FnOnce(&mut Context) -> Result<T, E>,
-    ) -> Result<T, E> {
+    ) -> Result<T, ScopedActivationError<E>> {
         let _guard = CTX_MUTEX.lock();
-        assert!(
-            !bound_context_scope_active() && no_current_context(),
-            "SuspendedContext::try_with_active() requires no active Context or Context binding scope; suspend the current Context first"
-        );
+        if bound_context_scope_active() {
+            return Err(
+                ContextScopeError::Activation(ContextActivationReason::BindingScopeActive).into(),
+            );
+        }
+        if !no_current_context() {
+            return Err(ContextScopeError::Activation(
+                ContextActivationReason::ContextAlreadyActive,
+            )
+            .into());
+        }
         let expected_id = self.0.id();
         let expected_raw = self.0.raw;
         let binding = self.0.binding();
@@ -87,15 +125,13 @@ impl SuspendedContext {
                 match result {
                     Ok(Ok(value)) => {
                         if self.0.end_frame_for_teardown_unlocked() {
-                            panic!(
-                                "SuspendedContext::try_with_active(): closure returned Ok while a Dear ImGui frame was still open"
-                            );
+                            return Err(ContextScopeError::FrameLeftOpen.into());
                         }
                         Ok(value)
                     }
                     Ok(Err(error)) => {
                         self.0.end_frame_for_teardown_unlocked();
-                        Err(error)
+                        Err(ScopedActivationError::Closure(error))
                     }
                     Err(payload) => {
                         // Cleanup must not replace the closure's panic payload.
@@ -106,7 +142,25 @@ impl SuspendedContext {
                     }
                 }
             })
-            .unwrap_or_else(|error| panic!("SuspendedContext::try_with_active(): {error}"))
+            .map_err(|error| {
+                ScopedActivationError::Scope(ContextScopeError::ContextUnavailable(error))
+            })?
+    }
+
+    /// Runs a closure while this suspended Context is active, panicking on scope errors.
+    ///
+    /// # Panics
+    ///
+    /// Panics if another Context or binding scope is active, if the closure leaves a frame open,
+    /// if the Context cannot be bound, or if the closure itself panics.
+    pub fn with_active_or_panic<T>(&mut self, f: impl FnOnce(&mut Context) -> T) -> T {
+        self.try_with_active(|context| Ok::<_, std::convert::Infallible>(f(context)))
+            .unwrap_or_else(|error| match error {
+                ScopedActivationError::Closure(never) => match never {},
+                ScopedActivationError::Scope(error) => {
+                    panic!("SuspendedContext::with_active_or_panic(): {error}")
+                }
+            })
     }
 
     /// Tries to create a new suspended Dear ImGui context
@@ -211,17 +265,36 @@ impl SuspendedContext {
         Ok(SuspendedContext(ctx))
     }
 
-    /// Attempts to activate this suspended context
+    /// Attempts to activate this suspended Context.
     ///
-    /// If there is no active Context or Context binding scope, this suspended Context is activated
-    /// and `Ok` is returned. Otherwise, nothing happens and `Err` returns the suspended Context.
-    pub fn activate(self) -> Result<Context, SuspendedContext> {
+    /// If activation is rejected, [`ContextActivationError`] retains this suspended owner and
+    /// reports whether another Context or a binding scope blocked activation.
+    pub fn activate(self) -> Result<Context, ContextActivationError> {
         let _guard = CTX_MUTEX.lock();
-        if !bound_context_scope_active() && no_current_context() {
-            set_current_context(self.0.raw);
-            Ok(self.0)
-        } else {
-            Err(self)
+        if bound_context_scope_active() {
+            return Err(ContextActivationError::new(
+                self,
+                ContextActivationReason::BindingScopeActive,
+            ));
         }
+        if !no_current_context() {
+            return Err(ContextActivationError::new(
+                self,
+                ContextActivationReason::ContextAlreadyActive,
+            ));
+        }
+        set_current_context(self.0.raw);
+        Ok(self.0)
+    }
+
+    /// Activates this suspended Context or panics with the rejection reason.
+    ///
+    /// # Panics
+    ///
+    /// Panics if another Context or Context binding scope is active. Use
+    /// [`SuspendedContext::activate`] when activation conflicts are recoverable.
+    pub fn activate_or_panic(self) -> Context {
+        self.activate()
+            .unwrap_or_else(|error| panic!("SuspendedContext::activate_or_panic(): {error}"))
     }
 }

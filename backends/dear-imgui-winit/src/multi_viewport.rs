@@ -6,9 +6,26 @@
 
 #![allow(unsafe_op_in_unsafe_fn)]
 
+#[cfg(doctest)]
+mod removed_runtime_facade_contract {
+    /// ```compile_fail
+    /// use dear_imgui_winit::multi_viewport::WinitPlatformRuntime;
+    /// ```
+    struct RemovedRuntimeFacade;
+
+    /// Renderer ownership is captured atomically by the route adapter rather than preflighted
+    /// through a public phase method.
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_winit::WinitPlatform;
+    /// let _ = WinitPlatform::validate_renderer_owner;
+    /// ```
+    struct RemovedRendererOwnerPreflight;
+}
+
 mod callbacks;
 mod coordinates;
-mod events;
+pub(crate) mod events;
 mod focus;
 mod native_cursor_hittest;
 mod registry;
@@ -26,7 +43,7 @@ pub(crate) use self::coordinates::{
     window_size_from_desktop,
 };
 pub(crate) use self::runtime::RuntimeControl;
-pub use self::runtime::{EventLoopScope, WinitPlatformRuntime};
+pub use self::runtime::{EventLoopScope, WinitViewportAttempt, WinitViewportRendererAdapter};
 pub use crate::WinitPlatformError;
 
 // Debug logging helper (off by default). Enable by building this crate with
