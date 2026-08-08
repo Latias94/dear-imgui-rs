@@ -224,7 +224,7 @@ fn assert_despawn_remains_tracked_until_deferred_application(release: bool) {
         bridge.queue(ImguiViewportCommand::Destroy { id: viewport_id });
     }
     world.insert_non_send(bridge);
-    world.insert_resource(crate::context::ownership::ImguiBackendRuntime::new(
+    world.insert_resource(crate::context::ImguiBackendRuntime::new(
         crate::ImguiPluginConfig::default(),
         true,
     ));
@@ -444,7 +444,7 @@ fn command_application_scopes_equal_viewport_ids_to_their_contexts() {
     );
 
     let mut world = World::new();
-    world.insert_resource(crate::context::ownership::ImguiBackendRuntime::new(
+    world.insert_resource(crate::context::ImguiBackendRuntime::new(
         crate::ImguiPluginConfig::default(),
         true,
     ));

@@ -50,8 +50,9 @@ use dear_imgui_bevy::route::ImguiInputRoute;
 #[cfg(feature = "multi-viewport")]
 use dear_imgui_bevy::{
     ImguiAppExt, ImguiContextError, ImguiContexts, ImguiFrame, ImguiNativeViewportStatus,
-    ImguiNativeViewportSupport, ImguiPass, ImguiPlugin, ImguiPluginConfig, ImguiShutdownError,
-    ImguiViewportBridge, ImguiViewportFeedback, ImguiViewportWindow, ImguiViewportWindowConfig,
+    ImguiNativeViewportSupport, ImguiPass, ImguiPlugin, ImguiPluginConfig, ImguiPluginInstallError,
+    ImguiShutdownError, ImguiViewportBridge, ImguiViewportFeedback, ImguiViewportWindow,
+    ImguiViewportWindowConfig,
 };
 use dear_imgui_rs as imgui;
 #[cfg(feature = "multi-viewport")]
@@ -209,7 +210,7 @@ fn remove_primary_context(app: &mut App) -> Result<imgui::SuspendedContext, Imgu
     app.world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .expect("plugin should install the ImGui Context registry")
-        .remove(primary_id)
+        .try_remove_immediately(primary_id)
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -284,7 +285,7 @@ fn additional_context_can_enable_native_viewports_when_primary_does_not() {
         .world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .unwrap()
-        .remove(secondary_id)
+        .try_remove_immediately(secondary_id)
         .expect("an unused Context-local viewport bridge should detach immediately");
     assert_eq!(removed.id(), secondary_id);
 }
@@ -1373,7 +1374,7 @@ fn native_viewport_bridge_isolates_equal_ids_across_two_contexts() {
         app.world_mut()
             .get_non_send_mut::<ImguiContexts>()
             .unwrap()
-            .remove(secondary_id),
+            .try_remove_immediately(secondary_id),
         Err(ImguiContextError::RemovalPending {
             reason:
                 dear_imgui_bevy::ImguiContextRemovalPendingReason::ViewportCallbackOwnership(
@@ -1388,7 +1389,7 @@ fn native_viewport_bridge_isolates_equal_ids_across_two_contexts() {
         .world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .expect("plugin should install the Context registry")
-        .remove(secondary_id)
+        .try_remove_immediately(secondary_id)
         .expect("callback-fault teardown should complete on retry");
     assert_eq!(removed.id(), secondary_id);
     let bridge = app
@@ -2216,20 +2217,18 @@ fn invalid_window_config_is_rejected_before_backend_attachment() {
         ..Default::default()
     };
     let mut app = App::new();
-    let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        app.add_plugins(ImguiPlugin::new(
-            ImguiPluginConfig::default()
-                .with_multi_viewport(true)
-                .with_viewport_window(invalid_window),
-        ));
-    }))
-    .expect_err("an invalid native viewport policy must fail during plugin installation");
-    let message = failure
-        .downcast_ref::<String>()
-        .map(String::as_str)
-        .or_else(|| failure.downcast_ref::<&str>().copied())
-        .unwrap_or_default();
-    assert!(message.contains("invalid Dear ImGui viewport window policy"));
+    let failure = match app.try_install_imgui(ImguiPlugin::new(
+        ImguiPluginConfig::default()
+            .with_multi_viewport(true)
+            .with_viewport_window(invalid_window),
+    )) {
+        Ok(_) => panic!("an invalid native viewport policy must fail during plugin installation"),
+        Err(error) => error,
+    };
+    assert!(matches!(
+        failure,
+        ImguiPluginInstallError::ViewportWindow(_)
+    ));
     assert!(
         app.world().get_non_send::<ImguiContexts>().is_none(),
         "configuration validation must run before the plugin installs backend state"

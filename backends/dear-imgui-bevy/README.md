@@ -50,8 +50,10 @@ use dear_imgui_bevy::prelude::*;
 
 fn main() {
     let mut app = App::new();
+    app.add_plugins(DefaultPlugins);
+    app.try_install_imgui(ImguiPlugin::default())
+        .expect("the Dear ImGui configuration is valid");
     app
-        .add_plugins((DefaultPlugins, ImguiPlugin::default()))
         .add_systems(Startup, |mut commands: Commands| {
             commands.spawn(Camera2d);
         });
@@ -66,6 +68,11 @@ fn tools_ui(frame: ImguiFrame<'_>) {
         .build(|| ui.text("Dear ImGui is drawing in Bevy."));
 }
 ```
+
+`try_install_imgui` validates Cargo-feature availability, native viewport-window policy, the
+existing Context registry, and private-driver schedule placement before it mutates the `App`.
+`app.add_plugins(ImguiPlugin::default())` remains available as an explicit panic-on-invalid-config
+convenience adapter over the same installation transaction.
 
 The plugin opens and closes each frame around a private, runner-owned pass. UI systems borrow the active frame through `ImguiFrame<'_, P>` and must not call `Context::frame()` or `Context::render()` themselves. Bind each UI function with `pass.system(...)`, then register it through `ImguiAppExt::add_imgui_systems`.
 
@@ -86,9 +93,10 @@ The plugin opens and closes each frame around a private, runner-owned pass. UI s
 
 | 0.15 shape | 0.16 replacement |
 | --- | --- |
-| `configure_example_context` and `ImguiOverlayCamera` | Spawn a normal camera and add `ImguiPlugin::default()`; the unique primary-window camera is automatic. |
+| `configure_example_context` and `ImguiOverlayCamera` | Spawn a normal camera and call `try_install_imgui(ImguiPlugin::default())`; the unique primary-window camera is automatic. |
 | `ImguiBackendConfig` / `ImguiBackendStatus` | Configure startup through private-field `ImguiPluginConfig`; observe route and runtime failures through `ImguiDiagnostics` and `ImguiContexts::last_error`. |
 | UI-only `ImguiContexts` system parameter | Use `ImguiFrame<'_, P>` inside a private Context pass; use the non-send `ImguiContexts` registry only for creation, configuration, inspection, and removal. |
+| Per-frame `ImguiContexts::remove` retry loop | Call `remove` once, retain its `ImguiContextRetirementId`, and observe the one-shot `ImguiContextRetired` message. Advanced owner-recovery code may use `try_remove_immediately` and explicitly retry its typed pending result. |
 | `ImguiBevyTextures::register` / `unregister` and retained raw IDs | Hold a cloneable strong or weak `ImguiTexture` lease from `register_strong` / `register_weak`. |
 | Public `ImguiInputState`, input systems/mappers, or writable `ImguiInputCapture` fields | Let `ImguiPlugin` translate messages; read `ImguiInputCapture` through aggregate/scoped queries or public run conditions. Call `aggregate()` when a copyable snapshot is needed. |
 | `ImguiViewportWindow { viewport_id }`, `ImguiViewportCamera { viewport_id }`, direct field access, or `.copied()` marker queries | Query markers by reference. Retain `instance_id()` for stable lifecycle identity; call `viewport_id()` only for the current Dear ImGui route. The backend exclusively creates and repairs these projections. |
@@ -96,7 +104,7 @@ The plugin opens and closes each frame around a private, runner-owned pass. UI s
 | Reusing an application schedule for an additional Context | Declare an `ImguiPass<P>` and register typed frame systems through `ImguiAppExt`; the private runner cannot be invoked as an application schedule. |
 | Single-system `add_imgui_system` registration | Bind systems with `pass.system(...)`, then pass normal Bevy system configs to `add_imgui_systems`; tuples, `chain`, `before`, `after`, `run_if`, and system sets retain Bevy semantics. |
 | Constructing `ImguiContexts::with_primary` and inserting it manually | Call `app.adopt_imgui_primary_context(context)` before adding `ImguiPlugin`; the App-scoped lifecycle prevents registry reconstruction after terminal shutdown. |
-| Wrapper extraction through `into_inner()` | Call `ImguiContexts::remove`, continue updating while it returns `RemovalPending`, and take the returned `SuspendedContext` after both worlds acknowledge release. |
+| Wrapper extraction through `into_inner()` | Advanced code that must recover the native owner calls `try_remove_immediately`, advances the required render/viewport schedules on `RemovalPending`, and retries explicitly. Normal removal destroys the Context through the managed queue. |
 
 ## Integration Model
 
@@ -213,7 +221,42 @@ A strong lease retains the image asset. The final lease drop withdraws the mappi
 
 ### Context Removal
 
-`ImguiContexts::remove` starts Context-local retirement. It returns `ImguiContextError::RemovalPending` while native window entities or render-world resources are still releasing; keep updating the app and retry. Other Contexts continue framing during that wait.
+`ImguiContexts::remove` transfers the complete owner to the plugin's existing retirement queue and
+returns an `ImguiContextRetirementId`. Repeating the request coalesces to the same ID. Renderer and
+viewport acknowledgements are advanced by the private driver while other Contexts continue to
+frame, and exactly one generation-qualified `ImguiContextRetired` message reports completion:
+
+```rust
+#[derive(Resource)]
+struct ContextToRemove(Option<ContextId>);
+
+fn request_removal(
+    mut contexts: NonSendMut<ImguiContexts>,
+    mut context_to_remove: ResMut<ContextToRemove>,
+) -> Result {
+    let Some(context_id) = context_to_remove.0.take() else {
+        return Ok(());
+    };
+    let retirement = contexts.remove(context_id)?;
+    info!(?retirement, "Context retirement requested");
+    Ok(())
+}
+
+fn observe_removal(mut completed: MessageReader<ImguiContextRetired>) {
+    for event in completed.read() {
+        info!(?event, "Context retirement completed");
+    }
+}
+```
+
+Match the complete `ImguiContextRetirementId`, not `ContextId` alone: the generation identifies the
+specific registry admission that owned the Context when retirement began, so delayed completion
+cannot target a later slot generation.
+Repairable renderer or platform ownership drift is returned before the owner enters the queue, so
+the Context remains available through `configure` for repair.
+`try_remove_immediately` is the advanced synchronous owner-recovery path. It returns
+`ImguiContextError::RemovalPending` when a renderer or viewport acknowledgement is still live, so
+that caller explicitly owns schedule advancement and retry policy.
 
 For terminal app teardown, call `app.shutdown_imgui()` through `ImguiAppExt`. It removes the registry and pumps only the private ImGui driver and Bevy render sub-app until renderer and viewport acknowledgements converge; it does not run user `Update` systems. The call is idempotent. Once teardown commits, the shared App lifecycle is permanently terminal: retained registry values become inert, and the App rejects new passes or `adopt_imgui_primary_context` calls.
 
@@ -252,7 +295,7 @@ Start with the first five examples for copy-runnable integration patterns:
 | [`simple`](examples/basic/simple.rs) | `cargo run -p dear-imgui-bevy --example simple` | Minimal default overlay with no marker or helper setup. |
 | [`custom_font`](examples/basic/custom_font.rs) | `cargo run -p dear-imgui-bevy --example custom_font` | Outside-frame atlas configuration and non-send `FontId` storage. |
 | [`custom_post_process`](examples/advanced/custom_post_process.rs) | `cargo run -p dear-imgui-bevy --example custom_post_process` | Public overlay ordering with post-processing, MSAA, HDR, and Bevy UI composition. |
-| [`multiple_contexts`](examples/advanced/multiple_contexts.rs) | `cargo run -p dear-imgui-bevy --example multiple_contexts` | Independent Context passes, windows, cameras, input routes, capture, and retryable teardown. |
+| [`multiple_contexts`](examples/advanced/multiple_contexts.rs) | `cargo run -p dear-imgui-bevy --example multiple_contexts` | Independent Context passes, windows, cameras, input routes, capture, and one-shot managed retirement. |
 | [`render_to_image`](examples/advanced/render_to_image.rs) | `cargo run -p dear-imgui-bevy --example render_to_image` | Offscreen Context, Bevy image lease, and explicit logical input mapping. |
 | [`app_integration`](examples/app/app_integration.rs) | `cargo run -p dear-imgui-bevy --example app_integration` | Gameplay/editor integration using capture policy. |
 | [`game_engine`](examples/game_engine/game_engine.rs) | `cargo run -p dear-imgui-bevy --example game_engine` | Docked editor surface and scene texture interop; add `--features multi-viewport` for native windows. |

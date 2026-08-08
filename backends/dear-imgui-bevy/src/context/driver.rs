@@ -19,7 +19,7 @@ pub(crate) fn install_context_lifecycle(app: &mut App) {
     #[cfg(feature = "render")]
     app.init_resource::<ImguiFrameMailbox>()
         .init_resource::<platform::ImguiPlatformFeedback>();
-    super::ownership::install_context_retirements(app);
+    super::install_context_retirements(app);
 }
 
 struct PrimaryFrameMetrics {

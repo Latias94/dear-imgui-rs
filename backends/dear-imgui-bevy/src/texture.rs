@@ -433,7 +433,7 @@ mod render {
 
     fn maintain_imgui_texture_leases(
         mut textures: ResMut<ImguiBevyTextures>,
-        backend_runtime: Option<Res<crate::context::ownership::ImguiBackendRuntime>>,
+        backend_runtime: Option<Res<crate::context::ImguiBackendRuntime>>,
     ) {
         let render_integration_installed =
             backend_runtime.is_some_and(|runtime| runtime.render_integration_installed());

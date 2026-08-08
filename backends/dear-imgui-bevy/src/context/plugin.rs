@@ -1,6 +1,8 @@
 //! Bevy plugin installation and backend configuration.
 
-use bevy_app::{App, Plugin};
+use std::fmt;
+
+use bevy_app::{App, Plugin, PluginsState};
 use bevy_ecs::resource::Resource;
 use bevy_ecs::schedule::ScheduleLabel;
 
@@ -13,10 +15,18 @@ use crate::route;
 use crate::viewport::ImguiViewportWindowConfig;
 use crate::{input, schedule, viewport};
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum ImguiPluginBuildMode {
+    #[default]
+    Install,
+    AlreadyInstalled,
+}
+
 /// Bevy plugin that owns Dear ImGui Context, input, render, and viewport integration.
 #[derive(Debug, Clone, Default)]
 pub struct ImguiPlugin {
     config: ImguiPluginConfig,
+    build_mode: ImguiPluginBuildMode,
     #[cfg(feature = "bevy-ui")]
     ui_render_order: render::ImguiUiRenderOrder,
 }
@@ -65,47 +75,194 @@ impl ImguiPlugin {
             render::ImguiUiRenderOrder::default()
         }
     }
+
+    fn already_installed(mut self) -> Self {
+        self.build_mode = ImguiPluginBuildMode::AlreadyInstalled;
+        self
+    }
 }
 
-impl Plugin for ImguiPlugin {
-    fn build(&self, app: &mut App) {
-        assert!(
-            !self.config.multi_viewport() || cfg!(feature = "multi-viewport"),
-            "ImguiPluginConfig requested native platform windows; enable the `multi-viewport` Cargo feature"
-        );
+/// Failure to validate a Dear ImGui installation before mutating the Bevy App.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum ImguiPluginInstallError {
+    /// The App already contains this integration.
+    AlreadyInstalled,
+    /// Bevy already finished or cleaned its plugin lifecycle.
+    PluginLifecycleClosed,
+    /// Native platform windows were requested by a build that cannot create them.
+    NativeMultiViewportUnavailable,
+    /// The secondary-window policy is internally inconsistent.
+    ViewportWindow(crate::viewport::ImguiViewportWindowConfigError),
+    /// The private Context driver was placed outside its valid main-schedule interval.
+    DriverSchedule(schedule::ImguiDriverScheduleError),
+    /// Explicit shutdown made the App terminal.
+    AppTerminated,
+    /// The App lifecycle still owns a registry that application code removed.
+    ContextRegistryMissing,
+    /// A registry exists without the App lifecycle claim that owns it.
+    ContextRegistryOwnershipMissing,
+    /// The Context registry and pass registry came from different Apps.
+    ForeignPassRegistry,
+    /// Core Context construction failed before App mutation began.
+    ContextCreation(dear_imgui_rs::ImGuiError),
+    /// Existing Contexts cannot admit this backend configuration.
+    ContextPreflight(super::ImguiContextError),
+}
+
+impl fmt::Display for ImguiPluginInstallError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AlreadyInstalled => {
+                formatter.write_str("Dear ImGui is already installed in this Bevy App")
+            }
+            Self::PluginLifecycleClosed => formatter.write_str(
+                "Dear ImGui plugins cannot be installed after Bevy plugin finish or cleanup",
+            ),
+            Self::NativeMultiViewportUnavailable => formatter.write_str(
+                "native Dear ImGui platform windows require a native build with the `multi-viewport` feature",
+            ),
+            Self::ViewportWindow(error) => write!(formatter, "invalid viewport window policy: {error}"),
+            Self::DriverSchedule(error) => error.fmt(formatter),
+            Self::AppTerminated => formatter
+                .write_str("the Dear ImGui integration is terminal after explicit App shutdown"),
+            Self::ContextRegistryMissing => formatter.write_str(
+                "ImguiContexts was removed after admission; restore the original registry or shut the App down",
+            ),
+            Self::ContextRegistryOwnershipMissing => formatter.write_str(
+                "ImguiContexts exists without the App lifecycle ownership claim",
+            ),
+            Self::ForeignPassRegistry => formatter.write_str(
+                "ImguiContexts was created with pass handles from another Bevy App",
+            ),
+            Self::ContextCreation(error) => error.fmt(formatter),
+            Self::ContextPreflight(error) => {
+                write!(formatter, "existing Context rejected backend installation: {error}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ImguiPluginInstallError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ViewportWindow(error) => Some(error),
+            Self::DriverSchedule(error) => Some(error),
+            Self::ContextCreation(error) => Some(error),
+            Self::ContextPreflight(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+struct PreparedImguiInstallation {
+    primary: Option<dear_imgui_rs::SuspendedContext>,
+    driver_schedule: schedule::ValidatedImguiDriverSchedulePlacement,
+}
+
+impl ImguiPlugin {
+    fn prepare_installation(
+        &self,
+        app: &mut App,
+    ) -> Result<PreparedImguiInstallation, ImguiPluginInstallError> {
+        let lifecycle = app
+            .world()
+            .get_resource::<super::lifecycle::ImguiAppLifecycle>()
+            .cloned();
+        if lifecycle
+            .as_ref()
+            .is_some_and(super::lifecycle::ImguiAppLifecycle::is_terminal)
+        {
+            return Err(ImguiPluginInstallError::AppTerminated);
+        }
+        if app.world().contains_resource::<ImguiBackendRuntime>() {
+            return Err(ImguiPluginInstallError::AlreadyInstalled);
+        }
+        if self.config.multi_viewport()
+            && !cfg!(all(feature = "multi-viewport", not(target_arch = "wasm32")))
+        {
+            return Err(ImguiPluginInstallError::NativeMultiViewportUnavailable);
+        }
         self.config
             .viewport_window()
             .validate()
-            .unwrap_or_else(|error| panic!("invalid Dear ImGui viewport window policy: {error}"));
+            .map_err(ImguiPluginInstallError::ViewportWindow)?;
+        let driver_schedule =
+            schedule::validate_imgui_schedule_placement(app, self.config.driver_schedule())
+                .map_err(ImguiPluginInstallError::DriverSchedule)?;
+
+        let primary = if app.world().get_non_send::<ImguiContexts>().is_some() {
+            let lifecycle = lifecycle
+                .as_ref()
+                .ok_or(ImguiPluginInstallError::ContextRegistryOwnershipMissing)?;
+            if !lifecycle.registry_claimed() {
+                return Err(ImguiPluginInstallError::ContextRegistryOwnershipMissing);
+            }
+            let pass_registry_id = super::pass::existing_registry_id(app.world())
+                .ok_or(ImguiPluginInstallError::ForeignPassRegistry)?;
+            if app
+                .world()
+                .get_non_send::<ImguiContexts>()
+                .expect("the Context registry was just checked")
+                .pass_registry_id()
+                != pass_registry_id
+            {
+                return Err(ImguiPluginInstallError::ForeignPassRegistry);
+            }
+
+            #[cfg(feature = "render")]
+            let render_integration_installed = render::render_integration_available(app);
+            #[cfg(not(feature = "render"))]
+            let render_integration_installed = false;
+            let attachment = BackendAttachment {
+                render_integration_installed,
+                #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+                viewport_bridge_registration: Some(
+                    viewport::ImguiViewportBridge::default().registration(),
+                ),
+                #[cfg(feature = "render")]
+                renderer_releases: None,
+            };
+            app.world_mut()
+                .get_non_send_mut::<ImguiContexts>()
+                .expect("the Context registry was just checked")
+                .preflight_backend_attachment(
+                    &attachment,
+                    Some((self.config.docking(), self.config.multi_viewport())),
+                )
+                .map_err(ImguiPluginInstallError::ContextPreflight)?;
+            None
+        } else {
+            if lifecycle
+                .as_ref()
+                .is_some_and(super::lifecycle::ImguiAppLifecycle::registry_claimed)
+            {
+                return Err(ImguiPluginInstallError::ContextRegistryMissing);
+            }
+            Some(
+                dear_imgui_rs::SuspendedContext::try_create()
+                    .map_err(ImguiPluginInstallError::ContextCreation)?,
+            )
+        };
+
+        Ok(PreparedImguiInstallation {
+            primary,
+            driver_schedule,
+        })
+    }
+
+    fn commit_installation(&self, app: &mut App, prepared: PreparedImguiInstallation) {
         super::pass::install_pass_registry(app);
-        let primary_pass = super::pass::primary_pass(app);
-        let lifecycle = super::pass::lifecycle(app.world());
-        if app.world().get_non_send::<ImguiContexts>().is_none() {
-            assert!(
-                !lifecycle.registry_claimed(),
-                "ImguiContexts was removed after installation; reinsert the original registry or shut the App down"
-            );
+        if let Some(primary) = prepared.primary {
+            let primary_pass = super::pass::primary_pass(app);
+            let lifecycle = super::pass::lifecycle(app.world());
             app.insert_non_send(ImguiContexts::with_primary(
-                dear_imgui_rs::SuspendedContext::create(),
+                primary,
                 primary_pass,
                 lifecycle,
             ));
-        } else {
-            assert!(
-                lifecycle.registry_claimed(),
-                "ImguiContexts exists without the App lifecycle ownership claim"
-            );
-            let registry_id = super::pass::registry_id(app.world());
-            assert_eq!(
-                app.world()
-                    .get_non_send::<ImguiContexts>()
-                    .expect("the Context registry was just checked")
-                    .pass_registry_id(),
-                registry_id,
-                "ImguiContexts was created with pass handles from another App"
-            );
         }
-        schedule::install_imgui_schedules(app, self.config.driver_schedule());
+        schedule::install_imgui_schedules(app, prepared.driver_schedule);
         #[cfg(feature = "render")]
         route::install_route_resolution(app);
         input::install_input_mapping(app);
@@ -123,7 +280,21 @@ impl Plugin for ImguiPlugin {
         let render_integration_installed = false;
         debug_assert_eq!(render_integration_installed, render_integration_available);
         viewport::install_viewport_bridge(app);
-        refresh_backend_contract(app, self.config.clone(), render_integration_installed);
+        refresh_backend_contract(app, self.config.clone(), render_integration_installed)
+            .expect("installation preflight must make backend attachment infallible");
+    }
+}
+
+impl Plugin for ImguiPlugin {
+    fn build(&self, app: &mut App) {
+        if self.build_mode == ImguiPluginBuildMode::AlreadyInstalled {
+            debug_assert!(app.world().contains_resource::<ImguiBackendRuntime>());
+            return;
+        }
+        let prepared = self
+            .prepare_installation(app)
+            .unwrap_or_else(|error| panic!("ImguiPlugin installation failed: {error}"));
+        self.commit_installation(app, prepared);
     }
 
     fn finish(&self, _app: &mut App) {
@@ -131,16 +302,45 @@ impl Plugin for ImguiPlugin {
         {
             let render_integration_installed =
                 render::install_render_extraction(_app, self.resolved_ui_render_order());
-            refresh_backend_contract(_app, self.config.clone(), render_integration_installed);
+            refresh_backend_contract(_app, self.config.clone(), render_integration_installed)
+                .unwrap_or_else(|error| panic!("ImguiPlugin finish failed: {error}"));
         }
     }
+}
+
+pub(crate) fn try_install_imgui(
+    app: &mut App,
+    plugin: ImguiPlugin,
+) -> Result<&mut App, ImguiPluginInstallError> {
+    if app
+        .world()
+        .get_resource::<super::lifecycle::ImguiAppLifecycle>()
+        .is_some_and(super::lifecycle::ImguiAppLifecycle::is_terminal)
+    {
+        return Err(ImguiPluginInstallError::AppTerminated);
+    }
+    if app.is_plugin_added::<ImguiPlugin>()
+        || app.world().contains_resource::<ImguiBackendRuntime>()
+    {
+        return Err(ImguiPluginInstallError::AlreadyInstalled);
+    }
+    if matches!(
+        app.plugins_state(),
+        PluginsState::Finished | PluginsState::Cleaned
+    ) {
+        return Err(ImguiPluginInstallError::PluginLifecycleClosed);
+    }
+    let prepared = plugin.prepare_installation(app)?;
+    plugin.commit_installation(app, prepared);
+    app.add_plugins(plugin.already_installed());
+    Ok(app)
 }
 
 fn refresh_backend_contract(
     app: &mut App,
     config: ImguiPluginConfig,
     render_integration_installed: bool,
-) {
+) -> Result<(), super::ImguiContextError> {
     #[cfg(feature = "render")]
     let renderer_releases = render_integration_installed.then(|| {
         app.world()
@@ -157,18 +357,19 @@ fn refresh_backend_contract(
         #[cfg(feature = "render")]
         renderer_releases,
     };
-    let mut contexts = app
-        .world_mut()
-        .get_non_send_mut::<ImguiContexts>()
-        .expect("ImguiPlugin must retain its Context registry");
-    contexts.set_primary_contract(config.docking(), config.multi_viewport());
-    contexts.attach_backend(attachment).unwrap_or_else(|error| {
-        panic!("ImguiPlugin could not attach the Dear ImGui Context registry: {error}")
-    });
+    {
+        let mut contexts = app
+            .world_mut()
+            .get_non_send_mut::<ImguiContexts>()
+            .expect("ImguiPlugin must retain its Context registry");
+        contexts.set_primary_contract(config.docking(), config.multi_viewport());
+        contexts.attach_backend(attachment)?;
+    }
     app.insert_resource(ImguiBackendRuntime::new(
         config,
         render_integration_installed,
     ));
+    Ok(())
 }
 
 /// Configuration applied when [`ImguiPlugin`] attaches the primary Context.
@@ -225,7 +426,9 @@ impl ImguiPluginConfig {
     /// Run the serial Context driver immediately before `anchor` in Bevy's main schedule order.
     ///
     /// The resulting placement must remain after `PreUpdate` completes and before `PostUpdate`
-    /// begins. Plugin installation panics when the anchor places the driver outside that interval.
+    /// begins. [`crate::ImguiAppExt::try_install_imgui`] returns
+    /// [`ImguiPluginInstallError::DriverSchedule`] when the anchor is invalid; direct Bevy plugin
+    /// installation is the explicit panic convenience path.
     #[must_use]
     pub fn with_driver_before(mut self, anchor: impl ScheduleLabel) -> Self {
         self.driver_schedule = schedule::ImguiDriverSchedulePlacement::before(anchor);
@@ -235,7 +438,9 @@ impl ImguiPluginConfig {
     /// Run the serial Context driver immediately after `anchor` in Bevy's main schedule order.
     ///
     /// The resulting placement must remain after `PreUpdate` completes and before `PostUpdate`
-    /// begins. Plugin installation panics when the anchor places the driver outside that interval.
+    /// begins. [`crate::ImguiAppExt::try_install_imgui`] returns
+    /// [`ImguiPluginInstallError::DriverSchedule`] when the anchor is invalid; direct Bevy plugin
+    /// installation is the explicit panic convenience path.
     #[must_use]
     pub fn with_driver_after(mut self, anchor: impl ScheduleLabel) -> Self {
         self.driver_schedule = schedule::ImguiDriverSchedulePlacement::after(anchor);

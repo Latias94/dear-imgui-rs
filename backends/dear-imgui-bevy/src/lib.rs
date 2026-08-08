@@ -16,8 +16,10 @@
 //! }
 //!
 //! let mut app = App::new();
+//! app.add_plugins(DefaultPlugins);
+//! app.try_install_imgui(ImguiPlugin::default())
+//!     .expect("the Dear ImGui configuration is valid");
 //! app
-//!     .add_plugins((DefaultPlugins, ImguiPlugin::default()))
 //!     .add_systems(Startup, |mut commands: Commands| {
 //!         commands.spawn(Camera2d);
 //!     });
@@ -108,19 +110,18 @@ pub mod route;
 pub use dear_imgui_rs::ContextId;
 
 #[cfg(feature = "render")]
-pub use self::context::ownership::ImguiRendererOwnershipError;
-pub use self::context::ownership::{
-    ImguiContextRemovalPendingReason, ImguiContextScopeError, ImguiPlugin, ImguiPluginConfig,
-};
+pub use self::context::ImguiRendererOwnershipError;
 pub use self::context::{
-    ImguiAppExt, ImguiContextAdmissionError, ImguiContextConfig, ImguiContextError, ImguiContexts,
-    ImguiFrame, ImguiPass, ImguiPrimaryChange, ImguiPrimaryPass, ImguiShutdownError, ImguiSystem,
+    ImguiAppExt, ImguiContextAdmissionError, ImguiContextConfig, ImguiContextError,
+    ImguiContextRemovalPendingReason, ImguiContextRetired, ImguiContextRetirementId,
+    ImguiContextScopeError, ImguiContexts, ImguiFrame, ImguiPass, ImguiPlugin, ImguiPluginConfig,
+    ImguiPluginInstallError, ImguiPrimaryChange, ImguiPrimaryPass, ImguiShutdownError, ImguiSystem,
 };
 #[cfg(feature = "render")]
 pub use self::render::ImguiRenderSystems;
 #[cfg(feature = "bevy-ui")]
 pub use self::render::ImguiUiRenderOrder;
-pub use self::schedule::ImguiDriverSchedulePlacement;
+pub use self::schedule::{ImguiDriverScheduleError, ImguiDriverSchedulePlacement};
 #[cfg(feature = "render")]
 pub use self::texture::{ImguiBevyTextures, ImguiTexture, ImguiTextureRegistrationError};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]

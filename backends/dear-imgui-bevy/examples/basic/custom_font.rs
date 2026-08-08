@@ -29,10 +29,11 @@ fn main() {
             ..Default::default()
         }),
         ..Default::default()
-    }))
-    .add_plugins(ImguiPlugin::default())
-    .insert_non_send(CustomFonts::default())
-    .add_systems(Startup, (setup_scene, configure_fonts));
+    }));
+    app.try_install_imgui(ImguiPlugin::default())
+        .expect("the custom-font example configuration is valid");
+    app.insert_non_send(CustomFonts::default())
+        .add_systems(Startup, (setup_scene, configure_fonts));
     let primary_pass = app.imgui_primary_pass();
     app.add_imgui_systems(&primary_pass, primary_pass.system(custom_font_ui))
         .run();

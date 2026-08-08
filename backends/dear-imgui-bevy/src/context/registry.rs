@@ -1,13 +1,70 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::num::NonZeroU64;
 
+use bevy_ecs::message::Message;
 use dear_imgui_rs::{Context, ContextId, SuspendedContext};
 
 use super::lifecycle::ImguiAppLifecycle;
-use super::ownership::{
-    ContextOwner, ImguiContextRemovalPendingReason, ImguiContextRetirementSink,
+use super::{
+    ContextOwner, ImguiContextRemovalPendingReason, ImguiContextRetirementSink, ImguiPass,
+    ImguiPrimaryPass, PassIdentity,
 };
-use super::{ImguiPass, ImguiPrimaryPass, PassIdentity};
+
+/// Generation-qualified identity of one managed Context retirement request.
+///
+/// Retain this value instead of matching a delayed completion by [`ContextId`] alone. The
+/// generation identifies the registry admission that owned the Context when retirement began.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct ImguiContextRetirementId {
+    context_id: ContextId,
+    generation: NonZeroU64,
+}
+
+impl ImguiContextRetirementId {
+    pub(crate) const fn new(context_id: ContextId, generation: NonZeroU64) -> Self {
+        Self {
+            context_id,
+            generation,
+        }
+    }
+
+    /// Return the Context identity that was registered when removal was requested.
+    #[must_use]
+    pub const fn context_id(self) -> ContextId {
+        self.context_id
+    }
+
+    /// Return the registry generation that distinguishes this request from a reused slot.
+    #[must_use]
+    pub const fn generation(self) -> NonZeroU64 {
+        self.generation
+    }
+}
+
+/// One-shot notification that a managed Context retirement completed.
+#[derive(Clone, Copy, Debug, Eq, Message, PartialEq)]
+pub struct ImguiContextRetired {
+    retirement: ImguiContextRetirementId,
+}
+
+impl ImguiContextRetired {
+    /// Return the generation-qualified retirement that completed.
+    #[must_use]
+    pub const fn retirement(self) -> ImguiContextRetirementId {
+        self.retirement
+    }
+
+    /// Return the retired Context identity.
+    #[must_use]
+    pub const fn context_id(self) -> ContextId {
+        self.retirement.context_id()
+    }
+
+    pub(crate) const fn new(retirement: ImguiContextRetirementId) -> Self {
+        Self { retirement }
+    }
+}
 
 /// Result of atomically selecting a new primary Context.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -124,7 +181,7 @@ pub enum ImguiContextError {
     /// A temporary active-Context scope could not be entered or completed.
     ScopedActivation {
         context_id: ContextId,
-        source: super::ownership::ImguiContextScopeError,
+        source: super::ImguiContextScopeError,
     },
     /// The legacy/headless font-atlas capability could not be acquired before opening a frame.
     FontAtlasMode {
@@ -147,7 +204,7 @@ pub enum ImguiContextError {
     #[cfg(feature = "render")]
     RendererOwnership {
         context_id: ContextId,
-        source: super::ownership::ImguiRendererOwnershipError,
+        source: super::ImguiRendererOwnershipError,
     },
     /// Detached snapshot completion failed for this Context.
     #[cfg(feature = "render")]
@@ -185,10 +242,14 @@ pub enum ImguiContextError {
     NativeMultiViewportUnavailable { context_id: ContextId },
     /// Core Context construction failed.
     ContextCreation(dear_imgui_rs::ImGuiError),
-    /// Context removal has begun but backend-owned work is still live.
+    /// The registry exhausted its monotonic slot generations.
+    ContextGenerationExhausted,
+    /// Managed removal was requested before the plugin installed its retirement queue.
+    RetirementQueueUnavailable { context_id: ContextId },
+    /// Context removal cannot begin or finish while backend-owned state is still live.
     RemovalPending {
         context_id: ContextId,
-        reason: super::ownership::ImguiContextRemovalPendingReason,
+        reason: super::ImguiContextRemovalPendingReason,
     },
 }
 
@@ -300,12 +361,17 @@ impl fmt::Display for ImguiContextError {
                 "Context {context_id:?} requests native multi-viewport, but this build cannot provide native windows"
             ),
             Self::ContextCreation(error) => error.fmt(formatter),
-            Self::RemovalPending { context_id, reason } => {
-                write!(
-                    formatter,
-                    "Context {context_id:?} removal is pending: {reason}"
-                )
+            Self::ContextGenerationExhausted => {
+                formatter.write_str("Dear ImGui Context registry generations are exhausted")
             }
+            Self::RetirementQueueUnavailable { context_id } => write!(
+                formatter,
+                "Context {context_id:?} cannot enter managed retirement before ImguiPlugin installation"
+            ),
+            Self::RemovalPending { context_id, reason } => write!(
+                formatter,
+                "Context {context_id:?} removal cannot proceed yet: {reason}"
+            ),
         }
     }
 }
@@ -403,6 +469,8 @@ pub(crate) enum ContextSlotState {
 pub(crate) struct ContextSlot {
     pub(crate) config: ImguiContextConfig,
     pub(crate) owner: Option<ContextOwner>,
+    generation: NonZeroU64,
+    retirement: Option<ImguiContextRetirementId>,
     pub(crate) frame_index: u64,
     pub(crate) state: ContextSlotState,
     pub(crate) last_error: Option<ImguiContextError>,
@@ -420,8 +488,9 @@ pub struct ImguiContexts {
     slots: HashMap<ContextId, ContextSlot>,
     order: Vec<ContextId>,
     pass_owners: HashMap<super::pass::PassKey, ContextId>,
-    backend: Option<super::ownership::BackendAttachment>,
+    backend: Option<super::BackendAttachment>,
     retirement_sink: Option<ImguiContextRetirementSink>,
+    next_slot_generation: u64,
 }
 
 impl ImguiContexts {
@@ -447,6 +516,8 @@ impl ImguiContexts {
             ContextSlot {
                 config,
                 owner: Some(ContextOwner::new(primary)),
+                generation: NonZeroU64::MIN,
+                retirement: None,
                 frame_index: 0,
                 state: ContextSlotState::Ready,
                 last_error: None,
@@ -461,6 +532,7 @@ impl ImguiContexts {
             pass_owners: HashMap::from([(pass.key(), primary_id)]),
             backend: None,
             retirement_sink: None,
+            next_slot_generation: 2,
         }
     }
 
@@ -498,7 +570,11 @@ impl ImguiContexts {
         })
     }
 
-    /// Iterate Context identities in deterministic drive order.
+    /// Iterate registered Context identities in deterministic registry order.
+    ///
+    /// A managed-retirement tombstone remains visible until its matching
+    /// [`ImguiContextRetired`] completion is emitted, although the private driver no longer opens
+    /// frames for it.
     pub fn ids(&self) -> impl ExactSizeIterator<Item = ContextId> + '_ {
         let order = if self.lifecycle.is_terminal() {
             &self.order[0..0]
@@ -584,6 +660,11 @@ impl ImguiContexts {
             ));
         }
 
+        let generation = match self.allocate_slot_generation() {
+            Ok(generation) => generation,
+            Err(error) => return Err(ImguiContextAdmissionError::new(error, context)),
+        };
+
         let mut owner = ContextOwner::new(context);
         if let Some(sink) = self.retirement_sink.as_ref() {
             owner.set_retirement_sink(sink.clone());
@@ -607,6 +688,8 @@ impl ImguiContexts {
             ContextSlot {
                 config,
                 owner: Some(owner),
+                generation,
+                retirement: None,
                 frame_index: 0,
                 state: ContextSlotState::Ready,
                 last_error: None,
@@ -642,9 +725,9 @@ impl ImguiContexts {
 
     /// Run an outside-frame configuration closure against one Context.
     ///
-    /// A Context whose removal is pending remains configurable so the integration that changed an
-    /// owned backend field can restore or finish replacing its state before [`Self::remove`] is
-    /// retried. Teardown Contexts never open another frame.
+    /// A Context whose immediate removal is pending remains configurable so the integration that
+    /// changed an owned backend field can restore it before [`Self::try_remove_immediately`] is
+    /// retried. A Context transferred to managed retirement cannot be configured.
     pub fn configure<T>(
         &mut self,
         context_id: ContextId,
@@ -667,7 +750,7 @@ impl ImguiContexts {
         let owner = slot
             .owner
             .as_mut()
-            .expect("a ready Context slot must retain its owner");
+            .ok_or(ImguiContextError::TeardownInProgress { context_id })?;
         owner
             .try_with_active_context(|context| {
                 Ok::<_, std::convert::Infallible>(configure(context))
@@ -677,8 +760,87 @@ impl ImguiContexts {
             })
     }
 
-    /// Retry Context-local backend teardown and remove the Context when it is idle.
-    pub fn remove(&mut self, context_id: ContextId) -> Result<SuspendedContext, ImguiContextError> {
+    /// Request managed removal of one Context.
+    ///
+    /// The request transfers the complete Context owner to the plugin's retirement queue and
+    /// returns immediately. Repeating the request while retirement is pending returns the same
+    /// generation-qualified identity. Observe [`ImguiContextRetired`] for the one-shot completion;
+    /// once accepted, applications do not need to poll or retry this method. A repairable
+    /// backend-ownership conflict is returned before transfer, so [`Self::configure`] remains
+    /// available.
+    pub fn remove(
+        &mut self,
+        context_id: ContextId,
+    ) -> Result<ImguiContextRetirementId, ImguiContextError> {
+        self.ensure_active()?;
+        if let Some(active) = self.driving_context() {
+            return Err(ImguiContextError::RawMutationWhileFrameOpen { context_id: active });
+        }
+        if let Some(retirement) = self.slots.get(&context_id).and_then(|slot| slot.retirement) {
+            return Ok(retirement);
+        }
+        if !self.slots.contains_key(&context_id) {
+            return Err(ImguiContextError::UnknownContext { context_id });
+        }
+        let sink = self
+            .retirement_sink
+            .clone()
+            .ok_or(ImguiContextError::RetirementQueueUnavailable { context_id })?;
+        let (retirement, owner, previous_state) = {
+            let slot = self
+                .slots
+                .get_mut(&context_id)
+                .ok_or(ImguiContextError::UnknownContext { context_id })?;
+            if slot.state == ContextSlotState::Driving {
+                return Err(ImguiContextError::RawMutationWhileFrameOpen { context_id });
+            }
+            slot.owner
+                .as_mut()
+                .expect("an unqueued Context slot must retain its owner")
+                .preflight_backend_detach()
+                .map_err(|reason| ImguiContextError::RemovalPending { context_id, reason })?;
+            let retirement = ImguiContextRetirementId::new(context_id, slot.generation);
+            let previous_state = slot.state;
+            slot.state = ContextSlotState::Teardown;
+            let owner = slot
+                .owner
+                .take()
+                .expect("an unqueued Context slot must retain its owner");
+            (retirement, owner, previous_state)
+        };
+        match sink.try_enqueue(owner, retirement) {
+            Ok(()) => {
+                self.slots
+                    .get_mut(&context_id)
+                    .expect("a queued Context slot must remain registered")
+                    .retirement = Some(retirement);
+                if self.primary == Some(context_id) {
+                    self.primary = None;
+                }
+                Ok(retirement)
+            }
+            Err(owner) => {
+                let slot = self
+                    .slots
+                    .get_mut(&context_id)
+                    .expect("a failed retirement enqueue must retain its slot");
+                slot.owner = Some(owner);
+                slot.state = previous_state;
+                Err(ImguiContextError::RetirementQueueUnavailable { context_id })
+            }
+        }
+    }
+
+    /// Attempt synchronous teardown and return the suspended Context to the caller.
+    ///
+    /// This is an advanced retry-oriented escape hatch for integrations that must recover the
+    /// native Context owner. A pending renderer or viewport acknowledgement returns
+    /// [`ImguiContextError::RemovalPending`]; the caller must advance the relevant Bevy schedules
+    /// before retrying. Normal applications should call [`Self::remove`] once instead.
+    pub fn try_remove_immediately(
+        &mut self,
+        context_id: ContextId,
+    ) -> Result<SuspendedContext, ImguiContextError> {
         self.ensure_active()?;
         if let Some(active) = self.driving_context() {
             return Err(ImguiContextError::RawMutationWhileFrameOpen { context_id: active });
@@ -687,6 +849,9 @@ impl ImguiContexts {
             .slots
             .get_mut(&context_id)
             .ok_or(ImguiContextError::UnknownContext { context_id })?;
+        if slot.retirement.is_some() {
+            return Err(ImguiContextError::TeardownInProgress { context_id });
+        }
         if slot.state == ContextSlotState::Driving {
             return Err(ImguiContextError::RawMutationWhileFrameOpen { context_id });
         }
@@ -699,15 +864,7 @@ impl ImguiContexts {
             return Err(ImguiContextError::RemovalPending { context_id, reason });
         }
 
-        let slot = self
-            .slots
-            .remove(&context_id)
-            .expect("the validated Context slot must still exist");
-        self.order.retain(|candidate| *candidate != context_id);
-        self.pass_owners.remove(&slot.config.pass.key());
-        if self.primary == Some(context_id) {
-            self.primary = None;
-        }
+        let slot = self.remove_slot(context_id);
         Ok(slot
             .owner
             .expect("removed Context slot must retain its owner")
@@ -728,10 +885,10 @@ impl ImguiContexts {
                 .get_mut(&context_id)
                 .expect("drive order must reference a registered Context");
             debug_assert_ne!(slot.state, ContextSlotState::Driving);
-            let owner = slot
-                .owner
-                .as_mut()
-                .expect("shutdown preflight requires idle Context owners");
+            let Some(owner) = slot.owner.as_mut() else {
+                debug_assert!(slot.retirement.is_some());
+                continue;
+            };
             if let Err(reason) = owner.preflight_backend_detach()
                 && first_failure.is_none()
             {
@@ -739,6 +896,18 @@ impl ImguiContexts {
             }
         }
         first_failure.map_or(Ok(()), Err)
+    }
+
+    pub(crate) fn complete_retirement(&mut self, retirement: ImguiContextRetirementId) -> bool {
+        let Some(slot) = self.slots.get(&retirement.context_id) else {
+            return false;
+        };
+        if slot.retirement != Some(retirement) {
+            return false;
+        }
+        let slot = self.remove_slot(retirement.context_id);
+        debug_assert!(slot.owner.is_none());
+        true
     }
 
     #[cfg(feature = "render")]
@@ -836,18 +1005,18 @@ impl ImguiContexts {
             .expect("a ready Context slot must retain its owner");
         match owner.try_recover_renderer() {
             Ok(()) => Ok(()),
-            Err(super::ownership::ImguiActiveRendererContextError::Operation(source)) => {
+            Err(super::ImguiActiveRendererContextError::Operation(source)) => {
                 Err(ImguiContextError::RendererRecovery { context_id, source })
             }
-            Err(super::ownership::ImguiActiveRendererContextError::ContextScope(source)) => {
+            Err(super::ImguiActiveRendererContextError::ContextScope(source)) => {
                 Err(ImguiContextError::ScopedActivation { context_id, source })
             }
-            Err(super::ownership::ImguiActiveRendererContextError::RendererOwnership(source)) => {
+            Err(super::ImguiActiveRendererContextError::RendererOwnership(source)) => {
                 slot.state = ContextSlotState::Teardown;
                 Err(ImguiContextError::RendererOwnership { context_id, source })
             }
             #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-            Err(super::ownership::ImguiActiveRendererContextError::ViewportBridge(source)) => {
+            Err(super::ImguiActiveRendererContextError::ViewportBridge(source)) => {
                 slot.state = ContextSlotState::Teardown;
                 Err(ImguiContextError::ViewportBridge { context_id, source })
             }
@@ -911,6 +1080,26 @@ impl ImguiContexts {
         slot.state = ContextSlotState::Teardown;
     }
 
+    fn allocate_slot_generation(&mut self) -> Result<NonZeroU64, ImguiContextError> {
+        let generation = NonZeroU64::new(self.next_slot_generation)
+            .ok_or(ImguiContextError::ContextGenerationExhausted)?;
+        self.next_slot_generation = self.next_slot_generation.checked_add(1).unwrap_or(0);
+        Ok(generation)
+    }
+
+    fn remove_slot(&mut self, context_id: ContextId) -> ContextSlot {
+        let slot = self
+            .slots
+            .remove(&context_id)
+            .expect("the validated Context slot must still exist");
+        self.order.retain(|candidate| *candidate != context_id);
+        self.pass_owners.remove(&slot.config.pass.key());
+        if self.primary == Some(context_id) {
+            self.primary = None;
+        }
+        slot
+    }
+
     #[cfg(feature = "render")]
     pub(crate) fn record_snapshot_commit_error(
         &mut self,
@@ -943,9 +1132,10 @@ impl ImguiContexts {
         }
     }
 
-    pub(crate) fn attach_backend(
+    pub(crate) fn preflight_backend_attachment(
         &mut self,
-        backend: super::ownership::BackendAttachment,
+        backend: &super::BackendAttachment,
+        primary_contract: Option<(bool, bool)>,
     ) -> Result<(), ImguiContextError> {
         self.ensure_active()?;
         if let Some(active) = self.driving_context() {
@@ -956,28 +1146,48 @@ impl ImguiContexts {
                 .slots
                 .get_mut(context_id)
                 .expect("drive order must reference a registered Context");
-            slot.owner
-                .as_mut()
-                .expect("backend attachment requires idle Context owners")
-                .preflight_backend_attachment(&backend, &slot.config)?;
+            let Some(owner) = slot.owner.as_mut() else {
+                debug_assert!(slot.retirement.is_some());
+                continue;
+            };
+            let mut config = slot.config.clone();
+            if self.primary == Some(*context_id)
+                && let Some((docking, multi_viewport)) = primary_contract
+            {
+                config.docking = docking;
+                config.multi_viewport = multi_viewport;
+            }
+            owner.preflight_backend_attachment(backend, &config)?;
         }
         for context_id in &self.order {
             let slot = self
                 .slots
                 .get_mut(context_id)
                 .expect("drive order must reference a registered Context");
-            let owner = slot
-                .owner
-                .as_mut()
-                .expect("renderer admission requires idle Context owners");
-            owner.preflight_renderer_admission(&backend)?;
+            let Some(owner) = slot.owner.as_mut() else {
+                debug_assert!(slot.retirement.is_some());
+                continue;
+            };
+            owner.preflight_renderer_admission(backend)?;
         }
+        Ok(())
+    }
+
+    pub(crate) fn attach_backend(
+        &mut self,
+        backend: super::BackendAttachment,
+    ) -> Result<(), ImguiContextError> {
+        self.preflight_backend_attachment(&backend, None)?;
         #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
         for context_id in &self.order {
             let slot = self
                 .slots
                 .get_mut(context_id)
                 .expect("drive order must reference a registered Context");
+            let Some(owner) = slot.owner.as_mut() else {
+                debug_assert!(slot.retirement.is_some());
+                continue;
+            };
             if !slot.config.multi_viewport() {
                 continue;
             }
@@ -985,32 +1195,66 @@ impl ImguiContexts {
                 .viewport_bridge_registration
                 .as_ref()
                 .expect("multi-viewport preflight must provide a bridge registration");
-            slot.owner
-                .as_mut()
-                .expect("backend attachment requires idle Context owners")
-                .attach_context_viewport_bridge(registration)?;
+            owner.attach_context_viewport_bridge(registration)?;
         }
         for context_id in &self.order {
             let slot = self
                 .slots
                 .get_mut(context_id)
                 .expect("drive order must reference a registered Context");
-            slot.owner
-                .as_mut()
-                .expect("renderer admission requires idle Context owners")
-                .commit_renderer_admission(&backend)?;
+            let Some(owner) = slot.owner.as_mut() else {
+                debug_assert!(slot.retirement.is_some());
+                continue;
+            };
+            owner.commit_renderer_admission(&backend)?;
         }
         for context_id in &self.order {
             let slot = self
                 .slots
                 .get_mut(context_id)
                 .expect("drive order must reference a registered Context");
-            slot.owner
-                .as_mut()
-                .expect("backend attachment requires idle Context owners")
-                .commit_backend_attachment(&backend, &slot.config)?;
+            let Some(owner) = slot.owner.as_mut() else {
+                debug_assert!(slot.retirement.is_some());
+                continue;
+            };
+            owner.commit_backend_attachment(&backend, &slot.config)?;
         }
         self.backend = Some(backend);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod retirement_generation_tests {
+    use super::*;
+    use crate::test_util::imgui_context_guard;
+
+    #[test]
+    fn stale_retirement_completion_cannot_remove_a_reused_slot_generation() {
+        let _guard = imgui_context_guard();
+        let mut app = bevy_app::App::new();
+        let primary_pass = super::super::pass::primary_pass(&mut app);
+        let lifecycle = super::super::pass::lifecycle(app.world());
+        let primary = SuspendedContext::create();
+        let context_id = primary.id();
+        let mut contexts = ImguiContexts::with_primary(primary, primary_pass, lifecycle);
+        let stale = ImguiContextRetirementId::new(context_id, NonZeroU64::MIN);
+        let current = ImguiContextRetirementId::new(context_id, NonZeroU64::new(2).unwrap());
+        let slot = contexts
+            .slots
+            .get_mut(&context_id)
+            .expect("the primary slot must exist");
+        slot.generation = NonZeroU64::new(2).unwrap();
+        slot.retirement = Some(current);
+
+        assert!(!contexts.complete_retirement(stale));
+        assert!(contexts.contains(context_id));
+        assert_eq!(
+            contexts
+                .slots
+                .get(&context_id)
+                .and_then(|slot| slot.retirement),
+            Some(current)
+        );
     }
 }

@@ -11,11 +11,9 @@ use bevy_ecs::schedule::{ScheduleLabel, Schedules};
 use bevy_render::{Render, RenderApp, extract_plugin::ExtractPlugin};
 use bevy_time::{Real, Time};
 use bevy_window::{PrimaryWindow, Window, WindowResolution};
-#[cfg(feature = "render")]
-use dear_imgui_bevy::ImguiContextRemovalPendingReason;
 use dear_imgui_bevy::{
-    ContextId, ImguiAppExt, ImguiContextConfig, ImguiContextError, ImguiContexts, ImguiFrame,
-    ImguiPass, ImguiPlugin, ImguiPrimaryPass,
+    ContextId, ImguiAppExt, ImguiContextConfig, ImguiContextError, ImguiContextRetired,
+    ImguiContexts, ImguiFrame, ImguiPass, ImguiPlugin, ImguiPrimaryPass,
 };
 use std::time::Duration;
 
@@ -542,6 +540,93 @@ fn explicit_headless_shutdown_is_terminal_and_idempotent() {
 }
 
 #[test]
+fn shutdown_converges_a_pending_managed_retirement_once() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+    app.add_plugins(ImguiPlugin::default());
+    let primary = app
+        .world()
+        .get_non_send::<ImguiContexts>()
+        .and_then(ImguiContexts::primary_id)
+        .unwrap();
+    let mut completions = app
+        .world()
+        .resource::<Messages<ImguiContextRetired>>()
+        .get_cursor();
+    let retirement = app
+        .world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
+        .remove(primary)
+        .expect("managed removal must enter the retirement queue");
+
+    app.shutdown_imgui()
+        .expect("terminal shutdown must drain a previously requested retirement");
+
+    assert!(app.world().get_non_send::<ImguiContexts>().is_none());
+    assert_eq!(
+        completions
+            .read(app.world().resource::<Messages<ImguiContextRetired>>())
+            .map(|completed| completed.retirement())
+            .collect::<Vec<_>>(),
+        vec![retirement]
+    );
+    app.shutdown_imgui()
+        .expect("a completed managed retirement must keep shutdown idempotent");
+    assert!(
+        completions
+            .read(app.world().resource::<Messages<ImguiContextRetired>>())
+            .next()
+            .is_none(),
+        "terminal convergence must not duplicate the completion message"
+    );
+}
+
+#[cfg(feature = "render")]
+#[test]
+fn plugin_finish_skips_a_context_already_transferred_to_managed_retirement() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+    app.try_install_imgui(ImguiPlugin::default())
+        .expect("headless plugin admission must succeed before RenderApp exists");
+    let primary = app
+        .world()
+        .get_non_send::<ImguiContexts>()
+        .and_then(ImguiContexts::primary_id)
+        .unwrap();
+    let mut completions = app
+        .world()
+        .resource::<Messages<ImguiContextRetired>>()
+        .get_cursor();
+    let retirement = app
+        .world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
+        .remove(primary)
+        .expect("managed retirement must accept the Context before plugin finish");
+
+    app.add_plugins(ExtractPlugin::default());
+    app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
+    app.finish();
+    app.world_mut()
+        .run_schedule(crate::schedule::ImguiContextDriver);
+
+    assert!(
+        !app.world()
+            .get_non_send::<ImguiContexts>()
+            .unwrap()
+            .contains(primary)
+    );
+    assert_eq!(
+        completions
+            .read(app.world().resource::<Messages<ImguiContextRetired>>())
+            .map(|completed| completed.retirement())
+            .collect::<Vec<_>>(),
+        vec![retirement]
+    );
+}
+
+#[test]
 fn terminal_shutdown_invalidates_retained_registries_and_rejects_app_scoped_readmission() {
     let _guard = imgui_context_guard();
     let mut app = app_with_primary_window();
@@ -917,7 +1002,7 @@ fn duplicate_pass_and_stale_context_errors_are_typed_and_recover_ownership() {
     let rejected = error.into_context();
     assert_eq!(rejected.id(), rejected_id);
 
-    let removed = contexts.remove(context_a).unwrap();
+    let removed = contexts.try_remove_immediately(context_a).unwrap();
     assert_eq!(removed.id(), context_a);
     assert!(matches!(
         contexts.configure(context_a, |_| ()),
@@ -979,7 +1064,7 @@ fn additional_multi_viewport_config_can_be_registered_before_backend_attachment(
     assert!(contexts.contains(additional_id));
     assert_eq!(
         contexts
-            .remove(additional_id)
+            .try_remove_immediately(additional_id)
             .expect("an unattached Context should remain removable")
             .id(),
         additional_id
@@ -1232,11 +1317,23 @@ fn removing_the_primary_context_does_not_stop_an_additional_context() {
         (primary, additional)
     };
     app.world_mut().resource_mut::<LifecycleTrace>().expected = vec![additional];
-    app.world_mut()
+    let mut completions = app
+        .world()
+        .resource::<Messages<ImguiContextRetired>>()
+        .get_cursor();
+    let retirement = app
+        .world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .unwrap()
         .remove(primary)
-        .expect("a primary Context without render-world work should detach immediately");
+        .expect("managed removal should enter the retirement queue");
+    let coalesced = app
+        .world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
+        .remove(primary)
+        .expect("repeated removal should coalesce");
+    assert_eq!(retirement, coalesced);
 
     app.update();
 
@@ -1246,6 +1343,22 @@ fn removing_the_primary_context_does_not_stop_an_additional_context() {
     assert_eq!(
         app.world().resource::<LifecycleTrace>().visits,
         vec![(additional, 1)]
+    );
+    assert_eq!(
+        completions
+            .read(app.world().resource::<Messages<ImguiContextRetired>>())
+            .map(|completed| completed.retirement())
+            .collect::<Vec<_>>(),
+        vec![retirement]
+    );
+
+    app.update();
+    assert!(
+        completions
+            .read(app.world().resource::<Messages<ImguiContextRetired>>())
+            .next()
+            .is_none(),
+        "managed retirement must emit exactly one completion"
     );
 }
 
@@ -1294,29 +1407,24 @@ fn context_removal_abandons_unextracted_snapshot_without_pausing_another_context
         }
     }
 
-    let removal = app
+    let mut completions = app
+        .world()
+        .resource::<Messages<ImguiContextRetired>>()
+        .get_cursor();
+    let retirement = app
         .world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .unwrap()
         .remove(context_a)
-        .expect_err("the render world must acknowledge Context A before removal");
-    assert!(matches!(
-        removal,
-        ImguiContextError::RemovalPending {
-            context_id,
-            reason: ImguiContextRemovalPendingReason::RenderWorldReleasePending,
-        } if context_id == context_a
-    ));
-    let completion = app
-        .world_mut()
-        .get_non_send_mut::<ImguiContexts>()
-        .unwrap()
-        .configure(context_a, |context| context.poll_snapshot_completions())
-        .expect("a teardown Context must remain configurable")
-        .expect("abandoning the staged snapshot must complete cleanly");
-    assert_eq!(completion.watermark(), 1);
-    assert_eq!(completion.committed(), 0);
-    assert_eq!(completion.abandoned(), 1);
+        .expect("managed retirement should own renderer acknowledgement retries");
+    assert_eq!(
+        app.world_mut()
+            .get_non_send_mut::<ImguiContexts>()
+            .unwrap()
+            .remove(context_a)
+            .expect("repeated managed removal should coalesce"),
+        retirement
+    );
 
     app.update();
 
@@ -1337,14 +1445,6 @@ fn context_removal_abandons_unextracted_snapshot_without_pausing_another_context
     assert_eq!(extracted.frame_index(context_a), None);
     assert_eq!(extracted.frame_index(context_b), Some(2));
 
-    let removed = app
-        .world_mut()
-        .get_non_send_mut::<ImguiContexts>()
-        .unwrap()
-        .remove(context_a)
-        .expect("render-world acknowledgement must make Context A removable");
-    assert_eq!(removed.id(), context_a);
-
     app.update();
 
     let contexts = app.world().get_non_send::<ImguiContexts>().unwrap();
@@ -1364,6 +1464,13 @@ fn context_removal_abandons_unextracted_snapshot_without_pausing_another_context
             (context_b, 2),
             (context_b, 3),
         ]
+    );
+    assert_eq!(
+        completions
+            .read(app.world().resource::<Messages<ImguiContextRetired>>())
+            .map(|completed| completed.retirement())
+            .collect::<Vec<_>>(),
+        vec![retirement]
     );
 }
 

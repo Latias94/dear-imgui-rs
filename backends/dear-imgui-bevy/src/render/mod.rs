@@ -412,11 +412,11 @@ mod tests {
             app.world_mut()
                 .get_non_send_mut::<crate::ImguiContexts>()
                 .unwrap()
-                .remove(context_a),
+                .try_remove_immediately(context_a),
             Err(crate::ImguiContextError::RemovalPending {
                 context_id,
                 reason:
-                    crate::context::ownership::ImguiContextRemovalPendingReason::RenderWorldReleasePending,
+                    crate::context::ImguiContextRemovalPendingReason::RenderWorldReleasePending,
             }) if context_id == context_a
         ));
         assert!(
@@ -450,7 +450,7 @@ mod tests {
             .world_mut()
             .get_non_send_mut::<crate::ImguiContexts>()
             .unwrap()
-            .remove(context_a)
+            .try_remove_immediately(context_a)
             .expect("Context A must consume the recovery-detached release packet");
         assert_eq!(removed.id(), context_a);
         drop(removed);
@@ -545,10 +545,10 @@ mod tests {
             app.world_mut()
                 .get_non_send_mut::<crate::ImguiContexts>()
                 .unwrap()
-                .remove(primary_id),
+                .try_remove_immediately(primary_id),
             Err(crate::ImguiContextError::RemovalPending {
                 context_id,
-                reason: crate::context::ownership::ImguiContextRemovalPendingReason::ViewportWorldReleasePending,
+                reason: crate::context::ImguiContextRemovalPendingReason::ViewportWorldReleasePending,
             }) if context_id == primary_id
         ));
         assert!(
@@ -587,10 +587,10 @@ mod tests {
             app.world_mut()
                 .get_non_send_mut::<crate::ImguiContexts>()
                 .unwrap()
-                .remove(primary_id),
+                .try_remove_immediately(primary_id),
             Err(crate::ImguiContextError::RemovalPending {
                 context_id,
-                reason: crate::context::ownership::ImguiContextRemovalPendingReason::RenderWorldReleasePending,
+                reason: crate::context::ImguiContextRemovalPendingReason::RenderWorldReleasePending,
             }) if context_id == primary_id
         ));
         assert!(releases.acknowledge_release(
@@ -604,7 +604,7 @@ mod tests {
             .world_mut()
             .get_non_send_mut::<crate::ImguiContexts>()
             .unwrap()
-            .remove(primary_id)
+            .try_remove_immediately(primary_id)
             .expect("viewport and renderer release acknowledgements must complete removal");
         assert_eq!(context.id(), primary_id);
         assert!(
@@ -711,9 +711,9 @@ mod tests {
     #[test]
     fn context_teardown_waits_for_render_world_release_before_native_mutation() {
         let context = managed_context();
-        let mut owner = crate::context::ownership::ContextOwner::new(context.suspend_or_panic());
+        let mut owner = crate::context::ContextOwner::new(context.suspend_or_panic());
         let releases = ImguiRendererReleases::default();
-        let backend = crate::context::ownership::BackendAttachment {
+        let backend = crate::context::BackendAttachment {
             render_integration_installed: true,
             #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
             viewport_bridge_registration: None,
@@ -740,7 +740,7 @@ mod tests {
             .expect_err("live render-world resources must prevent Context teardown");
         assert_eq!(
             error,
-            crate::context::ownership::ImguiContextRemovalPendingReason::RenderWorldReleasePending
+            crate::context::ImguiContextRemovalPendingReason::RenderWorldReleasePending
         );
         owner
             .try_with_active_renderer_context(false, |context, _| {
@@ -784,7 +784,7 @@ mod tests {
     #[test]
     fn device_recovery_resets_each_context_texture_and_resumes_its_consumer() {
         let releases = ImguiRendererReleases::default();
-        let backend = crate::context::ownership::BackendAttachment {
+        let backend = crate::context::BackendAttachment {
             render_integration_installed: true,
             #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
             viewport_bridge_registration: None,
@@ -793,8 +793,7 @@ mod tests {
         let make_owner = || {
             let context = managed_context();
             let context_id = context.id();
-            let mut owner =
-                crate::context::ownership::ContextOwner::new(context.suspend_or_panic());
+            let mut owner = crate::context::ContextOwner::new(context.suspend_or_panic());
             owner.preflight_renderer_admission(&backend).unwrap();
             owner.commit_renderer_admission(&backend).unwrap();
             let texture = owner
@@ -847,9 +846,7 @@ mod tests {
         for owner in [&mut owner_a, &mut owner_b] {
             assert_eq!(
                 owner.try_detach_backend(),
-                Err(
-                    crate::context::ownership::ImguiContextRemovalPendingReason::RenderWorldReleasePending
-                )
+                Err(crate::context::ImguiContextRemovalPendingReason::RenderWorldReleasePending)
             );
         }
         for (context_id, generation) in releases.requested_releases() {
