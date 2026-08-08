@@ -871,7 +871,7 @@ impl AppWindow {
             self.imgui.renderer.render(
                 pending_frame,
                 &mut rpass,
-                FramebufferExtent::new(self.surface_desc.width, self.surface_desc.height),
+                FramebufferExtent::from_texture(&frame.texture),
             )?;
         }
 

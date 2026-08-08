@@ -54,14 +54,15 @@ python tools/generate_ash_shaders.py --check --recompile --compiler /path/to/gls
 
 ## Managed textures
 
-`AshRenderer::cmd_draw` consumes a `PendingFrame`, uploads its owned texture requests, reconciles
-request-bound feedback into a `ReconciledFrame`, and only then reads immutable draw data.
+`AshRenderer::prepare_frame` consumes a `PendingFrame`, uploads its owned texture requests, and
+returns a `ReconciledFrame` with any `TextureRetirementBatch`. The unsafe `cmd_draw` entry consumes
+that reconciled capability and only then reads immutable draw data while recording Vulkan commands.
 
 Each `AshRenderer` owns the sole `SynchronousRendererConsumer` generation created for the Context
 passed to its constructor. Create one renderer per Context and pass `renderer.renderer_consumer()?`
-to `Context::render`. `cmd_draw` rejects a frame from another Context or consumer generation before
-recording GPU work, and the consumed frame lease prevents native `DrawData` from escaping its
-Context borrow.
+to `Context::render`. `prepare_frame` rejects a frame from another Context or consumer generation
+before mutating texture state, and `cmd_draw` revalidates the reconciled frame before recording GPU
+work. The consumed frame lease prevents native `DrawData` from escaping its Context borrow.
 
 - Font atlas textures are registered by ImGui itself.
 - Register an `OwnedTextureData` with `Context::register_texture(texture)`. Registration transfers
@@ -78,9 +79,11 @@ Recording a Vulkan command buffer does not mean the GPU has finished using its t
 request therefore moves the managed texture into a retirement queue instead of immediately freeing
 it or acknowledging the request.
 
-`AshRenderer::cmd_draw` returns the highest pending `TextureRetirementBatch`. The safe
-`wait_for_texture_retirements(batch)` path waits for device idle and only then releases the Vulkan
-resources. The next frame can then acknowledge Dear ImGui's repeated destroy request.
+`AshRenderer::prepare_frame` returns the highest pending `TextureRetirementBatch` alongside the
+`ReconciledFrame`; `cmd_draw` returns `()`. Keep the batch with the submission that records the
+reconciled frame. The safe `wait_for_texture_retirements(batch)` path waits for device idle and only
+then releases the Vulkan resources. The next frame can then acknowledge Dear ImGui's repeated
+destroy request.
 `pending_texture_retirement() -> RendererResult<Option<TextureRetirementBatch>>` recovers the
 current token if command recording returns an error after retirement began. Resource and texture
 entries consistently return `RendererDestroyed` after shutdown, before touching Vulkan.
