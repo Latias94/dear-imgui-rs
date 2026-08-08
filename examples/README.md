@@ -107,6 +107,16 @@ cargo run -p dear-imgui-examples --bin reflect_demo --features reflect
 
 Use these only when integrating Dear ImGui into an existing engine or writing a backend. They deliberately expose infrastructure that `dear-app` owns for normal applications:
 
+Start with the headless CPU renderer before choosing a window or GPU stack. It demonstrates the
+complete synchronous texture-feedback, draw traversal, and reset contract:
+
+```text
+cargo run -j 1 -p dear-imgui-rs --example custom_renderer_headless
+```
+
+Use `threaded_snapshot_minimal` instead when draw work must cross a thread or render-graph
+boundary; synchronous and detached consumers are intentionally separate modes.
+
 - `wgpu_basic`, `wgpu_textures`, and `dear_app_wgpu_textures`
 - `glow_basic`, `glow_textures`, and `glow_external_context_regression`
 - `ash_basic` and `ash_textures`

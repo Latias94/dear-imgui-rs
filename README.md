@@ -242,7 +242,12 @@ For the checked-in iOS smoke templates and a quick route-selection index, see
 Most users should stay on the safe backends (`dear-imgui-winit`,
 `dear-imgui-sdl3`, `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-ash`).
 If you need to integrate a custom engine or renderer, start with
-[`docs/CUSTOM_BACKENDS.md`](docs/CUSTOM_BACKENDS.md).
+[`docs/CUSTOM_BACKENDS.md`](docs/CUSTOM_BACKENDS.md). The dependency-light synchronous contract is
+also executable:
+
+```text
+cargo run -j 1 -p dear-imgui-rs --example custom_renderer_headless
+```
 
 For engine integrations or platform stacks that are not wrapped by a dedicated
 crate yet, `dear-imgui-sys` can expose selected official backend pieces behind

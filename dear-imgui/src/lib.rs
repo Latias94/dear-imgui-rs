@@ -119,6 +119,8 @@
 //! - Each frame, give every texture request one explicit `uploaded`, `destroyed`, `superseded`, or
 //!   `retry` outcome.
 //! - Reconcile synchronous feedback before rendering draw commands that depend on new IDs;
+//!   `cargo run -j 1 -p dear-imgui-rs --example custom_renderer_headless` is the executable
+//!   reference for the complete synchronous request, draw, and reset sequence.
 //!   detached snapshots commit feedback when their GPU work is complete.
 //! - Bind [`DrawCmdParams::texture_id`](render::DrawCmdParams::texture_id). Command iteration
 //!   resolves the effective ID for both legacy and managed texture references.

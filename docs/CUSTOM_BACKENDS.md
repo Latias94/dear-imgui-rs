@@ -232,203 +232,44 @@ Platform checklist:
   behavior of `dear-imgui-winit` or `dear-imgui-sdl3` before inventing new
   policy.
 
-## Renderer Backend Template
+## Renderer Backend Reference
 
-A renderer backend owns one synchronous renderer consumer, all managed GPU
-resources, and each `PendingFrame`/`ReconciledFrame` transition while it is
-reconciling and drawing that frame.
+The executable
+[`custom_renderer_headless.rs`](../dear-imgui/examples/custom_renderer_headless.rs)
+is the canonical synchronous renderer reference. It has no windowing or GPU dependency and runs
+the complete managed-texture contract:
 
-```rust,no_run
-use std::collections::{HashMap, HashSet};
-
-use dear_imgui_rs::{
-    BackendFlags, Context, TextureId,
-    render::{
-        PendingFrame, RendererConsumerError, SnapshotTextureId,
-        SynchronousRendererConsumer, TextureOp, TextureUploadIdentity,
-    },
-};
-
-struct ManagedResource {
-    texture_id: TextureId,
-    upload: TextureUploadIdentity,
-}
-
-pub struct MyRendererBackend {
-    consumer: Option<SynchronousRendererConsumer>,
-    textures: HashMap<SnapshotTextureId, ManagedResource>,
-    destroyed: HashSet<SnapshotTextureId>,
-    next_texture: usize,
-}
-
-impl MyRendererBackend {
-    pub fn new(imgui: &mut Context) -> Result<Self, RendererConsumerError> {
-        imgui
-            .set_renderer_name("my-renderer")
-            .expect("renderer name must not contain NUL bytes");
-
-        let mut flags = imgui.io().backend_flags();
-        flags.insert(BackendFlags::RENDERER_HAS_TEXTURES);
-        flags.insert(BackendFlags::RENDERER_HAS_VTX_OFFSET);
-        imgui.io_mut().set_backend_flags(flags);
-
-        // A previous renderer must have completed its own reset transaction before a new
-        // renderer consumer is attached to this Context.
-        let consumer = imgui.create_synchronous_renderer_consumer()?;
-        Ok(Self {
-            consumer: Some(consumer),
-            textures: HashMap::new(),
-            destroyed: HashSet::new(),
-            next_texture: 1,
-        })
-    }
-
-    pub fn consumer(&self) -> &SynchronousRendererConsumer {
-        self.consumer.as_ref().expect("renderer was shut down")
-    }
-
-    pub fn render(&mut self, frame: PendingFrame<'_>) -> Result<(), RendererConsumerError> {
-        let consumer = self.consumer.as_ref().expect("renderer was shut down");
-        if frame.context_id() != consumer.context_id() {
-            return Err(RendererConsumerError::ForeignContext {
-                expected: consumer.context_id(),
-                actual: frame.context_id(),
-            });
-        }
-        let mut feedback = Vec::with_capacity(frame.texture_requests().len());
-        for request in frame.texture_requests() {
-            match request.operation() {
-                TextureOp::Create { format, width, height, row_pitch, pixels } => {
-                    if self.destroyed.contains(&request.texture()) {
-                        // This upload predates an accepted Destroy for the same opaque identity.
-                        feedback.push(request.superseded());
-                        continue;
-                    }
-                    let upload = request.upload_identity().expect("create has an upload identity");
-                    if let Some(existing) = self.textures.get(&request.texture())
-                        && existing.upload == upload
-                    {
-                        feedback.push(
-                            request
-                                .uploaded(existing.texture_id)
-                                .expect("create is an upload"),
-                        );
-                        continue;
-                    }
-                    // Allocate and upload a GPU texture from the owned request bytes.
-                    let _ = (format, width, height, row_pitch, pixels);
-                    let texture_id = TextureId::new(self.next_texture);
-                    self.next_texture += 1;
-                    if let Some(previous) = self.textures.insert(
-                        request.texture(),
-                        ManagedResource { texture_id, upload },
-                    ) {
-                        // Retire the replaced GPU resource before dropping its record.
-                        let _ = previous;
-                    }
-                    feedback.push(request.uploaded(texture_id).expect("create is an upload"));
-                }
-                TextureOp::Update { format, width, height, rects } => {
-                    if self.destroyed.contains(&request.texture()) {
-                        feedback.push(request.superseded());
-                        continue;
-                    }
-                    let upload = request.upload_identity().expect("update has an upload identity");
-                    let Some(resource) = self.textures.get_mut(&request.texture()) else {
-                        feedback.push(request.retry());
-                        continue;
-                    };
-                    if resource.upload == upload {
-                        feedback.push(
-                            request
-                                .uploaded(resource.texture_id)
-                                .expect("update is an upload"),
-                        );
-                        continue;
-                    }
-                    let texture_id = resource.texture_id;
-                    // Upload the owned update rectangles to this GPU texture.
-                    let _ = (texture_id, format, width, height, rects);
-                    resource.upload = upload;
-                    feedback.push(request.uploaded(texture_id).expect("update is an upload"));
-                }
-                TextureOp::Destroy => {
-                    // Seal the identity before releasing the resource. Repeated Destroy requests
-                    // remain successful, while late Create/Update requests cannot revive it.
-                    self.destroyed.insert(request.texture());
-                    if let Some(resource) = self.textures.remove(&request.texture()) {
-                        // Destroy the GPU resource before acknowledging this request.
-                        let _ = resource;
-                    }
-                    feedback.push(request.destroyed().expect("destroy is not an upload"));
-                }
-            }
-        }
-
-        // This validates Context, consumer generation, epoch, request kind, and revision.
-        // It also updates draw-command TextureId values before the commands are read below.
-        let frame = frame.reconcile_texture_feedback(feedback)?;
-
-        for draw_list in frame.draw_data().draw_lists() {
-            // Upload or bind draw_list vertex/index buffers.
-            // For each draw command:
-            // - bind the texture from the command's TextureId
-            // - apply clip rect/scissor in framebuffer coordinates
-            // - draw indexed triangles with the command's element count
-            let _ = draw_list;
-        }
-        Ok(())
-    }
-
-    pub fn shutdown(&mut self, imgui: &mut Context) -> Result<(), RendererConsumerError> {
-        let Some(consumer) = self.consumer.as_ref() else {
-            return Ok(());
-        };
-        // Wait for backend GPU completion here, then validate the exact idle consumer while the
-        // complete GPU map is still intact. If preparation fails, retain the consumer and retry
-        // after outstanding work has completed; do not render new frames in between.
-        let reset = imgui.prepare_renderer_texture_reset(consumer)?;
-        self.textures.clear();
-        reset.commit();
-        self.destroyed.clear();
-        drop(self.consumer.take());
-        imgui.poll_snapshot_completions()?;
-        Ok(())
-    }
-}
+```text
+cargo run -j 1 -p dear-imgui-rs --example custom_renderer_headless
 ```
 
-Renderer checklist:
+The example owns one `SynchronousRendererConsumer`, handles create, partial update, and destroy
+requests with request-bound feedback, traverses only the resulting `ReconciledFrame`, rejects raw
+callbacks before texture side effects, and performs the two-phase renderer reset during shutdown.
+Use it as the starting implementation and replace only the CPU texture storage and recorded draw
+operations with backend resources.
 
-- Set `Context::set_renderer_name`.
-- Create exactly one `SynchronousRendererConsumer` and retain it for the renderer's lifetime.
-- Set `BackendFlags::RENDERER_HAS_TEXTURES` only if every `TextureRequest` is handled and
-  reconciled with request-bound feedback.
-- Set `BackendFlags::RENDERER_HAS_VTX_OFFSET` if draw commands can use vertex
-  offsets.
-- On `Create` or `Update`, upload the owned bytes and return `request.uploaded(texture_id)`.
-- Pair each resource with `request.upload_identity()`: return its existing ID for an identical
-  retry, and retire or update the old GPU resource before accepting a changed identity.
-- On `Destroy`, free the GPU resource before returning `request.destroyed()`.
-- Record the destroy epoch before processing `Destroy`; complete late `Create` or `Update` for
-  that identity with `request.superseded()` without allocating a resource.
-- Return `request.retry()` when the renderer cannot complete a current request in this frame.
-  Every request must receive exactly one outcome.
-- Reconcile feedback before reading draw commands that depend on newly assigned texture IDs.
-- During reset or shutdown, call `Context::prepare_renderer_texture_reset` while the complete GPU
-  map is still intact. Release the map only after preparation succeeds, then commit the permit.
-- A managed `SharedFontAtlas` becomes reusable only after that reset commit. Dropping its Context
-  first preserves the native binding and makes later Context registration return
-  `SharedFontAtlasRendererReleasePending`; after releasing external GPU resources, drop and
-  recreate the atlas rather than transferring the old renderer namespace.
-- Keep explicit shutdown retryable. Failed preparation must retain the same consumer, renderer
-  owner, and GPU map so outstanding epochs can finish before the caller retries.
-- Prune a tombstone only after `SnapshotCompletionProgress::watermark()` reaches its destroy epoch,
-  or after the matching consumer is idle and a complete reset succeeds. One accepted Destroy
-  feedback is not proof that every older request has drained.
-- Preserve or restore application GPU state unless the backend contract says the
-  caller must reset state after rendering.
-- Clip/scissor in framebuffer coordinates, not logical window coordinates.
+A synchronous renderer must preserve these invariants:
+
+- Set `BackendFlags::RENDERER_HAS_TEXTURES` only when every `TextureRequest` receives exactly one
+  `uploaded`, `destroyed`, `superseded`, or `retry` outcome.
+- Retain exactly one `SynchronousRendererConsumer` for the renderer lifetime and reject a
+  `PendingFrame` from another Context or consumer generation.
+- Preflight `PendingFrame::draw_requirements` before applying texture side effects.
+- Pair each resource with `TextureRequest::upload_identity`; identical retries reuse the existing
+  binding, while a changed upload retires or updates the previous resource first.
+- Seal a texture identity before acknowledging `Destroy`, and do not let late upload work revive
+  it. Tombstones may be removed only after the matching completion watermark or a complete reset.
+- Reconcile all feedback before reading draw commands because reconciliation assigns the effective
+  `TextureId` used by those commands.
+- Apply clip rectangles in framebuffer coordinates, honor vertex and index offsets, and either
+  support raw callbacks with their documented unsafe contract or reject the frame during preflight.
+- During shutdown, call `Context::prepare_renderer_texture_reset` while the complete resource map
+  still exists. Release resources only after preparation succeeds, then commit the permit and drop
+  the consumer. A failed preparation must leave the renderer intact and retryable.
+
+For a detached render thread or render graph, use the separate move-only snapshot example described
+below. Do not combine synchronous and detached consumer modes in one renderer instance.
 
 ## Threaded Or Render-Graph Backends
 
