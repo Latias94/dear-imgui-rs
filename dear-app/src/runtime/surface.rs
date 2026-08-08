@@ -14,7 +14,8 @@ use super::ownership::RuntimeOwnership;
 use super::recovery::RuntimeGenerations;
 use super::state::{RuntimeGeneration, UiState, WindowState};
 use crate::{
-    AddOns, AppConfig, Application, DockingApi, FrameContext, PrepareFrameContext, RunError,
+    AddOns, AppConfig, Application, ApplicationStage, DockingApi, FrameContext,
+    PrepareFrameContext, RunError,
 };
 
 struct RuntimeSurfaceAdmission<'a> {
@@ -181,6 +182,7 @@ impl<'a> AdmittedWgpuFrameDriver<'a> {
 
 #[cfg(feature = "test-engine")]
 impl TestFrameDriver for AdmittedWgpuFrameDriver<'_> {
+    type PreparedFrame<'frame> = ReconciledFrame<'frame>;
     type PrepareError = RunError;
     type RenderError = RunError;
     type PresentError = RunError;
@@ -189,13 +191,17 @@ impl TestFrameDriver for AdmittedWgpuFrameDriver<'_> {
         &mut self,
         frame: FrameToken<'frame>,
         _frame_index: u64,
-    ) -> Result<ReconciledFrame<'frame>, Self::PrepareError> {
+    ) -> Result<Self::PreparedFrame<'frame>, Self::PrepareError> {
         self.prepare_frame(frame)
+    }
+
+    fn prepared_context_id(frame: &Self::PreparedFrame<'_>) -> dear_imgui_rs::ContextId {
+        frame.context_id()
     }
 
     fn render_main(
         &mut self,
-        frame: ReconciledFrame<'_>,
+        frame: Self::PreparedFrame<'_>,
         _frame_index: u64,
     ) -> Result<MainRenderOutcome, Self::RenderError> {
         self.render_main_frame(frame)?;
@@ -286,7 +292,9 @@ pub(super) fn render_surface_frame<A: Application>(
                 imgui: context,
                 window: &window.window,
             };
-            application.prepare_frame(&mut prepare_frame)?;
+            application
+                .prepare_frame(&mut prepare_frame)
+                .map_err(|error| error.during_application_stage(ApplicationStage::PrepareFrame))?;
             super::state::validate_supported_imgui_config(context)?;
             platform
                 .prepare_frame(context, &window.window)
@@ -311,7 +319,9 @@ pub(super) fn render_surface_frame<A: Application>(
                     gpu: generation.api(),
                     exit_requested: &mut exit_requested,
                 };
-                application.frame(&mut frame)?;
+                application
+                    .frame(&mut frame)
+                    .map_err(|error| error.during_application_stage(ApplicationStage::Frame))?;
                 platform
                     .prepare_render(ui, &window.window)
                     .map_err(|error| {
@@ -380,7 +390,7 @@ fn draw_dockspace(
                 .flags(flags)
                 .build()
                 .map(|_| ())
-                .map_err(|error| RunError::application("dockspace", error.to_string()));
+                .map_err(RunError::Dockspace);
         });
     dockspace_result
 }

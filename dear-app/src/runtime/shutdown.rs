@@ -1,7 +1,7 @@
 //! Runtime initialization rollback and exactly-once shutdown coordination.
 
 use super::state::{UiState, WindowState};
-use crate::{Application, RunError, ShutdownContext};
+use crate::{Application, ApplicationStage, RunError, ShutdownContext};
 
 pub(super) fn abort_runtime_initialization<A: Application>(
     application: &mut A,
@@ -16,7 +16,9 @@ pub(super) fn abort_runtime_initialization<A: Application>(
                 window: &window.window,
                 generation: None,
             };
-            application.shutdown(&mut shutdown)
+            application
+                .shutdown(&mut shutdown)
+                .map_err(|error| error.during_application_stage(ApplicationStage::Shutdown))
         };
         let platform_result = ui.release_platform_then_teardown_or_quarantine();
         drop(window);
@@ -37,12 +39,20 @@ pub(super) fn finish_runtime_shutdown(
 ) -> RuntimeShutdownErrors {
     // User-owned resources may still need the Context, but renderer and platform teardown must
     // proceed even when the hook reports an error. Backend release owns the Context fail-stop
-    // decision and quarantines the complete graph if it cannot commit.
-    let shutdown_error = application_shutdown();
-    let release_result = release_backends();
+    // decision and quarantines the complete graph if it cannot commit. The application hook runs
+    // first, so its error remains the shutdown primary if backend release also fails.
+    let application_error = application_shutdown();
+    let release_error = release_backends().err();
+    if let (Some(primary), Some(secondary)) = (&application_error, &release_error) {
+        tracing::warn!(
+            %primary,
+            %secondary,
+            "Dear App backend release failed after application shutdown had already failed"
+        );
+    }
     RuntimeShutdownErrors {
-        terminal_error: terminal_error.or_else(|| release_result.err()),
-        shutdown_error,
+        terminal_error,
+        shutdown_error: application_error.or(release_error),
     }
 }
 
@@ -101,9 +111,23 @@ pub(super) fn resolve_run_result(
     shutdown_error: Option<RunError>,
 ) -> Result<(), RunError> {
     if let Some(error) = terminal_before_shutdown {
+        if let Some(secondary) = &shutdown_error {
+            tracing::warn!(
+                primary = %error,
+                %secondary,
+                "Dear App shutdown failed after an earlier runtime failure"
+            );
+        }
         return Err(error);
     }
     if let Err(error) = event_loop_result {
+        if let Some(secondary) = &shutdown_error {
+            tracing::warn!(
+                primary = %error,
+                %secondary,
+                "Dear App shutdown failed after an event-loop failure"
+            );
+        }
         return Err(error.into());
     }
     match shutdown_error {

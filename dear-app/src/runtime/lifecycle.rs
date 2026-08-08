@@ -277,8 +277,12 @@ mod tests {
     #[test]
     fn lifecycle_owns_and_preserves_the_first_terminal_error() {
         let mut lifecycle = LifecycleMachine::new();
-        lifecycle.fail(RunError::application("first", "primary failure"));
-        lifecycle.fail(RunError::application("second", "secondary failure"));
+        lifecycle.fail(RunError::GpuValidation {
+            message: "primary failure".to_owned(),
+        });
+        lifecycle.fail(RunError::GpuInternal {
+            message: "secondary failure".to_owned(),
+        });
         lifecycle.shutdown();
 
         let error = lifecycle
@@ -286,7 +290,7 @@ mod tests {
             .expect("the first terminal error should be retained");
         assert_eq!(
             error.to_string(),
-            "application callback failed during first: primary failure"
+            "WGPU reported an uncaptured validation error: primary failure"
         );
         assert!(lifecycle.take_terminal_error().is_none());
     }

@@ -21,7 +21,7 @@ mod tests {
     };
     use crate::runtime::state::GpuFaultKind;
     use crate::runtime::surface::build_frame;
-    use crate::{AppConfig, GpuGeneration, RunError};
+    use crate::{AppConfig, ApplicationStage, GpuGeneration, RunError};
     use dear_imgui_rs::ConfigFlags;
 
     struct DropProbe {
@@ -165,10 +165,9 @@ mod tests {
             self.events.borrow_mut().push("release_renderer");
             match self.renderer_release {
                 ProbeRelease::Succeeds => Ok(()),
-                ProbeRelease::Fails => Err(RunError::application(
-                    "renderer release",
-                    "injected release failure",
-                )),
+                ProbeRelease::Fails => Err(RunError::Recovery {
+                    message: "injected renderer release failure".to_owned(),
+                }),
                 ProbeRelease::Panics => panic!("injected renderer release panic"),
             }
         }
@@ -177,10 +176,9 @@ mod tests {
             self.events.borrow_mut().push("release_platform");
             match self.platform_release {
                 ProbeRelease::Succeeds => Ok(()),
-                ProbeRelease::Fails => Err(RunError::application(
-                    "platform release",
-                    "injected release failure",
-                )),
+                ProbeRelease::Fails => Err(RunError::Recovery {
+                    message: "injected platform release failure".to_owned(),
+                }),
                 ProbeRelease::Panics => panic!("injected platform release panic"),
             }
         }
@@ -258,8 +256,8 @@ mod tests {
             None,
             || {
                 events.borrow_mut().push("application_shutdown");
-                Some(RunError::application(
-                    "shutdown",
+                Some(RunError::application_message(
+                    ApplicationStage::Shutdown,
                     "injected application failure",
                 ))
             },
@@ -314,14 +312,41 @@ mod tests {
                 "release_platform"
             ]
         );
-        assert!(errors.shutdown_error.is_none());
+        assert!(errors.terminal_error.is_none());
         assert_eq!(
             errors
-                .terminal_error
+                .shutdown_error
                 .expect("platform release failure must be reportable")
                 .to_string(),
-            "application callback failed during platform release: injected release failure"
+            "GPU generation recovery failed: injected platform release failure"
         );
+    }
+
+    #[test]
+    fn application_shutdown_error_precedes_later_backend_release_error() {
+        let errors = finish_runtime_shutdown(
+            None,
+            || {
+                Some(RunError::application_message(
+                    ApplicationStage::Shutdown,
+                    "application shutdown failed first",
+                ))
+            },
+            || {
+                Err(RunError::Recovery {
+                    message: "backend release failed second".to_owned(),
+                })
+            },
+        );
+
+        assert!(errors.terminal_error.is_none());
+        assert!(matches!(
+            errors.shutdown_error,
+            Some(RunError::Application {
+                stage: ApplicationStage::Shutdown,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -431,7 +456,10 @@ mod tests {
 
         {
             let result = build_frame(&mut context, |_ui| {
-                Err(RunError::application("frame", "injected frame failure"))
+                Err(RunError::application_message(
+                    ApplicationStage::Frame,
+                    "injected frame failure",
+                ))
             });
             assert!(result.is_err());
         }
@@ -524,7 +552,9 @@ mod tests {
         let teardown_calls = Rc::new(Cell::new(0));
         let mut runtime = Some(ProbeRuntime {
             teardown_calls: Rc::clone(&teardown_calls),
-            terminal_error: Some(RunError::application("runtime", "primary failure")),
+            terminal_error: Some(RunError::GpuValidation {
+                message: "primary failure".to_owned(),
+            }),
         });
         let mut application = ProbeApplication::default();
         for _ in 0..2 {
@@ -535,8 +565,8 @@ mod tests {
                     application.shutdown_calls += 1;
                     RuntimeShutdownErrors {
                         terminal_error: runtime.terminal_error.take(),
-                        shutdown_error: Some(RunError::application(
-                            "shutdown",
+                        shutdown_error: Some(RunError::application_message(
+                            ApplicationStage::Shutdown,
                             "secondary failure",
                         )),
                     }
@@ -553,7 +583,7 @@ mod tests {
             .expect("the runtime error must reach the runner owner");
         assert_eq!(
             error.to_string(),
-            "application callback failed during runtime: primary failure"
+            "WGPU reported an uncaptured validation error: primary failure"
         );
         assert!(shutdown.take_terminal_error().is_none());
         let shutdown_error = shutdown
@@ -569,15 +599,22 @@ mod tests {
     #[test]
     fn shutdown_coordinator_does_not_replace_an_earlier_runner_error() {
         let mut shutdown = ShutdownCoordinator::default();
-        shutdown.remember_error(RunError::application("runner", "primary failure"));
+        shutdown.remember_error(RunError::GpuOutOfMemory {
+            message: "primary failure".to_owned(),
+        });
         let mut runtime = Some(());
         let mut shutdown_calls = 0;
 
         shutdown.shutdown_once(&mut runtime, &mut shutdown_calls, |_runtime, calls| {
             *calls += 1;
             RuntimeShutdownErrors {
-                terminal_error: Some(RunError::application("runtime", "secondary failure")),
-                shutdown_error: Some(RunError::application("shutdown", "shutdown failure")),
+                terminal_error: Some(RunError::GpuInternal {
+                    message: "secondary failure".to_owned(),
+                }),
+                shutdown_error: Some(RunError::application_message(
+                    ApplicationStage::Shutdown,
+                    "shutdown failure",
+                )),
             }
         });
 
@@ -587,7 +624,7 @@ mod tests {
             .expect("the first runner error must survive shutdown");
         assert_eq!(
             error.to_string(),
-            "application callback failed during runner: primary failure"
+            "WGPU exhausted GPU memory: primary failure"
         );
         assert_eq!(
             shutdown
@@ -605,21 +642,25 @@ mod tests {
             let event_loop_failed = mask & 0b010 != 0;
             let shutdown_failed = mask & 0b100 != 0;
 
-            let terminal_before_shutdown = has_terminal_before_shutdown
-                .then(|| RunError::application("runtime", "runtime failure"));
+            let terminal_before_shutdown =
+                has_terminal_before_shutdown.then(|| RunError::GpuValidation {
+                    message: "runtime failure".to_owned(),
+                });
             let event_loop_result = if event_loop_failed {
                 Err(EventLoopError::ExitFailure(73))
             } else {
                 Ok(())
             };
-            let shutdown_error =
-                shutdown_failed.then(|| RunError::application("shutdown", "shutdown failure"));
+            let shutdown_error = shutdown_failed.then(|| {
+                RunError::application_message(ApplicationStage::Shutdown, "shutdown failure")
+            });
 
             let result =
                 resolve_run_result(terminal_before_shutdown, event_loop_result, shutdown_error);
             let actual = match result {
                 Ok(()) => "ok",
-                Err(RunError::Application { stage, .. }) => stage,
+                Err(RunError::GpuValidation { .. }) => "runtime",
+                Err(RunError::Application { stage, .. }) => stage.as_str(),
                 Err(RunError::EventLoop(EventLoopError::ExitFailure(73))) => "event-loop",
                 Err(error) => panic!("unexpected run result for mask {mask:#05b}: {error}"),
             };
