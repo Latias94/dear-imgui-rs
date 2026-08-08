@@ -1,6 +1,6 @@
 use dear_app::{
-    AddOnsConfig, AppConfig, Application, DockingConfig, FrameContext, RedrawMode, RunError,
-    WgpuConfig, WgpuPreset, run,
+    AddOnsConfig, AppConfig, Application, ApplicationStage, DockingConfig, FrameContext,
+    RedrawMode, RunError, WgpuConfig, WgpuPreset, run,
 };
 use dear_imgui_rs::*;
 
@@ -232,7 +232,7 @@ impl Application for DockDemoState {
                     _bar.end();
                 }
             });
-        dockspace_result.map_err(|error| RunError::application("frame", error.to_string()))?;
+        dockspace_result.map_err(|error| RunError::application(ApplicationStage::Frame, error))?;
 
         // Windows content
         if state.show_main {

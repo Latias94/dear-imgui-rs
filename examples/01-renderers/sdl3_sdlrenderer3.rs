@@ -1,7 +1,7 @@
 //! SDL3 + SDLRenderer3 renderer example
 //!
 //! Run with:
-//!   cargo run -p dear-imgui-examples --bin sdl3_sdlrenderer --features sdl3-sdlrenderer3
+//!   cargo run -p dear-imgui-examples --bin sdl3_sdlrenderer3 --features sdl3-sdlrenderer3
 
 use std::cell::RefCell;
 use std::error::Error;
@@ -82,18 +82,13 @@ impl SdlRendererApp {
     }
 
     fn iterate(&self) -> Result<AppResult, Box<dyn Error>> {
-        let mut events = self.events.drain();
+        let mut events = self.events.try_drain()?;
         let mut main_guard = self.main.assert_get().borrow_mut();
         let main = &mut *main_guard;
         while let Some(event) = events.pop() {
-            event.with_imgui_event(|raw| -> Result<(), Box<dyn Error>> {
-                if let Some(raw) = raw {
-                    // SAFETY: the callback handoff reconstructs the active union variant and owns
-                    // every pointer payload for the duration of this closure.
-                    let _ = unsafe { main.sdl3_backend.process_raw_event(&mut main.imgui, raw)? };
-                }
-                Ok(())
-            })?;
+            let _ = main
+                .sdl3_backend
+                .process_callback_event(&mut main.imgui, &event)?;
             if requests_exit(&event, main.canvas.window().id()) {
                 return Ok(AppResult::Success);
             }

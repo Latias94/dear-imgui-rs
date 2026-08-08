@@ -1,7 +1,5 @@
 //! Shared application-level helpers for repository examples.
 
-pub mod animated_texture;
-
 #[cfg(feature = "sdl3-platform")]
 pub mod sdl3_callbacks;
 

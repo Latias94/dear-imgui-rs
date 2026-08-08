@@ -26,7 +26,11 @@ wasm = ["dear-imgui-rs/wasm"]
 multi-viewport = ["dear-imgui-rs/multi-viewport"]
 
 [dev-dependencies]
+dear-imgui-winit.workspace = true
 env_logger.workspace = true
+glutin.workspace = true
+glutin-winit.workspace = true
 pollster.workspace = true
+raw-window-handle.workspace = true
 static_assertions = "1.1"
 winit.workspace = true

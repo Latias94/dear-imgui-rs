@@ -142,26 +142,6 @@ pub fn clear_fence_references(images_in_flight: &mut [vk::Fence], fence: vk::Fen
     }
 }
 
-#[allow(
-    dead_code,
-    reason = "this support module is compiled separately by Ash examples without retirements"
-)]
-pub fn merge_texture_retirement_batches(
-    prepared: Option<TextureRetirementBatch>,
-    recorded: Option<TextureRetirementBatch>,
-) -> Result<Option<TextureRetirementBatch>, Box<dyn std::error::Error>> {
-    match (prepared, recorded) {
-        (Some(prepared), Some(recorded)) if prepared != recorded => Err(format!(
-            "Ash texture retirement advanced from batch {} to {} while recording one frame",
-            prepared.sequence(),
-            recorded.sequence()
-        )
-        .into()),
-        (Some(batch), _) | (_, Some(batch)) => Ok(Some(batch)),
-        (None, None) => Ok(None),
-    }
-}
-
 /// Records one color swapchain-image layout transition.
 ///
 /// # Safety

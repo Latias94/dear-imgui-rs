@@ -215,16 +215,6 @@ enum DeviceObjectReadiness {
 }
 
 impl GlowRenderer {
-    #[cfg(feature = "multi-viewport")]
-    pub(super) fn reconcile_context_frame<'context>(
-        &mut self,
-        context: &'context mut dear_imgui_rs::Context,
-    ) -> RenderResult<ReconciledFrame<'context>> {
-        self.ensure_context_matches(context)?;
-        let frame = context.try_render(self.renderer_consumer()?)?;
-        self.reconcile_frame(frame)
-    }
-
     /// Consume and render one Context-borrowed Dear ImGui frame.
     ///
     /// The native context for the retained Glow function table, or a compatible share-group
@@ -268,13 +258,22 @@ impl GlowRenderer {
         &mut self,
         frame: ReconciledFrame<'frame>,
     ) -> RenderResult<ReconciledFrame<'frame>> {
+        self.draw_reconciled_frame(&frame)?;
+        Ok(frame)
+    }
+
+    pub(super) fn draw_reconciled_frame(
+        &mut self,
+        frame: &ReconciledFrame<'_>,
+    ) -> RenderResult<()> {
         self.ensure_operational()?;
-        self.validate_reconciled_frame(&frame)?;
+        self.validate_reconciled_frame(frame)?;
         let gl = self
             .gl_context
             .clone()
             .ok_or(RenderError::MissingGlContext)?;
-        self.render_preflighted_reconciled_frame(&gl, frame)
+        self.ensure_device_objects_preflighted(&gl)?;
+        self.render_draw_data_with_ready_device_objects(&gl, frame.draw_data())
     }
 
     /// Consume and render a frame using an externally managed Glow function table.
@@ -387,7 +386,10 @@ impl GlowRenderer {
         Ok(())
     }
 
-    fn validate_reconciled_frame(&self, frame: &ReconciledFrame<'_>) -> RenderResult<()> {
+    pub(super) fn validate_reconciled_frame(
+        &self,
+        frame: &ReconciledFrame<'_>,
+    ) -> RenderResult<()> {
         let consumer = self.renderer_consumer()?;
         if frame.context_id() != consumer.context_id() {
             return Err(RenderError::ContextMismatch {

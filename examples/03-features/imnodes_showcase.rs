@@ -1,7 +1,7 @@
-//! Dear ImNodes Basic Example
+//! Complete Dear ImNodes showcase.
 //!
-//! Minimal demo showing how to integrate ImNodes via dear-imnodes
-//! following the same windowing/render pattern as other examples.
+//! This backend-reference-sized program covers multiple editors, persistence, style controls,
+//! minimaps, context menus, and dynamic links. Start with `imnodes_minimal` for the copyable path.
 
 use dear_imgui_rs::input::MouseButton;
 use dear_imgui_rs::*;

@@ -6,6 +6,11 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+### Breaking
+
+- Replace `WinitViewportRuntime` and `Sdl3ViewportRuntime` with `WinitViewportRoute` and `Sdl3ViewportRoute`. Each route captures the exact live platform generation at safe attachment and exposes one frame path: `prepare(FrameToken)` followed by `render_main(prepared, pass, FramebufferExtent)`.
+- Remove `prepare_context`, `prepare_frame`, `poll_fault`, `with_renderer`, unchecked platform attachment/preparation, and the manual trace/reconcile/render bypasses. `prepare` returns a move-only `WgpuPreparedViewportFrame` plus same-scope secondary report, or a platform-specific aggregate that preserves every pending renderer and platform fault in per-source FIFO order.
+
 ## [0.16.0-alpha.1]
 
 ### Breaking

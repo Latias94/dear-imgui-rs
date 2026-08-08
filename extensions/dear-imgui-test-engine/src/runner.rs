@@ -64,6 +64,7 @@ impl Error for HeadlessPrepareError {
 struct VirtualFrameDriver;
 
 impl TestFrameDriver for VirtualFrameDriver {
+    type PreparedFrame<'frame> = ReconciledFrame<'frame>;
     type PrepareError = HeadlessPrepareError;
     type RenderError = Infallible;
     type PresentError = Infallible;
@@ -72,7 +73,7 @@ impl TestFrameDriver for VirtualFrameDriver {
         &mut self,
         frame: FrameToken<'frame>,
         _frame_index: u64,
-    ) -> Result<ReconciledFrame<'frame>, Self::PrepareError> {
+    ) -> Result<Self::PreparedFrame<'frame>, Self::PrepareError> {
         if frame
             .ui()
             .io()
@@ -84,9 +85,13 @@ impl TestFrameDriver for VirtualFrameDriver {
         Ok(frame.render_legacy())
     }
 
+    fn prepared_context_id(frame: &Self::PreparedFrame<'_>) -> ContextId {
+        frame.context_id()
+    }
+
     fn render_main(
         &mut self,
-        frame: ReconciledFrame<'_>,
+        frame: Self::PreparedFrame<'_>,
         _frame_index: u64,
     ) -> Result<MainRenderOutcome, Self::RenderError> {
         drop(frame);
@@ -272,6 +277,7 @@ impl<Driver> TestFrameDriver for CaptureDriverAdapter<'_, '_, Driver>
 where
     Driver: CapturingTestFrameDriver,
 {
+    type PreparedFrame<'frame> = Driver::PreparedFrame<'frame>;
     type PrepareError = Driver::PrepareError;
     type RenderError = Driver::RenderError;
     type PresentError = Driver::PresentError;
@@ -280,13 +286,17 @@ where
         &mut self,
         frame: FrameToken<'frame>,
         frame_index: u64,
-    ) -> Result<ReconciledFrame<'frame>, Self::PrepareError> {
+    ) -> Result<Self::PreparedFrame<'frame>, Self::PrepareError> {
         self.slot.driver.borrow_mut().prepare(frame, frame_index)
+    }
+
+    fn prepared_context_id(frame: &Self::PreparedFrame<'_>) -> ContextId {
+        Driver::prepared_context_id(frame)
     }
 
     fn render_main(
         &mut self,
-        frame: ReconciledFrame<'_>,
+        frame: Self::PreparedFrame<'_>,
         frame_index: u64,
     ) -> Result<MainRenderOutcome, Self::RenderError> {
         let outcome = self

@@ -55,31 +55,6 @@ impl FramebufferExtent {
         self.width == 0 || self.height == 0
     }
 
-    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
-    pub(super) fn from_draw_data(draw_data: &DrawData) -> RendererResult<Option<Self>> {
-        let size = draw_data.display_size();
-        let scale = draw_data.framebuffer_scale();
-        let width = size[0] * scale[0];
-        let height = size[1] * scale[1];
-        if !width.is_finite() || !height.is_finite() {
-            return Err(RendererError::InvalidRenderState(
-                "draw data produced a non-finite framebuffer extent".to_owned(),
-            ));
-        }
-        if width <= 0.0 || height <= 0.0 {
-            return Ok(None);
-        }
-        if width > u32::MAX as f32 || height > u32::MAX as f32 {
-            return Err(RendererError::InvalidRenderState(
-                "draw data framebuffer extent exceeds WGPU limits".to_owned(),
-            ));
-        }
-        Ok(Some(Self {
-            width: width as u32,
-            height: height as u32,
-        }))
-    }
-
     fn width_f32(self) -> f32 {
         self.width as f32
     }

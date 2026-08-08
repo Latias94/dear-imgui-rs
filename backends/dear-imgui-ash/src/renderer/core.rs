@@ -28,7 +28,8 @@ impl AshRenderer {
     /// Returns the synchronous consumer capability owned by this renderer.
     ///
     /// Pass it to [`dear_imgui_rs::Context::render`] to create the pending frame consumed by
-    /// [`Self::cmd_draw`] or [`Self::prepare_frame`].
+    /// [`Self::prepare_frame`]. [`Self::cmd_draw`] then consumes the reconciled frame returned by
+    /// that preparation step.
     pub fn renderer_consumer(&self) -> RendererResult<&SynchronousRendererConsumer> {
         self.consumer
             .as_ref()

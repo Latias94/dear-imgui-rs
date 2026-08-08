@@ -20,8 +20,8 @@ use dear_imgui_examples::sdl3_callbacks::{
 };
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
-use dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRuntime;
-use dear_imgui_wgpu::{GammaMode, WgpuInitInfo, WgpuRenderer};
+use dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRoute;
+use dear_imgui_wgpu::{FramebufferExtent, GammaMode, WgpuInitInfo, WgpuRenderer};
 use sdl3::video::{SwapInterval, WindowPos};
 use sdl3_main::{AppResult, AppResultWithState, MainThreadData, app_impl};
 
@@ -33,7 +33,7 @@ struct WgpuMultiViewportApp {
 }
 
 struct MainData {
-    renderer: Sdl3ViewportRuntime,
+    renderer: Sdl3ViewportRoute,
     sdl3_backend: Sdl3PlatformBackend,
     imgui: Context,
     surface: wgpu::Surface<'static>,
@@ -152,7 +152,7 @@ impl WgpuMultiViewportApp {
             &mut imgui,
         )?;
         renderer.set_gamma_mode(GammaMode::Auto);
-        let renderer = Sdl3ViewportRuntime::attach(&mut imgui, &sdl3_backend, renderer)?;
+        let renderer = Sdl3ViewportRoute::attach(&mut imgui, &sdl3_backend, renderer)?;
 
         Ok(Self {
             events: Sdl3CallbackEventHandoff::default(),
@@ -176,16 +176,19 @@ impl WgpuMultiViewportApp {
     }
 
     fn process_events(&self) -> AppResult {
-        let mut events = self.events.drain();
+        let mut events = match self.events.try_drain() {
+            Ok(events) => events,
+            Err(error) => {
+                eprintln!("SDL3 callback event handoff failed: {error}");
+                return AppResult::Failure;
+            }
+        };
         let mut main_guard = self.main.assert_get().borrow_mut();
         let main = &mut *main_guard;
         while let Some(event) = events.pop() {
-            let backend_result = event.with_imgui_event(|raw| match raw {
-                // SAFETY: the callback handoff reconstructs the active union variant and owns
-                // every pointer payload for the duration of this closure.
-                Some(raw) => unsafe { main.sdl3_backend.process_raw_event(&mut main.imgui, raw) },
-                None => Ok(false),
-            });
+            let backend_result = main
+                .sdl3_backend
+                .process_callback_event(&mut main.imgui, &event);
             if let Err(error) = backend_result {
                 eprintln!("SDL3 backend event processing failed: {error}");
                 return AppResult::Failure;
@@ -218,7 +221,8 @@ impl WgpuMultiViewportApp {
             .set_delta_time((now - main.last_frame).as_secs_f32());
         main.last_frame = now;
         main.sdl3_backend.new_frame(&mut main.imgui)?;
-        let ui = main.imgui.frame();
+        let frame = main.imgui.begin_frame();
+        let ui = frame.ui();
         ui.dockspace().build()?;
         ui.window("SDL3 + WGPU (multi-viewport)")
             .size([420.0, 260.0], Condition::FirstUseEver)
@@ -236,31 +240,20 @@ impl WgpuMultiViewportApp {
         if main.show_demo {
             ui.show_demo_window(&mut main.show_demo);
         }
-        let viewports_enabled = ENABLE_VIEWPORTS
-            && main
-                .imgui
-                .io()
-                .config_flags()
-                .contains(ConfigFlags::VIEWPORTS_ENABLE);
-        // Reconcile independently of the main surface. Secondary native windows must continue to
-        // render while the main surface is occluded, minimized, lost, or being reconfigured.
-        let mut reconciled_frame = main.renderer.reconcile_context(&mut main.imgui)?;
-        if viewports_enabled {
-            reconciled_frame.update_and_render_platform_windows_default();
-            main.renderer.poll_fault()?;
-            main.sdl3_backend.poll_fault()?;
-        }
+        // Route preparation finishes secondary native windows before main-surface acquisition, so
+        // temporary main-surface failures do not stall the other viewports.
+        let prepared = main.renderer.prepare(frame)?;
 
         let (frame, reconfigure_after_present) = match main.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
             wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
-                drop(reconciled_frame);
+                drop(prepared);
                 Self::reconfigure_surface(main);
                 return Ok(());
             }
             wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
-                drop(reconciled_frame);
+                drop(prepared);
                 return Ok(());
             }
             wgpu::CurrentSurfaceTexture::Validation => {
@@ -297,13 +290,11 @@ impl WgpuMultiViewportApp {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            let reconciled_frame = main.renderer.render_with_fb_size_reconciled(
-                reconciled_frame,
+            main.renderer.render_main(
+                prepared,
                 &mut render_pass,
-                main.surface_config.width,
-                main.surface_config.height,
+                FramebufferExtent::from_texture(&frame.texture),
             )?;
-            drop(reconciled_frame);
         }
         main.queue.submit(std::iter::once(encoder.finish()));
         main.queue.present(frame);

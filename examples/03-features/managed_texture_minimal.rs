@@ -1,7 +1,8 @@
 //! Minimal Context-owned managed texture lifecycle.
 
 use dear_app::{
-    AppConfig, Application, FrameContext, InitContext, PrepareFrameContext, RunError, run,
+    AppConfig, Application, ApplicationStage, FrameContext, InitContext, PrepareFrameContext,
+    RunError, run,
 };
 use dear_imgui_rs::{
     Condition, ManagedTextureId, OwnedTextureData, TextureDataError, TextureFormat, TextureRegion,
@@ -68,7 +69,7 @@ impl ManagedTextureApp {
 impl Application for ManagedTextureApp {
     fn configure_imgui(&mut self, context: &mut InitContext<'_>) -> Result<(), RunError> {
         self.register(context.imgui(), self.revision)
-            .map_err(|error| RunError::application("configure_imgui", error.to_string()))?;
+            .map_err(|error| RunError::application(ApplicationStage::ConfigureImgui, error))?;
         Ok(())
     }
 
@@ -88,10 +89,7 @@ impl Application for ManagedTextureApp {
                     .imgui()
                     .try_with_texture_mut(texture, |mut texture| texture.replace_pixels(&pixels))
                     .map_err(|error| {
-                        RunError::application(
-                            "prepare_frame",
-                            format!("failed to update managed texture: {error}"),
-                        )
+                        RunError::application(ApplicationStage::PrepareFrame, error)
                     })?;
                 self.revision = revision;
             }
@@ -100,7 +98,7 @@ impl Application for ManagedTextureApp {
                     return Ok(());
                 };
                 let region = TextureRegion::new(32, 32, 64, 48).map_err(|error| {
-                    RunError::application("prepare_frame", format!("invalid patch region: {error}"))
+                    RunError::application(ApplicationStage::PrepareFrame, error)
                 })?;
                 let row_pitch = region.width() as usize * 4;
                 let mut pixels = Vec::with_capacity(row_pitch * region.height() as usize);
@@ -121,10 +119,7 @@ impl Application for ManagedTextureApp {
                             .update_subresource(TextureSubresource::new(region, row_pitch, &pixels))
                     })
                     .map_err(|error| {
-                        RunError::application(
-                            "prepare_frame",
-                            format!("failed to patch managed texture: {error}"),
-                        )
+                        RunError::application(ApplicationStage::PrepareFrame, error)
                     })?;
                 self.revision = self.revision.wrapping_add(1);
             }
@@ -133,10 +128,7 @@ impl Application for ManagedTextureApp {
                     return Ok(());
                 };
                 context.imgui().remove_texture(texture).map_err(|error| {
-                    RunError::application(
-                        "prepare_frame",
-                        format!("failed to remove managed texture: {error}"),
-                    )
+                    RunError::application(ApplicationStage::PrepareFrame, error)
                 })?;
                 self.texture = None;
             }
@@ -144,10 +136,7 @@ impl Application for ManagedTextureApp {
                 if self.texture.is_none() {
                     self.register(context.imgui(), self.revision.wrapping_add(1))
                         .map_err(|error| {
-                            RunError::application(
-                                "prepare_frame",
-                                format!("failed to recreate managed texture: {error}"),
-                            )
+                            RunError::application(ApplicationStage::PrepareFrame, error)
                         })?;
                 }
             }

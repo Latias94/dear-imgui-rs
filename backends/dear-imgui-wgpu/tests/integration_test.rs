@@ -567,36 +567,6 @@ fn device_objects_rebind_after_invalidation_and_shutdown() -> RendererResult<()>
         .commit();
     drop(foreign_consumer);
     foreign_context.io_mut().set_backend_flags(foreign_flags);
-    #[cfg(feature = "multi-viewport-winit")]
-    {
-        let failure = unsafe {
-            dear_imgui_wgpu::multi_viewport::WinitViewportRuntime::attach_unchecked(
-                &mut foreign_context,
-                renderer,
-            )
-        }
-        .unwrap_err();
-        assert!(matches!(
-            failure.error(),
-            dear_imgui_wgpu::multi_viewport::WgpuViewportError::RendererContextMismatch
-        ));
-        renderer = failure.into_renderer();
-    }
-    #[cfg(feature = "multi-viewport-sdl3")]
-    {
-        let failure = unsafe {
-            dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRuntime::attach_unchecked(
-                &mut foreign_context,
-                renderer,
-            )
-        }
-        .unwrap_err();
-        assert!(matches!(
-            failure.error(),
-            dear_imgui_wgpu::multi_viewport_sdl3::WgpuViewportError::RendererContextMismatch
-        ));
-        renderer = failure.into_renderer();
-    }
     assert_eq!(foreign_context.io().backend_flags(), foreign_flags);
 
     let suspended_foreign = foreign_context.suspend_or_panic();

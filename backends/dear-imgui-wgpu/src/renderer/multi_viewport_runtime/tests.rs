@@ -1,4 +1,5 @@
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::rc::Rc;
@@ -8,6 +9,7 @@ use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
     ContextAttachmentTeardownError, ContextBinding, ContextTeardown, sys,
 };
+use static_assertions::assert_not_impl_any;
 
 use super::callbacks::{
     destroy_renderer_viewport_resources, framebuffer_size_for_reconfigure,
@@ -20,7 +22,10 @@ use super::registry::{
     preflight_runtime, register_test_viewport_data, register_viewport_data,
     unregister_viewport_data, viewport_data_count,
 };
-use super::runtime::{RuntimeControl, RuntimeState};
+use super::runtime::{
+    RuntimeControl, RuntimeState, WgpuViewportRouteError, WgpuViewportRouteFault,
+    finish_route_preparation, prepare_route_for_context,
+};
 #[cfg(feature = "wgpu-30")]
 use super::surface::supports_surface_format;
 use super::surface::{
@@ -28,8 +33,10 @@ use super::surface::{
     request_close_after_surface_creation_failure, resolve_alpha_mode, resolve_present_mode,
     should_clear_viewport, surface_action, surface_config_from_capabilities,
 };
-use super::{OwningViewportRuntime, WgpuViewportError};
+use super::{OwningViewportRuntime, WgpuPreparedViewportFrame, WgpuViewportError};
 use crate::{WgpuViewportSurfaceConfig, renderer::WgpuRenderer};
+
+assert_not_impl_any!(WgpuPreparedViewportFrame<'static>: Send, Sync);
 
 struct TestPlatformMarker;
 struct TestPlatformAttachment;
@@ -233,6 +240,16 @@ fn lock_context() -> MutexGuard<'static, ()> {
         .get_or_init(|| Mutex::new(()))
         .lock()
         .unwrap_or_else(|poison| poison.into_inner())
+}
+
+fn prepare_legacy_frame_context(context: &mut Context) {
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("foreign test Context should own its legacy font atlas")
+        .build();
+    context.io_mut().set_display_size([128.0, 128.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
 }
 
 #[test]
@@ -908,7 +925,7 @@ fn moving_wrapper_keeps_runtime_owned_renderer_storage_stable() {
 }
 
 #[test]
-fn reconcile_frame_consumes_a_frame_token_without_reborrowing_context() {
+fn prepare_frame_consumes_a_frame_token_without_reborrowing_context() {
     let _guard = lock_context();
     let mut context = Context::create();
     context.io_mut().set_display_size([128.0, 128.0]);
@@ -919,11 +936,191 @@ fn reconcile_frame_consumes_a_frame_token_without_reborrowing_context() {
 
     let frame = context.begin_frame();
     assert!(matches!(
-        runtime.reconcile_frame(frame),
+        runtime.prepare_frame(frame),
         Err(WgpuViewportError::Renderer(
             crate::RendererError::InvalidRenderState(_)
         ))
     ));
+}
+
+#[test]
+fn public_route_context_gate_preserves_renderer_and_platform_fault_queues() {
+    let _guard = lock_context();
+    let context_a = Context::create();
+    let expected = context_a.id();
+    let suspended_a = context_a.suspend_or_panic();
+    let mut context_b = Context::create();
+    prepare_legacy_frame_context(&mut context_b);
+    let frame = context_b.begin_frame();
+    let actual = frame.ui().context_id();
+
+    let renderer_faults = RefCell::new(VecDeque::from([
+        WgpuViewportError::SurfaceOperationFailed {
+            operation: "queued route renderer fault",
+        },
+    ]));
+    #[cfg(feature = "multi-viewport-winit")]
+    let platform_faults = RefCell::new(VecDeque::from([
+        dear_imgui_winit::WinitPlatformError::WindowNotAttached,
+    ]));
+    #[cfg(feature = "multi-viewport-sdl3")]
+    let platform_faults = RefCell::new(VecDeque::from([
+        dear_imgui_sdl3::Sdl3BackendError::PlatformInitFailed {
+            entry_point: "queued route platform fault",
+        },
+    ]));
+
+    let result = prepare_route_for_context(expected, actual, || {
+        let renderer = renderer_faults
+            .borrow_mut()
+            .pop_front()
+            .expect("renderer fault must be queued");
+        let platform = platform_faults
+            .borrow_mut()
+            .pop_front()
+            .expect("platform fault must be queued");
+        Err::<(), _>(WgpuViewportRouteError::new(vec![
+            WgpuViewportRouteFault::Renderer(renderer),
+            WgpuViewportRouteFault::Platform(platform),
+        ]))
+    });
+
+    assert!(matches!(
+        result.unwrap_err().faults(),
+        [WgpuViewportRouteFault::Renderer(
+            WgpuViewportError::ContextMismatch {
+                expected: error_expected,
+                actual: error_actual,
+            }
+        )] if *error_expected == expected && *error_actual == actual
+    ));
+    assert_eq!(renderer_faults.borrow().len(), 1);
+    assert_eq!(platform_faults.borrow().len(), 1);
+
+    drop(frame);
+    drop(context_b);
+    drop(suspended_a);
+}
+
+#[test]
+fn prepare_frame_rejects_foreign_context_before_renderer_faults_are_consumed() {
+    let _guard = lock_context();
+    let mut context_a = Context::create();
+    let platform_a = attach_test_platform(&mut context_a);
+    let runtime_a =
+        OwningViewportRuntime::attach_for_test(&mut context_a, WgpuRenderer::empty()).unwrap();
+    let expected = context_a.id();
+    runtime_a
+        .control_for_test()
+        .record_fault(WgpuViewportError::SurfaceOperationFailed {
+            operation: "queued before frame Context validation",
+        });
+
+    let suspended_a = context_a.suspend_or_panic();
+    let mut context_b = Context::create();
+    prepare_legacy_frame_context(&mut context_b);
+    let actual = context_b.id();
+    let frame = context_b.begin_frame();
+
+    assert!(matches!(
+        runtime_a.prepare_frame(frame),
+        Err(WgpuViewportError::ContextMismatch {
+            expected: error_expected,
+            actual: error_actual,
+        }) if error_expected == expected && error_actual == actual
+    ));
+    assert!(matches!(
+        runtime_a.poll_fault(),
+        Err(WgpuViewportError::SurfaceOperationFailed {
+            operation: "queued before frame Context validation"
+        })
+    ));
+
+    drop(context_b);
+    drop(runtime_a);
+    drop(platform_a);
+    drop(suspended_a);
+}
+
+#[test]
+fn invalidate_device_objects_rejects_foreign_context_before_faults_are_consumed() {
+    let _guard = lock_context();
+    let mut context_a = Context::create();
+    let platform_a = attach_test_platform(&mut context_a);
+    let runtime_a =
+        OwningViewportRuntime::attach_for_test(&mut context_a, WgpuRenderer::empty()).unwrap();
+    let expected = context_a.id();
+    runtime_a
+        .control_for_test()
+        .record_fault(WgpuViewportError::SurfaceOperationFailed {
+            operation: "queued before invalidation Context validation",
+        });
+
+    let suspended_a = context_a.suspend_or_panic();
+    let mut context_b = Context::create();
+    let actual = context_b.id();
+
+    assert!(matches!(
+        runtime_a.invalidate_device_objects(&mut context_b),
+        Err(WgpuViewportError::ContextMismatch {
+            expected: error_expected,
+            actual: error_actual,
+        }) if error_expected == expected && error_actual == actual
+    ));
+    assert!(matches!(
+        runtime_a.poll_fault(),
+        Err(WgpuViewportError::SurfaceOperationFailed {
+            operation: "queued before invalidation Context validation"
+        })
+    ));
+
+    drop(context_b);
+    drop(runtime_a);
+    drop(platform_a);
+    drop(suspended_a);
+}
+
+#[test]
+fn prepared_runtime_mismatch_is_rejected_before_target_faults_are_consumed() {
+    let _guard = lock_context();
+    let mut context_a = Context::create();
+    let platform_a = attach_test_platform(&mut context_a);
+    let runtime_a =
+        OwningViewportRuntime::attach_for_test(&mut context_a, WgpuRenderer::empty()).unwrap();
+    let expected = context_a.id();
+    runtime_a
+        .control_for_test()
+        .record_fault(WgpuViewportError::SurfaceOperationFailed {
+            operation: "queued before runtime validation",
+        });
+
+    let suspended_a = context_a.suspend_or_panic();
+    let mut context_b = Context::create();
+    let platform_b = attach_test_platform(&mut context_b);
+    let runtime_b =
+        OwningViewportRuntime::attach_for_test(&mut context_b, WgpuRenderer::empty()).unwrap();
+    let actual = context_b.id();
+
+    assert!(matches!(
+        runtime_a.ensure_runtime_identity_for_test(&runtime_b),
+        Err(WgpuViewportError::PreparedFrameRuntimeMismatch {
+            expected: error_expected,
+            actual: error_actual,
+        }) if error_expected == expected && error_actual == actual
+    ));
+    assert!(matches!(
+        runtime_a.poll_fault(),
+        Err(WgpuViewportError::SurfaceOperationFailed {
+            operation: "queued before runtime validation"
+        })
+    ));
+
+    drop(runtime_b);
+    drop(platform_b);
+    drop(context_b);
+    drop(runtime_a);
+    drop(platform_a);
+    drop(suspended_a);
 }
 
 #[test]
@@ -1008,15 +1205,10 @@ fn foreign_renderer_user_data_is_preserved_and_reported_by_ffi_callbacks() {
             .contains(BackendFlags::RENDERER_HAS_VIEWPORTS)
     );
 
-    // Work callbacks are inert, while Destroy remains a cleanup entry and reports the foreign
-    // slot without clearing it.
+    // Work callbacks are inert, while Destroy remains a cleanup entry and preserves the foreign
+    // slot. The create failure is already the terminal root cause for this runtime generation.
     unsafe { renderer_destroy_window_sys(&mut viewport) };
-    assert!(matches!(
-        runtime.poll_fault(),
-        Err(WgpuViewportError::RendererUserDataOwnershipLost {
-            callback: "Renderer_DestroyWindow"
-        })
-    ));
+    assert!(runtime.poll_fault().is_ok());
     assert_eq!(viewport.RendererUserData, foreign);
 
     runtime.shutdown(&mut context).unwrap();
@@ -1053,16 +1245,13 @@ fn cleared_renderer_user_data_is_terminal_but_destroy_still_reclaims_sidecar() {
     assert_eq!(drops.get(), 0);
     assert_eq!(viewport_data_count(context.id()), 1);
 
-    // Destroy remains reachable as cleanup while ordinary callbacks are fail-closed.
+    // Destroy remains reachable as cleanup while ordinary callbacks are fail-closed. The first
+    // terminal fault is the root cause for this runtime generation, so cleanup does not enqueue a
+    // second terminal diagnostic for the same lost user-data contract.
     unsafe { renderer_destroy_window_sys(viewport) };
     assert_eq!(drops.get(), 1);
     assert_eq!(viewport_data_count(context.id()), 0);
-    assert!(matches!(
-        runtime.poll_fault(),
-        Err(WgpuViewportError::RendererUserDataOwnershipLost {
-            callback: "Renderer_DestroyWindow"
-        })
-    ));
+    assert!(runtime.poll_fault().is_ok());
 
     // No sidecar plus a null slot is a valid idempotent Destroy.
     unsafe { renderer_destroy_window_sys(viewport) };
@@ -1426,7 +1615,7 @@ fn rust_runtime_entry_records_core_drift_and_enters_shutdown() {
     context.io_mut().set_backend_flags(flags);
 
     assert!(matches!(
-        runtime.with_renderer(|_| ()),
+        runtime.set_gamma_mode(crate::GammaMode::Auto),
         Err(WgpuViewportError::Renderer(
             crate::RendererError::RendererStateDrift {
                 field: "RENDERER_HAS_TEXTURES"
@@ -1532,7 +1721,7 @@ fn terminal_surface_rejection_revokes_capability_and_stays_shutdown() {
             .contains(BackendFlags::RENDERER_HAS_VIEWPORTS)
     );
     assert!(matches!(
-        runtime.with_renderer(|_| ()),
+        runtime.set_gamma_mode(crate::GammaMode::Auto),
         Err(WgpuViewportError::RuntimeDetached)
     ));
 
@@ -1540,7 +1729,7 @@ fn terminal_surface_rejection_revokes_capability_and_stays_shutdown() {
 }
 
 #[test]
-fn terminal_fault_is_sticky_and_preempts_pending_non_terminal_fault() {
+fn renderer_fault_queue_preserves_observation_order_and_first_terminal_fault() {
     let _guard = lock_context();
     let mut context = Context::create();
     let _platform = attach_test_platform(&mut context);
@@ -1551,6 +1740,9 @@ fn terminal_fault_is_sticky_and_preempts_pending_non_terminal_fault() {
     control.record_fault(WgpuViewportError::SurfaceOperationFailed {
         operation: "earlier recoverable fault",
     });
+    control.record_fault(WgpuViewportError::SurfaceOperationFailed {
+        operation: "second recoverable fault",
+    });
     control.record_entry_fault(WgpuViewportError::SurfaceRejected {
         event: "first terminal fault",
     });
@@ -1560,14 +1752,20 @@ fn terminal_fault_is_sticky_and_preempts_pending_non_terminal_fault() {
 
     assert!(matches!(
         runtime.poll_fault(),
-        Err(WgpuViewportError::SurfaceRejected {
-            event: "first terminal fault"
+        Err(WgpuViewportError::SurfaceOperationFailed {
+            operation: "earlier recoverable fault"
         })
     ));
     assert!(matches!(
         runtime.poll_fault(),
         Err(WgpuViewportError::SurfaceOperationFailed {
-            operation: "earlier recoverable fault"
+            operation: "second recoverable fault"
+        })
+    ));
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(WgpuViewportError::SurfaceRejected {
+            event: "first terminal fault"
         })
     ));
     assert!(runtime.poll_fault().is_ok());
@@ -1863,7 +2061,7 @@ fn callback_match_helpers_do_not_confuse_foreign_functions() {
 }
 
 #[test]
-fn frame_trace_guard_rejects_nesting_and_drop_reopens_the_scope() {
+fn internal_frame_trace_scope_rejects_nesting_and_normalizes_its_report() {
     let _guard = lock_context();
     let mut context = Context::create();
     let _platform = attach_test_platform(&mut context);
@@ -1897,6 +2095,53 @@ fn frame_trace_guard_rejects_nesting_and_drop_reopens_the_scope() {
     );
 
     runtime.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn route_preparation_retains_renderer_and_platform_faults_in_source_order() {
+    let result: Result<(), _> = finish_route_preparation(
+        Some(Err(WgpuViewportError::SurfaceOperationFailed {
+            operation: "preparation failure",
+        })),
+        vec![
+            WgpuViewportError::SurfaceOperationFailed {
+                operation: "first deferred renderer failure",
+            },
+            WgpuViewportError::SurfaceOperationFailed {
+                operation: "second deferred renderer failure",
+            },
+        ],
+        vec!["first platform failure", "second platform failure"],
+    );
+
+    let faults = result.unwrap_err().into_faults();
+    assert_eq!(faults.len(), 5);
+    assert!(matches!(
+        &faults[0],
+        WgpuViewportRouteFault::Renderer(WgpuViewportError::SurfaceOperationFailed {
+            operation: "preparation failure"
+        })
+    ));
+    assert!(matches!(
+        &faults[1],
+        WgpuViewportRouteFault::Renderer(WgpuViewportError::SurfaceOperationFailed {
+            operation: "first deferred renderer failure"
+        })
+    ));
+    assert!(matches!(
+        &faults[2],
+        WgpuViewportRouteFault::Renderer(WgpuViewportError::SurfaceOperationFailed {
+            operation: "second deferred renderer failure"
+        })
+    ));
+    assert!(matches!(
+        &faults[3],
+        WgpuViewportRouteFault::Platform(error) if *error == "first platform failure"
+    ));
+    assert!(matches!(
+        &faults[4],
+        WgpuViewportRouteFault::Platform(error) if *error == "second platform failure"
+    ));
 }
 
 #[test]

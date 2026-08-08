@@ -1,7 +1,8 @@
-//! Dear ImPlot Basic Example - Modular API Showcase
+//! Dear ImPlot API showcase.
 //!
-//! This example demonstrates the new modular ImPlot API with comprehensive
-//! plot type support. It showcases:
+//! This example demonstrates the modular ImPlot API with comprehensive plot
+//! type support. For a copyable starting point, use `implot_minimal` instead.
+//! It showcases:
 //!
 //! - Line plots and scatter plots
 //! - Bar charts (simple and positional)
@@ -9,9 +10,9 @@
 //! - Heatmaps with configurable scaling
 //! - Pie charts with various options
 //! - Error bars and shaded plots
-//! - NEW: Stairs plots, Digital plots, Text annotations
-//! - NEW: Bar groups, Dummy plots, Stems plots
-//! - NEW: Polygon plots and closure-scoped array-backed item styling
+//! - Stairs plots, digital plots, and text annotations
+//! - Bar groups, dummy plots, and stems plots
+//! - Polygon plots and closure-scoped array-backed item styling
 //! - Plot combinations in single charts
 //! - Error handling and validation
 //!

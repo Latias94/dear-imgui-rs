@@ -166,6 +166,16 @@ impl RuntimeRegistration {
         &self.control
     }
 
+    pub(crate) fn viewport_renderer_adapter(
+        &self,
+        context: &Context,
+    ) -> Result<Sdl3ViewportRendererAdapter, Sdl3BackendError> {
+        self.control.ensure_entry(context)?;
+        Ok(Sdl3ViewportRendererAdapter {
+            control: Rc::clone(&self.control),
+        })
+    }
+
     #[cfg(any(
         feature = "opengl3-renderer",
         feature = "sdlrenderer3-renderer",
@@ -192,14 +202,13 @@ impl RuntimeRegistration {
             .expect("SDL3 renderer consumer is unavailable after renderer shutdown")
     }
 
+    #[cfg(test)]
     pub(crate) fn poll_fault(&self) -> Result<(), Sdl3BackendError> {
         self.control.poll_fault()
     }
 
-    pub(crate) fn begin_opengl_viewport_frame_trace(
-        &self,
-    ) -> Result<Sdl3OpenGlViewportFrameTrace<'_>, Sdl3OpenGlViewportFrameTraceError> {
-        self.control.begin_opengl_viewport_frame_trace()
+    pub(crate) fn drain_faults(&self) -> Vec<Sdl3BackendError> {
+        self.control.drain_faults()
     }
 
     #[cfg(feature = "multi-viewport")]

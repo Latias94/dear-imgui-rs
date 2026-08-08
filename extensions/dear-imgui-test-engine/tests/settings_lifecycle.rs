@@ -23,6 +23,7 @@ const ALLOCATION_ALIGNMENT: usize = 16;
 struct VirtualFrameDriver;
 
 impl TestFrameDriver for VirtualFrameDriver {
+    type PreparedFrame<'frame> = ReconciledFrame<'frame>;
     type PrepareError = Infallible;
     type RenderError = Infallible;
     type PresentError = Infallible;
@@ -31,13 +32,17 @@ impl TestFrameDriver for VirtualFrameDriver {
         &mut self,
         frame: FrameToken<'frame>,
         _frame_index: u64,
-    ) -> Result<ReconciledFrame<'frame>, Self::PrepareError> {
+    ) -> Result<Self::PreparedFrame<'frame>, Self::PrepareError> {
         Ok(frame.render_legacy())
+    }
+
+    fn prepared_context_id(frame: &Self::PreparedFrame<'_>) -> dear_imgui_rs::ContextId {
+        frame.context_id()
     }
 
     fn render_main(
         &mut self,
-        frame: ReconciledFrame<'_>,
+        frame: Self::PreparedFrame<'_>,
         _frame_index: u64,
     ) -> Result<MainRenderOutcome, Self::RenderError> {
         drop(frame);

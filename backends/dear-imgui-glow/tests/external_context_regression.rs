@@ -1,7 +1,11 @@
-//! Regression example for GlowRenderer::with_external_context + render_with_context.
+#![cfg(any(target_os = "linux", target_os = "windows"))]
+
+//! Native regression for `GlowRenderer::with_external_context` and `render_with_context`.
 //!
 //! This exercises Dear ImGui managed texture create/update/destroy requests through a
-//! `PendingFrame` while the OpenGL context is owned by the application.
+//! `PendingFrame` while the OpenGL context is owned by the application. It is ignored by
+//! default because it requires a real window system and OpenGL driver; the native runtime job
+//! runs it explicitly.
 
 use std::{num::NonZeroU32, sync::Arc, time::Instant};
 
@@ -14,7 +18,10 @@ use dear_imgui_winit::WinitPlatform;
 use glow::HasContext;
 use glutin::{
     config::ConfigTemplateBuilder,
-    context::{ContextAttributesBuilder, NotCurrentGlContext, PossiblyCurrentContext},
+    context::{
+        ContextAttributesBuilder, NotCurrentGlContext, PossiblyCurrentContext,
+        PossiblyCurrentGlContext,
+    },
     display::{GetGlDisplay, GlDisplay},
     surface::{GlSurface, Surface, SurfaceAttributesBuilder, WindowSurface},
 };
@@ -46,6 +53,40 @@ enum RegressionStage {
     Verified,
 }
 
+struct CurrentGlContext {
+    context: PossiblyCurrentContext,
+    bound: bool,
+}
+
+impl CurrentGlContext {
+    fn new(context: PossiblyCurrentContext) -> Self {
+        Self {
+            context,
+            bound: true,
+        }
+    }
+
+    fn get(&self) -> &PossiblyCurrentContext {
+        &self.context
+    }
+
+    fn unbind(&mut self) -> glutin::error::Result<()> {
+        if self.bound {
+            self.context.make_not_current_in_place()?;
+            self.bound = false;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for CurrentGlContext {
+    fn drop(&mut self) {
+        if let Err(error) = self.unbind() {
+            eprintln!("external-context regression GL unbind failed: {error}");
+        }
+    }
+}
+
 impl RegressionStage {
     fn label(self) -> &'static str {
         match self {
@@ -63,20 +104,22 @@ struct ImguiState {
     managed_texture: ManagedTextureId,
     renderer: GlowRenderer,
     platform: WinitPlatform,
-    context: ImguiContext,
     live_texture_id: Option<TextureId>,
     stage: RegressionStage,
     last_frame: Instant,
     clear_color: [f32; 4],
     frame_count: u32,
+    renderer_shutdown_complete: bool,
+    platform_shutdown_complete: bool,
+    context: ImguiContext,
 }
 
 struct AppWindow {
-    window: Arc<Window>,
-    surface: Surface<WindowSurface>,
-    context: PossiblyCurrentContext,
-    gl: glow::Context,
     imgui: ImguiState,
+    gl: glow::Context,
+    context: CurrentGlContext,
+    surface: Surface<WindowSurface>,
+    window: Arc<Window>,
 }
 
 #[derive(Default)]
@@ -84,6 +127,38 @@ struct App {
     window: Option<AppWindow>,
     success_message: Option<String>,
     failure_message: Option<String>,
+}
+
+fn initialization_failure(
+    cause: impl std::fmt::Display,
+    context: &mut ImguiContext,
+    platform: Option<&mut WinitPlatform>,
+    renderer: Option<(&mut GlowRenderer, &glow::Context)>,
+    gl_context: &mut CurrentGlContext,
+) -> Box<dyn std::error::Error> {
+    context.end_frame();
+    let mut errors = vec![format!(
+        "external-context regression initialization failed: {cause}"
+    )];
+    let mut attachments_shutdown = true;
+
+    if let Some((renderer, gl)) = renderer
+        && let Err(error) = renderer.shutdown_with_context(gl, context)
+    {
+        errors.push(format!("Glow renderer rollback failed: {error}"));
+        attachments_shutdown = false;
+    }
+    if let Some(platform) = platform
+        && let Err(error) = platform.shutdown(context)
+    {
+        errors.push(format!("Winit platform rollback failed: {error}"));
+        attachments_shutdown = false;
+    }
+    if attachments_shutdown && let Err(error) = gl_context.unbind() {
+        errors.push(format!("OpenGL context rollback failed: {error}"));
+    }
+
+    boxed_error(errors.join("; "))
 }
 
 impl AppWindow {
@@ -114,33 +189,90 @@ impl AppWindow {
             cfg.display()
                 .create_window_surface(&cfg, &surface_attribs)?
         };
-        let context = context.make_current(&surface)?;
+        let mut current_context = CurrentGlContext::new(context.make_current(&surface)?);
 
         let mut imgui_context = ImguiContext::create();
-        imgui_context.set_ini_filename(None::<String>).unwrap();
+        if let Err(error) = imgui_context.set_ini_filename(None::<String>) {
+            return Err(initialization_failure(
+                error,
+                &mut imgui_context,
+                None,
+                None,
+                &mut current_context,
+            ));
+        }
 
-        let mut platform = WinitPlatform::new(&mut imgui_context)?;
-        platform.attach_window(
+        let mut platform = match WinitPlatform::new(&mut imgui_context) {
+            Ok(platform) => platform,
+            Err(error) => {
+                return Err(initialization_failure(
+                    error,
+                    &mut imgui_context,
+                    None,
+                    None,
+                    &mut current_context,
+                ));
+            }
+        };
+        if let Err(error) = platform.attach_window(
             Arc::clone(&window),
             dear_imgui_winit::HiDpiMode::Default,
             &mut imgui_context,
-        )?;
+        ) {
+            return Err(initialization_failure(
+                error,
+                &mut imgui_context,
+                Some(&mut platform),
+                None,
+                &mut current_context,
+            ));
+        }
 
         let gl = unsafe {
             glow::Context::from_loader_function_cstr(|s| {
-                context.display().get_proc_address(s).cast()
+                current_context.get().display().get_proc_address(s).cast()
             })
         };
 
-        let mut renderer = GlowRenderer::with_external_context(&gl, &mut imgui_context)?;
-        renderer.set_framebuffer_srgb_enabled(true)?;
+        let mut renderer = match GlowRenderer::with_external_context(&gl, &mut imgui_context) {
+            Ok(renderer) => renderer,
+            Err(error) => {
+                return Err(initialization_failure(
+                    error,
+                    &mut imgui_context,
+                    Some(&mut platform),
+                    None,
+                    &mut current_context,
+                ));
+            }
+        };
+        if let Err(error) = renderer.set_framebuffer_srgb_enabled(true) {
+            return Err(initialization_failure(
+                error,
+                &mut imgui_context,
+                Some(&mut platform),
+                Some((&mut renderer, &gl)),
+                &mut current_context,
+            ));
+        }
 
-        let managed_texture = OwnedTextureData::from_pixels(
+        let managed_texture = match OwnedTextureData::from_pixels(
             dear_imgui_rs::texture::TextureFormat::RGBA32,
             TEXTURE_WIDTH,
             TEXTURE_HEIGHT,
             &texture_pixels(0),
-        )?;
+        ) {
+            Ok(texture) => texture,
+            Err(error) => {
+                return Err(initialization_failure(
+                    error,
+                    &mut imgui_context,
+                    Some(&mut platform),
+                    Some((&mut renderer, &gl)),
+                    &mut current_context,
+                ));
+            }
+        };
 
         let managed_texture = imgui_context.register_texture(managed_texture);
 
@@ -148,27 +280,63 @@ impl AppWindow {
             managed_texture,
             renderer,
             platform,
-            context: imgui_context,
             live_texture_id: None,
             stage: RegressionStage::AwaitCreate,
             last_frame: Instant::now(),
             clear_color: [0.08, 0.12, 0.16, 1.0],
             frame_count: 0,
+            renderer_shutdown_complete: false,
+            platform_shutdown_complete: false,
+            context: imgui_context,
         };
 
         Ok(Self {
-            window,
-            surface,
-            context,
-            gl,
             imgui,
+            gl,
+            context: current_context,
+            surface,
+            window,
         })
+    }
+
+    fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.imgui.context.end_frame();
+        let mut errors = Vec::new();
+
+        if !self.imgui.renderer_shutdown_complete {
+            match self
+                .imgui
+                .renderer
+                .shutdown_with_context(&self.gl, &mut self.imgui.context)
+            {
+                Ok(()) => self.imgui.renderer_shutdown_complete = true,
+                Err(error) => errors.push(format!("Glow renderer shutdown failed: {error}")),
+            }
+        }
+        if !self.imgui.platform_shutdown_complete {
+            match self.imgui.platform.shutdown(&mut self.imgui.context) {
+                Ok(()) => self.imgui.platform_shutdown_complete = true,
+                Err(error) => errors.push(format!("Winit platform shutdown failed: {error}")),
+            }
+        }
+        if self.imgui.renderer_shutdown_complete
+            && self.imgui.platform_shutdown_complete
+            && let Err(error) = self.context.unbind()
+        {
+            errors.push(format!("OpenGL context unbind failed: {error}"));
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(boxed_error(errors.join("; ")))
+        }
     }
 
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
             self.surface.resize(
-                &self.context,
+                self.context.get(),
                 NonZeroU32::new(new_size.width).unwrap(),
                 NonZeroU32::new(new_size.height).unwrap(),
             );
@@ -367,7 +535,7 @@ impl AppWindow {
             .renderer
             .render_with_context(&self.gl, pending_frame)?;
 
-        self.surface.swap_buffers(&self.context)?;
+        self.surface.swap_buffers(self.context.get())?;
 
         self.imgui.frame_count = self.imgui.frame_count.saturating_add(1);
         if self.imgui.frame_count > MAX_REGRESSION_FRAMES {
@@ -377,6 +545,14 @@ impl AppWindow {
         }
 
         self.verify_regression_step()
+    }
+}
+
+impl Drop for AppWindow {
+    fn drop(&mut self) {
+        if let Err(error) = self.shutdown() {
+            eprintln!("external-context regression fallback shutdown failed: {error}");
+        }
     }
 }
 
@@ -454,6 +630,14 @@ impl ApplicationHandler for App {
             }
         }
     }
+
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(window) = self.window.as_mut()
+            && let Err(error) = window.shutdown()
+        {
+            self.failure_message = Some(format!("external-context shutdown failed: {error}"));
+        }
+    }
 }
 
 fn texture_pixels(phase: u32) -> Vec<u8> {
@@ -475,10 +659,30 @@ fn texture_pixels(phase: u32) -> Vec<u8> {
     pixels
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::init();
+fn build_event_loop() -> Result<EventLoop<()>, winit::error::EventLoopError> {
+    let mut builder = EventLoop::builder();
 
-    let event_loop = EventLoop::new()?;
+    #[cfg(target_os = "linux")]
+    {
+        use winit::platform::{wayland::EventLoopBuilderExtWayland, x11::EventLoopBuilderExtX11};
+
+        EventLoopBuilderExtWayland::with_any_thread(&mut builder, true);
+        EventLoopBuilderExtX11::with_any_thread(&mut builder, true);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use winit::platform::windows::EventLoopBuilderExtWindows;
+
+        builder.with_any_thread(true);
+    }
+
+    builder.build()
+}
+
+fn run_regression() -> Result<(), Box<dyn std::error::Error>> {
+    let event_loop = build_event_loop()?;
+
     event_loop.set_control_flow(ControlFlow::Poll);
 
     let mut app = App::default();
@@ -488,9 +692,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err(boxed_error(message));
     }
 
-    if let Some(message) = app.success_message.take() {
-        println!("{message}");
-    }
+    let message = app.success_message.take().ok_or_else(|| {
+        boxed_error("event loop exited before the external-context lifecycle was verified")
+    })?;
+    println!("{message}");
 
     Ok(())
+}
+
+#[test]
+#[ignore = "requires a native OpenGL display; run the named native-runtime regression"]
+fn external_context_managed_texture_lifecycle() -> Result<(), Box<dyn std::error::Error>> {
+    let _ = env_logger::builder().is_test(true).try_init();
+    run_regression()
 }

@@ -1,7 +1,7 @@
-//! ImGuIZMO.quat basic demo (WGPU backend)
+//! Complete ImGuIZMO.quat showcase using Winit and WGPU.
 //!
 //! Run:
-//!   cargo run -p dear-imgui-examples --features imguizmo-quat --bin imguizmo_quat_basic
+//!   cargo run -p dear-imgui-examples --features imguizmo-quat --bin imguizmo_quat_showcase
 
 use dear_imgui_rs::*;
 use dear_imgui_wgpu::{FramebufferExtent, WgpuRenderer};
@@ -911,7 +911,7 @@ fn show_quat_gizmo_window(
     cone_thickness: &mut f32,
     solid_size: &mut f32,
 ) {
-    ui.window("ImGuIZMO.quat Basic##imguizmo_quat_basic")
+    ui.window("ImGuIZMO.quat Showcase##imguizmo_quat_showcase")
         .size([430.0, 500.0], Condition::FirstUseEver)
         .build(|| {
             ui.text("Quaternion + 3D gizmo (ImGuIZMO.quat)");

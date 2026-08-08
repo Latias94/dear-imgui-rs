@@ -1,6 +1,9 @@
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::fmt;
+use std::marker::PhantomData;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use dear_imgui_rs::render::ReconciledFrame;
 use dear_imgui_rs::{
@@ -40,6 +43,14 @@ pub enum WgpuViewportError {
     /// The renderer and runtime Context identities differ.
     #[error("WGPU viewport runtime belongs to Context {expected:?}, not {actual:?}")]
     ContextMismatch {
+        expected: ContextId,
+        actual: ContextId,
+    },
+    /// A prepared frame was passed to a different runtime instance.
+    #[error(
+        "WGPU prepared frame belongs to another runtime instance (expected Context {expected:?}, frame Context {actual:?})"
+    )]
+    PreparedFrameRuntimeMismatch {
         expected: ContextId,
         actual: ContextId,
     },
@@ -160,6 +171,157 @@ pub enum WgpuViewportError {
     FrameTraceAlreadyActive,
 }
 
+/// One failure observed while preparing a WGPU multi-viewport route.
+#[doc(hidden)]
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum WgpuViewportRouteFault<PlatformError> {
+    /// Texture reconciliation or a renderer callback failed.
+    Renderer(WgpuViewportError),
+    /// The platform owner reported a deferred native-window fault.
+    Platform(PlatformError),
+}
+
+impl<PlatformError> fmt::Display for WgpuViewportRouteFault<PlatformError>
+where
+    PlatformError: fmt::Display,
+{
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Renderer(error) => write!(formatter, "WGPU viewport route failed: {error}"),
+            Self::Platform(error) => write!(formatter, "viewport platform route failed: {error}"),
+        }
+    }
+}
+
+impl<PlatformError> std::error::Error for WgpuViewportRouteFault<PlatformError>
+where
+    PlatformError: std::error::Error + 'static,
+{
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Renderer(error) => Some(error),
+            Self::Platform(error) => Some(error),
+        }
+    }
+}
+
+/// Ordered failures from one WGPU multi-viewport preparation transaction.
+///
+/// Renderer failures are reported before platform failures observed after the same native
+/// callback pump. All failures from each source retain FIFO order.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct WgpuViewportRouteError<PlatformError> {
+    faults: Vec<WgpuViewportRouteFault<PlatformError>>,
+}
+
+impl<PlatformError> WgpuViewportRouteError<PlatformError> {
+    pub(crate) fn new(faults: Vec<WgpuViewportRouteFault<PlatformError>>) -> Self {
+        debug_assert!(!faults.is_empty());
+        Self { faults }
+    }
+
+    /// Returns every route fault in reporting order.
+    #[must_use]
+    pub fn faults(&self) -> &[WgpuViewportRouteFault<PlatformError>] {
+        &self.faults
+    }
+
+    /// Consumes the aggregate and returns every route fault in reporting order.
+    #[must_use]
+    pub fn into_faults(self) -> Vec<WgpuViewportRouteFault<PlatformError>> {
+        self.faults
+    }
+}
+
+impl<PlatformError> fmt::Display for WgpuViewportRouteError<PlatformError>
+where
+    PlatformError: fmt::Display,
+{
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let count = self.faults.len();
+        write!(formatter, "{}", self.faults[0])?;
+        if count > 1 {
+            write!(formatter, " ({count} viewport route faults in total)")?;
+        }
+        Ok(())
+    }
+}
+
+impl<PlatformError> std::error::Error for WgpuViewportRouteError<PlatformError>
+where
+    PlatformError: std::error::Error + 'static,
+{
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.faults
+            .first()
+            .map(|fault| fault as &(dyn std::error::Error + 'static))
+    }
+}
+
+pub(crate) fn finish_route_preparation<Prepared, PlatformError>(
+    renderer_result: Option<Result<Prepared, WgpuViewportError>>,
+    renderer_faults: Vec<WgpuViewportError>,
+    platform_faults: Vec<PlatformError>,
+) -> Result<Prepared, WgpuViewportRouteError<PlatformError>> {
+    let direct_renderer_fault = if matches!(renderer_result.as_ref(), Some(Err(_))) {
+        1
+    } else {
+        0
+    };
+    let mut faults =
+        Vec::with_capacity(direct_renderer_fault + renderer_faults.len() + platform_faults.len());
+    let prepared = match renderer_result {
+        Some(Ok(prepared)) => Some(prepared),
+        Some(Err(error)) => {
+            faults.push(WgpuViewportRouteFault::Renderer(error));
+            None
+        }
+        None => None,
+    };
+    faults.extend(
+        renderer_faults
+            .into_iter()
+            .map(WgpuViewportRouteFault::Renderer),
+    );
+    faults.extend(
+        platform_faults
+            .into_iter()
+            .map(WgpuViewportRouteFault::Platform),
+    );
+
+    if !faults.is_empty() {
+        Err(WgpuViewportRouteError::new(faults))
+    } else if let Some(prepared) = prepared {
+        Ok(prepared)
+    } else {
+        Err(WgpuViewportRouteError::new(vec![
+            WgpuViewportRouteFault::Renderer(WgpuViewportError::RuntimeDetached),
+        ]))
+    }
+}
+
+/// Runs a public route transaction only when its frame belongs to the attached Context.
+///
+/// The callback contains every platform-adapter entry and fault-queue read. Keeping it behind this
+/// pure identity check makes foreign-frame rejection observably side-effect free.
+pub(crate) fn prepare_route_for_context<Prepared, PlatformError>(
+    expected: ContextId,
+    actual: ContextId,
+    prepare: impl FnOnce() -> Result<Prepared, WgpuViewportRouteError<PlatformError>>,
+) -> Result<Prepared, WgpuViewportRouteError<PlatformError>> {
+    if expected != actual {
+        return Err(WgpuViewportRouteError::new(vec![
+            WgpuViewportRouteFault::Renderer(WgpuViewportError::ContextMismatch {
+                expected,
+                actual,
+            }),
+        ]));
+    }
+    prepare()
+}
+
 /// Transactional attachment failure that returns the renderer unchanged.
 pub struct WgpuViewportAttachError {
     error: WgpuViewportError,
@@ -233,9 +395,27 @@ enum ShutdownAction<'a> {
     Explicit(&'a mut Context),
 }
 
+/// Exact identity for one attached renderer runtime.
+///
+/// The marker deliberately keeps the identity tied to the UI thread. `Arc` is used only as an
+/// identity token; it must not make a prepared frame transferable to another thread.
+#[derive(Debug)]
+struct RuntimeIdentity {
+    _ui_thread: PhantomData<Rc<()>>,
+}
+
+impl RuntimeIdentity {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            _ui_thread: PhantomData,
+        })
+    }
+}
+
 pub(super) struct RuntimeControl {
     context_raw: *mut dear_imgui_rs::sys::ImGuiContext,
     binding: ContextBinding,
+    identity: Arc<RuntimeIdentity>,
     state: Cell<RuntimeState>,
     renderer: RefCell<Option<Box<WgpuRenderer>>>,
     globals: RefCell<Option<GlobalHandles>>,
@@ -253,29 +433,32 @@ pub(super) struct RuntimeControl {
 
 #[derive(Default)]
 struct RuntimeFaults {
-    terminal: Option<WgpuViewportError>,
-    non_terminal: Option<WgpuViewportError>,
+    pending: VecDeque<WgpuViewportError>,
+    terminal_recorded: bool,
 }
 
 impl RuntimeFaults {
     fn record_terminal(&mut self, fault: WgpuViewportError) {
-        if self.terminal.is_none() {
-            self.terminal = Some(fault);
+        if !self.terminal_recorded {
+            self.pending.push_back(fault);
+            self.terminal_recorded = true;
         }
     }
 
     fn record_non_terminal(&mut self, fault: WgpuViewportError) {
-        if self.non_terminal.is_none() {
-            self.non_terminal = Some(fault);
-        }
+        self.pending.push_back(fault);
     }
 
     fn has_pending(&self) -> bool {
-        self.terminal.is_some() || self.non_terminal.is_some()
+        !self.pending.is_empty()
     }
 
     fn take_next(&mut self) -> Option<WgpuViewportError> {
-        self.terminal.take().or_else(|| self.non_terminal.take())
+        self.pending.pop_front()
+    }
+
+    fn drain(&mut self) -> Vec<WgpuViewportError> {
+        self.pending.drain(..).collect()
     }
 }
 
@@ -296,6 +479,7 @@ impl RuntimeControl {
         Self {
             context_raw: context.as_raw(),
             binding: context.binding(),
+            identity: RuntimeIdentity::new(),
             state: Cell::new(RuntimeState::Constructing),
             renderer: RefCell::new(Some(Box::new(renderer))),
             globals: RefCell::new(globals),
@@ -485,6 +669,11 @@ impl RuntimeControl {
         self.faults.borrow_mut().take_next()
     }
 
+    fn detect_and_drain_faults(&self) -> Vec<WgpuViewportError> {
+        detect_runtime_contract_drift(self);
+        self.faults.borrow_mut().drain()
+    }
+
     fn ensure_context(&self, context: &Context) -> Result<(), WgpuViewportError> {
         if context.id() == self.binding.id() {
             Ok(())
@@ -541,27 +730,6 @@ impl RuntimeControl {
                 }
                 return Err(error);
             }
-        };
-        self.finish_entry()?;
-        Ok(result)
-    }
-
-    fn with_renderer<R>(
-        &self,
-        callback: impl FnOnce(&WgpuRenderer) -> R,
-    ) -> Result<R, WgpuViewportError> {
-        self.ensure_entry()?;
-        let result = {
-            let renderer =
-                self.renderer
-                    .try_borrow()
-                    .map_err(|_| WgpuViewportError::CallbackReentered {
-                        callback: "Rust runtime entry",
-                    })?;
-            let renderer = renderer
-                .as_deref()
-                .ok_or(WgpuViewportError::RuntimeDetached)?;
-            callback(renderer)
         };
         self.finish_entry()?;
         Ok(result)
@@ -887,21 +1055,47 @@ pub(crate) struct OwningViewportRuntime {
 /// a report that proves which secondary surfaces completed renderer submission and presentation
 /// within this scope. Dropping the guard discards the partial trace.
 #[must_use = "finish the frame trace to obtain its report"]
-pub struct WgpuViewportFrameTraceGuard<'runtime> {
+pub(super) struct FrameTraceGuard<'runtime> {
     control: &'runtime RuntimeControl,
     active: bool,
 }
 
-impl WgpuViewportFrameTraceGuard<'_> {
+/// Main-viewport frame whose managed textures and secondary viewports are already complete.
+///
+/// The owning viewport runtime is the only constructor. Applications may inspect secondary WSI
+/// evidence before acquiring the main surface, then consume this capability with the route's
+/// `render_main` method.
+#[must_use = "render or explicitly drop the prepared main-viewport frame"]
+pub struct WgpuPreparedViewportFrame<'frame> {
+    frame: ReconciledFrame<'frame>,
+    secondary: WgpuViewportFrameTraceReport,
+    runtime: Arc<RuntimeIdentity>,
+}
+
+impl WgpuPreparedViewportFrame<'_> {
+    /// Returns the Dear ImGui Context identity carried by this prepared frame.
+    #[must_use]
+    pub fn context_id(&self) -> ContextId {
+        self.frame.context_id()
+    }
+
+    /// Returns same-scope evidence for completed secondary submissions and presentations.
+    #[must_use]
+    pub fn secondary_report(&self) -> &WgpuViewportFrameTraceReport {
+        &self.secondary
+    }
+}
+
+impl FrameTraceGuard<'_> {
     /// Ends the trace and returns its normalized, same-scope submission evidence.
-    pub fn finish(mut self) -> WgpuViewportFrameTraceReport {
+    pub(super) fn finish(mut self) -> WgpuViewportFrameTraceReport {
         let report = self.control.finish_frame_trace();
         self.active = false;
         report
     }
 }
 
-impl Drop for WgpuViewportFrameTraceGuard<'_> {
+impl Drop for FrameTraceGuard<'_> {
     fn drop(&mut self) {
         if self.active {
             self.control.abort_frame_trace();
@@ -919,11 +1113,9 @@ impl fmt::Debug for OwningViewportRuntime {
 }
 
 impl OwningViewportRuntime {
-    pub(crate) fn begin_frame_trace(
-        &self,
-    ) -> Result<WgpuViewportFrameTraceGuard<'_>, WgpuViewportError> {
+    pub(super) fn begin_frame_trace(&self) -> Result<FrameTraceGuard<'_>, WgpuViewportError> {
         self.control.begin_frame_trace()?;
-        Ok(WgpuViewportFrameTraceGuard {
+        Ok(FrameTraceGuard {
             control: self.control.as_ref(),
             active: true,
         })
@@ -1026,93 +1218,88 @@ impl OwningViewportRuntime {
         self.control.detect_and_take_fault().map_or(Ok(()), Err)
     }
 
-    pub(crate) fn reconcile_context<'context>(
-        &self,
-        context: &'context mut Context,
-    ) -> Result<ReconciledFrame<'context>, WgpuViewportError> {
-        self.control.ensure_context(context)?;
-        self.control.with_renderer_mut(|renderer| {
-            let frame = context
-                .try_render(renderer.renderer_consumer()?)
-                .map_err(RendererError::from)?;
-            renderer.reconcile_frame(frame).map_err(Into::into)
-        })
+    pub(crate) fn drain_faults(&self) -> Vec<WgpuViewportError> {
+        self.control.detect_and_drain_faults()
     }
 
-    pub(crate) fn reconcile_frame<'frame>(
+    pub(crate) fn context_id(&self) -> ContextId {
+        self.control.binding().id()
+    }
+
+    /// Rejects a frame whose UI belongs to another Context before entering any renderer-owned
+    /// state. Route adapters call this before their platform transaction, and `prepare_frame`
+    /// repeats it at the owning runtime boundary.
+    pub(crate) fn ensure_frame_context(&self, actual: ContextId) -> Result<(), WgpuViewportError> {
+        let expected = self.context_id();
+        if expected == actual {
+            Ok(())
+        } else {
+            Err(WgpuViewportError::ContextMismatch { expected, actual })
+        }
+    }
+
+    pub(crate) fn prepare_frame<'frame>(
         &self,
         frame: FrameToken<'frame>,
-    ) -> Result<ReconciledFrame<'frame>, WgpuViewportError> {
-        self.control.with_renderer_mut(|renderer| {
+    ) -> Result<WgpuPreparedViewportFrame<'frame>, WgpuViewportError> {
+        self.ensure_frame_context(frame.ui().context_id())?;
+        let frame = self.control.with_renderer_mut(|renderer| {
             let frame = frame
                 .try_render(renderer.renderer_consumer()?)
                 .map_err(RendererError::from)?;
-            renderer.reconcile_frame(frame).map_err(Into::into)
-        })
-    }
-
-    pub(crate) fn render_reconciled<'frame>(
-        &self,
-        frame: ReconciledFrame<'frame>,
-        render_pass: &mut wgpu::RenderPass<'_>,
-    ) -> Result<ReconciledFrame<'frame>, WgpuViewportError> {
-        self.control.with_renderer_mut(|renderer| {
             renderer
-                .render_reconciled_using_draw_data_extent(frame, render_pass)
-                .map_err(Into::into)
+                .reconcile_frame(frame)
+                .map_err(WgpuViewportError::from)
+        })?;
+        self.prepare_reconciled(frame)
+    }
+
+    fn prepare_reconciled<'frame>(
+        &self,
+        mut frame: ReconciledFrame<'frame>,
+    ) -> Result<WgpuPreparedViewportFrame<'frame>, WgpuViewportError> {
+        self.poll_fault()?;
+        let trace = self.begin_frame_trace()?;
+        frame.update_and_render_platform_windows_default();
+        let secondary = trace.finish();
+        self.poll_fault()?;
+        Ok(WgpuPreparedViewportFrame {
+            frame,
+            secondary,
+            runtime: Arc::clone(&self.control.identity),
         })
     }
 
-    pub(crate) fn render_context(
+    fn ensure_prepared_runtime(
         &self,
-        context: &mut Context,
-        render_pass: &mut wgpu::RenderPass<'_>,
+        runtime: &Arc<RuntimeIdentity>,
+        actual: ContextId,
     ) -> Result<(), WgpuViewportError> {
-        self.control.with_renderer_mut(|renderer| {
-            renderer.ensure_context_matches(context)?;
-            let frame = context
-                .try_render(renderer.renderer_consumer()?)
-                .map_err(RendererError::from)?;
-            let frame = renderer.reconcile_frame(frame)?;
-            renderer
-                .render_reconciled_using_draw_data_extent(frame, render_pass)
-                .map(drop)
-                .map_err(Into::into)
-        })
+        if Arc::ptr_eq(&self.control.identity, runtime) {
+            Ok(())
+        } else {
+            Err(WgpuViewportError::PreparedFrameRuntimeMismatch {
+                expected: self.context_id(),
+                actual,
+            })
+        }
     }
 
-    pub(crate) fn render_with_fb_size_reconciled<'frame>(
+    pub(crate) fn render_main(
         &self,
-        frame: ReconciledFrame<'frame>,
+        prepared: WgpuPreparedViewportFrame<'_>,
         render_pass: &mut wgpu::RenderPass<'_>,
-        width: u32,
-        height: u32,
-    ) -> Result<ReconciledFrame<'frame>, WgpuViewportError> {
-        self.control.with_renderer_mut(|renderer| {
-            renderer
-                .render_reconciled_preserving_frame(
-                    frame,
-                    render_pass,
-                    FramebufferExtent::new(width, height),
-                )
-                .map_err(Into::into)
-        })
-    }
-
-    pub(crate) fn render_context_with_fb_size(
-        &self,
-        context: &mut Context,
-        render_pass: &mut wgpu::RenderPass<'_>,
-        width: u32,
-        height: u32,
+        framebuffer_extent: FramebufferExtent,
     ) -> Result<(), WgpuViewportError> {
+        self.ensure_prepared_runtime(&prepared.runtime, prepared.context_id())?;
+        let WgpuPreparedViewportFrame {
+            frame,
+            secondary: _,
+            runtime: _,
+        } = prepared;
         self.control.with_renderer_mut(|renderer| {
-            renderer.ensure_context_matches(context)?;
-            let frame = context
-                .try_render(renderer.renderer_consumer()?)
-                .map_err(RendererError::from)?;
             renderer
-                .render(frame, render_pass, FramebufferExtent::new(width, height))
+                .render_reconciled(frame, render_pass, framebuffer_extent)
                 .map_err(Into::into)
         })
     }
@@ -1121,18 +1308,12 @@ impl OwningViewportRuntime {
         &self,
         context: &mut Context,
     ) -> Result<(), WgpuViewportError> {
+        self.control.ensure_context(context)?;
         self.control.with_renderer_mut(|renderer| {
             renderer
                 .invalidate_device_objects(context)
                 .map_err(Into::into)
         })
-    }
-
-    pub(crate) fn with_renderer<R>(
-        &self,
-        callback: impl FnOnce(&WgpuRenderer) -> R,
-    ) -> Result<R, WgpuViewportError> {
-        self.control.with_renderer(callback)
     }
 
     pub(crate) fn set_gamma_mode(&self, mode: GammaMode) -> Result<(), WgpuViewportError> {
@@ -1223,6 +1404,14 @@ impl OwningViewportRuntime {
     #[cfg(test)]
     pub(super) fn control_for_test(&self) -> Rc<RuntimeControl> {
         Rc::clone(&self.control)
+    }
+
+    #[cfg(test)]
+    pub(super) fn ensure_runtime_identity_for_test(
+        &self,
+        other: &Self,
+    ) -> Result<(), WgpuViewportError> {
+        self.ensure_prepared_runtime(&other.control.identity, other.context_id())
     }
 
     #[cfg(test)]

@@ -1,7 +1,6 @@
 //! Minimal stateful application using the high-level `dear-app` runtime.
 
-use dear_app::{AppConfig, RunError, run_ui};
-use dear_imgui_rs::Condition;
+use dear_app::{AppConfig, RunError, imgui::Condition, run_ui};
 
 fn main() -> Result<(), RunError> {
     let config = AppConfig {

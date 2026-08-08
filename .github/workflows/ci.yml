@@ -184,7 +184,7 @@ jobs:
         run: cargo check -p dear-imgui-examples --features "multi-viewport" --bin multi_viewport_wgpu --bin multi_viewport_ash
 
       - name: Check Ash dynamic-rendering multi-viewport smoke harness
-        run: cargo check -p dear-imgui-examples --features "ash-winit-multi-viewport,ash-dynamic-rendering" --bin multi_viewport_ash
+        run: cargo check -p dear-imgui-examples --features "ash-winit-multi-viewport,ash-dynamic-rendering" --bin ash_vulkan_validation_smoke
 
       - name: Check SDL3 Glow multi-viewport example
         run: cargo check -p dear-imgui-examples --features "sdl3-glow-multi-viewport" --bin sdl3_glow_multi_viewport
@@ -202,7 +202,7 @@ jobs:
         run: cargo check -p dear-imgui-examples --no-default-features --features "sdl3-ash-multi-viewport,ash-dynamic-rendering" --bin sdl3_ash_multi_viewport
 
       - name: Check SDL3 GPU multi-viewport example
-        run: cargo check -p dear-imgui-examples --features "sdl3-gpu-multi-viewport" --bin sdl3_sdlgpu_multi_view
+        run: cargo check -p dear-imgui-examples --features "sdl3-gpu-multi-viewport" --bin sdl3_sdlgpu_multi_viewport
 
       - name: Restore cached SDL3 runtime
         if: runner.os == 'Windows'
@@ -216,7 +216,7 @@ jobs:
         run: cargo nextest run -p dear-imgui-examples --lib --features "sdl3-platform"
 
       - name: Test SDL3 GPU present-mode policy
-        run: cargo nextest run -p dear-imgui-examples --bin sdl3_sdlgpu_multi_view --features "sdl3-gpu-multi-viewport"
+        run: cargo nextest run -p dear-imgui-examples --bin sdl3_sdlgpu_multi_viewport --features "sdl3-gpu-multi-viewport"
 
       - name: Test SDL3 foreign pointer callback teardown
         run: cargo nextest run -p dear-imgui-sdl3 --lib --features "sdlgpu3-renderer,multi-viewport" pointer_callback_replacement_survives_renderer_shutdown
@@ -228,16 +228,16 @@ jobs:
         run: cargo check -p dear-imgui-examples --features "sdl3-platform" --bin sdl3_wgpu
 
       - name: Check SDLRenderer3 renderer example
-        run: cargo check -p dear-imgui-examples --features "sdl3-sdlrenderer3" --bin sdl3_sdlrenderer
+        run: cargo check -p dear-imgui-examples --features "sdl3-sdlrenderer3" --bin sdl3_sdlrenderer3
 
-      - name: Build examples (test-engine)
-        run: cargo build -p dear-imgui-examples --features "test-engine" --bin imgui_test_engine_basic
+      - name: Build interactive Test Engine example
+        run: cargo build -p dear-imgui-examples --features "test-engine" --bin test_engine_integration
 
       - name: Check WGPU multi-viewport Test Engine smoke harness
-        run: cargo check -p dear-imgui-examples --features "multi-viewport,test-engine" --bin multi_viewport_wgpu
+        run: cargo check -p dear-imgui-examples --features "multi-viewport,test-engine" --bin wgpu_multi_viewport_smoke
 
       - name: Check SDL3 Glow multi-viewport Test Engine smoke harness
-        run: cargo check -p dear-imgui-examples --features "sdl3-glow-multi-viewport,test-engine" --bin sdl3_glow_multi_viewport
+        run: cargo check -p dear-imgui-examples --features "sdl3-glow-multi-viewport,test-engine" --bin sdl3_glow_multi_viewport_smoke
 
       - name: Check test-engine (no capture)
         run: cargo check -p dear-imgui-test-engine --no-default-features
@@ -817,8 +817,8 @@ jobs:
           IMGUI_SYS_FORCE_BUILD: "1"
           NODE_EDITOR_SYS_FORCE_BUILD: "1"
 
-      - name: Check normal node editor basic example
-        run: cargo check -p dear-imgui-examples --bin node_editor_basic --no-default-features --features node-editor
+      - name: Check normal node editor minimal example
+        run: cargo check -p dear-imgui-examples --bin node_editor_minimal --no-default-features --features node-editor
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
           NODE_EDITOR_SYS_FORCE_BUILD: "1"

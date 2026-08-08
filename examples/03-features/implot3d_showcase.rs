@@ -1,13 +1,16 @@
-//! ImPlot3D Demo - Complete Rust port of official implot3d_demo.cpp
+//! ImPlot3D API showcase based on the official `implot3d_demo.cpp`.
 //!
-//! This example is a faithful reproduction of the official C++ ImPlot3D demo,
-//! showcasing all major features of the library.
+//! This example showcases the major features of the library. For a copyable
+//! starting point, use `implot3d_minimal` instead.
 //!
 //! The Rust implementation receives a stable declarative dock identity. The official C++ demo
 //! owns its native window name, so it remains user-dockable instead of pretending that safe Rust
 //! controls its identity.
 
-use dear_app::{AddOnsConfig, AppConfig, Application, DockingConfig, FrameContext, RunError, run};
+use dear_app::{
+    AddOnsConfig, AppConfig, Application, ApplicationStage, DockingConfig, FrameContext, RunError,
+    run,
+};
 use dear_imgui_rs::*;
 use dear_implot3d as implot3d;
 use implot3d::plots::*;
@@ -41,7 +44,7 @@ impl Application for ImPlot3dApp {
                 DockLayoutApply::IfMissing,
             )
             .build()
-            .map_err(|error| RunError::application("frame", error.to_string()))?;
+            .map_err(|error| RunError::application(ApplicationStage::Frame, error))?;
 
         ui.window(&self.rust_demo)
             .size([750.0, 850.0], Condition::FirstUseEver)
@@ -105,7 +108,9 @@ impl Application for ImPlot3dApp {
 }
 
 fn main() {
-    dear_imgui_examples::init_tracing_with_filter("dear_imgui=info,implot3d_basic=info,wgpu=warn");
+    dear_imgui_examples::init_tracing_with_filter(
+        "dear_imgui=info,implot3d_showcase=info,wgpu=warn",
+    );
 
     let config = AppConfig {
         window_title: "ImPlot3D Demo - Rust vs C++ Comparison".to_string(),

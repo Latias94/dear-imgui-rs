@@ -6,7 +6,8 @@ use dear_imgui_rs::{Context, ContextBinding, Id, platform_io::PlatformIo};
 use super::super::registry::{GlobalHandles, unregister_runtime};
 use super::super::trace::{AshViewportFrameReport, FrameTraceState};
 use super::{
-    AshViewportError, CallbackState, RendererStorage, RuntimeControl, RuntimeFaults, RuntimeState,
+    AshViewportError, CallbackState, RendererStorage, RuntimeControl, RuntimeFaults,
+    RuntimeIdentity, RuntimeState,
 };
 use crate::AshRenderer;
 #[cfg(test)]
@@ -29,6 +30,7 @@ impl RuntimeControl {
         Self {
             context_raw: context.as_raw(),
             binding: context.binding(),
+            identity: RuntimeIdentity::new(),
             state: Cell::new(RuntimeState::Constructing),
             renderer: RefCell::new(Some(renderer)),
             globals: RefCell::new(globals),

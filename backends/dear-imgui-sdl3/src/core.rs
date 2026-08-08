@@ -88,7 +88,7 @@ pub(super) mod ffi {
             explicit_swap_interval: i32,
             viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
         ) -> u64;
-        pub fn dear_imgui_sdl3_native_end() -> u64;
+        pub fn dear_imgui_sdl3_native_end(first_fault: *mut u64) -> u64;
         pub fn dear_imgui_sdl3_backend_clear_platform_monitors();
         #[cfg(any(
             feature = "opengl3-renderer",
@@ -150,6 +150,7 @@ pub(super) mod ffi {
         #[cfg(feature = "sdlgpu3-renderer")]
         pub fn dear_imgui_sdl3_backend_sdlgpu3_render_viewport(
             viewport: *mut sys::ImGuiViewport,
+            first_fault: *mut u64,
         ) -> u64;
         #[cfg(feature = "sdlgpu3-renderer")]
         pub fn dear_imgui_sdl3_backend_sdlgpu3_create_device_objects();
@@ -250,6 +251,8 @@ pub enum Sdl3BackendError {
     ViewportCreationFailed,
     #[error("SDL3 failed to capture the OpenGL state required for viewport creation")]
     ViewportOpenGlStateCaptureFailed,
+    #[error("SDL3 failed to enable OpenGL context sharing for a secondary viewport")]
+    ViewportOpenGlShareConfigurationFailed,
     #[error("SDL3 failed to create or activate a distinct OpenGL context for a secondary viewport")]
     ViewportOpenGlContextFailed,
     #[error(
@@ -270,6 +273,10 @@ pub enum Sdl3BackendError {
     ViewportSdlGpuCommandBufferFailed,
     #[error("SDL3 failed to acquire a swapchain texture for a secondary viewport")]
     ViewportSdlGpuSwapchainFailed,
+    #[error(
+        "SDL3 failed to cancel a command buffer after secondary viewport swapchain acquisition failed"
+    )]
+    ViewportSdlGpuCommandBufferCancelFailed,
     #[error("SDL3 failed to begin a render pass for a secondary viewport")]
     ViewportSdlGpuRenderPassFailed,
     #[error("SDL3 failed to submit a command buffer for a secondary viewport")]
@@ -302,6 +309,8 @@ pub enum Sdl3BackendError {
     ShutdownInProgress { phase: &'static str },
     #[error(transparent)]
     RendererConsumer(#[from] dear_imgui_rs::render::RendererConsumerError),
+    #[error(transparent)]
+    FrameCapture(#[from] dear_imgui_rs::render::SnapshotError),
     #[error(transparent)]
     TextureFeedback(#[from] dear_imgui_rs::render::TextureFeedbackError),
     #[error("managed texture {texture:?} received an update before renderer creation")]

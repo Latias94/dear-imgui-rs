@@ -1,6 +1,69 @@
 use super::*;
 
 #[test]
+fn renderer_adapter_retains_callback_output_and_duplicate_platform_faults() {
+    let _guard = crate::tests::test_guard();
+    let mut context = Context::create();
+    let mut runtime = synthetic_claimed_registration(
+        &mut context,
+        Rc::new(Cell::new(0)),
+        Rc::new(Cell::new(0)),
+        Rc::new(Cell::new(0)),
+        synthetic_create_window,
+    );
+    let adapter = runtime.viewport_renderer_adapter(&context).unwrap();
+
+    let attempt = adapter.run(|| {
+        runtime.control.record_viewport_creation_failed();
+        runtime.control.record_viewport_creation_failed();
+        Err::<(), _>("renderer failed")
+    });
+    let (output, faults) = attempt.into_parts();
+
+    assert_eq!(output, Some(Err("renderer failed")));
+    assert_eq!(faults.len(), 2);
+    assert!(
+        faults
+            .iter()
+            .all(|fault| matches!(fault, Sdl3BackendError::ViewportCreationFailed))
+    );
+    runtime.shutdown_platform(&mut context).unwrap();
+}
+
+#[test]
+fn renderer_adapter_skips_callback_and_drains_all_preexisting_faults() {
+    let _guard = crate::tests::test_guard();
+    let mut context = Context::create();
+    let mut runtime = synthetic_claimed_registration(
+        &mut context,
+        Rc::new(Cell::new(0)),
+        Rc::new(Cell::new(0)),
+        Rc::new(Cell::new(0)),
+        synthetic_create_window,
+    );
+    let adapter = runtime.viewport_renderer_adapter(&context).unwrap();
+    runtime.control.record_viewport_creation_failed();
+    runtime.control.record_native_faults(1 << 13, 1 << 13);
+    let callback_ran = Cell::new(false);
+
+    let attempt = adapter.run(|| callback_ran.set(true));
+    let (output, faults) = attempt.into_parts();
+
+    assert!(!callback_ran.get());
+    assert!(output.is_none());
+    assert_eq!(faults.len(), 2);
+    assert!(matches!(
+        faults[0],
+        Sdl3BackendError::ViewportCreationFailed
+    ));
+    assert!(matches!(
+        faults[1],
+        Sdl3BackendError::NativeBridgeProtocolFailed
+    ));
+    runtime.shutdown_platform(&mut context).unwrap();
+}
+
+#[test]
 fn platform_only_shutdown_rejects_an_active_renderer_before_closing_the_frame() {
     let _guard = crate::tests::test_guard();
     let mut context = Context::create();

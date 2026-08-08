@@ -1,4 +1,4 @@
-//! ImGuizmo Basic Example (wgpu + winit)
+//! Complete ImGuizmo showcase using Winit and WGPU.
 //!
 //! - Toggle full-view vs window viewport
 //! - Perspective/Orthographic camera, distance and FOV/width controls

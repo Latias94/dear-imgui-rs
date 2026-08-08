@@ -14,9 +14,8 @@ use winit::{
 };
 
 struct ImguiState {
-    context: Context,
-    platform: WinitPlatform,
     renderer: WgpuRenderer,
+    platform: WinitPlatform,
     clear_color: wgpu::Color,
     demo_open: bool,
     last_frame: Instant,
@@ -25,15 +24,19 @@ struct ImguiState {
     log_counter: i32,
     frame_count: u64,
     total_frame_time: f32,
+    renderer_shutdown_complete: bool,
+    platform_shutdown_complete: bool,
+    // Context must outlive every attachment, including fallback field drops after a failed shutdown.
+    context: Context,
 }
 
 struct AppWindow {
+    imgui: ImguiState,
+    surface: wgpu::Surface<'static>,
+    surface_desc: wgpu::SurfaceConfiguration,
     device: wgpu::Device,
     queue: wgpu::Queue,
     window: Arc<Window>,
-    surface_desc: wgpu::SurfaceConfiguration,
-    surface: wgpu::Surface<'static>,
-    imgui: ImguiState,
 }
 
 #[derive(Default)]
@@ -120,7 +123,7 @@ impl AppWindow {
         // Setup ImGui immediately
         let mut context = Context::create();
         context.set_ini_filename(None::<String>).unwrap();
-        let ini_path = std::env::temp_dir().join("dear-imgui-wgpu_basic.ini");
+        let ini_path = std::env::temp_dir().join("dear-imgui-winit_wgpu.ini");
         #[cfg(not(target_arch = "wasm32"))]
         {
             if let Err(e) = context.load_ini_settings_from_disk(ini_path.clone()) {
@@ -147,7 +150,6 @@ impl AppWindow {
         info!("Dear ImGui context and Winit/WGPU backends initialized");
 
         let imgui = ImguiState {
-            context,
             platform,
             renderer,
             clear_color: wgpu::Color {
@@ -162,16 +164,43 @@ impl AppWindow {
             log_counter: 0,
             frame_count: 0,
             total_frame_time: 0.0,
+            renderer_shutdown_complete: false,
+            platform_shutdown_complete: false,
+            context,
         };
 
         Ok(Self {
+            imgui,
+            surface,
+            surface_desc,
             device,
             queue,
             window,
-            surface_desc,
-            surface,
-            imgui,
         })
+    }
+
+    fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.imgui.context.end_frame();
+        let mut errors = Vec::new();
+
+        if !self.imgui.renderer_shutdown_complete {
+            match self.imgui.renderer.shutdown(&mut self.imgui.context) {
+                Ok(()) => self.imgui.renderer_shutdown_complete = true,
+                Err(error) => errors.push(format!("WGPU renderer shutdown failed: {error}")),
+            }
+        }
+        if !self.imgui.platform_shutdown_complete {
+            match self.imgui.platform.shutdown(&mut self.imgui.context) {
+                Ok(()) => self.imgui.platform_shutdown_complete = true,
+                Err(error) => errors.push(format!("Winit platform shutdown failed: {error}")),
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; ").into())
+        }
     }
 
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -313,7 +342,7 @@ impl AppWindow {
                 ui.separator();
                 ui.text_wrapped("Check your console/terminal for log output!");
                 ui.text_wrapped("Set RUST_LOG environment variable to control verbosity:");
-                ui.text("  RUST_LOG=debug cargo run --example wgpu_basic");
+                ui.text("  RUST_LOG=debug cargo run -p dear-imgui-examples --bin winit_wgpu");
             });
 
         // Show demo window if requested
@@ -367,6 +396,14 @@ impl AppWindow {
             self.surface.configure(&self.device, &self.surface_desc);
         }
         Ok(())
+    }
+}
+
+impl Drop for AppWindow {
+    fn drop(&mut self) {
+        if let Err(error) = self.shutdown() {
+            error!("Winit/WGPU fallback shutdown failed: {error}");
+        }
     }
 }
 
@@ -447,13 +484,21 @@ impl ApplicationHandler for App {
             window.window.request_redraw();
         }
     }
+
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(window) = self.window.as_mut()
+            && let Err(error) = window.shutdown()
+        {
+            error!("Winit/WGPU shutdown failed: {error}");
+        }
+    }
 }
 
 fn main() {
     // Initialize tracing with custom filter for demo
-    dear_imgui_examples::init_tracing_with_filter("dear_imgui=debug,wgpu_basic=info,wgpu=warn");
+    dear_imgui_examples::init_tracing_with_filter("dear_imgui=debug,winit_wgpu=info,wgpu=warn");
 
-    info!("Starting Dear ImGui WGPU Basic Example with Logging Demo");
+    info!("Starting Dear ImGui Winit + WGPU lifecycle reference");
     info!("This example demonstrates:");
     info!("  - Basic Dear ImGui usage with WGPU backend");
     info!("  - Integrated tracing/logging support");
@@ -468,5 +513,5 @@ fn main() {
     info!("Starting event loop...");
     event_loop.run_app(&mut app).unwrap();
 
-    info!("Dear ImGui WGPU Basic Example finished");
+    info!("Dear ImGui Winit + WGPU lifecycle reference finished");
 }

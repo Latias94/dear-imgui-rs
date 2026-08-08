@@ -136,25 +136,21 @@ impl SdlGpuApp {
     }
 
     fn iterate(&self) -> Result<AppResult, Box<dyn Error>> {
-        let mut events = self.events.drain();
+        let mut events = self.events.try_drain()?;
         let mut main_guard = self.main.assert_get().borrow_mut();
         let main = &mut *main_guard;
         while let Some(event) = events.pop() {
-            event.with_imgui_event(|raw| -> Result<(), Box<dyn Error>> {
-                if let Some(raw) = raw {
-                    // SAFETY: the callback handoff reconstructs the active union variant and owns
-                    // every pointer payload for the duration of this closure.
-                    let _ = unsafe { main.sdl3_backend.process_raw_event(&mut main.imgui, raw)? };
-                }
-                Ok(())
-            })?;
+            let _ = main
+                .sdl3_backend
+                .process_callback_event(&mut main.imgui, &event)?;
             if requests_exit(&event, main.window.id()) {
                 return Ok(AppResult::Success);
             }
         }
 
         main.sdl3_backend.new_frame(&mut main.imgui)?;
-        let ui = main.imgui.frame();
+        let frame = main.imgui.begin_frame();
+        let ui = frame.ui();
 
         ui.window("SDL3 + IMGUI")
             .size([400.0, 200.0], Condition::FirstUseEver)
@@ -176,29 +172,12 @@ impl SdlGpuApp {
             ui.show_about_window(&mut main.show_about);
         }
 
-        let viewports_enabled = main
-            .imgui
-            .io()
-            .config_flags()
-            .contains(ConfigFlags::VIEWPORTS_ENABLE);
         let main_window_minimized = main.window.is_minimized();
-        let pending_frame = main.imgui.render(main.sdl3_backend.consumer());
-        let mut reconciled_frame = main.sdl3_backend.reconcile_frame(pending_frame)?;
-        let is_minimized = reconciled_frame
-            .draw_data()
-            .display_size()
-            .into_iter()
-            .any(|size| size <= 0.0);
-
-        // Texture reconciliation and the secondary-window pump cannot depend on the main
-        // swapchain. Detached viewports remain interactive while the main window is minimized or
-        // temporarily lacks a presentable image.
-        if viewports_enabled {
-            reconciled_frame.update_and_render_platform_windows_default();
-            main.sdl3_backend.poll_fault()?;
-        }
-        if main_window_minimized || is_minimized {
-            drop(reconciled_frame);
+        // Preparation owns texture reconciliation and the secondary-window pump, so detached
+        // viewports remain interactive even when the main window has no presentable image.
+        let prepared = main.sdl3_backend.prepare(frame)?;
+        if main_window_minimized || !prepared.main_is_drawable() {
+            prepared.skip_main();
             sdl3::timer::delay(10);
             return Ok(AppResult::Continue);
         }
@@ -214,7 +193,7 @@ impl SdlGpuApp {
             }
         };
 
-        let main_render = if let Some(swap_chain) = swap_chain.filter(|_| !is_minimized) {
+        let main_render = if let Some(swap_chain) = swap_chain {
             let target_info = sdl3::gpu::ColorTargetInfo::default()
                 .with_texture(&swap_chain)
                 .with_clear_color(Color::RGB(0, 255, 255))
@@ -222,22 +201,20 @@ impl SdlGpuApp {
                 .with_store_op(sdl3::gpu::StoreOp::STORE);
             (|| -> Result<(), Box<dyn Error>> {
                 // SAFETY: this command buffer belongs to the device used to initialize the backend.
-                let prepared = unsafe {
-                    main.sdl3_backend
-                        .prepare_render_reconciled(reconciled_frame, &draw_cmd)?
-                };
+                let render_frame =
+                    unsafe { main.sdl3_backend.prepare_render_main(prepared, &draw_cmd)? };
                 let mut render_pass =
                     main.gpu
                         .begin_render_pass(&draw_cmd, &[target_info], None)?;
 
                 // SAFETY: this pass belongs to the same device and remains active for this call.
-                let render_result = unsafe { prepared.render(&mut render_pass) };
+                let render_result = unsafe { render_frame.render_main(&mut render_pass) };
                 main.gpu.end_render_pass(render_pass);
                 render_result?;
                 Ok(())
             })()
         } else {
-            drop(reconciled_frame);
+            prepared.skip_main();
             Ok(())
         };
         if let Err(error) = main_render {

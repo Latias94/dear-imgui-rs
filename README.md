@@ -108,84 +108,59 @@ Alpha.2 replaces alpha.1's `RenderedFrame` with the linear `PendingFrame` -> `Re
 
 ## Examples
 
-```bash
+```text
 # Fresh source checkout. The native -sys crates need vendored submodules.
 git clone --recursive https://github.com/Latias94/dear-imgui-rs
 cd dear-imgui-rs
 
 # If you already cloned without --recursive, run this inside the repo.
 git submodule update --init --recursive
+```
 
-# Core & docking examples
-cargo run --bin game_engine_docking
-cargo run --bin dockspace_minimal
-cargo run -p dear-imgui-examples --bin dear_app_docking
+Start with the application APIs, then move down to backend integration only when the application
+needs to own its window, surface, render pass, or native multi-viewport route:
 
-# Normal application path (UI-only closure, then the full lifecycle API)
+```text
 cargo run -p dear-app --example hello
 cargo run -p dear-imgui-examples --bin hello_world
+cargo run -p dear-imgui-examples --bin fallible_frame
 cargo run -p dear-imgui-examples --bin application_lifecycle
+```
 
-# Focused safe API recipes
+Focused safe API examples keep the host runtime out of the way:
+
+```text
 cargo run -p dear-imgui-examples --bin custom_font_minimal
 cargo run -p dear-imgui-examples --bin managed_texture_minimal
+cargo run -p dear-imgui-examples --bin dockspace_minimal
 cargo run -p dear-imgui-examples --bin task_organizer
+```
 
-# Extension examples (using wgpu + winit directly)
-cargo run --bin imguizmo_basic --features imguizmo
-cargo run --bin imnodes_basic --features imnodes
-# imgui-node-editor: basic uses the normal core; showcase opts into blueprint stack layout
-cargo run -p dear-imgui-examples --bin node_editor_basic --features node-editor
-cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-editor-blueprints
-cargo run --bin implot_basic --features implot
-cargo run --bin imguizmo_quat_basic --features imguizmo-quat
-cargo run --bin reflect_demo --features reflect
-cargo run --bin imgui_test_engine_basic --features test-engine
-  # Smoke test (auto-run + exit)
-  cargo run --bin imgui_test_engine_basic --features test-engine -- --exit-when-done --group tests
+Each optional extension has a small copyable entry point; larger `*_showcase` binaries are kept
+separate:
 
-# implot3d example (uses dear-app)
-cargo run --bin implot3d_basic --features implot3d
+```text
+cargo run -p dear-imgui-examples --bin implot_minimal --features implot
+cargo run -p dear-imgui-examples --bin implot3d_minimal --features implot3d
+cargo run -p dear-imgui-examples --bin imnodes_minimal --features imnodes
+cargo run -p dear-imgui-examples --bin imguizmo_minimal --features imguizmo
+cargo run -p dear-imgui-examples --bin imguizmo_quat_minimal --features imguizmo-quat
+cargo run -p dear-imgui-examples --bin node_editor_minimal --features node-editor
+```
 
-# Vulkan (Ash) renderer examples (native)
-cargo run --bin ash_basic
-cargo run --bin ash_textures
-# Multi-viewport (winit + Vulkan/Ash, native only)
-cargo run -p dear-imgui-examples --bin multi_viewport_ash --features multi-viewport
-# SDL3 + Vulkan/Ash multi-viewport (native only)
-cargo run -p dear-imgui-examples --bin sdl3_ash_multi_viewport --features sdl3-ash-multi-viewport
+The low-level renderer references expose the complete native lifecycle deliberately:
 
-# WebAssembly web demo (import-style, ImGui + optional extensions)
-# See the "WebAssembly support" section below and docs/WASM.md for the exact target/feature contract.
-
-# SDL3 backends (native)
-# SDL3 + OpenGL3 with official C++ backends (multi-viewport via imgui_impl_sdl3/imgui_impl_opengl3)
-cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport,sdl3-opengl3
-# SDL3 + Glow (experimental multi-viewport using Rust Glow renderer)
-cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features sdl3-glow-multi-viewport
-# SDL3 + WGPU (single-window)
-cargo run -p dear-imgui-examples --bin sdl3_wgpu --features sdl3-platform
-# SDL3 + WGPU (experimental multi-viewport, native only)
-cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport
-
-# winit + WGPU (experimental multi-viewport testbed, native only)
-# Enabled on Windows/macOS/Linux. Release CI exercises the Linux path under Xvfb + Mesa/Lavapipe.
+```text
+cargo run -p dear-imgui-examples --bin winit_wgpu
+cargo run -p dear-imgui-examples --bin winit_glow
+cargo run -p dear-imgui-examples --bin winit_ash
 cargo run -p dear-imgui-examples --bin multi_viewport_wgpu --features multi-viewport
+cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features sdl3-glow-multi-viewport
 ```
 
-Tip: The ImNodes example includes multiple tabs (Hello, Multi-Editor, Style, Advanced Style, Save/Load, Color Editor, Shader Graph, MiniMap Callback).
-
-See `examples/README.md` for the curated quick-start, renderer, feature, docking, and integration tracks.
-
-### File Browser
-
-```bash
-# OS-native dialogs (rfd)
-cargo run --bin file_dialog_native --features file-browser
-
-# Pure ImGui in-UI file browser
-cargo run --bin file_browser_imgui --features file-browser
-```
+See [`examples/README.md`](examples/README.md) for the complete four-level catalog, including
+feature flags, prerequisites, and the next example for every public binary. Private runtime probes
+under `examples/ci/` are release evidence and are intentionally excluded from that learning path.
 
 ## Installation
 
@@ -526,7 +501,7 @@ For binding verification, provider construction, feature-forwarding checks, and 
     - Winit example: `cargo run -p dear-imgui-examples --bin multi_viewport_wgpu --features multi-viewport`
     - SDL3 example: `cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport`
   - **Winit/SDL3 + Ash**: native-only Vulkan adapters share one owning callback/swapchain runtime for classic render-pass and dynamic-rendering routes. Attachment is unsafe only because raw Vulkan handle/device lineage cannot be proven; the runtime owns callback address stability and ordered shutdown.
-    - Winit example: `cargo run -p dear-imgui-examples --bin multi_viewport_ash --features multi-viewport`
+    - Winit example: `cargo run -p dear-imgui-examples --bin multi_viewport_ash --features ash-winit-multi-viewport`
     - SDL3 example: `cargo run -p dear-imgui-examples --bin sdl3_ash_multi_viewport --features sdl3-ash-multi-viewport`
   - Call `Context::enable_multi_viewport()` for viewports. Enable `ConfigFlags::DOCKING_ENABLE` separately when the application also needs docking.
   - Bevy native viewports are enabled only when Winit can provide global desktop client coordinates; query `ImguiNativeViewportSupport::get(context_id)` for the per-Context `ImguiNativeViewportStatus`. On Wayland the status is `GlobalDesktopCoordinatesUnavailable` and docking stays inside the host window.

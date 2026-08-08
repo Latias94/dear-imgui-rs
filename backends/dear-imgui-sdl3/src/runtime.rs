@@ -34,8 +34,8 @@ use dear_imgui_rs::platform_io::Viewport;
 use dear_imgui_rs::render::{SnapshotTextureId, TextureRequest};
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
-    ContextAttachmentTeardownError, ContextBinding, ContextDestroyed, ContextLifecycle,
-    ContextTeardown, Id, TextureData, sys,
+    ContextAttachmentTeardownError, ContextBinding, ContextDestroyed, ContextId, ContextLifecycle,
+    ContextTeardown, TextureData, sys,
 };
 
 struct Sdl3PlatformAttachmentMarker;
@@ -89,92 +89,6 @@ pub(super) enum PlatformGraphicsKind {
     Other,
     OpenGl,
     Vulkan,
-}
-
-/// Native OpenGL platform callbacks that completed successfully during one viewport frame.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct Sdl3OpenGlViewportFrameReport {
-    context_activated_viewports: Vec<Id>,
-    swapped_viewports: Vec<Id>,
-}
-
-impl Sdl3OpenGlViewportFrameReport {
-    /// Returns secondary viewport IDs whose native render-context transaction completed.
-    pub fn context_activated_viewports(&self) -> &[Id] {
-        &self.context_activated_viewports
-    }
-
-    /// Returns secondary viewport IDs whose native swap transaction completed.
-    pub fn swapped_viewports(&self) -> &[Id] {
-        &self.swapped_viewports
-    }
-}
-
-/// Failure to begin or finish an SDL3 OpenGL viewport frame trace.
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum Sdl3OpenGlViewportFrameTraceError {
-    /// The underlying platform runtime rejected the operation.
-    #[error(transparent)]
-    Backend(#[from] Sdl3BackendError),
-    /// The platform runtime was not initialized for OpenGL.
-    #[error("SDL3 OpenGL viewport tracing requires an OpenGL platform runtime")]
-    RequiresOpenGl,
-    /// Another guard is already collecting the runtime's callback events.
-    #[error("an SDL3 OpenGL viewport frame trace is already active")]
-    AlreadyActive,
-}
-
-#[derive(Debug)]
-struct ActiveOpenGlViewportFrameTrace {
-    context_activated_viewports: HashSet<Id>,
-    swapped_viewports: HashSet<Id>,
-}
-
-#[derive(Debug, Default)]
-struct OpenGlViewportFrameTraceState {
-    active: Option<ActiveOpenGlViewportFrameTrace>,
-}
-
-/// Scoped collector for one SDL3 OpenGL secondary-viewport platform pass.
-///
-/// Dropping this guard without calling [`Self::finish`] aborts its report. Each runtime accepts
-/// only one live trace, and callback routing remains bound to that runtime's Context attachment.
-#[must_use = "keep the trace alive through the platform-window pump, then call finish"]
-pub struct Sdl3OpenGlViewportFrameTrace<'runtime> {
-    control: &'runtime RuntimeControl,
-    finished: bool,
-}
-
-impl fmt::Debug for Sdl3OpenGlViewportFrameTrace<'_> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("Sdl3OpenGlViewportFrameTrace")
-            .field("context", &self.control.binding.id())
-            .field("finished", &self.finished)
-            .finish()
-    }
-}
-
-impl Sdl3OpenGlViewportFrameTrace<'_> {
-    /// Finishes this frame trace and returns only successful native transactions.
-    ///
-    /// The caller should restore the main OpenGL context before finishing the trace, then call
-    /// [`Sdl3PlatformBackend::poll_fault`](crate::Sdl3PlatformBackend::poll_fault) before the main
-    /// window is swapped.
-    pub fn finish(mut self) -> Sdl3OpenGlViewportFrameReport {
-        let report = self.control.finish_opengl_viewport_frame_trace();
-        self.finished = true;
-        report
-    }
-}
-
-impl Drop for Sdl3OpenGlViewportFrameTrace<'_> {
-    fn drop(&mut self) {
-        if !self.finished {
-            self.control.abort_opengl_viewport_frame_trace();
-        }
-    }
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -286,6 +200,7 @@ enum RuntimeFault {
     ForeignPlatformUserData,
     ViewportCreationFailed,
     ViewportOpenGlStateCaptureFailed,
+    ViewportOpenGlShareConfigurationFailed,
     ViewportOpenGlContextFailed,
     ViewportOpenGlSwapIntervalFailed,
     ViewportOpenGlStateRestoreFailed,
@@ -295,6 +210,7 @@ enum RuntimeFault {
     ViewportSdlGpuConfigureFailed,
     ViewportSdlGpuCommandBufferFailed,
     ViewportSdlGpuSwapchainFailed,
+    ViewportSdlGpuCommandBufferCancelFailed,
     ViewportSdlGpuRenderPassFailed,
     ViewportSdlGpuSubmitFailed,
     NativeBridgeProtocolFailed,
@@ -319,6 +235,9 @@ impl RuntimeFault {
             Self::ViewportOpenGlStateCaptureFailed => {
                 Sdl3BackendError::ViewportOpenGlStateCaptureFailed
             }
+            Self::ViewportOpenGlShareConfigurationFailed => {
+                Sdl3BackendError::ViewportOpenGlShareConfigurationFailed
+            }
             Self::ViewportOpenGlContextFailed => Sdl3BackendError::ViewportOpenGlContextFailed,
             Self::ViewportOpenGlSwapIntervalFailed => {
                 Sdl3BackendError::ViewportOpenGlSwapIntervalFailed
@@ -336,6 +255,9 @@ impl RuntimeFault {
                 Sdl3BackendError::ViewportSdlGpuCommandBufferFailed
             }
             Self::ViewportSdlGpuSwapchainFailed => Sdl3BackendError::ViewportSdlGpuSwapchainFailed,
+            Self::ViewportSdlGpuCommandBufferCancelFailed => {
+                Sdl3BackendError::ViewportSdlGpuCommandBufferCancelFailed
+            }
             Self::ViewportSdlGpuRenderPassFailed => {
                 Sdl3BackendError::ViewportSdlGpuRenderPassFailed
             }
@@ -480,12 +402,60 @@ pub(super) struct RuntimeControl {
     deferred_renderer_viewports: RefCell<HashMap<usize, DeferredRendererViewportState>>,
     failed_viewports: RefCell<HashSet<usize>>,
     faults: RefCell<VecDeque<RuntimeFault>>,
-    opengl_viewport_frame_trace: RefCell<OpenGlViewportFrameTraceState>,
     reported_replacements: RefCell<HashSet<&'static str>>,
+    foreign_platform_user_data_reported: Cell<bool>,
     revoked_capabilities: Cell<i32>,
     foreign_capabilities: Cell<i32>,
     #[cfg(test)]
     phase_log: RefCell<Vec<&'static str>>,
+}
+
+/// Result of one renderer-owned SDL3 viewport attempt.
+#[doc(hidden)]
+pub struct Sdl3ViewportAttempt<R> {
+    output: Option<R>,
+    faults: Vec<Sdl3BackendError>,
+}
+
+impl<R> Sdl3ViewportAttempt<R> {
+    fn skipped(faults: Vec<Sdl3BackendError>) -> Self {
+        debug_assert!(!faults.is_empty());
+        Self {
+            output: None,
+            faults,
+        }
+    }
+
+    fn completed(output: R, faults: Vec<Sdl3BackendError>) -> Self {
+        Self {
+            output: Some(output),
+            faults,
+        }
+    }
+
+    /// Splits the retained callback output from deferred platform faults.
+    #[must_use]
+    pub fn into_parts(self) -> (Option<R>, Vec<Sdl3BackendError>) {
+        (self.output, self.faults)
+    }
+}
+
+/// Exact-generation SDL3 adapter retained by a first-party renderer route.
+///
+/// Applications continue to own and use [`crate::Sdl3PlatformBackend`]; this adapter exists only
+/// so renderer crates can make native dispatch and fault collection one transaction.
+#[doc(hidden)]
+pub struct Sdl3ViewportRendererAdapter {
+    control: Rc<RuntimeControl>,
+}
+
+impl fmt::Debug for Sdl3ViewportRendererAdapter {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Sdl3ViewportRendererAdapter")
+            .field("context", &self.control.binding().id())
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Clone, Copy)]

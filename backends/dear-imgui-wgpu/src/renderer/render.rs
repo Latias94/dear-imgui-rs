@@ -90,17 +90,6 @@ impl WgpuRenderer {
         render_pass: &mut RenderPass<'_>,
         framebuffer_extent: FramebufferExtent,
     ) -> RendererResult<()> {
-        self.render_reconciled_preserving_frame(frame, render_pass, framebuffer_extent)
-            .map(drop)
-    }
-
-    /// Temporary bridge for U8 multi-viewport transactions that still carry the frame forward.
-    pub(super) fn render_reconciled_preserving_frame<'frame>(
-        &mut self,
-        frame: ReconciledFrame<'frame>,
-        render_pass: &mut RenderPass<'_>,
-        framebuffer_extent: FramebufferExtent,
-    ) -> RendererResult<ReconciledFrame<'frame>> {
         self.ensure_renderer_contract()?;
         self.ensure_reconciled_frame_matches(&frame)?;
         let binding = self.bound_context()?;
@@ -114,8 +103,7 @@ impl WgpuRenderer {
                 true,
                 platform_io,
             )
-        })?;
-        Ok(frame)
+        })
     }
 
     /// Applies managed-texture requests without drawing or acquiring a surface.
@@ -154,27 +142,6 @@ impl WgpuRenderer {
         let frame = frame.reconcile_texture_feedback(feedback)?;
         self.texture_manager
             .prune_destroyed_managed_textures(frame.completion_progress().watermark());
-        Ok(frame)
-    }
-
-    /// Temporary bridge for U8 multi-viewport aliases that do not yet receive the main extent.
-    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
-    pub(super) fn render_reconciled_using_draw_data_extent<'frame>(
-        &mut self,
-        frame: ReconciledFrame<'frame>,
-        render_pass: &mut RenderPass<'_>,
-    ) -> RendererResult<ReconciledFrame<'frame>> {
-        self.ensure_renderer_contract()?;
-        self.ensure_reconciled_frame_matches(&frame)?;
-        let binding = self.bound_context()?;
-        with_bound_context(&binding, || {
-            let platform_io = platform_io_for_current_context()?;
-            let draw_data = frame.draw_data();
-            let Some(extent) = FramebufferExtent::from_draw_data(draw_data)? else {
-                return Ok(());
-            };
-            self.render_draw_data_at_extent(draw_data, render_pass, extent, platform_io)
-        })?;
         Ok(frame)
     }
 

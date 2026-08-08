@@ -13,7 +13,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use dear_imgui_rs::{
-    BackendFlags, Context, FontSource, FrameLifecycleState, FrameToken, render::ReconciledFrame,
+    BackendFlags, Context, ContextId, FontSource, FrameLifecycleState, FrameToken,
+    render::ReconciledFrame,
 };
 #[cfg(feature = "capture")]
 use dear_imgui_test_engine::{
@@ -222,6 +223,13 @@ struct RecordingDriver {
     fault: DriverFault,
     fault_armed: bool,
     skip_main: bool,
+    reported_context: Option<ContextId>,
+}
+
+struct RecordingPreparedFrame<'frame> {
+    _frame: ReconciledFrame<'frame>,
+    prepared_frame_index: u64,
+    reported_context: ContextId,
 }
 
 impl RecordingDriver {
@@ -231,6 +239,7 @@ impl RecordingDriver {
             fault,
             fault_armed: false,
             skip_main: false,
+            reported_context: None,
         }
     }
 
@@ -256,6 +265,7 @@ impl RecordingDriver {
 }
 
 impl TestFrameDriver for RecordingDriver {
+    type PreparedFrame<'frame> = RecordingPreparedFrame<'frame>;
     type PrepareError = io::Error;
     type RenderError = io::Error;
     type PresentError = io::Error;
@@ -264,19 +274,29 @@ impl TestFrameDriver for RecordingDriver {
         &mut self,
         frame: FrameToken<'frame>,
         frame_index: u64,
-    ) -> Result<ReconciledFrame<'frame>, Self::PrepareError> {
+    ) -> Result<Self::PreparedFrame<'frame>, Self::PrepareError> {
         self.events.borrow_mut().push((frame_index, "prepare"));
         if self.fault == DriverFault::Prepare {
             return Err(io::Error::other("injected prepare failure"));
         }
-        Ok(frame.render_legacy())
+        let frame = frame.render_legacy();
+        Ok(RecordingPreparedFrame {
+            reported_context: self.reported_context.unwrap_or_else(|| frame.context_id()),
+            _frame: frame,
+            prepared_frame_index: frame_index,
+        })
+    }
+
+    fn prepared_context_id(frame: &Self::PreparedFrame<'_>) -> dear_imgui_rs::ContextId {
+        frame.reported_context
     }
 
     fn render_main(
         &mut self,
-        frame: ReconciledFrame<'_>,
+        frame: Self::PreparedFrame<'_>,
         frame_index: u64,
     ) -> Result<MainRenderOutcome, Self::RenderError> {
+        assert_eq!(frame.prepared_frame_index, frame_index);
         self.events.borrow_mut().push((frame_index, "render-main"));
         drop(frame);
         if self.fault == DriverFault::Render {
@@ -356,6 +376,7 @@ impl CapturingDriver {
 
 #[cfg(feature = "capture")]
 impl TestFrameDriver for CapturingDriver {
+    type PreparedFrame<'frame> = ReconciledFrame<'frame>;
     type PrepareError = io::Error;
     type RenderError = io::Error;
     type PresentError = io::Error;
@@ -364,16 +385,20 @@ impl TestFrameDriver for CapturingDriver {
         &mut self,
         frame: FrameToken<'frame>,
         _frame_index: u64,
-    ) -> Result<ReconciledFrame<'frame>, Self::PrepareError> {
+    ) -> Result<Self::PreparedFrame<'frame>, Self::PrepareError> {
         if self.frame_fault == DriverFault::Prepare {
             return Err(io::Error::other("capture-run prepare failure"));
         }
         Ok(frame.render_legacy())
     }
 
+    fn prepared_context_id(frame: &Self::PreparedFrame<'_>) -> dear_imgui_rs::ContextId {
+        frame.context_id()
+    }
+
     fn render_main(
         &mut self,
-        frame: ReconciledFrame<'_>,
+        frame: Self::PreparedFrame<'_>,
         _frame_index: u64,
     ) -> Result<MainRenderOutcome, Self::RenderError> {
         drop(frame);
@@ -803,6 +828,51 @@ fn drive_frame_reports_presented_and_skipped_without_false_swap_hooks() {
     drop(context);
 }
 
+#[test]
+fn drive_frame_rejects_a_prepared_transaction_that_reports_another_context() {
+    let _guard = test_lock();
+    let foreign_context = Context::create();
+    let foreign_context_id = foreign_context.id();
+    drop(foreign_context);
+
+    let mut context = context();
+    let mut engine = attached_engine(&mut context);
+    engine
+        .add_script_test("runner", "prepared-context", |script| {
+            script.yield_frames(ScriptCount::new(1)?)
+        })
+        .expect("prepared-context script");
+    engine
+        .queue_tests(TestGroup::Tests, Some("prepared-context"), RunFlags::NONE)
+        .expect("queue prepared-context script");
+
+    let frame = context.begin_frame();
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let mut driver = RecordingDriver::new(events.clone(), DriverFault::None);
+    driver.reported_context = Some(foreign_context_id);
+    let error = engine
+        .drive_frame(frame, 1, &mut driver)
+        .expect_err("a foreign prepared transaction must be rejected");
+
+    assert!(matches!(
+        error,
+        FrameDriverError::Context(TestEngineError::ContextMismatch {
+            operation: "TestEngine::drive_frame prepare completion",
+            expected,
+            actual,
+        }) if expected == context.id() && actual == foreign_context_id
+    ));
+    assert_eq!(events.borrow().as_slice(), &[(1, "prepare")]);
+    assert_eq!(
+        context.frame_lifecycle_state(),
+        FrameLifecycleState::Rendered
+    );
+
+    engine.stop().expect("stop prepared-context run");
+    engine.shutdown().expect("prepared-context shutdown");
+    drop(context);
+}
+
 fn assert_driver_failure(
     fault: DriverFault,
     expected_phase: dear_imgui_test_engine::FrameDriverPhase,
@@ -921,6 +991,7 @@ fn runner_closes_a_frame_rejected_by_the_driver_before_presentation() {
     }
 
     impl TestFrameDriver for RejectingDriver {
+        type PreparedFrame<'frame> = ReconciledFrame<'frame>;
         type PrepareError = io::Error;
         type RenderError = Infallible;
         type PresentError = Infallible;
@@ -929,13 +1000,17 @@ fn runner_closes_a_frame_rejected_by_the_driver_before_presentation() {
             &mut self,
             _frame: FrameToken<'frame>,
             _frame_index: u64,
-        ) -> Result<ReconciledFrame<'frame>, Self::PrepareError> {
+        ) -> Result<Self::PreparedFrame<'frame>, Self::PrepareError> {
             Err(io::Error::other("driver rejected frame"))
+        }
+
+        fn prepared_context_id(frame: &Self::PreparedFrame<'_>) -> dear_imgui_rs::ContextId {
+            frame.context_id()
         }
 
         fn render_main(
             &mut self,
-            frame: ReconciledFrame<'_>,
+            frame: Self::PreparedFrame<'_>,
             _frame_index: u64,
         ) -> Result<MainRenderOutcome, Self::RenderError> {
             drop(frame);

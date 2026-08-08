@@ -64,29 +64,6 @@ impl AshRenderer {
             .map_err(|error| RendererError::InvalidRenderState(error.to_string()))?
     }
 
-    /// Temporary bridge for multi-viewport facades that still accept a pending frame.
-    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
-    pub(super) unsafe fn cmd_draw_pending(
-        &mut self,
-        command_buffer: vk::CommandBuffer,
-        frame: PendingFrame<'_>,
-    ) -> RendererResult<Option<TextureRetirementBatch>> {
-        self.ensure_pending_frame_matches(&frame)?;
-        let binding = self.context_state.binding();
-        binding
-            .try_with_bound_context(|| {
-                let platform_io = platform_io_for_current_context()?;
-                unsafe {
-                    RendererRenderStateGuard::<AshRenderStateStorage>::preflight(platform_io)
-                }
-                .map_err(map_renderer_render_state_error)?;
-                let (frame, retirement) = self.prepare_frame_bound(frame)?;
-                self.cmd_draw_reconciled_bound(command_buffer, frame, platform_io)?;
-                Ok(retirement)
-            })
-            .map_err(|error| RendererError::InvalidRenderState(error.to_string()))?
-    }
-
     fn cmd_draw_reconciled_bound(
         &mut self,
         command_buffer: vk::CommandBuffer,

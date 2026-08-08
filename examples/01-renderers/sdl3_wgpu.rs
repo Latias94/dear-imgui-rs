@@ -156,16 +156,19 @@ impl WgpuApp {
     }
 
     fn process_events(&self) -> AppResult {
-        let mut events = self.events.drain();
+        let mut events = match self.events.try_drain() {
+            Ok(events) => events,
+            Err(error) => {
+                eprintln!("SDL3 callback event handoff failed: {error}");
+                return AppResult::Failure;
+            }
+        };
         let mut main_guard = self.main.assert_get().borrow_mut();
         let main = &mut *main_guard;
         while let Some(event) = events.pop() {
-            let backend_result = event.with_imgui_event(|raw| match raw {
-                // SAFETY: the callback handoff reconstructs the active union variant and owns
-                // every pointer payload for the duration of this closure.
-                Some(raw) => unsafe { main.sdl3_backend.process_raw_event(&mut main.imgui, raw) },
-                None => Ok(false),
-            });
+            let backend_result = main
+                .sdl3_backend
+                .process_callback_event(&mut main.imgui, &event);
             if let Err(error) = backend_result {
                 eprintln!("SDL3 backend event processing failed: {error}");
                 return AppResult::Failure;

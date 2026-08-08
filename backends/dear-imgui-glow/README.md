@@ -143,32 +143,30 @@ let renderer = GlowRenderer::with_shared_context(Rc::clone(&gl), &mut imgui)?;
 let mut runtime = unsafe { GlowViewportRuntime::attach(&mut imgui, renderer) }
     .map_err(|failure| failure.into_parts().0)?;
 
-runtime.render_context_with_platform_windows(&mut imgui)?;
+let frame = imgui.begin_frame();
+frame.ui().text("Hello from the main viewport");
+let prepared = runtime.prepare_frame(frame)?;
+let rendered = runtime.render_main(
+    prepared,
+    || restore_main_gl_context(),
+    || platform.drain_faults(),
+)?;
+drop(rendered);
 
 runtime.shutdown(&mut imgui)?;
 ```
 
-Integrations that own their frame schedule may split this convenience path as well:
-
-```rust
-let pending = runtime.with_renderer(|renderer| {
-    renderer
-        .renderer_consumer()
-        .map(|consumer| imgui.render(consumer))
-})??;
-let reconciled = runtime.reconcile_frame(pending)?;
-let reconciled = runtime.render_with_platform_windows_reconciled(reconciled)?;
-drop(reconciled);
-```
-
-The final call renders the main draw data, invokes the secondary viewport renderer callbacks while
-their OpenGL contexts are current, and finishes all OpenGL draw work before the platform presents
-the main back buffer. This OpenGL ordering intentionally differs from acquire-based WSI renderers:
-there is no separate main-surface acquisition phase to defer.
+`prepare_frame` reconciles managed textures and returns a linear capability that only
+`render_main` can consume. The final call renders the main draw data, invokes secondary viewport
+callbacks while their OpenGL contexts are current, always attempts to restore the main context,
+and combines renderer, restoration, and platform faults before the application presents the main
+back buffer. This OpenGL ordering intentionally differs from acquire-based WSI renderers: there is
+no separate main-surface acquisition phase to defer.
 
 Attachment preflights the complete renderer callback table and renderer capability bit, and fails
 without publishing partial state. Callback panic, reentry, renderer failure, and foreign callback
-replacement are contained and returned by the next Rust entry or `poll_fault`. Explicit shutdown
+replacement are contained and returned by the owning render route. `poll_fault` remains available
+for native lifecycle callbacks that run outside a frame route. Explicit shutdown
 validates the synchronous consumer lifecycle before deleting GL resources. Explicit shutdown and
 Context-first teardown both delete renderer resources before platform windows. Every Rust and
 direct renderer callback entry revalidates the renderer capability, platform capability, required

@@ -1,3 +1,5 @@
+//! Private runtime contract harness for CI.
+
 use std::cell::RefCell;
 use std::fmt;
 use std::fs::{self, OpenOptions};
@@ -7,22 +9,14 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use dear_app::{
-    AppConfig, Application, FrameContext, InitContext, RunError, ShutdownContext, Theme,
-    WgpuPreset, run,
+    AppConfig, Application, ApplicationStage, FrameContext, InitContext, RunError, ShutdownContext,
+    Theme, WgpuPreset, run,
 };
 use dear_imgui_test_engine::{
     AttachmentState, BuiltInTestSuite, HeadlessRunnerError, RegisteredTestSuite, ResultSummary,
     RunFlags, RunOutcome, RunReport, RunSpeed, RunTestStatus, RunnerControl, ScriptCount,
     TestEngine, TestGroup, TestRunner, VerboseLevel, raw,
 };
-
-#[derive(Debug, Default)]
-struct ScriptTargetState {
-    checkbox: bool,
-    slider: i32,
-    input: String,
-    my_int: i32,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GroupSel {
@@ -143,28 +137,18 @@ fn parse_cli() -> Result<Cli, String> {
         match arg.as_str() {
             "-h" | "--help" => {
                 return Err(
-                    "Usage: imgui_test_engine_basic [options]\n\n\
+                    "Usage: test_engine_runtime [options]\n\n\
 Options:\n\
   --scenario <NAME>      Run headlessly: pass|failure|no-match|timeout|abort|ffi-failure|callback-error|native-defaults|upstream-docking.\n\
   --dear-app-smoke       Run one bounded graphical test through dear_app::run.\n\
   --json-output <PATH>   Atomically write the machine-readable automated result.\n\
   --max-frames <N>       Set the non-zero primary frame budget for automated runs.\n\
-  --run                  Alias for --scenario pass.\n\
-  --exit-when-done       Alias for --scenario pass.\n\
   --group <tests|perfs>\n\
   --filter <SUBSTR>      Filter string passed to the test engine.\n\
   --speed <fast|normal|cinematic>\n\
   --verbose <silent|error|warning|info|debug|trace>\n"
                         .to_string(),
                 );
-            }
-            "--run" => {
-                args.next();
-                cli.scenario.get_or_insert(Scenario::Pass);
-            }
-            "--exit-when-done" => {
-                args.next();
-                cli.scenario.get_or_insert(Scenario::Pass);
             }
             "--dear-app-smoke" => {
                 args.next();
@@ -215,15 +199,15 @@ Options:\n\
 }
 
 #[derive(Debug)]
-struct AutomatedCallbackError(&'static str);
+struct RuntimeHarnessError(&'static str);
 
-impl fmt::Display for AutomatedCallbackError {
+impl fmt::Display for RuntimeHarnessError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.0)
     }
 }
 
-impl std::error::Error for AutomatedCallbackError {}
+impl std::error::Error for RuntimeHarnessError {}
 
 enum AutomatedResult {
     Report {
@@ -477,12 +461,10 @@ fn try_run_automated(cli: &Cli, scenario: Scenario) -> Result<RunReport, String>
         .frame_budget(cli.max_frames.unwrap_or(default_budget));
     let mut show_demo_window = true;
 
-    let result: Result<RunReport, HeadlessRunnerError<AutomatedCallbackError>> = runner
-        .run_headless(&mut context, |ui, frame| {
+    let result: Result<RunReport, HeadlessRunnerError<RuntimeHarnessError>> =
+        runner.run_headless(&mut context, |ui, frame| {
             if scenario == Scenario::CallbackError && frame == 1 {
-                return Err(AutomatedCallbackError(
-                    "injected application callback failure",
-                ));
+                return Err(RuntimeHarnessError("injected application callback failure"));
             }
             if scenario == Scenario::UpstreamDocking {
                 if show_demo_window {
@@ -641,46 +623,53 @@ struct DearAppSmoke {
 
 impl Application for DearAppSmoke {
     fn configure_imgui(&mut self, context: &mut InitContext<'_>) -> Result<(), RunError> {
-        let mut engine = TestEngine::create()
-            .map_err(|error| RunError::application("configure_imgui", error.to_string()))?;
+        let stage = ApplicationStage::ConfigureImgui;
+        let mut engine =
+            TestEngine::create().map_err(|error| RunError::application(stage, error))?;
         engine
             .start(context.imgui())
-            .map_err(|error| RunError::application("configure_imgui", error.to_string()))?;
+            .map_err(|error| RunError::application(stage, error))?;
         self.state.borrow_mut().engine_started = true;
         engine
             .set_verbose_level(self.verbose)
-            .map_err(|error| RunError::application("configure_imgui", error.to_string()))?;
+            .map_err(|error| RunError::application(stage, error))?;
         engine
             .set_run_speed(self.speed)
-            .map_err(|error| RunError::application("configure_imgui", error.to_string()))?;
+            .map_err(|error| RunError::application(stage, error))?;
         engine
             .add_script_test("dear_app", "graphical_presentation", |script| {
                 script.yield_frames(ScriptCount::new(2)?)
             })
-            .map_err(|error| RunError::application("configure_imgui", error.to_string()))?;
+            .map_err(|error| RunError::application(stage, error))?;
         self.state.borrow_mut().test_registered = true;
         engine
             .queue_tests(TestGroup::Tests, None, RunFlags::RUN_FROM_COMMAND_LINE)
-            .map_err(|error| RunError::application("configure_imgui", error.to_string()))?;
+            .map_err(|error| RunError::application(stage, error))?;
         self.state.borrow_mut().test_queued = true;
         self.engine = Some(engine);
         Ok(())
     }
 
     fn frame(&mut self, context: &mut FrameContext<'_>) -> Result<(), RunError> {
+        let stage = ApplicationStage::Frame;
         let admitted_frames = {
             let mut state = self.state.borrow_mut();
             state.admitted_frames = state.admitted_frames.checked_add(1).ok_or_else(|| {
-                RunError::application("frame", "admitted frame counter exhausted")
+                RunError::application(
+                    stage,
+                    RuntimeHarnessError("admitted frame counter exhausted"),
+                )
             })?;
             state.admitted_frames
         };
         let terminal_summary = self
             .engine
             .as_mut()
-            .ok_or_else(|| RunError::application("frame", "Test Engine is unavailable"))?
+            .ok_or_else(|| {
+                RunError::application(stage, RuntimeHarnessError("Test Engine is unavailable"))
+            })?
             .take_terminal_summary()
-            .map_err(|error| RunError::application("frame", error.to_string()))?;
+            .map_err(|error| RunError::application(stage, error))?;
 
         let should_exit = if let Some(summary) = terminal_summary {
             let mut state = self.state.borrow_mut();
@@ -724,13 +713,13 @@ impl Application for DearAppSmoke {
         };
         engine
             .shutdown()
-            .map_err(|error| RunError::application("shutdown", error.to_string()))?;
+            .map_err(|error| RunError::application(ApplicationStage::Shutdown, error))?;
         let destroyed = matches!(engine.attachment_state(), AttachmentState::Destroyed);
         self.state.borrow_mut().engine_shutdown = destroyed;
         if !destroyed {
             return Err(RunError::application(
-                "shutdown",
-                "Test Engine did not reach the destroyed attachment state",
+                ApplicationStage::Shutdown,
+                RuntimeHarnessError("Test Engine did not reach the destroyed attachment state"),
             ));
         }
         self.engine = None;
@@ -773,134 +762,6 @@ fn run_dear_app_smoke(cli: &Cli) -> DearAppSmokeResult {
     result
 }
 
-struct TestEngineApp {
-    cli: Cli,
-    engine: Option<TestEngine>,
-    script_target_state: ScriptTargetState,
-}
-
-impl Application for TestEngineApp {
-    fn configure_imgui(&mut self, context: &mut InitContext<'_>) -> Result<(), RunError> {
-        let mut engine = TestEngine::create()
-            .map_err(|error| RunError::application("configure_imgui", error.to_string()))?;
-        engine
-            .start(context.imgui())
-            .map_err(|error| RunError::application("configure_imgui", error.to_string()))?;
-        engine
-            .set_verbose_level(self.cli.verbose.unwrap_or(VerboseLevel::Info))
-            .map_err(|error| RunError::application("configure_imgui", error.to_string()))?;
-        engine
-            .set_run_speed(self.cli.speed.unwrap_or(RunSpeed::Normal))
-            .map_err(|error| RunError::application("configure_imgui", error.to_string()))?;
-        engine
-            .register_default_tests()
-            .map_err(|error| RunError::application("configure_imgui", error.to_string()))?;
-        engine
-            .add_script_test("rust_tests", "script_smoke", |test| {
-                test.set_ref("Script Target###RustScriptTarget")?;
-                test.wait_for_item("Click Me", ScriptCount::new(120)?)?;
-                test.assert_item_visible("Click Me")?;
-                test.item_click("Click Me")?;
-                test.wait_for_item_visible("Input", ScriptCount::new(120)?)?;
-                test.input_text_replace("Input", "hello from script", false)?;
-                test.wait_for_item_visible("MyInt", ScriptCount::new(120)?)?;
-                test.item_input_int("MyInt", 123)?;
-                test.assert_item_read_int_eq("MyInt", 123)?;
-                test.item_check("Node/Checkbox")?;
-                test.item_uncheck("Node/Checkbox")?;
-                test.yield_frames(ScriptCount::new(2)?)
-            })
-            .map_err(|error| RunError::application("configure_imgui", error.to_string()))?;
-
-        engine
-            .install_default_crash_handler()
-            .map_err(|error| RunError::application("configure_imgui", error.to_string()))?;
-        self.engine = Some(engine);
-        Ok(())
-    }
-
-    fn frame(&mut self, context: &mut FrameContext<'_>) -> Result<(), RunError> {
-        let ui = context.ui();
-        let Some(engine) = self.engine.as_mut() else {
-            return Ok(());
-        };
-        let summary = engine
-            .result_summary()
-            .map_err(|error| RunError::application("frame", error.to_string()))?;
-        let running = engine
-            .is_running_tests()
-            .map_err(|error| RunError::application("frame", error.to_string()))?;
-        let requesting_max_speed = engine
-            .is_requesting_max_app_speed()
-            .map_err(|error| RunError::application("frame", error.to_string()))?;
-        let state = &mut self.script_target_state;
-        ui.window("Script Target###RustScriptTarget")
-            .size([420.0, 160.0], dear_imgui_rs::Condition::FirstUseEver)
-            .build(|| {
-                ui.text("This window is owned by the application.");
-                ui.button("Click Me");
-                ui.input_text("Input", &mut state.input).build();
-                ui.input_int("MyInt", &mut state.my_int);
-                if let Some(_node) = ui.tree_node("Node") {
-                    ui.checkbox("Checkbox", &mut state.checkbox);
-                }
-                ui.slider_i32("Slider", &mut state.slider, 0, 1000);
-            });
-
-        let mut command_error = None;
-        ui.window("ImGui Test Engine")
-            .size([420.0, 220.0], dear_imgui_rs::Condition::FirstUseEver)
-            .build(|| {
-                if ui.button("Queue all Tests") {
-                    command_error = engine
-                        .queue_tests(TestGroup::Tests, None, RunFlags::RUN_FROM_COMMAND_LINE)
-                        .err();
-                }
-                ui.same_line();
-                if ui.button("Queue all Perfs") {
-                    command_error = engine
-                        .queue_tests(TestGroup::Perfs, None, RunFlags::RUN_FROM_COMMAND_LINE)
-                        .err();
-                }
-                ui.same_line();
-                if ui.button("Abort") {
-                    command_error = engine.abort_current_test().err();
-                }
-
-                ui.separator();
-                ui.text(format!(
-                    "Tested: {}  Success: {}  In queue: {}",
-                    summary.count_tested, summary.count_success, summary.count_in_queue
-                ));
-                ui.text(format!("Running tests: {running}"));
-                ui.text(format!("Request max app speed: {requesting_max_speed}"));
-            });
-        if let Some(error) = command_error {
-            return Err(RunError::application("frame", error.to_string()));
-        }
-        engine
-            .show_windows(ui, None)
-            .map_err(|error| RunError::application("frame", error.to_string()))?;
-        let _ = engine
-            .take_terminal_summary()
-            .map_err(|error| RunError::application("frame", error.to_string()))?;
-        Ok(())
-    }
-
-    fn test_engine(&mut self) -> Option<&mut TestEngine> {
-        self.engine.as_mut()
-    }
-
-    fn shutdown(&mut self, _context: &mut ShutdownContext<'_>) -> Result<(), RunError> {
-        if let Some(engine) = self.engine.as_mut() {
-            engine
-                .shutdown()
-                .map_err(|error| RunError::application("shutdown", error.to_string()))?;
-        }
-        Ok(())
-    }
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     let cli = match parse_cli() {
@@ -927,36 +788,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         return Ok(());
     }
-    if let Some(scenario) = cli.scenario {
-        let result = run_automated(&cli, scenario);
-        let json = result.to_json();
-        println!("{json}");
-        if let Some(path) = cli.json_output.as_deref()
-            && let Err(error) = write_json_atomic(path, &json)
-        {
-            eprintln!("failed to write automated JSON result: {error}");
-            std::process::exit(3);
-        }
-        let exit_code = result.exit_code();
-        if exit_code != 0 {
-            std::process::exit(exit_code);
-        }
-        return Ok(());
+    let Some(scenario) = cli.scenario else {
+        return Err("one of --scenario or --dear-app-smoke is required".into());
+    };
+    let result = run_automated(&cli, scenario);
+    let json = result.to_json();
+    println!("{json}");
+    if let Some(path) = cli.json_output.as_deref()
+        && let Err(error) = write_json_atomic(path, &json)
+    {
+        eprintln!("failed to write automated JSON result: {error}");
+        std::process::exit(3);
     }
-    let application = TestEngineApp {
-        cli,
-        engine: None,
-        script_target_state: ScriptTargetState {
-            checkbox: false,
-            slider: 42,
-            input: String::new(),
-            my_int: 42,
-        },
-    };
-    let config = AppConfig {
-        theme: Some(Theme::Dark),
-        ..Default::default()
-    };
-    run(config, application)?;
+    let exit_code = result.exit_code();
+    if exit_code != 0 {
+        std::process::exit(exit_code);
+    }
     Ok(())
 }

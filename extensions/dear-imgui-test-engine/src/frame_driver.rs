@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::fmt;
 
-use dear_imgui_rs::{FrameToken, render::ReconciledFrame};
+use dear_imgui_rs::FrameToken;
 
 use crate::TestEngineError;
 
@@ -177,6 +177,12 @@ pub enum FrameDriveOutcome {
 /// [`present`](Self::present) exactly once after `render_main` returns
 /// [`MainRenderOutcome::ReadyToPresent`] and the native pre-swap hook succeeds.
 pub trait TestFrameDriver {
+    /// Linear frame state produced by [`prepare`](Self::prepare).
+    ///
+    /// Single-viewport drivers normally use [`dear_imgui_rs::render::ReconciledFrame`]. A
+    /// multi-viewport backend may instead retain route-specific proof that auxiliary surfaces,
+    /// deferred faults, and resource retirement were handled before main-target rendering.
+    type PreparedFrame<'frame>;
     /// Error returned while closing and preparing the Dear ImGui frame.
     type PrepareError;
     /// Error returned while rendering the prepared main target.
@@ -188,16 +194,23 @@ pub trait TestFrameDriver {
     ///
     /// The driver chooses the renderer capability appropriate for its backend. Managed-texture
     /// renderers consume the token with [`FrameToken::render`] and reconcile every texture request;
-    /// legacy renderers consume it with [`FrameToken::render_legacy`]. Returning
-    /// [`ReconciledFrame`] keeps both paths linear and prevents a false successful return before
-    /// managed-texture feedback is reconciled. Multi-viewport drivers must also finish auxiliary
-    /// viewport rendering and presentation in this phase when their WSI contract requires it to
-    /// precede main-surface acquisition.
+    /// legacy renderers consume it with [`FrameToken::render_legacy`]. The returned associated type
+    /// keeps both paths linear and prevents route-specific proof from being erased back into a
+    /// plain reconciled frame. Multi-viewport drivers must also finish auxiliary viewport rendering
+    /// and presentation in this phase when their WSI contract requires it to precede main-surface
+    /// acquisition.
     fn prepare<'frame>(
         &mut self,
         frame: FrameToken<'frame>,
         frame_index: u64,
-    ) -> Result<ReconciledFrame<'frame>, Self::PrepareError>;
+    ) -> Result<Self::PreparedFrame<'frame>, Self::PrepareError>;
+
+    /// Returns the Context identity carried by one prepared frame.
+    ///
+    /// The Test Engine validates this identity before allowing main-target rendering. Composite
+    /// prepared transactions must report the identity of their embedded
+    /// [`dear_imgui_rs::render::ReconciledFrame`].
+    fn prepared_context_id(frame: &Self::PreparedFrame<'_>) -> dear_imgui_rs::ContextId;
 
     /// Renders the main target without presenting it.
     ///
@@ -208,7 +221,7 @@ pub trait TestFrameDriver {
     /// converting an unavailable surface into an infrastructure failure.
     fn render_main(
         &mut self,
-        frame: ReconciledFrame<'_>,
+        frame: Self::PreparedFrame<'_>,
         frame_index: u64,
     ) -> Result<MainRenderOutcome, Self::RenderError>;
 

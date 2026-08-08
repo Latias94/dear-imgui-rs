@@ -1,74 +1,22 @@
-use std::ffi::CString;
+use sdl3::event::Event;
+use sdl3_sys::events::SDL_Event;
 
-use sdl3::event::{DisplayEvent, Event, WindowEvent};
-use sdl3_sys::events::{
-    SDL_DisplayEvent, SDL_EVENT_DISPLAY_USABLE_BOUNDS_CHANGED, SDL_EVENT_TEXT_INPUT, SDL_Event,
-    SDL_TextInputEvent,
-};
-use sdl3_sys::video::SDL_WindowID;
-
-use super::{Sdl3BackendError, ffi};
-
-fn with_imgui_event<R>(
-    event: &Event,
-    callback: impl FnOnce(&SDL_Event) -> R,
-) -> Result<Option<R>, Sdl3BackendError> {
-    match event {
-        Event::TextInput {
-            timestamp,
-            window_id,
-            text,
-        } => {
-            let text = CString::new(text.as_bytes())
-                .map_err(|_| Sdl3BackendError::TextInputContainsNul)?;
-            let raw = SDL_Event {
-                text: SDL_TextInputEvent {
-                    r#type: SDL_EVENT_TEXT_INPUT,
-                    reserved: 0,
-                    timestamp: *timestamp,
-                    windowID: SDL_WindowID(*window_id),
-                    text: text.as_ptr(),
-                },
-            };
-            Ok(Some(callback(&raw)))
-        }
-        Event::Window {
-            win_event: WindowEvent::None,
-            ..
-        }
-        | Event::Display {
-            display_event: DisplayEvent::None,
-            ..
-        } => Ok(None),
-        Event::Unknown { timestamp, type_ }
-            if *type_ == SDL_EVENT_DISPLAY_USABLE_BOUNDS_CHANGED.0 =>
-        {
-            let raw = SDL_Event {
-                display: SDL_DisplayEvent {
-                    r#type: SDL_EVENT_DISPLAY_USABLE_BOUNDS_CHANGED,
-                    timestamp: *timestamp,
-                    ..Default::default()
-                },
-            };
-            Ok(Some(callback(&raw)))
-        }
-        Event::Window { .. }
-        | Event::KeyDown { .. }
-        | Event::KeyUp { .. }
-        | Event::MouseMotion { .. }
-        | Event::MouseButtonDown { .. }
-        | Event::MouseButtonUp { .. }
-        | Event::MouseWheel { .. }
-        | Event::Display { .. }
-        | Event::ControllerDeviceAdded { .. }
-        | Event::ControllerDeviceRemoved { .. } => Ok(event.to_ll().as_ref().map(callback)),
-        _ => Ok(None),
-    }
-}
+use super::{Sdl3BackendError, Sdl3CallbackEvent, ffi};
 
 pub(crate) fn process_owned_event(event: &Event) -> Result<bool, Sdl3BackendError> {
-    with_imgui_event(event, |event| unsafe { process_raw_sys_event(event) })
-        .map(|processed| processed.unwrap_or(false))
+    Ok(Sdl3CallbackEvent::from_owned_event(event)?
+        .as_ref()
+        .is_some_and(process_callback_owned_event))
+}
+
+pub(crate) fn process_callback_owned_event(event: &Sdl3CallbackEvent) -> bool {
+    event.with_raw_event(|event| {
+        event.is_some_and(|event| {
+            // SAFETY: Sdl3CallbackEvent reconstructs the active union member and retains every
+            // pointer payload for this call.
+            unsafe { process_raw_sys_event(event) }
+        })
+    })
 }
 
 /// # Safety
@@ -85,6 +33,7 @@ mod tests {
     use std::ffi::CStr;
 
     use super::*;
+    use sdl3_sys::events::SDL_EVENT_DISPLAY_USABLE_BOUNDS_CHANGED;
 
     #[test]
     fn text_input_owns_bytes_for_the_entire_raw_call() {
@@ -94,10 +43,12 @@ mod tests {
             text: "hello".to_owned(),
         };
 
-        let text = with_imgui_event(&event, |raw| unsafe {
-            CStr::from_ptr(raw.text.text).to_str().unwrap().to_owned()
-        })
-        .unwrap();
+        let text = Sdl3CallbackEvent::from_owned_event(&event)
+            .unwrap()
+            .expect("text input must reach Dear ImGui")
+            .with_raw_event(|raw| {
+                raw.map(|raw| unsafe { CStr::from_ptr(raw.text.text).to_str().unwrap().to_owned() })
+            });
 
         assert_eq!(text.as_deref(), Some("hello"));
     }
@@ -109,15 +60,12 @@ mod tests {
             window_id: 7,
             text: "hello\0world".to_owned(),
         };
-        let mut called = false;
-
-        let result = with_imgui_event(&event, |_| called = true);
+        let result = Sdl3CallbackEvent::from_owned_event(&event);
 
         assert!(matches!(
             result,
             Err(Sdl3BackendError::TextInputContainsNul)
         ));
-        assert!(!called);
     }
 
     #[test]
@@ -130,12 +78,9 @@ mod tests {
             data1: std::ptr::dangling_mut::<std::ffi::c_void>(),
             data2: std::ptr::dangling_mut::<std::ffi::c_void>(),
         };
-        let mut called = false;
+        let result = Sdl3CallbackEvent::from_owned_event(&event).unwrap();
 
-        let result = with_imgui_event(&event, |_| called = true).unwrap();
-
-        assert_eq!(result, None);
-        assert!(!called);
+        assert!(result.is_none());
     }
 
     #[test]
@@ -145,7 +90,10 @@ mod tests {
             type_: SDL_EVENT_DISPLAY_USABLE_BOUNDS_CHANGED.0,
         };
 
-        let display = with_imgui_event(&event, |raw| unsafe { raw.display }).unwrap();
+        let display = Sdl3CallbackEvent::from_owned_event(&event)
+            .unwrap()
+            .expect("usable-bounds changes must reach Dear ImGui")
+            .with_raw_event(|raw| raw.map(|raw| unsafe { raw.display }));
 
         assert_eq!(
             display.map(|event| (event.r#type.0, event.timestamp)),

@@ -1,7 +1,6 @@
-//! Basic Dear ImGui example using the Glow OpenGL backend
+//! Winit + Glow backend lifecycle reference.
 //!
-//! This example demonstrates the basic usage of dear-imgui-glow with winit v0.30.
-//! It shows a simple Dear ImGui window with some basic widgets and the demo window.
+//! This example keeps the complete window, OpenGL context, renderer, and shutdown order visible.
 
 use std::{num::NonZeroU32, sync::Arc, time::Instant};
 
@@ -11,7 +10,10 @@ use dear_imgui_winit::WinitPlatform;
 use glow::HasContext;
 use glutin::{
     config::ConfigTemplateBuilder,
-    context::{ContextAttributesBuilder, NotCurrentGlContext, PossiblyCurrentContext},
+    context::{
+        ContextAttributesBuilder, NotCurrentGlContext, PossiblyCurrentContext,
+        PossiblyCurrentGlContext,
+    },
     display::{GetGlDisplay, GlDisplay},
     surface::{GlSurface, Surface, SurfaceAttributesBuilder, WindowSurface},
 };
@@ -26,20 +28,87 @@ use winit::{
 };
 
 struct ImguiState {
-    context: Context,
-    platform: WinitPlatform,
     renderer: GlowRenderer,
+    platform: WinitPlatform,
     clear_color: [f32; 4],
     demo_open: bool,
     software_cursor: bool,
     last_frame: Instant,
+    renderer_shutdown_complete: bool,
+    platform_shutdown_complete: bool,
+    // Context must outlive every attachment, including fallback field drops after a failed shutdown.
+    context: Context,
+}
+
+struct CurrentGlContext {
+    context: PossiblyCurrentContext,
+    bound: bool,
+}
+
+impl CurrentGlContext {
+    fn new(context: PossiblyCurrentContext) -> Self {
+        Self {
+            context,
+            bound: true,
+        }
+    }
+
+    fn get(&self) -> &PossiblyCurrentContext {
+        &self.context
+    }
+
+    fn unbind(&mut self) -> glutin::error::Result<()> {
+        if self.bound {
+            self.context.make_not_current_in_place()?;
+            self.bound = false;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for CurrentGlContext {
+    fn drop(&mut self) {
+        if let Err(error) = self.unbind() {
+            eprintln!("Winit/Glow fallback context unbind failed: {error}");
+        }
+    }
+}
+
+fn initialization_failure(
+    cause: impl std::fmt::Display,
+    context: &mut Context,
+    platform: Option<&mut WinitPlatform>,
+    renderer: Option<&mut GlowRenderer>,
+    gl_context: &mut CurrentGlContext,
+) -> Box<dyn std::error::Error> {
+    context.end_frame();
+    let mut errors = vec![format!("Winit/Glow initialization failed: {cause}")];
+    let mut attachments_shutdown = true;
+
+    if let Some(renderer) = renderer
+        && let Err(error) = renderer.shutdown(context)
+    {
+        errors.push(format!("Glow renderer rollback failed: {error}"));
+        attachments_shutdown = false;
+    }
+    if let Some(platform) = platform
+        && let Err(error) = platform.shutdown(context)
+    {
+        errors.push(format!("Winit platform rollback failed: {error}"));
+        attachments_shutdown = false;
+    }
+    if attachments_shutdown && let Err(error) = gl_context.unbind() {
+        errors.push(format!("OpenGL context rollback failed: {error}"));
+    }
+
+    errors.join("; ").into()
 }
 
 struct AppWindow {
-    window: Arc<Window>,
-    surface: Surface<WindowSurface>,
-    context: PossiblyCurrentContext,
     imgui: ImguiState,
+    gl_context: CurrentGlContext,
+    surface: Surface<WindowSurface>,
+    window: Arc<Window>,
 }
 
 #[derive(Default)]
@@ -51,7 +120,7 @@ impl AppWindow {
     fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
         // Create window with OpenGL context
         let window_attributes = winit::window::Window::default_attributes()
-            .with_title("Dear ImGui Glow Basic Example")
+            .with_title("Dear ImGui - Winit + Glow")
             .with_inner_size(LogicalSize::new(1280.0, 720.0));
 
         let (window, cfg) = glutin_winit::DisplayBuilder::new()
@@ -80,52 +149,130 @@ impl AppWindow {
                 .create_window_surface(&cfg, &surface_attribs)?
         };
 
-        let context = context.make_current(&surface)?;
+        let mut gl_context = CurrentGlContext::new(context.make_current(&surface)?);
 
         // Setup Dear ImGui
         let mut imgui_context = Context::create();
-        imgui_context.set_ini_filename(None::<String>).unwrap();
+        if let Err(error) = imgui_context.set_ini_filename(None::<String>) {
+            return Err(initialization_failure(
+                error,
+                &mut imgui_context,
+                None,
+                None,
+                &mut gl_context,
+            ));
+        }
 
-        let mut platform = WinitPlatform::new(&mut imgui_context)?;
-        platform.attach_window(
+        let mut platform = match WinitPlatform::new(&mut imgui_context) {
+            Ok(platform) => platform,
+            Err(error) => {
+                return Err(initialization_failure(
+                    error,
+                    &mut imgui_context,
+                    None,
+                    None,
+                    &mut gl_context,
+                ));
+            }
+        };
+        if let Err(error) = platform.attach_window(
             Arc::clone(&window),
             dear_imgui_winit::HiDpiMode::Default,
             &mut imgui_context,
-        )?;
+        ) {
+            return Err(initialization_failure(
+                error,
+                &mut imgui_context,
+                Some(&mut platform),
+                None,
+                &mut gl_context,
+            ));
+        }
 
         // Create Glow context and renderer
         let gl = unsafe {
             glow::Context::from_loader_function_cstr(|s| {
-                context.display().get_proc_address(s).cast()
+                gl_context.get().display().get_proc_address(s).cast()
             })
         };
 
-        let mut renderer = GlowRenderer::new(gl, &mut imgui_context)?;
+        let mut renderer = match GlowRenderer::new(gl, &mut imgui_context) {
+            Ok(renderer) => renderer,
+            Err(error) => {
+                return Err(initialization_failure(
+                    error,
+                    &mut imgui_context,
+                    Some(&mut platform),
+                    None,
+                    &mut gl_context,
+                ));
+            }
+        };
         // Use sRGB framebuffer: enable FRAMEBUFFER_SRGB during ImGui rendering
-        renderer.set_framebuffer_srgb_enabled(true)?;
+        if let Err(error) = renderer.set_framebuffer_srgb_enabled(true) {
+            return Err(initialization_failure(
+                error,
+                &mut imgui_context,
+                Some(&mut platform),
+                Some(&mut renderer),
+                &mut gl_context,
+            ));
+        }
 
         let imgui = ImguiState {
-            context: imgui_context,
             platform,
             renderer,
             clear_color: [0.1, 0.2, 0.3, 1.0],
             demo_open: true,
             software_cursor: false,
             last_frame: Instant::now(),
+            renderer_shutdown_complete: false,
+            platform_shutdown_complete: false,
+            context: imgui_context,
         };
 
         Ok(Self {
-            window,
-            surface,
-            context,
             imgui,
+            gl_context,
+            surface,
+            window,
         })
+    }
+
+    fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.imgui.context.end_frame();
+        let mut errors = Vec::new();
+
+        if !self.imgui.renderer_shutdown_complete {
+            match self.imgui.renderer.shutdown(&mut self.imgui.context) {
+                Ok(()) => self.imgui.renderer_shutdown_complete = true,
+                Err(error) => errors.push(format!("Glow renderer shutdown failed: {error}")),
+            }
+        }
+        if !self.imgui.platform_shutdown_complete {
+            match self.imgui.platform.shutdown(&mut self.imgui.context) {
+                Ok(()) => self.imgui.platform_shutdown_complete = true,
+                Err(error) => errors.push(format!("Winit platform shutdown failed: {error}")),
+            }
+        }
+        if self.imgui.renderer_shutdown_complete
+            && self.imgui.platform_shutdown_complete
+            && let Err(error) = self.gl_context.unbind()
+        {
+            errors.push(format!("OpenGL context unbind failed: {error}"));
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; ").into())
+        }
     }
 
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
             self.surface.resize(
-                &self.context,
+                self.gl_context.get(),
                 NonZeroU32::new(new_size.width).unwrap(),
                 NonZeroU32::new(new_size.height).unwrap(),
             );
@@ -216,8 +363,16 @@ impl AppWindow {
 
         self.imgui.renderer.render(pending_frame)?;
 
-        self.surface.swap_buffers(&self.context)?;
+        self.surface.swap_buffers(self.gl_context.get())?;
         Ok(())
+    }
+}
+
+impl Drop for AppWindow {
+    fn drop(&mut self) {
+        if let Err(error) = self.shutdown() {
+            eprintln!("Winit/Glow fallback shutdown failed: {error}");
+        }
     }
 }
 
@@ -288,6 +443,14 @@ impl ApplicationHandler for App {
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         if let Some(window) = &self.window {
             window.window.request_redraw();
+        }
+    }
+
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(window) = self.window.as_mut()
+            && let Err(error) = window.shutdown()
+        {
+            eprintln!("Winit/Glow shutdown failed: {error}");
         }
     }
 }

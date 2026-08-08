@@ -18,7 +18,10 @@ use dear_imgui_winit::WinitPlatform;
 use glow::HasContext;
 use glutin::{
     config::ConfigTemplateBuilder,
-    context::{ContextAttributesBuilder, NotCurrentGlContext, PossiblyCurrentContext},
+    context::{
+        ContextAttributesBuilder, NotCurrentGlContext, PossiblyCurrentContext,
+        PossiblyCurrentGlContext,
+    },
     display::{GetGlDisplay, GlDisplay},
     surface::{GlSurface, Surface, SurfaceAttributesBuilder, WindowSurface},
 };
@@ -72,11 +75,8 @@ impl BrowserState {
     }
 
     fn scan_and_load(&mut self, root: &Path, renderer: &mut GlowRenderer) {
-        // Cleanup existing GL textures before reloading
-        for asset in self.assets.drain(..) {
-            if let Err(error) = renderer.unregister_texture(asset.tex) {
-                eprintln!("[asset_browser] texture cleanup failed: {error}");
-            }
+        for error in self.release_textures(renderer) {
+            eprintln!("[asset_browser] texture cleanup failed: {error}");
         }
         let mut count = 0usize;
         let mut ok = 0usize;
@@ -124,22 +124,102 @@ impl BrowserState {
         }
         self.status = format!("Loaded {ok}/{count} images from {}", root.display());
     }
+
+    fn release_textures(&mut self, renderer: &mut GlowRenderer) -> Vec<String> {
+        let mut errors = Vec::new();
+        let mut retained = Vec::new();
+        for asset in self.assets.drain(..) {
+            if let Err(error) = renderer.unregister_texture(asset.tex) {
+                errors.push(error.to_string());
+                retained.push(asset);
+            }
+        }
+        self.assets = retained;
+        errors
+    }
 }
 
 struct ImguiState {
-    context: Context,
-    platform: WinitPlatform,
     renderer: GlowRenderer,
+    platform: WinitPlatform,
     last_frame: Instant,
+    renderer_shutdown_complete: bool,
+    platform_shutdown_complete: bool,
+    // Context must outlive every attachment, including fallback field drops after failed shutdown.
+    context: Context,
+}
+
+struct CurrentGlContext {
+    context: PossiblyCurrentContext,
+    bound: bool,
+}
+
+impl CurrentGlContext {
+    fn new(context: PossiblyCurrentContext) -> Self {
+        Self {
+            context,
+            bound: true,
+        }
+    }
+
+    fn get(&self) -> &PossiblyCurrentContext {
+        &self.context
+    }
+
+    fn unbind(&mut self) -> glutin::error::Result<()> {
+        if self.bound {
+            self.context.make_not_current_in_place()?;
+            self.bound = false;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for CurrentGlContext {
+    fn drop(&mut self) {
+        if let Err(error) = self.unbind() {
+            eprintln!("Asset browser fallback context unbind failed: {error}");
+        }
+    }
+}
+
+fn initialization_failure(
+    cause: impl std::fmt::Display,
+    context: &mut Context,
+    platform: Option<&mut WinitPlatform>,
+    renderer: Option<&mut GlowRenderer>,
+    gl_context: &mut CurrentGlContext,
+) -> Box<dyn std::error::Error> {
+    context.end_frame();
+    let mut errors = vec![format!("Asset browser initialization failed: {cause}")];
+    let mut attachments_shutdown = true;
+
+    if let Some(renderer) = renderer
+        && let Err(error) = renderer.shutdown(context)
+    {
+        errors.push(format!("Glow renderer rollback failed: {error}"));
+        attachments_shutdown = false;
+    }
+    if let Some(platform) = platform
+        && let Err(error) = platform.shutdown(context)
+    {
+        errors.push(format!("Winit platform rollback failed: {error}"));
+        attachments_shutdown = false;
+    }
+    if attachments_shutdown && let Err(error) = gl_context.unbind() {
+        errors.push(format!("OpenGL context rollback failed: {error}"));
+    }
+
+    errors.join("; ").into()
 }
 
 struct AppWindow {
-    window: Arc<Window>,
-    surface: Surface<WindowSurface>,
-    context: PossiblyCurrentContext,
     imgui: ImguiState,
     browser: BrowserState,
     root: PathBuf,
+    gl_context: CurrentGlContext,
+    surface: Surface<WindowSurface>,
+    window: Arc<Window>,
 }
 
 #[derive(Default)]
@@ -172,47 +252,128 @@ impl AppWindow {
             cfg.display()
                 .create_window_surface(&cfg, &surface_attribs)?
         };
-        let context = context.make_current(&surface)?;
+        let mut gl_context = CurrentGlContext::new(context.make_current(&surface)?);
 
         let mut imgui_context = Context::create();
-        imgui_context.set_ini_filename(None::<String>).unwrap();
-        let mut platform = WinitPlatform::new(&mut imgui_context)?;
-        platform.attach_window(
+        if let Err(error) = imgui_context.set_ini_filename(None::<String>) {
+            return Err(initialization_failure(
+                error,
+                &mut imgui_context,
+                None,
+                None,
+                &mut gl_context,
+            ));
+        }
+        let mut platform = match WinitPlatform::new(&mut imgui_context) {
+            Ok(platform) => platform,
+            Err(error) => {
+                return Err(initialization_failure(
+                    error,
+                    &mut imgui_context,
+                    None,
+                    None,
+                    &mut gl_context,
+                ));
+            }
+        };
+        if let Err(error) = platform.attach_window(
             Arc::clone(&window),
             dear_imgui_winit::HiDpiMode::Default,
             &mut imgui_context,
-        )?;
+        ) {
+            return Err(initialization_failure(
+                error,
+                &mut imgui_context,
+                Some(&mut platform),
+                None,
+                &mut gl_context,
+            ));
+        }
 
         let gl = unsafe {
             glow::Context::from_loader_function_cstr(|s| {
-                context.display().get_proc_address(s).cast()
+                gl_context.get().display().get_proc_address(s).cast()
             })
         };
-        let mut renderer = GlowRenderer::new(gl, &mut imgui_context)?;
-        renderer.set_framebuffer_srgb_enabled(false)?;
+        let mut renderer = match GlowRenderer::new(gl, &mut imgui_context) {
+            Ok(renderer) => renderer,
+            Err(error) => {
+                return Err(initialization_failure(
+                    error,
+                    &mut imgui_context,
+                    Some(&mut platform),
+                    None,
+                    &mut gl_context,
+                ));
+            }
+        };
+        if let Err(error) = renderer.set_framebuffer_srgb_enabled(false) {
+            return Err(initialization_failure(
+                error,
+                &mut imgui_context,
+                Some(&mut platform),
+                Some(&mut renderer),
+                &mut gl_context,
+            ));
+        }
 
         let mut app = Self {
-            window,
-            surface,
-            context,
             imgui: ImguiState {
-                context: imgui_context,
-                platform,
                 renderer,
+                platform,
                 last_frame: Instant::now(),
+                renderer_shutdown_complete: false,
+                platform_shutdown_complete: false,
+                context: imgui_context,
             },
             browser: BrowserState::default(),
             root: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets"),
+            gl_context,
+            surface,
+            window,
         };
         app.browser
             .scan_and_load(&app.root, &mut app.imgui.renderer);
         Ok(app)
     }
 
+    fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.imgui.context.end_frame();
+        let mut errors = self.browser.release_textures(&mut self.imgui.renderer);
+
+        if !self.imgui.renderer_shutdown_complete {
+            match self.imgui.renderer.shutdown(&mut self.imgui.context) {
+                Ok(()) => {
+                    self.imgui.renderer_shutdown_complete = true;
+                    self.browser.assets.clear();
+                }
+                Err(error) => errors.push(format!("Glow renderer shutdown failed: {error}")),
+            }
+        }
+        if !self.imgui.platform_shutdown_complete {
+            match self.imgui.platform.shutdown(&mut self.imgui.context) {
+                Ok(()) => self.imgui.platform_shutdown_complete = true,
+                Err(error) => errors.push(format!("Winit platform shutdown failed: {error}")),
+            }
+        }
+        if self.imgui.renderer_shutdown_complete
+            && self.imgui.platform_shutdown_complete
+            && let Err(error) = self.gl_context.unbind()
+        {
+            errors.push(format!("OpenGL context unbind failed: {error}"));
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(std::io::Error::other(errors.join("; ")).into())
+        }
+    }
+
     fn resize(&mut self, sz: winit::dpi::PhysicalSize<u32>) {
         if sz.width > 0 && sz.height > 0 {
             self.surface.resize(
-                &self.context,
+                self.gl_context.get(),
                 NonZeroU32::new(sz.width).unwrap(),
                 NonZeroU32::new(sz.height).unwrap(),
             );
@@ -310,17 +471,15 @@ impl AppWindow {
             }
         }
         self.imgui.renderer.render(pending_frame)?;
-        self.surface.swap_buffers(&self.context)?;
+        self.surface.swap_buffers(self.gl_context.get())?;
         Ok(())
     }
 }
 
 impl Drop for AppWindow {
     fn drop(&mut self) {
-        for asset in self.browser.assets.drain(..) {
-            if let Err(error) = self.imgui.renderer.unregister_texture(asset.tex) {
-                eprintln!("[asset_browser] texture cleanup failed: {error}");
-            }
+        if let Err(error) = self.shutdown() {
+            eprintln!("Asset browser fallback shutdown failed: {error}");
         }
     }
 }
@@ -383,6 +542,14 @@ impl ApplicationHandler for App {
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         if let Some(w) = &self.window {
             w.window.request_redraw();
+        }
+    }
+
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(window) = self.window.as_mut()
+            && let Err(error) = window.shutdown()
+        {
+            eprintln!("Asset browser shutdown failed: {error}");
         }
     }
 }

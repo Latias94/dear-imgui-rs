@@ -149,15 +149,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ui.text("ImGui + SDL3 + OpenGL3");
             });
 
-        // 4) Render via OpenGL backend
-        let pending = frame.render(sdl3_backend.consumer());
-        unsafe {
-            use sdl3::video::Window;
-            use sdl3::video::GLContext;
-            // The context passed at initialization must be current for every OpenGL operation.
-            window.gl_make_current(&gl_context)?;
-        }
-        sdl3_backend.render(pending)?;
+        // 4) Prepare the complete renderer/platform transaction. This also updates and renders
+        // secondary viewports when the current SDL driver advertises that capability.
+        let prepared = sdl3_backend.prepare(frame, || window.gl_make_current(&gl_context))?;
+        sdl3_backend.render_main(prepared)?;
         window.gl_swap_window();
     }
 }
@@ -167,24 +162,22 @@ APIs of interest (see `src/lib.rs` for full docs):
 
 - `Sdl3OpenGl3Backend` and `SdlRenderer3Backend`:
   RAII renderer owners whose shared runtime retains the Context's renderer consumer through
-  explicit or Context-owned teardown, processes request-bound texture feedback, and consumes
-  `PendingFrame` values. Each owner exposes its non-cloneable synchronous consumer through
-  `consumer()`.
-  OpenGL multi-viewport routes can call `reconcile_frame(...)`, run secondary platform-window
-  callbacks, then transfer that capability into `render_reconciled(...)` for the main viewport.
-  OpenGL users must keep the initialized context current for renderer
-  operations. SDLRenderer has one normal `render(...)` path and rejects a `WindowCanvas` backed by
-  another raw renderer before texture or draw work starts.
+  explicit or Context-owned teardown. OpenGL3's normal path consumes a `FrameToken` through
+  `prepare(frame, restore_main_context)`: managed textures, capability-aware secondary viewports,
+  OpenGL context restoration, and FIFO fault attribution are one transaction. Pass the resulting
+  move-only capability to `render_main(...)`; a raw `ReconciledFrame` cannot bypass that contract.
+  OpenGL users must keep the initialized context current for renderer operations. SDLRenderer keeps
+  its separate single-window `render(...)` path and rejects a `WindowCanvas` backed by another raw
+  renderer before texture or draw work starts.
 - `SdlGpu3RendererBackend`:
-  RAII renderer owner for SDL3 + SDLGPU3. Unsafe `prepare_render(...)` returns an
-  `SdlGpu3PreparedFrame` that keeps the renderer and Context frame alive until its unsafe
-  `render(...)` call inside the SDL GPU render pass. The calls are unsafe because `sdl3` does not
-  expose enough provenance to verify that the command buffer, render pass, and initialized device
-  share one native owner. `reconcile_frame(...)` is a surface-independent preparation step for
-  applications that must render secondary viewports before attempting to acquire the main
-  swapchain image. After the secondary callbacks, `prepare_render_reconciled(...)` prepares that
-  same linear capability for the main pass. The methods consume their frame capabilities, so the
-  same epoch cannot be reconciled or rendered twice.
+  RAII renderer owner for SDL3 + SDLGPU3. `prepare(frame)` consumes a `FrameToken`, reconciles
+  managed textures, and runs the secondary-window transaction before the application acquires its
+  main swapchain. `unsafe prepare_render_main(prepared, command_buffer)` records main preparation
+  commands and returns a move-only `SdlGpu3RenderPassFrame`; consume it with unsafe
+  `render_main(render_pass)` while the application-owned pass is active. If the main surface is
+  minimized or unavailable, call `prepared.skip_main()` after the secondary work has completed.
+  The unsafe boundary remains because `sdl3` cannot prove that command buffers, render passes, and
+  the initialized SDL GPU device share one native owner.
 - `Sdl3PlatformBackend`:
   platform-only RAII owner for applications that provide a separate renderer. It intentionally
   does not claim a renderer consumer. Construct it with unsafe `Sdl3PlatformBackend::init_for_other`,
@@ -208,17 +201,27 @@ APIs of interest (see `src/lib.rs` for full docs):
   active. This preflight runs before the current frame or native SDL state changes; shut down the
   renderer first, then retry platform shutdown. Context-owned teardown preserves the same ordered
   renderer-before-platform contract automatically.
-- `poll_fault()`:
-  returns deferred platform callback failures without unwinding through native code. Ordinary
-  owner methods also surface the oldest pending fault before entering SDL.
+- `Sdl3PlatformBackend::drain_faults()`:
+  returns every deferred platform callback failure in observation order without unwinding through
+  native code. First-party multi-viewport routes already include this ordered batch in their frame
+  result; the method remains as the advanced escape hatch for Glow and custom renderer routes.
+  Ordinary owner methods surface the oldest pending fault before entering SDL.
 - `process_event(&mut Context, &sdl3::event::Event)`:
   the safe event path for normal `EventPump` loops. Pointer-bearing SDL payloads such as text input
   remain owned while the official backend consumes them.
+- `Sdl3CallbackEventHandoff` and `process_callback_event(...)`:
+  the safe main-callback path. `push_from_callback(...)` is the single unsafe enqueue boundary: it
+  copies every transient payload consumed by the official backend, catches callback-path panics,
+  and makes failures available through `try_drain()` without unwinding through SDL's C ABI. Call
+  `try_drain()` on the main thread and pass each owned event directly to the backend owner; a
+  reported fault leaves queued events available for the next iteration. There is no unchecked
+  drain or separate handoff-fault polling path in the normal API.
 - `unsafe process_raw_event(&mut Context, &SDL_Event)`:
-  the low-level escape hatch for SDL callbacks and foreign event loops. The caller must prove the
-  active union variant, payload pointer lifetime, SDL thread, and backend provenance contracts.
+  the low-level escape hatch for foreign event loops. Callback-mode applications should use the
+  owned handoff instead of reconstructing and replaying the raw union themselves.
 - Runtime entry checks are scope-bound. Callback replacement detected while an operation returns
-  an error or unwinds remains queued for `poll_fault()` instead of being skipped by an early exit.
+  an error or unwinds remains queued for the route result or the next owner entry instead of being
+  skipped by an early exit.
 The free renderer initialization, render, texture-update, and device-object functions were
 removed. They allowed callers to bypass the Context-owned renderer epoch and write directly into
 native texture state. Call the owning backend's `shutdown(...)` method when shutdown errors need to
@@ -567,8 +570,9 @@ VSync waits across several platform windows. Use
 `init_platform_for_opengl_with_viewport_swap_interval(...)` to choose `VSync`, `Adaptive`, or
 `MatchMain`. Swap-interval selection is best effort: if a driver rejects the requested timing after
 the secondary context is valid, the viewport keeps the driver's default timing. Native GL context,
-state-restoration, and SDL_GPU failures are deferred through `poll_fault()`; a partially initialized
-viewport is closed instead of being published as usable.
+state-restoration, and SDL_GPU failures are deferred into the owning route result (or
+`drain_faults()` for a custom route); a partially initialized viewport is closed instead of being
+published as usable.
 
 - **SDL3 + OpenGL3**: multi-viewport is provided by the upstream C++ backends and
   considered stable for desktop use.

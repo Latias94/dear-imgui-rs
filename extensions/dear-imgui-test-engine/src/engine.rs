@@ -330,9 +330,10 @@ impl TestEngine {
     ///
     /// Consuming [`FrameToken`] gives the driver the one-use capability to prepare the open Dear
     /// ImGui frame before rendering the main target. The attached Context is checked before the
-    /// driver sees the token, and the returned reconciled frame is checked again before main-target
-    /// rendering. Presentation is bracketed as `pre-swap -> present -> post-swap` only when the
-    /// driver reports that the main target is ready.
+    /// driver sees the token, and the returned prepared transaction's Context identity is checked
+    /// again before main-target rendering. Presentation is bracketed as
+    /// `pre-swap -> present -> post-swap` only when the driver reports that the main target is
+    /// ready.
     ///
     /// If presentation fails or panics, an abort path releases native capture state without
     /// pretending that the surface was presented.
@@ -367,20 +368,21 @@ impl TestEngine {
             ));
         }
 
-        let reconciled = driver
+        let prepared = driver
             .prepare(frame, frame_index)
             .map_err(FrameDriverError::Prepare)?;
-        if reconciled.context_id() != expected {
+        let actual = Driver::prepared_context_id(&prepared);
+        if actual != expected {
             return Err(FrameDriverError::Context(
                 TestEngineError::ContextMismatch {
                     operation: "TestEngine::drive_frame prepare completion",
                     expected,
-                    actual: reconciled.context_id(),
+                    actual,
                 },
             ));
         }
         match driver
-            .render_main(reconciled, frame_index)
+            .render_main(prepared, frame_index)
             .map_err(FrameDriverError::Render)?
         {
             MainRenderOutcome::ReadyToPresent => {}

@@ -116,8 +116,8 @@ fn draw_manual(ui: &dear_imgui_rs::Ui, editor: &dear_node_editor::NodeEditorFram
 Run the repository examples:
 
 ```bash
-# Minimal interaction sample based on upstream basic-interaction-example.
-cargo run -p dear-imgui-examples --bin node_editor_basic --features node-editor
+# Minimal copy-ready interaction sample.
+cargo run -p dear-imgui-examples --bin node_editor_minimal --features node-editor
 
 # Blueprint-style showcase based on upstream blueprints-example.
 cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-editor-blueprints

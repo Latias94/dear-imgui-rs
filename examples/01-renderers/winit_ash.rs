@@ -6,12 +6,18 @@ use ash::{
 #[cfg(feature = "ash-dynamic-rendering")]
 use dear_imgui_ash::DynamicRendering;
 use dear_imgui_ash::{
-    AshRenderer, AshRendererConfig, Options as AshOptions, TextureRetirementBatch,
+    AshRenderer, AshRendererConfig, Options as AshOptions, RendererError, TextureRetirementBatch,
 };
 use dear_imgui_rs::*;
 use dear_imgui_winit::WinitPlatform;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
-use std::{ffi::CString, sync::Arc, time::Instant};
+use std::{
+    ffi::CString,
+    mem::ManuallyDrop,
+    ops::{Deref, DerefMut},
+    sync::Arc,
+    time::Instant,
+};
 use tracing::{error, info};
 use winit::{
     application::ApplicationHandler,
@@ -31,6 +37,156 @@ use ash_frame_sync::{
 
 const FRAMES_IN_FLIGHT: usize = 2;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DeviceTeardownState {
+    Active,
+    Complete,
+    Lost,
+}
+
+impl DeviceTeardownState {
+    const fn permits_native_destruction(self) -> bool {
+        matches!(self, Self::Complete | Self::Lost)
+    }
+}
+
+fn classify_teardown_wait(
+    result: Result<(), vk::Result>,
+) -> Result<DeviceTeardownState, vk::Result> {
+    match result {
+        Ok(()) => Ok(DeviceTeardownState::Complete),
+        Err(vk::Result::ERROR_DEVICE_LOST) => Ok(DeviceTeardownState::Lost),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(test)]
+mod teardown_state_tests {
+    use super::*;
+
+    #[test]
+    fn only_idle_and_device_lost_are_terminal_drop_proofs() {
+        assert!(!DeviceTeardownState::Active.permits_native_destruction());
+        assert!(DeviceTeardownState::Complete.permits_native_destruction());
+        assert!(DeviceTeardownState::Lost.permits_native_destruction());
+    }
+
+    #[test]
+    fn retryable_wait_errors_do_not_publish_a_terminal_proof() {
+        assert_eq!(
+            classify_teardown_wait(Err(vk::Result::ERROR_OUT_OF_HOST_MEMORY)),
+            Err(vk::Result::ERROR_OUT_OF_HOST_MEMORY)
+        );
+        assert_eq!(
+            classify_teardown_wait(Err(vk::Result::ERROR_DEVICE_LOST)),
+            Ok(DeviceTeardownState::Lost)
+        );
+        assert_eq!(
+            classify_teardown_wait(Ok(())),
+            Ok(DeviceTeardownState::Complete)
+        );
+    }
+}
+
+struct VulkanContextInit {
+    entry: Option<Entry>,
+    instance: Option<Instance>,
+    surface_loader: Option<khr_surface::Instance>,
+    surface: vk::SurfaceKHR,
+    device: Option<Device>,
+    command_pool: vk::CommandPool,
+}
+
+impl VulkanContextInit {
+    fn new(entry: Entry) -> Self {
+        Self {
+            entry: Some(entry),
+            instance: None,
+            surface_loader: None,
+            surface: vk::SurfaceKHR::null(),
+            device: None,
+            command_pool: vk::CommandPool::null(),
+        }
+    }
+
+    fn entry(&self) -> &Entry {
+        self.entry
+            .as_ref()
+            .expect("Vulkan initialization still owns its entry")
+    }
+
+    fn instance(&self) -> &Instance {
+        self.instance
+            .as_ref()
+            .expect("Vulkan initialization already created its instance")
+    }
+
+    fn surface_loader(&self) -> &khr_surface::Instance {
+        self.surface_loader
+            .as_ref()
+            .expect("Vulkan initialization already created its surface loader")
+    }
+
+    fn device(&self) -> &Device {
+        self.device
+            .as_ref()
+            .expect("Vulkan initialization already created its device")
+    }
+
+    fn finish(mut self, physical_device: vk::PhysicalDevice, queue: vk::Queue) -> VulkanContext {
+        let surface = std::mem::replace(&mut self.surface, vk::SurfaceKHR::null());
+        let command_pool = std::mem::replace(&mut self.command_pool, vk::CommandPool::null());
+        VulkanContext {
+            _entry: self
+                .entry
+                .take()
+                .expect("completed Vulkan initialization owns its entry"),
+            instance: self
+                .instance
+                .take()
+                .expect("completed Vulkan initialization owns its instance"),
+            surface_loader: self
+                .surface_loader
+                .take()
+                .expect("completed Vulkan initialization owns its surface loader"),
+            surface,
+            physical_device,
+            device: self
+                .device
+                .take()
+                .expect("completed Vulkan initialization owns its device"),
+            queue,
+            command_pool,
+            teardown_state: DeviceTeardownState::Active,
+        }
+    }
+}
+
+impl Drop for VulkanContextInit {
+    fn drop(&mut self) {
+        unsafe {
+            if let Some(device) = self.device.as_ref() {
+                if self.command_pool != vk::CommandPool::null() {
+                    device.destroy_command_pool(self.command_pool, None);
+                    self.command_pool = vk::CommandPool::null();
+                }
+            }
+            if let Some(device) = self.device.take() {
+                device.destroy_device(None);
+            }
+            if self.surface != vk::SurfaceKHR::null() {
+                if let Some(surface_loader) = self.surface_loader.as_ref() {
+                    surface_loader.destroy_surface(self.surface, None);
+                }
+                self.surface = vk::SurfaceKHR::null();
+            }
+            if let Some(instance) = self.instance.take() {
+                instance.destroy_instance(None);
+            }
+        }
+    }
+}
+
 struct VulkanContext {
     _entry: Entry,
     instance: Instance,
@@ -40,11 +196,16 @@ struct VulkanContext {
     device: Device,
     queue: vk::Queue,
     command_pool: vk::CommandPool,
+    teardown_state: DeviceTeardownState,
 }
 
 impl VulkanContext {
     fn new(window: &Window, title: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let entry = unsafe { Entry::load()? };
+
+        // Resolve every fallible native window handle before creating the first Vulkan object.
+        let display_handle = window.display_handle()?.as_raw();
+        let window_handle = window.window_handle()?.as_raw();
 
         let app_name = CString::new(title)?;
         let engine_name = CString::new("dear-imgui-examples")?;
@@ -57,56 +218,82 @@ impl VulkanContext {
                 vk::API_VERSION_1_0
             });
 
-        let extensions =
-            ash_window::enumerate_required_extensions(window.display_handle()?.as_raw())?.to_vec();
+        let extensions = ash_window::enumerate_required_extensions(display_handle)?.to_vec();
 
         let instance_create_info = vk::InstanceCreateInfo::default()
             .application_info(&app_info)
             .enabled_extension_names(&extensions);
-        let instance = unsafe { entry.create_instance(&instance_create_info, None)? };
+        let mut init = VulkanContextInit::new(entry);
+        let instance = unsafe { init.entry().create_instance(&instance_create_info, None)? };
+        init.instance = Some(instance);
 
-        let surface_loader = khr_surface::Instance::new(&entry, &instance);
+        let surface_loader = khr_surface::Instance::new(init.entry(), init.instance());
+        init.surface_loader = Some(surface_loader);
         let surface = unsafe {
             ash_window::create_surface(
-                &entry,
-                &instance,
-                window.display_handle()?.as_raw(),
-                window.window_handle()?.as_raw(),
+                init.entry(),
+                init.instance(),
+                display_handle,
+                window_handle,
                 None,
             )?
         };
+        init.surface = surface;
 
         let (physical_device, queue_family_index) =
-            pick_physical_device(&instance, &surface_loader, surface)?;
+            pick_physical_device(init.instance(), init.surface_loader(), init.surface)?;
 
-        let (device, queue) = create_device(&instance, physical_device, queue_family_index)?;
+        let (device, queue) = create_device(init.instance(), physical_device, queue_family_index)?;
+        init.device = Some(device);
 
         let command_pool = unsafe {
-            device.create_command_pool(
+            init.device().create_command_pool(
                 &vk::CommandPoolCreateInfo::default()
                     .queue_family_index(queue_family_index)
                     .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER),
                 None,
             )?
         };
+        init.command_pool = command_pool;
 
-        Ok(Self {
-            _entry: entry,
-            instance,
-            surface_loader,
-            surface,
-            physical_device,
-            device,
-            queue,
-            command_pool,
-        })
+        Ok(init.finish(physical_device, queue))
+    }
+
+    fn mark_renderer_shutdown(&mut self, result: &Result<(), RendererError>) {
+        match result {
+            Ok(()) | Err(RendererError::RendererDestroyed) => {
+                self.teardown_state = DeviceTeardownState::Complete;
+            }
+            Err(RendererError::Vulkan(vk::Result::ERROR_DEVICE_LOST)) => {
+                self.teardown_state = DeviceTeardownState::Lost;
+            }
+            Err(_) => {}
+        }
+    }
+
+    fn wait_idle_for_teardown(&mut self) -> Result<(), vk::Result> {
+        if self.teardown_state != DeviceTeardownState::Active {
+            return Ok(());
+        }
+        self.teardown_state = classify_teardown_wait(unsafe { self.device.device_wait_idle() })?;
+        Ok(())
+    }
+
+    fn teardown_is_proven(&self) -> bool {
+        self.teardown_state.permits_native_destruction()
     }
 }
 
 impl Drop for VulkanContext {
     fn drop(&mut self) {
+        if let Err(error) = self.wait_idle_for_teardown() {
+            error!(
+                ?error,
+                "Vulkan device-idle proof failed during fallback teardown; leaking the native context"
+            );
+            return;
+        }
         unsafe {
-            let _ = self.device.device_wait_idle();
             self.device.destroy_command_pool(self.command_pool, None);
             self.device.destroy_device(None);
             self.surface_loader.destroy_surface(self.surface, None);
@@ -115,8 +302,9 @@ impl Drop for VulkanContext {
     }
 }
 
-#[derive(Clone, Copy)]
 struct MainRenderTarget {
+    #[cfg(not(feature = "ash-dynamic-rendering"))]
+    device: Device,
     #[cfg(feature = "ash-dynamic-rendering")]
     format: vk::Format,
     #[cfg(not(feature = "ash-dynamic-rendering"))]
@@ -124,24 +312,32 @@ struct MainRenderTarget {
 }
 
 impl MainRenderTarget {
-    fn new(_device: &Device, format: vk::Format) -> Result<Self, Box<dyn std::error::Error>> {
+    fn new(device: &Device, format: vk::Format) -> Result<Self, Box<dyn std::error::Error>> {
+        #[cfg(feature = "ash-dynamic-rendering")]
+        let _ = device;
         Ok(Self {
+            #[cfg(not(feature = "ash-dynamic-rendering"))]
+            device: device.clone(),
             #[cfg(feature = "ash-dynamic-rendering")]
             format,
             #[cfg(not(feature = "ash-dynamic-rendering"))]
-            render_pass: create_render_pass(_device, format)?,
+            render_pass: create_render_pass(device, format)?,
         })
     }
+}
 
-    fn destroy(self, _device: &Device) {
+impl Drop for MainRenderTarget {
+    fn drop(&mut self) {
         #[cfg(not(feature = "ash-dynamic-rendering"))]
         unsafe {
-            _device.destroy_render_pass(self.render_pass, None);
+            self.device.destroy_render_pass(self.render_pass, None);
+            self.render_pass = vk::RenderPass::null();
         }
     }
 }
 
 struct SwapchainState {
+    device: Device,
     loader: khr_swapchain::Device,
     swapchain: vk::SwapchainKHR,
     surface_format: vk::SurfaceFormatKHR,
@@ -159,7 +355,7 @@ impl SwapchainState {
     fn new(
         ctx: &VulkanContext,
         window: &Window,
-        render_target: MainRenderTarget,
+        render_target: &MainRenderTarget,
         surface_format: vk::SurfaceFormatKHR,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         Self::new_with_old(
@@ -174,7 +370,7 @@ impl SwapchainState {
     fn new_with_old(
         ctx: &VulkanContext,
         window: &Window,
-        _render_target: MainRenderTarget,
+        _render_target: &MainRenderTarget,
         surface_format: vk::SurfaceFormatKHR,
         old_swapchain: vk::SwapchainKHR,
     ) -> Result<Self, Box<dyn std::error::Error>> {
@@ -270,6 +466,7 @@ impl SwapchainState {
         #[cfg(feature = "ash-dynamic-rendering")]
         let image_count = images.len();
         Ok(Self {
+            device: ctx.device.clone(),
             loader,
             swapchain,
             surface_format,
@@ -288,7 +485,7 @@ impl SwapchainState {
         &mut self,
         ctx: &VulkanContext,
         window: &Window,
-        render_target: MainRenderTarget,
+        render_target: &MainRenderTarget,
     ) -> Result<(), Box<dyn std::error::Error>> {
         unsafe { ctx.device.device_wait_idle()? };
         self.recreate_after_device_idle(ctx, window, render_target)
@@ -298,7 +495,7 @@ impl SwapchainState {
         &mut self,
         ctx: &VulkanContext,
         window: &Window,
-        render_target: MainRenderTarget,
+        render_target: &MainRenderTarget,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let replacement = match Self::new_with_old(
             ctx,
@@ -309,25 +506,25 @@ impl SwapchainState {
         ) {
             Ok(replacement) => replacement,
             Err(error) => {
-                self.destroy(&ctx.device);
+                self.destroy();
                 return Err(error);
             }
         };
         let mut previous = std::mem::replace(self, replacement);
-        previous.destroy(&ctx.device);
+        previous.destroy();
         Ok(())
     }
 
-    fn destroy(&mut self, device: &Device) {
+    fn destroy(&mut self) {
         unsafe {
             #[cfg(not(feature = "ash-dynamic-rendering"))]
             for fb in self.framebuffers.drain(..) {
-                device.destroy_framebuffer(fb, None);
+                self.device.destroy_framebuffer(fb, None);
             }
             for view in self.image_views.drain(..) {
-                device.destroy_image_view(view, None);
+                self.device.destroy_image_view(view, None);
             }
-            destroy_present_semaphores(device, &mut self.present_semaphores);
+            destroy_present_semaphores(&self.device, &mut self.present_semaphores);
             if self.swapchain != vk::SwapchainKHR::null() {
                 self.loader.destroy_swapchain(self.swapchain, None);
                 self.swapchain = vk::SwapchainKHR::null();
@@ -338,50 +535,142 @@ impl SwapchainState {
 
 impl Drop for SwapchainState {
     fn drop(&mut self) {
-        // `destroy()` requires a `Device`; handled by `VulkanState::drop()`.
+        self.destroy();
+    }
+}
+
+struct FrameSyncState {
+    device: Device,
+    command_pool: vk::CommandPool,
+    frames: Vec<FrameSync>,
+}
+
+impl FrameSyncState {
+    fn new(ctx: &VulkanContext, count: usize) -> Result<Self, vk::Result> {
+        Ok(Self {
+            device: ctx.device.clone(),
+            command_pool: ctx.command_pool,
+            frames: create_frame_syncs(&ctx.device, ctx.command_pool, count)?,
+        })
+    }
+}
+
+impl Deref for FrameSyncState {
+    type Target = [FrameSync];
+
+    fn deref(&self) -> &Self::Target {
+        &self.frames
+    }
+}
+
+impl DerefMut for FrameSyncState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.frames
+    }
+}
+
+impl Drop for FrameSyncState {
+    fn drop(&mut self) {
+        destroy_frame_syncs(&self.device, self.command_pool, &mut self.frames);
     }
 }
 
 struct ImguiState {
-    context: Context,
-    platform: WinitPlatform,
     renderer: AshRenderer,
+    platform: WinitPlatform,
     clear_color: [f32; 4],
     demo_open: bool,
     last_frame: Instant,
+    renderer_shutdown_complete: bool,
+    platform_shutdown_complete: bool,
+    // Context must outlive every attachment, including fallback field drops after a failed shutdown.
+    context: Context,
 }
 
 struct VulkanState {
-    ctx: VulkanContext,
-    render_target: MainRenderTarget,
-    swapchain: SwapchainState,
-    frames: Vec<FrameSync>,
+    // These fields are manually dropped only after device-idle or device-loss proves teardown is
+    // terminal. A retryable wait failure intentionally leaks the complete Vulkan ownership tree.
+    frames: ManuallyDrop<FrameSyncState>,
+    swapchain: ManuallyDrop<SwapchainState>,
+    render_target: ManuallyDrop<MainRenderTarget>,
     images_in_flight: Vec<vk::Fence>,
     frame_index: usize,
     swapchain_dirty: bool,
+    ctx: ManuallyDrop<VulkanContext>,
+    // Keep the native window alive if fallback teardown has to leak the Vulkan tree.
+    window_keepalive: ManuallyDrop<Arc<Window>>,
+}
+
+impl VulkanState {
+    fn new(window: &Arc<Window>) -> Result<Self, Box<dyn std::error::Error>> {
+        let ctx = VulkanContext::new(window, "dear-imgui-winit-ash")?;
+        let surface_format = pick_surface_format(&ctx, window)?;
+        let render_target = MainRenderTarget::new(&ctx.device, surface_format.format)?;
+        let swapchain = SwapchainState::new(&ctx, window, &render_target, surface_format)?;
+        let frames = FrameSyncState::new(&ctx, FRAMES_IN_FLIGHT)?;
+        let images_in_flight = vec![vk::Fence::null(); swapchain.images.len()];
+
+        Ok(Self {
+            frames: ManuallyDrop::new(frames),
+            swapchain: ManuallyDrop::new(swapchain),
+            render_target: ManuallyDrop::new(render_target),
+            images_in_flight,
+            frame_index: 0,
+            swapchain_dirty: false,
+            ctx: ManuallyDrop::new(ctx),
+            window_keepalive: ManuallyDrop::new(Arc::clone(window)),
+        })
+    }
 }
 
 impl Drop for VulkanState {
     fn drop(&mut self) {
-        unsafe {
-            let _ = self.ctx.device.device_wait_idle();
+        if let Err(error) = self.ctx.wait_idle_for_teardown() {
+            error!(
+                ?error,
+                "Vulkan device-idle proof failed; leaking frame, swapchain, render-target, and device ownership"
+            );
+            return;
         }
-        destroy_frame_syncs(&self.ctx.device, self.ctx.command_pool, &mut self.frames);
-        self.swapchain.destroy(&self.ctx.device);
-        self.render_target.destroy(&self.ctx.device);
+
+        // SAFETY: every field is dropped exactly once here, and only after a terminal teardown
+        // proof. Declaration order mirrors Vulkan parentage: GPU children precede the device.
+        unsafe {
+            ManuallyDrop::drop(&mut self.frames);
+            ManuallyDrop::drop(&mut self.swapchain);
+            ManuallyDrop::drop(&mut self.render_target);
+            ManuallyDrop::drop(&mut self.ctx);
+            ManuallyDrop::drop(&mut self.window_keepalive);
+        }
     }
 }
 
 struct AppWindow {
-    window: Arc<Window>,
-    imgui: ImguiState,
-    vk: VulkanState,
+    imgui: ManuallyDrop<ImguiState>,
+    vk: ManuallyDrop<VulkanState>,
+    window: ManuallyDrop<Arc<Window>>,
 }
 
 impl Drop for AppWindow {
     fn drop(&mut self) {
-        let _ = unsafe { self.vk.ctx.device.device_wait_idle() };
-        let _ = self.imgui.renderer.shutdown(&mut self.imgui.context);
+        if let Err(error) = self.shutdown() {
+            error!("Winit/Ash fallback shutdown failed: {error}");
+        }
+        if !self.vk.ctx.teardown_is_proven() {
+            error!(
+                "Winit/Ash fallback teardown lacks a terminal GPU proof; leaking the ImGui, Vulkan, and window ownership tree"
+            );
+            return;
+        }
+
+        // SAFETY: the terminal GPU proof permits ordered destruction. ImGui attachments are
+        // released while the Vulkan device and platform window are alive, then Vulkan children
+        // and their device are destroyed before the window.
+        unsafe {
+            ManuallyDrop::drop(&mut self.imgui);
+            ManuallyDrop::drop(&mut self.vk);
+            ManuallyDrop::drop(&mut self.window);
+        }
     }
 }
 
@@ -391,25 +680,72 @@ struct App {
 }
 
 impl AppWindow {
+    fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let ImguiState {
+            renderer,
+            platform,
+            renderer_shutdown_complete,
+            platform_shutdown_complete,
+            context,
+            ..
+        } = &mut *self.imgui;
+
+        context.end_frame();
+        let mut errors = Vec::new();
+
+        if !*renderer_shutdown_complete {
+            let result = renderer.shutdown(context);
+            self.vk.ctx.mark_renderer_shutdown(&result);
+            match result {
+                Ok(()) | Err(RendererError::RendererDestroyed) => {
+                    *renderer_shutdown_complete = true;
+                }
+                Err(error @ RendererError::Vulkan(vk::Result::ERROR_DEVICE_LOST)) => {
+                    // Device loss is terminal: Ash already reclaimed its resources and committed
+                    // the Context texture reset. Preserve the first diagnostic, but never retry it.
+                    *renderer_shutdown_complete = true;
+                    errors.push(format!(
+                        "Ash renderer shutdown completed after device loss: {error}"
+                    ));
+                }
+                Err(error) => errors.push(format!("Ash renderer shutdown failed: {error}")),
+            }
+        }
+        if !self.vk.ctx.teardown_is_proven()
+            && let Err(error) = self.vk.ctx.wait_idle_for_teardown()
+        {
+            errors.push(format!("Ash device-idle wait failed: {error}"));
+            return Err(errors.join("; ").into());
+        }
+        if *renderer_shutdown_complete && !*platform_shutdown_complete {
+            match platform.shutdown(context) {
+                Ok(()) => *platform_shutdown_complete = true,
+                Err(error) => errors.push(format!("Winit platform shutdown failed: {error}")),
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; ").into())
+        }
+    }
+
     fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
         let version = env!("CARGO_PKG_VERSION");
         let size = LogicalSize::new(1280.0, 720.0);
         let window = Arc::new(
             event_loop.create_window(
                 Window::default_attributes()
-                    .with_title(format!("Dear ImGui Ash Basic - {version}"))
+                    .with_title(format!("Dear ImGui - Winit + Ash - {version}"))
                     .with_inner_size(size),
             )?,
         );
 
-        let ctx = VulkanContext::new(&window, "dear-imgui-ash-basic")?;
-        let surface_format = pick_surface_format(&ctx, &window)?;
-        let render_target = MainRenderTarget::new(&ctx.device, surface_format.format)?;
-        let swapchain = SwapchainState::new(&ctx, &window, render_target, surface_format)?;
+        let vk = VulkanState::new(&window)?;
 
         // Setup ImGui
         let mut context = Context::create();
-        context.set_ini_filename(None::<String>).unwrap();
+        context.set_ini_filename(None::<String>)?;
         let mut platform = WinitPlatform::new(&mut context)?;
         platform.attach_window(
             Arc::clone(&window),
@@ -417,21 +753,21 @@ impl AppWindow {
             &mut context,
         )?;
 
-        let framebuffer_srgb = is_srgb_format(swapchain.surface_format.format);
+        let framebuffer_srgb = is_srgb_format(vk.swapchain.surface_format.format);
         #[cfg(not(feature = "ash-dynamic-rendering"))]
         let renderer_config = AshRendererConfig::with_render_pass(
-            ctx.device.clone(),
-            ctx.queue,
-            ctx.command_pool,
-            render_target.render_pass,
+            vk.ctx.device.clone(),
+            vk.ctx.queue,
+            vk.ctx.command_pool,
+            vk.render_target.render_pass,
         );
         #[cfg(feature = "ash-dynamic-rendering")]
         let renderer_config = AshRendererConfig::with_dynamic_rendering(
-            ctx.device.clone(),
-            ctx.queue,
-            ctx.command_pool,
+            vk.ctx.device.clone(),
+            vk.ctx.queue,
+            vk.ctx.command_pool,
             DynamicRendering {
-                color_attachment_format: render_target.format,
+                color_attachment_format: vk.render_target.format,
                 depth_attachment_format: None,
             },
         );
@@ -440,43 +776,34 @@ impl AppWindow {
             framebuffer_srgb,
             ..Default::default()
         });
+        // Keep renderer creation as the final fallible step. The backend rolls back its own
+        // partial initialization, while `platform`, `context`, and `vk` then unwind in that order.
         // SAFETY: all handles were created from ctx's device lineage; the graphics queue and
         // command pool are compatible, and the render target matches the swapchain format.
         let renderer = unsafe {
             AshRenderer::with_default_allocator(
-                &ctx.instance,
-                ctx.physical_device,
+                &vk.ctx.instance,
+                vk.ctx.physical_device,
                 renderer_config,
                 &mut context,
             )?
         };
 
-        // Frame sync objects
-        let frames = create_frame_syncs(&ctx.device, ctx.command_pool, FRAMES_IN_FLIGHT)?;
-
-        let images_in_flight = vec![vk::Fence::null(); swapchain.images.len()];
-
         let imgui = ImguiState {
-            context,
             platform,
             renderer,
             clear_color: [0.1, 0.2, 0.3, 1.0],
             demo_open: true,
             last_frame: Instant::now(),
+            renderer_shutdown_complete: false,
+            platform_shutdown_complete: false,
+            context,
         };
 
         Ok(Self {
-            window,
-            imgui,
-            vk: VulkanState {
-                ctx,
-                render_target,
-                swapchain,
-                frames,
-                images_in_flight,
-                frame_index: 0,
-                swapchain_dirty: false,
-            },
+            imgui: ManuallyDrop::new(imgui),
+            vk: ManuallyDrop::new(vk),
+            window: ManuallyDrop::new(window),
         })
     }
 
@@ -488,61 +815,62 @@ impl AppWindow {
     }
 
     fn recover_aborted_acquire(
-        &mut self,
+        vk: &mut VulkanState,
+        renderer: &mut AshRenderer,
+        window: &Arc<Window>,
         frame_slot: usize,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        self.vk.swapchain_dirty = true;
-        unsafe { self.vk.ctx.device.device_wait_idle()? };
+        vk.swapchain_dirty = true;
+        unsafe { vk.ctx.device.device_wait_idle()? };
 
-        let frame = self
-            .vk
+        let frame = vk
             .frames
             .get_mut(frame_slot)
             .ok_or("Ash frame slot disappeared during acquire recovery")?;
         let abandoned_fence = frame.fence;
-        clear_fence_references(&mut self.vk.images_in_flight, abandoned_fence);
-        let abandoned_retirement =
-            replace_frame_sync(&self.vk.ctx.device, self.vk.ctx.command_pool, frame)?;
+        clear_fence_references(&mut vk.images_in_flight, abandoned_fence);
+        let abandoned_retirement = replace_frame_sync(&vk.ctx.device, vk.ctx.command_pool, frame)?;
 
-        self.vk.swapchain.recreate_after_device_idle(
-            &self.vk.ctx,
-            &self.window,
-            self.vk.render_target,
-        )?;
-        self.vk.images_in_flight = vec![vk::Fence::null(); self.vk.swapchain.images.len()];
-        self.vk.swapchain_dirty = false;
+        vk.swapchain
+            .recreate_after_device_idle(&vk.ctx, window, &vk.render_target)?;
+        vk.images_in_flight = vec![vk::Fence::null(); vk.swapchain.images.len()];
+        vk.swapchain_dirty = false;
 
         if let Some(retirement) = abandoned_retirement {
-            self.imgui
-                .renderer
-                .wait_for_texture_retirements(retirement)?;
+            renderer.wait_for_texture_retirements(retirement)?;
         }
-        if let Some(retirement) = self.imgui.renderer.pending_texture_retirement()? {
-            self.imgui
-                .renderer
-                .wait_for_texture_retirements(retirement)?;
+        if let Some(retirement) = renderer.pending_texture_retirement()? {
+            renderer.wait_for_texture_retirements(retirement)?;
         }
         Ok(())
     }
 
     fn render(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if self.vk.swapchain_dirty {
-            self.vk
-                .swapchain
-                .recreate(&self.vk.ctx, &self.window, self.vk.render_target)?;
-            self.vk.images_in_flight = vec![vk::Fence::null(); self.vk.swapchain.images.len()];
-            self.vk.swapchain_dirty = false;
+        let window = &*self.window;
+        let vk = &mut *self.vk;
+        let ImguiState {
+            renderer,
+            platform,
+            clear_color,
+            demo_open,
+            last_frame,
+            context,
+            ..
+        } = &mut *self.imgui;
+
+        if vk.swapchain_dirty {
+            vk.swapchain.recreate(&vk.ctx, window, &vk.render_target)?;
+            vk.images_in_flight = vec![vk::Fence::null(); vk.swapchain.images.len()];
+            vk.swapchain_dirty = false;
         }
 
         let now = Instant::now();
-        let dt = (now - self.imgui.last_frame).as_secs_f32();
-        self.imgui.context.io_mut().set_delta_time(dt);
-        self.imgui.last_frame = now;
+        let dt = (now - *last_frame).as_secs_f32();
+        context.io_mut().set_delta_time(dt);
+        *last_frame = now;
 
-        self.imgui
-            .platform
-            .prepare_frame(&mut self.imgui.context, &self.window)?;
-        let ui = self.imgui.context.frame();
+        platform.prepare_frame(context, window)?;
+        let ui = context.frame();
 
         ui.window("Hello, Dear ImGui (Ash)!")
             .size([420.0, 240.0], Condition::FirstUseEver)
@@ -558,17 +886,17 @@ impl AppWindow {
 
                 ui.text(format!(
                     "Swapchain format: {:?}",
-                    self.vk.swapchain.surface_format.format
+                    vk.swapchain.surface_format.format
                 ));
                 ui.text(format!(
                     "Framebuffer sRGB: {} (shader gamma path)",
-                    is_srgb_format(self.vk.swapchain.surface_format.format)
+                    is_srgb_format(vk.swapchain.surface_format.format)
                 ));
 
-                ui.color_edit4("Clear color", &mut self.imgui.clear_color);
+                ui.color_edit4("Clear color", clear_color);
 
                 if ui.button("Show Demo Window") {
-                    self.imgui.demo_open = true;
+                    *demo_open = true;
                 }
 
                 ui.separator();
@@ -577,40 +905,34 @@ impl AppWindow {
                 ui.bullet_text("PendingFrame create/update/destroy reconciliation");
             });
 
-        if self.imgui.demo_open {
-            ui.show_demo_window(&mut self.imgui.demo_open);
+        if *demo_open {
+            ui.show_demo_window(demo_open);
         }
 
-        self.imgui.platform.prepare_render(&ui, &self.window)?;
-        let pending_frame = self
-            .imgui
-            .context
-            .render(self.imgui.renderer.renderer_consumer()?);
+        platform.prepare_render(&ui, window)?;
+        let pending_frame = context.render(renderer.renderer_consumer()?);
 
-        let frame_slot = self.vk.frame_index % self.vk.frames.len();
-        let frame_fence = self.vk.frames[frame_slot].fence;
-        let image_available = self.vk.frames[frame_slot].image_available;
-        let command_buffer = self.vk.frames[frame_slot].command_buffer;
+        let frame_slot = vk.frame_index % vk.frames.len();
+        let frame_fence = vk.frames[frame_slot].fence;
+        let image_available = vk.frames[frame_slot].image_available;
+        let command_buffer = vk.frames[frame_slot].command_buffer;
 
         unsafe {
-            self.vk
-                .ctx
+            vk.ctx
                 .device
                 .wait_for_fences(&[frame_fence], true, u64::MAX)?;
         }
-        if let Some(retirement) = self.vk.frames[frame_slot].texture_retirement.take() {
+        if let Some(retirement) = vk.frames[frame_slot].texture_retirement.take() {
             // SAFETY: this frame fence covers its draw submission and every earlier upload on the
             // same renderer queue.
             unsafe {
-                self.imgui
-                    .renderer
-                    .complete_texture_retirements_with_fences(retirement, &[frame_fence])?;
+                renderer.complete_texture_retirements_with_fences(retirement, &[frame_fence])?;
             }
         }
 
         let acquire = unsafe {
-            self.vk.swapchain.loader.acquire_next_image(
-                self.vk.swapchain.swapchain,
+            vk.swapchain.loader.acquire_next_image(
+                vk.swapchain.swapchain,
                 u64::MAX,
                 image_available,
                 vk::Fence::null(),
@@ -620,53 +942,47 @@ impl AppWindow {
         let (image_index, acquire_suboptimal) = match acquire {
             Ok(v) => v,
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR) => {
-                self.vk.swapchain_dirty = true;
+                vk.swapchain_dirty = true;
                 return Ok(());
             }
             Err(e) => return Err(Box::new(e)),
         };
         let image_index_usize = image_index as usize;
         let submission = (|| -> Result<(Option<TextureRetirementBatch>, vk::Semaphore), Box<dyn std::error::Error>> {
-            let image_fence = self
-                .vk
+            let image_fence = vk
                 .images_in_flight
                 .get(image_index_usize)
                 .copied()
                 .ok_or("acquired Ash image has no in-flight fence slot")?;
-            let present_semaphore = self
-                .vk
+            let present_semaphore = vk
                 .swapchain
                 .present_semaphores
                 .get(image_index_usize)
                 .copied()
                 .ok_or("acquired Ash image has no present semaphore")?;
             #[cfg(not(feature = "ash-dynamic-rendering"))]
-            let framebuffer = self
-                .vk
+            let framebuffer = vk
                 .swapchain
                 .framebuffers
                 .get(image_index_usize)
                 .copied()
                 .ok_or("acquired Ash image has no framebuffer")?;
             #[cfg(feature = "ash-dynamic-rendering")]
-            let image = self
-                .vk
+            let image = vk
                 .swapchain
                 .images
                 .get(image_index_usize)
                 .copied()
                 .ok_or("acquired Ash image is missing")?;
             #[cfg(feature = "ash-dynamic-rendering")]
-            let image_view = self
-                .vk
+            let image_view = vk
                 .swapchain
                 .image_views
                 .get(image_index_usize)
                 .copied()
                 .ok_or("acquired Ash image has no image view")?;
             #[cfg(feature = "ash-dynamic-rendering")]
-            let old_layout = self
-                .vk
+            let old_layout = vk
                 .swapchain
                 .image_layouts
                 .get(image_index_usize)
@@ -675,26 +991,24 @@ impl AppWindow {
 
             if image_fence != vk::Fence::null() {
                 unsafe {
-                    self.vk
-                        .ctx
+                    vk.ctx
                         .device
                         .wait_for_fences(&[image_fence], true, u64::MAX)?;
                 }
             }
             unsafe {
-                self.vk.ctx.device.reset_command_buffer(
+                vk.ctx.device.reset_command_buffer(
                     command_buffer,
                     vk::CommandBufferResetFlags::empty(),
                 )?;
             }
 
-            let (reconciled_frame, texture_retirement) =
-                self.imgui.renderer.prepare_frame(pending_frame)?;
+            let (reconciled_frame, texture_retirement) = renderer.prepare_frame(pending_frame)?;
 
             let texture_retirement = record_command_buffer(
-                &self.vk.ctx.device,
+                &vk.ctx.device,
                 command_buffer,
-                self.vk.render_target,
+                &vk.render_target,
                 #[cfg(not(feature = "ash-dynamic-rendering"))]
                 framebuffer,
                 #[cfg(feature = "ash-dynamic-rendering")]
@@ -703,12 +1017,12 @@ impl AppWindow {
                 image_view,
                 #[cfg(feature = "ash-dynamic-rendering")]
                 old_layout,
-                self.vk.swapchain.extent,
-                self.imgui.clear_color,
+                vk.swapchain.extent,
+                *clear_color,
                 // SAFETY: cmd is recording inside the compatible render pass and is submitted
                 // before any renderer resource can be retired or destroyed.
                 |cmd| {
-                    unsafe { self.imgui.renderer.cmd_draw(cmd, reconciled_frame) }?;
+                    unsafe { renderer.cmd_draw(cmd, reconciled_frame) }?;
                     Ok(texture_retirement)
                 },
             )?;
@@ -720,9 +1034,9 @@ impl AppWindow {
                 .command_buffers(std::slice::from_ref(&command_buffer))
                 .signal_semaphores(std::slice::from_ref(&present_semaphore));
             unsafe {
-                self.vk.ctx.device.reset_fences(&[frame_fence])?;
-                self.vk.ctx.device.queue_submit(
-                    self.vk.ctx.queue,
+                vk.ctx.device.reset_fences(&[frame_fence])?;
+                vk.ctx.device.queue_submit(
+                    vk.ctx.queue,
                     std::slice::from_ref(&submit_info),
                     frame_fence,
                 )?;
@@ -732,7 +1046,9 @@ impl AppWindow {
         let (texture_retirement, present_semaphore) = match submission {
             Ok(submission) => submission,
             Err(error) => {
-                if let Err(recovery_error) = self.recover_aborted_acquire(frame_slot) {
+                if let Err(recovery_error) =
+                    Self::recover_aborted_acquire(vk, renderer, window, frame_slot)
+                {
                     return Err(format!(
                         "Ash main acquire failed before submit: {error}; recovery also failed: {recovery_error}"
                     )
@@ -744,35 +1060,34 @@ impl AppWindow {
 
         #[cfg(feature = "ash-dynamic-rendering")]
         {
-            self.vk.swapchain.image_layouts[image_index_usize] = vk::ImageLayout::PRESENT_SRC_KHR;
+            vk.swapchain.image_layouts[image_index_usize] = vk::ImageLayout::PRESENT_SRC_KHR;
         }
-        self.vk.images_in_flight[image_index_usize] = frame_fence;
-        self.vk.frames[frame_slot].texture_retirement = texture_retirement;
-        self.vk.swapchain_dirty |= acquire_suboptimal;
+        vk.images_in_flight[image_index_usize] = frame_fence;
+        vk.frames[frame_slot].texture_retirement = texture_retirement;
+        vk.swapchain_dirty |= acquire_suboptimal;
 
         let present_info = vk::PresentInfoKHR::default()
             .wait_semaphores(std::slice::from_ref(&present_semaphore))
-            .swapchains(std::slice::from_ref(&self.vk.swapchain.swapchain))
+            .swapchains(std::slice::from_ref(&vk.swapchain.swapchain))
             .image_indices(std::slice::from_ref(&image_index));
 
         let present = unsafe {
-            self.vk
-                .swapchain
+            vk.swapchain
                 .loader
-                .queue_present(self.vk.ctx.queue, &present_info)
+                .queue_present(vk.ctx.queue, &present_info)
         };
         match present {
-            Ok(suboptimal) => self.vk.swapchain_dirty |= suboptimal,
+            Ok(suboptimal) => vk.swapchain_dirty |= suboptimal,
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR) => {
-                self.vk.swapchain_dirty = true;
+                vk.swapchain_dirty = true;
             }
             Err(error) => {
-                self.vk.swapchain_dirty = true;
+                vk.swapchain_dirty = true;
                 return Err(Box::new(error));
             }
         }
 
-        self.vk.frame_index = (self.vk.frame_index + 1) % self.vk.frames.len();
+        vk.frame_index = (vk.frame_index + 1) % vk.frames.len();
         Ok(())
     }
 }
@@ -805,12 +1120,10 @@ impl ApplicationHandler for App {
             None => return,
         };
 
-        let imgui = &mut window.imgui;
-        if let Err(error) =
-            imgui
-                .platform
-                .handle_window_event(&mut imgui.context, &window.window, &event)
-        {
+        let ImguiState {
+            platform, context, ..
+        } = &mut *window.imgui;
+        if let Err(error) = platform.handle_window_event(context, &window.window, &event) {
             error!("Winit platform event error: {error}");
             event_loop.exit();
             return;
@@ -851,11 +1164,19 @@ impl ApplicationHandler for App {
             window.window.request_redraw();
         }
     }
+
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(window) = self.window.as_mut()
+            && let Err(error) = window.shutdown()
+        {
+            error!("Winit/Ash shutdown failed: {error}");
+        }
+    }
 }
 
 fn main() {
-    dear_imgui_examples::init_tracing_with_filter("dear_imgui=debug,ash_basic=info");
-    info!("Starting Dear ImGui Ash Basic Example");
+    dear_imgui_examples::init_tracing_with_filter("dear_imgui=debug,winit_ash=info");
+    info!("Starting Dear ImGui Winit + Ash lifecycle reference");
 
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);
@@ -1117,7 +1438,7 @@ fn destroy_framebuffers(device: &Device, framebuffers: Vec<vk::Framebuffer>) {
 fn record_command_buffer<F>(
     device: &Device,
     cmd: vk::CommandBuffer,
-    _render_target: MainRenderTarget,
+    _render_target: &MainRenderTarget,
     #[cfg(not(feature = "ash-dynamic-rendering"))] framebuffer: vk::Framebuffer,
     #[cfg(feature = "ash-dynamic-rendering")] image: vk::Image,
     #[cfg(feature = "ash-dynamic-rendering")] image_view: vk::ImageView,

@@ -121,7 +121,7 @@ pub enum WinitPlatformError {
     #[error("Dear ImGui failed to allocate Winit monitor storage")]
     MonitorStorageAllocationFailed,
     /// Dear ImGui requested a new viewport outside a scoped Winit event-loop entry.
-    #[error("Winit viewport creation requires WinitPlatformRuntime::with_event_loop")]
+    #[error("Winit viewport creation requires WinitPlatform::with_event_loop")]
     EventLoopUnavailable,
     /// Winit failed to create a secondary viewport window.
     #[error("Winit failed to create a secondary viewport window: {message}")]

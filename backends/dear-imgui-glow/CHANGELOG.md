@@ -42,6 +42,11 @@ The format follows Keep a Changelog and Semantic Versioning.
   process-unique texture registry and returns distinct `RendererTextureId` and `ExternalTextureId`
   handles, so managed, renderer-owned, and application-owned resources cannot cross lifecycle APIs.
   External registration no longer asks for unused dimensions or format metadata.
+- `GlowViewportRuntime` now accepts a `FrameToken` through `prepare_frame` and consumes the
+  resulting `GlowPreparedViewportFrame` through one `render_main` route. That route owns main and
+  secondary drawing, always attempts host-provided main-context restoration, and returns ordered
+  renderer, restoration, and platform faults. Manual frame tracing, `render_context*`,
+  `reconcile_frame`, `render_with_platform_windows*`, and `with_renderer` entry points were removed.
 
 ### Fixed
 

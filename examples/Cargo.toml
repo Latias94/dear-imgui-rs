@@ -18,7 +18,6 @@ node-editor-blueprints = [
 ]
 imguizmo-quat = ["dep:dear-imguizmo-quat"]
 implot3d = ["dep:dear-implot3d", "dear-app/implot3d"]
-freetype = ["dear-imgui-rs/freetype"]
 file-browser = ["dep:dear-file-browser", "dear-file-browser/thumbnails-image"]
 reflect = ["dep:dear-imgui-reflect", "dear-imgui-reflect/glam"]
 test-engine = ["dep:dear-imgui-test-engine", "dear-app/test-engine"]
@@ -72,7 +71,7 @@ sdl3-ash-multi-viewport = [
 ### SDL3 platform (window + events)
 ###
 ### This feature gates SDL3-related dependencies so that examples which do not
-### use SDL3 (e.g. `game_engine_docking`) do not pay the cost of building SDL3
+### use SDL3 (e.g. `game_engine_showcase`) do not pay the cost of building SDL3
 ### or its C dependencies (CMake, SDKs, etc.).
 sdl3-platform = [
     "dep:sdl3",
@@ -109,24 +108,28 @@ sdl3-gpu-multi-viewport = [
 ]
 
 [[bin]]
-name = "wgpu_basic"
-path = "01-renderers/wgpu_basic.rs"
+name = "winit_wgpu"
+path = "01-renderers/winit_wgpu.rs"
 
 [[bin]]
 name = "hello_world"
 path = "00-quickstart/hello_world.rs"
 
 [[bin]]
+name = "fallible_frame"
+path = "00-quickstart/fallible_frame.rs"
+
+[[bin]]
 name = "application_lifecycle"
 path = "00-quickstart/application_lifecycle.rs"
 
 [[bin]]
-name = "game_engine_docking"
-path = "02-docking/game_engine_docking.rs"
+name = "game_engine_showcase"
+path = "02-docking/game_engine_showcase.rs"
 
 [[bin]]
-name = "glow_basic"
-path = "01-renderers/glow_basic.rs"
+name = "winit_glow"
+path = "01-renderers/winit_glow.rs"
 
 [[bin]]
 name = "input_text_minimal"
@@ -169,12 +172,8 @@ name = "style_and_fonts"
 path = "03-features/style_and_fonts.rs"
 
 [[bin]]
-name = "glow_textures"
-path = "01-renderers/glow_textures.rs"
-
-[[bin]]
-name = "glow_external_context_regression"
-path = "01-renderers/glow_external_context_regression.rs"
+name = "glow_renderer_texture"
+path = "01-renderers/glow_renderer_texture.rs"
 
 [[bin]]
 name = "dockspace_minimal"
@@ -186,9 +185,19 @@ path = "02-docking/multi_viewport_wgpu.rs"
 required-features = ["multi-viewport"]
 
 [[bin]]
+name = "wgpu_multi_viewport_smoke"
+path = "ci/wgpu_multi_viewport_smoke.rs"
+required-features = ["multi-viewport", "test-engine"]
+
+[[bin]]
 name = "multi_viewport_ash"
 path = "02-docking/multi_viewport_ash.rs"
 required-features = ["ash-winit-multi-viewport"]
+
+[[bin]]
+name = "ash_vulkan_validation_smoke"
+path = "ci/ash_vulkan_validation_smoke.rs"
+required-features = ["ash-winit-multi-viewport", "ash-dynamic-rendering"]
 
 [[bin]]
 name = "sdl3_opengl_multi_viewport"
@@ -198,7 +207,12 @@ required-features = ["multi-viewport", "sdl3-opengl3"]
 [[bin]]
 name = "sdl3_glow_multi_viewport"
 path = "02-docking/sdl3_glow_multi_viewport.rs"
-required-features = ["sdl3-platform", "glow-multi-viewport"]
+required-features = ["sdl3-glow-multi-viewport"]
+
+[[bin]]
+name = "sdl3_glow_multi_viewport_smoke"
+path = "ci/sdl3_glow_multi_viewport_smoke.rs"
+required-features = ["sdl3-glow-multi-viewport", "test-engine"]
 
 [[bin]]
 name = "sdl3_wgpu"
@@ -206,8 +220,8 @@ path = "01-renderers/sdl3_wgpu.rs"
 required-features = ["sdl3-platform"]
 
 [[bin]]
-name = "sdl3_sdlrenderer"
-path = "01-renderers/sdl3_sdlrenderer.rs"
+name = "sdl3_sdlrenderer3"
+path = "01-renderers/sdl3_sdlrenderer3.rs"
 required-features = ["sdl3-sdlrenderer3"]
 
 [[bin]]
@@ -221,44 +235,56 @@ path = "02-docking/sdl3_ash_multi_viewport.rs"
 required-features = ["sdl3-ash-multi-viewport"]
 
 [[bin]]
-name = "wgpu_textures"
-path = "01-renderers/wgpu_textures.rs"
+name = "dear_app_external_texture"
+path = "01-renderers/dear_app_external_texture.rs"
 
 [[bin]]
-name = "dear_app_wgpu_textures"
-path = "01-renderers/dear_app_wgpu_textures.rs"
+name = "winit_ash"
+path = "01-renderers/winit_ash.rs"
 
 [[bin]]
-name = "ash_basic"
-path = "01-renderers/ash_basic.rs"
-
-[[bin]]
-name = "ash_textures"
-path = "01-renderers/ash_textures.rs"
-
-[[bin]]
-name = "implot_basic"
-path = "03-features/implot_basic.rs"
+name = "implot_minimal"
+path = "03-features/implot_minimal.rs"
 required-features = ["implot"]
 
 [[bin]]
-name = "implot3d_basic"
-path = "03-features/implot3d_basic.rs"
+name = "implot_showcase"
+path = "03-features/implot_showcase.rs"
+required-features = ["implot"]
+
+[[bin]]
+name = "implot3d_minimal"
+path = "03-features/implot3d_minimal.rs"
 required-features = ["implot3d"]
 
 [[bin]]
-name = "imguizmo_basic"
-path = "03-features/imguizmo_basic.rs"
+name = "implot3d_showcase"
+path = "03-features/implot3d_showcase.rs"
+required-features = ["implot3d"]
+
+[[bin]]
+name = "imguizmo_minimal"
+path = "03-features/imguizmo_minimal.rs"
 required-features = ["imguizmo"]
 
 [[bin]]
-name = "imnodes_basic"
-path = "03-features/imnodes_basic.rs"
+name = "imguizmo_showcase"
+path = "03-features/imguizmo_showcase.rs"
+required-features = ["imguizmo"]
+
+[[bin]]
+name = "imnodes_minimal"
+path = "03-features/imnodes_minimal.rs"
 required-features = ["imnodes"]
 
 [[bin]]
-name = "node_editor_basic"
-path = "03-features/node_editor_basic.rs"
+name = "imnodes_showcase"
+path = "03-features/imnodes_showcase.rs"
+required-features = ["imnodes"]
+
+[[bin]]
+name = "node_editor_minimal"
+path = "03-features/node_editor_minimal.rs"
 required-features = ["node-editor"]
 
 [[bin]]
@@ -267,10 +293,14 @@ path = "03-features/node_editor_showcase.rs"
 required-features = ["node-editor-blueprints"]
 
 [[bin]]
-name = "imguizmo_quat_basic"
-path = "03-features/imguizmo_quat_basic.rs"
+name = "imguizmo_quat_minimal"
+path = "03-features/imguizmo_quat_minimal.rs"
 required-features = ["imguizmo-quat"]
 
+[[bin]]
+name = "imguizmo_quat_showcase"
+path = "03-features/imguizmo_quat_showcase.rs"
+required-features = ["imguizmo-quat"]
 
 [[bin]]
 name = "wgpu_rtt_gameview"
@@ -316,13 +346,18 @@ path = "03-features/reflect_demo.rs"
 required-features = ["reflect"]
 
 [[bin]]
-name = "imgui_test_engine_basic"
-path = "04-integration/imgui_test_engine_basic.rs"
+name = "test_engine_integration"
+path = "04-integration/test_engine_integration.rs"
 required-features = ["test-engine"]
 
 [[bin]]
-name = "sdl3_sdlgpu_multi_view"
-path = "02-docking/sdl3_sdlgpu_multi_view.rs"
+name = "test_engine_runtime"
+path = "ci/test_engine_runtime.rs"
+required-features = ["test-engine"]
+
+[[bin]]
+name = "sdl3_sdlgpu_multi_viewport"
+path = "02-docking/sdl3_sdlgpu_multi_viewport.rs"
 required-features = ["sdl3-gpu-multi-viewport"]
 
 [dependencies]
@@ -358,8 +393,6 @@ glutin-winit = { workspace = true }
 raw-window-handle = { workspace = true }
 image = { workspace = true }
 bytemuck = { workspace = true }
-ttf-parser.workspace = true
-once_cell = "1"
 # `ash::Entry::load()` is gated behind the `loaded` feature in ash 0.38.
 # We use it in Vulkan examples to avoid requiring a Vulkan SDK / loader at link time.
 ash = { version = "0.38", default-features = false, features = ["debug", "std", "loaded"] }

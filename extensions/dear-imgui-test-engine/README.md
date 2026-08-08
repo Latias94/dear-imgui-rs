@@ -19,7 +19,7 @@ For native build/link options, see `extensions/dear-imgui-test-engine-sys/README
 
 - Upstream: https://github.com/ocornut/imgui_test_engine
 - Low-level crate: `dear-imgui-test-engine-sys`
-- Example: `examples/04-integration/imgui_test_engine_basic.rs`
+- Example: `examples/04-integration/test_engine_integration.rs`
 
 ## Compatibility
 
@@ -116,10 +116,14 @@ every `Ok` report as success.
 Use `run_graphical` for graphical or texture-using tests. Implement `TestFrameDriver` on the object
 that owns backend preparation, main-target rendering, and surface presentation:
 
-- `prepare` consumes `FrameToken` and returns `ReconciledFrame`. A managed renderer uses its own
-  `SynchronousRendererConsumer`; a legacy renderer uses `FrameToken::render_legacy`. Multi-viewport
-  WSI drivers finish auxiliary viewport work here when it must precede main-surface acquisition.
-- `render_main` consumes `ReconciledFrame` and returns `MainRenderOutcome::ReadyToPresent` or
+- `prepare` consumes `FrameToken` and returns the driver's GAT-backed `PreparedFrame`. A
+  single-window driver can use `ReconciledFrame`; a multi-viewport route keeps its own prepared
+  transaction so secondary completion, deferred faults, and renderer-specific retirement proof are
+  not erased. Managed renderers use their own `SynchronousRendererConsumer`; legacy renderers use
+  `FrameToken::render_legacy`.
+- `prepared_context_id` reports the Context carried by that prepared transaction. The Test Engine
+  verifies it before allowing the main target to render.
+- `render_main` consumes `PreparedFrame` and returns `MainRenderOutcome::ReadyToPresent` or
   `MainRenderOutcome::Skipped`. OpenGL-style drivers may draw the main viewport and then complete
   auxiliary contexts here, as long as all draw work finishes before the method returns.
 - `present` performs exactly one main-surface presentation after the native pre-swap hook succeeds.

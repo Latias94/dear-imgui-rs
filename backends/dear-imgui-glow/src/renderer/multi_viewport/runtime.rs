@@ -1,13 +1,14 @@
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::fmt;
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::rc::Rc;
 
-use dear_imgui_rs::render::{PendingFrame, ReconciledFrame};
+use dear_imgui_rs::render::{DrawData, ReconciledFrame};
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
     ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding, ContextBindingError,
-    ContextDestroyed, ContextId, ContextTeardown, Id, TextureFormat,
+    ContextDestroyed, ContextId, ContextTeardown, FrameToken, Id, TextureFormat,
 };
 use thiserror::Error;
 
@@ -83,9 +84,17 @@ pub enum GlowViewportError {
     /// Dear ImGui passed an invalid viewport to the renderer callback.
     #[error("Glow renderer callback received a null viewport")]
     InvalidViewport,
-    /// A frame trace is already collecting events for this runtime.
-    #[error("a Glow viewport frame trace is already active")]
-    FrameTraceAlreadyActive,
+    /// A viewport frame route is already active for this runtime.
+    #[error("a Glow viewport frame route is already active")]
+    FrameRouteAlreadyActive,
+    /// A prepared viewport frame was passed to a different owning runtime.
+    #[error(
+        "prepared Glow viewport frame belongs to Context {actual:?}, not this runtime for Context {expected:?}"
+    )]
+    PreparedFrameRuntimeMismatch {
+        expected: ContextId,
+        actual: ContextId,
+    },
 }
 
 /// Renderer callbacks that completed successfully during one platform-window pump.
@@ -101,6 +110,164 @@ impl GlowViewportFrameReport {
     }
 }
 
+/// Main-viewport frame whose managed textures have been reconciled for the owning Glow runtime.
+///
+/// Only [`GlowViewportRuntime::render_main`] can consume this capability. That route owns the main
+/// draw, the secondary platform-window pump, restoration of the application's main OpenGL
+/// context, and deferred renderer-fault collection before it returns.
+#[must_use = "render or explicitly drop the prepared viewport frame"]
+pub struct GlowPreparedViewportFrame<'frame> {
+    frame: ReconciledFrame<'frame>,
+    runtime: Rc<RuntimeControl>,
+}
+
+impl GlowPreparedViewportFrame<'_> {
+    /// Returns the Context identity carried by this prepared frame.
+    #[must_use]
+    pub fn context_id(&self) -> ContextId {
+        self.frame.context_id()
+    }
+}
+
+/// Completed Glow viewport route retained until the application presents the main window.
+#[must_use = "inspect or explicitly drop the rendered viewport frame before presenting"]
+pub struct GlowRenderedViewportFrame<'frame> {
+    frame: ReconciledFrame<'frame>,
+    secondary: GlowViewportFrameReport,
+}
+
+impl GlowRenderedViewportFrame<'_> {
+    /// Returns the Context identity carried by this rendered frame.
+    #[must_use]
+    pub fn context_id(&self) -> ContextId {
+        self.frame.context_id()
+    }
+
+    /// Returns the main viewport draw data retained by this frame.
+    #[must_use]
+    pub fn draw_data(&self) -> &DrawData {
+        self.frame.draw_data()
+    }
+
+    /// Returns same-route evidence for successfully rendered secondary viewports.
+    #[must_use]
+    pub fn secondary_report(&self) -> &GlowViewportFrameReport {
+        &self.secondary
+    }
+}
+
+/// One failure observed while completing a Glow multi-viewport render route.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum GlowViewportRouteFault<RestoreError, PlatformError> {
+    /// The main viewport draw failed before the secondary platform-window pump.
+    MainDraw(GlowViewportError),
+    /// A renderer callback or renderer-ownership check failed during the route.
+    DeferredRenderer(GlowViewportError),
+    /// The host failed to restore its main native OpenGL context.
+    MainContextRestore(RestoreError),
+    /// The platform backend reported a deferred fault after main-context restoration.
+    DeferredPlatform(PlatformError),
+}
+
+impl<RestoreError, PlatformError> fmt::Display
+    for GlowViewportRouteFault<RestoreError, PlatformError>
+where
+    RestoreError: fmt::Display,
+    PlatformError: fmt::Display,
+{
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MainDraw(error) => write!(formatter, "main Glow viewport draw failed: {error}"),
+            Self::DeferredRenderer(error) => {
+                write!(formatter, "Glow viewport callback failed: {error}")
+            }
+            Self::MainContextRestore(error) => {
+                write!(
+                    formatter,
+                    "failed to restore the main OpenGL context: {error}"
+                )
+            }
+            Self::DeferredPlatform(error) => {
+                write!(formatter, "viewport platform callback failed: {error}")
+            }
+        }
+    }
+}
+
+impl<RestoreError, PlatformError> std::error::Error
+    for GlowViewportRouteFault<RestoreError, PlatformError>
+where
+    RestoreError: std::error::Error + 'static,
+    PlatformError: std::error::Error + 'static,
+{
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::MainDraw(error) | Self::DeferredRenderer(error) => Some(error),
+            Self::MainContextRestore(error) => Some(error),
+            Self::DeferredPlatform(error) => Some(error),
+        }
+    }
+}
+
+/// Ordered failures from one Glow multi-viewport render route.
+///
+/// The route continues through the secondary platform-window pump and always attempts main-context
+/// restoration before inspecting deferred queues. Reporting order is main draw, restoration,
+/// renderer callback FIFO, then platform callback FIFO; no later fault hides an earlier stage.
+#[derive(Debug)]
+pub struct GlowViewportRouteError<RestoreError, PlatformError> {
+    faults: Vec<GlowViewportRouteFault<RestoreError, PlatformError>>,
+}
+
+impl<RestoreError, PlatformError> GlowViewportRouteError<RestoreError, PlatformError> {
+    fn new(faults: Vec<GlowViewportRouteFault<RestoreError, PlatformError>>) -> Self {
+        debug_assert!(!faults.is_empty());
+        Self { faults }
+    }
+
+    /// Returns every route fault in route reporting order.
+    #[must_use]
+    pub fn faults(&self) -> &[GlowViewportRouteFault<RestoreError, PlatformError>] {
+        &self.faults
+    }
+
+    /// Consumes the aggregate and returns every route fault in route reporting order.
+    #[must_use]
+    pub fn into_faults(self) -> Vec<GlowViewportRouteFault<RestoreError, PlatformError>> {
+        self.faults
+    }
+}
+
+impl<RestoreError, PlatformError> fmt::Display
+    for GlowViewportRouteError<RestoreError, PlatformError>
+where
+    RestoreError: fmt::Display,
+    PlatformError: fmt::Display,
+{
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let count = self.faults.len();
+        write!(formatter, "{}", self.faults[0])?;
+        if count > 1 {
+            write!(formatter, " ({count} route faults in total)")?;
+        }
+        Ok(())
+    }
+}
+
+impl<RestoreError, PlatformError> std::error::Error
+    for GlowViewportRouteError<RestoreError, PlatformError>
+where
+    RestoreError: std::error::Error + 'static,
+    PlatformError: std::error::Error + 'static,
+{
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.faults
+            .first()
+            .map(|fault| fault as &(dyn std::error::Error + 'static))
+    }
+}
+
 #[derive(Debug)]
 struct ActiveFrameTrace {
     rendered_viewports: HashSet<Id>,
@@ -111,37 +278,20 @@ struct FrameTraceState {
     active: Option<ActiveFrameTrace>,
 }
 
-/// Scoped collector for one Glow secondary-viewport render pass.
-///
-/// Dropping this guard without calling [`Self::finish`] aborts the report and releases the runtime
-/// for the next frame. A runtime accepts at most one live trace, so callback events cannot be
-/// assigned to overlapping frames.
-#[must_use = "keep the trace alive through the platform-window pump, then call finish"]
-pub struct GlowViewportFrameTrace<'runtime> {
+pub(super) struct FrameTraceGuard<'runtime> {
     control: &'runtime RuntimeControl,
     finished: bool,
 }
 
-impl fmt::Debug for GlowViewportFrameTrace<'_> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("GlowViewportFrameTrace")
-            .field("context", &self.control.binding.id())
-            .field("finished", &self.finished)
-            .finish()
-    }
-}
-
-impl GlowViewportFrameTrace<'_> {
-    /// Finishes this frame trace and returns only callbacks that completed successfully.
-    pub fn finish(mut self) -> GlowViewportFrameReport {
+impl FrameTraceGuard<'_> {
+    pub(super) fn finish(mut self) -> GlowViewportFrameReport {
         let report = self.control.finish_frame_trace();
         self.finished = true;
         report
     }
 }
 
-impl Drop for GlowViewportFrameTrace<'_> {
+impl Drop for FrameTraceGuard<'_> {
     fn drop(&mut self) {
         if !self.finished {
             self.control.abort_frame_trace();
@@ -238,27 +388,33 @@ pub(super) struct RuntimeControl {
     transitions: RefCell<Vec<&'static str>>,
 }
 
-#[derive(Default)]
 struct RuntimeFaults {
-    terminal: Option<GlowViewportError>,
-    non_terminal: Option<GlowViewportError>,
+    pending: VecDeque<GlowViewportError>,
 }
 
 impl RuntimeFaults {
     fn record_terminal(&mut self, fault: GlowViewportError) {
-        if self.terminal.is_none() {
-            self.terminal = Some(fault);
-        }
+        self.pending.push_back(fault);
     }
 
     fn record_non_terminal(&mut self, fault: GlowViewportError) {
-        if self.non_terminal.is_none() {
-            self.non_terminal = Some(fault);
-        }
+        self.pending.push_back(fault);
     }
 
     fn take_next(&mut self) -> Option<GlowViewportError> {
-        self.terminal.take().or_else(|| self.non_terminal.take())
+        self.pending.pop_front()
+    }
+
+    fn drain(&mut self) -> Vec<GlowViewportError> {
+        self.pending.drain(..).collect()
+    }
+}
+
+impl Default for RuntimeFaults {
+    fn default() -> Self {
+        Self {
+            pending: VecDeque::new(),
+        }
     }
 }
 
@@ -376,21 +532,21 @@ impl RuntimeControl {
         self.begin_shutdown();
     }
 
-    fn begin_frame_trace(&self) -> Result<GlowViewportFrameTrace<'_>, GlowViewportError> {
+    fn begin_frame_trace(&self) -> Result<FrameTraceGuard<'_>, GlowViewportError> {
         if self.frame_trace.borrow().active.is_some() {
-            return Err(GlowViewportError::FrameTraceAlreadyActive);
+            return Err(GlowViewportError::FrameRouteAlreadyActive);
         }
         self.ensure_entry()?;
         {
             let mut trace = self.frame_trace.borrow_mut();
             if trace.active.is_some() {
-                return Err(GlowViewportError::FrameTraceAlreadyActive);
+                return Err(GlowViewportError::FrameRouteAlreadyActive);
             }
             trace.active = Some(ActiveFrameTrace {
                 rendered_viewports: HashSet::new(),
             });
         }
-        Ok(GlowViewportFrameTrace {
+        Ok(FrameTraceGuard {
             control: self,
             finished: false,
         })
@@ -439,15 +595,64 @@ impl RuntimeControl {
         self.faults.borrow_mut().take_next()
     }
 
+    fn detect_and_drain_faults(&self) -> Vec<GlowViewportError> {
+        detect_callback_drift(self);
+        self.faults.borrow_mut().drain()
+    }
+
     fn ensure_context(&self, context: &Context) -> Result<(), GlowViewportError> {
-        if context.id() == self.binding.id() {
+        self.ensure_context_id(context.id())
+    }
+
+    fn ensure_frame_context(&self, frame: &FrameToken<'_>) -> Result<(), GlowViewportError> {
+        self.ensure_context_id(frame.ui().context_id())
+    }
+
+    fn ensure_context_id(&self, actual: ContextId) -> Result<(), GlowViewportError> {
+        let expected = self.binding.id();
+        if actual == expected {
             Ok(())
         } else {
-            Err(GlowViewportError::ContextMismatch {
-                expected: self.binding.id(),
-                actual: context.id(),
-            })
+            Err(GlowViewportError::ContextMismatch { expected, actual })
         }
+    }
+
+    fn prepare_frame<'frame>(
+        &self,
+        frame: FrameToken<'frame>,
+    ) -> Result<ReconciledFrame<'frame>, GlowViewportError> {
+        // Keep this check at the renderer-owning boundary even though the public facade performs
+        // the same preflight. Internal callers must not be able to drain faults or borrow the
+        // renderer with a token from another Context.
+        self.ensure_frame_context(&frame)?;
+        self.with_renderer_mut(|renderer| {
+            let pending = frame
+                .try_render(renderer.renderer_consumer()?)
+                .map_err(RenderError::from)?;
+            renderer.reconcile_frame(pending).map_err(Into::into)
+        })
+    }
+
+    #[cfg(test)]
+    fn prepare_frame_with_retry_feedback_for_test<'frame>(
+        &self,
+        frame: FrameToken<'frame>,
+    ) -> Result<ReconciledFrame<'frame>, GlowViewportError> {
+        self.ensure_frame_context(&frame)?;
+        self.with_renderer_mut(|renderer| {
+            let pending = frame
+                .try_render(renderer.renderer_consumer()?)
+                .map_err(RenderError::from)?;
+            let feedback = pending
+                .texture_requests()
+                .iter()
+                .map(dear_imgui_rs::render::TextureRequest::retry)
+                .collect::<Vec<_>>();
+            pending
+                .reconcile_texture_feedback(feedback)
+                .map_err(RenderError::from)
+                .map_err(GlowViewportError::from)
+        })
     }
 
     fn ensure_entry(&self) -> Result<(), GlowViewportError> {
@@ -482,27 +687,6 @@ impl RuntimeControl {
             renderer.ensure_operational()?;
             callback(renderer)
         }?;
-        self.finish_entry()?;
-        Ok(result)
-    }
-
-    fn with_renderer<R>(
-        &self,
-        callback: impl FnOnce(&GlowRenderer) -> R,
-    ) -> Result<R, GlowViewportError> {
-        self.ensure_entry()?;
-        let result = {
-            let renderer =
-                self.renderer
-                    .try_borrow()
-                    .map_err(|_| GlowViewportError::CallbackReentered {
-                        callback: "Rust runtime entry",
-                    })?;
-            let renderer = renderer
-                .as_deref()
-                .ok_or(GlowViewportError::RuntimeDetached)?;
-            callback(renderer)
-        };
         self.finish_entry()?;
         Ok(result)
     }
@@ -842,125 +1026,118 @@ impl GlowViewportRuntime {
         Ok(Self { control })
     }
 
-    /// Returns and clears the oldest callback or ownership fault.
-    pub fn poll_fault(&self) -> Result<(), GlowViewportError> {
+    #[cfg(test)]
+    pub(super) fn poll_fault(&self) -> Result<(), GlowViewportError> {
         self.control.detect_and_take_fault().map_or(Ok(()), Err)
     }
 
-    /// Begins an instance-bound trace for one secondary platform-window render pass.
-    ///
-    /// Keep the returned guard alive while calling
-    /// [`Self::render_with_platform_windows_reconciled`], restore the main native GL context, and
-    /// then call [`GlowViewportFrameTrace::finish`]. The report contains only renderer callbacks
-    /// whose Glow draw completed successfully. This diagnostic trace does not replace
-    /// [`Self::poll_fault`].
-    pub fn begin_frame_trace(&self) -> Result<GlowViewportFrameTrace<'_>, GlowViewportError> {
-        self.control.begin_frame_trace()
-    }
-
-    /// Finalizes and renders one frame for the attached Context.
-    pub fn render_context(&self, context: &mut Context) -> Result<(), GlowViewportError> {
-        self.render_context_reconciled(context).map(drop)
-    }
-
-    /// Finalizes and renders the main viewport while retaining the reconciled frame capability.
-    pub fn render_context_reconciled<'context>(
+    /// Consumes an open frame and reconciles its managed textures for this viewport route.
+    pub fn prepare_frame<'frame>(
         &self,
-        context: &'context mut Context,
-    ) -> Result<ReconciledFrame<'context>, GlowViewportError> {
-        self.control.ensure_context(context)?;
-        let frame = self.control.with_renderer_mut(|renderer| {
-            renderer
-                .reconcile_context_frame(context)
-                .map_err(Into::into)
-        })?;
-        self.render_reconciled(frame)
-    }
-
-    /// Consumes and renders one Context-owned frame.
-    pub fn render(&self, frame: PendingFrame<'_>) -> Result<(), GlowViewportError> {
-        let frame = self.reconcile_frame(frame)?;
-        self.render_reconciled(frame).map(drop)
-    }
-
-    /// Reconciles managed textures without drawing the main viewport.
-    pub fn reconcile_frame<'frame>(
-        &self,
-        frame: PendingFrame<'frame>,
-    ) -> Result<ReconciledFrame<'frame>, GlowViewportError> {
-        self.control
-            .with_renderer_mut(|renderer| renderer.reconcile_frame(frame).map_err(Into::into))
-    }
-
-    /// Draws one reconciled main-viewport frame.
-    pub fn render_reconciled<'frame>(
-        &self,
-        frame: ReconciledFrame<'frame>,
-    ) -> Result<ReconciledFrame<'frame>, GlowViewportError> {
-        self.control.with_renderer_mut(|renderer| {
-            renderer
-                .render_reconciled_preserving_frame(frame)
-                .map_err(Into::into)
+        frame: FrameToken<'frame>,
+    ) -> Result<GlowPreparedViewportFrame<'frame>, GlowViewportError> {
+        // Reject foreign tokens before entering the runtime. `with_renderer_mut` observes deferred
+        // faults and borrows renderer state, so running it first would make a Context mismatch
+        // consume unrelated target-runtime state.
+        self.control.ensure_frame_context(&frame)?;
+        let frame = self.control.prepare_frame(frame)?;
+        Ok(GlowPreparedViewportFrame {
+            frame,
+            runtime: Rc::clone(&self.control),
         })
     }
 
-    /// Renders the main viewport, then completes every secondary platform viewport.
-    pub fn render_with_platform_windows(
+    #[cfg(test)]
+    pub(super) fn prepare_frame_with_retry_feedback_for_test<'frame>(
         &self,
-        frame: PendingFrame<'_>,
-    ) -> Result<(), GlowViewportError> {
-        let frame = self.reconcile_frame(frame)?;
-        self.render_with_platform_windows_reconciled(frame)
-            .map(drop)
+        frame: FrameToken<'frame>,
+    ) -> Result<GlowPreparedViewportFrame<'frame>, GlowViewportError> {
+        self.control.ensure_frame_context(&frame)?;
+        let frame = self
+            .control
+            .prepare_frame_with_retry_feedback_for_test(frame)?;
+        Ok(GlowPreparedViewportFrame {
+            frame,
+            runtime: Rc::clone(&self.control),
+        })
     }
 
-    /// Renders the main viewport, then completes every secondary platform viewport.
+    /// Renders the main viewport, completes every secondary viewport, and restores the main GL
+    /// context before returning.
     ///
-    /// This follows Dear ImGui's OpenGL multi-viewport ordering while retaining the Context render
-    /// lease across the native platform-window callbacks. The caller remains responsible for
-    /// restoring its main native GL context and calling [`Self::poll_fault`] before presenting the
-    /// main window. Delaying fault propagation until after context restoration keeps teardown on a
-    /// known GL capability even when a native callback fails.
-    pub fn render_with_platform_windows_reconciled<'frame>(
+    /// The host owns the native main-context handle, so it supplies the restoration operation.
+    /// The operation is attempted even if the main draw, a secondary renderer callback, or the
+    /// platform-window pump fails. After restoration, `take_platform_faults` drains faults recorded
+    /// by the platform owner during the same pump. The fault drain also runs when restoration
+    /// returns an error and therefore must not perform OpenGL work or assume a current context.
+    ///
+    /// This method does not make [`Self::attach`]'s share-group contract safe: the platform must
+    /// still activate a compatible context for every secondary renderer callback.
+    ///
+    /// # Panics
+    ///
+    /// A panic from the Dear ImGui platform-window pump is resumed only after attempting to restore
+    /// the main context. A panic from `restore_main_context` propagates normally.
+    pub fn render_main<'frame, RestoreError, PlatformError, PlatformFaults>(
         &self,
-        frame: ReconciledFrame<'frame>,
-    ) -> Result<ReconciledFrame<'frame>, GlowViewportError> {
-        let mut frame = self.render_reconciled(frame)?;
-        frame.update_and_render_platform_windows_default();
-        Ok(frame)
-    }
-
-    /// Finalizes the attached Context frame, renders the main viewport, and completes every
-    /// secondary platform viewport.
-    pub fn render_context_with_platform_windows(
-        &self,
-        context: &mut Context,
-    ) -> Result<(), GlowViewportError> {
-        self.render_context_with_platform_windows_reconciled(context)
-            .map(drop)
-    }
-
-    /// Finalizes the attached Context frame, renders the main viewport, and completes every
-    /// secondary platform viewport.
-    pub fn render_context_with_platform_windows_reconciled<'context>(
-        &self,
-        context: &'context mut Context,
-    ) -> Result<ReconciledFrame<'context>, GlowViewportError> {
-        self.control.ensure_context(context)?;
-        let frame = self.control.with_renderer_mut(|renderer| {
-            renderer
-                .reconcile_context_frame(context)
-                .map_err(Into::into)
+        prepared: GlowPreparedViewportFrame<'frame>,
+        restore_main_context: impl FnOnce() -> Result<(), RestoreError>,
+        take_platform_faults: impl FnOnce() -> PlatformFaults,
+    ) -> Result<
+        GlowRenderedViewportFrame<'frame>,
+        GlowViewportRouteError<RestoreError, PlatformError>,
+    >
+    where
+        PlatformFaults: IntoIterator<Item = PlatformError>,
+    {
+        if !Rc::ptr_eq(&self.control, &prepared.runtime) {
+            return Err(GlowViewportRouteError::new(vec![
+                GlowViewportRouteFault::DeferredRenderer(
+                    GlowViewportError::PreparedFrameRuntimeMismatch {
+                        expected: self.control.binding.id(),
+                        actual: prepared.frame.context_id(),
+                    },
+                ),
+            ]));
+        }
+        let GlowPreparedViewportFrame { frame, runtime: _ } = prepared;
+        self.control
+            .with_renderer_mut(|renderer| {
+                renderer
+                    .validate_reconciled_frame(&frame)
+                    .map_err(GlowViewportError::from)
+            })
+            .map_err(|error| {
+                GlowViewportRouteError::new(vec![GlowViewportRouteFault::DeferredRenderer(error)])
+            })?;
+        let trace = self.control.begin_frame_trace().map_err(|error| {
+            GlowViewportRouteError::new(vec![GlowViewportRouteFault::DeferredRenderer(error)])
         })?;
-        self.render_with_platform_windows_reconciled(frame)
-    }
+        let mut frame = frame;
+        let mut faults = Vec::new();
 
-    /// Runs a read-only, non-escaping renderer inspection.
-    pub fn with_renderer<R>(
-        &self,
-        callback: impl FnOnce(&GlowRenderer) -> R,
-    ) -> Result<R, GlowViewportError> {
-        self.control.with_renderer(callback)
+        if let Err(error) = self.control.with_renderer_mut(|renderer| {
+            renderer
+                .draw_reconciled_frame(&frame)
+                .map_err(GlowViewportError::from)
+        }) {
+            faults.push(GlowViewportRouteFault::MainDraw(error));
+        }
+
+        let faults = collect_platform_route_faults(
+            faults,
+            || frame.update_and_render_platform_windows_default(),
+            || self.control.detect_and_drain_faults(),
+            restore_main_context,
+            take_platform_faults,
+        );
+
+        let secondary = trace.finish();
+        if faults.is_empty() {
+            Ok(GlowRenderedViewportFrame { frame, secondary })
+        } else {
+            Err(GlowViewportRouteError::new(faults))
+        }
     }
 
     /// Configures the clear color used for secondary viewports.
@@ -1108,6 +1285,13 @@ impl GlowViewportRuntime {
     pub(super) fn panic_next_callback_for_test(&self) {
         self.control.panic_next_callback_for_test();
     }
+
+    #[cfg(test)]
+    pub(super) fn begin_frame_trace_for_test(
+        &self,
+    ) -> Result<FrameTraceGuard<'_>, GlowViewportError> {
+        self.control.begin_frame_trace()
+    }
 }
 
 impl Drop for GlowViewportRuntime {
@@ -1122,6 +1306,138 @@ fn first_error<const N: usize>(
     errors.into_iter().flatten().next().map_or(Ok(()), Err)
 }
 
+fn collect_platform_route_faults<RestoreError, PlatformError, PlatformFaults>(
+    mut faults: Vec<GlowViewportRouteFault<RestoreError, PlatformError>>,
+    pump_platform_windows: impl FnOnce(),
+    take_deferred_faults: impl FnOnce() -> Vec<GlowViewportError>,
+    restore_main_context: impl FnOnce() -> Result<(), RestoreError>,
+    take_platform_faults: impl FnOnce() -> PlatformFaults,
+) -> Vec<GlowViewportRouteFault<RestoreError, PlatformError>>
+where
+    PlatformFaults: IntoIterator<Item = PlatformError>,
+{
+    let pump_result = catch_unwind(AssertUnwindSafe(pump_platform_windows));
+    let restore_result = restore_main_context();
+
+    if let Err(payload) = pump_result {
+        resume_unwind(payload);
+    }
+    match restore_result {
+        Ok(()) => {}
+        Err(error) => faults.push(GlowViewportRouteFault::MainContextRestore(error)),
+    }
+    faults.extend(
+        take_deferred_faults()
+            .into_iter()
+            .map(GlowViewportRouteFault::DeferredRenderer),
+    );
+    faults.extend(
+        take_platform_faults()
+            .into_iter()
+            .map(GlowViewportRouteFault::DeferredPlatform),
+    );
+    faults
+}
+
 fn context_teardown_error(error: GlowViewportError) -> ContextAttachmentTeardownError {
     ContextAttachmentTeardownError::new(format!("Glow viewport teardown failed: {error}"))
+}
+
+#[cfg(test)]
+mod route_fault_tests {
+    use std::cell::Cell;
+    use std::fmt;
+    use std::panic::AssertUnwindSafe;
+    use std::rc::Rc;
+
+    use super::{GlowViewportError, GlowViewportRouteFault, collect_platform_route_faults};
+
+    #[derive(Debug, Eq, PartialEq)]
+    struct RestoreFailure;
+
+    impl fmt::Display for RestoreFailure {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("restore failed")
+        }
+    }
+
+    impl std::error::Error for RestoreFailure {}
+
+    #[derive(Debug, Eq, PartialEq)]
+    struct PlatformFailure;
+
+    impl fmt::Display for PlatformFailure {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("platform failed")
+        }
+    }
+
+    impl std::error::Error for PlatformFailure {}
+
+    #[test]
+    fn route_restores_before_observing_deferred_faults_and_preserves_stage_order() {
+        let pumped = Rc::new(Cell::new(false));
+        let restored = Rc::new(Cell::new(false));
+        let pump_observer = Rc::clone(&pumped);
+        let restore_observer = Rc::clone(&restored);
+        let deferred_observer = Rc::clone(&restored);
+        let platform_observer = Rc::clone(&restored);
+
+        let faults = collect_platform_route_faults(
+            vec![GlowViewportRouteFault::MainDraw(
+                GlowViewportError::InvalidViewport,
+            )],
+            move || pump_observer.set(true),
+            move || {
+                assert!(deferred_observer.get());
+                vec![GlowViewportError::CallbackReentered {
+                    callback: "Renderer_RenderWindow",
+                }]
+            },
+            move || {
+                assert!(pumped.get());
+                restore_observer.set(true);
+                Err(RestoreFailure)
+            },
+            move || {
+                assert!(platform_observer.get());
+                [PlatformFailure]
+            },
+        );
+
+        assert!(restored.get());
+        assert!(matches!(faults[0], GlowViewportRouteFault::MainDraw(_)));
+        assert!(matches!(
+            faults[1],
+            GlowViewportRouteFault::MainContextRestore(RestoreFailure)
+        ));
+        assert!(matches!(
+            faults[2],
+            GlowViewportRouteFault::DeferredRenderer(_)
+        ));
+        assert!(matches!(
+            faults[3],
+            GlowViewportRouteFault::DeferredPlatform(PlatformFailure)
+        ));
+    }
+
+    #[test]
+    fn platform_pump_panic_cannot_skip_main_context_restoration() {
+        let restored = Cell::new(false);
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            collect_platform_route_faults(
+                Vec::new(),
+                || panic!("injected platform-window pump panic"),
+                Vec::new,
+                || {
+                    restored.set(true);
+                    Ok::<_, RestoreFailure>(())
+                },
+                Vec::<PlatformFailure>::new,
+            )
+        }));
+
+        assert!(restored.get());
+        assert!(result.is_err());
+    }
 }

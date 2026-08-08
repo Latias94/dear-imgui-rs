@@ -1,4 +1,5 @@
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::rc::Rc;
 #[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
@@ -9,8 +10,9 @@ use ash::vk;
 
 use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
-    ContextAttachmentTeardownError, ContextBinding, ContextTeardown, Id, sys,
+    ContextAttachmentTeardownError, ContextBinding, ContextTeardown, FrameLifecycleState, Id, sys,
 };
+use static_assertions::{assert_impl_all, assert_not_impl_any};
 
 use super::callbacks::{
     renderer_create_window_sys, renderer_destroy_window_sys, renderer_probe_runtime_sys,
@@ -18,14 +20,17 @@ use super::callbacks::{
 };
 use super::registry::SurfaceSupportError;
 use super::runtime::{
-    AshViewportError, OwningViewportRuntime, RuntimeControl, RuntimeState,
-    preflight_attachment_with,
+    AshPreparedViewportFrame, AshViewportError, AshViewportFrameCompletion, AshViewportRouteFault,
+    OwningViewportRuntime, RuntimeControl, RuntimeState, preflight_attachment_with,
 };
 #[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
 use super::{SurfaceAdapter, SurfaceCreateError, ViewportSwapchainPolicy, VulkanViewportConfig};
 use crate::RendererError;
 #[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
 use crate::renderer::lifecycle::renderer_for_test;
+
+assert_impl_all!(AshViewportFrameCompletion: Send, Sync);
+assert_not_impl_any!(AshPreparedViewportFrame<'static>: Send, Sync);
 
 struct TestPlatformMarker;
 
@@ -561,7 +566,7 @@ fn recoverable_surface_fault_remains_non_terminal() {
 }
 
 #[test]
-fn terminal_fault_preempts_and_preserves_pending_non_terminal_fault() {
+fn renderer_fault_queue_preserves_observation_order_and_first_terminal_fault() {
     let _guard = super::test_context_guard();
     let mut context = Context::create();
     let _platform = attach_test_platform(&mut context);
@@ -571,20 +576,29 @@ fn terminal_fault_preempts_and_preserves_pending_non_terminal_fault() {
     control.record_fault(AshViewportError::CallbackReentered {
         callback: "earlier recoverable fault",
     });
+    control.record_fault(AshViewportError::CallbackReentered {
+        callback: "second recoverable fault",
+    });
     control.record_runtime_contract_fault(AshViewportError::RendererCallbackReplaced {
         callback: "terminal contract fault",
     });
 
     assert!(matches!(
         runtime.poll_fault(),
-        Err(AshViewportError::RendererCallbackReplaced {
-            callback: "terminal contract fault"
+        Err(AshViewportError::CallbackReentered {
+            callback: "earlier recoverable fault"
         })
     ));
     assert!(matches!(
         runtime.poll_fault(),
         Err(AshViewportError::CallbackReentered {
-            callback: "earlier recoverable fault"
+            callback: "second recoverable fault"
+        })
+    ));
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(AshViewportError::RendererCallbackReplaced {
+            callback: "terminal contract fault"
         })
     ));
     runtime.shutdown(&mut context).unwrap();
@@ -1165,6 +1179,288 @@ fn frame_trace_is_instance_bound_non_nested_and_drop_abortable() {
     let report = runtime.begin_frame_trace().unwrap().finish();
     assert!(report.render_submitted_viewport_ids().is_empty());
     assert!(report.present_submitted_viewport_ids().is_empty());
+
+    runtime.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn public_route_rejects_foreign_frame_before_platform_or_renderer_side_effects() {
+    let _guard = super::test_context_guard();
+    let mut target = Context::create();
+    let target_platform = attach_test_platform(&mut target);
+    let target_runtime = OwningViewportRuntime::attach_for_test(&mut target).unwrap();
+    let expected = target.id();
+    target_runtime
+        .control_for_test()
+        .record_fault(AshViewportError::CallbackReentered {
+            callback: "queued renderer fault",
+        });
+
+    let suspended_target = target.suspend_or_panic();
+    let mut source = Context::create();
+    source
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("foreign test Context should own its legacy font atlas")
+        .build();
+    source.io_mut().set_display_size([128.0, 128.0]);
+    source.io_mut().set_delta_time(1.0 / 60.0);
+    let actual = source.id();
+    let frame = source.begin_frame();
+    let platform_scope_called = Cell::new(false);
+    let platform_faults = RefCell::new(VecDeque::from([
+        std::io::Error::other("queued platform fault one"),
+        std::io::Error::other("queued platform fault two"),
+    ]));
+
+    // Both public platform routes delegate their Winit/SDL3 entry and deferred-fault drain to
+    // this closure. A foreign frame must return before either operation becomes observable.
+    let error = match target_runtime.prepare_route_for_context(actual, || {
+        platform_scope_called.set(true);
+        let faults = platform_faults.borrow_mut().drain(..).collect();
+        (None, faults)
+    }) {
+        Ok(_) => panic!("a foreign frame must not produce a prepared route frame"),
+        Err(error) => error,
+    };
+
+    assert_eq!(frame.lifecycle_state(), FrameLifecycleState::InFrame);
+    assert!(!platform_scope_called.get());
+    assert_eq!(platform_faults.borrow().len(), 2);
+    assert!(matches!(
+        error.faults(),
+        [AshViewportRouteFault::Renderer(
+            AshViewportError::ContextMismatch {
+                expected: error_expected,
+                actual: error_actual,
+            }
+        )] if *error_expected == expected && *error_actual == actual
+    ));
+    assert!(matches!(
+        target_runtime.poll_fault(),
+        Err(AshViewportError::CallbackReentered {
+            callback: "queued renderer fault"
+        })
+    ));
+
+    drop(frame);
+    drop(source);
+    drop(target_runtime);
+    drop(target_platform);
+    drop(suspended_target);
+}
+
+#[test]
+fn owning_runtime_rejects_foreign_frame_before_target_fault_or_renderer_entry() {
+    let _guard = super::test_context_guard();
+    let mut target = Context::create();
+    let target_platform = attach_test_platform(&mut target);
+    let target_runtime = OwningViewportRuntime::attach_for_test(&mut target).unwrap();
+    let expected = target.id();
+    target_runtime
+        .control_for_test()
+        .record_fault(AshViewportError::CallbackPanicked {
+            callback: "queued before owning prepare",
+        });
+
+    let suspended_target = target.suspend_or_panic();
+    let mut source = Context::create();
+    source
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("foreign test Context should own its legacy font atlas")
+        .build();
+    source.io_mut().set_display_size([128.0, 128.0]);
+    source.io_mut().set_delta_time(1.0 / 60.0);
+    let actual = source.id();
+    let frame = source.begin_frame();
+
+    let error = match target_runtime.prepare(frame) {
+        Ok(_) => panic!("a foreign frame must not reach the owning Ash renderer"),
+        Err(error) => error,
+    };
+    assert!(matches!(
+        error,
+        AshViewportError::ContextMismatch {
+            expected: error_expected,
+            actual: error_actual,
+        } if error_expected == expected && error_actual == actual
+    ));
+    assert!(matches!(
+        target_runtime.poll_fault(),
+        Err(AshViewportError::CallbackPanicked {
+            callback: "queued before owning prepare"
+        })
+    ));
+
+    drop(source);
+    drop(target_runtime);
+    drop(target_platform);
+    drop(suspended_target);
+}
+
+#[test]
+fn frame_runtime_identity_mismatch_is_rejected_before_target_faults_are_consumed() {
+    let _guard = super::test_context_guard();
+    let mut context_a = Context::create();
+    let platform_a = attach_test_platform(&mut context_a);
+    let runtime_a = OwningViewportRuntime::attach_for_test(&mut context_a).unwrap();
+    let expected = context_a.id();
+    runtime_a
+        .control_for_test()
+        .record_fault(AshViewportError::CallbackReentered {
+            callback: "queued before runtime validation",
+        });
+
+    let suspended_a = context_a.suspend_or_panic();
+    let mut context_b = Context::create();
+    let platform_b = attach_test_platform(&mut context_b);
+    let runtime_b = OwningViewportRuntime::attach_for_test(&mut context_b).unwrap();
+    let actual = context_b.id();
+
+    runtime_a
+        .ensure_runtime_identity_for_test(&runtime_a)
+        .unwrap();
+    assert!(matches!(
+        runtime_a.ensure_runtime_identity_for_test(&runtime_b),
+        Err(AshViewportError::FrameTransactionRuntimeMismatch {
+            expected: error_expected,
+            actual: error_actual,
+        }) if error_expected == expected && error_actual == actual
+    ));
+    assert!(matches!(
+        runtime_a.wait_for_frame_completion(runtime_b.empty_completion_for_test()),
+        Err(AshViewportError::FrameTransactionRuntimeMismatch {
+            expected: error_expected,
+            actual: error_actual,
+        }) if error_expected == expected && error_actual == actual
+    ));
+    assert!(matches!(
+        runtime_a.poll_fault(),
+        Err(AshViewportError::CallbackReentered {
+            callback: "queued before runtime validation"
+        })
+    ));
+
+    drop(runtime_b);
+    drop(platform_b);
+    drop(context_b);
+    drop(runtime_a);
+    drop(platform_a);
+    drop(suspended_a);
+}
+
+#[test]
+fn prepared_transaction_traces_exactly_one_secondary_dispatch_scope() {
+    let _guard = super::test_context_guard();
+    let mut context = Context::create();
+    let _platform = attach_test_platform(&mut context);
+    let mut runtime = OwningViewportRuntime::attach_for_test(&mut context).unwrap();
+    let control = runtime.control_for_test();
+    let low = Id::from(3_u32);
+    let high = Id::from(7_u32);
+
+    let (output, report) = runtime
+        .trace_secondary_dispatch(|| {
+            control.record_viewport_render_submitted(high);
+            control.record_viewport_render_submitted(low);
+            control.record_viewport_present_submitted(high);
+            "secondary complete"
+        })
+        .unwrap();
+
+    assert_eq!(output, "secondary complete");
+    assert_eq!(report.render_submitted_viewport_ids(), &[low, high]);
+    assert_eq!(report.present_submitted_viewport_ids(), &[high]);
+    assert!(runtime.begin_frame_trace().is_ok());
+
+    runtime.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn prepared_transaction_checks_faults_before_and_after_secondary_dispatch() {
+    let _guard = super::test_context_guard();
+    let mut context = Context::create();
+    let _platform = attach_test_platform(&mut context);
+    let mut runtime = OwningViewportRuntime::attach_for_test(&mut context).unwrap();
+    let control = runtime.control_for_test();
+    let dispatched = Cell::new(false);
+
+    control.record_fault(AshViewportError::CallbackReentered {
+        callback: "before secondary dispatch",
+    });
+    assert!(matches!(
+        runtime.trace_secondary_dispatch(|| dispatched.set(true)),
+        Err(AshViewportError::CallbackReentered {
+            callback: "before secondary dispatch"
+        })
+    ));
+    assert!(!dispatched.get());
+
+    assert!(matches!(
+        runtime.trace_secondary_dispatch(|| {
+            dispatched.set(true);
+            control.record_fault(AshViewportError::CallbackPanicked {
+                callback: "during secondary dispatch",
+            });
+        }),
+        Err(AshViewportError::CallbackPanicked {
+            callback: "during secondary dispatch"
+        })
+    ));
+    assert!(dispatched.get());
+    assert!(runtime.begin_frame_trace().is_ok());
+
+    runtime.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn route_error_retains_renderer_then_platform_fault_order() {
+    let _guard = super::test_context_guard();
+    let mut context = Context::create();
+    let _platform = attach_test_platform(&mut context);
+    let mut runtime = OwningViewportRuntime::attach_for_test(&mut context).unwrap();
+    let control = runtime.control_for_test();
+    control.record_fault(AshViewportError::CallbackReentered {
+        callback: "renderer first",
+    });
+    control.record_fault(AshViewportError::CallbackPanicked {
+        callback: "renderer second",
+    });
+
+    let error = match runtime.finish_route_preparation(
+        None,
+        vec![
+            std::io::Error::other("platform first"),
+            std::io::Error::other("platform second"),
+        ],
+    ) {
+        Ok(_) => panic!("faulted route must not produce a prepared frame"),
+        Err(error) => error,
+    };
+
+    assert_eq!(error.faults().len(), 4);
+    let faults = error.into_faults();
+    assert!(matches!(
+        &faults[0],
+        AshViewportRouteFault::Renderer(AshViewportError::CallbackReentered {
+            callback: "renderer first"
+        })
+    ));
+    assert!(matches!(
+        &faults[1],
+        AshViewportRouteFault::Renderer(AshViewportError::CallbackPanicked {
+            callback: "renderer second"
+        })
+    ));
+    assert!(matches!(
+        &faults[2],
+        AshViewportRouteFault::Platform(error) if error.to_string() == "platform first"
+    ));
+    assert!(matches!(
+        &faults[3],
+        AshViewportRouteFault::Platform(error) if error.to_string() == "platform second"
+    ));
 
     runtime.shutdown(&mut context).unwrap();
 }
