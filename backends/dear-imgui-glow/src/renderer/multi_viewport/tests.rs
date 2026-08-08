@@ -7,7 +7,7 @@ use std::sync::{Mutex, OnceLock};
 
 use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
-    ContextAttachmentTeardownError, ContextTeardown, sys,
+    ContextAttachmentTeardownError, ContextTeardown, TextureFormat, sys,
 };
 
 use super::callbacks::renderer_render_window_sys;
@@ -18,7 +18,7 @@ use crate::renderer::callbacks::{
     draw_callback_set_sampler_nearest,
 };
 use crate::{GlowRenderer, RenderError};
-use crate::{shaders::Shaders, texture::SimpleTextureMap, versions::GlVersion};
+use crate::{shaders::Shaders, texture::TextureRegistry, versions::GlVersion};
 
 static DELETED_TEXTURES: AtomicU32 = AtomicU32::new(0);
 
@@ -157,6 +157,15 @@ fn test_renderer(
     let mut flags = context.io().backend_flags();
     flags.insert(BackendFlags::RENDERER_HAS_VTX_OFFSET | BackendFlags::RENDERER_HAS_TEXTURES);
     context.io_mut().set_backend_flags(flags);
+    let mut texture_registry = TextureRegistry::default();
+    if owned_texture {
+        texture_registry
+            .register_renderer(
+                glow::NativeTexture(NonZeroU32::new(91).unwrap()),
+                TextureFormat::RGBA32,
+            )
+            .unwrap();
+    }
 
     GlowRenderer {
         shaders: Shaders {
@@ -170,10 +179,6 @@ fn test_renderer(
         },
         vbo_handle: None,
         ebo_handle: None,
-        owned_textures: owned_texture
-            .then(|| glow::NativeTexture(NonZeroU32::new(91).unwrap()))
-            .into_iter()
-            .collect(),
         samplers: None,
         gl_version: GlVersion {
             major: 3,
@@ -190,7 +195,7 @@ fn test_renderer(
         renderer_texture_max: [0, 0],
         renderer_state_fault: None,
         synthetic_test_renderer: true,
-        texture_map: Some(Box::new(SimpleTextureMap::default())),
+        texture_registry,
         managed_textures: std::collections::HashMap::new(),
         destroyed_managed_textures: std::collections::HashMap::new(),
         renderer_consumer: Some(renderer_consumer),
@@ -439,6 +444,29 @@ fn runtime_texture_entry_fails_closed_on_core_drift() {
             | BackendFlags::RENDERER_HAS_VIEWPORTS
     ));
     let _ = runtime.shutdown(&mut context);
+}
+
+#[test]
+fn runtime_external_texture_lifecycle_never_deletes_application_resources() {
+    let _guard = test_guard();
+    DELETED_TEXTURES.store(0, Ordering::SeqCst);
+    let mut context = Context::create();
+    let _platform = attach_test_platform(&mut context);
+    let gl = fake_gl();
+    let renderer = test_renderer(&mut context, Some(Rc::clone(&gl)), false);
+    let mut runtime = unsafe { GlowViewportRuntime::attach(&mut context, renderer) }.unwrap();
+
+    let initial = glow::NativeTexture(NonZeroU32::new(93).unwrap());
+    let replacement = glow::NativeTexture(NonZeroU32::new(94).unwrap());
+    let texture = runtime.register_external_texture(initial).unwrap();
+    runtime
+        .update_external_texture(texture, replacement)
+        .unwrap();
+    runtime.unregister_external_texture(texture).unwrap();
+    assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 0);
+
+    runtime.shutdown(&mut context).unwrap();
+    assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 0);
 }
 
 #[test]

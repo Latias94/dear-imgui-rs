@@ -12,7 +12,7 @@ use std::{
     time::Instant,
 };
 
-use dear_imgui_glow::GlowRenderer;
+use dear_imgui_glow::{GlowRenderer, RendererTextureId};
 use dear_imgui_rs::*;
 use dear_imgui_winit::WinitPlatform;
 use glow::HasContext;
@@ -36,7 +36,7 @@ use winit::{
 struct AssetThumb {
     path: PathBuf,
     size_px: (u32, u32),
-    tex: TextureId,
+    tex: RendererTextureId,
 }
 
 struct BrowserState {
@@ -273,7 +273,7 @@ impl AppWindow {
                                 self.browser.thumb_size,
                                 (self.browser.thumb_size * aspect).max(1.0),
                             ];
-                            Image::new(ui, it.tex, size).build();
+                            Image::new(ui, it.tex.texture_id(), size).build();
                             let is_sel = self.browser.selected == Some(i);
                             if ui.selectable_config(name).selected(is_sel).build() {
                                 self.browser.selected = Some(i);

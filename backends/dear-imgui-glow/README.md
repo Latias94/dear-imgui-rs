@@ -67,9 +67,18 @@ For a renderer created with `with_external_context`, call `shutdown_with_context
 live function table while its OpenGL context is current. `destroy_device_objects` and
 `destroy_device_objects_with_context` use the same prepare-delete-commit transaction but keep the
 consumer attached. The next owned or external render recreates device objects transactionally
-before managed-texture reconciliation. Dropping an unreconciled `PendingFrame` records abandonment
+before managed-texture reconciliation. Renderer-owned texture handles become stale during this
+reset because their GL objects are deleted; registered external texture mappings remain valid and
+their GL objects remain application-owned. Final shutdown removes those external mappings without
+deleting the application resources. Dropping an unreconciled `PendingFrame` records abandonment
 before the Context becomes mutably available again, so teardown can retry without a separate
 completion-poll step.
+
+Manual texture APIs preserve their ownership at the type level. `register_texture` returns a
+`RendererTextureId`, while `register_external_texture` returns an `ExternalTextureId`. Convert
+either handle with `texture_id()` only when submitting an image widget; keep the typed handle for
+updates and removal. The renderer allocates all IDs and does not expose a mutable texture map, so a
+managed, renderer-owned, or external texture cannot be removed through another ownership route.
 
 ## Runtime Capabilities and Texture Sampling
 
@@ -121,17 +130,13 @@ with the Context:
 
 ```rust
 use std::rc::Rc;
-use dear_imgui_glow::{GlowRenderer, SimpleTextureMap, multi_viewport::GlowViewportRuntime};
+use dear_imgui_glow::{GlowRenderer, multi_viewport::GlowViewportRuntime};
 
 // Attach an OpenGL-aware platform runtime first.
 let gl = Rc::new(unsafe {
     glow::Context::from_loader_function(|name| loader.get_proc_address(name) as *const _)
 });
-let renderer = GlowRenderer::with_shared_context(
-    Rc::clone(&gl),
-    &mut imgui,
-    Box::new(SimpleTextureMap::default()),
-)?;
+let renderer = GlowRenderer::with_shared_context(Rc::clone(&gl), &mut imgui)?;
 // SAFETY: the platform creates every secondary GL context in `gl`'s share group, makes the
 // viewport context current before Platform_RenderWindow, and keeps a compatible context current
 // for runtime GL work and teardown.
@@ -252,10 +257,12 @@ describe how the crate was compiled, but not what the active OpenGL context supp
   and `supports_sampler_objects()` for the supported observations. Device-object destruction is
   recoverable at the next render, while `shutdown` terminates the renderer, so there is no shared
   boolean state for both operations.
-- Mutable access to the texture map has been removed. Use `register_texture`/`unregister_texture`
-  for renderer-owned GL textures and
-  `register_external_texture`/`update_external_texture`/`unregister_external_texture` for
-  application-owned mappings.
+- The public `TextureMap`/`SimpleTextureMap` extension point, `GlowRenderer::texture_map`, and
+  `GlowRenderer::with_texture_map` were removed. `with_external_context` and
+  `with_shared_context` no longer take a texture-map argument. Use
+  `register_texture`/`update_texture`/`unregister_texture` with `RendererTextureId` for
+  renderer-owned GL textures, or the corresponding `register_external_texture` operations with
+  `ExternalTextureId` for application-owned mappings.
 - `GlVersion` capability queries now use explicit runtime names:
   `bind_vertex_array_support` -> `is_supported`, `vertex_offset_support` ->
   `supports_vertex_offset`, `clip_origin_support` -> `supports_clip_origin`,
@@ -263,6 +270,8 @@ describe how the crate was compiled, but not what the active OpenGL context supp
   `supports_polygon_mode`, and `primitive_restart_support` ->
   `supports_primitive_restart`. The last query now correctly reports `false` for OpenGL ES,
   where fixed-index restart is not the desktop toggle restored by this backend.
-- Match `RenderError::UnknownTextureId(TextureId)` for a legacy texture ID that is not in the
-  renderer map, or `RenderError::ManagedTextureMissing(SnapshotTextureId)` for a managed update
-  received before its matching GPU create request, instead of parsing `RenderError::InvalidTexture(String)`.
+- Match `RenderError::UnknownTextureId(TextureId)` when draw data references an unregistered raw
+  ID. `RenderError::RendererTextureNotFound(TextureId)` and
+  `RenderError::ExternalTextureNotFound(TextureId)` identify stale or foreign typed handles.
+  `RenderError::ManagedTextureMissing(SnapshotTextureId)` identifies a managed update received
+  before its matching GPU create request.

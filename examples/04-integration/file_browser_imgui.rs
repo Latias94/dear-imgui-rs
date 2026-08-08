@@ -2,13 +2,13 @@
 //! - Uses dear-file-browser `FileDialogState` and `Ui` extension
 //! - Works on desktop and WASM without native dialogs
 
-use std::{num::NonZeroU32, sync::Arc, time::Instant};
+use std::{collections::HashMap, num::NonZeroU32, sync::Arc, time::Instant};
 
 use dear_file_browser::{
     DialogMode, FileDialogExt, FileDialogState, FileListViewMode, ImageThumbnailProvider,
     ThumbnailBackend, ThumbnailRenderer, ToolbarDensity, ToolbarIconMode,
 };
-use dear_imgui_glow::GlowRenderer;
+use dear_imgui_glow::{GlowRenderer, RendererTextureId};
 use dear_imgui_rs::*;
 use dear_imgui_winit::WinitPlatform;
 use glow::HasContext;
@@ -42,6 +42,7 @@ struct AppWindow {
     // demo state
     browser: FileDialogState,
     thumbnails_provider: ImageThumbnailProvider,
+    thumbnail_textures: HashMap<TextureId, RendererTextureId>,
     status: String,
 }
 
@@ -139,6 +140,7 @@ impl AppWindow {
             },
             browser,
             thumbnails_provider: ImageThumbnailProvider::default(),
+            thumbnail_textures: HashMap::new(),
             status: String::new(),
         })
     }
@@ -189,6 +191,7 @@ impl AppWindow {
                 if self.browser.is_open() {
                     let mut renderer = GlowThumbnailRenderer {
                         renderer: &mut self.imgui.renderer,
+                        textures: &mut self.thumbnail_textures,
                     };
                     let mut backend = ThumbnailBackend {
                         provider: &mut self.thumbnails_provider,
@@ -233,6 +236,7 @@ impl AppWindow {
 
 struct GlowThumbnailRenderer<'a> {
     renderer: &'a mut GlowRenderer,
+    textures: &'a mut HashMap<TextureId, RendererTextureId>,
 }
 
 impl ThumbnailRenderer for GlowThumbnailRenderer<'_> {
@@ -240,18 +244,27 @@ impl ThumbnailRenderer for GlowThumbnailRenderer<'_> {
         &mut self,
         image: &dear_file_browser::DecodedRgbaImage,
     ) -> Result<TextureId, String> {
-        self.renderer
+        let texture = self
+            .renderer
             .register_texture(
                 image.width,
                 image.height,
                 dear_imgui_rs::TextureFormat::RGBA32,
                 &image.rgba,
             )
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        let texture_id = texture.texture_id();
+        let previous = self.textures.insert(texture_id, texture);
+        debug_assert!(previous.is_none(), "Glow texture ID was reused");
+        Ok(texture_id)
     }
 
     fn destroy(&mut self, texture_id: TextureId) {
-        if let Err(error) = self.renderer.unregister_texture(texture_id) {
+        let Some(texture) = self.textures.remove(&texture_id) else {
+            eprintln!("Unknown thumbnail texture {texture_id:?}");
+            return;
+        };
+        if let Err(error) = self.renderer.unregister_texture(texture) {
             eprintln!("Failed to release thumbnail texture {texture_id:?}: {error}");
         }
     }

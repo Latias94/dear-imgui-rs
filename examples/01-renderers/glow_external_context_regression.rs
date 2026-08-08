@@ -5,7 +5,7 @@
 
 use std::{num::NonZeroU32, sync::Arc, time::Instant};
 
-use dear_imgui_glow::{GlowRenderer, SimpleTextureMap};
+use dear_imgui_glow::GlowRenderer;
 use dear_imgui_rs::{
     Condition, Context as ImguiContext, ManagedTextureError, ManagedTextureId, TextureId,
     texture::{OwnedTextureData, TextureStatus},
@@ -132,11 +132,7 @@ impl AppWindow {
             })
         };
 
-        let mut renderer = GlowRenderer::with_external_context(
-            &gl,
-            &mut imgui_context,
-            Box::new(SimpleTextureMap::default()),
-        )?;
+        let mut renderer = GlowRenderer::with_external_context(&gl, &mut imgui_context)?;
         renderer.set_framebuffer_srgb_enabled(true)?;
 
         let managed_texture = OwnedTextureData::from_pixels(
@@ -220,11 +216,6 @@ impl AppWindow {
                             "managed texture create completed without assigning a TextureId",
                         ));
                     }
-                    if self.imgui.renderer.texture_map().get(tex_id).is_none() {
-                        return Err(boxed_error(
-                            "managed texture create completed but renderer texture map is missing the GPU texture",
-                        ));
-                    }
                     self.imgui.live_texture_id = Some(tex_id);
                     self.imgui.stage = RegressionStage::SubmitUpdate;
                     println!("Verified managed texture create request");
@@ -247,11 +238,6 @@ impl AppWindow {
                             "managed texture update unexpectedly changed the TextureId",
                         ));
                     }
-                    if self.imgui.renderer.texture_map().get(tex_id).is_none() {
-                        return Err(boxed_error(
-                            "managed texture update completed but renderer texture map no longer contains the GPU texture",
-                        ));
-                    }
                     self.imgui.stage = RegressionStage::SubmitDestroy;
                     println!("Verified managed texture update request");
                 }
@@ -264,14 +250,9 @@ impl AppWindow {
                 {
                     Err(ManagedTextureError::Retiring(_)) => {}
                     Err(ManagedTextureError::AlreadyRemoved(_)) => {
-                        let tex_id = self.imgui.live_texture_id.ok_or_else(|| {
+                        self.imgui.live_texture_id.ok_or_else(|| {
                             boxed_error("missing TextureId before destroy verification")
                         })?;
-                        if self.imgui.renderer.texture_map().get(tex_id).is_some() {
-                            return Err(boxed_error(
-                                "managed texture destroy completed but renderer texture map still contains the GPU texture",
-                            ));
-                        }
                         self.imgui.stage = RegressionStage::Verified;
                         let message = format!(
                             "Regression passed: external-context Glow renderer handled managed texture create/update/destroy in {} frames.",

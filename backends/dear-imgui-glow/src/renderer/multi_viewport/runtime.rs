@@ -7,7 +7,7 @@ use dear_imgui_rs::render::{PendingFrame, ReconciledFrame};
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
     ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding, ContextBindingError,
-    ContextDestroyed, ContextId, ContextTeardown, Id, TextureFormat, TextureId,
+    ContextDestroyed, ContextId, ContextTeardown, Id, TextureFormat,
 };
 use thiserror::Error;
 
@@ -16,7 +16,7 @@ use super::callbacks::{
     revoke_renderer_viewport_capability_if_owned,
 };
 use super::registry::{preflight_runtime, register_runtime, unregister_runtime};
-use crate::{GlowRenderer, InitError, RenderError};
+use crate::{ExternalTextureId, GlTexture, GlowRenderer, RenderError, RendererTextureId};
 
 struct GlowRendererAttachmentMarker;
 
@@ -33,9 +33,6 @@ pub enum GlowViewportError {
     /// The underlying renderer operation failed.
     #[error(transparent)]
     Renderer(#[from] RenderError),
-    /// A renderer-owned legacy texture operation failed.
-    #[error(transparent)]
-    Texture(#[from] InitError),
     /// Existing external-context renderers do not own a verifiable GL capability.
     #[error(
         "Glow multi-viewport requires a renderer created with an owned or shared glow::Context"
@@ -988,14 +985,14 @@ impl GlowViewportRuntime {
         })
     }
 
-    /// Registers a renderer-owned legacy texture through the runtime's verified GL capability.
+    /// Registers a renderer-owned texture through the runtime's verified GL capability.
     pub fn register_texture(
         &self,
         width: u32,
         height: u32,
         format: TextureFormat,
         data: &[u8],
-    ) -> Result<TextureId, GlowViewportError> {
+    ) -> Result<RendererTextureId, GlowViewportError> {
         self.control.with_renderer_mut(|renderer| {
             renderer
                 .register_texture(width, height, format, data)
@@ -1003,10 +1000,10 @@ impl GlowViewportRuntime {
         })
     }
 
-    /// Updates a renderer-owned legacy texture.
+    /// Updates a renderer-owned texture.
     pub fn update_texture(
         &self,
-        texture: TextureId,
+        texture: RendererTextureId,
         width: u32,
         height: u32,
         data: &[u8],
@@ -1014,6 +1011,49 @@ impl GlowViewportRuntime {
         self.control.with_renderer_mut(|renderer| {
             renderer
                 .update_texture(texture, width, height, data)
+                .map_err(Into::into)
+        })
+    }
+
+    /// Unregisters and deletes a renderer-owned texture.
+    pub fn unregister_texture(&self, texture: RendererTextureId) -> Result<(), GlowViewportError> {
+        self.control
+            .with_renderer_mut(|renderer| renderer.unregister_texture(texture).map_err(Into::into))
+    }
+
+    /// Registers an application-owned OpenGL texture without transferring ownership.
+    pub fn register_external_texture(
+        &self,
+        texture: GlTexture,
+    ) -> Result<ExternalTextureId, GlowViewportError> {
+        self.control.with_renderer_mut(|renderer| {
+            renderer
+                .register_external_texture(texture)
+                .map_err(Into::into)
+        })
+    }
+
+    /// Replaces an application-owned texture mapping without deleting either GL object.
+    pub fn update_external_texture(
+        &self,
+        texture: ExternalTextureId,
+        replacement: GlTexture,
+    ) -> Result<(), GlowViewportError> {
+        self.control.with_renderer_mut(|renderer| {
+            renderer
+                .update_external_texture(texture, replacement)
+                .map_err(Into::into)
+        })
+    }
+
+    /// Removes an application-owned texture mapping without deleting its GL object.
+    pub fn unregister_external_texture(
+        &self,
+        texture: ExternalTextureId,
+    ) -> Result<(), GlowViewportError> {
+        self.control.with_renderer_mut(|renderer| {
+            renderer
+                .unregister_external_texture(texture)
                 .map_err(Into::into)
         })
     }

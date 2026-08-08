@@ -59,21 +59,9 @@ pub enum InitError {
         actual: usize,
     },
 
-    /// TextureId zero/null is not valid for this operation.
-    #[error("TextureId must be non-zero for OpenGL")]
-    NullTextureId,
-
     /// TextureId allocation space was exhausted.
     #[error("TextureId allocation space is exhausted")]
     TextureIdExhausted,
-
-    /// The texture map does not contain the requested texture ID.
-    #[error("TextureId is not registered: {0:?}")]
-    UnknownTextureId(dear_imgui_rs::TextureId),
-
-    /// A legacy texture operation was applied to an application-owned mapping.
-    #[error("TextureId is not owned by the Glow renderer: {0:?}")]
-    TextureNotRendererOwned(dear_imgui_rs::TextureId),
 
     /// A texture upload row is shorter than the pixels required by its format.
     #[error("{format:?} texture row pitch is too small: expected at least {minimum}, got {actual}")]
@@ -131,12 +119,13 @@ pub enum RenderError {
     #[error("texture ID is not registered: {0:?}")]
     UnknownTextureId(dear_imgui_rs::TextureId),
 
-    /// A texture operation does not match the mapping's ownership.
-    #[error("texture ID {texture_id:?} is not {expected}")]
-    TextureOwnershipMismatch {
-        texture_id: dear_imgui_rs::TextureId,
-        expected: &'static str,
-    },
+    /// A renderer-owned texture handle is stale or belongs to another renderer.
+    #[error("renderer-owned Glow texture is not registered: {0:?}")]
+    RendererTextureNotFound(dear_imgui_rs::TextureId),
+
+    /// An external texture handle is stale or belongs to another renderer.
+    #[error("external Glow texture is not registered: {0:?}")]
+    ExternalTextureNotFound(dear_imgui_rs::TextureId),
 
     /// An application-owned mapping attempted to alias a renderer-owned GL texture.
     #[error("an external texture mapping cannot alias a renderer-owned OpenGL texture")]
@@ -233,10 +222,6 @@ pub enum RenderError {
     /// Context-owned renderer epoch validation failed.
     #[error(transparent)]
     RendererConsumer(#[from] dear_imgui_rs::render::RendererConsumerError),
-
-    /// A custom texture map panicked while preparing renderer-owned resources for release.
-    #[error("custom TextureMap::clear panicked during renderer teardown")]
-    TextureMapCleanupPanicked,
 
     /// A Context-owned renderer state slot changed after Glow published it.
     #[error("Glow renderer state slot `{field}` drifted while attached")]

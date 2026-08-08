@@ -15,7 +15,7 @@ use crate::{
         FramebufferSrgbScope, GlStateGuard, GlowRenderStateStorage, GlowSamplerStrategy,
         map_renderer_render_state_error,
     },
-    texture::TextureMap,
+    texture::TextureRegistry,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -34,7 +34,7 @@ struct FramebufferExtent {
 
 struct DrawListRenderScope<'draw> {
     gl: &'draw Context,
-    texture_map: &'draw dyn TextureMap,
+    texture_registry: &'draw TextureRegistry,
     display_pos: [f32; 2],
     framebuffer_scale: [f32; 2],
     extent: FramebufferExtent,
@@ -520,10 +520,10 @@ impl GlowRenderer {
             &vertex_array,
             framebuffer_srgb.as_ref(),
         )?;
-        let texture_map = self.texture_map_for_draw();
+        let texture_registry = &self.texture_registry;
         self.render_draw_lists(
             gl,
-            texture_map,
+            texture_registry,
             draw_data,
             extent,
             &vertex_array,
@@ -534,12 +534,6 @@ impl GlowRenderer {
             .finish()
             .map_err(map_renderer_render_state_error)?;
         Ok(())
-    }
-
-    fn texture_map_for_draw(&self) -> &dyn TextureMap {
-        self.texture_map
-            .as_deref()
-            .expect("GlowRenderer texture_map missing (internal invariant)")
     }
 
     /// Set up OpenGL render state for ImGui rendering
@@ -681,7 +675,7 @@ impl GlowRenderer {
     fn render_draw_lists(
         &self,
         gl: &Context,
-        texture_map: &dyn TextureMap,
+        texture_registry: &TextureRegistry,
         draw_data: &DrawData,
         extent: FramebufferExtent,
         vertex_array: &VertexArrayGuard<'_>,
@@ -697,7 +691,7 @@ impl GlowRenderer {
 
             let scope = DrawListRenderScope {
                 gl,
-                texture_map,
+                texture_registry,
                 display_pos: draw_data.display_pos(),
                 framebuffer_scale: draw_data.framebuffer_scale(),
                 extent,
@@ -875,7 +869,7 @@ impl GlowRenderer {
             return Ok(());
         };
         let texture = scope
-            .texture_map
+            .texture_registry
             .get(cmd_params.texture_id)
             .ok_or(RenderError::UnknownTextureId(cmd_params.texture_id))?;
 
@@ -925,15 +919,11 @@ mod tests {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicU32, Ordering};
 
-    use dear_imgui_rs::{TextureFormat, TextureId};
     use glow::HasContext;
 
-    use super::{
-        FramebufferExtent, GlowRenderer, clear_viewport_framebuffer, project_scissor_rect,
-    };
+    use super::{FramebufferExtent, clear_viewport_framebuffer, project_scissor_rect};
     use super::{SamplerBinding, VertexArrayGuard};
     use crate::renderer::sampler::SamplerFilter;
-    use crate::{GlTexture, GlVersion, InitResult, shaders::Shaders, texture::TextureMap};
 
     static CLEAR_EVENTS: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
     static BOUND_VERTEX_ARRAY: AtomicU32 = AtomicU32::new(0);
@@ -1109,80 +1099,6 @@ mod tests {
         }
     }
 
-    struct PanicTextureMap;
-
-    impl TextureMap for PanicTextureMap {
-        fn get(&self, _texture_id: TextureId) -> Option<GlTexture> {
-            panic!("injected texture map panic")
-        }
-
-        fn set(&mut self, _texture_id: TextureId, _gl_texture: GlTexture) {}
-        fn remove(&mut self, _texture_id: TextureId) -> Option<GlTexture> {
-            None
-        }
-        fn clear(&mut self) {}
-        fn register_texture(
-            &mut self,
-            _gl_texture: GlTexture,
-            _width: u32,
-            _height: u32,
-            _format: TextureFormat,
-        ) -> InitResult<TextureId> {
-            unreachable!()
-        }
-        fn update_texture(
-            &mut self,
-            _texture_id: TextureId,
-            _gl_texture: GlTexture,
-            _width: u32,
-            _height: u32,
-        ) {
-        }
-        fn texture_format(&self, _texture_id: TextureId) -> Option<TextureFormat> {
-            None
-        }
-    }
-
-    fn test_renderer(texture_map: Box<dyn TextureMap>) -> GlowRenderer {
-        GlowRenderer {
-            shaders: Shaders {
-                program: None,
-                attrib_location_tex: None,
-                attrib_location_proj_mtx: None,
-                attrib_location_color_gamma: None,
-                attrib_location_vtx_pos: 0,
-                attrib_location_vtx_uv: 0,
-                attrib_location_vtx_color: 0,
-            },
-            vbo_handle: None,
-            ebo_handle: None,
-            owned_textures: Vec::new(),
-            samplers: None,
-            gl_version: GlVersion {
-                major: 3,
-                minor: 3,
-                is_es: false,
-            },
-            has_clip_origin_support: false,
-            has_separate_polygon_modes: false,
-            has_sampler_object_support: true,
-            gl_context: None,
-            context_binding: None,
-            backend_user_data: Box::default(),
-            renderer_name_ptr: std::ptr::null(),
-            renderer_texture_max: [0, 0],
-            renderer_state_fault: None,
-            synthetic_test_renderer: true,
-            texture_map: Some(texture_map),
-            managed_textures: std::collections::HashMap::new(),
-            destroyed_managed_textures: std::collections::HashMap::new(),
-            renderer_consumer: None,
-            framebuffer_srgb: false,
-            color_gamma_override: None,
-            viewport_clear_color: [0.0, 0.0, 0.0, 1.0],
-        }
-    }
-
     #[test]
     fn viewport_clear_is_unclipped_and_writes_every_color_channel() {
         CLEAR_EVENTS.lock().unwrap().clear();
@@ -1191,16 +1107,6 @@ mod tests {
             *CLEAR_EVENTS.lock().unwrap(),
             ["disable-scissor", "color-mask", "clear-color", "clear"]
         );
-    }
-
-    #[test]
-    fn texture_map_remains_owned_when_lookup_panics() {
-        let renderer = test_renderer(Box::new(PanicTextureMap));
-        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            renderer.texture_map_for_draw().get(TextureId::new(1));
-        }));
-        assert!(panic.is_err());
-        assert!(renderer.texture_map.is_some());
     }
 
     #[test]

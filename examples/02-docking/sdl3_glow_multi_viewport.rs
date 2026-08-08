@@ -28,18 +28,16 @@ use std::time::Instant;
 use dear_imgui_examples::sdl3_callbacks::{
     Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
 };
+use dear_imgui_glow::{
+    ExternalTextureId, GlTexture, GlowRenderer, create_texture_from_rgba,
+    multi_viewport::GlowViewportRuntime,
+};
 #[cfg(feature = "test-engine")]
 use dear_imgui_glow::{
     GlBuffer, GlProgram, GlSampler, GlVersion, GlVertexArray, GlowRenderState,
     GlowRenderStateAccessError, GlowSamplerStrategy,
 };
-use dear_imgui_glow::{
-    GlTexture, GlowRenderer, SimpleTextureMap, TextureMap, create_texture_from_rgba,
-    multi_viewport::GlowViewportRuntime,
-};
-use dear_imgui_rs::{
-    Condition, ConfigFlags, Context, FrameToken, TextureId, render::ReconciledFrame,
-};
+use dear_imgui_rs::{Condition, ConfigFlags, Context, FrameToken, render::ReconciledFrame};
 #[cfg(feature = "test-engine")]
 use dear_imgui_rs::{Id, RawDrawCallback};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, Sdl3PlatformBackend};
@@ -191,14 +189,14 @@ impl Drop for TextureUnitZeroGuard<'_> {
 }
 
 struct ExternalTexture {
-    id: TextureId,
+    id: ExternalTextureId,
     handle: GlTexture,
     #[cfg(feature = "test-engine")]
     expected_filters: [i32; 2],
 }
 
 impl ExternalTexture {
-    fn create(gl: &glow::Context) -> Result<Self, Box<dyn Error>> {
+    fn create(gl: &glow::Context, renderer: &mut GlowRenderer) -> Result<Self, Box<dyn Error>> {
         let pixels = [
             255, 255, 255, 255, 255, 0, 255, 255, 0, 255, 255, 255, 0, 0, 0, 255,
         ];
@@ -220,8 +218,15 @@ impl ExternalTexture {
                 );
             }
         }
+        let id = match renderer.register_external_texture(handle) {
+            Ok(id) => id,
+            Err(error) => {
+                unsafe { gl.delete_texture(handle) };
+                return Err(error.into());
+            }
+        };
         Ok(Self {
-            id: TextureId::new(u64::MAX - 1),
+            id,
             handle,
             #[cfg(feature = "test-engine")]
             expected_filters,
@@ -1246,11 +1251,8 @@ impl MainData {
             Sdl3PlatformBackend::init_platform_for_opengl(&mut imgui, &window, &gl_context)?
         };
 
-        let external_texture = ExternalTexture::create(&gl)?;
-        let mut texture_map = SimpleTextureMap::default();
-        texture_map.set(external_texture.id, external_texture.handle);
-        let renderer =
-            GlowRenderer::with_shared_context(Rc::clone(&gl), &mut imgui, Box::new(texture_map))?;
+        let mut renderer = GlowRenderer::with_shared_context(Rc::clone(&gl), &mut imgui)?;
+        let external_texture = ExternalTexture::create(&gl, &mut renderer)?;
         #[cfg(feature = "test-engine")]
         let sampler_strategy = if renderer.supports_sampler_objects() {
             GlowSamplerStrategy::SamplerObjects
@@ -1382,7 +1384,7 @@ impl MainData {
         let frame = self.imgui.begin_frame();
         let ui = frame.ui();
         ui.dockspace().build()?;
-        let external_texture_id = self.external_texture.id;
+        let external_texture_id = self.external_texture.id.texture_id();
         #[cfg(feature = "test-engine")]
         let reset_render_state_callback = self.reset_render_state_callback;
         #[cfg(feature = "test-engine")]

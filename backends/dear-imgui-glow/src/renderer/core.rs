@@ -1,4 +1,4 @@
-use crate::{GlBuffer, GlTexture, shaders::Shaders, texture::TextureMap, versions::GlVersion};
+use crate::{GlBuffer, shaders::Shaders, texture::TextureRegistry, versions::GlVersion};
 use dear_imgui_rs::ContextBinding;
 use dear_imgui_rs::render::{SnapshotTextureId, SynchronousRendererConsumer};
 use std::collections::HashMap;
@@ -41,7 +41,6 @@ pub struct GlowRenderer {
     pub(super) shaders: Shaders,
     pub(super) vbo_handle: Option<GlBuffer>,
     pub(super) ebo_handle: Option<GlBuffer>,
-    pub(super) owned_textures: Vec<GlTexture>,
     pub(super) samplers: Option<SamplerObjects>,
     pub(super) gl_version: GlVersion,
     pub(super) has_clip_origin_support: bool,
@@ -57,7 +56,7 @@ pub struct GlowRenderer {
     pub(super) renderer_state_fault: Option<RendererStateFault>,
     #[cfg(test)]
     pub(super) synthetic_test_renderer: bool,
-    pub(super) texture_map: Option<Box<dyn TextureMap>>,
+    pub(super) texture_registry: TextureRegistry,
     pub(super) managed_textures: HashMap<SnapshotTextureId, ManagedTextureBinding>,
     /// Identities sealed by Destroy until a matching `Destroyed` outcome is acknowledged.
     pub(super) destroyed_managed_textures: HashMap<SnapshotTextureId, ManagedTextureTombstone>,
@@ -107,16 +106,6 @@ impl GlowRenderer {
             && self.vbo_handle.is_some()
             && self.ebo_handle.is_some()
             && (!self.has_sampler_object_support || self.samplers.is_some())
-    }
-
-    pub(super) fn track_owned_texture(&mut self, texture: GlTexture) {
-        if !self.owned_textures.contains(&texture) {
-            self.owned_textures.push(texture);
-        }
-    }
-
-    pub(super) fn forget_owned_texture(&mut self, texture: GlTexture) {
-        self.owned_textures.retain(|owned| *owned != texture);
     }
 
     pub(super) fn backend_user_data_ptr(&self) -> *mut c_void {

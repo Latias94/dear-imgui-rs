@@ -13,7 +13,7 @@ use std::{
 };
 
 use dear_imgui_examples::animated_texture::animated_rgba_pixels;
-use dear_imgui_glow::GlowRenderer;
+use dear_imgui_glow::{GlowRenderer, RendererTextureId};
 use dear_imgui_rs::*;
 use dear_imgui_winit::WinitPlatform;
 use glow::HasContext;
@@ -34,10 +34,10 @@ use winit::{
 };
 
 struct TextureDemo {
-    generated_texture: Option<TextureId>,
-    checkerboard_texture: Option<TextureId>,
-    animated_texture: Option<TextureId>,
-    user_image_texture: Option<TextureId>,
+    generated_texture: Option<RendererTextureId>,
+    checkerboard_texture: Option<RendererTextureId>,
+    animated_texture: Option<RendererTextureId>,
+    user_image_texture: Option<RendererTextureId>,
     user_image_size: Option<(u32, u32)>,
     frame_count: u32,
     animation_started: Instant,
@@ -81,7 +81,7 @@ impl TextureDemo {
     fn create_gradient_texture(
         &self,
         renderer: &mut GlowRenderer,
-    ) -> Result<TextureId, Box<dyn std::error::Error>> {
+    ) -> Result<RendererTextureId, Box<dyn std::error::Error>> {
         const WIDTH: u32 = 256;
         const HEIGHT: u32 = 256;
 
@@ -107,7 +107,7 @@ impl TextureDemo {
     fn try_load_image_texture(
         &self,
         renderer: &mut GlowRenderer,
-    ) -> Option<(TextureId, (u32, u32))> {
+    ) -> Option<(RendererTextureId, (u32, u32))> {
         // Prefer the gradient test image we ship with the examples; fall back
         // to the original JPEG if needed. This keeps behavior consistent with
         // the WGPU texture demos.
@@ -164,7 +164,7 @@ impl TextureDemo {
     fn create_checkerboard_texture(
         &self,
         renderer: &mut GlowRenderer,
-    ) -> Result<TextureId, Box<dyn std::error::Error>> {
+    ) -> Result<RendererTextureId, Box<dyn std::error::Error>> {
         const WIDTH: u32 = 128;
         const HEIGHT: u32 = 128;
         const CHECKER_SIZE: u32 = 16;
@@ -189,7 +189,7 @@ impl TextureDemo {
     fn create_animated_texture(
         &self,
         renderer: &mut GlowRenderer,
-    ) -> Result<TextureId, Box<dyn std::error::Error>> {
+    ) -> Result<RendererTextureId, Box<dyn std::error::Error>> {
         const WIDTH: u32 = 64;
         const HEIGHT: u32 = 64;
 
@@ -232,21 +232,21 @@ impl TextureDemo {
 
                 if let Some(texture_id) = self.generated_texture {
                     ui.text("Gradient Texture:");
-                    Image::new(ui, texture_id, [128.0, 128.0]).build();
+                    Image::new(ui, texture_id.texture_id(), [128.0, 128.0]).build();
                 }
 
                 ui.same_line();
 
                 if let Some(texture_id) = self.checkerboard_texture {
                     ui.text("Checkerboard Texture:");
-                    Image::new(ui, texture_id, [128.0, 128.0]).build();
+                    Image::new(ui, texture_id.texture_id(), [128.0, 128.0]).build();
                 }
 
                 ui.separator();
 
                 if let Some(texture_id) = self.animated_texture {
                     ui.text("Animated Texture (wall-clock motion, uploaded each frame):");
-                    Image::new(ui, texture_id, [128.0, 128.0]).build();
+                    Image::new(ui, texture_id.texture_id(), [128.0, 128.0]).build();
 
                     ui.text(&format!("Frame: {}", self.frame_count));
                 }
@@ -260,9 +260,9 @@ impl TextureDemo {
                         let h = h_u as f32;
                         let max_dim = 256.0;
                         let scale = if w > h { max_dim / w } else { max_dim / h };
-                        Image::new(ui, texture_id, [w * scale, h * scale]).build();
+                        Image::new(ui, texture_id.texture_id(), [w * scale, h * scale]).build();
                     } else {
-                        Image::new(ui, texture_id, [256.0, 256.0]).build();
+                        Image::new(ui, texture_id.texture_id(), [256.0, 256.0]).build();
                     }
                 } else {
                     ui.separator();

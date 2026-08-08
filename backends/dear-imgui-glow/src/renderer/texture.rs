@@ -8,8 +8,8 @@ use glow::{Context, HasContext};
 
 use super::GlowRenderer;
 use crate::texture::{
-    GlTextureUpdate, alpha8_to_rgba, create_texture_from_alpha, create_texture_from_rgba,
-    update_texture, upload_texture_data,
+    ExternalTextureId, GlTextureUpdate, RendererTextureId, alpha8_to_rgba,
+    create_texture_from_alpha, create_texture_from_rgba, update_texture, upload_texture_data,
 };
 use crate::{
     GlTexture,
@@ -183,12 +183,6 @@ impl GlowRenderer {
                 &pixels,
             )
             .map_err(RenderError::DeviceObjectInit)?;
-            self.texture_map_mut().update_texture(
-                binding.texture_id,
-                binding.gl_texture,
-                create.width,
-                create.height,
-            );
             return Ok(binding.texture_id);
         }
 
@@ -202,20 +196,10 @@ impl GlowRenderer {
         }
         .map_err(RenderError::DeviceObjectInit)?;
 
-        // Publish ownership before entering application-provided TextureMap code. If that code
-        // unwinds, explicit renderer teardown still clears any partial map state before deleting
-        // the GL object.
-        self.track_owned_texture(gl_texture);
-        let texture_id = match self.texture_map_mut().register_texture(
-            gl_texture,
-            create.width,
-            create.height,
-            create.format,
-        ) {
+        let texture_id = match self.texture_registry.register_managed(gl_texture) {
             Ok(texture_id) => texture_id,
             Err(error) => {
                 unsafe { gl.delete_texture(gl_texture) };
-                self.forget_owned_texture(gl_texture);
                 return Err(RenderError::DeviceObjectInit(error));
             }
         };
@@ -278,12 +262,6 @@ impl GlowRenderer {
             .map_err(RenderError::DeviceObjectInit)?;
         }
 
-        self.texture_map_mut().update_texture(
-            binding.texture_id,
-            binding.gl_texture,
-            width,
-            height,
-        );
         Ok(binding.texture_id)
     }
 
@@ -291,20 +269,22 @@ impl GlowRenderer {
         let Some(binding) = self.managed_textures.remove(&key) else {
             return;
         };
-        self.texture_map_mut().remove(binding.texture_id);
-        if self.owned_textures.contains(&binding.gl_texture) {
+        if self
+            .texture_registry
+            .remove_managed(binding.texture_id)
+            .is_some()
+        {
             unsafe { gl.delete_texture(binding.gl_texture) };
-            self.forget_owned_texture(binding.gl_texture);
         }
     }
 
-    /// Update a renderer-owned legacy texture.
+    /// Update a renderer-owned texture.
     ///
     /// The native context for the retained Glow function table, or a compatible share-group
     /// context, must be current on this thread.
     pub fn update_texture(
         &mut self,
-        texture_id: TextureId,
+        texture: RendererTextureId,
         width: u32,
         height: u32,
         data: &[u8],
@@ -314,55 +294,49 @@ impl GlowRenderer {
             .gl_context
             .clone()
             .ok_or(RenderError::MissingGlContext)?;
-        self.update_legacy_texture(&gl, texture_id, width, height, data)
-            .map_err(RenderError::DeviceObjectInit)
+        self.update_renderer_texture(&gl, texture, width, height, data)
     }
 
-    /// Update a renderer-owned legacy texture using an externally managed Glow function table.
+    /// Update a renderer-owned texture using an externally managed Glow function table.
     ///
     /// The table must remain live and its compatible native context must be current.
     pub fn update_texture_with_context(
         &mut self,
         gl: &Context,
-        texture_id: TextureId,
+        texture: RendererTextureId,
         width: u32,
         height: u32,
         data: &[u8],
     ) -> RenderResult<()> {
         self.ensure_operational()?;
-        self.update_legacy_texture(gl, texture_id, width, height, data)
-            .map_err(RenderError::DeviceObjectInit)
+        self.update_renderer_texture(gl, texture, width, height, data)
     }
 
-    fn update_legacy_texture(
+    fn update_renderer_texture(
         &mut self,
         gl: &Context,
-        texture_id: TextureId,
+        texture: RendererTextureId,
         width: u32,
         height: u32,
         data: &[u8],
-    ) -> InitResult<()> {
-        if texture_id.is_null() {
-            return Err(InitError::NullTextureId);
-        }
-        let gl_texture = self
-            .texture_map()
-            .get(texture_id)
-            .ok_or(InitError::UnknownTextureId(texture_id))?;
-        if !self.owned_textures.contains(&gl_texture) {
-            return Err(InitError::TextureNotRendererOwned(texture_id));
-        }
-        let format = self
-            .texture_map()
-            .texture_format(texture_id)
-            .unwrap_or(TextureFormat::RGBA32);
-        upload_texture_data(gl, gl_texture, width, height, format, data)?;
-        self.texture_map_mut()
-            .update_texture(texture_id, gl_texture, width, height);
+    ) -> RenderResult<()> {
+        let registered = self
+            .texture_registry
+            .renderer(texture)
+            .ok_or(RenderError::RendererTextureNotFound(texture.texture_id()))?;
+        upload_texture_data(
+            gl,
+            registered.gl_texture,
+            width,
+            height,
+            registered.format,
+            data,
+        )
+        .map_err(RenderError::DeviceObjectInit)?;
         Ok(())
     }
 
-    /// Register a renderer-owned legacy texture.
+    /// Register a renderer-owned texture.
     ///
     /// The native context for the retained Glow function table, or a compatible share-group
     /// context, must be current on this thread.
@@ -372,17 +346,17 @@ impl GlowRenderer {
         height: u32,
         format: TextureFormat,
         data: &[u8],
-    ) -> RenderResult<TextureId> {
+    ) -> RenderResult<RendererTextureId> {
         self.ensure_operational()?;
         let gl = self
             .gl_context
             .clone()
             .ok_or(RenderError::MissingGlContext)?;
-        self.register_legacy_texture(&gl, width, height, format, data)
+        self.register_renderer_texture(&gl, width, height, format, data)
             .map_err(RenderError::DeviceObjectInit)
     }
 
-    /// Register a renderer-owned legacy texture using an external Glow function table.
+    /// Register a renderer-owned texture using an external Glow function table.
     ///
     /// The table must remain live and its compatible native context must be current.
     pub fn register_texture_with_context(
@@ -392,82 +366,68 @@ impl GlowRenderer {
         height: u32,
         format: TextureFormat,
         data: &[u8],
-    ) -> RenderResult<TextureId> {
+    ) -> RenderResult<RendererTextureId> {
         self.ensure_operational()?;
-        self.register_legacy_texture(gl, width, height, format, data)
+        self.register_renderer_texture(gl, width, height, format, data)
             .map_err(RenderError::DeviceObjectInit)
     }
 
-    fn register_legacy_texture(
+    fn register_renderer_texture(
         &mut self,
         gl: &Context,
         width: u32,
         height: u32,
         format: TextureFormat,
         data: &[u8],
-    ) -> InitResult<TextureId> {
+    ) -> InitResult<RendererTextureId> {
         let gl_texture = match format {
             TextureFormat::RGBA32 => create_texture_from_rgba(gl, width, height, data)?,
             TextureFormat::Alpha8 => create_texture_from_alpha(gl, width, height, data)?,
         };
-        self.track_owned_texture(gl_texture);
-        let texture_id = match self
-            .texture_map_mut()
-            .register_texture(gl_texture, width, height, format)
-        {
-            Ok(texture_id) => texture_id,
+        match self.texture_registry.register_renderer(gl_texture, format) {
+            Ok(texture) => Ok(texture),
             Err(error) => {
                 unsafe { gl.delete_texture(gl_texture) };
-                self.forget_owned_texture(gl_texture);
-                return Err(error);
+                Err(error)
             }
-        };
-        Ok(texture_id)
+        }
     }
 
-    /// Unregister and delete a legacy texture created by [`Self::register_texture`].
+    /// Unregister and delete a renderer-owned texture created by [`Self::register_texture`].
     ///
     /// The native OpenGL context associated with this renderer's retained function table must be
     /// current on this thread.
-    pub fn unregister_texture(&mut self, texture_id: TextureId) -> RenderResult<()> {
+    pub fn unregister_texture(&mut self, texture: RendererTextureId) -> RenderResult<()> {
         self.ensure_operational()?;
         let gl = self
             .gl_context
             .clone()
             .ok_or(RenderError::MissingGlContext)?;
-        self.unregister_texture_with_context_inner(&gl, texture_id)
+        self.unregister_texture_with_context_inner(&gl, texture)
     }
 
-    /// Unregister and delete a renderer-owned legacy texture using an external GL context.
+    /// Unregister and delete a renderer-owned texture using an external GL context.
     ///
     /// `gl` must be a live function table for the context/share group that owns the texture, and
     /// that native context must be current on this thread.
     pub fn unregister_texture_with_context(
         &mut self,
         gl: &Context,
-        texture_id: TextureId,
+        texture: RendererTextureId,
     ) -> RenderResult<()> {
         self.ensure_operational()?;
-        self.unregister_texture_with_context_inner(gl, texture_id)
+        self.unregister_texture_with_context_inner(gl, texture)
     }
 
     fn unregister_texture_with_context_inner(
         &mut self,
         gl: &Context,
-        texture_id: TextureId,
+        texture: RendererTextureId,
     ) -> RenderResult<()> {
         let gl_texture = self
-            .texture_map()
-            .get(texture_id)
-            .ok_or(RenderError::UnknownTextureId(texture_id))?;
-        if !self.owned_textures.contains(&gl_texture) {
-            return Err(RenderError::TextureOwnershipMismatch {
-                texture_id,
-                expected: "renderer-owned",
-            });
-        }
-        self.texture_map_mut().remove(texture_id);
-        self.forget_owned_texture(gl_texture);
+            .texture_registry
+            .remove_renderer(texture)
+            .ok_or(RenderError::RendererTextureNotFound(texture.texture_id()))?;
         unsafe { gl.delete_texture(gl_texture) };
         Ok(())
     }
@@ -479,67 +439,54 @@ impl GlowRenderer {
     pub fn register_external_texture(
         &mut self,
         gl_texture: GlTexture,
-        width: u32,
-        height: u32,
-        format: TextureFormat,
-    ) -> RenderResult<TextureId> {
+    ) -> RenderResult<ExternalTextureId> {
         self.ensure_operational()?;
-        if self.owned_textures.contains(&gl_texture) {
+        if self.texture_registry.aliases_renderer_owned(gl_texture) {
             return Err(RenderError::ExternalTextureAliasesRendererOwned);
         }
-        self.texture_map_mut()
-            .register_texture(gl_texture, width, height, format)
+        self.texture_registry
+            .register_external(gl_texture)
             .map_err(RenderError::DeviceObjectInit)
     }
 
     /// Replace an application-owned texture mapping without deleting either GL object.
     pub fn update_external_texture(
         &mut self,
-        texture_id: TextureId,
+        texture: ExternalTextureId,
         gl_texture: GlTexture,
-        width: u32,
-        height: u32,
     ) -> RenderResult<()> {
         self.ensure_operational()?;
-        let previous = self
-            .texture_map()
-            .get(texture_id)
-            .ok_or(RenderError::UnknownTextureId(texture_id))?;
-        if self.owned_textures.contains(&previous) {
-            return Err(RenderError::TextureOwnershipMismatch {
-                texture_id,
-                expected: "application-owned",
-            });
+        if self.texture_registry.external(texture).is_none() {
+            return Err(RenderError::ExternalTextureNotFound(texture.texture_id()));
         }
-        if self.owned_textures.contains(&gl_texture) {
+        if self.texture_registry.aliases_renderer_owned(gl_texture) {
             return Err(RenderError::ExternalTextureAliasesRendererOwned);
         }
-        self.texture_map_mut()
-            .update_texture(texture_id, gl_texture, width, height);
+        let updated = self.texture_registry.update_external(texture, gl_texture);
+        debug_assert!(updated, "validated external texture disappeared");
         Ok(())
     }
 
     /// Remove an application-owned texture mapping without deleting the GL object.
-    pub fn unregister_external_texture(&mut self, texture_id: TextureId) -> RenderResult<()> {
+    pub fn unregister_external_texture(&mut self, texture: ExternalTextureId) -> RenderResult<()> {
         self.ensure_operational()?;
-        let gl_texture = self
-            .texture_map()
-            .get(texture_id)
-            .ok_or(RenderError::UnknownTextureId(texture_id))?;
-        if self.owned_textures.contains(&gl_texture) {
-            return Err(RenderError::TextureOwnershipMismatch {
-                texture_id,
-                expected: "application-owned",
-            });
-        }
-        self.texture_map_mut().remove(texture_id);
-        Ok(())
+        self.texture_registry
+            .remove_external(texture)
+            .map(drop)
+            .ok_or(RenderError::ExternalTextureNotFound(texture.texture_id()))
     }
 
-    /// Pixel format recorded for a renderer-owned legacy texture.
+    /// Pixel format recorded for a renderer-owned texture.
     #[must_use]
-    pub fn texture_format(&self, texture_id: TextureId) -> Option<TextureFormat> {
-        self.texture_map.as_deref()?.texture_format(texture_id)
+    pub fn texture_format(&self, texture: RendererTextureId) -> Option<TextureFormat> {
+        self.texture_registry
+            .renderer(texture)
+            .map(|registered| registered.format)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_texture_registered(&self, texture_id: TextureId) -> bool {
+        self.texture_registry.contains(texture_id)
     }
 }
 
@@ -630,11 +577,7 @@ fn validate_update_rect(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        shaders::Shaders,
-        texture::{SimpleTextureMap, TextureMap},
-        versions::GlVersion,
-    };
+    use crate::{shaders::Shaders, texture::TextureRegistry, versions::GlVersion};
     use dear_imgui_rs::render::{SnapshotTextureId, TextureRequestKind};
     use dear_imgui_rs::{
         Context as ImGuiContext, FramePrepareOptions, ManagedTextureId, OwnedTextureData,
@@ -648,60 +591,6 @@ mod tests {
     static NEXT_TEXTURE: AtomicU32 = AtomicU32::new(100);
     static DELETED_TEXTURES: AtomicU32 = AtomicU32::new(0);
     static GL_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-    #[derive(Default)]
-    struct PanicOnceTextureMap {
-        inner: SimpleTextureMap,
-        panic_on_register: bool,
-    }
-
-    impl TextureMap for PanicOnceTextureMap {
-        fn get(&self, texture_id: TextureId) -> Option<GlTexture> {
-            self.inner.get(texture_id)
-        }
-
-        fn set(&mut self, texture_id: TextureId, gl_texture: GlTexture) {
-            self.inner.set(texture_id, gl_texture);
-        }
-
-        fn remove(&mut self, texture_id: TextureId) -> Option<GlTexture> {
-            self.inner.remove(texture_id)
-        }
-
-        fn clear(&mut self) {
-            self.inner.clear();
-        }
-
-        fn register_texture(
-            &mut self,
-            gl_texture: GlTexture,
-            width: u32,
-            height: u32,
-            format: TextureFormat,
-        ) -> InitResult<TextureId> {
-            if self.panic_on_register {
-                self.panic_on_register = false;
-                panic!("injected TextureMap::register_texture panic");
-            }
-            self.inner
-                .register_texture(gl_texture, width, height, format)
-        }
-
-        fn update_texture(
-            &mut self,
-            texture_id: TextureId,
-            gl_texture: GlTexture,
-            width: u32,
-            height: u32,
-        ) {
-            self.inner
-                .update_texture(texture_id, gl_texture, width, height);
-        }
-
-        fn texture_format(&self, texture_id: TextureId) -> Option<TextureFormat> {
-            self.inner.texture_format(texture_id)
-        }
-    }
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     struct FakeUploadState {
@@ -732,45 +621,6 @@ mod tests {
 
     static FAKE_UPLOAD_STATE: Mutex<FakeUploadState> = Mutex::new(FakeUploadState::DEFAULT);
 
-    struct PanicRegisterTextureMap;
-
-    impl TextureMap for PanicRegisterTextureMap {
-        fn get(&self, _texture_id: TextureId) -> Option<GlTexture> {
-            None
-        }
-
-        fn set(&mut self, _texture_id: TextureId, _gl_texture: GlTexture) {}
-
-        fn remove(&mut self, _texture_id: TextureId) -> Option<GlTexture> {
-            None
-        }
-
-        fn clear(&mut self) {}
-
-        fn register_texture(
-            &mut self,
-            _gl_texture: GlTexture,
-            _width: u32,
-            _height: u32,
-            _format: TextureFormat,
-        ) -> InitResult<TextureId> {
-            panic!("injected TextureMap::register_texture panic");
-        }
-
-        fn update_texture(
-            &mut self,
-            _texture_id: TextureId,
-            _gl_texture: GlTexture,
-            _width: u32,
-            _height: u32,
-        ) {
-        }
-
-        fn texture_format(&self, _texture_id: TextureId) -> Option<TextureFormat> {
-            None
-        }
-    }
-
     fn make_test_renderer() -> GlowRenderer {
         GlowRenderer {
             shaders: Shaders {
@@ -784,7 +634,6 @@ mod tests {
             },
             vbo_handle: None,
             ebo_handle: None,
-            owned_textures: Vec::new(),
             samplers: None,
             gl_version: GlVersion {
                 major: 3,
@@ -801,7 +650,7 @@ mod tests {
             renderer_texture_max: [0, 0],
             renderer_state_fault: None,
             synthetic_test_renderer: true,
-            texture_map: Some(Box::new(SimpleTextureMap::default())),
+            texture_registry: TextureRegistry::default(),
             managed_textures: std::collections::HashMap::new(),
             destroyed_managed_textures: std::collections::HashMap::new(),
             renderer_consumer: None,
@@ -1090,33 +939,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_texture_register_panic_keeps_the_gl_texture_owned_until_teardown() {
-        let _guard = GL_TEST_LOCK.lock().unwrap();
-        DELETED_TEXTURES.store(0, Ordering::SeqCst);
-        let gl = make_fake_gl();
-        let mut renderer = make_test_renderer();
-        renderer.texture_map = Some(Box::new(PanicRegisterTextureMap));
-
-        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _ = renderer.register_texture_with_context(
-                &gl,
-                1,
-                1,
-                TextureFormat::RGBA32,
-                &[255, 255, 255, 255],
-            );
-        }));
-
-        assert!(panic.is_err());
-        assert_eq!(renderer.owned_textures.len(), 1);
-        assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 0);
-
-        renderer.destroy_gpu_resources_only(&gl).unwrap();
-        assert!(renderer.owned_textures.is_empty());
-        assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
     fn managed_requests_create_update_and_destroy_by_snapshot_key() {
         let _guard = GL_TEST_LOCK.lock().unwrap();
         let mut context = ImGuiContext::create();
@@ -1201,38 +1023,6 @@ mod tests {
         renderer.shutdown_with_context(&gl, &mut context).unwrap();
         assert!(renderer.destroyed_managed_textures.is_empty());
         assert!(renderer.renderer_consumer.is_none());
-    }
-
-    #[test]
-    fn texture_map_register_panic_keeps_the_gl_texture_owned_until_teardown() {
-        let _guard = GL_TEST_LOCK.lock().unwrap();
-        let mut context = ImGuiContext::create();
-        context.prepare_frame(
-            FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
-        );
-        let texture = register_rgba_texture(&mut context);
-        let mut renderer = make_protocol_renderer(&mut context);
-        renderer.texture_map = Some(Box::new(PanicOnceTextureMap {
-            inner: SimpleTextureMap::default(),
-            panic_on_register: true,
-        }));
-        let gl = make_fake_gl();
-        DELETED_TEXTURES.store(0, Ordering::SeqCst);
-
-        let frame = render_managed_frame(&mut context, &renderer, Some(texture));
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _ = process_frame_requests(&mut renderer, &gl, &frame);
-        }));
-
-        assert!(result.is_err());
-        assert_eq!(renderer.owned_textures.len(), 1);
-        assert!(renderer.managed_textures.is_empty());
-        assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 0);
-
-        drop(frame);
-        renderer.shutdown_with_context(&gl, &mut context).unwrap();
-        assert!(renderer.owned_textures.is_empty());
-        assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 1);
     }
 
     #[test]
@@ -1476,7 +1266,7 @@ mod tests {
             .expect("create feedback should reconcile");
         drop(frame);
 
-        let owned_texture_count = u32::try_from(renderer.owned_textures.len()).unwrap();
+        let owned_texture_count = u32::try_from(renderer.texture_registry.len()).unwrap();
         let renderer_texture_ids = renderer
             .managed_textures
             .values()
@@ -1490,7 +1280,7 @@ mod tests {
         assert!(
             renderer_texture_ids
                 .into_iter()
-                .all(|texture_id| renderer.texture_map().get(texture_id).is_none())
+                .all(|texture_id| !renderer.texture_registry.contains(texture_id))
         );
         assert!(renderer.renderer_consumer.is_none());
         context
@@ -1520,7 +1310,7 @@ mod tests {
         let uploaded = uploaded.reconcile_texture_feedback(feedback).unwrap();
         drop(uploaded);
 
-        let owned_texture_count = u32::try_from(renderer.owned_textures.len()).unwrap();
+        let owned_texture_count = u32::try_from(renderer.texture_registry.len()).unwrap();
         let renderer_texture_ids = renderer
             .managed_textures
             .values()
@@ -1542,7 +1332,7 @@ mod tests {
         assert!(
             renderer_texture_ids
                 .into_iter()
-                .all(|texture_id| renderer.texture_map().get(texture_id).is_none())
+                .all(|texture_id| !renderer.texture_registry.contains(texture_id))
         );
         assert!(renderer.renderer_consumer.is_some());
         context
@@ -1554,7 +1344,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_texture_ids_do_not_enter_the_managed_request_map() {
+    fn external_texture_ids_do_not_enter_the_managed_request_map() {
         let _guard = GL_TEST_LOCK.lock().unwrap();
         let mut context = ImGuiContext::create();
         context.prepare_frame(
@@ -1562,9 +1352,9 @@ mod tests {
         );
         let mut renderer = make_protocol_renderer(&mut context);
         let gl = make_fake_gl();
-        let texture_id = TextureId::new(77);
         let gl_texture = glow::NativeTexture(std::num::NonZeroU32::new(88).unwrap());
-        renderer.texture_map_mut().set(texture_id, gl_texture);
+        let external = renderer.register_external_texture(gl_texture).unwrap();
+        let texture_id = external.texture_id();
 
         context.prepare_frame(
             FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
@@ -1602,12 +1392,12 @@ mod tests {
                 .keys()
                 .all(|texture| matches!(texture, SnapshotTextureId::FontAtlas { .. }))
         );
-        assert_eq!(renderer.texture_map().get(texture_id), Some(gl_texture));
+        assert!(renderer.is_texture_registered(texture_id));
         renderer.shutdown_with_context(&gl, &mut context).unwrap();
     }
 
     #[test]
-    fn legacy_texture_unregistration_respects_renderer_and_application_ownership() {
+    fn typed_texture_handles_keep_owned_and_external_lifecycles_separate() {
         let _guard = GL_TEST_LOCK.lock().unwrap();
         let mut context = ImGuiContext::create();
         let mut renderer = make_protocol_renderer(&mut context);
@@ -1617,70 +1407,195 @@ mod tests {
         let owned = renderer
             .register_texture_with_context(&gl, 1, 1, TextureFormat::RGBA32, &[255, 255, 255, 255])
             .unwrap();
-        assert!(matches!(
-            renderer.unregister_external_texture(owned),
-            Err(RenderError::TextureOwnershipMismatch {
-                texture_id,
-                expected: "application-owned",
-            }) if texture_id == owned
-        ));
-
         let external_gl = glow::NativeTexture(std::num::NonZeroU32::new(900).unwrap());
-        let external = renderer
-            .register_external_texture(external_gl, 1, 1, TextureFormat::RGBA32)
-            .unwrap();
-        assert!(matches!(
-            renderer.unregister_texture_with_context(&gl, external),
-            Err(RenderError::TextureOwnershipMismatch {
-                texture_id,
-                expected: "renderer-owned",
-            }) if texture_id == external
-        ));
-        assert!(matches!(
-            renderer.update_texture_with_context(
-                &gl,
-                external,
-                1,
-                1,
-                &[0, 0, 0, 0],
-            ),
-            Err(RenderError::DeviceObjectInit(
-                InitError::TextureNotRendererOwned(texture_id)
-            )) if texture_id == external
-        ));
+        let external = renderer.register_external_texture(external_gl).unwrap();
+        assert_ne!(owned.texture_id(), external.texture_id());
 
         renderer
             .unregister_texture_with_context(&gl, owned)
             .unwrap();
         assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 1);
-        assert!(renderer.texture_map().get(owned).is_none());
+        assert!(!renderer.is_texture_registered(owned.texture_id()));
+        assert!(matches!(
+            renderer.unregister_texture_with_context(&gl, owned),
+            Err(RenderError::RendererTextureNotFound(texture_id))
+                if texture_id == owned.texture_id()
+        ));
 
         renderer.unregister_external_texture(external).unwrap();
         assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 1);
-        assert!(renderer.texture_map().get(external).is_none());
+        assert!(!renderer.is_texture_registered(external.texture_id()));
+        assert!(matches!(
+            renderer.unregister_external_texture(external),
+            Err(RenderError::ExternalTextureNotFound(texture_id))
+                if texture_id == external.texture_id()
+        ));
 
         renderer.shutdown_with_context(&gl, &mut context).unwrap();
         assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 1);
     }
 
     #[test]
+    fn external_mappings_cannot_alias_renderer_owned_or_managed_gl_objects() {
+        let _guard = GL_TEST_LOCK.lock().unwrap();
+        let mut renderer = make_test_renderer();
+        let gl = make_fake_gl();
+        let owned = renderer
+            .register_texture_with_context(&gl, 1, 1, TextureFormat::RGBA32, &[255; 4])
+            .unwrap();
+        let owned_gl = renderer
+            .texture_registry
+            .renderer(owned)
+            .unwrap()
+            .gl_texture;
+
+        assert!(matches!(
+            renderer.register_external_texture(owned_gl),
+            Err(RenderError::ExternalTextureAliasesRendererOwned)
+        ));
+
+        let external_gl = glow::NativeTexture(std::num::NonZeroU32::new(920).unwrap());
+        let external = renderer.register_external_texture(external_gl).unwrap();
+        let managed_gl = glow::NativeTexture(std::num::NonZeroU32::new(921).unwrap());
+        renderer
+            .texture_registry
+            .register_managed(managed_gl)
+            .unwrap();
+
+        assert!(matches!(
+            renderer.update_external_texture(external, managed_gl),
+            Err(RenderError::ExternalTextureAliasesRendererOwned)
+        ));
+        assert_eq!(
+            renderer.texture_registry.external(external),
+            Some(external_gl)
+        );
+    }
+
+    #[test]
+    fn device_reset_invalidates_owned_handles_and_preserves_external_handles() {
+        let _guard = GL_TEST_LOCK.lock().unwrap();
+        let mut context = ImGuiContext::create();
+        let mut renderer = make_protocol_renderer(&mut context);
+        let gl = make_fake_gl();
+        DELETED_TEXTURES.store(0, Ordering::SeqCst);
+
+        let owned = renderer
+            .register_texture_with_context(&gl, 1, 1, TextureFormat::RGBA32, &[255; 4])
+            .unwrap();
+        let external_gl = glow::NativeTexture(std::num::NonZeroU32::new(900).unwrap());
+        let external = renderer.register_external_texture(external_gl).unwrap();
+
+        renderer
+            .destroy_device_objects_with_context(&gl, &mut context)
+            .unwrap();
+
+        assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 1);
+        assert!(!renderer.is_texture_registered(owned.texture_id()));
+        assert!(renderer.is_texture_registered(external.texture_id()));
+        assert!(matches!(
+            renderer.update_texture_with_context(&gl, owned, 1, 1, &[0; 4]),
+            Err(RenderError::RendererTextureNotFound(texture_id))
+                if texture_id == owned.texture_id()
+        ));
+
+        let replacement = glow::NativeTexture(std::num::NonZeroU32::new(901).unwrap());
+        renderer
+            .update_external_texture(external, replacement)
+            .unwrap();
+        assert_eq!(
+            renderer.texture_registry.external(external).unwrap(),
+            replacement
+        );
+
+        renderer.shutdown_with_context(&gl, &mut context).unwrap();
+        assert!(!renderer.is_texture_registered(external.texture_id()));
+        assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn texture_handles_are_unique_and_rejected_by_foreign_renderers() {
+        let _guard = GL_TEST_LOCK.lock().unwrap();
+        let gl = make_fake_gl();
+        let mut first = make_test_renderer();
+        let mut second = make_test_renderer();
+        let first_owned = first
+            .register_texture_with_context(&gl, 1, 1, TextureFormat::RGBA32, &[1; 4])
+            .unwrap();
+        let second_owned = second
+            .register_texture_with_context(&gl, 1, 1, TextureFormat::RGBA32, &[2; 4])
+            .unwrap();
+        let first_texture = first
+            .register_external_texture(glow::NativeTexture(std::num::NonZeroU32::new(910).unwrap()))
+            .unwrap();
+        let second_texture = second
+            .register_external_texture(glow::NativeTexture(std::num::NonZeroU32::new(911).unwrap()))
+            .unwrap();
+
+        assert_ne!(first_owned.texture_id(), second_owned.texture_id());
+        assert_ne!(first_texture.texture_id(), second_texture.texture_id());
+        assert!(matches!(
+            second.update_texture_with_context(&gl, first_owned, 1, 1, &[3; 4]),
+            Err(RenderError::RendererTextureNotFound(texture_id))
+                if texture_id == first_owned.texture_id()
+        ));
+        assert!(matches!(
+            second.unregister_texture_with_context(&gl, first_owned),
+            Err(RenderError::RendererTextureNotFound(texture_id))
+                if texture_id == first_owned.texture_id()
+        ));
+        assert!(matches!(
+            second.update_external_texture(
+                first_texture,
+                glow::NativeTexture(std::num::NonZeroU32::new(912).unwrap()),
+            ),
+            Err(RenderError::ExternalTextureNotFound(texture_id))
+                if texture_id == first_texture.texture_id()
+        ));
+        assert_eq!(
+            first.texture_registry.external(first_texture),
+            Some(glow::NativeTexture(std::num::NonZeroU32::new(910).unwrap()))
+        );
+        assert_eq!(
+            second.texture_registry.external(second_texture),
+            Some(glow::NativeTexture(std::num::NonZeroU32::new(911).unwrap()))
+        );
+        assert!(first.texture_registry.renderer(first_owned).is_some());
+        assert!(second.texture_registry.renderer(second_owned).is_some());
+
+        first
+            .unregister_texture_with_context(&gl, first_owned)
+            .unwrap();
+        second
+            .unregister_texture_with_context(&gl, second_owned)
+            .unwrap();
+    }
+
+    #[test]
     fn update_texture_with_context_uses_registered_gl_texture() {
         let _guard = GL_TEST_LOCK.lock().unwrap();
         let mut renderer = make_test_renderer();
-        let texture_id = TextureId::from(42u64);
-        let gl_texture = glow::NativeTexture(std::num::NonZeroU32::new(99).unwrap());
-        renderer.track_owned_texture(gl_texture);
-        renderer.texture_map_mut().set(texture_id, gl_texture);
+        let gl = make_fake_gl();
+        let texture = renderer
+            .register_texture_with_context(&gl, 1, 1, TextureFormat::RGBA32, &[1, 2, 3, 4])
+            .unwrap();
+        let gl_texture = renderer
+            .texture_registry
+            .renderer(texture)
+            .unwrap()
+            .gl_texture;
 
         LAST_BOUND_TEXTURE.store(0, Ordering::SeqCst);
-        let gl = make_fake_gl();
         renderer
-            .update_texture_with_context(&gl, texture_id, 1, 1, &[1, 2, 3, 4])
+            .update_texture_with_context(&gl, texture, 1, 1, &[1, 2, 3, 4])
             .expect("update should use the registered GL texture");
 
-        assert_eq!(LAST_BOUND_TEXTURE.load(Ordering::SeqCst), 99);
+        assert_eq!(
+            LAST_BOUND_TEXTURE.load(Ordering::SeqCst),
+            gl_texture.0.get()
+        );
         renderer
-            .unregister_texture_with_context(&gl, texture_id)
+            .unregister_texture_with_context(&gl, texture)
             .unwrap();
     }
 }
