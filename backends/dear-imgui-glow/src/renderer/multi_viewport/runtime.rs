@@ -861,12 +861,6 @@ impl GlowViewportRuntime {
         self.control.begin_frame_trace()
     }
 
-    /// Prepares renderer device objects for a new frame.
-    pub fn new_frame(&self) -> Result<(), GlowViewportError> {
-        self.control
-            .with_renderer_mut(|renderer| renderer.new_frame().map_err(Into::into))
-    }
-
     /// Finalizes and renders one frame for the attached Context.
     pub fn render_context(&self, context: &mut Context) -> Result<(), GlowViewportError> {
         self.render_context_reconciled(context).map(drop)
@@ -906,8 +900,11 @@ impl GlowViewportRuntime {
         &self,
         frame: ReconciledFrame<'frame>,
     ) -> Result<ReconciledFrame<'frame>, GlowViewportError> {
-        self.control
-            .with_renderer_mut(|renderer| renderer.render_reconciled(frame).map_err(Into::into))
+        self.control.with_renderer_mut(|renderer| {
+            renderer
+                .render_reconciled_preserving_frame(frame)
+                .map_err(Into::into)
+        })
     }
 
     /// Renders the main viewport, then completes every secondary platform viewport.

@@ -454,10 +454,11 @@ let mut renderer = unsafe {
 
 // In your render loop (inside a render pass):
 # let command_buffer = vk::CommandBuffer::null();
-let frame = imgui.render(renderer.renderer_consumer()?);
+let pending = imgui.render(renderer.renderer_consumer()?);
+let (frame, retirement) = renderer.prepare_frame(pending)?;
 // SAFETY: command_buffer is recording inside the compatible render pass and will be submitted
 // before renderer resources referenced by it are changed or destroyed.
-let retirement = unsafe { renderer.cmd_draw(command_buffer, frame)? };
+unsafe { renderer.cmd_draw(command_buffer, frame)? };
 
 // Submit command_buffer. The safe path waits for all device work before releasing retired textures.
 if let Some(batch) = retirement {

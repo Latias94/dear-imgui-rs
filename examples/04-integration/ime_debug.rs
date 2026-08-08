@@ -10,7 +10,7 @@
 
 use dear_imgui_rs::*;
 use dear_imgui_rs::{FontConfig, FontSource};
-use dear_imgui_wgpu::WgpuRenderer;
+use dear_imgui_wgpu::{FramebufferExtent, WgpuRenderer};
 use dear_imgui_winit::WinitPlatform;
 use std::sync::Arc;
 use std::time::Instant;
@@ -217,6 +217,7 @@ impl AppWindow {
                 return Err("surface acquisition failed with a WGPU validation error".into());
             }
         };
+        let framebuffer_extent = FramebufferExtent::from_texture(&frame.texture);
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -348,12 +349,9 @@ impl AppWindow {
                 .imgui
                 .context
                 .render(self.imgui.renderer.renderer_consumer()?);
-            self.imgui.renderer.render_with_fb_size(
-                pending_frame,
-                &mut rpass,
-                self.surface_desc.width,
-                self.surface_desc.height,
-            )?;
+            self.imgui
+                .renderer
+                .render(pending_frame, &mut rpass, framebuffer_extent)?;
         }
 
         self.queue.submit(Some(encoder.finish()));

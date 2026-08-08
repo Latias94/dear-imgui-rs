@@ -33,13 +33,14 @@ fn core_renderer_flags(gl_version: GlVersion) -> i32 {
 }
 
 impl GlowRenderer {
-    /// Create a new Glow renderer with owned OpenGL context (recommended)
+    /// Create a new Glow renderer with a retained Glow function table (recommended).
     ///
     /// This is the preferred way to create a Glow renderer as it handles all resource
-    /// management automatically and provides a simple API similar to the WGPU backend.
+    /// management automatically and provides a simple API similar to the WGPU backend. The native
+    /// context behind `gl` must be current during construction and every renderer operation.
     ///
     /// # Arguments
-    /// * `gl` - OpenGL context (will be owned by the renderer)
+    /// * `gl` - Glow function table retained by the renderer
     /// * `imgui_context` - Dear ImGui context to configure
     ///
     /// # Example
@@ -54,16 +55,17 @@ impl GlowRenderer {
     /// ```
     pub fn new(gl: glow::Context, imgui_context: &mut ImGuiContext) -> InitResult<Self> {
         let texture_map = Box::new(SimpleTextureMap::default());
-        Self::with_texture_map(Some(gl), imgui_context, texture_map)
+        Self::with_texture_map(gl, imgui_context, texture_map)
     }
 
-    /// Create a new Glow renderer with custom texture management (advanced)
+    /// Create a new Glow renderer with custom texture management (advanced).
     ///
     /// This method allows you to provide your own texture management implementation
-    /// and optionally manage the OpenGL context externally.
+    /// while retaining ownership of the OpenGL function table. The associated native context must
+    /// be current during construction and every renderer operation.
     ///
     /// # Arguments
-    /// * `gl` - OpenGL context (Some = owned, None = externally managed)
+    /// * `gl` - Glow function table retained by the renderer
     /// * `imgui_context` - Dear ImGui context to configure
     /// * `texture_map` - Custom texture map implementation
     ///
@@ -77,29 +79,26 @@ impl GlowRenderer {
     /// # let gl_context = unsafe { glow::Context::from_loader_function(|_| std::ptr::null()) };
     /// # let mut imgui_context = ImGuiContext::create();
     /// let mut renderer = GlowRenderer::with_texture_map(
-    ///     Some(gl_context),
+    ///     gl_context,
     ///     &mut imgui_context,
     ///     texture_map
     /// ).unwrap();
     /// ```
     pub fn with_texture_map(
-        gl: Option<glow::Context>,
+        gl: glow::Context,
         imgui_context: &mut ImGuiContext,
         texture_map: Box<dyn TextureMap>,
     ) -> InitResult<Self> {
-        match gl {
-            Some(context) => {
-                let gl_rc = std::rc::Rc::new(context);
-                Self::init_internal(Some(gl_rc.clone()), &gl_rc, imgui_context, texture_map)
-            }
-            None => Err(InitError::MissingGlContext),
-        }
+        let gl = std::rc::Rc::new(gl);
+        Self::init_internal(Some(gl.clone()), &gl, imgui_context, texture_map)
     }
 
-    /// Create a new Glow renderer with external OpenGL context (advanced)
+    /// Create a new Glow renderer with an externally retained function table (advanced).
     ///
     /// This method is for advanced users who want to manage the OpenGL context
-    /// externally while still using custom texture management.
+    /// externally while still using custom texture management. The table must remain valid, and
+    /// its native context or a compatible share-group context must be current for initialization
+    /// and every later `*_with_context` operation.
     ///
     /// # Arguments
     /// * `gl` - Reference to externally managed OpenGL context
@@ -133,7 +132,8 @@ impl GlowRenderer {
     ///
     /// Unlike [`Self::with_external_context`], the renderer retains the exact `Rc` used to create
     /// its GL objects. This is the supported construction path when the renderer will later be
-    /// consumed by `GlowViewportRuntime`.
+    /// consumed by `GlowViewportRuntime`. Retaining the table does not make its native context
+    /// current; the application/platform runtime must still activate a compatible context.
     ///
     /// ```rust,no_run
     /// use std::rc::Rc;
@@ -226,7 +226,6 @@ impl GlowRenderer {
             has_clip_origin_support,
             has_separate_polygon_modes,
             has_sampler_object_support,
-            is_destroyed: false,
             gl_context: owned_gl,
             context_binding: Some(imgui_context.binding()),
             backend_user_data,

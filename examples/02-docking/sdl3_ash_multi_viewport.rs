@@ -968,9 +968,10 @@ impl RendererRuntime {
         frame: ReconciledFrame<'_>,
     ) -> Result<Option<TextureRetirementBatch>, Box<dyn Error>> {
         Ok(match self {
-            Self::Single(renderer) => unsafe {
-                renderer.cmd_draw_reconciled(command_buffer, frame)?
-            },
+            Self::Single(renderer) => {
+                unsafe { renderer.cmd_draw(command_buffer, frame) }?;
+                None
+            }
             Self::Viewports(runtime) => unsafe {
                 runtime.cmd_draw_reconciled(command_buffer, frame)?
             },

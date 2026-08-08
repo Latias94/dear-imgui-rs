@@ -121,6 +121,8 @@ impl<'a> AdmittedWgpuFrameDriver<'a> {
             .ok_or_else(|| RunError::Recovery {
                 message: "admitted surface frame was consumed before rendering".to_owned(),
             })?;
+        let framebuffer_extent =
+            dear_imgui_wgpu::FramebufferExtent::from_texture(&surface_frame.texture);
         let view = surface_frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -146,11 +148,9 @@ impl<'a> AdmittedWgpuFrameDriver<'a> {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            drop(
-                self.renderer
-                    .render_reconciled(frame, &mut render_pass)
-                    .map_err(RunError::Render)?,
-            );
+            self.renderer
+                .render_reconciled(frame, &mut render_pass, framebuffer_extent)
+                .map_err(RunError::Render)?;
         }
         self.queue.submit(Some(encoder.finish()));
         self.rendered = true;

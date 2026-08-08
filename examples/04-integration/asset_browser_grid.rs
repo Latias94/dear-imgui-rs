@@ -73,17 +73,10 @@ impl BrowserState {
 
     fn scan_and_load(&mut self, root: &Path, renderer: &mut GlowRenderer) {
         // Cleanup existing GL textures before reloading
-        if let Some(gl_rc) = renderer.gl_context().cloned() {
-            let tex_map = renderer.texture_map_mut();
-            for asset in self.assets.drain(..) {
-                if let Some(gl_tex) = tex_map.remove(asset.tex) {
-                    unsafe {
-                        gl_rc.delete_texture(gl_tex);
-                    }
-                }
+        for asset in self.assets.drain(..) {
+            if let Err(error) = renderer.unregister_texture(asset.tex) {
+                eprintln!("[asset_browser] texture cleanup failed: {error}");
             }
-        } else {
-            self.assets.clear();
         }
         let mut count = 0usize;
         let mut ok = 0usize;
@@ -197,7 +190,6 @@ impl AppWindow {
         };
         let mut renderer = GlowRenderer::new(gl, &mut imgui_context)?;
         renderer.set_framebuffer_srgb_enabled(false)?;
-        renderer.new_frame()?;
 
         let mut app = Self {
             window,
@@ -227,68 +219,6 @@ impl AppWindow {
         }
     }
 
-    fn draw_browser(&mut self, ui: &Ui) {
-        ui.text("Asset Browser (images)");
-        ui.same_line();
-        if ui.button("Refresh") {
-            self.browser
-                .scan_and_load(&self.root, &mut self.imgui.renderer);
-        }
-        ui.same_line();
-        ui.text_disabled(&self.browser.status);
-
-        ui.separator();
-        let changed = ui
-            .input_text("Filter", &mut self.browser.filter)
-            .hint("substring...")
-            .build();
-        if changed { /* live filter */ }
-        ui.slider("Thumb Size", 64.0, 256.0, &mut self.browser.thumb_size);
-
-        ui.separator();
-        let avail = ui.content_region_avail();
-        let pad = 12.0f32;
-        let cell_w = self.browser.thumb_size + pad;
-        let cols = (avail[0] / cell_w).max(1.0).floor() as i32;
-        let mut cur_col = 0i32;
-
-        ui.child_window("grid").size([0.0, 0.0]).build(&ui, || {
-            let filter = self.browser.filter.to_lowercase();
-            for (i, it) in self.browser.assets.iter().enumerate() {
-                let name = it.path.file_name().and_then(|s| s.to_str()).unwrap_or("?");
-                if !filter.is_empty() && !name.to_lowercase().contains(&filter) {
-                    continue;
-                }
-
-                if cur_col > 0 {
-                    ui.same_line();
-                }
-                ui.group(|| {
-                    let aspect = it.size_px.1 as f32 / it.size_px.0 as f32;
-                    let size = [
-                        self.browser.thumb_size,
-                        (self.browser.thumb_size * aspect).max(1.0),
-                    ];
-                    Image::new(ui, it.tex, size).build();
-                    let is_sel = self.browser.selected == Some(i);
-                    if ui.selectable_config(name).selected(is_sel).build() {
-                        self.browser.selected = Some(i);
-                    }
-                    if let Some(_p) = ui.begin_popup_context_item() {
-                        if ui.menu_item("Reveal in log") {
-                            self.browser.status = format!("{}", it.path.display());
-                        }
-                    }
-                });
-
-                cur_col += 1;
-                if cur_col >= cols {
-                    cur_col = 0;
-                }
-            }
-        });
-    }
-
     fn render(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let now = Instant::now();
         let dt = now - self.imgui.last_frame;
@@ -300,13 +230,12 @@ impl AppWindow {
             .prepare_frame(&mut self.imgui.context, &self.window)?;
         let ui = self.imgui.context.frame();
 
-        // Inline browser UI to avoid &Ui + &mut self borrow conflict
+        let mut want_refresh = false;
         ui.window("Asset Browser")
             .size([980.0, 720.0], Condition::FirstUseEver)
             .build(|| {
                 ui.text("Asset Browser (images)");
                 ui.same_line();
-                let mut want_refresh = false;
                 if ui.button("Refresh") {
                     want_refresh = true;
                 }
@@ -362,25 +291,9 @@ impl AppWindow {
                         }
                     }
                 });
-
-                // Apply deferred operations after building UI
-                if want_refresh {
-                    // safe: we are out of child_window closure; still within Ui, but not touching Ui internals
-                    // It only uses renderer, not context.
-                    // We still defer actual call outside the build closure to be extra safe.
-                    // Record intent by writing to status; perform after window build.
-                    // We'll use a flag in outer scope: set a temporary status and perform after build.
-                    // However, we're inside closure; store intent in a field, then handle below.
-                    // We reuse status as feedback, real refresh happens after window render.
-                    self.browser.status = "Refreshing...".to_string();
-                    // Mark refresh via a sentinel negative selection (not ideal but simple):
-                    // We'll actually refresh just after rendering below.
-                    // Instead, do nothing here; the frame ends immediately after build.
-                }
             });
 
-        // If user pressed Refresh, perform it here (check status message)
-        if self.browser.status == "Refreshing..." {
+        if want_refresh {
             self.browser
                 .scan_and_load(&self.root, &mut self.imgui.renderer);
         }
@@ -396,7 +309,6 @@ impl AppWindow {
                 gl.clear(glow::COLOR_BUFFER_BIT);
             }
         }
-        self.imgui.renderer.new_frame()?;
         self.imgui.renderer.render(pending_frame)?;
         self.surface.swap_buffers(&self.context)?;
         Ok(())
@@ -405,14 +317,9 @@ impl AppWindow {
 
 impl Drop for AppWindow {
     fn drop(&mut self) {
-        if let Some(gl_rc) = self.imgui.renderer.gl_context().cloned() {
-            let tex_map = self.imgui.renderer.texture_map_mut();
-            for asset in self.browser.assets.drain(..) {
-                if let Some(gl_tex) = tex_map.remove(asset.tex) {
-                    unsafe {
-                        gl_rc.delete_texture(gl_tex);
-                    }
-                }
+        for asset in self.browser.assets.drain(..) {
+            if let Err(error) = self.imgui.renderer.unregister_texture(asset.tex) {
+                eprintln!("[asset_browser] texture cleanup failed: {error}");
             }
         }
     }

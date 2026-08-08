@@ -37,7 +37,9 @@ pub(crate) fn init_for_opengl(
     with_context(imgui, "init_for_opengl()", || {
         unsafe {
             if !ffi::ImGui_ImplSDL3_InitForOpenGL_Rust(sdl_window, sdl_gl as *mut c_void) {
-                return Err(Sdl3BackendError::Sdl3InitFailed);
+                return Err(Sdl3BackendError::PlatformInitFailed {
+                    entry_point: "ImGui_ImplSDL3_InitForOpenGL",
+                });
             }
         }
         init_opengl3_impl(glsl.as_ptr())
@@ -61,7 +63,9 @@ pub(crate) fn init_for_opengl_default(
     with_context(imgui, "init_for_opengl_default()", || {
         unsafe {
             if !ffi::ImGui_ImplSDL3_InitForOpenGL_Rust(sdl_window, sdl_gl as *mut c_void) {
-                return Err(Sdl3BackendError::Sdl3InitFailed);
+                return Err(Sdl3BackendError::PlatformInitFailed {
+                    entry_point: "ImGui_ImplSDL3_InitForOpenGL",
+                });
             }
         }
         init_opengl3_impl(std::ptr::null())
@@ -91,7 +95,9 @@ pub(crate) fn init_platform_for_opengl(
     with_context(imgui, "init_platform_for_opengl()", || {
         unsafe {
             if !ffi::ImGui_ImplSDL3_InitForOpenGL_Rust(sdl_window, sdl_gl as *mut c_void) {
-                return Err(Sdl3BackendError::Sdl3InitFailed);
+                return Err(Sdl3BackendError::PlatformInitFailed {
+                    entry_point: "ImGui_ImplSDL3_InitForOpenGL",
+                });
             }
         }
         Ok(())
@@ -112,7 +118,9 @@ pub(crate) fn init_for_other(imgui: &mut Context, window: &Window) -> Result<(),
     with_context(imgui, "init_for_other()", || {
         unsafe {
             if !ffi::ImGui_ImplSDL3_InitForOther_Rust(sdl_window) {
-                return Err(Sdl3BackendError::Sdl3InitFailed);
+                return Err(Sdl3BackendError::PlatformInitFailed {
+                    entry_point: "ImGui_ImplSDL3_InitForOther",
+                });
             }
         }
         Ok(())
@@ -131,7 +139,9 @@ pub(crate) fn init_for_vulkan(
     with_context(imgui, "init_for_vulkan()", || {
         unsafe {
             if !ffi::ImGui_ImplSDL3_InitForVulkan_Rust(sdl_window) {
-                return Err(Sdl3BackendError::Sdl3InitFailed);
+                return Err(Sdl3BackendError::PlatformInitFailed {
+                    entry_point: "ImGui_ImplSDL3_InitForVulkan",
+                });
             }
         }
         Ok(())
@@ -139,12 +149,15 @@ pub(crate) fn init_for_vulkan(
 }
 
 /// Initialize the Dear ImGui SDL3 platform backend for Direct3D (Windows only).
+#[cfg(target_os = "windows")]
 pub(crate) fn init_for_d3d(imgui: &mut Context, window: &Window) -> Result<(), Sdl3BackendError> {
     let sdl_window = window.raw();
     with_context(imgui, "init_for_d3d()", || {
         unsafe {
             if !ffi::ImGui_ImplSDL3_InitForD3D_Rust(sdl_window) {
-                return Err(Sdl3BackendError::Sdl3InitFailed);
+                return Err(Sdl3BackendError::PlatformInitFailed {
+                    entry_point: "ImGui_ImplSDL3_InitForD3D",
+                });
             }
         }
         Ok(())
@@ -157,7 +170,9 @@ pub(crate) fn init_for_metal(imgui: &mut Context, window: &Window) -> Result<(),
     with_context(imgui, "init_for_metal()", || {
         unsafe {
             if !ffi::ImGui_ImplSDL3_InitForMetal_Rust(sdl_window) {
-                return Err(Sdl3BackendError::Sdl3InitFailed);
+                return Err(Sdl3BackendError::PlatformInitFailed {
+                    entry_point: "ImGui_ImplSDL3_InitForMetal",
+                });
             }
         }
         Ok(())
@@ -178,7 +193,9 @@ pub(crate) unsafe fn init_for_sdl_renderer(
     with_context(imgui, "init_for_sdl_renderer()", || {
         unsafe {
             if !ffi::ImGui_ImplSDL3_InitForSDLRenderer_Rust(sdl_window, renderer) {
-                return Err(Sdl3BackendError::Sdl3InitFailed);
+                return Err(Sdl3BackendError::PlatformInitFailed {
+                    entry_point: "ImGui_ImplSDL3_InitForSDLRenderer",
+                });
             }
         }
         Ok(())
@@ -200,7 +217,9 @@ fn init_for_sdl_gpu_impl(
 ) -> Result<(), Sdl3BackendError> {
     unsafe {
         if !ffi::ImGui_ImplSDL3_InitForSDLGPU_Rust(sdl_window) {
-            return Err(Sdl3BackendError::Sdl3InitFailed);
+            return Err(Sdl3BackendError::PlatformInitFailed {
+                entry_point: "ImGui_ImplSDL3_InitForSDLGPU",
+            });
         }
     }
     Ok(())
@@ -244,41 +263,32 @@ pub(crate) fn init_for_sdlgpu3(
     })
 }
 
-/// Initialize the Dear ImGui SDL3 + SDLGPU3 backend using the default renderer settings.
-#[cfg(feature = "sdlgpu3-renderer")]
-pub(crate) fn init_for_sdlgpu3_default(
-    imgui: &mut Context,
-    window: &Window,
-    device: &Device,
-) -> Result<(), Sdl3BackendError> {
-    init_for_sdlgpu3(imgui, window, SdlGpu3InitInfo::from_window(device, window))
-}
-
 /// Initialize the Dear ImGui SDL3 + SDLRenderer3 backend.
 ///
 /// This assumes that:
 /// - a `dear_imgui_rs::Context` already exists;
 /// - `window` is the window associated with `canvas`;
-/// - the canvas outlives its owning `Sdl3RendererBackend`.
+/// - the canvas outlives its owning `SdlRenderer3Backend`.
 ///
 /// Requires the `sdlrenderer3-renderer` feature.
 #[cfg(feature = "sdlrenderer3-renderer")]
 pub(crate) fn init_for_canvas(
     imgui: &mut Context,
-    window: &Window,
     canvas: &WindowCanvas,
 ) -> Result<(), Sdl3BackendError> {
-    let sdl_window = window.raw();
+    let sdl_window = canvas.window().raw();
     let sdl_renderer = canvas.raw();
 
     with_context(imgui, "init_for_canvas()", || {
         unsafe {
             if !ffi::ImGui_ImplSDL3_InitForSDLRenderer_Rust(sdl_window, sdl_renderer) {
-                return Err(Sdl3BackendError::Sdl3InitFailed);
+                return Err(Sdl3BackendError::PlatformInitFailed {
+                    entry_point: "ImGui_ImplSDL3_InitForSDLRenderer",
+                });
             }
             if !ffi::dear_imgui_sdl3_backend_sdlrenderer3_init(sdl_renderer) {
                 ffi::ImGui_ImplSDL3_Shutdown_Rust();
-                return Err(Sdl3BackendError::Renderer3InitFailed);
+                return Err(Sdl3BackendError::SdlRenderer3InitFailed);
             }
         }
         Ok(())

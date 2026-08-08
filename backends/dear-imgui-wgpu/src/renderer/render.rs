@@ -8,7 +8,7 @@ use super::{
 use crate::wgpu;
 use crate::{GammaMode, RendererError, RendererResult, Uniforms};
 use dear_imgui_rs::{
-    Context, ContextBinding,
+    ContextBinding,
     render::{DrawData, PendingFrame, ReconciledFrame},
     sys,
 };
@@ -65,47 +65,57 @@ impl WgpuRenderer {
         self.prepare_frame_epoch(epoch.sequence(), unsafe { sys::igGetFrameCount() })
     }
 
-    /// Renders one Context-borrowed Dear ImGui frame.
+    /// Renders one Context-borrowed Dear ImGui frame into an explicit framebuffer extent.
     ///
     /// Managed texture requests are reconciled before draw commands resolve
-    /// renderer texture IDs. Consuming the frame prevents native draw data from
-    /// escaping its owning Context borrow.
+    /// renderer texture IDs. WGPU render passes do not expose their attachment dimensions, so
+    /// callers must pass the physical width and height of the target being rendered.
     pub fn render(
         &mut self,
         frame: PendingFrame<'_>,
         render_pass: &mut RenderPass<'_>,
+        framebuffer_extent: FramebufferExtent,
     ) -> RendererResult<()> {
         let frame = self.reconcile_frame(frame)?;
-        self.render_reconciled(frame, render_pass).map(drop)
+        self.render_reconciled(frame, render_pass, framebuffer_extent)
     }
 
-    /// Renders an already reconciled frame and returns its reconciliation proof.
+    /// Renders an already reconciled frame into an explicit framebuffer extent.
     ///
-    /// The proof does not claim that command submission or presentation completed.
-    pub fn render_reconciled<'frame>(
+    /// Recording consumes the reconciled capability. Command submission and presentation remain
+    /// the application's responsibility.
+    pub fn render_reconciled(
+        &mut self,
+        frame: ReconciledFrame<'_>,
+        render_pass: &mut RenderPass<'_>,
+        framebuffer_extent: FramebufferExtent,
+    ) -> RendererResult<()> {
+        self.render_reconciled_preserving_frame(frame, render_pass, framebuffer_extent)
+            .map(drop)
+    }
+
+    /// Temporary bridge for U8 multi-viewport transactions that still carry the frame forward.
+    pub(super) fn render_reconciled_preserving_frame<'frame>(
         &mut self,
         frame: ReconciledFrame<'frame>,
         render_pass: &mut RenderPass<'_>,
+        framebuffer_extent: FramebufferExtent,
     ) -> RendererResult<ReconciledFrame<'frame>> {
         self.ensure_renderer_contract()?;
         self.ensure_reconciled_frame_matches(&frame)?;
         let binding = self.bound_context()?;
         with_bound_context(&binding, || {
             let platform_io = platform_io_for_current_context()?;
-            self.render_read_only_draw_data(frame.draw_data(), render_pass, platform_io)
+            self.render_read_only_draw_data_with_fb_size(
+                frame.draw_data(),
+                render_pass,
+                framebuffer_extent.width(),
+                framebuffer_extent.height(),
+                true,
+                platform_io,
+            )
         })?;
         Ok(frame)
-    }
-
-    /// Finalizes and renders the frame for this renderer's bound Context.
-    pub fn render_context(
-        &mut self,
-        context: &mut Context,
-        render_pass: &mut RenderPass<'_>,
-    ) -> RendererResult<()> {
-        self.ensure_context_matches(context)?;
-        let frame = context.try_render(self.renderer_consumer()?)?;
-        self.render(frame, render_pass)
     }
 
     /// Applies managed-texture requests without drawing or acquiring a surface.
@@ -147,67 +157,25 @@ impl WgpuRenderer {
         Ok(frame)
     }
 
-    pub(super) fn render_read_only_draw_data(
-        &mut self,
-        draw_data: &DrawData,
-        render_pass: &mut RenderPass<'_>,
-        platform_io: *mut sys::ImGuiPlatformIO,
-    ) -> RendererResult<()> {
-        let Some(extent) = FramebufferExtent::from_draw_data(draw_data)? else {
-            return Ok(());
-        };
-        self.render_draw_data_at_extent(draw_data, render_pass, extent, platform_io)
-    }
-
-    /// Renders one Context-borrowed frame at explicit framebuffer dimensions.
-    pub fn render_with_fb_size(
-        &mut self,
-        frame: PendingFrame<'_>,
-        render_pass: &mut RenderPass<'_>,
-        fb_width: u32,
-        fb_height: u32,
-    ) -> RendererResult<()> {
-        let frame = self.reconcile_frame(frame)?;
-        self.render_with_fb_size_reconciled(frame, render_pass, fb_width, fb_height)
-            .map(drop)
-    }
-
-    /// Renders an already reconciled frame at explicit dimensions and returns its proof.
-    pub fn render_with_fb_size_reconciled<'frame>(
+    /// Temporary bridge for U8 multi-viewport aliases that do not yet receive the main extent.
+    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+    pub(super) fn render_reconciled_using_draw_data_extent<'frame>(
         &mut self,
         frame: ReconciledFrame<'frame>,
         render_pass: &mut RenderPass<'_>,
-        fb_width: u32,
-        fb_height: u32,
     ) -> RendererResult<ReconciledFrame<'frame>> {
         self.ensure_renderer_contract()?;
         self.ensure_reconciled_frame_matches(&frame)?;
         let binding = self.bound_context()?;
         with_bound_context(&binding, || {
             let platform_io = platform_io_for_current_context()?;
-            self.render_read_only_draw_data_with_fb_size(
-                frame.draw_data(),
-                render_pass,
-                fb_width,
-                fb_height,
-                true,
-                platform_io,
-            )
+            let draw_data = frame.draw_data();
+            let Some(extent) = FramebufferExtent::from_draw_data(draw_data)? else {
+                return Ok(());
+            };
+            self.render_draw_data_at_extent(draw_data, render_pass, extent, platform_io)
         })?;
         Ok(frame)
-    }
-
-    /// Finalizes and renders a frame for the bound Context at explicit dimensions.
-    pub fn render_context_with_fb_size(
-        &mut self,
-        context: &mut Context,
-        render_pass: &mut RenderPass<'_>,
-        fb_width: u32,
-        fb_height: u32,
-    ) -> RendererResult<()> {
-        self.ensure_context_matches(context)?;
-        let frame = context.try_render(self.renderer_consumer()?)?;
-        self.render_with_fb_size(frame, render_pass, fb_width, fb_height)
     }
 
     /// Internal explicit-size variant used by renderer-owned secondary viewports.
@@ -222,9 +190,10 @@ impl WgpuRenderer {
     ) -> RendererResult<()> {
         self.ensure_frame_prepared()?;
         self.log_framebuffer_mismatch(draw_data, fb_width, fb_height, main_viewport);
-        let Some(extent) = FramebufferExtent::explicit(fb_width, fb_height) else {
+        let extent = FramebufferExtent::new(fb_width, fb_height);
+        if extent.is_empty() {
             return Ok(());
-        };
+        }
         self.render_draw_data_at_extent(draw_data, render_pass, extent, platform_io)
     }
 

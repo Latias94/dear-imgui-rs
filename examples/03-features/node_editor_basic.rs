@@ -1,7 +1,7 @@
 //! Basic imgui-node-editor example for `dear-node-editor`.
 
 use dear_imgui_rs::*;
-use dear_imgui_wgpu::WgpuRenderer;
+use dear_imgui_wgpu::{FramebufferExtent, WgpuRenderer};
 use dear_imgui_winit::WinitPlatform;
 use dear_node_editor::{
     EditorContext, LinkId, NodeEditorFrame, NodeEditorUiExt, NodeId, PinId, PinKind,
@@ -313,9 +313,11 @@ impl AppWindow {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            self.imgui
-                .renderer
-                .render(pending_frame, &mut render_pass)?;
+            self.imgui.renderer.render(
+                pending_frame,
+                &mut render_pass,
+                FramebufferExtent::new(self.surface_desc.width, self.surface_desc.height),
+            )?;
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));

@@ -1479,7 +1479,7 @@ mod operational_gate_tests {
         );
         context.frame();
         let frame = context.render(&consumer);
-        assert_destroyed(unsafe { renderer.cmd_draw(vk::CommandBuffer::null(), frame) });
+        assert_destroyed(renderer.prepare_frame(frame));
         assert_destroyed(renderer.shutdown(&mut context));
 
         #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]

@@ -926,7 +926,6 @@ impl SdlGlowFrameDriver<'_> {
             });
         }
 
-        self.renderer.new_frame().map_err(SdlGlowFrameError::new)?;
         let pending_frame = self
             .renderer
             .with_renderer(|renderer| {

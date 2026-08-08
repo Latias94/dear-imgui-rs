@@ -4,7 +4,7 @@
 //!   cargo run -p dear-imgui-examples --features imguizmo-quat --bin imguizmo_quat_basic
 
 use dear_imgui_rs::*;
-use dear_imgui_wgpu::WgpuRenderer;
+use dear_imgui_wgpu::{FramebufferExtent, WgpuRenderer};
 use dear_imgui_winit::WinitPlatform;
 use dear_imguizmo_quat::{GizmoQuatExt, Mode, Modifiers};
 use pollster::block_on;
@@ -868,7 +868,11 @@ impl AppWindow {
                 multiview_mask: None,
             });
 
-            self.imgui.renderer.render(pending_frame, &mut rpass)?;
+            self.imgui.renderer.render(
+                pending_frame,
+                &mut rpass,
+                FramebufferExtent::new(self.surface_desc.width, self.surface_desc.height),
+            )?;
         }
 
         self.queue.submit(Some(encoder.finish()));

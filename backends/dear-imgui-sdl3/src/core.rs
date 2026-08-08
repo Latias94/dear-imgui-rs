@@ -123,8 +123,6 @@ pub(super) mod ffi {
             renderer: *mut SDL_Renderer,
         );
         #[cfg(feature = "sdlrenderer3-renderer")]
-        pub fn dear_imgui_sdl3_backend_sdlrenderer3_create_device_objects();
-        #[cfg(feature = "sdlrenderer3-renderer")]
         pub fn dear_imgui_sdl3_backend_sdlrenderer3_destroy_device_objects();
         #[cfg(feature = "sdlrenderer3-renderer")]
         pub fn dear_imgui_sdl3_backend_sdlrenderer3_update_texture(
@@ -197,16 +195,16 @@ impl Sdl3OpenGlViewportSwapInterval {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Sdl3BackendError {
-    #[error("ImGui_ImplSDL3_InitForOpenGL returned false")]
-    Sdl3InitFailed,
+    #[error("{entry_point} returned false")]
+    PlatformInitFailed { entry_point: &'static str },
     #[error("ImGui_ImplOpenGL3_Init returned false")]
-    OpenGlInitFailed,
+    OpenGlRendererInitFailed,
     #[error("Invalid GLSL version string")]
     InvalidGlslVersion,
     #[error("ImGui_ImplSDLRenderer3_Init returned false")]
-    Renderer3InitFailed,
+    SdlRenderer3InitFailed,
     #[error("ImGui_ImplSDLGPU3_Init returned false")]
-    Gpu3InitFailed,
+    SdlGpu3InitFailed,
     #[error("SDL3 runtime belongs to Context {expected:?}, but received Context {actual:?}")]
     ContextMismatch {
         expected: dear_imgui_rs::ContextId,
@@ -353,7 +351,7 @@ pub(super) fn init_opengl3_impl(
     unsafe {
         if !opengl3_backend::dear_imgui_backend_opengl3_init(glsl_version) {
             ffi::ImGui_ImplSDL3_Shutdown_Rust();
-            return Err(Sdl3BackendError::OpenGlInitFailed);
+            return Err(Sdl3BackendError::OpenGlRendererInitFailed);
         }
     }
     Ok(())
@@ -373,7 +371,7 @@ pub(super) fn init_sdlgpu3_impl(
     unsafe {
         if !ffi::dear_imgui_sdl3_backend_sdlgpu3_init(&mut init_info) {
             ffi::ImGui_ImplSDL3_Shutdown_Rust();
-            return Err(Sdl3BackendError::Gpu3InitFailed);
+            return Err(Sdl3BackendError::SdlGpu3InitFailed);
         }
     }
     Ok(())

@@ -501,7 +501,9 @@ impl OwningViewportRuntime {
     ) -> Result<Option<TextureRetirementBatch>, AshViewportError> {
         self.control
             .with_renderer_mut("cmd_draw", |renderer| unsafe {
-                renderer.cmd_draw(command_buffer, frame).map_err(Into::into)
+                renderer
+                    .cmd_draw_pending(command_buffer, frame)
+                    .map_err(Into::into)
             })
     }
 
@@ -533,9 +535,8 @@ impl OwningViewportRuntime {
     ) -> Result<Option<TextureRetirementBatch>, AshViewportError> {
         self.control
             .with_renderer_mut("cmd_draw_reconciled", |renderer| unsafe {
-                renderer
-                    .cmd_draw_reconciled(command_buffer, frame)
-                    .map_err(Into::into)
+                renderer.cmd_draw(command_buffer, frame)?;
+                renderer.pending_texture_retirement().map_err(Into::into)
             })
     }
 

@@ -140,7 +140,6 @@ impl AppWindow {
         };
         let mut renderer = GlowRenderer::new(gl, &mut imgui_context)?;
         renderer.set_framebuffer_srgb_enabled(false)?;
-        renderer.new_frame()?;
 
         let imgui = ImguiState {
             context: imgui_context,
@@ -253,7 +252,6 @@ impl AppWindow {
             .context
             .render(self.imgui.renderer.renderer_consumer()?);
 
-        self.imgui.renderer.new_frame()?;
         self.imgui.renderer.render(pending_frame)?;
 
         self.surface.swap_buffers(&self.context)?;

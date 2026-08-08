@@ -328,8 +328,6 @@ impl AppWindow {
             .font_atlas()
             .add_custom_rect(CustomRectData::rgba32(CHECKER_SIZE, &checker))
             .ok_or_else(|| std::io::Error::other("font atlas could not allocate checker rect"))?;
-        renderer.new_frame()?;
-
         let imgui = ImguiState {
             context: context_imgui,
             platform,
@@ -1697,7 +1695,6 @@ impl AppWindow {
                 gl.clear(glow::COLOR_BUFFER_BIT);
             }
         }
-        self.imgui.renderer.new_frame()?;
         self.imgui.renderer.render(pending_frame)?;
         self.surface.swap_buffers(&self.context)?;
 

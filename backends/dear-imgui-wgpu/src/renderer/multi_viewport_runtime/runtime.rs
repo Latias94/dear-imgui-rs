@@ -20,7 +20,7 @@ use super::registry::{
     renderer_globals, unregister_runtime,
 };
 use super::trace::{FrameTraceState, WgpuViewportFrameTraceReport};
-use crate::{ExternalTextureId, GammaMode, RendererError, WgpuRenderer};
+use crate::{ExternalTextureId, FramebufferExtent, GammaMode, RendererError, WgpuRenderer};
 
 struct WgpuRendererAttachmentMarker;
 
@@ -1058,7 +1058,7 @@ impl OwningViewportRuntime {
     ) -> Result<ReconciledFrame<'frame>, WgpuViewportError> {
         self.control.with_renderer_mut(|renderer| {
             renderer
-                .render_reconciled(frame, render_pass)
+                .render_reconciled_using_draw_data_extent(frame, render_pass)
                 .map_err(Into::into)
         })
     }
@@ -1069,8 +1069,14 @@ impl OwningViewportRuntime {
         render_pass: &mut wgpu::RenderPass<'_>,
     ) -> Result<(), WgpuViewportError> {
         self.control.with_renderer_mut(|renderer| {
+            renderer.ensure_context_matches(context)?;
+            let frame = context
+                .try_render(renderer.renderer_consumer()?)
+                .map_err(RendererError::from)?;
+            let frame = renderer.reconcile_frame(frame)?;
             renderer
-                .render_context(context, render_pass)
+                .render_reconciled_using_draw_data_extent(frame, render_pass)
+                .map(drop)
                 .map_err(Into::into)
         })
     }
@@ -1084,7 +1090,11 @@ impl OwningViewportRuntime {
     ) -> Result<ReconciledFrame<'frame>, WgpuViewportError> {
         self.control.with_renderer_mut(|renderer| {
             renderer
-                .render_with_fb_size_reconciled(frame, render_pass, width, height)
+                .render_reconciled_preserving_frame(
+                    frame,
+                    render_pass,
+                    FramebufferExtent::new(width, height),
+                )
                 .map_err(Into::into)
         })
     }
@@ -1097,8 +1107,12 @@ impl OwningViewportRuntime {
         height: u32,
     ) -> Result<(), WgpuViewportError> {
         self.control.with_renderer_mut(|renderer| {
+            renderer.ensure_context_matches(context)?;
+            let frame = context
+                .try_render(renderer.renderer_consumer()?)
+                .map_err(RendererError::from)?;
             renderer
-                .render_context_with_fb_size(context, render_pass, width, height)
+                .render(frame, render_pass, FramebufferExtent::new(width, height))
                 .map_err(Into::into)
         })
     }

@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
-use dear_imgui_wgpu::{GammaMode, WgpuInitInfo, WgpuRenderer, wgpu};
+use dear_imgui_wgpu::{FramebufferExtent, GammaMode, WgpuInitInfo, WgpuRenderer, wgpu};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform};
 use pollster::block_on;
 use winit::application::ApplicationHandler;
@@ -217,7 +217,10 @@ impl AppWindow {
         self.imgui
             .platform
             .prepare_render(&ui, &self.window)?;
-        let draw_data = self.imgui.context.render();
+        let pending_frame = self
+            .imgui
+            .context
+            .try_render(self.imgui.renderer.renderer_consumer()?)?;
 
         let (frame, reconfigure_after_present) = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
@@ -261,7 +264,10 @@ impl AppWindow {
                 multiview_mask: None,
             });
 
-            self.imgui.renderer.render(draw_data, &mut render_pass)?;
+            let framebuffer_extent = FramebufferExtent::from_texture(&frame.texture);
+            self.imgui
+                .renderer
+                .render(pending_frame, &mut render_pass, framebuffer_extent)?;
         }
 
         self.queue.submit(Some(encoder.finish()));

@@ -401,7 +401,10 @@ impl AshRenderer {
         self.shutdown_with_destroy(imgui_context, |renderer| renderer.destroy_internal())
     }
 
-    #[cfg(test)]
+    #[cfg(all(
+        test,
+        any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3")
+    ))]
     pub(super) fn shutdown_without_vulkan_for_test(
         &mut self,
         imgui_context: &mut Context,

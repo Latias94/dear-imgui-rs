@@ -183,7 +183,6 @@ fn test_renderer(
         has_clip_origin_support: false,
         has_separate_polygon_modes: false,
         has_sampler_object_support: true,
-        is_destroyed: false,
         gl_context: gl,
         context_binding: None,
         backend_user_data: Box::default(),
@@ -227,7 +226,7 @@ fn destroy_returned_renderer(
     gl: &glow::Context,
     context: &mut Context,
 ) {
-    renderer.destroy(gl, context).unwrap();
+    renderer.shutdown_with_context(gl, context).unwrap();
 }
 
 #[test]
@@ -783,7 +782,7 @@ fn rust_entry_fail_closes_when_a_platform_callback_disappears() {
 
     assert_dependency_error(
         MissingRuntimeDependency::PlatformRender,
-        runtime.new_frame().unwrap_err(),
+        runtime.render_context(&mut context).unwrap_err(),
     );
     assert!(
         !context

@@ -7,7 +7,7 @@
 //! - Draw grid and multiple cubes, manipulate with gizmos
 
 use dear_imgui_rs::*;
-use dear_imgui_wgpu::WgpuRenderer;
+use dear_imgui_wgpu::{FramebufferExtent, WgpuRenderer};
 use dear_imgui_winit::WinitPlatform;
 use dear_imguizmo as guizmo;
 use dear_imguizmo::GuizmoExt;
@@ -788,7 +788,11 @@ impl AppWindow {
             .imgui
             .context
             .render(self.imgui.renderer.renderer_consumer()?);
-        self.imgui.renderer.render(pending_frame, &mut rpass)?;
+        self.imgui.renderer.render(
+            pending_frame,
+            &mut rpass,
+            FramebufferExtent::new(self.surface_desc.width, self.surface_desc.height),
+        )?;
         drop(rpass);
         self.queue.submit(Some(encoder.finish()));
         self.queue.present(output);

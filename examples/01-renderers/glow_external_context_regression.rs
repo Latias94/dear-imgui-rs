@@ -138,7 +138,6 @@ impl AppWindow {
             Box::new(SimpleTextureMap::default()),
         )?;
         renderer.set_framebuffer_srgb_enabled(true)?;
-        renderer.create_device_objects(&gl)?;
 
         let managed_texture = OwnedTextureData::from_pixels(
             dear_imgui_rs::texture::TextureFormat::RGBA32,
@@ -381,9 +380,8 @@ impl AppWindow {
             .context
             .render(self.imgui.renderer.renderer_consumer()?);
 
-        // Mirror the original issue reproduction, where the application keeps the GL
-        // context externally and explicitly ensures device objects exist.
-        self.imgui.renderer.create_device_objects(&self.gl)?;
+        // The external GL capability is supplied at the render boundary. If device objects were
+        // invalidated, the renderer recreates them transactionally before texture reconciliation.
         self.imgui
             .renderer
             .render_with_context(&self.gl, pending_frame)?;

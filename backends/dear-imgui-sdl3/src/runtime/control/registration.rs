@@ -166,6 +166,11 @@ impl RuntimeRegistration {
         &self.control
     }
 
+    #[cfg(any(
+        feature = "opengl3-renderer",
+        feature = "sdlrenderer3-renderer",
+        feature = "sdlgpu3-renderer"
+    ))]
     pub(crate) fn install_renderer_consumer(&mut self, consumer: SynchronousRendererConsumer) {
         let consumer = Rc::new(consumer);
         self.control.install_renderer_consumer(Rc::clone(&consumer));
@@ -176,6 +181,11 @@ impl RuntimeRegistration {
         );
     }
 
+    #[cfg(any(
+        feature = "opengl3-renderer",
+        feature = "sdlrenderer3-renderer",
+        feature = "sdlgpu3-renderer"
+    ))]
     pub(crate) fn renderer_consumer(&self) -> &SynchronousRendererConsumer {
         self.renderer_consumer
             .as_deref()
@@ -216,10 +226,10 @@ impl RuntimeRegistration {
         feature = "sdlrenderer3-renderer",
         feature = "sdlgpu3-renderer"
     ))]
-    pub(crate) fn destroy_renderer_device_objects(
+    pub(crate) fn reset_renderer_device_objects(
         &self,
         context: &mut Context,
-        destroy_device_objects: impl FnOnce(),
+        reset_native_objects: impl FnOnce(),
     ) -> Result<(), Sdl3BackendError> {
         let entry = self.control.enter(context)?;
         let consumer_guard = self.control.renderer_consumer.borrow();
@@ -230,7 +240,7 @@ impl RuntimeRegistration {
 
         self.control.binding.try_with_bound_context(|| {
             self.control.destroy_uninstalled_renderer_textures_bound()?;
-            destroy_device_objects();
+            reset_native_objects();
             self.control.forget_textures_destroyed_by_upstream();
             Ok::<(), Sdl3BackendError>(())
         })??;

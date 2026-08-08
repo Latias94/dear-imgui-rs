@@ -33,8 +33,9 @@ impl RendererStateFault {
 /// Main renderer for Dear ImGui using Glow (OpenGL)
 ///
 /// This renderer provides a unified API similar to the WGPU backend while maintaining
-/// flexibility for advanced use cases. It can either own the OpenGL context and texture
-/// management (simple usage) or work with externally managed resources (advanced usage).
+/// flexibility for advanced use cases. It can retain a Glow function table and own texture
+/// resources (simple usage) or borrow the function table on each operation (advanced usage).
+/// It never owns or switches the native OpenGL context.
 pub struct GlowRenderer {
     // Core rendering state
     pub(super) shaders: Shaders,
@@ -46,7 +47,6 @@ pub struct GlowRenderer {
     pub(super) has_clip_origin_support: bool,
     pub(super) has_separate_polygon_modes: bool,
     pub(super) has_sampler_object_support: bool,
-    pub(super) is_destroyed: bool,
 
     // Resource management
     pub(super) gl_context: Option<std::rc::Rc<glow::Context>>, // None = externally managed
@@ -102,9 +102,11 @@ impl GlowRenderer {
         self.has_sampler_object_support
     }
 
-    /// Returns whether this renderer has completed terminal destruction.
-    pub fn is_destroyed(&self) -> bool {
-        self.is_destroyed
+    pub(super) fn device_objects_ready(&self) -> bool {
+        self.shaders.program.is_some()
+            && self.vbo_handle.is_some()
+            && self.ebo_handle.is_some()
+            && (!self.has_sampler_object_support || self.samplers.is_some())
     }
 
     pub(super) fn track_owned_texture(&mut self, texture: GlTexture) {

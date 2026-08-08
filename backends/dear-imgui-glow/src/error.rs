@@ -39,10 +39,6 @@ pub enum InitError {
     #[error("Unsupported OpenGL version: {0}")]
     UnsupportedVersion(String),
 
-    /// An owned OpenGL context is required for this operation.
-    #[error("No OpenGL context available")]
-    MissingGlContext,
-
     /// A compiled shader program is missing a required vertex attribute.
     #[error("Could not find shader attribute: {0}")]
     MissingShaderAttribute(&'static str),
@@ -74,6 +70,10 @@ pub enum InitError {
     /// The texture map does not contain the requested texture ID.
     #[error("TextureId is not registered: {0:?}")]
     UnknownTextureId(dear_imgui_rs::TextureId),
+
+    /// A legacy texture operation was applied to an application-owned mapping.
+    #[error("TextureId is not owned by the Glow renderer: {0:?}")]
+    TextureNotRendererOwned(dear_imgui_rs::TextureId),
 
     /// A texture upload row is shorter than the pixels required by its format.
     #[error("{format:?} texture row pitch is too small: expected at least {minimum}, got {actual}")]
@@ -130,6 +130,17 @@ pub enum RenderError {
     /// A draw command references a texture that is not registered with this renderer.
     #[error("texture ID is not registered: {0:?}")]
     UnknownTextureId(dear_imgui_rs::TextureId),
+
+    /// A texture operation does not match the mapping's ownership.
+    #[error("texture ID {texture_id:?} is not {expected}")]
+    TextureOwnershipMismatch {
+        texture_id: dear_imgui_rs::TextureId,
+        expected: &'static str,
+    },
+
+    /// An application-owned mapping attempted to alias a renderer-owned GL texture.
+    #[error("an external texture mapping cannot alias a renderer-owned OpenGL texture")]
+    ExternalTextureAliasesRendererOwned,
 
     /// A managed texture update arrived without its matching GPU allocation.
     #[error("managed texture {0:?} received an update before creation")]

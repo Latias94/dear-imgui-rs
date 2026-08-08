@@ -19,7 +19,6 @@ let mut imgui = Context::create();
 let mut renderer = GlowRenderer::new(gl, &mut imgui)?;
 
 // Per frame, after building the UI. The renderer owns the synchronous consumer capability.
-renderer.new_frame()?;
 let frame = imgui.render(renderer.renderer_consumer()?);
 renderer.render(frame)?;
 ```
@@ -54,22 +53,23 @@ renderer.render_reconciled(reconciled)?;
 resulting linear capability and issues the draw commands. The ordinary `render` entry point is the
 convenience composition of those two operations.
 
-For single-viewport use, explicitly destroy the renderer while its OpenGL context is current.
+For single-viewport use, explicitly shut down the renderer while its OpenGL context is current.
 Teardown first obtains an idle reset permit from the Context. A pending frame is abandoned by its
 RAII guard if it cannot be reconciled, and teardown only proceeds once the Context has observed
 that completion. Once validated, teardown deletes renderer-owned GPU textures, commits the Context
 binding reset, and releases the consumer so another renderer can attach:
 
 ```rust
-let gl = renderer.gl_context().expect("owned GL context").clone();
-renderer.destroy(&gl, &mut imgui)?;
+renderer.shutdown(&mut imgui)?;
 ```
 
-For a single-viewport renderer created with `with_external_context`, pass the same live GL context
-to `destroy`. `destroy_device_objects` uses the same prepare-delete-commit transaction but keeps the
-consumer attached for later device-object recreation. Dropping an unreconciled `PendingFrame`
-records abandonment before the Context becomes mutably available again, so teardown can retry
-without a separate completion-poll step.
+For a renderer created with `with_external_context`, call `shutdown_with_context` with the same
+live function table while its OpenGL context is current. `destroy_device_objects` and
+`destroy_device_objects_with_context` use the same prepare-delete-commit transaction but keep the
+consumer attached. The next owned or external render recreates device objects transactionally
+before managed-texture reconciliation. Dropping an unreconciled `PendingFrame` records abandonment
+before the Context becomes mutably available again, so teardown can retry without a separate
+completion-poll step.
 
 ## Runtime Capabilities and Texture Sampling
 
@@ -138,7 +138,6 @@ let renderer = GlowRenderer::with_shared_context(
 let mut runtime = unsafe { GlowViewportRuntime::attach(&mut imgui, renderer) }
     .map_err(|failure| failure.into_parts().0)?;
 
-runtime.new_frame()?;
 runtime.render_context_with_platform_windows(&mut imgui)?;
 
 runtime.shutdown(&mut imgui)?;
@@ -250,7 +249,13 @@ describe how the crate was compiled, but not what the active OpenGL context supp
   `debug_message_insert_support` from dependency features.
 - Renderer GPU handles and capability fields are private implementation details. Use
   `gl_version()`, `supports_clip_origin()`, `supports_framebuffer_srgb_control()`,
-  `supports_sampler_objects()`, and `is_destroyed()` for the supported observations.
+  and `supports_sampler_objects()` for the supported observations. Device-object destruction is
+  recoverable at the next render, while `shutdown` terminates the renderer, so there is no shared
+  boolean state for both operations.
+- Mutable access to the texture map has been removed. Use `register_texture`/`unregister_texture`
+  for renderer-owned GL textures and
+  `register_external_texture`/`update_external_texture`/`unregister_external_texture` for
+  application-owned mappings.
 - `GlVersion` capability queries now use explicit runtime names:
   `bind_vertex_array_support` -> `is_supported`, `vertex_offset_support` ->
   `supports_vertex_offset`, `clip_origin_support` -> `supports_clip_origin`,

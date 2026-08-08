@@ -753,6 +753,9 @@ impl AppWindow {
                 )?;
             }
 
+            let (reconciled_frame, texture_retirement) =
+                self.imgui.renderer.prepare_frame(pending_frame)?;
+
             let texture_retirement = record_command_buffer(
                 &self.vk.ctx.device,
                 command_buffer,
@@ -769,7 +772,10 @@ impl AppWindow {
                 self.imgui.clear_color,
                 // SAFETY: cmd is recording inside the compatible render pass and is submitted
                 // before any renderer resource can be retired or destroyed.
-                |cmd| unsafe { self.imgui.renderer.cmd_draw(cmd, pending_frame) },
+                |cmd| {
+                    unsafe { self.imgui.renderer.cmd_draw(cmd, reconciled_frame) }?;
+                    Ok(texture_retirement)
+                },
             )?;
 
             let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];

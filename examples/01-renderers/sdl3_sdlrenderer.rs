@@ -10,7 +10,7 @@ use dear_imgui_examples::sdl3_callbacks::{
     Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
 };
 use dear_imgui_rs::{Condition, Context};
-use dear_imgui_sdl3::{self as imgui_sdl3_backend, Sdl3RendererBackend};
+use dear_imgui_sdl3::{self as imgui_sdl3_backend, SdlRenderer3Backend};
 use sdl3::pixels::Color;
 use sdl3::{Sdl, VideoSubsystem};
 use sdl3_main::{AppResult, AppResultWithState, MainThreadData, app_impl};
@@ -21,7 +21,7 @@ struct SdlRendererApp {
 }
 
 struct MainData {
-    sdl3_backend: Sdl3RendererBackend,
+    sdl3_backend: SdlRenderer3Backend,
     imgui: Context,
     canvas: sdl3::render::Canvas<sdl3::video::Window>,
     _video: VideoSubsystem,
@@ -64,8 +64,7 @@ impl SdlRendererApp {
         imgui.set_log_filename(None::<String>)?;
 
         // SAFETY: `canvas` owns the Window and SDL_Renderer through shutdown or Context teardown.
-        let sdl3_backend =
-            unsafe { Sdl3RendererBackend::init(&mut imgui, canvas.window(), &canvas)? };
+        let sdl3_backend = unsafe { SdlRenderer3Backend::init(&mut imgui, &canvas)? };
 
         Ok(Self {
             main: MainThreadData::assert_new(RefCell::new(MainData {

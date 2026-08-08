@@ -6,7 +6,7 @@ WGPU renderer for Dear ImGui.
 
 ```rust
 use dear_imgui_rs::Context;
-use dear_imgui_wgpu::{WgpuRenderer, WgpuInitInfo, GammaMode};
+use dear_imgui_wgpu::{FramebufferExtent, GammaMode, WgpuInitInfo, WgpuRenderer};
 
 // device, queue, surface_format prepared ahead
 let mut imgui = Context::create();
@@ -17,10 +17,11 @@ renderer.set_gamma_mode(GammaMode::Auto); // Auto | Linear | Gamma22
 
 // per-frame
 let frame = imgui.render(renderer.renderer_consumer()?);
-renderer.render(frame, &mut render_pass)?;
+let framebuffer_extent = FramebufferExtent::from_texture(&surface_texture.texture);
+renderer.render(frame, &mut render_pass, framebuffer_extent)?;
 ```
 
-Each `WgpuRenderer` is fully initialized and bound to the `Context` passed to `new`; there is no public empty or two-phase state. Create one renderer per context in multi-context applications. After `shutdown`, create a replacement renderer instead of reinitializing the old value. `render()` consumes the Context-borrowed frame, processes pointer-free managed texture requests, reconciles feedback, and only then reads draw commands. `render_context()` and `render_context_with_fb_size()` are convenience methods that finalize only the bound context and return `RendererError::ContextMismatch` for another context.
+Each `WgpuRenderer` is fully initialized and bound to the `Context` passed to `new`; there is no public empty or two-phase state. Create one renderer per context in multi-context applications. After `shutdown`, create a replacement renderer instead of reinitializing the old value. `render()` is the normal path: it consumes a `PendingFrame`, processes pointer-free managed texture requests, reconciles feedback, and only then reads draw commands. Integrations that must reconcile before acquiring the main surface can split that work into `reconcile_frame()` followed by `render_reconciled()`. Both render methods require the physical extent of the actual color attachment; when rendering to a surface, derive it from the acquired `SurfaceTexture` instead of assuming the configured size still matches.
 
 ## External texture views
 

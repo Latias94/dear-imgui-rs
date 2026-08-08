@@ -36,7 +36,9 @@ use dear_imgui_test_engine::{
     BuiltInTestSuite, FrameDriveOutcome, MainRenderOutcome, RegisteredTestSuite, ResultSummary,
     RunFlags, RunSpeed, ScriptCount, TestEngine, TestFrameDriver, TestGroup, VerboseLevel,
 };
-use dear_imgui_wgpu::{GammaMode, WgpuInitInfo, WgpuRenderer, multi_viewport as wgpu_mvp};
+use dear_imgui_wgpu::{
+    FramebufferExtent, GammaMode, WgpuInitInfo, WgpuRenderer, multi_viewport as wgpu_mvp,
+};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform, multi_viewport as winit_mvp};
 use pollster::block_on;
 use std::{fmt, sync::Arc, time::Instant};
@@ -382,21 +384,26 @@ impl AppRenderer {
         }
     }
 
-    fn render_with_fb_size_reconciled<'frame>(
+    fn render_reconciled(
         &mut self,
-        frame: ReconciledFrame<'frame>,
+        frame: ReconciledFrame<'_>,
         render_pass: &mut wgpu::RenderPass<'_>,
-        width: u32,
-        height: u32,
-    ) -> Result<ReconciledFrame<'frame>, Box<dyn std::error::Error>> {
+        framebuffer_extent: FramebufferExtent,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         match self {
             Self::Single(renderer) => {
-                Ok(renderer.render_with_fb_size_reconciled(frame, render_pass, width, height)?)
+                renderer.render_reconciled(frame, render_pass, framebuffer_extent)?
             }
-            Self::Multi(runtime) => {
-                Ok(runtime.render_with_fb_size_reconciled(frame, render_pass, width, height)?)
-            }
+            Self::Multi(runtime) => runtime
+                .render_with_fb_size_reconciled(
+                    frame,
+                    render_pass,
+                    framebuffer_extent.width(),
+                    framebuffer_extent.height(),
+                )
+                .map(drop)?,
         }
+        Ok(())
     }
 
     #[cfg(feature = "test-engine")]
@@ -511,6 +518,7 @@ impl MainSurfaceFrameDriver<'_> {
                 ));
             }
         };
+        let framebuffer_extent = FramebufferExtent::from_texture(&surface_frame.texture);
         let view = surface_frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -519,7 +527,7 @@ impl MainSurfaceFrameDriver<'_> {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("imgui-main-encoder"),
             });
-        let frame = {
+        {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("imgui-main-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -542,15 +550,9 @@ impl MainSurfaceFrameDriver<'_> {
                 multiview_mask: None,
             });
             self.renderer
-                .render_with_fb_size_reconciled(
-                    frame,
-                    &mut render_pass,
-                    self.surface_config.width,
-                    self.surface_config.height,
-                )
-                .map_err(MainSurfaceFrameError::from)?
-        };
-        drop(frame);
+                .render_reconciled(frame, &mut render_pass, framebuffer_extent)
+                .map_err(MainSurfaceFrameError::from)?;
+        }
         self.queue.submit(Some(encoder.finish()));
         self.surface_frame = Some(surface_frame);
         self.rendered = true;
@@ -1232,16 +1234,15 @@ impl AppWindow {
             }
         };
         #[cfg(not(feature = "test-engine"))]
-        let was_presented = {
+        {
             let reconciled = driver.prepare_frame(frame)?;
             match driver.render_main_frame(reconciled)? {
                 MainSurfaceRenderOutcome::ReadyToPresent => {
                     driver.present_frame()?;
-                    true
                 }
-                MainSurfaceRenderOutcome::Skipped => false,
+                MainSurfaceRenderOutcome::Skipped => {}
             }
-        };
+        }
 
         #[cfg(feature = "test-engine")]
         let secondary_submission_evidence = driver.secondary_submission_evidence.take();

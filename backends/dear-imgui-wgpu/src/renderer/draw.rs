@@ -17,13 +17,45 @@ const IMGUI_INDEX_FORMAT: wgpu::IndexFormat = if std::mem::size_of::<DrawIdx>() 
     wgpu::IndexFormat::Uint32
 };
 
+/// Physical dimensions of the WGPU render target receiving Dear ImGui commands.
+///
+/// WGPU render passes do not expose attachment dimensions. Applications must therefore pass the
+/// extent of the texture view used to create the render pass instead of asking the renderer to
+/// infer it from Dear ImGui's logical display metrics.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub(super) struct FramebufferExtent {
+pub struct FramebufferExtent {
     width: u32,
     height: u32,
 }
 
 impl FramebufferExtent {
+    /// Creates an extent. A zero width or height represents a target that cannot be drawn yet.
+    pub const fn new(width: u32, height: u32) -> Self {
+        Self { width, height }
+    }
+
+    /// Returns the extent of a WGPU texture.
+    pub fn from_texture(texture: &wgpu::Texture) -> Self {
+        let size = texture.size();
+        Self::new(size.width, size.height)
+    }
+
+    /// Returns the physical width in pixels.
+    pub const fn width(self) -> u32 {
+        self.width
+    }
+
+    /// Returns the physical height in pixels.
+    pub const fn height(self) -> u32 {
+        self.height
+    }
+
+    /// Returns whether the target has no drawable area.
+    pub const fn is_empty(self) -> bool {
+        self.width == 0 || self.height == 0
+    }
+
+    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     pub(super) fn from_draw_data(draw_data: &DrawData) -> RendererResult<Option<Self>> {
         let size = draw_data.display_size();
         let scale = draw_data.framebuffer_scale();
@@ -46,14 +78,6 @@ impl FramebufferExtent {
             width: width as u32,
             height: height as u32,
         }))
-    }
-
-    pub(super) const fn explicit(width: u32, height: u32) -> Option<Self> {
-        if width == 0 || height == 0 {
-            None
-        } else {
-            Some(Self { width, height })
-        }
     }
 
     fn width_f32(self) -> f32 {

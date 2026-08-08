@@ -98,8 +98,6 @@ use dear_imgui_sys::backend_shim::opengl3 as opengl3_backend;
 #[cfg(feature = "sdlgpu3-renderer")]
 use sdl3::gpu::CommandBuffer;
 #[cfg(feature = "sdlgpu3-renderer")]
-use sdl3::gpu::Device;
-#[cfg(feature = "sdlgpu3-renderer")]
 use sdl3::gpu::RenderPass;
 #[cfg(feature = "sdlrenderer3-renderer")]
 use sdl3::render::WindowCanvas;
@@ -117,7 +115,7 @@ use sdl3_sys::render::SDL_Renderer;
 pub use self::backend::Sdl3OpenGl3Backend;
 pub use self::backend::Sdl3PlatformBackend;
 #[cfg(feature = "sdlrenderer3-renderer")]
-pub use self::backend::Sdl3RendererBackend;
+pub use self::backend::SdlRenderer3Backend;
 #[cfg(feature = "sdlgpu3-renderer")]
 pub use self::backend::{SdlGpu3PreparedFrame, SdlGpu3RendererBackend};
 #[cfg(feature = "multi-viewport")]
@@ -145,11 +143,13 @@ use self::core::{init_sdlgpu3_impl, new_frame_sdlgpu3_impl, shutdown_sdlgpu3_ren
 use self::runtime::{NativeRendererKind, PlatformGraphicsKind, RuntimeRegistration};
 #[cfg(feature = "sdlrenderer3-renderer")]
 use self::viewport::init_for_canvas;
+#[cfg(target_os = "windows")]
+use self::viewport::init_for_d3d;
+#[cfg(feature = "sdlgpu3-renderer")]
+use self::viewport::init_for_sdlgpu3;
 use self::viewport::{
-    init_for_d3d, init_for_metal, init_for_other, init_for_sdl_gpu, init_for_sdl_renderer,
-    init_for_vulkan, init_platform_for_opengl,
+    init_for_metal, init_for_other, init_for_sdl_gpu, init_for_sdl_renderer, init_for_vulkan,
+    init_platform_for_opengl,
 };
 #[cfg(feature = "opengl3-renderer")]
 use self::viewport::{init_for_opengl, init_for_opengl_default};
-#[cfg(feature = "sdlgpu3-renderer")]
-use self::viewport::{init_for_sdlgpu3, init_for_sdlgpu3_default};

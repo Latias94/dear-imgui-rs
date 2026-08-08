@@ -684,9 +684,10 @@ impl RendererRuntime {
         // `record_command_buffer` supplies a live command buffer inside the renderer-compatible
         // render scope, and the example submits it only to the renderer's configured queue.
         Ok(match self {
-            Self::Single(renderer) => unsafe {
-                renderer.cmd_draw_reconciled(command_buffer, frame)?
-            },
+            Self::Single(renderer) => {
+                unsafe { renderer.cmd_draw(command_buffer, frame) }?;
+                None
+            }
             Self::Viewports(runtime) => unsafe {
                 runtime.cmd_draw_reconciled(command_buffer, frame)?
             },

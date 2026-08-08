@@ -21,7 +21,7 @@ use dear_imgui_examples::sdl3_callbacks::{
 };
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
-use dear_imgui_wgpu::{WgpuInitInfo, WgpuRenderer};
+use dear_imgui_wgpu::{FramebufferExtent, WgpuInitInfo, WgpuRenderer};
 use sdl3::video::{SwapInterval, WindowPos};
 use sdl3_main::{AppResult, AppResultWithState, MainThreadData, app_impl};
 
@@ -226,13 +226,14 @@ impl WgpuApp {
                 return Ok(());
             }
             wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
-                drop(draw_data);
+                drop(pending_frame);
                 return Ok(());
             }
             wgpu::CurrentSurfaceTexture::Validation => {
                 return Err("surface acquisition failed with a WGPU validation error".into());
             }
         };
+        let framebuffer_extent = FramebufferExtent::from_texture(&frame.texture);
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -263,12 +264,8 @@ impl WgpuApp {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            main.renderer.render_with_fb_size(
-                pending_frame,
-                &mut render_pass,
-                main.surface_config.width,
-                main.surface_config.height,
-            )?;
+            main.renderer
+                .render(pending_frame, &mut render_pass, framebuffer_extent)?;
         }
         main.queue.submit(std::iter::once(encoder.finish()));
         main.queue.present(frame);

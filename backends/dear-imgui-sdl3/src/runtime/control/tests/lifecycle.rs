@@ -735,7 +735,7 @@ fn device_object_destroy_commits_synchronous_texture_reset_after_native_destruct
     runtime.install_renderer_consumer(consumer);
 
     runtime
-        .destroy_renderer_device_objects(&mut context, {
+        .reset_renderer_device_objects(&mut context, {
             let native_destroy_count = Rc::clone(&native_destroy_count);
             move || native_destroy_count.set(native_destroy_count.get() + 1)
         })

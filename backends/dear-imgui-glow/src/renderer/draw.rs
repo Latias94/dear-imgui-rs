@@ -207,13 +207,15 @@ fn clear_viewport_framebuffer(gl: &Context, color: [f32; 4]) {
     }
 }
 
-impl GlowRenderer {
-    /// Finalizes and renders a frame for this renderer's bound Dear ImGui Context.
-    pub fn render_context(&mut self, context: &mut dear_imgui_rs::Context) -> RenderResult<()> {
-        let frame = self.reconcile_context_frame(context)?;
-        self.render_reconciled(frame).map(drop)
-    }
+#[derive(Copy, Clone)]
+enum DeviceObjectReadiness {
+    Ready,
+    #[cfg(feature = "multi-viewport")]
+    EnsureIfDrawing,
+}
 
+impl GlowRenderer {
+    #[cfg(feature = "multi-viewport")]
     pub(super) fn reconcile_context_frame<'context>(
         &mut self,
         context: &'context mut dear_imgui_rs::Context,
@@ -224,56 +226,75 @@ impl GlowRenderer {
     }
 
     /// Consume and render one Context-borrowed Dear ImGui frame.
+    ///
+    /// The native context for the retained Glow function table, or a compatible share-group
+    /// context, must be current on this thread.
     pub fn render(&mut self, frame: PendingFrame<'_>) -> RenderResult<()> {
-        let frame = self.reconcile_frame(frame)?;
-        self.render_reconciled(frame).map(drop)
+        self.ensure_operational()?;
+        self.validate_pending_frame(&frame)?;
+        let gl = self
+            .gl_context
+            .clone()
+            .ok_or(RenderError::MissingGlContext)?;
+        self.render_preflighted_pending_frame(&gl, frame)
     }
 
     /// Reconciles managed textures without reading or drawing the frame's commands.
+    ///
+    /// The native context for the retained Glow function table, or a compatible share-group
+    /// context, must be current on this thread.
     pub fn reconcile_frame<'frame>(
         &mut self,
         frame: PendingFrame<'frame>,
     ) -> RenderResult<ReconciledFrame<'frame>> {
         self.ensure_operational()?;
         self.validate_pending_frame(&frame)?;
-        if self.is_destroyed {
-            return Err(RenderError::RendererDestroyed);
-        }
         let gl = self
             .gl_context
             .clone()
             .ok_or(RenderError::MissingGlContext)?;
-        self.reconcile_pending_frame(&gl, frame)
+        self.reconcile_preflighted_pending_frame(&gl, frame)
     }
 
-    /// Draws one already-reconciled frame and returns its linear presentation capability.
-    pub fn render_reconciled<'frame>(
+    /// Consumes and draws one already-reconciled frame.
+    ///
+    /// The native context for the retained Glow function table, or a compatible share-group
+    /// context, must be current on this thread.
+    pub fn render_reconciled(&mut self, frame: ReconciledFrame<'_>) -> RenderResult<()> {
+        self.render_reconciled_preserving_frame(frame).map(drop)
+    }
+
+    pub(super) fn render_reconciled_preserving_frame<'frame>(
         &mut self,
         frame: ReconciledFrame<'frame>,
     ) -> RenderResult<ReconciledFrame<'frame>> {
         self.ensure_operational()?;
         self.validate_reconciled_frame(&frame)?;
-        if self.is_destroyed {
-            return Err(RenderError::RendererDestroyed);
-        }
         let gl = self
             .gl_context
             .clone()
             .ok_or(RenderError::MissingGlContext)?;
-        self.render_reconciled_frame(&gl, frame)
+        self.render_preflighted_reconciled_frame(&gl, frame)
     }
 
-    /// Consume and render a frame using an externally managed OpenGL context.
+    /// Consume and render a frame using an externally managed Glow function table.
+    ///
+    /// The table must remain live, and the native context/share group that owns this renderer's
+    /// resources must be current on this thread for the duration of the call.
     pub fn render_with_context(
         &mut self,
         gl: &Context,
         frame: PendingFrame<'_>,
     ) -> RenderResult<()> {
-        let frame = self.reconcile_frame_with_context(gl, frame)?;
-        self.render_with_context_reconciled(gl, frame).map(drop)
+        self.ensure_operational()?;
+        self.validate_pending_frame(&frame)?;
+        self.render_preflighted_pending_frame(gl, frame)
     }
 
-    /// Reconciles managed textures with an externally managed OpenGL context.
+    /// Reconciles managed textures with an externally managed Glow function table.
+    ///
+    /// The table must remain live, and the native context/share group that owns this renderer's
+    /// resources must be current on this thread for the duration of the call.
     pub fn reconcile_frame_with_context<'frame>(
         &mut self,
         gl: &Context,
@@ -281,23 +302,48 @@ impl GlowRenderer {
     ) -> RenderResult<ReconciledFrame<'frame>> {
         self.ensure_operational()?;
         self.validate_pending_frame(&frame)?;
-        if self.is_destroyed {
-            return Err(RenderError::RendererDestroyed);
-        }
+        self.reconcile_preflighted_pending_frame(gl, frame)
+    }
+
+    /// Draws one reconciled frame with an externally managed Glow function table.
+    ///
+    /// The table must remain live, and the native context/share group that owns this renderer's
+    /// resources must be current on this thread for the duration of the call.
+    pub fn render_with_context_reconciled(
+        &mut self,
+        gl: &Context,
+        frame: ReconciledFrame<'_>,
+    ) -> RenderResult<()> {
+        self.ensure_operational()?;
+        self.validate_reconciled_frame(&frame)?;
+        self.render_preflighted_reconciled_frame(gl, frame)
+            .map(drop)
+    }
+
+    fn render_preflighted_pending_frame(
+        &mut self,
+        gl: &Context,
+        frame: PendingFrame<'_>,
+    ) -> RenderResult<()> {
+        let frame = self.reconcile_preflighted_pending_frame(gl, frame)?;
+        self.render_reconciled_frame(gl, frame).map(drop)
+    }
+
+    fn reconcile_preflighted_pending_frame<'frame>(
+        &mut self,
+        gl: &Context,
+        frame: PendingFrame<'frame>,
+    ) -> RenderResult<ReconciledFrame<'frame>> {
+        self.ensure_device_objects_preflighted(gl)?;
         self.reconcile_pending_frame(gl, frame)
     }
 
-    /// Draws one reconciled frame with an externally managed OpenGL context.
-    pub fn render_with_context_reconciled<'frame>(
+    fn render_preflighted_reconciled_frame<'frame>(
         &mut self,
         gl: &Context,
         frame: ReconciledFrame<'frame>,
     ) -> RenderResult<ReconciledFrame<'frame>> {
-        self.ensure_operational()?;
-        self.validate_reconciled_frame(&frame)?;
-        if self.is_destroyed {
-            return Err(RenderError::RendererDestroyed);
-        }
+        self.ensure_device_objects_preflighted(gl)?;
         self.render_reconciled_frame(gl, frame)
     }
 
@@ -319,7 +365,7 @@ impl GlowRenderer {
         gl: &Context,
         reconciled: ReconciledFrame<'frame>,
     ) -> RenderResult<ReconciledFrame<'frame>> {
-        self.render_draw_data(gl, reconciled.draw_data())?;
+        self.render_draw_data_with_ready_device_objects(gl, reconciled.draw_data())?;
         Ok(reconciled)
     }
 
@@ -360,7 +406,7 @@ impl GlowRenderer {
     }
 
     /// Draw already-reconciled data. Multi-viewport callbacks use this for secondary viewports.
-    pub(super) fn render_draw_data(
+    fn render_draw_data_with_ready_device_objects(
         &mut self,
         gl: &Context,
         draw_data: &DrawData,
@@ -371,7 +417,12 @@ impl GlowRenderer {
             .ok_or(RenderError::RendererNotAttached)?;
         binding
             .try_with_bound_context(|| {
-                self.render_draw_data_transaction(gl, Some(draw_data), false)
+                self.render_draw_data_transaction(
+                    gl,
+                    Some(draw_data),
+                    false,
+                    DeviceObjectReadiness::Ready,
+                )
             })
             .map_err(RenderError::ContextBinding)?
     }
@@ -389,7 +440,14 @@ impl GlowRenderer {
             .clone()
             .ok_or(RenderError::RendererNotAttached)?;
         binding
-            .try_with_bound_context(|| self.render_draw_data_transaction(gl, draw_data, clear))
+            .try_with_bound_context(|| {
+                self.render_draw_data_transaction(
+                    gl,
+                    draw_data,
+                    clear,
+                    DeviceObjectReadiness::EnsureIfDrawing,
+                )
+            })
             .map_err(RenderError::ContextBinding)?
     }
 
@@ -398,11 +456,8 @@ impl GlowRenderer {
         gl: &Context,
         draw_data: Option<&DrawData>,
         clear: bool,
+        _device_objects: DeviceObjectReadiness,
     ) -> RenderResult<()> {
-        if self.is_destroyed {
-            return Err(RenderError::RendererDestroyed);
-        }
-
         let framebuffer_extent = draw_data
             .map(FramebufferExtent::from_draw_data)
             .transpose()?
@@ -410,6 +465,10 @@ impl GlowRenderer {
         let drawable = framebuffer_extent.is_some();
         if !clear && !drawable {
             return Ok(());
+        }
+        #[cfg(feature = "multi-viewport")]
+        if matches!(_device_objects, DeviceObjectReadiness::EnsureIfDrawing) {
+            self.ensure_device_objects_preflighted(gl)?;
         }
 
         let platform_io = drawable.then(platform_io_for_current_context).transpose()?;
@@ -1107,7 +1166,6 @@ mod tests {
             has_clip_origin_support: false,
             has_separate_polygon_modes: false,
             has_sampler_object_support: true,
-            is_destroyed: false,
             gl_context: None,
             context_binding: None,
             backend_user_data: Box::default(),

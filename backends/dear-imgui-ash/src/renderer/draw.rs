@@ -5,8 +5,8 @@ impl AshRenderer {
     ///
     /// Multi-viewport integrations must consume the pending frame here before renderer callbacks
     /// draw secondary viewports. The returned [`ReconciledFrame`] is the only capability that can
-    /// expose draw data. [`Self::cmd_draw`] performs the same reconciliation automatically for
-    /// single-viewport integrations.
+    /// expose draw data. The retirement batch must remain associated with the submission/fence
+    /// that covers every draw which may still reference the retired resources.
     pub fn prepare_frame<'ctx>(
         &mut self,
         frame: PendingFrame<'ctx>,
@@ -32,13 +32,7 @@ impl AshRenderer {
         Ok((frame, pending_retirement))
     }
 
-    /// Reconcile managed textures and record one Context-borrowed frame.
-    ///
-    /// The returned batch represents every pending managed-texture retirement. Recording this
-    /// command buffer is not GPU completion: do not complete the batch until synchronization for
-    /// every queue that can still use its textures has signaled. With multi-viewport enabled, that
-    /// includes secondary viewport work recorded after this method returns. See
-    /// [`Self::complete_texture_retirements_with_fences`].
+    /// Record a frame previously returned by [`Self::prepare_frame`].
     ///
     /// # Safety
     ///
@@ -54,41 +48,8 @@ impl AshRenderer {
     pub unsafe fn cmd_draw(
         &mut self,
         command_buffer: vk::CommandBuffer,
-        frame: PendingFrame<'_>,
-    ) -> RendererResult<Option<TextureRetirementBatch>> {
-        self.ensure_pending_frame_matches(&frame)?;
-        let binding = self.context_state.binding();
-        binding
-            .try_with_bound_context(|| self.cmd_draw_bound(command_buffer, frame))
-            .map_err(|error| RendererError::InvalidRenderState(error.to_string()))?
-    }
-
-    fn cmd_draw_bound(
-        &mut self,
-        command_buffer: vk::CommandBuffer,
-        frame: PendingFrame<'_>,
-    ) -> RendererResult<Option<TextureRetirementBatch>> {
-        let platform_io = platform_io_for_current_context()?;
-        unsafe { RendererRenderStateGuard::<AshRenderStateStorage>::preflight(platform_io) }
-            .map_err(map_renderer_render_state_error)?;
-        let (frame, _) = self.prepare_frame_bound(frame)?;
-        self.cmd_draw_reconciled_bound(command_buffer, frame, platform_io)
-    }
-
-    /// Record a frame previously returned by [`Self::prepare_frame`].
-    ///
-    /// This entry point exists for multi-viewport integrations, which must reconcile textures
-    /// before secondary renderer callbacks run and record the main viewport afterwards.
-    ///
-    /// # Safety
-    ///
-    /// `command_buffer` must satisfy [`Self::cmd_draw`], and `frame` must be the frame returned by
-    /// this renderer's [`Self::prepare_frame`] call for the current Dear ImGui frame.
-    pub unsafe fn cmd_draw_reconciled(
-        &mut self,
-        command_buffer: vk::CommandBuffer,
         frame: ReconciledFrame<'_>,
-    ) -> RendererResult<Option<TextureRetirementBatch>> {
+    ) -> RendererResult<()> {
         self.ensure_reconciled_frame_matches(&frame)?;
         let binding = self.context_state.binding();
         binding
@@ -103,15 +64,38 @@ impl AshRenderer {
             .map_err(|error| RendererError::InvalidRenderState(error.to_string()))?
     }
 
+    /// Temporary bridge for multi-viewport facades that still accept a pending frame.
+    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+    pub(super) unsafe fn cmd_draw_pending(
+        &mut self,
+        command_buffer: vk::CommandBuffer,
+        frame: PendingFrame<'_>,
+    ) -> RendererResult<Option<TextureRetirementBatch>> {
+        self.ensure_pending_frame_matches(&frame)?;
+        let binding = self.context_state.binding();
+        binding
+            .try_with_bound_context(|| {
+                let platform_io = platform_io_for_current_context()?;
+                unsafe {
+                    RendererRenderStateGuard::<AshRenderStateStorage>::preflight(platform_io)
+                }
+                .map_err(map_renderer_render_state_error)?;
+                let (frame, retirement) = self.prepare_frame_bound(frame)?;
+                self.cmd_draw_reconciled_bound(command_buffer, frame, platform_io)?;
+                Ok(retirement)
+            })
+            .map_err(|error| RendererError::InvalidRenderState(error.to_string()))?
+    }
+
     fn cmd_draw_reconciled_bound(
         &mut self,
         command_buffer: vk::CommandBuffer,
         frame: ReconciledFrame<'_>,
         platform_io: *mut dear_imgui_rs::sys::ImGuiPlatformIO,
-    ) -> RendererResult<Option<TextureRetirementBatch>> {
+    ) -> RendererResult<()> {
         let draw_data = frame.draw_data();
         if !draw_data.valid() {
-            return self.pending_texture_retirement();
+            return Ok(());
         }
 
         let gamma = self.gamma();
@@ -137,7 +121,7 @@ impl AshRenderer {
                 platform_io,
             },
         )?;
-        self.pending_texture_retirement()
+        Ok(())
     }
 
     #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
@@ -784,10 +768,8 @@ mod tests {
             .expect("an empty request phase should reconcile without Vulkan work");
         assert_eq!(prepared_batch, Some(expected_batch));
 
-        let recorded_batch =
-            unsafe { renderer.cmd_draw_reconciled(vk::CommandBuffer::null(), reconciled) }
-                .expect("a zero-sized framebuffer should not issue Vulkan commands");
-        assert_eq!(recorded_batch, Some(expected_batch));
+        unsafe { renderer.cmd_draw(vk::CommandBuffer::null(), reconciled) }
+            .expect("a zero-sized framebuffer should not issue Vulkan commands");
         assert_eq!(
             renderer.pending_texture_retirement().unwrap(),
             Some(expected_batch)

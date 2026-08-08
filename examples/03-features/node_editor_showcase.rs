@@ -6,7 +6,7 @@ mod node_editor_blueprint;
 mod wgpu_init;
 
 use dear_imgui_rs::*;
-use dear_imgui_wgpu::{GammaMode, WgpuInitInfo, WgpuRenderer};
+use dear_imgui_wgpu::{FramebufferExtent, GammaMode, WgpuInitInfo, WgpuRenderer};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform};
 use dear_node_editor::{
     CanvasSizeMode, EditorConfig, EditorContext, FlowDirection, LinkId, NodeEditorFrame,
@@ -531,9 +531,11 @@ impl AppWindow {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            self.imgui
-                .renderer
-                .render(pending_frame, &mut render_pass)?;
+            self.imgui.renderer.render(
+                pending_frame,
+                &mut render_pass,
+                FramebufferExtent::new(self.surface_desc.width, self.surface_desc.height),
+            )?;
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));

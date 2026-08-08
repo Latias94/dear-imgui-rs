@@ -860,10 +860,6 @@ void dear_imgui_sdl3_backend_sdlrenderer3_render_draw_data(ImDrawData* draw_data
     ImGui_ImplSDLRenderer3_RenderDrawData(draw_data, renderer);
 }
 
-void dear_imgui_sdl3_backend_sdlrenderer3_create_device_objects() {
-    ImGui_ImplSDLRenderer3_CreateDeviceObjects();
-}
-
 void dear_imgui_sdl3_backend_sdlrenderer3_destroy_device_objects() {
     ImGui_ImplSDLRenderer3_DestroyDeviceObjects();
 }

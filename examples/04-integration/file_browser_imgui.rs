@@ -94,7 +94,6 @@ impl AppWindow {
         };
         let mut renderer = GlowRenderer::new(gl, &mut imgui_context)?;
         renderer.set_framebuffer_srgb_enabled(false)?;
-        renderer.new_frame()?;
 
         let browser = {
             let mut st = FileDialogState::new(DialogMode::OpenFiles);
@@ -188,15 +187,8 @@ impl AppWindow {
 
                 ui.separator();
                 if self.browser.is_open() {
-                    let gl = self
-                        .imgui
-                        .renderer
-                        .gl_context()
-                        .cloned()
-                        .expect("GlowRenderer missing gl_context");
                     let mut renderer = GlowThumbnailRenderer {
-                        gl: &gl,
-                        texture_map: self.imgui.renderer.texture_map_mut(),
+                        renderer: &mut self.imgui.renderer,
                     };
                     let mut backend = ThumbnailBackend {
                         provider: &mut self.thumbnails_provider,
@@ -233,7 +225,6 @@ impl AppWindow {
             .imgui
             .context
             .render(self.imgui.renderer.renderer_consumer()?);
-        self.imgui.renderer.new_frame()?;
         self.imgui.renderer.render(pending_frame)?;
         self.surface.swap_buffers(&self.context)?;
         Ok(())
@@ -241,8 +232,7 @@ impl AppWindow {
 }
 
 struct GlowThumbnailRenderer<'a> {
-    gl: &'a glow::Context,
-    texture_map: &'a mut dyn dear_imgui_glow::TextureMap,
+    renderer: &'a mut GlowRenderer,
 }
 
 impl ThumbnailRenderer for GlowThumbnailRenderer<'_> {
@@ -250,35 +240,19 @@ impl ThumbnailRenderer for GlowThumbnailRenderer<'_> {
         &mut self,
         image: &dear_file_browser::DecodedRgbaImage,
     ) -> Result<TextureId, String> {
-        let gl_tex = dear_imgui_glow::create_texture_from_rgba(
-            self.gl,
-            image.width,
-            image.height,
-            &image.rgba,
-        )
-        .map_err(|e| format!("{e}"))?;
-        match self.texture_map.register_texture(
-            gl_tex,
-            image.width,
-            image.height,
-            dear_imgui_rs::TextureFormat::RGBA32,
-        ) {
-            Ok(texture_id) => Ok(texture_id),
-            Err(error) => {
-                unsafe {
-                    self.gl.delete_texture(gl_tex);
-                }
-                Err(error.to_string())
-            }
-        }
+        self.renderer
+            .register_texture(
+                image.width,
+                image.height,
+                dear_imgui_rs::TextureFormat::RGBA32,
+                &image.rgba,
+            )
+            .map_err(|error| error.to_string())
     }
 
     fn destroy(&mut self, texture_id: TextureId) {
-        let Some(gl_tex) = self.texture_map.remove(texture_id) else {
-            return;
-        };
-        unsafe {
-            self.gl.delete_texture(gl_tex);
+        if let Err(error) = self.renderer.unregister_texture(texture_id) {
+            eprintln!("Failed to release thumbnail texture {texture_id:?}: {error}");
         }
     }
 }

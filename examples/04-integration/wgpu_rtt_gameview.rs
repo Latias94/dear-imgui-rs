@@ -2,7 +2,7 @@
 //! Renders to an offscreen wgpu::Texture each frame and shows it in an ImGui window.
 
 use dear_imgui_rs::*;
-use dear_imgui_wgpu::WgpuRenderer;
+use dear_imgui_wgpu::{FramebufferExtent, WgpuRenderer};
 use dear_imgui_winit::WinitPlatform;
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -464,7 +464,11 @@ impl AppWindow {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            renderer.render(pending_frame, &mut rpass)?;
+            renderer.render(
+                pending_frame,
+                &mut rpass,
+                FramebufferExtent::new(self.surface_desc.width, self.surface_desc.height),
+            )?;
         }
 
         self.queue.submit(Some(encoder.finish()));

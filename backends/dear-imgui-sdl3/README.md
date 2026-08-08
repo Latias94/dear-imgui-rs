@@ -165,16 +165,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 APIs of interest (see `src/lib.rs` for full docs):
 
-- `Sdl3OpenGl3Backend` and `Sdl3RendererBackend`:
+- `Sdl3OpenGl3Backend` and `SdlRenderer3Backend`:
   RAII renderer owners whose shared runtime retains the Context's renderer consumer through
   explicit or Context-owned teardown, processes request-bound texture feedback, and consumes
   `PendingFrame` values. Each owner exposes its non-cloneable synchronous consumer through
-  `consumer()`, and reconciliation returns the only drawable `ReconciledFrame` capability.
+  `consumer()`.
   OpenGL multi-viewport routes can call `reconcile_frame(...)`, run secondary platform-window
   callbacks, then transfer that capability into `render_reconciled(...)` for the main viewport.
   OpenGL users must keep the initialized context current for renderer
-  operations; SDLRenderer rejects a `WindowCanvas` backed by another raw renderer before texture
-  or draw work starts.
+  operations. SDLRenderer has one normal `render(...)` path and rejects a `WindowCanvas` backed by
+  another raw renderer before texture or draw work starts.
 - `SdlGpu3RendererBackend`:
   RAII renderer owner for SDL3 + SDLGPU3. Unsafe `prepare_render(...)` returns an
   `SdlGpu3PreparedFrame` that keeps the renderer and Context frame alive until its unsafe
@@ -188,7 +188,7 @@ APIs of interest (see `src/lib.rs` for full docs):
 - `Sdl3PlatformBackend`:
   platform-only RAII owner for applications that provide a separate renderer. It intentionally
   does not claim a renderer consumer. Construct it with unsafe `Sdl3PlatformBackend::init_for_other`,
-  `init_platform_for_opengl`, `init_for_vulkan`, `init_for_metal`, `init_for_d3d`,
+  `init_platform_for_opengl`, `init_for_vulkan`, `init_for_metal`, Windows-only `init_for_d3d`,
   `init_for_sdl_gpu`, or `init_for_sdl_renderer` as appropriate. Every constructor is unsafe
   because the upstream backend retains native window and graphics pointers beyond the call; keep
   those owners alive until explicit shutdown succeeds or the Context finishes attachment teardown.

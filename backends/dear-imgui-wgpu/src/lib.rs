@@ -23,7 +23,7 @@
 //!
 //! ```rust,no_run
 //! use dear_imgui_rs::Context;
-//! use dear_imgui_wgpu::{WgpuRenderer, WgpuInitInfo, wgpu};
+//! use dear_imgui_wgpu::{FramebufferExtent, WgpuInitInfo, WgpuRenderer, wgpu};
 //!
 //! # fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! # let (device, queue) = todo!("initialize a WGPU Device/Queue");
@@ -39,7 +39,8 @@
 //! // imgui.new_frame();
 //! // ... build your UI ...
 //! // let frame = imgui.render(renderer.renderer_consumer()?);
-//! // renderer.render(frame, &mut render_pass)?;
+//! // let extent = FramebufferExtent::from_texture(&surface_texture.texture);
+//! // renderer.render(frame, &mut render_pass, extent)?;
 //! # Ok(())
 //! # }
 //! ```
@@ -307,7 +308,7 @@ pub use data::{
     WgpuInitInfo, WgpuRenderState, WgpuRenderStateAccessError, WgpuViewportSurfaceConfig,
 };
 pub use error::{RendererError, RendererResult};
-pub use renderer::WgpuRenderer;
+pub use renderer::{FramebufferExtent, WgpuRenderer};
 pub use texture::ExternalTextureId;
 
 pub(crate) use data::{WgpuBackendData, WgpuRenderStateStorage};

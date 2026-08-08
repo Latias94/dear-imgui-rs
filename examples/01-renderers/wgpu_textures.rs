@@ -4,7 +4,7 @@
 use ::image::ImageReader;
 use dear_imgui_examples::animated_texture::animated_rgba_pixels;
 use dear_imgui_rs::*;
-use dear_imgui_wgpu::WgpuRenderer;
+use dear_imgui_wgpu::{FramebufferExtent, WgpuRenderer};
 use dear_imgui_winit::WinitPlatform;
 use pollster::block_on;
 use std::{
@@ -318,7 +318,11 @@ impl AppWindow {
                 multiview_mask: None,
             });
 
-            self.imgui.renderer.render(pending_frame, &mut rpass)?;
+            self.imgui.renderer.render(
+                pending_frame,
+                &mut rpass,
+                FramebufferExtent::new(self.surface_desc.width, self.surface_desc.height),
+            )?;
         }
 
         self.queue.submit(Some(encoder.finish()));

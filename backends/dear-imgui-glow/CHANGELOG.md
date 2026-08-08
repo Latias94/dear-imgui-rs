@@ -22,8 +22,9 @@ The format follows Keep a Changelog and Semantic Versioning.
   and WebGL rather than issuing a desktop-only GL enum. Its temporary desktop state is restored
   after rendering and re-established after a standard reset callback.
 - `GlowRenderer` GPU handles and capability fields are private. Use `gl_version()`,
-  `supports_clip_origin()`, `supports_framebuffer_srgb_control()`, `supports_sampler_objects()`,
-  and `is_destroyed()` for supported observations.
+  `supports_clip_origin()`, `supports_framebuffer_srgb_control()`, and
+  `supports_sampler_objects()` for supported observations. The ambiguous `is_destroyed()` query
+  was removed because device-object destruction is recoverable while `shutdown` is terminal.
 - `GlVersion::{bind_vertex_array_support,vertex_offset_support,clip_origin_support,
   bind_sampler_support,polygon_mode_support,primitive_restart_support}` were replaced by
   `is_supported`, `supports_vertex_offset`, `supports_clip_origin`,
@@ -31,9 +32,15 @@ The format follows Keep a Changelog and Semantic Versioning.
 - `RenderError::InvalidTexture(String)` was replaced by typed
   `RenderError::UnknownTextureId(TextureId)` and `RenderError::ManagedTextureMissing(SnapshotTextureId)`.
 - The renderer now owns a `SynchronousRendererConsumer`; `Context::render` returns a non-drawable
-  `PendingFrame`, and Glow returns a `ReconciledFrame` only after producing exactly one outcome for
-  every managed texture request. `renderer_consumer` and `render_context` provide the corresponding
-  direct integration paths.
+  `PendingFrame`, and `reconcile_frame` returns a `ReconciledFrame` only after producing exactly one
+  outcome for every managed texture request. Rendering consumes that capability instead of
+  returning it unchanged.
+- `new_frame` and single-window `render_context` were removed. Rendering now recreates destroyed
+  device objects transactionally, and owned/external-context teardown is named `shutdown` and
+  `shutdown_with_context` respectively.
+- Mutable texture-map access was replaced with ownership-aware renderer-owned and external texture
+  registration, update, and unregistration methods. Renderer-owned GL objects cannot be deleted
+  through an application-owned path or aliased as external mappings.
 
 ### Fixed
 

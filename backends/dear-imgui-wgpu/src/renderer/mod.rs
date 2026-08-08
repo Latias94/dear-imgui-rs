@@ -34,6 +34,7 @@ mod sdl3_raw_window_handle;
 use crate::{RendererError, RendererResult, Uniforms, WgpuBackendData, WgpuTextureManager};
 pub use core::WgpuRenderer;
 use dear_imgui_rs::render::{RendererRenderStateGuard, RendererRenderStateGuardError};
+pub use draw::FramebufferExtent;
 
 pub(super) fn map_renderer_render_state_error(
     error: RendererRenderStateGuardError,

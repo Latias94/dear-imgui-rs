@@ -3,13 +3,13 @@
 //! This test verifies that our improvements maintain compatibility with the C++ implementation
 
 use dear_imgui_rs::{
-    BackendFlags, Condition, Context, ManagedTextureId, TextureId,
+    BackendFlags, Condition, Context, FramePrepareOptions, ManagedTextureId, TextureId,
     texture::{OwnedTextureData, TextureFormat as ImGuiTextureFormat},
 };
 use dear_imgui_wgpu::wgpu::*;
 use dear_imgui_wgpu::{
-    ExternalTextureId, RendererError, RendererResult, WgpuInitInfo, WgpuRenderState,
-    WgpuRenderStateAccessError, WgpuRenderer,
+    ExternalTextureId, FramebufferExtent, RendererError, RendererResult, WgpuInitInfo,
+    WgpuRenderState, WgpuRenderStateAccessError, WgpuRenderer,
 };
 use static_assertions::assert_not_impl_any;
 use std::sync::{
@@ -120,7 +120,7 @@ fn render_callback_contract_frame(
     context: &mut Context,
     device: &Device,
     queue: &Queue,
-    explicit_extent: bool,
+    split_reconciliation: bool,
     include_geometry: bool,
 ) -> RendererResult<()> {
     CALLBACK_STEP.store(0, Ordering::SeqCst);
@@ -198,29 +198,28 @@ fn render_callback_contract_frame(
             multiview_mask: None,
             timestamp_writes: None,
         });
-        let frame = context.render(renderer.renderer_consumer()?);
-        let frame = renderer.reconcile_frame(frame)?;
-        if !include_geometry {
-            assert_eq!(frame.draw_data().total_vtx_count(), 0);
-            assert_eq!(frame.draw_data().total_idx_count(), 0);
-            assert_eq!(
-                frame
-                    .draw_data()
-                    .draw_lists()
-                    .flat_map(|list| list.commands())
-                    .filter(|command| {
-                        matches!(command, dear_imgui_rs::render::DrawCmd::RawCallback(_))
-                    })
-                    .count(),
-                2
-            );
-        }
-        let frame = if explicit_extent {
-            renderer.render_with_fb_size_reconciled(frame, &mut render_pass, 64, 64)?
+        let pending = context.try_render(renderer.renderer_consumer()?)?;
+        if split_reconciliation {
+            let frame = renderer.reconcile_frame(pending)?;
+            if !include_geometry {
+                assert_eq!(frame.draw_data().total_vtx_count(), 0);
+                assert_eq!(frame.draw_data().total_idx_count(), 0);
+                assert_eq!(
+                    frame
+                        .draw_data()
+                        .draw_lists()
+                        .flat_map(|list| list.commands())
+                        .filter(|command| {
+                            matches!(command, dear_imgui_rs::render::DrawCmd::RawCallback(_))
+                        })
+                        .count(),
+                    2
+                );
+            }
+            renderer.render_reconciled(frame, &mut render_pass, FramebufferExtent::new(64, 64))?;
         } else {
-            renderer.render_reconciled(frame, &mut render_pass)?
-        };
-        drop(frame);
+            renderer.render(pending, &mut render_pass, FramebufferExtent::new(64, 64))?;
+        }
     }
     queue.submit([encoder.finish()]);
 
@@ -236,8 +235,7 @@ fn render_callback_contract_frame(
 }
 
 #[test]
-fn direct_and_explicit_render_paths_execute_raw_callbacks_with_scoped_state() -> RendererResult<()>
-{
+fn direct_and_split_render_paths_execute_raw_callbacks_with_scoped_state() -> RendererResult<()> {
     let _guard = callback_test_guard();
     let Some((device, queue)) = request_test_device() else {
         assert!(
@@ -310,10 +308,80 @@ fn render_opens_its_resource_arena_from_the_pending_frame_epoch() -> RendererRes
         timestamp_writes: None,
     });
     let frame = context.render(renderer.renderer_consumer()?);
-    renderer.render(frame, &mut render_pass)?;
+    renderer.render(frame, &mut render_pass, FramebufferExtent::new(64, 64))?;
     drop(render_pass);
     queue.submit([encoder.finish()]);
 
+    renderer.shutdown(&mut context)
+}
+
+#[test]
+fn zero_sized_framebuffer_still_reconciles_the_pending_frame() -> RendererResult<()> {
+    let Some((device, queue)) = request_test_device() else {
+        return Ok(());
+    };
+    let mut context = Context::create();
+    let mut renderer = WgpuRenderer::new(
+        WgpuInitInfo::new(device.clone(), queue.clone(), TextureFormat::Rgba8Unorm),
+        &mut context,
+    )?;
+    let managed_data =
+        OwnedTextureData::from_pixels(ImGuiTextureFormat::RGBA32, 1, 1, &[255; 4]).unwrap();
+    let managed = context.register_texture(managed_data);
+
+    let target = device.create_texture(&TextureDescriptor {
+        label: Some("dear-imgui-wgpu zero-sized framebuffer target"),
+        size: Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let view = target.create_view(&TextureViewDescriptor::default());
+    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
+        label: Some("dear-imgui-wgpu zero-sized framebuffer encoder"),
+    });
+
+    for extent in [FramebufferExtent::new(0, 1), FramebufferExtent::new(1, 0)] {
+        context.io_mut().set_display_size([1.0, 1.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context.frame().text("zero-sized framebuffer");
+        let color_attachments = [Some(RenderPassColorAttachment {
+            view: &view,
+            resolve_target: None,
+            ops: Operations {
+                load: LoadOp::Clear(Color::BLACK),
+                store: StoreOp::Store,
+            },
+            depth_slice: None,
+        })];
+        let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
+            label: Some("dear-imgui-wgpu zero-sized framebuffer pass"),
+            color_attachments: &color_attachments,
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
+            multiview_mask: None,
+            timestamp_writes: None,
+        });
+        let frame = context.try_render(renderer.renderer_consumer()?)?;
+        renderer.render(frame, &mut render_pass, extent)?;
+    }
+    queue.submit([encoder.finish()]);
+
+    let texture_id = context
+        .with_texture(managed, |texture| texture.texture_id())
+        .expect("managed texture should remain active after zero-sized rendering");
+    assert!(
+        !texture_id.is_null(),
+        "zero-sized targets must still reconcile managed texture requests"
+    );
     renderer.shutdown(&mut context)
 }
 
@@ -376,15 +444,16 @@ fn render_test_frame(
             multiview_mask: None,
             timestamp_writes: None,
         });
-        renderer.render_context(context, &mut render_pass)?;
+        let frame = context.try_render(renderer.renderer_consumer()?)?;
+        renderer.render(frame, &mut render_pass, FramebufferExtent::new(64, 64))?;
     }
     queue.submit([encoder.finish()]);
     Ok(())
 }
 
-fn render_context_without_open_frame(
+fn render_pending_frame(
     renderer: &mut WgpuRenderer,
-    context: &mut Context,
+    frame: dear_imgui_rs::render::PendingFrame<'_>,
     device: &Device,
 ) -> RendererResult<()> {
     let target = device.create_texture(&TextureDescriptor {
@@ -423,7 +492,7 @@ fn render_context_without_open_frame(
         multiview_mask: None,
         timestamp_writes: None,
     });
-    renderer.render_context(context, &mut render_pass)
+    renderer.render(frame, &mut render_pass, FramebufferExtent::new(1, 1))
 }
 
 #[test]
@@ -476,6 +545,9 @@ fn device_objects_rebind_after_invalidation_and_shutdown() -> RendererResult<()>
     let suspended_owner = context.suspend_or_panic();
     let mut foreign_context = Context::create();
     let foreign_flags = foreign_context.io().backend_flags();
+    let foreign_consumer = foreign_context.create_synchronous_renderer_consumer()?;
+    foreign_context
+        .prepare_frame(FramePrepareOptions::new([1.0, 1.0], 1.0 / 60.0).renderer_has_textures());
     assert!(matches!(
         renderer.invalidate_device_objects(&mut foreign_context),
         Err(RendererError::ContextMismatch)
@@ -484,10 +556,17 @@ fn device_objects_rebind_after_invalidation_and_shutdown() -> RendererResult<()>
         renderer.shutdown(&mut foreign_context),
         Err(RendererError::ContextMismatch)
     ));
+    foreign_context.frame().text("foreign renderer frame");
+    let foreign_frame = foreign_context.render(&foreign_consumer);
     assert!(matches!(
-        render_context_without_open_frame(&mut renderer, &mut foreign_context, &device),
+        render_pending_frame(&mut renderer, foreign_frame, &device),
         Err(RendererError::ContextMismatch)
     ));
+    foreign_context
+        .prepare_renderer_texture_reset(&foreign_consumer)?
+        .commit();
+    drop(foreign_consumer);
+    foreign_context.io_mut().set_backend_flags(foreign_flags);
     #[cfg(feature = "multi-viewport-winit")]
     {
         let failure = unsafe {

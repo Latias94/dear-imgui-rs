@@ -1,5 +1,5 @@
 use dear_imgui_rs::*;
-use dear_imgui_wgpu::WgpuRenderer;
+use dear_imgui_wgpu::{FramebufferExtent, WgpuRenderer};
 use dear_imgui_winit::WinitPlatform;
 use pollster::block_on;
 use std::{path::PathBuf, sync::Arc, time::Instant};
@@ -350,9 +350,15 @@ impl AppWindow {
                 multiview_mask: None,
             });
 
-            self.imgui
-                .renderer
-                .render_context(&mut self.imgui.context, &mut rpass)?;
+            let pending_frame = self
+                .imgui
+                .context
+                .try_render(self.imgui.renderer.renderer_consumer()?)?;
+            self.imgui.renderer.render(
+                pending_frame,
+                &mut rpass,
+                FramebufferExtent::new(self.surface_desc.width, self.surface_desc.height),
+            )?;
         }
 
         self.queue.submit(Some(encoder.finish()));

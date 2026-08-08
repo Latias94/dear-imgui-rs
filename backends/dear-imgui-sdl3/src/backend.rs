@@ -100,11 +100,7 @@ fn ensure_matching_pending_frame(
     Ok(())
 }
 
-#[cfg(any(
-    feature = "opengl3-renderer",
-    feature = "sdlrenderer3-renderer",
-    feature = "sdlgpu3-renderer"
-))]
+#[cfg(any(feature = "opengl3-renderer", feature = "sdlgpu3-renderer"))]
 fn ensure_matching_reconciled_frame(
     context: &ContextBinding,
     frame: &ReconciledFrame<'_>,
@@ -237,6 +233,7 @@ mod renderer_contract_tests {
         ));
     }
 
+    #[cfg(any(feature = "opengl3-renderer", feature = "sdlgpu3-renderer"))]
     #[test]
     fn reconciled_frame_from_foreign_context_is_rejected_before_renderer_work() {
         let _guard = crate::tests::test_guard();
@@ -314,7 +311,7 @@ mod input_control_surface_tests {
     #[cfg(feature = "sdlrenderer3-renderer")]
     #[test]
     fn sdl_renderer_owner_exposes_the_complete_input_control_surface() {
-        assert_input_controls!(Sdl3RendererBackend);
+        assert_input_controls!(SdlRenderer3Backend);
     }
 }
 
@@ -476,6 +473,7 @@ impl Sdl3PlatformBackend {
     ///
     /// `window` must remain alive at the same native allocation until explicit shutdown succeeds
     /// or `imgui` finishes attachment teardown.
+    #[cfg(target_os = "windows")]
     pub unsafe fn init_for_d3d(
         imgui: &mut Context,
         window: &Window,
@@ -839,7 +837,7 @@ impl Sdl3OpenGl3Backend {
     /// The reset is committed only after every renderer-owned texture has been released.
     pub fn destroy_device_objects(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
         self.runtime
-            .destroy_renderer_device_objects(imgui, destroy_opengl3_device_objects)
+            .reset_renderer_device_objects(imgui, destroy_opengl3_device_objects)
     }
 
     /// Shut down the official OpenGL3 renderer and SDL3 platform backend.
@@ -905,33 +903,6 @@ impl SdlGpu3RendererBackend {
             NativeRendererKind::SdlGpu3,
         )?;
         if let Err(error) = init_for_sdlgpu3(imgui, window, info) {
-            runtime.native_initialization_failed();
-            return Err(error);
-        }
-        runtime.finish_native_initialization(imgui)?;
-        Ok(Self::from_initialized_context(runtime))
-    }
-
-    /// Initialize the SDL3 platform backend and the official SDLGPU3 renderer.
-    ///
-    /// # Safety
-    ///
-    /// `window` and `gpu` must remain valid until explicit shutdown succeeds or `imgui` finishes
-    /// attachment teardown. Dropping this owner alone does not end their lifetime requirement.
-    pub unsafe fn init_default(
-        imgui: &mut Context,
-        window: &Window,
-        gpu: &Device,
-    ) -> Result<Self, Sdl3BackendError> {
-        let mut runtime = prepare_renderer_runtime(
-            imgui,
-            shutdown_sdlgpu3_renderer_impl,
-            destroy_sdlgpu3_device_objects,
-            update_sdlgpu3_texture,
-            PlatformGraphicsKind::Other,
-            NativeRendererKind::SdlGpu3,
-        )?;
-        if let Err(error) = init_for_sdlgpu3_default(imgui, window, gpu) {
             runtime.native_initialization_failed();
             return Err(error);
         }
@@ -1042,9 +1013,8 @@ impl SdlGpu3RendererBackend {
     /// This first destroys the previous device objects and therefore requires the same idle
     /// renderer consumer as [`Self::destroy_device_objects`].
     pub fn create_device_objects(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
-        self.destroy_device_objects(imgui)?;
-        run_backend_entry(&self.runtime, imgui, create_sdlgpu3_device_objects)?;
-        Ok(())
+        self.runtime
+            .reset_renderer_device_objects(imgui, create_sdlgpu3_device_objects)
     }
 
     /// Destroy SDL GPU3 renderer device objects.
@@ -1053,7 +1023,7 @@ impl SdlGpu3RendererBackend {
     /// The reset is committed only after every renderer-owned texture has been released.
     pub fn destroy_device_objects(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
         self.runtime
-            .destroy_renderer_device_objects(imgui, destroy_sdlgpu3_device_objects)
+            .reset_renderer_device_objects(imgui, destroy_sdlgpu3_device_objects)
     }
 
     /// Shut down the official SDLGPU3 renderer and SDL3 platform backend.
@@ -1106,16 +1076,16 @@ impl SdlGpu3PreparedFrame<'_, '_, '_> {
 #[cfg(feature = "sdlrenderer3-renderer")]
 #[must_use = "call shutdown for reported cleanup errors, or retain the owner until Context teardown"]
 #[derive(Debug)]
-pub struct Sdl3RendererBackend {
+pub struct SdlRenderer3Backend {
     runtime: RuntimeRegistration,
     renderer: *mut sdl3_sys::render::SDL_Renderer,
 }
 
 #[cfg(feature = "sdlrenderer3-renderer")]
-impl_sdl3_input_controls!(Sdl3RendererBackend);
+impl_sdl3_input_controls!(SdlRenderer3Backend);
 
 #[cfg(feature = "sdlrenderer3-renderer")]
-impl Sdl3RendererBackend {
+impl SdlRenderer3Backend {
     fn from_initialized_context(
         runtime: RuntimeRegistration,
         renderer: *mut sdl3_sys::render::SDL_Renderer,
@@ -1139,12 +1109,11 @@ impl Sdl3RendererBackend {
     ///
     /// # Safety
     ///
-    /// `window`, `canvas`, and their associated native `SDL_Renderer` must remain valid until
+    /// `canvas`, its window, and their associated native `SDL_Renderer` must remain valid until
     /// explicit shutdown succeeds or `imgui` finishes attachment teardown. Dropping this owner
     /// alone does not end their lifetime requirement.
     pub unsafe fn init(
         imgui: &mut Context,
-        window: &Window,
         canvas: &WindowCanvas,
     ) -> Result<Self, Sdl3BackendError> {
         let mut runtime = prepare_renderer_runtime(
@@ -1155,7 +1124,7 @@ impl Sdl3RendererBackend {
             PlatformGraphicsKind::Other,
             NativeRendererKind::SdlRenderer3,
         )?;
-        if let Err(error) = init_for_canvas(imgui, window, canvas) {
+        if let Err(error) = init_for_canvas(imgui, canvas) {
             runtime.native_initialization_failed();
             return Err(error);
         }
@@ -1206,30 +1175,17 @@ impl Sdl3RendererBackend {
         canvas: &WindowCanvas,
     ) -> Result<(), Sdl3BackendError> {
         ensure_matching_sdl_renderer(self.renderer, canvas.raw())?;
-        let frame = self.reconcile_frame(frame)?;
+        let frame = reconcile_renderer_frame(&self.runtime, frame)?;
         let entry = self.runtime.control().enter_bound()?;
         self.runtime
             .control()
             .binding()
             .try_with_bound_context(|| {
-                assert_current_draw_data(frame.draw_data(), "Sdl3RendererBackend::render()");
+                assert_current_draw_data(frame.draw_data(), "SdlRenderer3Backend::render()");
                 render_sdlrenderer3_impl(frame.draw_data(), canvas);
             })?;
         entry.finish()?;
         Ok(())
-    }
-
-    /// Consume pending managed-texture requests without drawing or acquiring a surface.
-    pub fn reconcile_frame<'ctx>(
-        &mut self,
-        frame: PendingFrame<'ctx>,
-    ) -> Result<ReconciledFrame<'ctx>, Sdl3BackendError> {
-        reconcile_renderer_frame(&self.runtime, frame)
-    }
-
-    /// Create SDLRenderer3 renderer device objects.
-    pub fn create_device_objects(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
-        run_backend_entry(&self.runtime, imgui, create_sdlrenderer3_device_objects)
     }
 
     /// Destroy SDLRenderer3 renderer device objects.
@@ -1238,7 +1194,7 @@ impl Sdl3RendererBackend {
     /// The reset is committed only after every renderer-owned texture has been released.
     pub fn destroy_device_objects(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
         self.runtime
-            .destroy_renderer_device_objects(imgui, destroy_sdlrenderer3_device_objects)
+            .reset_renderer_device_objects(imgui, destroy_sdlrenderer3_device_objects)
     }
 
     /// Shut down the official SDLRenderer3 renderer and SDL3 platform backend.
@@ -1340,11 +1296,6 @@ fn destroy_opengl3_device_objects() {
     unsafe {
         opengl3_backend::dear_imgui_backend_opengl3_destroy_device_objects();
     }
-}
-
-#[cfg(feature = "sdlrenderer3-renderer")]
-fn create_sdlrenderer3_device_objects() {
-    unsafe { ffi::dear_imgui_sdl3_backend_sdlrenderer3_create_device_objects() }
 }
 
 #[cfg(feature = "sdlrenderer3-renderer")]

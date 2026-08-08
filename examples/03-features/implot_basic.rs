@@ -19,7 +19,7 @@
 //! and demonstrates the builder pattern API for ergonomic plot creation.
 
 use dear_imgui_rs::*;
-use dear_imgui_wgpu::WgpuRenderer;
+use dear_imgui_wgpu::{FramebufferExtent, WgpuRenderer};
 use dear_imgui_winit::WinitPlatform;
 use dear_implot::*;
 use pollster::block_on;
@@ -677,9 +677,11 @@ impl AppWindow {
                 .imgui
                 .context
                 .render(self.imgui.renderer.renderer_consumer()?);
-            self.imgui
-                .renderer
-                .render(pending_frame, &mut render_pass)?;
+            self.imgui.renderer.render(
+                pending_frame,
+                &mut render_pass,
+                FramebufferExtent::new(self.surface_desc.width, self.surface_desc.height),
+            )?;
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
