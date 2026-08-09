@@ -43,6 +43,9 @@ ash-winit-multi-viewport = [
 # Switch the Ash example and renderer to Vulkan dynamic rendering.
 ash-dynamic-rendering = ["dear-imgui-ash/dynamic-rendering"]
 
+# Compile the private Ash Vulkan validation policy and evidence adapter.
+ash-validation-smoke = []
+
 # Enable the SDL3 platform and Glow renderer multi-viewport route without
 # activating the unrelated Winit/WGPU/Ash multi-viewport routes.
 sdl3-glow-multi-viewport = [
@@ -197,7 +200,11 @@ required-features = ["ash-winit-multi-viewport"]
 [[bin]]
 name = "ash_vulkan_validation_smoke"
 path = "ci/ash_vulkan_validation_smoke.rs"
-required-features = ["ash-winit-multi-viewport", "ash-dynamic-rendering"]
+required-features = [
+    "ash-winit-multi-viewport",
+    "ash-dynamic-rendering",
+    "ash-validation-smoke",
+]
 
 [[bin]]
 name = "sdl3_opengl_multi_viewport"

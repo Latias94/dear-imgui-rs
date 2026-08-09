@@ -383,7 +383,7 @@ _ASH_VULKAN_VIEWPORT_SMOKE = ViewportSmokeSpec(
     profile=ViewportSmokeProfile.ASH_VULKAN,
     gate="ash-vulkan-validation-smoke",
     binary="ash_vulkan_validation_smoke",
-    features="ash-winit-multi-viewport,ash-dynamic-rendering",
+    features="ash-winit-multi-viewport,ash-dynamic-rendering,ash-validation-smoke",
     package_names=(
         "xvfb",
         "openbox",

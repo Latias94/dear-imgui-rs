@@ -4,17 +4,15 @@
 //! evidence. Native Winit, Vulkan, swapchain, renderer, and teardown order remain in the shared
 //! Ash lifecycle used by the interactive example.
 
-// The shared lifecycle also exposes interactive fields consumed only by the teaching example.
-#[allow(dead_code)]
 #[path = "../support/ash_multi_viewport.rs"]
 mod ash_multi_viewport;
 
 use ash::vk::{self, Handle as _};
-use ash_multi_viewport::{
+use ash_multi_viewport::validation::{
     AshCompletionRequest, AshFrameOutcome, AshFrameUi, AshSecondarySubmissions,
-    AshViewportScenario, ExampleResult, TeardownEvidence, ValidationConfig, ValidationState,
-    VulkanAdapterInfo,
+    AshValidationScenario, TeardownEvidence, ValidationConfig, ValidationState, run_validation,
 };
+use ash_multi_viewport::{ExampleResult, VulkanAdapterInfo};
 use dear_imgui_ash::AshRenderState;
 use dear_imgui_rs::{
     Condition, Context, Id, ManagedTextureId, OwnedTextureData, TextureDataError, TextureFormat,
@@ -558,7 +556,7 @@ impl ValidationSmoke {
     }
 }
 
-impl AshViewportScenario for ValidationSmoke {
+impl AshValidationScenario for ValidationSmoke {
     type Evidence = CompletedValidationSmoke;
 
     fn validation_config(&self) -> ValidationConfig {
@@ -738,5 +736,5 @@ fn write_json_atomic(path: &Path, contents: &str) -> ExampleResult {
 }
 
 fn main() -> ExampleResult {
-    ash_multi_viewport::run(ValidationSmoke::from_environment())
+    run_validation(ValidationSmoke::from_environment())
 }

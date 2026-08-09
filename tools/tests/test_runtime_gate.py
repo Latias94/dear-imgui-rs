@@ -439,6 +439,10 @@ class RuntimeGateTests(unittest.TestCase):
             VIEWPORT._ASH_VULKAN_VIEWPORT_SMOKE.binary,
             "ash_vulkan_validation_smoke",
         )
+        self.assertEqual(
+            VIEWPORT._ASH_VULKAN_VIEWPORT_SMOKE.features,
+            "ash-winit-multi-viewport,ash-dynamic-rendering,ash-validation-smoke",
+        )
 
     def test_viewport_success_requires_lavapipe_and_full_lifecycle(self):
         valid = {

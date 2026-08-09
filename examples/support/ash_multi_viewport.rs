@@ -1,14 +1,16 @@
-//! Shared Ash/Winit multi-viewport lifecycle used by the interactive example and the
-//! private Vulkan validation contract.
+//! Shared Ash/Winit multi-viewport lifecycle for the interactive example.
 //!
 //! The module owns the native order: Winit event forwarding, ImGui frame preparation,
 //! secondary viewport submission, main-surface acquire/submit/present, and GPU-aware
-//! renderer completion. UI composition and validation policy are supplied by the executable
-//! through [`AshViewportScenario`].
+//! renderer completion. UI composition is supplied through [`AshViewportScenario`].
+//!
+//! The private Vulkan validation executable enables a separate feature-gated adapter while
+//! reusing this exact native lifecycle.
 
+#[cfg(feature = "ash-validation-smoke")]
+use ash::ext::debug_utils as ext_debug_utils;
 use ash::{
     Device, Entry, Instance,
-    ext::debug_utils as ext_debug_utils,
     khr::{surface as khr_surface, swapchain as khr_swapchain},
     vk,
 };
@@ -17,16 +19,13 @@ use dear_imgui_ash::DynamicRendering;
 use dear_imgui_ash::{
     AshRenderer, AshRendererConfig, Options as AshOptions, multi_viewport as ash_mvp,
 };
-use dear_imgui_rs::{ConfigFlags, Context, FrameToken, Id, Ui, sys};
+use dear_imgui_rs::{ConfigFlags, Context, FrameToken, Ui};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::{
-    ffi::{CStr, CString, c_void},
+    ffi::{CStr, CString},
     mem::ManuallyDrop,
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicU32, Ordering},
-    },
+    sync::Arc,
     time::Instant,
 };
 use tracing::{error, info};
@@ -46,86 +45,11 @@ use ash_frame_sync::{
     destroy_frame_syncs, destroy_present_semaphores, replace_frame_sync,
 };
 
+#[cfg(feature = "ash-validation-smoke")]
+#[path = "ash_multi_viewport_validation.rs"]
+pub mod validation;
+
 const FRAMES_IN_FLIGHT: usize = 2;
-const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
-
-/// Vulkan instance policy supplied before the native lifecycle starts.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct ValidationConfig {
-    pub validation_enabled: bool,
-    pub require_software_vulkan: bool,
-}
-
-#[derive(Debug, Default)]
-pub struct ValidationState {
-    warnings: AtomicU32,
-    errors: AtomicU32,
-    messages: Mutex<Vec<String>>,
-}
-
-impl ValidationState {
-    fn record(&self, severity: vk::DebugUtilsMessageSeverityFlagsEXT, message: String) {
-        if severity.contains(vk::DebugUtilsMessageSeverityFlagsEXT::ERROR) {
-            self.errors.fetch_add(1, Ordering::Relaxed);
-        } else if severity.contains(vk::DebugUtilsMessageSeverityFlagsEXT::WARNING) {
-            self.warnings.fetch_add(1, Ordering::Relaxed);
-        }
-        if let Ok(mut messages) = self.messages.lock()
-            && messages.len() < 32
-        {
-            messages.push(message);
-        }
-    }
-
-    pub fn warning_count(&self) -> u32 {
-        self.warnings.load(Ordering::Acquire)
-    }
-
-    pub fn error_count(&self) -> u32 {
-        self.errors.load(Ordering::Acquire)
-    }
-
-    pub fn diagnostics(&self) -> String {
-        self.messages
-            .lock()
-            .map(|messages| messages.join(" | "))
-            .unwrap_or_else(|_| "validation diagnostics lock was poisoned".to_owned())
-    }
-}
-
-unsafe extern "system" fn validation_callback(
-    severity: vk::DebugUtilsMessageSeverityFlagsEXT,
-    _message_types: vk::DebugUtilsMessageTypeFlagsEXT,
-    callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT<'_>,
-    user_data: *mut c_void,
-) -> vk::Bool32 {
-    if callback_data.is_null() || user_data.is_null() {
-        return vk::FALSE;
-    }
-    let state = unsafe { &*user_data.cast::<ValidationState>() };
-    let message = unsafe { CStr::from_ptr((*callback_data).p_message) }
-        .to_string_lossy()
-        .into_owned();
-    state.record(severity, message);
-    vk::FALSE
-}
-
-fn validation_messenger_info(
-    state: &Arc<ValidationState>,
-) -> vk::DebugUtilsMessengerCreateInfoEXT<'static> {
-    vk::DebugUtilsMessengerCreateInfoEXT::default()
-        .message_severity(
-            vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
-                | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
-        )
-        .message_type(
-            vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
-                | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
-        )
-        .pfn_user_callback(Some(validation_callback))
-        .user_data(Arc::as_ptr(state).cast_mut().cast())
-}
 
 #[derive(Clone, Debug)]
 pub struct VulkanAdapterInfo {
@@ -139,9 +63,10 @@ pub struct VulkanAdapterInfo {
 
 pub type ExampleResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
-pub type DrawCallback = unsafe extern "C" fn(*const sys::ImDrawList, *const sys::ImDrawCmd);
-
 /// Renderer and platform values exposed while a scenario composes one ImGui frame.
+// The package-level validation feature also compiles this interactive facade into the private
+// validation binary, where it is intentionally not constructed.
+#[cfg_attr(feature = "ash-validation-smoke", allow(dead_code))]
 pub struct AshFrameUi<'a> {
     pub ui: &'a Ui,
     pub viewport_count: usize,
@@ -149,48 +74,12 @@ pub struct AshFrameUi<'a> {
     pub framebuffer_srgb: bool,
     pub clear_color: &'a mut [f32; 4],
     pub demo_open: &'a mut bool,
-    pub sampler_linear_callback: DrawCallback,
-    pub sampler_nearest_callback: DrawCallback,
-    pub reset_render_state_callback: DrawCallback,
 }
 
-/// Same-scope secondary viewport submission evidence produced by the Ash route.
-pub struct AshSecondarySubmissions<'a> {
-    pub rendered: &'a [Id],
-    pub presented: &'a [Id],
-}
-
-/// Renderer completion behavior requested by a scenario.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct AshCompletionRequest {
-    pub reject_null_fence: bool,
-    pub complete_with_submitted_fence: bool,
-}
-
-/// Observable result after the prepared renderer transaction is completed.
-#[derive(Clone, Copy, Debug)]
-pub struct AshFrameOutcome {
-    pub main_presented: bool,
-    pub callback_only_zero_geometry: Option<bool>,
-    pub render_state_cleared: Option<bool>,
-    pub null_fence_rejected: bool,
-    pub fence_completion_count: usize,
-    pub texture_retirement_queue_drained: bool,
-}
-
-/// UI and evidence policy layered over the shared native Ash lifecycle.
+/// Interactive UI policy layered over the shared native Ash lifecycle.
+#[cfg_attr(feature = "ash-validation-smoke", allow(dead_code))]
 pub trait AshViewportScenario: 'static {
-    type Evidence;
-
-    fn validation_config(&self) -> ValidationConfig {
-        ValidationConfig::default()
-    }
-
     fn requires_dynamic_rendering(&self) -> bool {
-        false
-    }
-
-    fn requires_validation(&self) -> bool {
         false
     }
 
@@ -198,7 +87,6 @@ pub trait AshViewportScenario: 'static {
         &mut self,
         _context: &mut Context,
         _adapter: &VulkanAdapterInfo,
-        _validation: Arc<ValidationState>,
     ) -> ExampleResult {
         Ok(())
     }
@@ -211,36 +99,188 @@ pub trait AshViewportScenario: 'static {
         Ok(())
     }
 
-    /// Compose scenario UI and return whether this frame intentionally contains callbacks only.
-    fn draw_ui(&mut self, frame: AshFrameUi<'_>) -> ExampleResult<bool>;
+    fn draw_ui(&mut self, frame: AshFrameUi<'_>) -> ExampleResult;
 
-    fn observe_secondary_submissions(&mut self, _report: AshSecondarySubmissions<'_>) {}
+    fn is_complete(&self) -> bool {
+        false
+    }
+}
 
-    fn completion_request(&self) -> AshCompletionRequest {
-        AshCompletionRequest::default()
+#[derive(Clone, Copy, Debug, Default)]
+struct RuntimeInstancePolicy {
+    #[cfg(feature = "ash-validation-smoke")]
+    validation_enabled: bool,
+    #[cfg(feature = "ash-validation-smoke")]
+    require_software_vulkan: bool,
+}
+
+#[derive(Default)]
+struct RuntimeValidation {
+    #[cfg(feature = "ash-validation-smoke")]
+    state: Arc<validation::ValidationState>,
+}
+
+#[derive(Default)]
+struct RuntimeCallbacks {
+    #[cfg(feature = "ash-validation-smoke")]
+    validation: Option<validation::RuntimeDrawCallbacks>,
+}
+
+#[cfg(feature = "ash-validation-smoke")]
+impl RuntimeCallbacks {
+    fn load(_context: &Context, required: bool) -> ExampleResult<Self> {
+        if !required {
+            return Ok(Self::default());
+        }
+
+        Ok(Self {
+            validation: Some(validation::load_renderer_callbacks(_context)?),
+        })
+    }
+}
+
+#[cfg_attr(feature = "ash-validation-smoke", allow(dead_code))]
+struct RuntimeFrameUi<'a> {
+    ui: &'a Ui,
+    viewport_count: usize,
+    surface_format: vk::Format,
+    framebuffer_srgb: bool,
+    clear_color: &'a mut [f32; 4],
+    demo_open: &'a mut bool,
+    _callbacks: &'a RuntimeCallbacks,
+}
+
+#[cfg_attr(feature = "ash-validation-smoke", allow(dead_code))]
+impl<'a> RuntimeFrameUi<'a> {
+    fn into_interactive(self) -> AshFrameUi<'a> {
+        AshFrameUi {
+            ui: self.ui,
+            viewport_count: self.viewport_count,
+            surface_format: self.surface_format,
+            framebuffer_srgb: self.framebuffer_srgb,
+            clear_color: self.clear_color,
+            demo_open: self.demo_open,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct RuntimeFrameDirective {
+    #[cfg(feature = "ash-validation-smoke")]
+    callback_only: bool,
+}
+
+trait RuntimeScenario: 'static {
+    #[cfg(feature = "ash-validation-smoke")]
+    type Evidence;
+
+    #[cfg(feature = "ash-validation-smoke")]
+    fn instance_policy(&self) -> RuntimeInstancePolicy {
+        RuntimeInstancePolicy::default()
     }
 
-    fn observe_frame_outcome(&mut self, _outcome: AshFrameOutcome) {}
+    fn requires_dynamic_rendering(&self) -> bool {
+        false
+    }
+
+    #[cfg(feature = "ash-validation-smoke")]
+    fn requires_validation(&self) -> bool {
+        false
+    }
+
+    #[cfg(feature = "ash-validation-smoke")]
+    fn requires_renderer_callbacks(&self) -> bool {
+        false
+    }
+
+    fn initialize(
+        &mut self,
+        _context: &mut Context,
+        _adapter: &VulkanAdapterInfo,
+        _validation: &RuntimeValidation,
+    ) -> ExampleResult {
+        Ok(())
+    }
+
+    fn prepare_frame(&mut self, _context: &mut Context) -> ExampleResult {
+        Ok(())
+    }
+
+    fn begin_frame(&mut self) -> ExampleResult {
+        Ok(())
+    }
+
+    fn draw_ui(&mut self, frame: RuntimeFrameUi<'_>) -> ExampleResult<RuntimeFrameDirective>;
+
+    #[cfg(feature = "ash-validation-smoke")]
+    fn observe_secondary_submissions(
+        &mut self,
+        _report: validation::RuntimeSecondarySubmissions<'_>,
+    ) {
+    }
+
+    #[cfg(feature = "ash-validation-smoke")]
+    fn completion_request(&self) -> validation::RuntimeCompletionRequest {
+        validation::RuntimeCompletionRequest::default()
+    }
+
+    #[cfg(feature = "ash-validation-smoke")]
+    fn observe_frame_outcome(&mut self, _outcome: validation::RuntimeFrameOutcome) {}
 
     fn is_complete(&self) -> bool {
         false
     }
 
+    #[cfg(feature = "ash-validation-smoke")]
     fn completed_evidence(&self) -> Option<Self::Evidence> {
         None
     }
 
-    fn finalize(_evidence: Self::Evidence, _teardown: TeardownEvidence) -> ExampleResult {
+    #[cfg(feature = "ash-validation-smoke")]
+    fn finalize(
+        _evidence: Self::Evidence,
+        _teardown: validation::RuntimeTeardownEvidence,
+    ) -> ExampleResult {
         Ok(())
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct TeardownEvidence {
-    pub renderer_shutdown_complete: bool,
-    pub viewport_runtime_shutdown_complete: bool,
-    pub platform_shutdown_complete: bool,
-    pub gpu_idle_before_teardown: bool,
+#[cfg_attr(feature = "ash-validation-smoke", allow(dead_code))]
+struct InteractiveScenarioAdapter<S>(S);
+
+impl<S: AshViewportScenario> RuntimeScenario for InteractiveScenarioAdapter<S> {
+    #[cfg(feature = "ash-validation-smoke")]
+    type Evidence = ();
+
+    fn requires_dynamic_rendering(&self) -> bool {
+        self.0.requires_dynamic_rendering()
+    }
+
+    fn initialize(
+        &mut self,
+        context: &mut Context,
+        adapter: &VulkanAdapterInfo,
+        _validation: &RuntimeValidation,
+    ) -> ExampleResult {
+        self.0.initialize(context, adapter)
+    }
+
+    fn prepare_frame(&mut self, context: &mut Context) -> ExampleResult {
+        self.0.prepare_frame(context)
+    }
+
+    fn begin_frame(&mut self) -> ExampleResult {
+        self.0.begin_frame()
+    }
+
+    fn draw_ui(&mut self, frame: RuntimeFrameUi<'_>) -> ExampleResult<RuntimeFrameDirective> {
+        self.0.draw_ui(frame.into_interactive())?;
+        Ok(RuntimeFrameDirective::default())
+    }
+
+    fn is_complete(&self) -> bool {
+        self.0.is_complete()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -297,37 +337,42 @@ mod teardown_state_tests {
 struct VulkanContextInit {
     entry: Option<Entry>,
     instance: Option<Instance>,
+    #[cfg(feature = "ash-validation-smoke")]
     debug_loader: Option<ext_debug_utils::Instance>,
+    #[cfg(feature = "ash-validation-smoke")]
     debug_messenger: Option<vk::DebugUtilsMessengerEXT>,
     surface_loader: Option<khr_surface::Instance>,
     surface: Option<vk::SurfaceKHR>,
     device: Option<Device>,
     command_pool: Option<vk::CommandPool>,
+    window_keepalive: Option<Arc<Window>>,
 }
 
 impl VulkanContextInit {
-    fn new(entry: Entry) -> Self {
+    fn new(entry: Entry, window_keepalive: Arc<Window>) -> Self {
         Self {
             entry: Some(entry),
             instance: None,
+            #[cfg(feature = "ash-validation-smoke")]
             debug_loader: None,
+            #[cfg(feature = "ash-validation-smoke")]
             debug_messenger: None,
             surface_loader: None,
             surface: None,
             device: None,
             command_pool: None,
+            window_keepalive: Some(window_keepalive),
         }
     }
 
     fn finish(
         mut self,
-        validation: Arc<ValidationState>,
-        validation_enabled: bool,
+        validation: RuntimeValidation,
+        _policy: RuntimeInstancePolicy,
         physical_device: vk::PhysicalDevice,
         queue_family_index: u32,
         queue: vk::Queue,
         adapter: VulkanAdapterInfo,
-        window_keepalive: Arc<Window>,
     ) -> VulkanContext {
         VulkanContext {
             entry: self.entry.take().expect("Vulkan entry was initialized"),
@@ -335,13 +380,16 @@ impl VulkanContextInit {
                 .instance
                 .take()
                 .expect("Vulkan instance was initialized"),
+            #[cfg(feature = "ash-validation-smoke")]
             debug_loader: self.debug_loader.take(),
+            #[cfg(feature = "ash-validation-smoke")]
             debug_messenger: self
                 .debug_messenger
                 .take()
                 .unwrap_or(vk::DebugUtilsMessengerEXT::null()),
             validation,
-            validation_enabled,
+            #[cfg(feature = "ash-validation-smoke")]
+            validation_enabled: _policy.validation_enabled,
             surface_loader: self
                 .surface_loader
                 .take()
@@ -357,7 +405,10 @@ impl VulkanContextInit {
                 .expect("Vulkan command pool was initialized"),
             adapter,
             teardown_state: DeviceTeardownState::Pending,
-            _window_keepalive: window_keepalive,
+            _window_keepalive: self
+                .window_keepalive
+                .take()
+                .expect("Vulkan window keepalive was initialized"),
         }
     }
 }
@@ -376,6 +427,7 @@ impl Drop for VulkanContextInit {
             {
                 surface_loader.destroy_surface(surface, None);
             }
+            #[cfg(feature = "ash-validation-smoke")]
             if let (Some(debug_loader), Some(debug_messenger)) =
                 (self.debug_loader.as_ref(), self.debug_messenger.take())
             {
@@ -391,9 +443,12 @@ impl Drop for VulkanContextInit {
 struct VulkanContext {
     entry: Entry,
     instance: Instance,
+    #[cfg(feature = "ash-validation-smoke")]
     debug_loader: Option<ext_debug_utils::Instance>,
+    #[cfg(feature = "ash-validation-smoke")]
     debug_messenger: vk::DebugUtilsMessengerEXT,
-    validation: Arc<ValidationState>,
+    validation: RuntimeValidation,
+    #[cfg(feature = "ash-validation-smoke")]
     validation_enabled: bool,
     surface_loader: khr_surface::Instance,
     surface: vk::SurfaceKHR,
@@ -412,12 +467,11 @@ impl VulkanContext {
     fn new(
         window: &Arc<Window>,
         title: &str,
-        validation_enabled: bool,
-        require_software_vulkan: bool,
+        policy: RuntimeInstancePolicy,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let validation = Arc::new(ValidationState::default());
+        let validation = RuntimeValidation::default();
         let entry = unsafe { Entry::load()? };
-        let mut init = VulkanContextInit::new(entry);
+        let mut init = VulkanContextInit::new(entry, Arc::clone(window));
 
         let app_name = CString::new(title)?;
         let engine_name = CString::new("dear-imgui-examples")?;
@@ -430,9 +484,12 @@ impl VulkanContext {
                 vk::API_VERSION_1_0
             });
 
-        let mut extensions =
+        let extensions =
             ash_window::enumerate_required_extensions(window.display_handle()?.as_raw())?.to_vec();
-        let layer_names = if validation_enabled {
+        #[cfg(feature = "ash-validation-smoke")]
+        let mut extensions = extensions;
+        #[cfg(feature = "ash-validation-smoke")]
+        let layer_names = if policy.validation_enabled {
             let available_layers = unsafe {
                 init.entry
                     .as_ref()
@@ -440,25 +497,31 @@ impl VulkanContext {
                     .enumerate_instance_layer_properties()?
             };
             let available = available_layers.iter().any(|layer| unsafe {
-                CStr::from_ptr(layer.layer_name.as_ptr()) == VALIDATION_LAYER
+                CStr::from_ptr(layer.layer_name.as_ptr()) == validation::VALIDATION_LAYER
             });
             if !available {
                 return Err("VK_LAYER_KHRONOS_validation is required but unavailable".into());
             }
             extensions.push(ext_debug_utils::NAME.as_ptr());
-            vec![VALIDATION_LAYER.as_ptr()]
+            vec![validation::VALIDATION_LAYER.as_ptr()]
         } else {
             Vec::new()
         };
+        #[cfg(not(feature = "ash-validation-smoke"))]
+        let layer_names: Vec<*const i8> = Vec::new();
 
-        let mut debug_create_info = validation_messenger_info(&validation);
-        let mut instance_create_info = vk::InstanceCreateInfo::default()
+        let instance_create_info = vk::InstanceCreateInfo::default()
             .application_info(&app_info)
             .enabled_extension_names(&extensions)
             .enabled_layer_names(&layer_names);
-        if validation_enabled {
-            instance_create_info = instance_create_info.push_next(&mut debug_create_info);
-        }
+        #[cfg(feature = "ash-validation-smoke")]
+        let mut debug_create_info = validation::validation_messenger_info(&validation.state);
+        #[cfg(feature = "ash-validation-smoke")]
+        let instance_create_info = if policy.validation_enabled {
+            instance_create_info.push_next(&mut debug_create_info)
+        } else {
+            instance_create_info
+        };
         let instance = unsafe {
             init.entry
                 .as_ref()
@@ -467,7 +530,8 @@ impl VulkanContext {
         };
         init.instance = Some(instance);
 
-        if validation_enabled {
+        #[cfg(feature = "ash-validation-smoke")]
+        if policy.validation_enabled {
             let loader = ext_debug_utils::Instance::new(
                 init.entry.as_ref().expect("Vulkan entry was initialized"),
                 init.instance
@@ -514,8 +578,9 @@ impl VulkanContext {
                 .expect("Vulkan instance was initialized"),
             physical_device,
         );
-        if require_software_vulkan {
-            validate_software_adapter(&adapter)?;
+        #[cfg(feature = "ash-validation-smoke")]
+        if policy.require_software_vulkan {
+            validation::validate_software_adapter(&adapter)?;
         }
 
         let (device, queue) = create_device(
@@ -542,12 +607,11 @@ impl VulkanContext {
 
         Ok(init.finish(
             validation,
-            validation_enabled,
+            policy,
             physical_device,
             queue_family_index,
             queue,
             adapter,
-            Arc::clone(window),
         ))
     }
 
@@ -592,6 +656,7 @@ impl Drop for VulkanContext {
             self.device.destroy_command_pool(self.command_pool, None);
             self.device.destroy_device(None);
             self.surface_loader.destroy_surface(self.surface, None);
+            #[cfg(feature = "ash-validation-smoke")]
             if let Some(loader) = self.debug_loader.as_ref() {
                 loader.destroy_debug_utils_messenger(self.debug_messenger, None);
             }
@@ -831,7 +896,7 @@ impl SwapchainState {
 }
 
 enum RendererRuntime {
-    Single(AshRenderer),
+    Single(Box<AshRenderer>),
     Viewports(ash_mvp::WinitViewportRoute),
 }
 
@@ -849,6 +914,7 @@ enum PreparedRendererFrame<'frame> {
 }
 
 impl PreparedRendererFrame<'_> {
+    #[cfg(feature = "ash-validation-smoke")]
     fn draw_data(&self) -> &dear_imgui_rs::render::DrawData {
         match self {
             Self::Single { frame, .. } => frame.draw_data(),
@@ -856,6 +922,7 @@ impl PreparedRendererFrame<'_> {
         }
     }
 
+    #[cfg(feature = "ash-validation-smoke")]
     fn secondary_report(&self) -> Option<&ash_mvp::AshViewportFrameReport> {
         match self {
             Self::Single { .. } => None,
@@ -922,6 +989,7 @@ impl RendererRuntime {
         })
     }
 
+    #[cfg(feature = "ash-validation-smoke")]
     fn expect_null_completion_fence_rejected(
         &mut self,
         completion: RendererFrameCompletion,
@@ -967,6 +1035,7 @@ impl RendererRuntime {
         }
     }
 
+    #[cfg(feature = "ash-validation-smoke")]
     unsafe fn complete_frame_with_fences(
         &mut self,
         completion: RendererFrameCompletion,
@@ -1046,12 +1115,10 @@ struct ImguiState {
     clear_color: [f32; 4],
     demo_open: bool,
     last_frame: Instant,
-    sampler_linear_callback: DrawCallback,
-    sampler_nearest_callback: DrawCallback,
-    reset_render_state_callback: DrawCallback,
+    callbacks: RuntimeCallbacks,
 }
 
-struct AppWindow<S: AshViewportScenario> {
+struct AppWindow<S: RuntimeScenario> {
     imgui: ManuallyDrop<ImguiState>,
     vk: ManuallyDrop<VulkanState>,
     // A scenario may retain device-lineage resources, so it belongs to the same terminal-proof
@@ -1087,13 +1154,11 @@ impl AppWindowInit {
         }
     }
 
-    fn finish<S: AshViewportScenario>(
+    fn finish<S: RuntimeScenario>(
         mut self,
         window: Arc<Window>,
         scenario: S,
-        sampler_linear_callback: DrawCallback,
-        sampler_nearest_callback: DrawCallback,
-        reset_render_state_callback: DrawCallback,
+        callbacks: RuntimeCallbacks,
     ) -> AppWindow<S> {
         let image_count = self
             .swapchain
@@ -1112,9 +1177,7 @@ impl AppWindowInit {
                 clear_color: [0.1, 0.12, 0.15, 1.0],
                 demo_open: true,
                 last_frame: Instant::now(),
-                sampler_linear_callback,
-                sampler_nearest_callback,
-                reset_render_state_callback,
+                callbacks,
             }),
             vk: ManuallyDrop::new(VulkanState {
                 ctx: ManuallyDrop::new(self.ctx.take().expect("Vulkan context was initialized")),
@@ -1179,12 +1242,11 @@ impl Drop for AppWindowInit {
 
         if let Some(context) = self.context.as_mut() {
             context.end_frame();
-            if let Some(renderer) = self.renderer.as_mut() {
-                if renderer.shutdown(context).is_ok()
-                    && let Some(ctx) = self.ctx.as_mut()
-                {
-                    ctx.note_renderer_shutdown();
-                }
+            if let Some(renderer) = self.renderer.as_mut()
+                && renderer.shutdown(context).is_ok()
+                && let Some(ctx) = self.ctx.as_mut()
+            {
+                ctx.note_renderer_shutdown();
             }
             if let Some(platform) = self.platform.as_mut() {
                 if platform.viewports_enabled() {
@@ -1208,7 +1270,7 @@ impl Drop for AppWindowInit {
     }
 }
 
-impl<S: AshViewportScenario> Drop for AppWindow<S> {
+impl<S: RuntimeScenario> Drop for AppWindow<S> {
     fn drop(&mut self) {
         if let Err(error) = self.shutdown() {
             error!("Ash example fallback shutdown failed: {error}");
@@ -1231,13 +1293,13 @@ impl<S: AshViewportScenario> Drop for AppWindow<S> {
     }
 }
 
-struct App<S: AshViewportScenario> {
+struct App<S: RuntimeScenario> {
     pending_scenario: Option<S>,
     window: Option<Box<AppWindow<S>>>,
     error: Option<String>,
 }
 
-impl<S: AshViewportScenario> App<S> {
+impl<S: RuntimeScenario> App<S> {
     fn new(scenario: S) -> Self {
         Self {
             pending_scenario: Some(scenario),
@@ -1247,7 +1309,7 @@ impl<S: AshViewportScenario> App<S> {
     }
 }
 
-impl<S: AshViewportScenario> AppWindow<S> {
+impl<S: RuntimeScenario> AppWindow<S> {
     fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let ImguiState {
             renderer,
@@ -1323,8 +1385,9 @@ impl<S: AshViewportScenario> AppWindow<S> {
         }
     }
 
-    fn teardown_evidence(&self) -> TeardownEvidence {
-        TeardownEvidence {
+    #[cfg(feature = "ash-validation-smoke")]
+    fn teardown_evidence(&self) -> validation::RuntimeTeardownEvidence {
+        validation::RuntimeTeardownEvidence {
             renderer_shutdown_complete: self.renderer_shutdown_complete,
             viewport_runtime_shutdown_complete: !self.imgui.platform.viewports_enabled(),
             platform_shutdown_complete: self.platform_shutdown_complete,
@@ -1338,7 +1401,10 @@ impl<S: AshViewportScenario> AppWindow<S> {
             target_os = "macos",
             target_os = "linux"
         ));
-        let validation = scenario.validation_config();
+        #[cfg(feature = "ash-validation-smoke")]
+        let instance_policy = scenario.instance_policy();
+        #[cfg(not(feature = "ash-validation-smoke"))]
+        let instance_policy = RuntimeInstancePolicy::default();
         if scenario.requires_dynamic_rendering() && !cfg!(feature = "ash-dynamic-rendering") {
             return Err("this Ash scenario requires feature `ash-dynamic-rendering`".into());
         }
@@ -1353,13 +1419,9 @@ impl<S: AshViewportScenario> AppWindow<S> {
             )?,
         );
 
-        let ctx = VulkanContext::new(
-            &window,
-            "dear-imgui-multi-viewport-ash",
-            validation.validation_enabled,
-            validation.require_software_vulkan,
-        )?;
+        let ctx = VulkanContext::new(&window, "dear-imgui-multi-viewport-ash", instance_policy)?;
         let mut init = AppWindowInit::new(ctx);
+        #[cfg(feature = "ash-validation-smoke")]
         if scenario.requires_validation()
             && !init
                 .ctx
@@ -1485,39 +1547,28 @@ impl<S: AshViewportScenario> AppWindow<S> {
             }
         };
         renderer.set_viewport_clear_color([0.1, 0.12, 0.15, 1.0]);
-        init.renderer = Some(RendererRuntime::Single(renderer));
-        let (sampler_linear_callback, sampler_nearest_callback, reset_render_state_callback) = {
-            let context = init
-                .context
+        init.renderer = Some(RendererRuntime::Single(Box::new(renderer)));
+        #[cfg(feature = "ash-validation-smoke")]
+        let callbacks = RuntimeCallbacks::load(
+            init.context
                 .as_ref()
-                .expect("ImGui context was initialized");
-            (
-                context
-                    .platform_io()
-                    .draw_callback_set_sampler_linear_raw()
-                    .ok_or("Ash did not publish its linear sampler callback")?,
-                context
-                    .platform_io()
-                    .draw_callback_set_sampler_nearest_raw()
-                    .ok_or("Ash did not publish its nearest sampler callback")?,
-                context
-                    .platform_io()
-                    .draw_callback_reset_render_state_raw()
-                    .ok_or("Ash did not publish its reset-render-state callback")?,
-            )
-        };
+                .expect("ImGui context was initialized"),
+            scenario.requires_renderer_callbacks(),
+        )?;
+        #[cfg(not(feature = "ash-validation-smoke"))]
+        let callbacks = RuntimeCallbacks::default();
         {
             let AppWindowInit { ctx, context, .. } = &mut init;
             let ctx = ctx.as_ref().expect("Vulkan context was initialized");
             scenario.initialize(
                 context.as_mut().expect("ImGui context was initialized"),
                 &ctx.adapter,
-                Arc::clone(&ctx.validation),
+                &ctx.validation,
             )?;
         }
 
         let renderer = match init.renderer.take() {
-            Some(RendererRuntime::Single(renderer)) => renderer,
+            Some(RendererRuntime::Single(renderer)) => *renderer,
             _ => unreachable!("initial Ash renderer must be in single-viewport state"),
         };
         let renderer = if enable_viewports {
@@ -1559,12 +1610,12 @@ impl<S: AshViewportScenario> AppWindow<S> {
                 Ok(route) => RendererRuntime::Viewports(route),
                 Err(error) => {
                     let (error, renderer) = error.into_parts();
-                    init.renderer = Some(RendererRuntime::Single(renderer));
+                    init.renderer = Some(RendererRuntime::Single(Box::new(renderer)));
                     return Err(error.into());
                 }
             }
         } else {
-            RendererRuntime::Single(renderer)
+            RendererRuntime::Single(Box::new(renderer))
         };
         init.renderer = Some(renderer);
 
@@ -1580,13 +1631,7 @@ impl<S: AshViewportScenario> AppWindow<S> {
                 .command_pool,
             FRAMES_IN_FLIGHT,
         )?;
-        Ok(init.finish(
-            window,
-            scenario,
-            sampler_linear_callback,
-            sampler_nearest_callback,
-            reset_render_state_callback,
-        ))
+        Ok(init.finish(window, scenario, callbacks))
     }
 
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -1631,9 +1676,7 @@ impl<S: AshViewportScenario> AppWindow<S> {
             clear_color,
             demo_open,
             last_frame,
-            sampler_linear_callback,
-            sampler_nearest_callback,
-            reset_render_state_callback,
+            callbacks,
         } = &mut *self.imgui;
 
         let window_size = window.inner_size();
@@ -1657,32 +1700,34 @@ impl<S: AshViewportScenario> AppWindow<S> {
         let viewport_count = context.platform_io().viewports_iter().count();
         let frame = context.begin_frame();
         let ui = frame.ui();
-        let callback_only_frame = scenario.draw_ui(AshFrameUi {
+        let directive = scenario.draw_ui(RuntimeFrameUi {
             ui,
             viewport_count,
             surface_format: vk.swapchain.surface_format.format,
             framebuffer_srgb: is_srgb_format(vk.swapchain.surface_format.format),
             clear_color,
             demo_open,
-            sampler_linear_callback: *sampler_linear_callback,
-            sampler_nearest_callback: *sampler_nearest_callback,
-            reset_render_state_callback: *reset_render_state_callback,
+            _callbacks: callbacks,
         })?;
         renderer.set_viewport_clear_color(*clear_color)?;
 
         platform.prepare_render(ui, window)?;
         let clear_color = *clear_color;
         let prepared = renderer.prepare(event_loop, frame)?;
-        let callback_only_zero_geometry = callback_only_frame
+        #[cfg(feature = "ash-validation-smoke")]
+        let callback_only_zero_geometry = directive.callback_only
             && prepared.draw_data().total_vtx_count() == 0
             && prepared.draw_data().total_idx_count() == 0;
+        #[cfg(not(feature = "ash-validation-smoke"))]
+        let _ = directive;
 
         // Secondary swapchains submit and present before the main swapchain is acquired. This
         // avoids overlapping WSI acquisition semaphores across independently owned surfaces. The
-        // prepared transaction makes managed texture updates visible to those draws and retains
-        // same-scope submission evidence until the main command buffer consumes it.
+        // prepared transaction makes managed texture updates visible to those draws before the
+        // main command buffer consumes it.
+        #[cfg(feature = "ash-validation-smoke")]
         if let Some(report) = prepared.secondary_report() {
-            scenario.observe_secondary_submissions(AshSecondarySubmissions {
+            scenario.observe_secondary_submissions(validation::RuntimeSecondarySubmissions {
                 rendered: report.render_submitted_viewport_ids(),
                 presented: report.present_submitted_viewport_ids(),
             });
@@ -1713,23 +1758,29 @@ impl<S: AshViewportScenario> AppWindow<S> {
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR) => {
                 vk.swapchain_dirty = true;
                 let completion = prepared.skip_main();
-                let completion_request = scenario.completion_request();
-                let (null_fence_rejected, completion_count, queue_drained) =
-                    if completion_request.reject_null_fence {
-                        renderer.expect_null_completion_fence_rejected(completion)?;
-                        (true, 0, false)
-                    } else {
-                        let completion_count = renderer.wait_for_frame_completion(completion)?;
-                        (false, completion_count, true)
-                    };
-                scenario.observe_frame_outcome(AshFrameOutcome {
-                    main_presented: false,
-                    callback_only_zero_geometry: None,
-                    render_state_cleared: None,
-                    null_fence_rejected,
-                    fence_completion_count: completion_count,
-                    texture_retirement_queue_drained: queue_drained,
-                });
+                #[cfg(feature = "ash-validation-smoke")]
+                {
+                    let completion_request = scenario.completion_request();
+                    let (null_fence_rejected, completion_count, queue_drained) =
+                        if completion_request.reject_null_fence {
+                            renderer.expect_null_completion_fence_rejected(completion)?;
+                            (true, 0, false)
+                        } else {
+                            let completion_count =
+                                renderer.wait_for_frame_completion(completion)?;
+                            (false, completion_count, true)
+                        };
+                    scenario.observe_frame_outcome(validation::RuntimeFrameOutcome {
+                        main_presented: false,
+                        callback_only_zero_geometry: None,
+                        render_state_cleared: None,
+                        null_fence_rejected,
+                        fence_completion_count: completion_count,
+                        texture_retirement_queue_drained: queue_drained,
+                    });
+                }
+                #[cfg(not(feature = "ash-validation-smoke"))]
+                renderer.wait_for_frame_completion(completion)?;
                 return Ok(());
             }
             Err(error) => {
@@ -1794,22 +1845,24 @@ impl<S: AshViewportScenario> AppWindow<S> {
                     )?;
                 }
 
-                let completion = record_command_buffer(
-                    &vk.ctx.device,
-                    command_buffer,
-                    vk.render_target,
+                let target = MainCommandTarget {
                     #[cfg(not(feature = "ash-dynamic-rendering"))]
                     framebuffer,
+                    #[cfg(not(feature = "ash-dynamic-rendering"))]
+                    render_pass: vk.render_target.render_pass,
                     #[cfg(feature = "ash-dynamic-rendering")]
                     image,
                     #[cfg(feature = "ash-dynamic-rendering")]
                     image_view,
                     #[cfg(feature = "ash-dynamic-rendering")]
                     old_layout,
-                    vk.swapchain.extent,
+                    extent: vk.swapchain.extent,
                     clear_color,
-                    |cmd| renderer.cmd_draw_main(cmd, prepared),
-                )?;
+                };
+                let completion =
+                    record_command_buffer(&vk.ctx.device, command_buffer, target, |cmd| {
+                        renderer.cmd_draw_main(cmd, prepared)
+                    })?;
                 let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
                 let submit_info = vk::SubmitInfo::default()
                     .wait_semaphores(std::slice::from_ref(&image_available))
@@ -1872,41 +1925,46 @@ impl<S: AshViewportScenario> AppWindow<S> {
 
         vk.frame_index = (vk.frame_index + 1) % vk.frames.len();
 
-        let completion_request = scenario.completion_request();
-        let (null_fence_rejected, fence_completion_count, texture_retirement_queue_drained) =
-            if completion_request.reject_null_fence {
-                renderer.expect_null_completion_fence_rejected(completion)?;
-                (true, 0, false)
-            } else if completion_request.complete_with_submitted_fence {
-                unsafe {
-                    vk.ctx
-                        .device
-                        .wait_for_fences(&[submitted_fence], true, u64::MAX)?;
-                    let completion_count =
-                        renderer.complete_frame_with_fences(completion, &[submitted_fence])?;
-                    (false, completion_count, true)
-                }
-            } else {
-                renderer.wait_for_frame_completion(completion)?;
-                (false, 0, true)
-            };
+        #[cfg(feature = "ash-validation-smoke")]
+        {
+            let completion_request = scenario.completion_request();
+            let (null_fence_rejected, fence_completion_count, texture_retirement_queue_drained) =
+                if completion_request.reject_null_fence {
+                    renderer.expect_null_completion_fence_rejected(completion)?;
+                    (true, 0, false)
+                } else if completion_request.complete_with_submitted_fence {
+                    unsafe {
+                        vk.ctx
+                            .device
+                            .wait_for_fences(&[submitted_fence], true, u64::MAX)?;
+                        let completion_count =
+                            renderer.complete_frame_with_fences(completion, &[submitted_fence])?;
+                        (false, completion_count, true)
+                    }
+                } else {
+                    renderer.wait_for_frame_completion(completion)?;
+                    (false, 0, true)
+                };
 
-        let render_state_cleared =
-            unsafe { context.platform_io().renderer_render_state().is_null() };
-        scenario.observe_frame_outcome(AshFrameOutcome {
-            main_presented: true,
-            callback_only_zero_geometry: Some(callback_only_zero_geometry),
-            render_state_cleared: Some(render_state_cleared),
-            null_fence_rejected,
-            fence_completion_count,
-            texture_retirement_queue_drained,
-        });
+            let render_state_cleared =
+                unsafe { context.platform_io().renderer_render_state().is_null() };
+            scenario.observe_frame_outcome(validation::RuntimeFrameOutcome {
+                main_presented: true,
+                callback_only_zero_geometry: Some(callback_only_zero_geometry),
+                render_state_cleared: Some(render_state_cleared),
+                null_fence_rejected,
+                fence_completion_count,
+                texture_retirement_queue_drained,
+            });
+        }
+        #[cfg(not(feature = "ash-validation-smoke"))]
+        renderer.wait_for_frame_completion(completion)?;
 
         Ok(())
     }
 }
 
-impl<S: AshViewportScenario> ApplicationHandler for App<S> {
+impl<S: RuntimeScenario> ApplicationHandler for App<S> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if let Some(window) = self.window.as_ref() {
             window.window.request_redraw();
@@ -1984,23 +2042,21 @@ impl<S: AshViewportScenario> ApplicationHandler for App<S> {
                     event_loop.exit();
                 }
             }
-            WindowEvent::RedrawRequested => {
+            WindowEvent::RedrawRequested if is_main_window => {
                 // We drive rendering from the main window. Secondary viewport windows are
                 // rendered via ImGui's platform callbacks during `app.render()`.
-                if is_main_window {
-                    match app.render(event_loop) {
-                        Ok(()) => {
-                            if app.scenario.is_complete() {
-                                event_loop.exit();
-                            } else {
-                                app.window.request_redraw();
-                            }
-                        }
-                        Err(error) => {
-                            error!("Render error: {error}");
-                            self.error = Some(error.to_string());
+                match app.render(event_loop) {
+                    Ok(()) => {
+                        if app.scenario.is_complete() {
                             event_loop.exit();
+                        } else {
+                            app.window.request_redraw();
                         }
+                    }
+                    Err(error) => {
+                        error!("Render error: {error}");
+                        self.error = Some(error.to_string());
+                        event_loop.exit();
                     }
                 }
             }
@@ -2009,18 +2065,14 @@ impl<S: AshViewportScenario> ApplicationHandler for App<S> {
     }
 }
 
-pub fn run<S: AshViewportScenario>(scenario: S) -> ExampleResult {
-    dear_imgui_examples::init_tracing_with_filter(
-        "dear_imgui=debug,multi_viewport_ash=info,ash_vulkan_validation_smoke=info",
-    );
-    info!("Starting Dear ImGui Multi-Viewport (ash) Example");
-
+fn run_runtime<S: RuntimeScenario>(scenario: S) -> ExampleResult {
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);
 
     let mut app = App::new(scenario);
     let event_loop_result = event_loop.run_app(&mut app);
     let app_error = app.error.take();
+    #[cfg(feature = "ash-validation-smoke")]
     let scenario_evidence = app
         .window
         .as_ref()
@@ -2029,6 +2081,7 @@ pub fn run<S: AshViewportScenario>(scenario: S) -> ExampleResult {
         .window
         .as_mut()
         .map_or(Ok(()), |window| window.shutdown());
+    #[cfg(feature = "ash-validation-smoke")]
     let teardown_evidence = app.window.as_ref().map(|window| window.teardown_evidence());
     drop(app);
 
@@ -2042,6 +2095,7 @@ pub fn run<S: AshViewportScenario>(scenario: S) -> ExampleResult {
     if let Err(error) = shutdown_result {
         errors.push(error.to_string());
     }
+    #[cfg(feature = "ash-validation-smoke")]
     if let (Some(evidence), Some(teardown)) = (scenario_evidence, teardown_evidence)
         && let Err(error) = S::finalize(evidence, teardown)
     {
@@ -2052,6 +2106,13 @@ pub fn run<S: AshViewportScenario>(scenario: S) -> ExampleResult {
     } else {
         Err(errors.join("; ").into())
     }
+}
+
+#[cfg_attr(feature = "ash-validation-smoke", allow(dead_code))]
+pub fn run<S: AshViewportScenario>(scenario: S) -> ExampleResult {
+    dear_imgui_examples::init_tracing_with_filter("dear_imgui=debug,multi_viewport_ash=info");
+    info!("Starting Dear ImGui Multi-Viewport (ash) Example");
+    run_runtime(InteractiveScenarioAdapter(scenario))
 }
 
 fn pick_physical_device(
@@ -2141,31 +2202,6 @@ fn describe_physical_device(instance: &Instance, device: vk::PhysicalDevice) -> 
         vendor: properties.vendor_id,
         device: properties.device_id,
     }
-}
-
-fn validate_software_adapter(
-    adapter: &VulkanAdapterInfo,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if adapter.device_type != "Cpu" {
-        return Err(format!(
-            "Ash validation smoke requires a CPU Vulkan adapter, selected '{}' ({})",
-            adapter.name, adapter.device_type
-        )
-        .into());
-    }
-    let identity = format!(
-        "{} {} {}",
-        adapter.name, adapter.driver, adapter.driver_info
-    )
-    .to_lowercase();
-    if !identity.contains("lavapipe") && !identity.contains("llvmpipe") {
-        return Err(format!(
-            "Ash validation smoke requires Lavapipe/llvmpipe, selected '{}'",
-            adapter.name
-        )
-        .into());
-    }
-    Ok(())
 }
 
 fn pick_surface_format(
@@ -2371,16 +2407,25 @@ fn destroy_framebuffers(device: &Device, framebuffers: Vec<vk::Framebuffer>) {
     }
 }
 
+struct MainCommandTarget {
+    #[cfg(not(feature = "ash-dynamic-rendering"))]
+    render_pass: vk::RenderPass,
+    #[cfg(not(feature = "ash-dynamic-rendering"))]
+    framebuffer: vk::Framebuffer,
+    #[cfg(feature = "ash-dynamic-rendering")]
+    image: vk::Image,
+    #[cfg(feature = "ash-dynamic-rendering")]
+    image_view: vk::ImageView,
+    #[cfg(feature = "ash-dynamic-rendering")]
+    old_layout: vk::ImageLayout,
+    extent: vk::Extent2D,
+    clear_color: [f32; 4],
+}
+
 fn record_command_buffer<F, T>(
     device: &Device,
     cmd: vk::CommandBuffer,
-    _render_target: MainRenderTarget,
-    #[cfg(not(feature = "ash-dynamic-rendering"))] framebuffer: vk::Framebuffer,
-    #[cfg(feature = "ash-dynamic-rendering")] image: vk::Image,
-    #[cfg(feature = "ash-dynamic-rendering")] image_view: vk::ImageView,
-    #[cfg(feature = "ash-dynamic-rendering")] old_layout: vk::ImageLayout,
-    extent: vk::Extent2D,
-    clear_color: [f32; 4],
+    target: MainCommandTarget,
     record_draws: F,
 ) -> Result<T, Box<dyn std::error::Error>>
 where
@@ -2395,7 +2440,7 @@ where
 
         let clear_value = vk::ClearValue {
             color: vk::ClearColorValue {
-                float32: clear_color,
+                float32: target.clear_color,
             },
         };
 
@@ -2403,11 +2448,11 @@ where
         device.cmd_begin_render_pass(
             cmd,
             &vk::RenderPassBeginInfo::default()
-                .render_pass(_render_target.render_pass)
-                .framebuffer(framebuffer)
+                .render_pass(target.render_pass)
+                .framebuffer(target.framebuffer)
                 .render_area(vk::Rect2D {
                     offset: vk::Offset2D { x: 0, y: 0 },
-                    extent,
+                    extent: target.extent,
                 })
                 .clear_values(std::slice::from_ref(&clear_value)),
             vk::SubpassContents::INLINE,
@@ -2418,12 +2463,12 @@ where
             ash_frame_sync::transition_swapchain_image(
                 device,
                 cmd,
-                image,
-                old_layout,
+                target.image,
+                target.old_layout,
                 vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
             );
             let color_attachment = vk::RenderingAttachmentInfo::default()
-                .image_view(image_view)
+                .image_view(target.image_view)
                 .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
                 .load_op(vk::AttachmentLoadOp::CLEAR)
                 .store_op(vk::AttachmentStoreOp::STORE)
@@ -2433,7 +2478,7 @@ where
                 &vk::RenderingInfo::default()
                     .render_area(vk::Rect2D {
                         offset: vk::Offset2D { x: 0, y: 0 },
-                        extent,
+                        extent: target.extent,
                     })
                     .layer_count(1)
                     .color_attachments(std::slice::from_ref(&color_attachment)),
@@ -2450,7 +2495,7 @@ where
             ash_frame_sync::transition_swapchain_image(
                 device,
                 cmd,
-                image,
+                target.image,
                 vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 vk::ImageLayout::PRESENT_SRC_KHR,
             );
