@@ -1,7 +1,7 @@
 #![cfg(target_arch = "wasm32")]
 
 use dear_imgui_rs::*;
-use dear_imgui_wgpu::WgpuRenderer;
+use dear_imgui_wgpu::{FramebufferExtent, WgpuRenderer};
 use dear_imgui_winit::WinitPlatform;
 #[cfg(feature = "imguizmo")]
 use dear_imguizmo::{GuizmoExt, Mode as GuizmoMode, Operation as GuizmoOperation};
@@ -432,6 +432,7 @@ impl AppWindow {
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+        let framebuffer_extent = FramebufferExtent::from_texture(&frame.texture);
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -469,7 +470,7 @@ impl AppWindow {
 
             self.imgui
                 .renderer
-                .render(pending_frame, &mut rpass)
+                .render(pending_frame, &mut rpass, framebuffer_extent)
                 .map_err(|e| JsValue::from_str(&format!("render: {e}")))?;
         }
 
