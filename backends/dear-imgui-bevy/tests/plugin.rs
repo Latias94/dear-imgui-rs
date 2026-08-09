@@ -222,9 +222,11 @@ fn plugin_convenience_panics_with_the_fallible_installation_cause() {
 fn fallible_installation_rejects_invalid_viewport_policy_before_app_mutation() {
     let _guard = imgui_context_guard();
     let mut app = App::new();
-    let mut viewport = ImguiViewportWindowConfig::default();
-    viewport.transparent = true;
-    viewport.composite_alpha_mode = bevy_window::CompositeAlphaMode::Opaque;
+    let viewport = ImguiViewportWindowConfig {
+        transparent: true,
+        composite_alpha_mode: bevy_window::CompositeAlphaMode::Opaque,
+        ..Default::default()
+    };
     let error = install_error(
         app.try_install_imgui(ImguiPlugin::new(
             ImguiPluginConfig::default().with_viewport_window(viewport),

@@ -64,12 +64,12 @@ impl ImguiContextRetirementSink {
         &self,
         owner: ContextOwner,
         retirement: ImguiContextRetirementId,
-    ) -> Result<(), ContextOwner> {
+    ) -> Result<(), Box<ContextOwner>> {
         let Some(queue) = self.queue.upgrade() else {
-            return Err(owner);
+            return Err(Box::new(owner));
         };
         let Ok(mut pending) = queue.pending.try_borrow_mut() else {
-            return Err(owner);
+            return Err(Box::new(owner));
         };
         pending.push_back(ContextRetirement {
             owner: Some(ManuallyDrop::new(owner)),
@@ -175,15 +175,15 @@ fn maintain_context_retirements(world: &mut World) {
         let Some(mut retirement) = sink.try_pop_front() else {
             break;
         };
-        if retirement.advance().is_ok() {
-            if let Some(completed) = retirement.finish() {
-                if let Some(mut contexts) = world.get_non_send_mut::<ImguiContexts>() {
-                    let _ = contexts.complete_retirement(completed);
-                }
-                world
-                    .resource_mut::<Messages<ImguiContextRetired>>()
-                    .write(ImguiContextRetired::new(completed));
+        if retirement.advance().is_ok()
+            && let Some(completed) = retirement.finish()
+        {
+            if let Some(mut contexts) = world.get_non_send_mut::<ImguiContexts>() {
+                let _ = contexts.complete_retirement(completed);
             }
+            world
+                .resource_mut::<Messages<ImguiContextRetired>>()
+                .write(ImguiContextRetired::new(completed));
         }
     }
 }

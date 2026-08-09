@@ -204,12 +204,11 @@ fn rejects_the_exact_unsupported_cmap_selected_by_stb() {
         .unwrap();
     let last_recognized = (0..records)
         .map(|index| 4 + index * 8)
-        .filter(|&record| {
+        .rfind(|&record| {
             let platform = u16::from_be_bytes([cmap_bytes[record], cmap_bytes[record + 1]]);
             let encoding = u16::from_be_bytes([cmap_bytes[record + 2], cmap_bytes[record + 3]]);
             platform == 0 || (platform == 3 && matches!(encoding, 1 | 10))
         })
-        .next_back()
         .unwrap();
     font[cmap.0 + last_recognized + 4..cmap.0 + last_recognized + 8]
         .copy_from_slice(&mac_format_zero_offset.to_be_bytes());

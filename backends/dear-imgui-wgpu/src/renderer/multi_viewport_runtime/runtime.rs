@@ -1,9 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::fmt;
-use std::marker::PhantomData;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use dear_imgui_rs::render::ReconciledFrame;
 use dear_imgui_rs::{
@@ -397,25 +395,21 @@ enum ShutdownAction<'a> {
 
 /// Exact identity for one attached renderer runtime.
 ///
-/// The marker deliberately keeps the identity tied to the UI thread. `Arc` is used only as an
-/// identity token; it must not make a prepared frame transferable to another thread.
+/// The identity is intentionally reference-counted with [`Rc`] because the owning runtime and
+/// every prepared frame remain on the UI thread.
 #[derive(Debug)]
-struct RuntimeIdentity {
-    _ui_thread: PhantomData<Rc<()>>,
-}
+struct RuntimeIdentity;
 
 impl RuntimeIdentity {
-    fn new() -> Arc<Self> {
-        Arc::new(Self {
-            _ui_thread: PhantomData,
-        })
+    fn new() -> Rc<Self> {
+        Rc::new(Self)
     }
 }
 
 pub(super) struct RuntimeControl {
     context_raw: *mut dear_imgui_rs::sys::ImGuiContext,
     binding: ContextBinding,
-    identity: Arc<RuntimeIdentity>,
+    identity: Rc<RuntimeIdentity>,
     state: Cell<RuntimeState>,
     renderer: RefCell<Option<Box<WgpuRenderer>>>,
     globals: RefCell<Option<GlobalHandles>>,
@@ -1069,7 +1063,7 @@ pub(super) struct FrameTraceGuard<'runtime> {
 pub struct WgpuPreparedViewportFrame<'frame> {
     frame: ReconciledFrame<'frame>,
     secondary: WgpuViewportFrameTraceReport,
-    runtime: Arc<RuntimeIdentity>,
+    runtime: Rc<RuntimeIdentity>,
 }
 
 impl WgpuPreparedViewportFrame<'_> {
@@ -1266,16 +1260,16 @@ impl OwningViewportRuntime {
         Ok(WgpuPreparedViewportFrame {
             frame,
             secondary,
-            runtime: Arc::clone(&self.control.identity),
+            runtime: Rc::clone(&self.control.identity),
         })
     }
 
     fn ensure_prepared_runtime(
         &self,
-        runtime: &Arc<RuntimeIdentity>,
+        runtime: &Rc<RuntimeIdentity>,
         actual: ContextId,
     ) -> Result<(), WgpuViewportError> {
-        if Arc::ptr_eq(&self.control.identity, runtime) {
+        if Rc::ptr_eq(&self.control.identity, runtime) {
             Ok(())
         } else {
             Err(WgpuViewportError::PreparedFrameRuntimeMismatch {

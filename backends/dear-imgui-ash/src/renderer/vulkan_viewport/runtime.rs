@@ -519,7 +519,6 @@ impl AshPreparedViewportFrame<'_> {
     /// main viewport. Any secondary submissions reported by [`Self::secondary_report`] still need
     /// to be covered before completing the returned capability. Dropping either capability keeps
     /// retired resources queued for a later frame or route shutdown.
-    #[must_use]
     pub fn skip_main(self) -> AshViewportFrameCompletion {
         let context = self.context_id();
         let Self {

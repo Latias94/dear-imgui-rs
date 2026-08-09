@@ -214,7 +214,7 @@ fn validated_stb_source_rejects_loader_and_collection_overrides_before_ffi() {
     let validated = StbTrueTypeFontData::from_slice(FONT_DATA).unwrap();
 
     let mut loader_override = FontConfig::new();
-    loader_override.raw.FontLoader = 1_usize as *const sys::ImFontLoader;
+    loader_override.raw.FontLoader = std::ptr::dangling();
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _ = FontSource::stb_truetype(validated.clone()).with_config(loader_override);

@@ -652,12 +652,11 @@ fn ensure_primary_window(app: &mut App) -> Entity {
     let mut primary_windows = app
         .world_mut()
         .query_filtered::<Entity, With<PrimaryWindow>>();
-    let entity = primary_windows.iter(app.world()).next().unwrap_or_else(|| {
+    primary_windows.iter(app.world()).next().unwrap_or_else(|| {
         app.world_mut()
             .spawn((Window::default(), PrimaryWindow))
             .id()
-    });
-    entity
+    })
 }
 
 #[cfg(feature = "multi-viewport")]

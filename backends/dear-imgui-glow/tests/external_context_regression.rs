@@ -649,7 +649,7 @@ fn texture_pixels(phase: u32) -> Vec<u8> {
             let i = ((y * TEXTURE_WIDTH + x) * 4) as usize;
             let fx = x as f32 / TEXTURE_WIDTH as f32;
             let fy = y as f32 / TEXTURE_HEIGHT as f32;
-            pixels[i + 0] = ((fx * 255.0 + t.sin() * 96.0).clamp(0.0, 255.0)) as u8;
+            pixels[i] = ((fx * 255.0 + t.sin() * 96.0).clamp(0.0, 255.0)) as u8;
             pixels[i + 1] = ((fy * 255.0 + (t * 1.4).cos() * 96.0).clamp(0.0, 255.0)) as u8;
             pixels[i + 2] = (((fx + fy + t * 0.25).sin().abs()) * 255.0) as u8;
             pixels[i + 3] = 255;

@@ -824,7 +824,7 @@ impl ImguiContexts {
                     .slots
                     .get_mut(&context_id)
                     .expect("a failed retirement enqueue must retain its slot");
-                slot.owner = Some(owner);
+                slot.owner = Some(*owner);
                 slot.state = previous_state;
                 Err(ImguiContextError::RetirementQueueUnavailable { context_id })
             }
