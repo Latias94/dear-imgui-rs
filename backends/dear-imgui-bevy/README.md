@@ -10,13 +10,13 @@ The backend owns Dear ImGui Contexts on Bevy's main thread, routes Bevy window i
 | --- | --- |
 | Rust | `1.95.0` or newer |
 | Bevy | exactly `0.19.0` |
-| dear-imgui-rs | `0.16.0-alpha.3` |
+| dear-imgui-rs | `0.16.0-alpha.2` |
 
 `dear-imgui-bevy` defaults to the renderer plus deterministic Bevy UI ordering. Native multi-viewport is supported through an explicit feature and runtime opt-in. WASM supports the normal and headless feature sets but cannot create native platform windows.
 
 ## Installation
 
-Until `0.16.0-alpha.3` is published:
+Until `0.16.0-alpha.2` is published:
 
 ```toml
 [dependencies]
@@ -30,14 +30,14 @@ After publication:
 ```toml
 [dependencies]
 bevy = "=0.19.0"
-dear-imgui-bevy = "=0.16.0-alpha.3"
-dear-imgui-rs = "=0.16.0-alpha.3"
+dear-imgui-bevy = "=0.16.0-alpha.2"
+dear-imgui-rs = "=0.16.0-alpha.2"
 ```
 
 For a headless integration that drives private UI passes without installing the Bevy renderer:
 
 ```toml
-dear-imgui-bevy = { version = "=0.16.0-alpha.3", default-features = false }
+dear-imgui-bevy = { version = "=0.16.0-alpha.2", default-features = false }
 ```
 
 ## Quick Start

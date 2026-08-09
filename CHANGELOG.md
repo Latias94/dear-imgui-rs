@@ -8,7 +8,7 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
-## [0.16.0-alpha.3] - 2026-08-09
+## [0.16.0-alpha.2] - 2026-08-09
 
 This source-breaking prerelease completes the ownership work started in alpha.1. Safe APIs now carry the Context, frame, renderer, native-callback, and GPU-completion capabilities needed for the operation they expose; provisional aliases and manual phase controls were removed instead of becoming permanent compatibility surface.
 

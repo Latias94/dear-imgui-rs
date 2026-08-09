@@ -25,8 +25,8 @@ This crate supports multiple build strategies to fit different development workf
 ### 1. Prebuilt Static Libraries (Recommended)
 
 The fastest way to get started is to use prebuilt static libraries instead of compiling from source.
-`0.16.0-alpha.1` archives are currently published. Until `0.16.0-alpha.3` is published, use a
-repository checkout or build the alpha.3 candidate from source.
+`0.16.0-alpha.1` archives are currently published. Until `0.16.0-alpha.2` is published, use a
+repository checkout or build the alpha.2 candidate from source.
 
 ```bash
 # Option A: Point to the library directory inside an extracted core artifact.
@@ -34,7 +34,7 @@ repository checkout or build the alpha.3 candidate from source.
 export IMGUI_SYS_LIB_DIR=/path/to/extracted/dear-imgui-artifact/lib
 
 # Option B: Use a package-tool-generated local archive or HTTP(S) URL.
-export IMGUI_SYS_PREBUILT_URL=/path/to/dear-imgui-prebuilt-0.16.0-alpha.3-<target>-static.tar.gz
+export IMGUI_SYS_PREBUILT_URL=/path/to/dear-imgui-prebuilt-0.16.0-alpha.2-<target>-static.tar.gz
 cargo build -p dear-imgui-sys --features prebuilt
 
 # Option C: Enable HTTP(S) downloads / auto-download from GitHub releases
@@ -168,7 +168,7 @@ For a complete, up-to-date guide (including required tools, commands, and troubl
 
 This is a low-level sys crate providing unsafe FFI bindings. Most users should use the higher-level [`dear-imgui-rs`](https://crates.io/crates/dear-imgui-rs) crate instead, which provides safe Rust wrappers.
 
-Until `0.16.0-alpha.3` is published, test this candidate from `main`:
+Until `0.16.0-alpha.2` is published, test this candidate from `main`:
 
 ```toml
 [dependencies]
@@ -179,10 +179,10 @@ After publication, use the exact prerelease requirement:
 
 ```toml
 [dependencies]
-dear-imgui-sys = "=0.16.0-alpha.3"
+dear-imgui-sys = "=0.16.0-alpha.2"
 
 # Enable features as needed
-dear-imgui-sys = { version = "=0.16.0-alpha.3", features = ["freetype", "wasm"] }
+dear-imgui-sys = { version = "=0.16.0-alpha.2", features = ["freetype", "wasm"] }
 ```
 
 ### Direct FFI Usage (Advanced)
@@ -215,7 +215,7 @@ can expose optional backend shim modules behind `backend-shim-*` features:
 
 ```toml
 [dependencies]
-dear-imgui-sys = { version = "=0.16.0-alpha.3", features = ["backend-shim-opengl3"] }
+dear-imgui-sys = { version = "=0.16.0-alpha.2", features = ["backend-shim-opengl3"] }
 ```
 
 These features expose self-contained modules such as:
@@ -348,8 +348,8 @@ There are two first-class Android directions.
 
    ```toml
    [dependencies]
-   dear-imgui-rs = "=0.16.0-alpha.3"
-   dear-imgui-sys = { version = "=0.16.0-alpha.3", features = ["backend-shim-android", "backend-shim-opengl3"] }
+   dear-imgui-rs = "=0.16.0-alpha.2"
+   dear-imgui-sys = { version = "=0.16.0-alpha.2", features = ["backend-shim-android", "backend-shim-opengl3"] }
    ```
 
    Use `dear-imgui-rs` for the safe core (`Context`, IO, frame lifecycle,

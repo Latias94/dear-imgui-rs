@@ -32,7 +32,7 @@ Every user-relevant native or provisional high-level surface must have one recor
 - `delete`: no high-level replacement is justified, so callers use a safer composition or the sys
   escape hatch.
 
-The single release ledger is [0.16 alpha.3 public API disposition](COMPATIBILITY.md#016-alpha3-public-api-disposition).
+The single release ledger is [0.16 alpha.2 public API disposition](COMPATIBILITY.md#016-alpha2-public-api-disposition).
 Do not duplicate it in generated coverage reports or infer a `keep` decision merely because a Rust
 method and native symbol share a name. Every removal must identify one replacement or explicitly
 state that the sys API is the intended unsafe route.

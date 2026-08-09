@@ -8,8 +8,8 @@ cursor handling and DPI awareness into Dear ImGui. Inspired by
 
 | Item          | Version |
 |---------------|---------|
-| Crate         | 0.16.0-alpha.3  |
-| dear-imgui-rs | 0.16.0-alpha.3  |
+| Crate         | 0.16.0-alpha.2  |
+| dear-imgui-rs | 0.16.0-alpha.2  |
 | winit         | 0.30.13 |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
