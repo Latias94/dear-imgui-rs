@@ -1,6 +1,7 @@
 use dear_imgui_examples::sdl3_callbacks::{
     Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
 };
+use dear_imgui_examples::sdl3_gpu_present::{primary_present_mode, secondary_present_mode};
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, SdlGpu3InitInfo, SdlGpu3RendererBackend};
 use sdl3::gpu::{PresentMode, ShaderFormat, SwapchainComposition};
@@ -9,14 +10,6 @@ use sdl3::{Sdl, VideoSubsystem};
 use sdl3_main::{AppResult, AppResultWithState, MainThreadData, app_impl};
 use std::cell::RefCell;
 use std::error::Error;
-
-fn select_present_mode(mailbox_supported: bool) -> PresentMode {
-    if mailbox_supported {
-        PresentMode::Mailbox
-    } else {
-        PresentMode::Vsync
-    }
-}
 
 fn low_latency_present_mode(gpu: &sdl3::gpu::Device, window: &sdl3::video::Window) -> PresentMode {
     // The device claims `window` before this query. Mailbox avoids presenting stale queued frames.
@@ -27,14 +20,7 @@ fn low_latency_present_mode(gpu: &sdl3::gpu::Device, window: &sdl3::video::Windo
             sdl3::sys::gpu::SDL_GPUPresentMode::MAILBOX,
         )
     };
-    select_present_mode(mailbox_supported)
-}
-
-fn secondary_viewport_present_mode() -> PresentMode {
-    // On D3D12, SDL claims new viewport windows with VSync before applying the requested mode.
-    // Switching the newly claimed viewport to Mailbox waits for the shared queue to drain, which
-    // turns a normal viewport drag into a synchronous UI stall. The primary window keeps Mailbox.
-    PresentMode::Vsync
+    primary_present_mode(mailbox_supported)
 }
 
 struct SdlGpuApp {
@@ -116,7 +102,7 @@ impl SdlGpuApp {
 
         // SAFETY: `window` and `gpu` are stored with the backend and outlive explicit shutdown.
         let mut init_info = SdlGpu3InitInfo::from_window(&gpu, &window);
-        init_info.present_mode = secondary_viewport_present_mode();
+        init_info.present_mode = secondary_present_mode();
         let sdl3_backend = unsafe { SdlGpu3RendererBackend::init(&mut imgui, &window, init_info)? };
 
         Ok(Self {
@@ -288,21 +274,5 @@ impl SdlGpuApp {
         if let Some(app) = state {
             app.shutdown();
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn mailbox_is_preferred_when_supported() {
-        assert_eq!(select_present_mode(true), PresentMode::Mailbox);
-        assert_eq!(select_present_mode(false), PresentMode::Vsync);
-    }
-
-    #[test]
-    fn secondary_viewports_stay_on_vsync() {
-        assert_eq!(secondary_viewport_present_mode(), PresentMode::Vsync);
     }
 }

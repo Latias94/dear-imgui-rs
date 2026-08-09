@@ -184,7 +184,7 @@ jobs:
         run: cargo check -p dear-imgui-examples --features "multi-viewport" --bin multi_viewport_wgpu --bin multi_viewport_ash
 
       - name: Check Ash dynamic-rendering multi-viewport smoke harness
-        run: cargo check -p dear-imgui-examples --features "ash-winit-multi-viewport,ash-dynamic-rendering" --bin ash_vulkan_validation_smoke
+        run: cargo check -p dear-imgui-examples --features "ash-winit-multi-viewport,ash-dynamic-rendering,ash-validation-smoke" --bin ash_vulkan_validation_smoke
 
       - name: Check SDL3 Glow multi-viewport example
         run: cargo check -p dear-imgui-examples --features "sdl3-glow-multi-viewport" --bin sdl3_glow_multi_viewport
@@ -213,10 +213,10 @@ jobs:
           --github-path "$env:GITHUB_PATH"
 
       - name: Test SDL3 callback event handoff
-        run: cargo nextest run -p dear-imgui-examples --lib --features "sdl3-platform"
+        run: cargo nextest run -p dear-imgui-sdl3 --lib callback_events
 
       - name: Test SDL3 GPU present-mode policy
-        run: cargo nextest run -p dear-imgui-examples --bin sdl3_sdlgpu_multi_viewport --features "sdl3-gpu-multi-viewport"
+        run: cargo nextest run -p dear-imgui-examples --lib --features "sdl3-gpu-multi-viewport" sdl3_gpu_present
 
       - name: Test SDL3 foreign pointer callback teardown
         run: cargo nextest run -p dear-imgui-sdl3 --lib --features "sdlgpu3-renderer,multi-viewport" pointer_callback_replacement_survives_renderer_shutdown
