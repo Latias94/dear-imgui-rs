@@ -340,7 +340,7 @@ impl OpenGlApp {
         }
         main.sdl3_backend.render_main(prepared)?;
         main.restore_main_context("presenting the main window")?;
-        main.window.gl_swap_window();
+        dear_imgui_examples::sdl3_gl::swap_window(&main.window)?;
         Ok(())
     }
 

@@ -504,7 +504,9 @@ impl<'a> SdlGlowFrameDriver<'a> {
             ));
         }
         self.restore_main_context("presenting the main window")?;
-        self.window.gl_swap_window();
+        dear_imgui_examples::sdl3_gl::swap_window(self.window).map_err(|error| {
+            SdlGlowFrameError::message(format!("failed to present the main OpenGL window: {error}"))
+        })?;
         self.presented = true;
         Ok(())
     }

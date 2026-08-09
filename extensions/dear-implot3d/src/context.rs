@@ -163,12 +163,15 @@ mod tests {
         let _guard = test_guard();
         let mut imgui = Context::create();
         {
-            use dear_imgui_rs::BackendFlags;
             let io = imgui.io_mut();
             io.set_display_size([800.0, 600.0]);
             io.set_delta_time(1.0 / 60.0);
-            io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_TEXTURES);
         }
+        imgui
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("headless test requires the legacy font-atlas capability")
+            .build();
         let plot_a = Plot3DContext::create(&imgui);
         let plot_b = Plot3DContext::create(&imgui);
         let raw_b = plot_b.raw;

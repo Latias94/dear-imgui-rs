@@ -412,6 +412,68 @@ enum NativeScopeOrder {
     ProvenanceOnly,
 }
 
+#[derive(Debug, Default)]
+enum NativeScopeStack {
+    #[default]
+    Empty,
+    One(u64),
+    Many(Vec<u64>),
+}
+
+impl NativeScopeStack {
+    fn push(&mut self, id: u64) {
+        *self = match std::mem::take(self) {
+            Self::Empty => Self::One(id),
+            Self::One(previous) => Self::Many(vec![previous, id]),
+            Self::Many(mut ids) => {
+                ids.push(id);
+                Self::Many(ids)
+            }
+        };
+    }
+
+    fn last(&self) -> Option<u64> {
+        match self {
+            Self::Empty => None,
+            Self::One(id) => Some(*id),
+            Self::Many(ids) => ids.last().copied(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::Empty => 0,
+            Self::One(_) => 1,
+            Self::Many(ids) => ids.len(),
+        }
+    }
+
+    fn position(&self, id: u64) -> Option<usize> {
+        match self {
+            Self::Empty => None,
+            Self::One(candidate) => (*candidate == id).then_some(0),
+            Self::Many(ids) => ids.iter().position(|candidate| *candidate == id),
+        }
+    }
+
+    fn remove(&mut self, position: usize) -> bool {
+        *self = match std::mem::take(self) {
+            Self::Empty => panic!("native scope resource stack is empty"),
+            Self::One(_) if position == 0 => Self::Empty,
+            Self::One(_) => panic!("native scope resource stack position is invalid"),
+            Self::Many(mut ids) => {
+                ids.remove(position);
+                match ids.as_slice() {
+                    [] => Self::Empty,
+                    [id] => Self::One(*id),
+                    _ => Self::Many(ids),
+                }
+            }
+        };
+        matches!(self, Self::Empty)
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 struct NativeScopeEntry {
     id: u64,
@@ -426,7 +488,7 @@ struct NativeScopeEntry {
 #[derive(Debug, Default)]
 pub(crate) struct NativeScopeTracker {
     next_id: u64,
-    stacks: HashMap<NativeScopeKey, Vec<u64>>,
+    stacks: HashMap<NativeScopeKey, NativeScopeStack>,
     entries: HashMap<u64, NativeScopeEntry>,
     pending_recovery: bool,
 }
@@ -522,10 +584,10 @@ impl NativeScopeTracker {
                     .stacks
                     .get(&key)
                     .expect("native scope resource stack disappeared");
-                if stack.last().copied() != Some(entry.id) {
+                if stack.last() != Some(entry.id) {
                     let top = stack
                         .last()
-                        .and_then(|id| self.entries.get(id))
+                        .and_then(|id| self.entries.get(&id))
                         .map_or("unknown scope", |entry| entry.label);
                     return Some(format!("was dropped before the active inner scope `{top}`"));
                 }
@@ -630,8 +692,7 @@ impl NativeScopeTracker {
                     .get_mut(&key)
                     .expect("native scope resource stack disappeared");
                 let position = stack
-                    .iter()
-                    .position(|candidate| *candidate == entry.id)
+                    .position(entry.id)
                     .expect("native scope resource stack lost its active entry");
                 if entry.order == NativeScopeOrder::StrictLifo {
                     assert_eq!(
@@ -640,8 +701,7 @@ impl NativeScopeTracker {
                         "strict native scope was removed out of order"
                     );
                 }
-                stack.remove(position);
-                stack.is_empty()
+                stack.remove(position)
             };
             if remove_stack {
                 self.stacks.remove(&key);

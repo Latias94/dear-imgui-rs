@@ -318,6 +318,13 @@ fn render_opens_its_resource_arena_from_the_pending_frame_epoch() -> RendererRes
 #[test]
 fn zero_sized_framebuffer_still_reconciles_the_pending_frame() -> RendererResult<()> {
     let Some((device, queue)) = request_test_device() else {
+        assert!(
+            std::env::var_os("DEAR_IMGUI_REQUIRE_WGPU_ADAPTER").is_none(),
+            "the WGPU zero-sized framebuffer gate requires a working headless adapter"
+        );
+        eprintln!(
+            "skipping WGPU zero-sized framebuffer test because no headless adapter is available"
+        );
         return Ok(());
     };
     let mut context = Context::create();

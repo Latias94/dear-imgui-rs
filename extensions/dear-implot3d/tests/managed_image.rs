@@ -18,7 +18,21 @@ fn prepare_imgui(imgui: &mut Context) {
     let io = imgui.io_mut();
     io.set_display_size([800.0, 600.0]);
     io.set_delta_time(1.0 / 60.0);
+}
+
+fn prepare_managed_imgui(imgui: &mut Context) {
+    prepare_imgui(imgui);
+    let io = imgui.io_mut();
     io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_TEXTURES);
+}
+
+fn prepare_legacy_imgui(imgui: &mut Context) {
+    prepare_imgui(imgui);
+    imgui
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("headless test requires the legacy font-atlas capability")
+        .build();
 }
 
 fn register_texture(imgui: &mut Context) -> ManagedTextureId {
@@ -48,7 +62,7 @@ fn panic_message(payload: Box<dyn Any + Send>) -> String {
 fn managed_and_legacy_images_resolve_in_the_owner_context() {
     let _guard = test_guard();
     let mut imgui = Context::create();
-    prepare_imgui(&mut imgui);
+    prepare_managed_imgui(&mut imgui);
     let managed = register_texture(&mut imgui);
     let plot = Plot3DContext::create(&imgui);
     let consumer = imgui
@@ -178,7 +192,7 @@ fn managed_image_rejects_a_foreign_context_before_plot_ffi() {
     let owner = owner.suspend_or_panic();
 
     let mut foreign = Context::create();
-    prepare_imgui(&mut foreign);
+    prepare_legacy_imgui(&mut foreign);
     let plot = Plot3DContext::create(&foreign);
     {
         let frame = foreign.begin_frame();
@@ -216,7 +230,7 @@ fn managed_image_rejects_a_foreign_context_before_plot_ffi() {
 fn managed_image_rejects_a_retired_identity_before_plot_ffi() {
     let _guard = test_guard();
     let mut imgui = Context::create();
-    prepare_imgui(&mut imgui);
+    prepare_legacy_imgui(&mut imgui);
     let stale = register_texture(&mut imgui);
     imgui
         .remove_texture(stale)

@@ -180,9 +180,9 @@ $env:DOCS_RS = '1'; cargo check -p dear-imgui-test-engine-sys
 ### Example checks to consider
 
 ```powershell
-cargo check -p dear-imgui-examples --bin implot_basic --features implot
-cargo check -p dear-imgui-examples --bin implot3d_basic --features implot3d
-cargo check -p dear-imgui-examples --bin imgui_test_engine_basic --features test-engine
+cargo check -p dear-imgui-examples --bin implot_minimal --features implot
+cargo check -p dear-imgui-examples --bin implot3d_minimal --features implot3d
+cargo check -p dear-imgui-examples --bin test_engine_integration --features test-engine
 cargo check -p dear-imgui-examples --bin node_editor_showcase --features node-editor-blueprints
 ```
 

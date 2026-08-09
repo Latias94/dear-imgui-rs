@@ -1,6 +1,6 @@
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use dear_imgui_rs::{BackendFlags, Context};
+use dear_imgui_rs::Context;
 use dear_implot3d::{
     Plot3D, Plot3DContext, Plot3DDataLayout, Plot3DError, Surface3D, Surface3DFlags,
 };
@@ -18,7 +18,11 @@ fn configured_context() -> Context {
     let io = context.io_mut();
     io.set_display_size([800.0, 600.0]);
     io.set_delta_time(1.0 / 60.0);
-    io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_TEXTURES);
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("headless test requires the legacy font-atlas capability")
+        .build();
     context
 }
 
