@@ -128,7 +128,7 @@ pub(crate) struct SecondarySubmissionEvidence {
 }
 
 impl SecondarySubmissionEvidence {
-    fn from_report(report: &wgpu_mvp::WgpuViewportFrameTraceReport) -> Option<Self> {
+    fn from_report(report: &wgpu_mvp::WgpuViewportFrameReport) -> Option<Self> {
         let render_submitted_viewport_ids = report
             .render_submitted_viewport_ids()
             .iter()

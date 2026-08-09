@@ -20,7 +20,7 @@ use super::registry::{
     GlobalHandles, drop_orphaned_viewport_data, preflight_runtime, register_runtime,
     renderer_globals, unregister_runtime,
 };
-use super::trace::{FrameTraceState, WgpuViewportFrameTraceReport};
+use super::trace::{FrameTraceState, WgpuViewportFrameReport};
 use crate::{ExternalTextureId, FramebufferExtent, GammaMode, RendererError, WgpuRenderer};
 
 struct WgpuRendererAttachmentMarker;
@@ -586,7 +586,7 @@ impl RuntimeControl {
         }
     }
 
-    fn finish_frame_trace(&self) -> WgpuViewportFrameTraceReport {
+    fn finish_frame_trace(&self) -> WgpuViewportFrameReport {
         self.frame_trace.borrow_mut().finish()
     }
 
@@ -1062,7 +1062,7 @@ pub(super) struct FrameTraceGuard<'runtime> {
 #[must_use = "render or explicitly drop the prepared main-viewport frame"]
 pub struct WgpuPreparedViewportFrame<'frame> {
     frame: ReconciledFrame<'frame>,
-    secondary: WgpuViewportFrameTraceReport,
+    secondary: WgpuViewportFrameReport,
     runtime: Rc<RuntimeIdentity>,
 }
 
@@ -1075,14 +1075,14 @@ impl WgpuPreparedViewportFrame<'_> {
 
     /// Returns same-scope evidence for completed secondary submissions and presentations.
     #[must_use]
-    pub fn secondary_report(&self) -> &WgpuViewportFrameTraceReport {
+    pub fn secondary_report(&self) -> &WgpuViewportFrameReport {
         &self.secondary
     }
 }
 
 impl FrameTraceGuard<'_> {
     /// Ends the trace and returns its normalized, same-scope submission evidence.
-    pub(super) fn finish(mut self) -> WgpuViewportFrameTraceReport {
+    pub(super) fn finish(mut self) -> WgpuViewportFrameReport {
         let report = self.control.finish_frame_trace();
         self.active = false;
         report

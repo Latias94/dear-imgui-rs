@@ -22,12 +22,12 @@ mod removed_free_api_contracts {
     ///
     /// ```
     /// use dear_imgui_wgpu::multi_viewport::{
-    ///     WgpuPreparedViewportFrame, WgpuViewportFrameTraceReport,
+    ///     WgpuPreparedViewportFrame, WgpuViewportFrameReport,
     /// };
     ///
     /// fn secondary_report<'a>(
     ///     frame: &'a WgpuPreparedViewportFrame<'_>,
-    /// ) -> &'a WgpuViewportFrameTraceReport {
+    /// ) -> &'a WgpuViewportFrameReport {
     ///     frame.secondary_report()
     /// }
     /// ```
@@ -87,6 +87,13 @@ mod removed_free_api_contracts {
     /// }
     /// ```
     struct PreparedTransaction;
+
+    /// The old manual-trace report name is intentionally unavailable.
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::multi_viewport::WgpuViewportFrameTraceReport;
+    /// ```
+    struct RemovedTraceReportName;
 }
 
 use dear_imgui_rs::{Context, FrameToken};
@@ -96,8 +103,7 @@ use super::multi_viewport_runtime::{
     OwningViewportRuntime, finish_route_preparation, prepare_route_for_context,
 };
 pub use super::multi_viewport_runtime::{
-    WgpuPreparedViewportFrame, WgpuViewportAttachError, WgpuViewportError,
-    WgpuViewportFrameTraceReport,
+    WgpuPreparedViewportFrame, WgpuViewportAttachError, WgpuViewportError, WgpuViewportFrameReport,
 };
 use super::multi_viewport_runtime::{WgpuViewportRouteError, WgpuViewportRouteFault};
 use crate::{ExternalTextureId, FramebufferExtent, GammaMode};

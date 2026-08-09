@@ -1,18 +1,18 @@
 use dear_imgui_rs::Id;
 
-/// Secondary-viewport GPU submissions collected within one trace scope.
+/// Secondary-viewport GPU submissions collected while preparing one frame.
 ///
 /// A viewport appears in [`Self::render_submitted_viewport_ids`] only after its command buffer
 /// was submitted and its acquired surface frame was retained for presentation. It appears in
 /// [`Self::present_submitted_viewport_ids`] only after the backend called the WGPU presentation
 /// API for that retained frame. Both ID sets are sorted and contain no duplicates.
 #[derive(Debug, Default, Eq, PartialEq)]
-pub struct WgpuViewportFrameTraceReport {
+pub struct WgpuViewportFrameReport {
     render_submitted_viewport_ids: Vec<Id>,
     present_submitted_viewport_ids: Vec<Id>,
 }
 
-impl WgpuViewportFrameTraceReport {
+impl WgpuViewportFrameReport {
     /// Returns sorted, unique viewport IDs whose render commands were submitted.
     pub fn render_submitted_viewport_ids(&self) -> &[Id] {
         &self.render_submitted_viewport_ids
@@ -37,7 +37,7 @@ fn normalize_ids(ids: &mut Vec<Id>) {
 
 #[derive(Debug, Default)]
 pub(super) struct FrameTraceState {
-    active: Option<WgpuViewportFrameTraceReport>,
+    active: Option<WgpuViewportFrameReport>,
 }
 
 impl FrameTraceState {
@@ -45,7 +45,7 @@ impl FrameTraceState {
         if self.active.is_some() {
             return false;
         }
-        self.active = Some(WgpuViewportFrameTraceReport::default());
+        self.active = Some(WgpuViewportFrameReport::default());
         true
     }
 
@@ -61,7 +61,7 @@ impl FrameTraceState {
         }
     }
 
-    pub(super) fn finish(&mut self) -> WgpuViewportFrameTraceReport {
+    pub(super) fn finish(&mut self) -> WgpuViewportFrameReport {
         self.active
             .take()
             .expect("a live WGPU frame-trace guard owns the active trace")

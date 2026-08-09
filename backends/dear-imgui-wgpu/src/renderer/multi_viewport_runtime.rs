@@ -16,7 +16,7 @@ pub use runtime::{
     WgpuPreparedViewportFrame, WgpuViewportAttachError, WgpuViewportError, WgpuViewportRouteError,
     WgpuViewportRouteFault,
 };
-pub use trace::WgpuViewportFrameTraceReport;
+pub use trace::WgpuViewportFrameReport;
 
 #[cfg(all(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
 compile_error!(
