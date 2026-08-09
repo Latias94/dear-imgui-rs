@@ -39,7 +39,7 @@ exclude = [
 ]
 
 [workspace.package]
-version = "0.16.0-alpha.2"
+version = "0.16.0-alpha.3"
 edition = "2024"
 rust-version = "1.92"
 authors = ["Mingzhen Zhuang <superfrankie621@gmail.com>"]
@@ -61,33 +61,33 @@ xtask = { path = "xtask", version = "0.1.0" }
 [workspace.dependencies]
 # Workspace release catalog. Keep every publishable package here so member
 # manifests inherit one path and one registry requirement for internal edges.
-build-support = { package = "dear-imgui-build-support", version = "=0.16.0-alpha.2", path = "tools/build-support" }
-dear-app = { version = "=0.16.0-alpha.2", path = "dear-app" }
-dear-file-browser = { version = "=0.16.0-alpha.2", path = "extensions/dear-file-browser" }
-dear-imgui-ash = { version = "=0.16.0-alpha.2", path = "backends/dear-imgui-ash" }
-dear-imgui-bevy = { version = "=0.16.0-alpha.2", path = "backends/dear-imgui-bevy" }
-dear-imgui-glow = { version = "=0.16.0-alpha.2", path = "backends/dear-imgui-glow" }
-dear-imgui-reflect = { version = "=0.16.0-alpha.2", path = "extensions/dear-imgui-reflect" }
-dear-imgui-reflect-derive = { version = "=0.16.0-alpha.2", path = "extensions/dear-imgui-reflect-derive" }
-dear-imgui-rs = { version = "=0.16.0-alpha.2", path = "dear-imgui", default-features = false }
-dear-imgui-sdl3 = { version = "=0.16.0-alpha.2", path = "backends/dear-imgui-sdl3" }
-dear-imgui-sys = { version = "=0.16.0-alpha.2", path = "dear-imgui-sys", default-features = false }
-dear-imgui-test-engine = { version = "=0.16.0-alpha.2", path = "extensions/dear-imgui-test-engine" }
-dear-imgui-test-engine-sys = { version = "=0.16.0-alpha.2", path = "extensions/dear-imgui-test-engine-sys", default-features = false }
-dear-imgui-wgpu = { version = "=0.16.0-alpha.2", path = "backends/dear-imgui-wgpu" }
-dear-imgui-winit = { version = "=0.16.0-alpha.2", path = "backends/dear-imgui-winit" }
-dear-imguizmo = { version = "=0.16.0-alpha.2", path = "extensions/dear-imguizmo" }
-dear-imguizmo-quat = { version = "=0.16.0-alpha.2", path = "extensions/dear-imguizmo-quat" }
-dear-imguizmo-quat-sys = { version = "=0.16.0-alpha.2", path = "extensions/dear-imguizmo-quat-sys", default-features = false }
-dear-imguizmo-sys = { version = "=0.16.0-alpha.2", path = "extensions/dear-imguizmo-sys", default-features = false }
-dear-imnodes = { version = "=0.16.0-alpha.2", path = "extensions/dear-imnodes" }
-dear-imnodes-sys = { version = "=0.16.0-alpha.2", path = "extensions/dear-imnodes-sys", default-features = false }
-dear-implot = { version = "=0.16.0-alpha.2", path = "extensions/dear-implot" }
-dear-implot-sys = { version = "=0.16.0-alpha.2", path = "extensions/dear-implot-sys", default-features = false }
-dear-implot3d = { version = "=0.16.0-alpha.2", path = "extensions/dear-implot3d" }
-dear-implot3d-sys = { version = "=0.16.0-alpha.2", path = "extensions/dear-implot3d-sys", default-features = false }
-dear-node-editor = { version = "=0.16.0-alpha.2", path = "extensions/dear-node-editor" }
-dear-node-editor-sys = { version = "=0.16.0-alpha.2", path = "extensions/dear-node-editor-sys", default-features = false }
+build-support = { package = "dear-imgui-build-support", version = "=0.16.0-alpha.3", path = "tools/build-support" }
+dear-app = { version = "=0.16.0-alpha.3", path = "dear-app" }
+dear-file-browser = { version = "=0.16.0-alpha.3", path = "extensions/dear-file-browser" }
+dear-imgui-ash = { version = "=0.16.0-alpha.3", path = "backends/dear-imgui-ash" }
+dear-imgui-bevy = { version = "=0.16.0-alpha.3", path = "backends/dear-imgui-bevy" }
+dear-imgui-glow = { version = "=0.16.0-alpha.3", path = "backends/dear-imgui-glow" }
+dear-imgui-reflect = { version = "=0.16.0-alpha.3", path = "extensions/dear-imgui-reflect" }
+dear-imgui-reflect-derive = { version = "=0.16.0-alpha.3", path = "extensions/dear-imgui-reflect-derive" }
+dear-imgui-rs = { version = "=0.16.0-alpha.3", path = "dear-imgui", default-features = false }
+dear-imgui-sdl3 = { version = "=0.16.0-alpha.3", path = "backends/dear-imgui-sdl3" }
+dear-imgui-sys = { version = "=0.16.0-alpha.3", path = "dear-imgui-sys", default-features = false }
+dear-imgui-test-engine = { version = "=0.16.0-alpha.3", path = "extensions/dear-imgui-test-engine" }
+dear-imgui-test-engine-sys = { version = "=0.16.0-alpha.3", path = "extensions/dear-imgui-test-engine-sys", default-features = false }
+dear-imgui-wgpu = { version = "=0.16.0-alpha.3", path = "backends/dear-imgui-wgpu" }
+dear-imgui-winit = { version = "=0.16.0-alpha.3", path = "backends/dear-imgui-winit" }
+dear-imguizmo = { version = "=0.16.0-alpha.3", path = "extensions/dear-imguizmo" }
+dear-imguizmo-quat = { version = "=0.16.0-alpha.3", path = "extensions/dear-imguizmo-quat" }
+dear-imguizmo-quat-sys = { version = "=0.16.0-alpha.3", path = "extensions/dear-imguizmo-quat-sys", default-features = false }
+dear-imguizmo-sys = { version = "=0.16.0-alpha.3", path = "extensions/dear-imguizmo-sys", default-features = false }
+dear-imnodes = { version = "=0.16.0-alpha.3", path = "extensions/dear-imnodes" }
+dear-imnodes-sys = { version = "=0.16.0-alpha.3", path = "extensions/dear-imnodes-sys", default-features = false }
+dear-implot = { version = "=0.16.0-alpha.3", path = "extensions/dear-implot" }
+dear-implot-sys = { version = "=0.16.0-alpha.3", path = "extensions/dear-implot-sys", default-features = false }
+dear-implot3d = { version = "=0.16.0-alpha.3", path = "extensions/dear-implot3d" }
+dear-implot3d-sys = { version = "=0.16.0-alpha.3", path = "extensions/dear-implot3d-sys", default-features = false }
+dear-node-editor = { version = "=0.16.0-alpha.3", path = "extensions/dear-node-editor" }
+dear-node-editor-sys = { version = "=0.16.0-alpha.3", path = "extensions/dear-node-editor-sys", default-features = false }
 
 # Core dependencies
 bitflags = "2.11"

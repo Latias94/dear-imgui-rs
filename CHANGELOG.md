@@ -8,9 +8,7 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
-## [0.16.0-alpha.2]
-
-Pending publication.
+## [0.16.0-alpha.3] - 2026-08-09
 
 This source-breaking prerelease completes the ownership work started in alpha.1. Safe APIs now carry the Context, frame, renderer, native-callback, and GPU-completion capabilities needed for the operation they expose; provisional aliases and manual phase controls were removed instead of becoming permanent compatibility surface.
 
@@ -36,6 +34,12 @@ See the [compatibility guide](docs/COMPATIBILITY.md), [custom backend guide](doc
 - Public examples now follow a four-level learning path with focused `*_minimal` entries, explicit lifecycle references, smaller showcases, and no CI protocol in copyable code; runtime evidence lives in private backend-specific probes that share the same lifecycle modules.
 - Obsolete compatibility surfaces were removed: use `Style::font_scale_main` instead of the old IO font-scale shims, replace the removed `Color*Flags::ALPHA_PREVIEW` names with `NONE` (the upstream default) or `ALPHA_NO_BG` only when suppressing the checkerboard, and use `ImString` instead of the unused `ImStr` alias and `im_str!` macro.
 - CI pins every third-party Action, cancels stale runs, checks Rust 1.92 and public API doctests, regenerates maintained bindings, and authorizes crates.io Trusted Publishing only from the exact successful run and candidate SHA. Release automation reserves the tag before publishing, rejects stale GitHub Release assets, and treats runtime preparation retries as authoritative only after an initial failure.
+
+### Fixed
+
+- Backend-free examples and ImPlot3D headless tests now declare legacy font-atlas ownership before opening a frame, matching the fail-closed font lifecycle contract.
+- SDL3 OpenGL examples now propagate native swap failures instead of reporting a main window as presented after `SDL_GL_SwapWindow` fails.
+- Common single-level UI scopes no longer allocate a temporary heap-backed stack for every token.
 
 ## [0.16.0-alpha.1] - 2026-08-02
 

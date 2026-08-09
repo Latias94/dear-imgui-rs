@@ -41,7 +41,7 @@ Typical use cases:
 - `sdlgpu3-renderer`: enables this crate's official SDLGPU3 renderer shim.
 - `multi-viewport`: enables multi-viewport helpers (requires `dear-imgui-rs/multi-viewport`).
 
-Until `0.16.0-alpha.2` is published, test any feature combination from `main`:
+Until `0.16.0-alpha.3` is published, test any feature combination from `main`:
 
 ```toml
 dear-imgui-sdl3 = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["opengl3-renderer"] }
@@ -52,33 +52,33 @@ After publication, use the exact prerelease requirement in the combinations belo
 Platform-only usage (SDL3 + WGPU/Glow, no official OpenGL3 renderer):
 
 ```toml
-dear-imgui-sdl3 = { version = "=0.16.0-alpha.2", default-features = false }
+dear-imgui-sdl3 = { version = "=0.16.0-alpha.3", default-features = false }
 ```
 
 Enable the official OpenGL3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "=0.16.0-alpha.2", features = ["opengl3-renderer"] }
+dear-imgui-sdl3 = { version = "=0.16.0-alpha.3", features = ["opengl3-renderer"] }
 ```
 
 Enable the official SDLRenderer3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "=0.16.0-alpha.2", features = ["sdlrenderer3-renderer"] }
+dear-imgui-sdl3 = { version = "=0.16.0-alpha.3", features = ["sdlrenderer3-renderer"] }
 ```
 
 Enable the official SDLGPU3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "=0.16.0-alpha.2", features = ["sdlgpu3-renderer"] }
+dear-imgui-sdl3 = { version = "=0.16.0-alpha.3", features = ["sdlgpu3-renderer"] }
 ```
 
 ## Compatibility
 
 | Item          | Version  |
 |---------------|----------|
-| Crate         | 0.16.0-alpha.2  |
-| dear-imgui-rs | 0.16.0-alpha.2  |
+| Crate         | 0.16.0-alpha.3  |
+| dear-imgui-rs | 0.16.0-alpha.3  |
 | SDL3 crate    | 0.18.4   |
 | sdl3-sys      | 0.6      |
 
@@ -417,7 +417,7 @@ Example:
 
 ```toml
 [dependencies]
-dear-imgui-sdl3 = { version = "=0.16.0-alpha.2", features = ["opengl3-renderer"] }
+dear-imgui-sdl3 = { version = "=0.16.0-alpha.3", features = ["opengl3-renderer"] }
 sdl3 = { version = "0.18", features = ["build-from-source"] }
 ```
 

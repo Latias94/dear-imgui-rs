@@ -60,6 +60,10 @@ let mut ctx = Context::create();
 // you must set `io.DisplaySize` before calling `Context::frame()`.
 ctx.io_mut().set_display_size([300.0, 120.0]);
 ctx.io_mut().set_delta_time(1.0 / 60.0);
+ctx.font_atlas()
+   .try_claim_legacy_renderer()
+   .expect("the backend-free example uses the legacy font atlas")
+   .build();
 
 let ui = ctx.frame();
 ui.window("Hello")
@@ -104,7 +108,7 @@ The 0.16 train is intentionally breaking. Alpha.1 introduced the main architectu
 - implicit WASM target selection to the explicit `wasm32-unknown-unknown` plus `wasm` feature contract; and
 - `dear_imgui_sys::IMGUI_VERSION` to `BINDING_VERSION`, without a compatibility alias.
 
-Alpha.2 replaces alpha.1's `RenderedFrame` with the linear `PendingFrame` -> `ReconciledFrame` protocol and replaces the mode-selecting `RendererConsumer` with separate synchronous and detached capabilities. It also hardens Context, Docking, multi-viewport renderer, Test Engine, and Bevy frame ownership. See the [alpha.2 migration table](CHANGELOG.md#0160-alpha2); applications migrating directly from 0.15 should also read the [alpha.1 migration guide](CHANGELOG.md#0160-alpha1).
+Alpha.3 replaces alpha.1's `RenderedFrame` with the linear `PendingFrame` -> `ReconciledFrame` protocol and replaces the mode-selecting `RendererConsumer` with separate synchronous and detached capabilities. It also hardens Context, Docking, multi-viewport renderer, Test Engine, and Bevy frame ownership. See the [alpha.3 migration table](CHANGELOG.md#0160-alpha3); applications migrating directly from 0.15 should also read the [alpha.1 migration guide](CHANGELOG.md#0160-alpha1).
 
 ## Examples
 
@@ -164,7 +168,7 @@ under `examples/ci/` are release evidence and are intentionally excluded from th
 
 ## Installation
 
-The source tree is preparing the unified `0.16.0-alpha.2` release. The latest crates.io prerelease is `0.16.0-alpha.1`, while the latest stable train remains `0.15.1`. Before alpha.2 is published, use Git dependencies on the repository's `main` branch. After publication, pin the exact prerelease `=0.16.0-alpha.2`; a broad `"0.16"` requirement does not select a prerelease. Applications staying on `0.15.1` can use the [v0.15.1 README](https://github.com/Latias94/dear-imgui-rs/blob/v0.15.1/README.md) for its API and installation snippets.
+The source tree is preparing the unified `0.16.0-alpha.3` release. The latest crates.io prerelease is `0.16.0-alpha.1`, while the latest stable train remains `0.15.1`. Before alpha.3 is published, use Git dependencies on the repository's `main` branch. After publication, pin the exact prerelease `=0.16.0-alpha.3`; a broad `"0.16"` requirement does not select a prerelease. Applications staying on `0.15.1` can use the [v0.15.1 README](https://github.com/Latias94/dear-imgui-rs/blob/v0.15.1/README.md) for its API and installation snippets.
 
 ### Core + Backends
 
@@ -353,47 +357,47 @@ Quick examples (enable auto prebuilt download):
 - Env (Unix): `IMGUI_SYS_USE_PREBUILT=1 cargo build -p dear-imgui-rs --features prebuilt`
 - Env (Windows PowerShell): `$env:IMGUI_SYS_USE_PREBUILT='1'; cargo build -p dear-imgui-rs --features prebuilt`
 
-## Compatibility Candidate (0.16.0-alpha.2)
+## Compatibility Candidate (0.16.0-alpha.3)
 
-The workspace follows a release-train model. The table below lists the combinations validated for the 0.16.0-alpha.2 candidate. See [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for version history and compatibility policy.
+The workspace follows a release-train model. The table below lists the combinations validated for the 0.16.0-alpha.3 candidate. See [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for version history and compatibility policy.
 
 Core
 
 | Crate           | Version | Notes                                     |
 |-----------------|---------|-------------------------------------------|
-| dear-imgui-rs   | 0.16.0-alpha.2 | Safe Rust API over dear-imgui-sys     |
-| dear-imgui-sys  | 0.16.0-alpha.2 | Dear ImGui v1.92.9b docking via cimgui |
+| dear-imgui-rs   | 0.16.0-alpha.3 | Safe Rust API over dear-imgui-sys     |
+| dear-imgui-sys  | 0.16.0-alpha.3 | Dear ImGui v1.92.9b docking via cimgui |
 
 Backends
 
 | Crate            | Version | External deps     | Notes                          |
 |------------------|---------|-------------------|--------------------------------|
-| dear-imgui-wgpu  | 0.16.0-alpha.2 | wgpu = 30/29/28/27 | WebGPU renderer; WGPU 30 default, native Winit/SDL3 multi-viewport, browser single-window |
-| dear-imgui-glow  | 0.16.0-alpha.2 | glow = 0.17       | OpenGL renderer (winit/glutin) |
-| dear-imgui-ash   | 0.16.0-alpha.2 | ash = 0.38        | Native Vulkan renderer with Winit/SDL3 multi-viewport adapters |
-| dear-imgui-winit | 0.16.0-alpha.2 | winit = 0.30.13   | Winit platform backend         |
-| dear-imgui-sdl3  | 0.16.0-alpha.2 | sdl3 = 0.18.4     | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
-| dear-imgui-bevy  | 0.16.0-alpha.2 | Bevy = 0.19.0     | Experimental Bevy-native backend with docking, texture interop, and native multi-viewport |
+| dear-imgui-wgpu  | 0.16.0-alpha.3 | wgpu = 30/29/28/27 | WebGPU renderer; WGPU 30 default, native Winit/SDL3 multi-viewport, browser single-window |
+| dear-imgui-glow  | 0.16.0-alpha.3 | glow = 0.17       | OpenGL renderer (winit/glutin) |
+| dear-imgui-ash   | 0.16.0-alpha.3 | ash = 0.38        | Native Vulkan renderer with Winit/SDL3 multi-viewport adapters |
+| dear-imgui-winit | 0.16.0-alpha.3 | winit = 0.30.13   | Winit platform backend         |
+| dear-imgui-sdl3  | 0.16.0-alpha.3 | sdl3 = 0.18.4     | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
+| dear-imgui-bevy  | 0.16.0-alpha.3 | Bevy = 0.19.0     | Experimental Bevy-native backend with docking, texture interop, and native multi-viewport |
 
 Application Runtime
 
 | Crate     | Version | Requires dear-imgui-rs | Notes                                            |
 |-----------|---------|------------------------|--------------------------------------------------|
-| dear-app  | 0.16.0-alpha.2 | 0.16.0-alpha.2       | Generation-aware Winit + WGPU application runtime |
+| dear-app  | 0.16.0-alpha.3 | 0.16.0-alpha.3       | Generation-aware Winit + WGPU application runtime |
 
 Extensions
 
 | Crate               | Version | Requires dear-imgui-rs | Sys crate                   | Notes                                  |
 |---------------------|---------|------------------------|-----------------------------|----------------------------------------|
-| dear-implot         | 0.16.0-alpha.2 | 0.16.0-alpha.2 | dear-implot-sys 0.16.0-alpha.2 | 2D plotting                         |
-| dear-imnodes        | 0.16.0-alpha.2 | 0.16.0-alpha.2 | dear-imnodes-sys 0.16.0-alpha.2 | WASM-capable node editor            |
-| dear-node-editor    | 0.16.0-alpha.2 | 0.16.0-alpha.2 | dear-node-editor-sys 0.16.0-alpha.2 | Native imgui-node-editor; optional blueprints profile |
-| dear-imguizmo       | 0.16.0-alpha.2 | 0.16.0-alpha.2 | dear-imguizmo-sys 0.16.0-alpha.2 | 3D gizmo + GraphEditor              |
-| dear-file-browser   | 0.16.0-alpha.2 | 0.16.0-alpha.2 | —                              | State-owned ImGui UI + native dialog backends |
-| dear-implot3d       | 0.16.0-alpha.2 | 0.16.0-alpha.2 | dear-implot3d-sys 0.16.0-alpha.2 | 3D plotting                       |
-| dear-imguizmo-quat  | 0.16.0-alpha.2 | 0.16.0-alpha.2 | dear-imguizmo-quat-sys 0.16.0-alpha.2 | Quaternion gizmo              |
-| dear-imgui-test-engine | 0.16.0-alpha.2 | 0.16.0-alpha.2 | dear-imgui-test-engine-sys 0.16.0-alpha.2 | UI automation and test runner |
-| dear-imgui-reflect  | 0.16.0-alpha.2 | 0.16.0-alpha.2 | —                              | Session-owned reflection UI              |
+| dear-implot         | 0.16.0-alpha.3 | 0.16.0-alpha.3 | dear-implot-sys 0.16.0-alpha.3 | 2D plotting                         |
+| dear-imnodes        | 0.16.0-alpha.3 | 0.16.0-alpha.3 | dear-imnodes-sys 0.16.0-alpha.3 | WASM-capable node editor            |
+| dear-node-editor    | 0.16.0-alpha.3 | 0.16.0-alpha.3 | dear-node-editor-sys 0.16.0-alpha.3 | Native imgui-node-editor; optional blueprints profile |
+| dear-imguizmo       | 0.16.0-alpha.3 | 0.16.0-alpha.3 | dear-imguizmo-sys 0.16.0-alpha.3 | 3D gizmo + GraphEditor              |
+| dear-file-browser   | 0.16.0-alpha.3 | 0.16.0-alpha.3 | —                              | State-owned ImGui UI + native dialog backends |
+| dear-implot3d       | 0.16.0-alpha.3 | 0.16.0-alpha.3 | dear-implot3d-sys 0.16.0-alpha.3 | 3D plotting                       |
+| dear-imguizmo-quat  | 0.16.0-alpha.3 | 0.16.0-alpha.3 | dear-imguizmo-quat-sys 0.16.0-alpha.3 | Quaternion gizmo              |
+| dear-imgui-test-engine | 0.16.0-alpha.3 | 0.16.0-alpha.3 | dear-imgui-test-engine-sys 0.16.0-alpha.3 | UI automation and test runner |
+| dear-imgui-reflect  | 0.16.0-alpha.3 | 0.16.0-alpha.3 | —                              | Session-owned reflection UI              |
 
 The workspace MSRV is Rust 1.92. The experimental Bevy backend requires Rust 1.95 because Bevy 0.19 does. Select exactly one WGPU major; `dear-app` follows the WGPU 30 default.
 

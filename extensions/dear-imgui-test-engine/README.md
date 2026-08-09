@@ -25,15 +25,15 @@ For native build/link options, see `extensions/dear-imgui-test-engine-sys/README
 
 | Item                        | Version |
 |-----------------------------|---------|
-| Crate                       | 0.16.0-alpha.2  |
-| dear-imgui-rs               | 0.16.0-alpha.2  |
-| dear-imgui-test-engine-sys  | 0.16.0-alpha.2  |
+| Crate                       | 0.16.0-alpha.3  |
+| dear-imgui-rs               | 0.16.0-alpha.3  |
+| dear-imgui-test-engine-sys  | 0.16.0-alpha.3  |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md).
 
 ## Quick Start
 
-Until `0.16.0-alpha.2` is published, use matching Git dependencies from `main`:
+Until `0.16.0-alpha.3` is published, use matching Git dependencies from `main`:
 
 ```toml
 [dependencies]
@@ -45,8 +45,8 @@ After publication, use the exact prerelease requirements:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "=0.16.0-alpha.2"
-dear-imgui-test-engine = "=0.16.0-alpha.2"
+dear-imgui-rs = "=0.16.0-alpha.3"
+dear-imgui-test-engine = "=0.16.0-alpha.3"
 ```
 
 ```rust
