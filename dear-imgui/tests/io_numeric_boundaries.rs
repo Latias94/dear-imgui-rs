@@ -226,24 +226,3 @@ fn io_config_floats_reject_invalid_values_before_storing() {
     });
     assert_eq!(io.key_repeat_rate(), 0.0);
 }
-
-#[test]
-fn io_font_global_scale_rejects_non_positive_values_before_storing() {
-    let _guard = test_guard();
-
-    let mut ctx = imgui::Context::create();
-    let io = ctx.io_mut();
-
-    io.set_font_global_scale(1.5);
-    assert_eq!(io.font_global_scale(), 1.5);
-
-    assert_panics!({
-        io.set_font_global_scale(0.0);
-    });
-    assert_eq!(io.font_global_scale(), 1.5);
-
-    assert_panics!({
-        io.set_font_global_scale(f32::NAN);
-    });
-    assert_eq!(io.font_global_scale(), 1.5);
-}

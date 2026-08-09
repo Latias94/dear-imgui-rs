@@ -165,8 +165,8 @@ no separate main-surface acquisition phase to defer.
 
 Attachment preflights the complete renderer callback table and renderer capability bit, and fails
 without publishing partial state. Callback panic, reentry, renderer failure, and foreign callback
-replacement are contained and returned by the owning render route. `poll_fault` remains available
-for native lifecycle callbacks that run outside a frame route. Explicit shutdown
+replacement are contained and returned by the owning render route. Native lifecycle failures are
+reported by the owning shutdown route rather than a detached polling API. Explicit shutdown
 validates the synchronous consumer lifecycle before deleting GL resources. Explicit shutdown and
 Context-first teardown both delete renderer resources before platform windows. Every Rust and
 direct renderer callback entry revalidates the renderer capability, platform capability, required

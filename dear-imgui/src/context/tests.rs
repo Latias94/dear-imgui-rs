@@ -2251,7 +2251,7 @@ fn style_and_main_viewport_accessors_use_self_context_not_current_context() {
 }
 
 #[test]
-fn io_font_global_scale_uses_owner_context_not_current_context() {
+fn style_font_scale_uses_owner_context_not_current_context() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx_a = Context::create();
     ctx_a.style_mut().set_font_scale_main(1.25);
@@ -2266,9 +2266,9 @@ fn io_font_global_scale_uses_owner_context_not_current_context() {
         super::ContextActivationReason::ContextAlreadyActive
     );
     let mut ctx_a = activation_error.into_owner();
-    assert_eq!(ctx_a.0.io().font_global_scale(), 1.25);
+    assert_eq!(ctx_a.0.style().font_scale_main(), 1.25);
 
-    ctx_a.0.io_mut().set_font_global_scale(1.5);
+    ctx_a.0.style_mut().set_font_scale_main(1.5);
 
     assert_eq!(ctx_a.0.style().font_scale_main(), 1.5);
     assert_eq!(ctx_b.style().font_scale_main(), 2.0);

@@ -184,6 +184,11 @@ fn style_setters_reject_non_finite_or_invalid_runtime_numbers_before_storing() {
     assert_eq!(style.font_scale_main(), 1.2);
 
     assert_panics!({
+        style.set_font_scale_main(f32::NAN);
+    });
+    assert_eq!(style.font_scale_main(), 1.2);
+
+    assert_panics!({
         style.set_font_scale_dpi(f32::INFINITY);
     });
     assert_eq!(style.font_scale_dpi(), 1.3);

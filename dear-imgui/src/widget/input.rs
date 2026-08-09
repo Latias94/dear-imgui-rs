@@ -15,7 +15,7 @@
 //!
 //! // Text (ImString, zero-copy)
 //! let mut im = ImString::with_capacity(64);
-//! ui.input_text_imstr("ImStr", &mut im).build();
+//! ui.input_text_imstr("ImString", &mut im).build();
 //!
 //! // Numbers
 //! let mut i = 0i32;

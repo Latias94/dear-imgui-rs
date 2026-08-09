@@ -19,16 +19,23 @@
 //!     // edited in-place, no extra copies
 //! }
 //! ```
+//!
+//! The unused `ImStr` alias and allocating `im_str!` compatibility macro are intentionally absent:
+//! ```compile_fail
+//! let _: dear_imgui_rs::ImStr<'static> = std::borrow::Cow::Borrowed("text");
+//! ```
+//! ```compile_fail
+//! let _ = dear_imgui_rs::im_str!("text");
+//! ```
 mod buffer;
 mod im_string;
-mod macros;
 mod scratch;
 
 #[cfg(test)]
 mod tests;
 
 pub use buffer::UiBuffer;
-pub use im_string::{ImStr, ImString};
+pub use im_string::ImString;
 pub(crate) use scratch::tls_scratch_txt;
 pub use scratch::{
     with_scratch_txt, with_scratch_txt_slice, with_scratch_txt_slice_with_opt,

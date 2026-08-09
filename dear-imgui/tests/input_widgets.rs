@@ -30,7 +30,7 @@ fn input_text_growable_buffer_no_panic() {
     let _ = ui.input_text("LongText", &mut text).build();
     // ImString variant
     let mut im = imgui::ImString::new("hello");
-    let _ = ui.input_text_imstr("ImStr", &mut im).build();
+    let _ = ui.input_text_imstr("ImString", &mut im).build();
     // Ensure we can render without crashes
     // No render required in headless tests
 }
@@ -59,7 +59,7 @@ fn input_text_multiline_growable_buffer_no_panic() {
     // ImString variant
     let mut im = imgui::ImString::new(String::from_iter(std::iter::repeat_n('c', 4096)));
     let _ = ui
-        .input_text_multiline_imstr("ImStrMultiline", &mut im, [300.0, 120.0])
+        .input_text_multiline_imstr("ImStringMultiline", &mut im, [300.0, 120.0])
         .build();
     // No render required in headless tests
 }

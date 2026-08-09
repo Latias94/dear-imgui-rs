@@ -16,6 +16,12 @@
 //! io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_TEXTURES);
 //! ```
 //!
+//! Font scaling is style state rather than IO compatibility state:
+//! ```compile_fail
+//! # let mut ctx = dear_imgui_rs::Context::create();
+//! ctx.io_mut().set_font_global_scale(1.25);
+//! ```
+//!
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -28,7 +34,6 @@ mod core;
 mod display;
 mod events;
 mod flags;
-mod font;
 mod input_state;
 mod metrics;
 mod mouse;

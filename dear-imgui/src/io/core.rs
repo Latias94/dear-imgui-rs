@@ -26,12 +26,6 @@ impl Io {
         unsafe { &mut *self.0.get() }
     }
 
-    pub(crate) fn context_ptr(&self, caller: &str) -> *mut sys::ImGuiContext {
-        let ctx = self.inner().Ctx;
-        assert!(!ctx.is_null(), "{caller} requires a valid ImGui context");
-        ctx
-    }
-
     fn frame_count(&self) -> i32 {
         let ctx = self.inner().Ctx;
         if ctx.is_null() {

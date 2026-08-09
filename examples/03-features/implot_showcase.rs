@@ -622,7 +622,7 @@ impl AppWindow {
 
                 ui.separator();
                 ui.text("API Comparison:");
-                ui.text("Old API: plot_ui.plot_line(\"label\", &x, &y)");
+                ui.text("0.15 API (historical): plot_ui.plot_line(\"label\", &x, &y)");
                 ui.text("New API: LinePlot::new(\"label\", &x, &y).plot(&plot_ui)");
                 ui.text("Benefits:");
                 ui.bullet_text("Type safety and validation");
