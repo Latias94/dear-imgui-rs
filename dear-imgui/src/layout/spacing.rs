@@ -1,25 +1,27 @@
 use super::validation::{assert_finite_f32, assert_finite_vec2};
-use crate::Ui;
-use crate::sys;
+use crate::scope::{NativeScopePop, NativeScopeToken};
+use crate::{Ui, sys};
 
 /// Tracks an indentation scope started with [`Ui::begin_indent`] or
 /// [`Ui::begin_indent_by`].
+///
+/// Tokens from the same window may be ended in any order because each token removes its own
+/// captured width. Cross-window cleanup is deferred until the originating window becomes current
+/// again. [`Ui::with_indent`] and [`Ui::with_indent_by`] remain the canonical APIs for ordinary
+/// scoped use.
 #[must_use]
 pub struct IndentToken<'ui> {
-    ui: &'ui Ui,
-    width: f32,
+    scope: NativeScopeToken<'ui>,
 }
 
 impl IndentToken<'_> {
     /// Ends the indentation scope explicitly.
-    pub fn end(self) {
-        // Drop restores the previous indentation.
-    }
+    pub fn end(self) {}
 }
 
 impl Drop for IndentToken<'_> {
     fn drop(&mut self) {
-        self.ui.unindent_by(self.width);
+        self.scope.finish();
     }
 }
 
@@ -95,28 +97,58 @@ impl Ui {
         self.run_with_bound_context(|| unsafe { sys::igIndent(width) });
     }
 
-    /// Starts an indentation scope using `Style::indent_spacing`.
+    /// Starts an indentation scope using [`Style::indent_spacing`](crate::Style::indent_spacing).
     ///
-    /// The returned token restores the previous indentation when it is dropped
-    /// or explicitly ended.
+    /// The returned token restores the exact width captured at creation and may be dropped in any
+    /// order relative to other indentation tokens from the same window.
     #[doc(alias = "Indent")]
     pub fn begin_indent(&self) -> IndentToken<'_> {
-        let width = self.run_with_bound_context(|| {
-            // SAFETY: the bound Ui owns a live current context, so `igGetStyle` is non-null. The
-            // spacing value is copied immediately and no reference escapes this call.
-            unsafe { (*sys::igGetStyle()).IndentSpacing }
-        });
-        self.begin_indent_by(width)
+        self.begin_indent_by(0.0)
     }
 
     /// Starts an indentation scope with a custom width.
     ///
-    /// The returned token restores the previous indentation when it is dropped
-    /// or explicitly ended.
+    /// Passing `0.0` snapshots the current [`Style::indent_spacing`](crate::Style::indent_spacing)
+    /// so a later style change cannot alter restoration.
     #[doc(alias = "Indent")]
     pub fn begin_indent_by(&self, width: f32) -> IndentToken<'_> {
-        self.indent_by(width);
-        IndentToken { ui: self, width }
+        assert_finite_f32("Ui::begin_indent_by()", "width", width);
+        let width = self.run_with_bound_context(|| unsafe {
+            let width = if width == 0.0 {
+                (*sys::igGetStyle()).IndentSpacing
+            } else {
+                width
+            };
+            sys::igIndent(width);
+            width
+        });
+        IndentToken {
+            scope: self
+                .begin_provenance_native_scope(NativeScopePop::Unindent(width), "IndentToken"),
+        }
+    }
+
+    /// Runs `f` in an indentation scope using [`Style::indent_spacing`](crate::Style::indent_spacing).
+    ///
+    /// The indentation is restored if `f` returns early or panics. Prefer this closure-based
+    /// scope over manually pairing [`Self::indent`] and [`Self::unindent`].
+    #[doc(alias = "Indent", alias = "Unindent")]
+    pub fn with_indent<R>(&self, f: impl FnOnce() -> R) -> R {
+        let indent = self.begin_indent();
+        let result = f();
+        drop(indent);
+        result
+    }
+
+    /// Runs `f` in an indentation scope with a custom width.
+    ///
+    /// The indentation is restored if `f` returns early or panics.
+    #[doc(alias = "Indent", alias = "Unindent")]
+    pub fn with_indent_by<R>(&self, width: f32, f: impl FnOnce() -> R) -> R {
+        let indent = self.begin_indent_by(width);
+        let result = f();
+        drop(indent);
+        result
     }
 
     /// Moves content position to the left by `Style::indent_spacing`

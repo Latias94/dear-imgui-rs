@@ -8,6 +8,7 @@
 //! The intent is to provide a simple, ownership-aware API that:
 //! - plugs into an existing `dear-imgui-rs::Context`
 //! - integrates with an SDL3 window and OpenGL context
+//! - owns transient event payloads for SDL callback-mode applications
 //! - supports Dear ImGui multi-viewport when the active SDL video driver provides the global
 //!   mouse state and capture capabilities required by the official backend.
 //!
@@ -56,9 +57,23 @@ mod removed_free_api_contracts {
     /// use dear_imgui_sdl3::set_gamepad_mode_manual_for_context;
     /// ```
     struct SetGamepadModeManualForContext;
+
+    /// SDL3 callback faults are consumed by owning renderer routes rather than a public manual
+    /// trace protocol.
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_sdl3::Sdl3OpenGlViewportFrameTrace;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_sdl3::Sdl3PlatformBackend;
+    /// let _ = Sdl3PlatformBackend::begin_opengl_viewport_frame_trace;
+    /// ```
+    struct RemovedOpenGlViewportTrace;
 }
 
 mod backend;
+mod callback_events;
 mod callback_ownership;
 mod clipboard;
 mod core;
@@ -91,14 +106,12 @@ use dear_imgui_rs::ContextBinding;
     feature = "sdlrenderer3-renderer",
     feature = "sdlgpu3-renderer"
 ))]
-use dear_imgui_rs::render::{DrawData, RenderedFrame};
+use dear_imgui_rs::render::{DrawData, PendingFrame, ReconciledFrame};
 use dear_imgui_rs::{Context, ContextId};
 #[cfg(feature = "opengl3-renderer")]
 use dear_imgui_sys::backend_shim::opengl3 as opengl3_backend;
 #[cfg(feature = "sdlgpu3-renderer")]
 use sdl3::gpu::CommandBuffer;
-#[cfg(feature = "sdlgpu3-renderer")]
-use sdl3::gpu::Device;
 #[cfg(feature = "sdlgpu3-renderer")]
 use sdl3::gpu::RenderPass;
 #[cfg(feature = "sdlrenderer3-renderer")]
@@ -113,13 +126,24 @@ use sdl3_sys::gpu::{
 #[cfg(feature = "sdlrenderer3-renderer")]
 use sdl3_sys::render::SDL_Renderer;
 
-#[cfg(feature = "opengl3-renderer")]
-pub use self::backend::Sdl3OpenGl3Backend;
 pub use self::backend::Sdl3PlatformBackend;
+#[cfg(any(feature = "opengl3-renderer", feature = "sdlgpu3-renderer"))]
+pub use self::backend::Sdl3ViewportRouteError;
 #[cfg(feature = "sdlrenderer3-renderer")]
-pub use self::backend::Sdl3RendererBackend;
+pub use self::backend::SdlRenderer3Backend;
+#[cfg(feature = "opengl3-renderer")]
+pub use self::backend::{
+    Sdl3OpenGl3Backend, Sdl3OpenGl3PreparedViewportFrame, Sdl3OpenGl3ViewportRouteError,
+    Sdl3OpenGl3ViewportRouteFault,
+};
 #[cfg(feature = "sdlgpu3-renderer")]
-pub use self::backend::{SdlGpu3PreparedFrame, SdlGpu3RendererBackend};
+pub use self::backend::{
+    SdlGpu3PreparedViewportFrame, SdlGpu3RenderPassFrame, SdlGpu3RendererBackend,
+};
+pub use self::callback_events::{
+    Sdl3CallbackEvent, Sdl3CallbackEventHandoff, Sdl3CallbackEventHandoffError,
+    Sdl3CallbackEventQueue,
+};
 #[cfg(feature = "multi-viewport")]
 pub use self::core::Sdl3VulkanSurfaceError;
 pub use self::core::{Sdl3BackendError, Sdl3OpenGlViewportSwapInterval};
@@ -128,14 +152,12 @@ use self::core::{ffi, sdl3_new_frame_impl, with_context};
 use self::core::{init_opengl3_impl, new_frame_opengl3_impl, shutdown_opengl3_renderer_impl};
 #[cfg(feature = "sdlrenderer3-renderer")]
 use self::core::{new_frame_sdlrenderer3_impl, shutdown_sdlrenderer3_renderer_impl};
-use self::events::{process_owned_event, process_raw_sys_event};
+use self::events::{process_callback_owned_event, process_owned_event, process_raw_sys_event};
 pub use self::input::{GamepadMode, MouseCaptureMode};
 use self::input::{set_gamepad_mode, set_gamepad_mode_manual, set_mouse_capture_mode};
 #[cfg(feature = "multi-viewport")]
 pub use self::runtime::Sdl3VulkanSurfaceProvider;
-pub use self::runtime::{
-    Sdl3OpenGlViewportFrameReport, Sdl3OpenGlViewportFrameTrace, Sdl3OpenGlViewportFrameTraceError,
-};
+pub use self::runtime::{Sdl3ViewportAttempt, Sdl3ViewportRendererAdapter};
 #[cfg(feature = "sdlgpu3-renderer")]
 pub use self::viewport::SdlGpu3InitInfo;
 pub use self::viewport::enable_native_ime_ui;
@@ -145,11 +167,13 @@ use self::core::{init_sdlgpu3_impl, new_frame_sdlgpu3_impl, shutdown_sdlgpu3_ren
 use self::runtime::{NativeRendererKind, PlatformGraphicsKind, RuntimeRegistration};
 #[cfg(feature = "sdlrenderer3-renderer")]
 use self::viewport::init_for_canvas;
+#[cfg(target_os = "windows")]
+use self::viewport::init_for_d3d;
+#[cfg(feature = "sdlgpu3-renderer")]
+use self::viewport::init_for_sdlgpu3;
 use self::viewport::{
-    init_for_d3d, init_for_metal, init_for_other, init_for_sdl_gpu, init_for_sdl_renderer,
-    init_for_vulkan, init_platform_for_opengl,
+    init_for_metal, init_for_other, init_for_sdl_gpu, init_for_sdl_renderer, init_for_vulkan,
+    init_platform_for_opengl,
 };
 #[cfg(feature = "opengl3-renderer")]
 use self::viewport::{init_for_opengl, init_for_opengl_default};
-#[cfg(feature = "sdlgpu3-renderer")]
-use self::viewport::{init_for_sdlgpu3, init_for_sdlgpu3_default};

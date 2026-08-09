@@ -347,9 +347,11 @@ mod tests {
         let io = imgui.io_mut();
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
-        io.set_backend_flags(
-            io.backend_flags() | dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES,
-        );
+        imgui
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("headless test requires the legacy font-atlas capability")
+            .build();
         let plot_context = crate::Plot3DContext::create(&imgui);
         let frame = imgui.begin_frame();
         let plot_ui = plot_context.get_plot_ui(frame.ui());

@@ -1,5 +1,6 @@
 use crate::{DockNodeFlags, Id, sys, ui::Ui};
 use std::ffi::{CStr, CString};
+use std::ptr;
 
 pub(crate) const MAX_DOCKSPACE_HOST_NAME_BYTES: usize = 236;
 const MIN_TRUNCATABLE_DOCKSPACE_SIZE: f32 = -2_147_483_648.0;
@@ -88,6 +89,22 @@ pub(crate) fn main_viewport_dockspace_host_name(caller: &str) -> CString {
         assert!(!viewport.is_null(), "{caller} requires a main viewport");
         CString::new(format!("WindowOverViewport_{:08X}", (*viewport).ID))
             .expect("generated viewport host name cannot contain a NUL byte")
+    }
+}
+
+pub(crate) fn main_viewport_dockspace_id(caller: &str, requested: Option<Id>) -> Id {
+    if let Some(requested) = requested {
+        return requested;
+    }
+
+    let host_name = main_viewport_dockspace_host_name(caller);
+    unsafe {
+        let host_id = sys::igGetIDWithSeed_Str(host_name.as_ptr(), ptr::null(), 0);
+        Id::from(sys::igGetIDWithSeed_Str(
+            c"DockSpace".as_ptr(),
+            ptr::null(),
+            host_id,
+        ))
     }
 }
 

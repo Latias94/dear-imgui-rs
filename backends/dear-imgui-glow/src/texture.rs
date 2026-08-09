@@ -5,6 +5,97 @@ use dear_imgui_rs::{TextureFormat, TextureId};
 use glow::{Context, HasContext};
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_TEXTURE_ID: AtomicU64 = AtomicU64::new(1);
+
+fn allocate_texture_id() -> InitResult<TextureId> {
+    let id = NEXT_TEXTURE_ID
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            current.checked_add(1)
+        })
+        .map_err(|_| InitError::TextureIdExhausted)?;
+    Ok(TextureId::new(id))
+}
+
+/// Opaque handle for a texture allocated and owned by [`crate::GlowRenderer`].
+///
+/// Convert it to a Dear ImGui [`TextureId`] with [`Self::texture_id`] when building image widgets.
+/// The handle cannot be forged from a raw ID, so update and removal operations cannot target a
+/// managed or application-owned texture accidentally.
+///
+/// ```compile_fail
+/// use dear_imgui_glow::RendererTextureId;
+/// use dear_imgui_rs::TextureId;
+///
+/// let _: RendererTextureId = TextureId::new(1).into();
+/// ```
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[repr(transparent)]
+pub struct RendererTextureId(TextureId);
+
+impl RendererTextureId {
+    pub(crate) const fn new(texture_id: TextureId) -> Self {
+        Self(texture_id)
+    }
+
+    /// Returns the Dear ImGui texture identifier used by image widgets and draw-list commands.
+    #[must_use]
+    pub const fn texture_id(self) -> TextureId {
+        self.0
+    }
+}
+
+impl From<RendererTextureId> for TextureId {
+    fn from(texture: RendererTextureId) -> Self {
+        texture.texture_id()
+    }
+}
+
+/// Opaque handle for an application-owned OpenGL texture registered with a renderer.
+///
+/// Registration does not transfer ownership of the OpenGL object. The handle can be converted to
+/// a Dear ImGui [`TextureId`] with [`Self::texture_id`], but cannot be forged from a raw ID or used
+/// with renderer-owned texture operations.
+///
+/// ```compile_fail
+/// use dear_imgui_glow::ExternalTextureId;
+/// use dear_imgui_rs::TextureId;
+///
+/// let _: ExternalTextureId = TextureId::new(1).into();
+/// ```
+///
+/// ```compile_fail
+/// use dear_imgui_glow::{GlowRenderer, RendererTextureId};
+///
+/// fn unregister_through_wrong_owner(
+///     renderer: &mut GlowRenderer,
+///     texture: RendererTextureId,
+/// ) {
+///     renderer.unregister_external_texture(texture).unwrap();
+/// }
+/// ```
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[repr(transparent)]
+pub struct ExternalTextureId(TextureId);
+
+impl ExternalTextureId {
+    pub(crate) const fn new(texture_id: TextureId) -> Self {
+        Self(texture_id)
+    }
+
+    /// Returns the Dear ImGui texture identifier used by image widgets and draw-list commands.
+    #[must_use]
+    pub const fn texture_id(self) -> TextureId {
+        self.0
+    }
+}
+
+impl From<ExternalTextureId> for TextureId {
+    fn from(texture: ExternalTextureId) -> Self {
+        texture.texture_id()
+    }
+}
 
 struct TextureUploadStateGuard<'a> {
     gl: &'a Context,
@@ -125,141 +216,175 @@ pub(crate) fn checked_gl_texture_size(width: u32, height: u32) -> InitResult<(i3
     ))
 }
 
-/// Rust-owned mapping between opaque Dear ImGui texture IDs and OpenGL resources.
-///
-/// Managed texture request identity is tracked separately by [`crate::GlowRenderer`] using
-/// pointer-free [`dear_imgui_rs::render::SnapshotTextureId`] keys. Implementations of this trait
-/// never receive native `ImTextureData` pointers or renderer feedback state.
-pub trait TextureMap {
-    /// Get the OpenGL texture for a Dear ImGui texture ID
-    fn get(&self, texture_id: TextureId) -> Option<GlTexture>;
-
-    /// Set the OpenGL texture for a Dear ImGui texture ID
-    fn set(&mut self, texture_id: TextureId, gl_texture: GlTexture);
-
-    /// Remove a texture mapping
-    fn remove(&mut self, texture_id: TextureId) -> Option<GlTexture>;
-
-    /// Clear all texture mappings
-    fn clear(&mut self);
-
-    /// Register a texture with Dear ImGui's texture management system
-    fn register_texture(
-        &mut self,
-        gl_texture: GlTexture,
-        _width: u32,
-        _height: u32,
-        format: TextureFormat,
-    ) -> InitResult<TextureId>;
-
-    /// Update a texture in Dear ImGui's texture management system
-    fn update_texture(
-        &mut self,
-        texture_id: TextureId,
-        gl_texture: GlTexture,
-        width: u32,
-        height: u32,
-    );
-
-    /// Pixel format recorded for a renderer-owned texture.
-    fn texture_format(&self, texture_id: TextureId) -> Option<TextureFormat>;
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RendererTexture {
+    pub(crate) gl_texture: GlTexture,
+    pub(crate) format: TextureFormat,
 }
 
-/// Simple texture map implementation using a HashMap with modern texture management
+#[derive(Clone, Copy, Debug)]
+enum RegisteredTexture {
+    Managed(GlTexture),
+    Renderer(RendererTexture),
+    External(GlTexture),
+}
+
+impl RegisteredTexture {
+    fn gl_texture(self) -> GlTexture {
+        match self {
+            Self::Managed(texture) | Self::External(texture) => texture,
+            Self::Renderer(texture) => texture.gl_texture,
+        }
+    }
+}
+
+/// Renderer-private registry for globally unique Dear ImGui texture IDs.
 #[derive(Default)]
-pub struct SimpleTextureMap {
-    textures: HashMap<TextureId, GlTexture>,
-    formats: HashMap<TextureId, TextureFormat>,
-    next_id: u64,
+pub(crate) struct TextureRegistry {
+    textures: HashMap<TextureId, RegisteredTexture>,
 }
 
-impl TextureMap for SimpleTextureMap {
-    fn get(&self, texture_id: TextureId) -> Option<GlTexture> {
-        self.textures.get(&texture_id).copied()
+impl TextureRegistry {
+    pub(crate) fn get(&self, texture_id: TextureId) -> Option<GlTexture> {
+        self.textures
+            .get(&texture_id)
+            .copied()
+            .map(RegisteredTexture::gl_texture)
     }
 
-    fn set(&mut self, texture_id: TextureId, gl_texture: GlTexture) {
-        self.textures.insert(texture_id, gl_texture);
+    #[cfg(test)]
+    pub(crate) fn contains(&self, texture_id: TextureId) -> bool {
+        self.textures.contains_key(&texture_id)
     }
 
-    fn remove(&mut self, texture_id: TextureId) -> Option<GlTexture> {
-        let gl_texture = self.textures.remove(&texture_id);
-        self.formats.remove(&texture_id);
-        gl_texture
-    }
-
-    fn clear(&mut self) {
-        self.textures.clear();
-        self.formats.clear();
-    }
-
-    fn register_texture(
-        &mut self,
-        gl_texture: GlTexture,
-        _width: u32,
-        _height: u32,
-        format: TextureFormat,
-    ) -> InitResult<TextureId> {
-        let texture_id = loop {
-            self.next_id = self
-                .next_id
-                .checked_add(1)
-                .ok_or(InitError::TextureIdExhausted)?;
-            let candidate = TextureId::new(self.next_id);
-            if !candidate.is_null() && !self.textures.contains_key(&candidate) {
-                break candidate;
-            }
-        };
-
-        self.textures.insert(texture_id, gl_texture);
-        self.formats.insert(texture_id, format);
-
+    pub(crate) fn register_managed(&mut self, gl_texture: GlTexture) -> InitResult<TextureId> {
+        let texture_id = allocate_texture_id()?;
+        self.insert(texture_id, RegisteredTexture::Managed(gl_texture));
         Ok(texture_id)
     }
 
-    fn update_texture(
+    pub(crate) fn register_renderer(
         &mut self,
-        texture_id: TextureId,
         gl_texture: GlTexture,
-        _width: u32,
-        _height: u32,
-    ) {
-        self.textures.insert(texture_id, gl_texture);
+        format: TextureFormat,
+    ) -> InitResult<RendererTextureId> {
+        let texture_id = allocate_texture_id()?;
+        self.insert(
+            texture_id,
+            RegisteredTexture::Renderer(RendererTexture { gl_texture, format }),
+        );
+        Ok(RendererTextureId::new(texture_id))
     }
 
-    fn texture_format(&self, texture_id: TextureId) -> Option<TextureFormat> {
-        self.formats.get(&texture_id).copied()
+    pub(crate) fn register_external(
+        &mut self,
+        gl_texture: GlTexture,
+    ) -> InitResult<ExternalTextureId> {
+        let texture_id = allocate_texture_id()?;
+        self.insert(texture_id, RegisteredTexture::External(gl_texture));
+        Ok(ExternalTextureId::new(texture_id))
     }
-}
 
-impl SimpleTextureMap {
-    /// Create a new empty texture map
-    pub fn new() -> Self {
-        Self {
-            textures: HashMap::new(),
-            formats: HashMap::new(),
-            next_id: 0,
+    fn insert(&mut self, texture_id: TextureId, texture: RegisteredTexture) {
+        let previous = self.textures.insert(texture_id, texture);
+        debug_assert!(previous.is_none(), "process-unique TextureId was reused");
+    }
+
+    pub(crate) fn renderer(&self, texture: RendererTextureId) -> Option<RendererTexture> {
+        match self.textures.get(&texture.texture_id())? {
+            RegisteredTexture::Renderer(texture) => Some(*texture),
+            RegisteredTexture::Managed(_) | RegisteredTexture::External(_) => None,
         }
     }
 
-    /// Get the number of textures in the map
-    pub fn len(&self) -> usize {
+    pub(crate) fn external(&self, texture: ExternalTextureId) -> Option<GlTexture> {
+        match self.textures.get(&texture.texture_id())? {
+            RegisteredTexture::External(texture) => Some(*texture),
+            RegisteredTexture::Managed(_) | RegisteredTexture::Renderer(_) => None,
+        }
+    }
+
+    pub(crate) fn update_external(
+        &mut self,
+        texture: ExternalTextureId,
+        gl_texture: GlTexture,
+    ) -> bool {
+        let Some(registered) = self.textures.get_mut(&texture.texture_id()) else {
+            return false;
+        };
+        match registered {
+            RegisteredTexture::External(registered) => {
+                *registered = gl_texture;
+                true
+            }
+            RegisteredTexture::Managed(_) | RegisteredTexture::Renderer(_) => false,
+        }
+    }
+
+    pub(crate) fn remove_renderer(&mut self, texture: RendererTextureId) -> Option<GlTexture> {
+        if !matches!(
+            self.textures.get(&texture.texture_id()),
+            Some(RegisteredTexture::Renderer(_))
+        ) {
+            return None;
+        }
+        match self.textures.remove(&texture.texture_id()) {
+            Some(RegisteredTexture::Renderer(texture)) => Some(texture.gl_texture),
+            _ => unreachable!("validated renderer texture changed before removal"),
+        }
+    }
+
+    pub(crate) fn remove_external(&mut self, texture: ExternalTextureId) -> Option<GlTexture> {
+        if !matches!(
+            self.textures.get(&texture.texture_id()),
+            Some(RegisteredTexture::External(_))
+        ) {
+            return None;
+        }
+        match self.textures.remove(&texture.texture_id()) {
+            Some(RegisteredTexture::External(texture)) => Some(texture),
+            _ => unreachable!("validated external texture changed before removal"),
+        }
+    }
+
+    pub(crate) fn remove_managed(&mut self, texture_id: TextureId) -> Option<GlTexture> {
+        if !matches!(
+            self.textures.get(&texture_id),
+            Some(RegisteredTexture::Managed(_))
+        ) {
+            return None;
+        }
+        match self.textures.remove(&texture_id) {
+            Some(RegisteredTexture::Managed(texture)) => Some(texture),
+            _ => unreachable!("validated managed texture changed before removal"),
+        }
+    }
+
+    pub(crate) fn aliases_renderer_owned(&self, gl_texture: GlTexture) -> bool {
+        self.textures.values().any(|texture| {
+            !matches!(texture, RegisteredTexture::External(_)) && texture.gl_texture() == gl_texture
+        })
+    }
+
+    pub(crate) fn take_renderer_owned(&mut self) -> Vec<GlTexture> {
+        let mut owned = Vec::new();
+        self.textures.retain(|_, texture| match texture {
+            RegisteredTexture::External(_) => true,
+            RegisteredTexture::Managed(_) | RegisteredTexture::Renderer(_) => {
+                owned.push(texture.gl_texture());
+                false
+            }
+        });
+        owned
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.textures.clear();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
         self.textures.len()
-    }
-
-    /// Check if the texture map is empty
-    pub fn is_empty(&self) -> bool {
-        self.textures.is_empty()
-    }
-
-    /// Iterate over all texture mappings
-    pub fn iter(&self) -> impl Iterator<Item = (&TextureId, &GlTexture)> {
-        self.textures.iter()
-    }
-
-    /// Iterate over the formats recorded for renderer-owned textures.
-    pub fn format_iter(&self) -> impl Iterator<Item = (&TextureId, &TextureFormat)> {
-        self.formats.iter()
     }
 }
 

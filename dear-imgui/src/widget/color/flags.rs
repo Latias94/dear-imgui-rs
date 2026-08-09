@@ -38,8 +38,6 @@ bitflags::bitflags! {
         const ALPHA_OPAQUE = sys::ImGuiColorEditFlags_AlphaOpaque as u32;
         /// Disable the checkerboard background behind transparent colors.
         const ALPHA_NO_BG = sys::ImGuiColorEditFlags_AlphaNoBg as u32;
-        /// Compatibility alias for [`Self::ALPHA_NO_BG`].
-        const ALPHA_PREVIEW = Self::ALPHA_NO_BG.bits();
         /// Display half opaque / half checkerboard, instead of opaque.
         const ALPHA_PREVIEW_HALF = sys::ImGuiColorEditFlags_AlphaPreviewHalf as u32;
         /// Disable 0.0f..1.0f limits in RGBA edition.
@@ -77,8 +75,6 @@ bitflags::bitflags! {
         const ALPHA_OPAQUE = sys::ImGuiColorEditFlags_AlphaOpaque as u32;
         /// Disable the checkerboard background behind transparent colors.
         const ALPHA_NO_BG = sys::ImGuiColorEditFlags_AlphaNoBg as u32;
-        /// Compatibility alias for [`Self::ALPHA_NO_BG`].
-        const ALPHA_PREVIEW = Self::ALPHA_NO_BG.bits();
         /// Display half opaque / half checkerboard, instead of opaque.
         const ALPHA_PREVIEW_HALF = sys::ImGuiColorEditFlags_AlphaPreviewHalf as u32;
         /// Disable 0.0f..1.0f limits in RGBA edition.
@@ -107,8 +103,6 @@ bitflags::bitflags! {
         const ALPHA_OPAQUE = sys::ImGuiColorEditFlags_AlphaOpaque as u32;
         /// Disable the checkerboard background behind transparent colors.
         const ALPHA_NO_BG = sys::ImGuiColorEditFlags_AlphaNoBg as u32;
-        /// Compatibility alias for [`Self::ALPHA_NO_BG`].
-        const ALPHA_PREVIEW = Self::ALPHA_NO_BG.bits();
         /// Display half opaque / half checkerboard, instead of opaque.
         const ALPHA_PREVIEW_HALF = sys::ImGuiColorEditFlags_AlphaPreviewHalf as u32;
     }

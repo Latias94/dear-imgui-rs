@@ -15,9 +15,7 @@ use bevy::{
 };
 use dear_imgui_bevy::prelude::*;
 use dear_imgui_bevy::{ImguiNativeViewportStatus, ImguiNativeViewportSupport};
-use dear_imgui_rs::{
-    Condition, DockLayout, DockLayoutApply, DockSplit, DockspaceOptions, WindowFlags,
-};
+use dear_imgui_rs::{Condition, DockLayout, DockLayoutApply, DockSplit, WindowFlags, WindowKey};
 
 const SCENE_SIZE: [u32; 2] = [960, 540];
 
@@ -53,6 +51,25 @@ impl Default for EditorState {
     }
 }
 
+#[derive(Resource)]
+struct EditorWindowKeys {
+    scene: WindowKey,
+    hierarchy: WindowKey,
+    inspector: WindowKey,
+    diagnostics: WindowKey,
+}
+
+impl Default for EditorWindowKeys {
+    fn default() -> Self {
+        Self {
+            scene: WindowKey::new("scene", "Scene").expect("valid window key"),
+            hierarchy: WindowKey::new("hierarchy", "Hierarchy").expect("valid window key"),
+            inspector: WindowKey::new("inspector", "Inspector").expect("valid window key"),
+            diagnostics: WindowKey::new("diagnostics", "Diagnostics").expect("valid window key"),
+        }
+    }
+}
+
 fn main() {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -71,6 +88,7 @@ fn main() {
             .with_multi_viewport(cfg!(feature = "multi-viewport")),
     ))
     .init_resource::<EditorState>()
+    .init_resource::<EditorWindowKeys>()
     .add_systems(Startup, setup)
     .add_systems(Update, (close_on_escape, animate_scene));
     let primary_pass = app.imgui_primary_pass();
@@ -211,6 +229,7 @@ fn editor_ui(
     frame: ImguiFrame<'_>,
     native_viewports: Res<ImguiNativeViewportSupport>,
     preview: Res<ScenePreview>,
+    windows: Res<EditorWindowKeys>,
     mut editor: ResMut<EditorState>,
     objects: Query<(Entity, &Name, &Transform), With<SceneObject>>,
     frame_count: Res<FrameCount>,
@@ -221,18 +240,15 @@ fn editor_ui(
     let native_viewport_status = native_viewports.get(context_id);
 
     let root_id = ui.get_id("DearImguiBevyGameEngineDockspace");
-    let options = match DockspaceOptions::new(root_id) {
-        Ok(options) => options,
-        Err(error) => {
-            error!("invalid game-engine dockspace options: {error}");
-            return Ok(());
-        }
-    };
-    let dockspace_id = match ui.dockspace_over_main_viewport_with_layout(
-        &options,
-        &game_engine_dock_layout(),
-        DockLayoutApply::IfMissing,
-    ) {
+    let dockspace_id = match ui
+        .dockspace()
+        .root_id(root_id)
+        .layout(
+            &game_engine_dock_layout(&windows),
+            DockLayoutApply::IfMissing,
+        )
+        .build()
+    {
         Ok(id) => id,
         Err(error) => {
             error!("failed to apply game-engine dock layout: {error}");
@@ -241,22 +257,22 @@ fn editor_ui(
     };
 
     ui.set_next_window_dock_id_with_cond(dockspace_id, Condition::FirstUseEver);
-    ui.window("Scene")
+    ui.window(&windows.scene)
         .size([780.0, 520.0], Condition::FirstUseEver)
         .build(|| render_scene_window(ui, &preview, &mut editor));
 
     ui.set_next_window_dock_id_with_cond(dockspace_id, Condition::FirstUseEver);
-    ui.window("Hierarchy")
+    ui.window(&windows.hierarchy)
         .size([260.0, 420.0], Condition::FirstUseEver)
         .build(|| render_hierarchy(ui, &objects, &mut editor));
 
     ui.set_next_window_dock_id_with_cond(dockspace_id, Condition::FirstUseEver);
-    ui.window("Inspector")
+    ui.window(&windows.inspector)
         .size([330.0, 420.0], Condition::FirstUseEver)
         .build(|| render_inspector(ui, &objects, &editor));
 
     ui.set_next_window_dock_id_with_cond(dockspace_id, Condition::FirstUseEver);
-    ui.window("Diagnostics")
+    ui.window(&windows.diagnostics)
         .size([360.0, 180.0], Condition::FirstUseEver)
         .build(|| {
             ui.text(format!("Bevy frame: {}", frame_count.0));
@@ -275,20 +291,20 @@ fn editor_ui(
     Ok(())
 }
 
-fn game_engine_dock_layout() -> DockLayout {
+fn game_engine_dock_layout(windows: &EditorWindowKeys) -> DockLayout {
     DockLayout::split(
         DockSplit::Left,
         0.20,
-        DockLayout::tabs(["Hierarchy"]),
+        DockLayout::tabs([&windows.hierarchy]),
         DockLayout::split(
             DockSplit::Right,
             0.25,
-            DockLayout::tabs(["Inspector"]),
+            DockLayout::tabs([&windows.inspector]),
             DockLayout::split(
                 DockSplit::Down,
                 0.24,
-                DockLayout::tabs(["Diagnostics"]),
-                DockLayout::tabs(["Scene"]),
+                DockLayout::tabs([&windows.diagnostics]),
+                DockLayout::tabs([&windows.scene]),
             ),
         ),
     )

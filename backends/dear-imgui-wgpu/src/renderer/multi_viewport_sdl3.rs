@@ -1,4 +1,4 @@
-//! Owning SDL3/WGPU multi-viewport renderer runtime.
+//! Owning SDL3/WGPU multi-viewport renderer route.
 
 #[cfg(doctest)]
 mod removed_free_api_contracts {
@@ -13,36 +13,121 @@ mod removed_free_api_contracts {
     struct Shutdown;
 
     /// ```compile_fail
-    /// fn removed(runtime: &dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRuntime) {
-    ///     runtime.new_frame().unwrap();
+    /// use dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRuntime;
+    /// let _ = Sdl3ViewportRuntime::attach;
+    /// ```
+    struct RemovedRuntime;
+
+    /// The prepared capability carries the report from the same secondary-viewport scope.
+    ///
+    /// ```
+    /// use dear_imgui_wgpu::multi_viewport_sdl3::{
+    ///     WgpuPreparedViewportFrame, WgpuViewportFrameReport,
+    /// };
+    ///
+    /// fn secondary_report<'a>(
+    ///     frame: &'a WgpuPreparedViewportFrame<'_>,
+    /// ) -> &'a WgpuViewportFrameReport {
+    ///     frame.secondary_report()
     /// }
     /// ```
-    struct NewFrame;
+    ///
+    /// Manual tracing and partially prepared frames are intentionally unavailable.
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::multi_viewport_sdl3::WgpuViewportFrameTraceGuard;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRoute;
+    /// let _ = Sdl3ViewportRoute::begin_frame_trace;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRoute;
+    /// let _ = Sdl3ViewportRoute::prepare_context;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRoute;
+    /// let _ = Sdl3ViewportRoute::prepare_frame;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRoute;
+    /// let _ = Sdl3ViewportRoute::attach_unchecked;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRoute;
+    /// let _ = Sdl3ViewportRoute::poll_fault;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRoute;
+    /// let _ = Sdl3ViewportRoute::prepare_frame_unchecked;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRoute;
+    /// let _ = Sdl3ViewportRoute::with_renderer;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_rs::render::ReconciledFrame;
+    /// use dear_imgui_wgpu::{FramebufferExtent, multi_viewport_sdl3::Sdl3ViewportRoute, wgpu};
+    ///
+    /// fn bypass_preparation(
+    ///     route: &Sdl3ViewportRoute,
+    ///     frame: ReconciledFrame<'_>,
+    ///     render_pass: &mut wgpu::RenderPass<'_>,
+    ///     extent: FramebufferExtent,
+    /// ) {
+    ///     route.render_main(frame, render_pass, extent).unwrap();
+    /// }
+    /// ```
+    struct PreparedTransaction;
+
+    /// The old manual-trace report name is intentionally unavailable.
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::multi_viewport_sdl3::WgpuViewportFrameTraceReport;
+    /// ```
+    struct RemovedTraceReportName;
 }
 
-use dear_imgui_rs::Context;
-use dear_imgui_rs::render::{ReconciledFrame, RenderedFrame};
+use dear_imgui_rs::{Context, FrameToken};
 
 use super::WgpuRenderer;
-use super::multi_viewport_runtime::OwningViewportRuntime;
-pub use super::multi_viewport_runtime::{
-    WgpuViewportAttachError, WgpuViewportError, WgpuViewportFrameTraceGuard,
-    WgpuViewportFrameTraceReport,
+use super::multi_viewport_runtime::{
+    OwningViewportRuntime, finish_route_preparation, prepare_route_for_context,
 };
-use crate::{ExternalTextureId, GammaMode};
-use dear_imgui_sdl3::Sdl3PlatformBackend;
+pub use super::multi_viewport_runtime::{
+    WgpuPreparedViewportFrame, WgpuViewportAttachError, WgpuViewportError, WgpuViewportFrameReport,
+};
+use super::multi_viewport_runtime::{WgpuViewportRouteError, WgpuViewportRouteFault};
+use crate::{ExternalTextureId, FramebufferExtent, GammaMode};
+use dear_imgui_sdl3::{Sdl3BackendError, Sdl3PlatformBackend, Sdl3ViewportRendererAdapter};
 
-/// Owning WGPU renderer runtime for the SDL3 multi-viewport route.
+/// One failure observed while preparing an SDL3/WGPU multi-viewport route.
+pub type Sdl3ViewportRouteFault = WgpuViewportRouteFault<Sdl3BackendError>;
+
+/// Ordered failures from one SDL3/WGPU multi-viewport preparation transaction.
+pub type Sdl3ViewportRouteError = WgpuViewportRouteError<Sdl3BackendError>;
+
+/// Owning WGPU renderer route for SDL3 multi-viewport applications.
 ///
-/// The runtime consumes the renderer into stable boxed storage, owns the Context renderer
-/// attachment and callback claim, and releases all WGPU viewport resources before the SDL3
-/// platform attachment enters its platform-window teardown phase.
+/// The route consumes the renderer into stable boxed storage, captures the exact live SDL3
+/// platform generation, owns the Context renderer attachment and callback claim, and releases all
+/// WGPU viewport resources before the SDL3 platform attachment enters its platform-window
+/// teardown phase.
 #[derive(Debug)]
-pub struct Sdl3ViewportRuntime {
+pub struct Sdl3ViewportRoute {
     inner: OwningViewportRuntime,
+    platform: Sdl3ViewportRendererAdapter,
 }
 
-impl Sdl3ViewportRuntime {
+impl Sdl3ViewportRoute {
     /// Transactionally attaches an initialized renderer to an active SDL3 platform runtime.
     ///
     /// Failure returns the unchanged renderer through [`WgpuViewportAttachError`]. The renderer
@@ -62,112 +147,53 @@ impl Sdl3ViewportRuntime {
                 renderer,
             ));
         }
-        if let Err(error) = platform.validate_renderer_owner(context) {
-            return Err(WgpuViewportAttachError::new(
-                WgpuViewportError::Sdl3PlatformOwner(error),
-                renderer,
-            ));
-        }
-        OwningViewportRuntime::attach(context, renderer).map(|inner| Self { inner })
+        let platform = match platform.viewport_renderer_adapter(context) {
+            Ok(platform) => platform,
+            Err(error) => {
+                return Err(WgpuViewportAttachError::new(
+                    WgpuViewportError::Sdl3PlatformOwner(error),
+                    renderer,
+                ));
+            }
+        };
+        OwningViewportRuntime::attach(context, renderer).map(|inner| Self { inner, platform })
     }
 
-    /// Attaches a WGPU renderer to a custom platform that follows the SDL3 viewport handle
-    /// contract.
+    /// Consumes an open frame, reconciles textures, and completes secondary viewports.
     ///
-    /// # Safety
-    ///
-    /// The current Context must have a live SDL3-compatible platform runtime. Every viewport's
-    /// `PlatformHandle` must contain the ID of a live SDL3 window, and the platform must keep
-    /// those windows alive until the renderer runtime has released its callbacks and resources.
-    /// Prefer [`Self::attach`] for the built-in [`Sdl3PlatformBackend`] owner.
-    pub unsafe fn attach_unchecked(
-        context: &mut Context,
-        renderer: WgpuRenderer,
-    ) -> Result<Self, WgpuViewportAttachError> {
-        OwningViewportRuntime::attach(context, renderer).map(|inner| Self { inner })
-    }
-
-    /// Returns and clears the oldest deferred callback or ownership fault.
-    pub fn poll_fault(&self) -> Result<(), WgpuViewportError> {
-        self.inner.poll_fault()
-    }
-
-    /// Begins a non-nestable trace of real secondary-viewport GPU work.
-    ///
-    /// Finish the returned guard immediately after rendering platform windows and before
-    /// acquiring the application's main surface. The report then provides same-scope evidence
-    /// for secondary command submission and presentation. Dropping the guard discards its
-    /// partial observations.
-    pub fn begin_frame_trace(&self) -> Result<WgpuViewportFrameTraceGuard<'_>, WgpuViewportError> {
-        self.inner.begin_frame_trace()
-    }
-
-    /// Prepares frame resources and applies managed-texture requests before platform-window rendering.
-    pub fn reconcile_frame(&self, frame: &mut RenderedFrame<'_>) -> Result<(), WgpuViewportError> {
-        self.inner.reconcile_frame(frame)
-    }
-
-    /// Consumes and renders one Context-owned frame.
-    pub fn render(
+    /// Call this before acquiring the application's main surface. A temporary main-surface
+    /// failure may discard the returned capability without losing secondary completion. A frame
+    /// from another Context is rejected before the SDL3 adapter or either deferred-fault queue is
+    /// entered.
+    pub fn prepare<'frame>(
         &self,
-        frame: RenderedFrame<'_>,
-        render_pass: &mut wgpu::RenderPass<'_>,
-    ) -> Result<(), WgpuViewportError> {
-        self.inner.render(frame, render_pass)
+        frame: FrameToken<'frame>,
+    ) -> Result<WgpuPreparedViewportFrame<'frame>, Sdl3ViewportRouteError> {
+        let actual = frame.ui().context_id();
+        prepare_route_for_context(self.inner.context_id(), actual, || {
+            self.prepare_with_platform(|| self.inner.prepare_frame(frame))
+        })
     }
 
-    /// Renders one frame and returns its reconciliation proof to a presentation owner.
-    pub fn render_reconciled<'frame>(
+    /// Renders the main viewport after secondary work completed during preparation.
+    pub fn render_main(
         &self,
-        frame: RenderedFrame<'frame>,
+        frame: WgpuPreparedViewportFrame<'_>,
         render_pass: &mut wgpu::RenderPass<'_>,
-    ) -> Result<ReconciledFrame<'frame>, WgpuViewportError> {
-        self.inner.render_reconciled(frame, render_pass)
-    }
-
-    /// Finalizes and renders the bound Context's current frame.
-    pub fn render_context(
-        &self,
-        context: &mut Context,
-        render_pass: &mut wgpu::RenderPass<'_>,
-    ) -> Result<(), WgpuViewportError> {
-        self.inner.render_context(context, render_pass)
-    }
-
-    /// Consumes and renders one Context-owned frame with explicit framebuffer dimensions.
-    pub fn render_with_fb_size(
-        &self,
-        frame: RenderedFrame<'_>,
-        render_pass: &mut wgpu::RenderPass<'_>,
-        width: u32,
-        height: u32,
+        framebuffer_extent: FramebufferExtent,
     ) -> Result<(), WgpuViewportError> {
         self.inner
-            .render_with_fb_size(frame, render_pass, width, height)
+            .render_main(frame, render_pass, framebuffer_extent)
     }
 
-    /// Renders one frame at explicit dimensions and returns its reconciliation proof.
-    pub fn render_with_fb_size_reconciled<'frame>(
+    fn prepare_with_platform<'frame>(
         &self,
-        frame: RenderedFrame<'frame>,
-        render_pass: &mut wgpu::RenderPass<'_>,
-        width: u32,
-        height: u32,
-    ) -> Result<ReconciledFrame<'frame>, WgpuViewportError> {
-        self.inner
-            .render_with_fb_size_reconciled(frame, render_pass, width, height)
-    }
+        prepare: impl FnOnce() -> Result<WgpuPreparedViewportFrame<'frame>, WgpuViewportError>,
+    ) -> Result<WgpuPreparedViewportFrame<'frame>, Sdl3ViewportRouteError> {
+        debug_assert_eq!(self.platform.context_id(), self.inner.context_id());
 
-    /// Finalizes and renders the bound Context with explicit framebuffer dimensions.
-    pub fn render_context_with_fb_size(
-        &self,
-        context: &mut Context,
-        render_pass: &mut wgpu::RenderPass<'_>,
-        width: u32,
-        height: u32,
-    ) -> Result<(), WgpuViewportError> {
-        self.inner
-            .render_context_with_fb_size(context, render_pass, width, height)
+        let (renderer_result, platform_faults) = self.platform.run(prepare).into_parts();
+        finish_route_preparation(renderer_result, self.inner.drain_faults(), platform_faults)
     }
 
     /// Invalidates renderer-owned device objects while preserving external texture handles.
@@ -176,14 +202,6 @@ impl Sdl3ViewportRuntime {
         context: &mut Context,
     ) -> Result<(), WgpuViewportError> {
         self.inner.invalidate_device_objects(context)
-    }
-
-    /// Runs a read-only, non-escaping renderer inspection.
-    pub fn with_renderer<R>(
-        &self,
-        callback: impl FnOnce(&WgpuRenderer) -> R,
-    ) -> Result<R, WgpuViewportError> {
-        self.inner.with_renderer(callback)
     }
 
     /// Sets the renderer gamma policy.

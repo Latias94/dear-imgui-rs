@@ -1,16 +1,16 @@
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::fmt;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use dear_imgui_rs::render::RenderedFrame;
+use dear_imgui_rs::render::ReconciledFrame;
 #[cfg(test)]
-use dear_imgui_rs::render::{FrameSnapshot, RendererConsumer};
+use dear_imgui_rs::render::SynchronousRendererConsumer;
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
     ContextAttachmentRole, ContextBinding, ContextBindingError, ContextId, ContextLifecycle,
-    TextureData, TextureId,
+    FrameToken, TextureData, TextureId,
 };
 use thiserror::Error;
 
@@ -31,7 +31,7 @@ mod viewport_registry;
 
 struct AshRendererAttachmentMarker;
 
-/// Failure to attach or operate an owning Ash multi-viewport runtime.
+/// Failure to attach or operate an owning Ash multi-viewport route.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum AshViewportError {
@@ -47,6 +47,14 @@ pub enum AshViewportError {
     /// The runtime and supplied Context identities differ.
     #[error("Ash viewport runtime belongs to Context {expected:?}, not {actual:?}")]
     ContextMismatch {
+        expected: ContextId,
+        actual: ContextId,
+    },
+    /// A prepared frame or completion was passed to a different attached runtime instance.
+    #[error(
+        "Ash frame transaction belongs to another runtime instance (expected Context {expected:?}, frame Context {actual:?})"
+    )]
+    FrameTransactionRuntimeMismatch {
         expected: ContextId,
         actual: ContextId,
     },
@@ -161,6 +169,100 @@ pub enum AshViewportError {
     DeviceLost { operation: &'static str },
 }
 
+/// One failure observed while preparing an Ash multi-viewport route.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum AshViewportRouteFault<PlatformError> {
+    /// Texture reconciliation or an Ash renderer callback failed.
+    Renderer(AshViewportError),
+    /// The platform owner reported a deferred native-window fault.
+    Platform(PlatformError),
+}
+
+impl<PlatformError> fmt::Display for AshViewportRouteFault<PlatformError>
+where
+    PlatformError: fmt::Display,
+{
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Renderer(error) => write!(formatter, "Ash viewport route failed: {error}"),
+            Self::Platform(error) => write!(formatter, "viewport platform route failed: {error}"),
+        }
+    }
+}
+
+impl<PlatformError> std::error::Error for AshViewportRouteFault<PlatformError>
+where
+    PlatformError: std::error::Error + 'static,
+{
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Renderer(error) => Some(error),
+            Self::Platform(error) => Some(error),
+        }
+    }
+}
+
+/// Ordered failures from one Ash multi-viewport preparation transaction.
+///
+/// Renderer failures are reported before platform failures observed by the same native callback
+/// pump. All failures from each source retain FIFO order.
+#[derive(Debug)]
+pub struct AshViewportRouteError<PlatformError> {
+    faults: Vec<AshViewportRouteFault<PlatformError>>,
+}
+
+impl<PlatformError> AshViewportRouteError<PlatformError> {
+    pub(crate) fn new(faults: Vec<AshViewportRouteFault<PlatformError>>) -> Self {
+        debug_assert!(!faults.is_empty());
+        Self { faults }
+    }
+
+    fn renderer(error: AshViewportError) -> Self {
+        Self::new(vec![AshViewportRouteFault::Renderer(error)])
+    }
+
+    /// Returns every route fault in reporting order.
+    #[must_use]
+    pub fn faults(&self) -> &[AshViewportRouteFault<PlatformError>] {
+        &self.faults
+    }
+
+    /// Consumes the aggregate and returns every route fault in reporting order.
+    #[must_use]
+    pub fn into_faults(self) -> Vec<AshViewportRouteFault<PlatformError>> {
+        self.faults
+    }
+}
+
+impl<PlatformError> fmt::Display for AshViewportRouteError<PlatformError>
+where
+    PlatformError: fmt::Display,
+{
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Some(first) = self.faults.first() else {
+            return formatter.write_str("Ash viewport route failed without a diagnostic");
+        };
+        let count = self.faults.len();
+        write!(formatter, "{first}")?;
+        if count > 1 {
+            write!(formatter, " ({count} viewport route faults in total)")?;
+        }
+        Ok(())
+    }
+}
+
+impl<PlatformError> std::error::Error for AshViewportRouteError<PlatformError>
+where
+    PlatformError: std::error::Error + 'static,
+{
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.faults
+            .first()
+            .map(|fault| fault as &(dyn std::error::Error + 'static))
+    }
+}
+
 /// Transactional attachment failure that returns the unchanged renderer.
 pub struct AshViewportAttachError {
     error: AshViewportError,
@@ -240,7 +342,7 @@ enum RendererStorage {
     #[cfg(test)]
     Fake {
         probe: Box<u8>,
-        consumer: Option<RendererConsumer>,
+        consumer: Option<SynchronousRendererConsumer>,
     },
 }
 
@@ -270,9 +372,20 @@ impl RendererStorage {
     }
 }
 
+/// Exact, non-reusable identity for one attached renderer runtime.
+#[derive(Debug)]
+struct RuntimeIdentity;
+
+impl RuntimeIdentity {
+    fn new() -> Arc<Self> {
+        Arc::new(Self)
+    }
+}
+
 pub(super) struct RuntimeControl {
     context_raw: *mut dear_imgui_rs::sys::ImGuiContext,
     binding: ContextBinding,
+    identity: Arc<RuntimeIdentity>,
     state: Cell<RuntimeState>,
     renderer: RefCell<Option<RendererStorage>>,
     globals: RefCell<Option<GlobalHandles>>,
@@ -302,29 +415,32 @@ pub(super) struct RuntimeControl {
 
 #[derive(Default)]
 struct RuntimeFaults {
-    terminal: Option<AshViewportError>,
-    non_terminal: Option<AshViewportError>,
+    pending: VecDeque<AshViewportError>,
+    terminal_recorded: bool,
 }
 
 impl RuntimeFaults {
     fn record_terminal(&mut self, fault: AshViewportError) {
-        if self.terminal.is_none() {
-            self.terminal = Some(fault);
+        if !self.terminal_recorded {
+            self.pending.push_back(fault);
+            self.terminal_recorded = true;
         }
     }
 
     fn record_non_terminal(&mut self, fault: AshViewportError) {
-        if self.non_terminal.is_none() {
-            self.non_terminal = Some(fault);
-        }
+        self.pending.push_back(fault);
     }
 
     fn has_pending(&self) -> bool {
-        self.terminal.is_some() || self.non_terminal.is_some()
+        !self.pending.is_empty()
     }
 
     fn take_next(&mut self) -> Option<AshViewportError> {
-        self.terminal.take().or_else(|| self.non_terminal.take())
+        self.pending.pop_front()
+    }
+
+    fn drain(&mut self) -> Vec<AshViewportError> {
+        self.pending.drain(..).collect()
     }
 }
 
@@ -350,17 +466,120 @@ pub(crate) struct OwningViewportRuntime {
 /// Call [`Self::finish`] after `render_platform_windows_default` to obtain same-scope evidence of
 /// successful render submission and presentation. Dropping the guard discards partial evidence.
 #[must_use = "finish the frame trace to obtain its report"]
-pub struct AshViewportFrameTrace<'runtime> {
+pub(super) struct AshViewportFrameTrace<'runtime> {
     control: &'runtime RuntimeControl,
     active: bool,
 }
 
 impl AshViewportFrameTrace<'_> {
     /// Ends the trace and returns normalized secondary-viewport submission evidence.
-    pub fn finish(mut self) -> AshViewportFrameReport {
+    pub(super) fn finish(mut self) -> AshViewportFrameReport {
         let report = self.control.finish_frame_trace();
         self.active = false;
         report
+    }
+}
+
+/// Main-viewport frame whose textures and secondary Vulkan viewports are already prepared.
+///
+/// The owning viewport route is the only constructor. Applications may inspect same-frame
+/// secondary submission evidence before trying to acquire the main surface. Recording or
+/// explicitly skipping the main viewport consumes this capability and produces an
+/// [`AshViewportFrameCompletion`] that keeps texture retirement tied to GPU completion.
+#[must_use = "record or explicitly skip the main viewport"]
+pub struct AshPreparedViewportFrame<'frame> {
+    frame: ReconciledFrame<'frame>,
+    secondary: AshViewportFrameReport,
+    retirement: Option<TextureRetirementBatch>,
+    runtime: Arc<RuntimeIdentity>,
+}
+
+impl AshPreparedViewportFrame<'_> {
+    /// Returns the Dear ImGui Context identity carried by this prepared frame.
+    #[must_use]
+    pub fn context_id(&self) -> ContextId {
+        self.frame.context_id()
+    }
+
+    /// Returns the reconciled main-viewport draw data for read-only inspection.
+    #[must_use]
+    pub fn draw_data(&self) -> &dear_imgui_rs::render::DrawData {
+        self.frame.draw_data()
+    }
+
+    /// Returns same-scope evidence for completed secondary submissions and presentations.
+    #[must_use]
+    pub fn secondary_report(&self) -> &AshViewportFrameReport {
+        &self.secondary
+    }
+
+    /// Skips main-viewport command recording and preserves this frame's retirement obligation.
+    ///
+    /// Use this after main-surface acquisition fails or the application deliberately omits the
+    /// main viewport. Any secondary submissions reported by [`Self::secondary_report`] still need
+    /// to be covered before completing the returned capability. Dropping either capability keeps
+    /// retired resources queued for a later frame or route shutdown.
+    pub fn skip_main(self) -> AshViewportFrameCompletion {
+        let context = self.context_id();
+        let Self {
+            frame,
+            secondary: _,
+            retirement,
+            runtime,
+        } = self;
+        drop(frame);
+        AshViewportFrameCompletion {
+            context,
+            retirement,
+            runtime,
+        }
+    }
+}
+
+/// Move-only proof obligation for one prepared Ash viewport frame.
+///
+/// The capability contains any renderer-local retirement batch without exposing it to route
+/// callers. Pass it by value to the same route after device-idle or fence-backed GPU completion.
+/// Dropping it never frees Vulkan resources; the renderer retains them for a later frame or route
+/// shutdown. Except for terminal device-loss reclamation, a failed completion attempt also leaves
+/// resources queued so a later prepared frame can carry the obligation again.
+#[must_use = "prove GPU completion or intentionally defer texture retirement"]
+pub struct AshViewportFrameCompletion {
+    context: ContextId,
+    retirement: Option<TextureRetirementBatch>,
+    runtime: Arc<RuntimeIdentity>,
+}
+
+impl AshViewportFrameCompletion {
+    /// Returns the Dear ImGui Context identity carried by this completion capability.
+    #[must_use]
+    pub fn context_id(&self) -> ContextId {
+        self.context
+    }
+
+    fn into_retirement(
+        self,
+        expected: &Arc<RuntimeIdentity>,
+        expected_context: ContextId,
+    ) -> Result<Option<TextureRetirementBatch>, AshViewportError> {
+        if Arc::ptr_eq(&self.runtime, expected) {
+            Ok(self.retirement)
+        } else {
+            Err(AshViewportError::FrameTransactionRuntimeMismatch {
+                expected: expected_context,
+                actual: self.context,
+            })
+        }
+    }
+}
+
+impl fmt::Debug for AshViewportFrameCompletion {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AshViewportFrameCompletion")
+            .field("context", &self.context)
+            .field("retirement_pending", &self.retirement.is_some())
+            .finish()
     }
 }
 
@@ -382,7 +601,7 @@ impl fmt::Debug for OwningViewportRuntime {
 }
 
 impl OwningViewportRuntime {
-    pub(crate) fn begin_frame_trace(&self) -> Result<AshViewportFrameTrace<'_>, AshViewportError> {
+    pub(super) fn begin_frame_trace(&self) -> Result<AshViewportFrameTrace<'_>, AshViewportError> {
         self.control.begin_frame_trace()?;
         Ok(AshViewportFrameTrace {
             control: self.control.as_ref(),
@@ -456,14 +675,14 @@ impl OwningViewportRuntime {
         preflight_callbacks(context)?;
         preflight_runtime(context.id())?;
         let consumer = context
-            .create_renderer_consumer()
+            .create_synchronous_renderer_consumer()
             .map_err(RendererError::from)?;
         // The fake renderer below has no Vulkan texture map and cannot have submitted an epoch.
         // Commit the empty transaction before the test runtime claims callbacks.
         let reset = context
             .prepare_renderer_texture_reset(&consumer)
             .map_err(RendererError::from)?;
-        let _ = reset.commit();
+        reset.commit();
         let control = Rc::new(RuntimeControl::new_with_storage(
             context,
             RendererStorage::Fake {
@@ -494,59 +713,199 @@ impl OwningViewportRuntime {
         }
     }
 
-    pub(crate) unsafe fn cmd_draw(
-        &self,
-        command_buffer: ash::vk::CommandBuffer,
-        frame: RenderedFrame<'_>,
-    ) -> Result<Option<TextureRetirementBatch>, AshViewportError> {
-        self.control
-            .with_renderer_mut("cmd_draw", |renderer| unsafe {
-                renderer.cmd_draw(command_buffer, frame).map_err(Into::into)
-            })
+    pub(crate) fn drain_faults(&self) -> Vec<AshViewportError> {
+        self.control.detect_and_drain_faults()
     }
 
-    pub(crate) fn prepare_frame(
+    pub(crate) fn context_id(&self) -> ContextId {
+        self.control.binding().id()
+    }
+
+    pub(super) fn ensure_matching_frame_token(
         &self,
-        frame: &mut RenderedFrame<'_>,
-    ) -> Result<Option<TextureRetirementBatch>, AshViewportError> {
-        self.control.with_renderer_mut("prepare_frame", |renderer| {
+        frame: &FrameToken<'_>,
+    ) -> Result<(), AshViewportError> {
+        let expected = self.context_id();
+        let actual = frame.ui().context_id();
+        if expected == actual {
+            Ok(())
+        } else {
+            Err(AshViewportError::ContextMismatch { expected, actual })
+        }
+    }
+
+    /// Enters a public platform route only after a pure frame-Context identity check.
+    ///
+    /// The closure contains every platform-adapter entry and deferred-fault read, so rejecting a
+    /// foreign frame is observably side-effect free at the route boundary.
+    pub(crate) fn prepare_route_for_context<'ctx, PlatformError>(
+        &self,
+        actual: ContextId,
+        platform_scope: impl FnOnce() -> (
+            Option<Result<AshPreparedViewportFrame<'ctx>, AshViewportError>>,
+            Vec<PlatformError>,
+        ),
+    ) -> Result<AshPreparedViewportFrame<'ctx>, AshViewportRouteError<PlatformError>> {
+        let expected = self.context_id();
+        if expected != actual {
+            return Err(AshViewportRouteError::renderer(
+                AshViewportError::ContextMismatch { expected, actual },
+            ));
+        }
+        let (renderer_result, platform_faults) = platform_scope();
+        self.finish_route_preparation(renderer_result, platform_faults)
+    }
+
+    pub(super) fn finish_route_preparation<'ctx, PlatformError>(
+        &self,
+        renderer_result: Option<Result<AshPreparedViewportFrame<'ctx>, AshViewportError>>,
+        platform_faults: Vec<PlatformError>,
+    ) -> Result<AshPreparedViewportFrame<'ctx>, AshViewportRouteError<PlatformError>> {
+        let mut faults = Vec::new();
+        let prepared = match renderer_result {
+            Some(Ok(prepared)) => Some(prepared),
+            Some(Err(error)) => {
+                faults.push(AshViewportRouteFault::Renderer(error));
+                None
+            }
+            None => None,
+        };
+        faults.extend(
+            self.drain_faults()
+                .into_iter()
+                .map(AshViewportRouteFault::Renderer),
+        );
+        faults.extend(
+            platform_faults
+                .into_iter()
+                .map(AshViewportRouteFault::Platform),
+        );
+
+        if !faults.is_empty() {
+            Err(AshViewportRouteError::new(faults))
+        } else if let Some(prepared) = prepared {
+            Ok(prepared)
+        } else {
+            Err(AshViewportRouteError::new(vec![
+                AshViewportRouteFault::Renderer(AshViewportError::RuntimeDetached),
+            ]))
+        }
+    }
+
+    pub(crate) fn prepare<'ctx>(
+        &self,
+        frame: FrameToken<'ctx>,
+    ) -> Result<AshPreparedViewportFrame<'ctx>, AshViewportError> {
+        self.ensure_matching_frame_token(&frame)?;
+        let (frame, retirement) = self.control.with_renderer_mut("prepare", |renderer| {
+            let frame = frame
+                .try_render(renderer.renderer_consumer()?)
+                .map_err(RendererError::from)?;
             renderer.prepare_frame(frame).map_err(Into::into)
+        })?;
+        self.prepare_reconciled(frame, retirement)
+    }
+
+    fn prepare_reconciled<'ctx>(
+        &self,
+        mut frame: ReconciledFrame<'ctx>,
+        retirement: Option<TextureRetirementBatch>,
+    ) -> Result<AshPreparedViewportFrame<'ctx>, AshViewportError> {
+        let ((), secondary) = self.trace_secondary_dispatch(|| {
+            frame.update_and_render_platform_windows_default();
+        })?;
+        Ok(AshPreparedViewportFrame {
+            frame,
+            secondary,
+            retirement,
+            runtime: Arc::clone(&self.control.identity),
         })
     }
 
-    pub(crate) fn pending_texture_retirement(
+    pub(super) fn trace_secondary_dispatch<R>(
         &self,
-    ) -> Result<Option<TextureRetirementBatch>, AshViewportError> {
-        self.control
-            .with_renderer(AshRenderer::pending_texture_retirement)
-            .and_then(|result| result.map_err(Into::into))
+        dispatch: impl FnOnce() -> R,
+    ) -> Result<(R, AshViewportFrameReport), AshViewportError> {
+        self.poll_fault()?;
+        let trace = self.begin_frame_trace()?;
+        let output = dispatch();
+        let secondary = trace.finish();
+        self.poll_fault()?;
+        Ok((output, secondary))
     }
 
-    pub(crate) fn wait_for_texture_retirements(
+    fn ensure_frame_runtime(
         &self,
-        batch: TextureRetirementBatch,
-    ) -> Result<usize, AshViewportError> {
+        runtime: &Arc<RuntimeIdentity>,
+        actual: ContextId,
+    ) -> Result<(), AshViewportError> {
+        if Arc::ptr_eq(&self.control.identity, runtime) {
+            Ok(())
+        } else {
+            Err(AshViewportError::FrameTransactionRuntimeMismatch {
+                expected: self.context_id(),
+                actual,
+            })
+        }
+    }
+
+    pub(crate) unsafe fn cmd_draw_main(
+        &self,
+        command_buffer: ash::vk::CommandBuffer,
+        prepared: AshPreparedViewportFrame<'_>,
+    ) -> Result<AshViewportFrameCompletion, AshViewportError> {
+        self.ensure_frame_runtime(&prepared.runtime, prepared.context_id())?;
+        let context = prepared.context_id();
+        let AshPreparedViewportFrame {
+            frame,
+            retirement,
+            runtime,
+            ..
+        } = prepared;
         self.control
-            .with_renderer_mut("wait_for_texture_retirements", |renderer| {
+            .with_renderer_mut("cmd_draw_main", |renderer| unsafe {
+                renderer.cmd_draw(command_buffer, frame)?;
+                Ok(AshViewportFrameCompletion {
+                    context,
+                    retirement,
+                    runtime,
+                })
+            })
+    }
+
+    pub(crate) fn wait_for_frame_completion(
+        &self,
+        completion: AshViewportFrameCompletion,
+    ) -> Result<usize, AshViewportError> {
+        let Some(batch) = completion.into_retirement(&self.control.identity, self.context_id())?
+        else {
+            self.poll_fault()?;
+            return Ok(0);
+        };
+        self.control
+            .with_renderer_mut("wait_for_frame_completion", |renderer| {
                 renderer
                     .wait_for_texture_retirements(batch)
                     .map_err(Into::into)
             })
     }
 
-    pub(crate) unsafe fn complete_texture_retirements_with_fences(
+    pub(crate) unsafe fn complete_frame_with_fences(
         &self,
-        batch: TextureRetirementBatch,
+        completion: AshViewportFrameCompletion,
         fences: &[ash::vk::Fence],
     ) -> Result<usize, AshViewportError> {
-        self.control.with_renderer_mut(
-            "complete_texture_retirements_with_fences",
-            |renderer| unsafe {
+        let Some(batch) = completion.into_retirement(&self.control.identity, self.context_id())?
+        else {
+            self.poll_fault()?;
+            return Ok(0);
+        };
+        self.control
+            .with_renderer_mut("complete_frame_with_fences", |renderer| unsafe {
                 renderer
                     .complete_texture_retirements_with_fences(batch, fences)
                     .map_err(Into::into)
-            },
-        )
+            })
     }
 
     pub(crate) fn set_viewport_clear_color(&self, color: [f32; 4]) -> Result<(), AshViewportError> {
@@ -564,13 +923,6 @@ impl OwningViewportRuntime {
 
     pub(crate) fn options(&self) -> Result<Options, AshViewportError> {
         self.control.with_renderer(AshRenderer::options)
-    }
-
-    pub(crate) fn with_renderer<R>(
-        &self,
-        callback: impl FnOnce(&AshRenderer) -> R,
-    ) -> Result<R, AshViewportError> {
-        self.control.with_renderer(callback)
     }
 
     pub(crate) unsafe fn register_external_texture(
@@ -692,11 +1044,6 @@ impl OwningViewportRuntime {
     }
 
     #[cfg(test)]
-    pub(super) fn snapshot_for_shutdown_test(&self, context: &mut Context) -> FrameSnapshot {
-        self.control.snapshot_for_shutdown_test(context)
-    }
-
-    #[cfg(test)]
     pub(super) fn state_for_test(&self) -> RuntimeState {
         self.control.state()
     }
@@ -709,6 +1056,23 @@ impl OwningViewportRuntime {
     #[cfg(test)]
     pub(super) fn control_for_test(&self) -> Rc<RuntimeControl> {
         Rc::clone(&self.control)
+    }
+
+    #[cfg(test)]
+    pub(super) fn ensure_runtime_identity_for_test(
+        &self,
+        other: &Self,
+    ) -> Result<(), AshViewportError> {
+        self.ensure_frame_runtime(&other.control.identity, other.context_id())
+    }
+
+    #[cfg(test)]
+    pub(super) fn empty_completion_for_test(&self) -> AshViewportFrameCompletion {
+        AshViewportFrameCompletion {
+            context: self.context_id(),
+            retirement: None,
+            runtime: Arc::clone(&self.control.identity),
+        }
     }
 
     #[cfg(test)]

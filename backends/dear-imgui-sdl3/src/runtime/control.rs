@@ -53,8 +53,8 @@ impl RuntimeControl {
             deferred_renderer_viewports: RefCell::new(HashMap::new()),
             failed_viewports: RefCell::new(HashSet::new()),
             faults: RefCell::new(VecDeque::new()),
-            opengl_viewport_frame_trace: RefCell::new(OpenGlViewportFrameTraceState::default()),
             reported_replacements: RefCell::new(HashSet::new()),
+            foreign_platform_user_data_reported: Cell::new(false),
             revoked_capabilities: Cell::new(0),
             foreign_capabilities: Cell::new(0),
             #[cfg(test)]
@@ -66,7 +66,7 @@ impl RuntimeControl {
         &self.binding
     }
 
-    pub(crate) fn install_renderer_consumer(&self, consumer: RendererConsumer) {
+    pub(crate) fn install_renderer_consumer(&self, consumer: Rc<SynchronousRendererConsumer>) {
         let previous = self.renderer_consumer.borrow_mut().replace(consumer);
         assert!(
             previous.is_none(),
@@ -74,7 +74,7 @@ impl RuntimeControl {
         );
     }
 
-    fn take_renderer_consumer(&self) -> Option<RendererConsumer> {
+    fn take_renderer_consumer(&self) -> Option<Rc<SynchronousRendererConsumer>> {
         self.renderer_consumer.borrow_mut().take()
     }
 
@@ -84,81 +84,6 @@ impl RuntimeControl {
 
     pub(crate) fn expects_opengl(&self) -> bool {
         self.platform_graphics == PlatformGraphicsKind::OpenGl
-    }
-
-    fn begin_opengl_viewport_frame_trace(
-        &self,
-    ) -> Result<Sdl3OpenGlViewportFrameTrace<'_>, Sdl3OpenGlViewportFrameTraceError> {
-        if self.opengl_viewport_frame_trace.borrow().active.is_some() {
-            return Err(Sdl3OpenGlViewportFrameTraceError::AlreadyActive);
-        }
-        self.ensure_bound_entry()?;
-        if !self.expects_opengl() {
-            return Err(Sdl3OpenGlViewportFrameTraceError::RequiresOpenGl);
-        }
-        {
-            let mut trace = self.opengl_viewport_frame_trace.borrow_mut();
-            if trace.active.is_some() {
-                return Err(Sdl3OpenGlViewportFrameTraceError::AlreadyActive);
-            }
-            trace.active = Some(ActiveOpenGlViewportFrameTrace {
-                context_activated_viewports: HashSet::new(),
-                swapped_viewports: HashSet::new(),
-            });
-        }
-        Ok(Sdl3OpenGlViewportFrameTrace {
-            control: self,
-            finished: false,
-        })
-    }
-
-    pub(super) fn finish_opengl_viewport_frame_trace(&self) -> Sdl3OpenGlViewportFrameReport {
-        let active = {
-            let mut trace = self.opengl_viewport_frame_trace.borrow_mut();
-            trace
-                .active
-                .take()
-                .expect("a live SDL3 OpenGL frame-trace guard owns the active trace")
-        };
-        let mut context_activated_viewports = active
-            .context_activated_viewports
-            .into_iter()
-            .collect::<Vec<_>>();
-        context_activated_viewports.sort_unstable_by_key(|id| id.raw());
-        let mut swapped_viewports = active.swapped_viewports.into_iter().collect::<Vec<_>>();
-        swapped_viewports.sort_unstable_by_key(|id| id.raw());
-        Sdl3OpenGlViewportFrameReport {
-            context_activated_viewports,
-            swapped_viewports,
-        }
-    }
-
-    pub(super) fn abort_opengl_viewport_frame_trace(&self) {
-        self.opengl_viewport_frame_trace.borrow_mut().active = None;
-    }
-
-    pub(crate) fn record_opengl_viewport_context_activated(&self, viewport_id: sys::ImGuiID) {
-        if let Some(active) = self
-            .opengl_viewport_frame_trace
-            .borrow_mut()
-            .active
-            .as_mut()
-        {
-            active
-                .context_activated_viewports
-                .insert(Id::from(viewport_id));
-        }
-    }
-
-    pub(crate) fn record_opengl_viewport_swapped(&self, viewport_id: sys::ImGuiID) {
-        if let Some(active) = self
-            .opengl_viewport_frame_trace
-            .borrow_mut()
-            .active
-            .as_mut()
-        {
-            active.swapped_viewports.insert(Id::from(viewport_id));
-        }
     }
 
     #[cfg(feature = "multi-viewport")]
@@ -563,6 +488,15 @@ impl RuntimeControl {
         }
     }
 
+    pub(crate) fn drain_faults(&self) -> Vec<Sdl3BackendError> {
+        self.detect_callback_replacements();
+        self.faults
+            .borrow_mut()
+            .drain(..)
+            .map(RuntimeFault::into_error)
+            .collect()
+    }
+
     fn take_pending_fault(&self) -> Option<Sdl3BackendError> {
         self.detect_callback_replacements();
         self.faults
@@ -624,7 +558,7 @@ impl RuntimeControl {
         &self,
         requests: &[TextureRequest],
         request_epoch: u64,
-    ) -> Result<Vec<TextureFeedback>, Sdl3BackendError> {
+    ) -> Result<ProcessedTextureRequests, Sdl3BackendError> {
         let update_texture = self
             .lifecycle
             .renderer_texture_update
@@ -640,21 +574,10 @@ impl RuntimeControl {
         feature = "sdlrenderer3-renderer",
         feature = "sdlgpu3-renderer"
     ))]
-    pub(crate) fn mark_textures_reconciled(&self, requests: &[TextureRequest], request_epoch: u64) {
+    pub(crate) fn mark_textures_reconciled(&self, installed: &[SnapshotTextureId]) {
         self.renderer_textures
             .borrow_mut()
-            .mark_reconciled(requests, request_epoch);
-    }
-
-    #[cfg(any(
-        feature = "opengl3-renderer",
-        feature = "sdlrenderer3-renderer",
-        feature = "sdlgpu3-renderer"
-    ))]
-    pub(crate) fn reconciled_texture_epoch_is(&self, request_epoch: u64) -> bool {
-        self.renderer_textures
-            .borrow()
-            .reconciled_epoch_is(request_epoch)
+            .mark_reconciled(installed);
     }
 
     #[cfg(any(
@@ -1007,9 +930,7 @@ impl RuntimeControl {
     }
 
     fn record_fault(&self, fault: RuntimeFault) {
-        if !self.faults.borrow().contains(&fault) {
-            self.faults.borrow_mut().push_back(fault);
-        }
+        self.faults.borrow_mut().push_back(fault);
     }
 
     pub(crate) fn record_callback_replaced(&self, callback: &'static str) {
@@ -1083,7 +1004,9 @@ impl RuntimeControl {
     }
 
     pub(crate) fn record_foreign_platform_user_data(&self) {
-        self.record_fault(RuntimeFault::ForeignPlatformUserData);
+        if !self.foreign_platform_user_data_reported.replace(true) {
+            self.record_fault(RuntimeFault::ForeignPlatformUserData);
+        }
         self.revoke_capabilities(SDL_PLATFORM_RESERVED_FLAGS);
         self.begin_shutdown();
     }
@@ -1119,7 +1042,7 @@ impl RuntimeControl {
         self.record_fault(RuntimeFault::ViewportCreationFailed);
     }
 
-    pub(crate) fn record_native_faults(&self, faults: u64) {
+    pub(crate) fn record_native_faults(&self, faults: u64, first_fault: u64) {
         const GL_SHARE_CAPTURE: u64 = 1 << 0;
         const GL_SHARE_SET: u64 = 1 << 1;
         const GL_MAIN_CONTEXT: u64 = 1 << 2;
@@ -1137,45 +1060,77 @@ impl RuntimeControl {
         const SDLGPU_SWAPCHAIN: u64 = 1 << 15;
         const SDLGPU_RENDER_PASS: u64 = 1 << 16;
         const SDLGPU_SUBMIT: u64 = 1 << 17;
+        const SDLGPU_CANCEL: u64 = 1 << 18;
 
-        if faults & GL_SHARE_CAPTURE != 0 {
-            self.record_fault(RuntimeFault::ViewportOpenGlStateCaptureFailed);
+        const GROUPS: &[(u64, RuntimeFault)] = &[
+            (
+                GL_SHARE_CAPTURE,
+                RuntimeFault::ViewportOpenGlStateCaptureFailed,
+            ),
+            (
+                GL_SHARE_SET,
+                RuntimeFault::ViewportOpenGlShareConfigurationFailed,
+            ),
+            (
+                GL_MAIN_CONTEXT | GL_CREATE_CONTEXT,
+                RuntimeFault::ViewportOpenGlContextFailed,
+            ),
+            (
+                GL_SET_SWAP_INTERVAL,
+                RuntimeFault::ViewportOpenGlSwapIntervalFailed,
+            ),
+            (
+                GL_RESTORE_SHARE | GL_RESTORE_CONTEXT,
+                RuntimeFault::ViewportOpenGlStateRestoreFailed,
+            ),
+            (
+                GL_RENDER_CONTEXT,
+                RuntimeFault::ViewportOpenGlRenderContextFailed,
+            ),
+            (
+                GL_SWAP_CONTEXT | GL_SWAP_WINDOW,
+                RuntimeFault::ViewportOpenGlSwapFailed,
+            ),
+            (SDLGPU_CLAIM, RuntimeFault::ViewportSdlGpuClaimFailed),
+            (
+                SDLGPU_CONFIGURE,
+                RuntimeFault::ViewportSdlGpuConfigureFailed,
+            ),
+            (NATIVE_PROTOCOL, RuntimeFault::NativeBridgeProtocolFailed),
+            (
+                SDLGPU_COMMAND_BUFFER,
+                RuntimeFault::ViewportSdlGpuCommandBufferFailed,
+            ),
+            (
+                SDLGPU_SWAPCHAIN,
+                RuntimeFault::ViewportSdlGpuSwapchainFailed,
+            ),
+            (
+                SDLGPU_CANCEL,
+                RuntimeFault::ViewportSdlGpuCommandBufferCancelFailed,
+            ),
+            (
+                SDLGPU_RENDER_PASS,
+                RuntimeFault::ViewportSdlGpuRenderPassFailed,
+            ),
+            (SDLGPU_SUBMIT, RuntimeFault::ViewportSdlGpuSubmitFailed),
+        ];
+
+        let mut recorded_groups = 0;
+        let first_fault = first_fault & faults;
+        if first_fault != 0 {
+            debug_assert!(first_fault.is_power_of_two());
+            if let Some((mask, fault)) = GROUPS.iter().find(|(mask, _)| first_fault & *mask != 0) {
+                self.record_fault(*fault);
+                recorded_groups |= *mask;
+            }
         }
-        if faults & (GL_MAIN_CONTEXT | GL_CREATE_CONTEXT) != 0 {
-            self.record_fault(RuntimeFault::ViewportOpenGlContextFailed);
-        }
-        if faults & GL_SET_SWAP_INTERVAL != 0 {
-            self.record_fault(RuntimeFault::ViewportOpenGlSwapIntervalFailed);
-        }
-        if faults & (GL_SHARE_SET | GL_RESTORE_CONTEXT | GL_RESTORE_SHARE) != 0 {
-            self.record_fault(RuntimeFault::ViewportOpenGlStateRestoreFailed);
-        }
-        if faults & GL_RENDER_CONTEXT != 0 {
-            self.record_fault(RuntimeFault::ViewportOpenGlRenderContextFailed);
-        }
-        if faults & (GL_SWAP_CONTEXT | GL_SWAP_WINDOW) != 0 {
-            self.record_fault(RuntimeFault::ViewportOpenGlSwapFailed);
-        }
-        if faults & SDLGPU_CLAIM != 0 {
-            self.record_fault(RuntimeFault::ViewportSdlGpuClaimFailed);
-        }
-        if faults & SDLGPU_CONFIGURE != 0 {
-            self.record_fault(RuntimeFault::ViewportSdlGpuConfigureFailed);
-        }
-        if faults & NATIVE_PROTOCOL != 0 {
-            self.record_fault(RuntimeFault::NativeBridgeProtocolFailed);
-        }
-        if faults & SDLGPU_COMMAND_BUFFER != 0 {
-            self.record_fault(RuntimeFault::ViewportSdlGpuCommandBufferFailed);
-        }
-        if faults & SDLGPU_SWAPCHAIN != 0 {
-            self.record_fault(RuntimeFault::ViewportSdlGpuSwapchainFailed);
-        }
-        if faults & SDLGPU_RENDER_PASS != 0 {
-            self.record_fault(RuntimeFault::ViewportSdlGpuRenderPassFailed);
-        }
-        if faults & SDLGPU_SUBMIT != 0 {
-            self.record_fault(RuntimeFault::ViewportSdlGpuSubmitFailed);
+
+        for &(mask, fault) in GROUPS {
+            if faults & mask != 0 && recorded_groups & mask == 0 {
+                self.record_fault(fault);
+                recorded_groups |= mask;
+            }
         }
     }
 
@@ -1225,6 +1180,30 @@ impl RuntimeControl {
             }
             _ => false,
         }
+    }
+}
+
+impl Sdl3ViewportRendererAdapter {
+    /// Returns the Context identity of this exact platform generation.
+    #[must_use]
+    pub fn context_id(&self) -> ContextId {
+        self.control.binding().id()
+    }
+
+    /// Runs one renderer route attempt and retains every deferred platform fault.
+    pub fn run<R>(&self, callback: impl FnOnce() -> R) -> Sdl3ViewportAttempt<R> {
+        let faults = self.control.drain_faults();
+        if !faults.is_empty() {
+            return Sdl3ViewportAttempt::skipped(faults);
+        }
+        if let Err(error) = self.control.ensure_bound_entry() {
+            let mut faults = vec![error];
+            faults.extend(self.control.drain_faults());
+            return Sdl3ViewportAttempt::skipped(faults);
+        }
+
+        let output = callback();
+        Sdl3ViewportAttempt::completed(output, self.control.drain_faults())
     }
 }
 

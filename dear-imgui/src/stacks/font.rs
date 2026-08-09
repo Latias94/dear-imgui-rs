@@ -50,12 +50,18 @@ create_token!(
     #[doc(alias = "PopFont")]
     pub struct FontStackToken<'ui>;
 
+    pop crate::scope::NativeScopePop::PopFont;
+
     /// Pops a change from the font stack.
     drop { unsafe { sys::igPopFont() } }
 );
 
 impl FontStackToken<'_> {
     /// Pops a change from the font stack.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the same conditions as [`Self::end`].
     pub fn pop(self) {
         self.end()
     }
@@ -79,7 +85,10 @@ mod tests {
             .add_font(&[crate::FontSource::default_font_with_size(29.0)]);
         assert_eq!(small.reference_size(), Some(13.0));
         assert_eq!(large.reference_size(), Some(29.0));
-        let _ = ctx.font_atlas().build();
+        ctx.font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
         ctx.io_mut().set_display_size([128.0, 128.0]);
         ctx.io_mut().set_delta_time(1.0 / 60.0);
 
@@ -101,7 +110,7 @@ mod tests {
     fn push_font_preserves_current_size_without_a_reference_size() {
         let mut ctx = crate::Context::create();
         let _consumer = ctx
-            .create_renderer_consumer()
+            .create_synchronous_renderer_consumer()
             .expect("the managed renderer consumer should attach");
         let small = ctx
             .font_atlas()

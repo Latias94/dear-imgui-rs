@@ -21,9 +21,11 @@ fn thread_safety_context_and_render_markers() {
     assert_not_impl_any!(dear_imgui_rs::CustomRectSnapshot<'static>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::FontAtlasTexture<'static>: Send, Sync);
 
-    assert_not_impl_any!(dear_imgui_rs::render::RenderedFrame<'static>: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::render::PendingFrame<'static>: Send, Sync, Clone, Copy);
     assert_not_impl_any!(dear_imgui_rs::render::ReconciledFrame<'static>: Send, Sync, Clone, Copy);
-    assert_not_impl_any!(dear_imgui_rs::render::RendererConsumer: Send, Sync, Clone);
+    assert_not_impl_any!(dear_imgui_rs::render::SynchronousRendererConsumer: Send, Sync, Clone);
+    assert_not_impl_any!(dear_imgui_rs::render::DetachedRendererConsumer: Send, Sync, Clone);
+    assert_impl_all!(dear_imgui_rs::render::DrawRequirements: Send, Sync, Clone, Copy);
 
     // Detached snapshots move across threads but cannot be cloned.
     assert_impl_all!(dear_imgui_rs::render::snapshot::FrameSnapshot: Send, Sync);
@@ -51,9 +53,6 @@ fn thread_safety_context_and_render_markers() {
 
 #[test]
 fn thread_safety_core_scope_tokens_are_ui_bound() {
-    assert_not_impl_any!(dear_imgui_rs::WindowToken<'static>: Send, Sync);
-    assert_not_impl_any!(dear_imgui_rs::ChildWindowToken<'static>: Send, Sync);
-
     assert_not_impl_any!(dear_imgui_rs::FontStackToken<'static>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::ColorStackToken<'static>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::StyleStackToken<'static>: Send, Sync);
@@ -81,8 +80,6 @@ fn thread_safety_core_scope_tokens_are_ui_bound() {
     assert_not_impl_any!(dear_imgui_rs::TabBarToken<'static>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::TabItemToken<'static>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::TableToken<'static>: Send, Sync);
-    assert_not_impl_any!(dear_imgui_rs::TableBackgroundChannelToken<'static>: Send, Sync);
-    assert_not_impl_any!(dear_imgui_rs::TableColumnChannelToken<'static>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::TooltipToken<'static>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::TreeNodeToken<'static>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::MultiSelectScope<'static>: Send, Sync);

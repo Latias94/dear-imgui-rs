@@ -1,4 +1,7 @@
-use super::{TextureData, TextureFormat, TextureId, TextureRect, TextureStatus};
+use super::{
+    TextureData, TextureDataError, TextureFormat, TextureId, TextureRect, TextureStatus,
+    TextureSubresource,
+};
 
 /// Read-only access to a Context-owned managed texture.
 ///
@@ -114,18 +117,60 @@ impl<'texture> ManagedTextureRef<'texture> {
 ///
 /// Applications can update pixel data and inspect metadata, but renderer-owned status, texture
 /// identifiers, backend data, and the native allocation remain behind the Context protocol.
+///
+/// The former unchecked managed setter is intentionally unavailable:
+///
+/// ```compile_fail
+/// use dear_imgui_rs::ManagedTextureMut;
+/// fn replace(mut texture: ManagedTextureMut<'_>) { texture.set_data(&[0; 4]); }
+/// ```
 pub struct ManagedTextureMut<'texture> {
     texture: &'texture mut TextureData,
+    mutated: &'texture mut bool,
 }
 
 impl<'texture> ManagedTextureMut<'texture> {
-    pub(crate) fn new(texture: &'texture mut TextureData) -> Self {
-        Self { texture }
+    pub(crate) fn new(texture: &'texture mut TextureData, mutated: &'texture mut bool) -> Self {
+        Self { texture, mutated }
     }
 
-    /// Replace the texture's pixel data and queue the appropriate upload request.
-    pub fn set_data(&mut self, data: &[u8]) {
-        self.texture.set_data(data);
+    /// Replace every pixel using the destination's exact tightly packed byte length.
+    ///
+    /// Validation is transactional: an error leaves pixels, status, and queued update rectangles
+    /// unchanged. See [`TextureData::replace_pixels`] for the complete lifecycle contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TextureDataError`] when the texture is not mutable, its layout is invalid, the
+    /// payload length is not exact, or a live full update is not natively representable.
+    pub fn replace_pixels(&mut self, pixels: &[u8]) -> Result<(), TextureDataError> {
+        let result = self.texture.replace_pixels(pixels);
+        if result.is_ok() {
+            *self.mutated = true;
+        }
+        result
+    }
+
+    /// Copy one strided source payload into the requested texture region.
+    ///
+    /// The exact payload length is `(height - 1) * row_pitch + tight_row_bytes`; final-row padding
+    /// is not accepted. Validation is transactional. In `WantCreate`, the operation changes the
+    /// initial pixels without queuing a rectangle; in `OK` or `WantUpdates`, it queues the region
+    /// and ends in `WantUpdates`. See [`TextureData::update_subresource`] for the complete contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TextureDataError`] when the texture is not mutable, the region is invalid, the
+    /// row pitch or payload length is wrong, or the native update rectangle is not representable.
+    pub fn update_subresource(
+        &mut self,
+        update: TextureSubresource<'_>,
+    ) -> Result<(), TextureDataError> {
+        let result = self.texture.update_subresource(update);
+        if result.is_ok() {
+            *self.mutated = true;
+        }
+        result
     }
 
     /// Inspect the texture without exposing renderer-owned fields or native pointers.

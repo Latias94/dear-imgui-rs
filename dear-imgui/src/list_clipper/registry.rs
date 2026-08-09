@@ -1,16 +1,14 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use crate::sys;
+use crate::scope::{TableScope, WindowScope};
+use crate::{Ui, sys};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ClipperScope {
     context: *mut sys::ImGuiContext,
-    frame: i32,
-    window: *mut sys::ImGuiWindow,
-    window_begin_count: i16,
-    table: *mut sys::ImGuiTable,
-    table_instance: i16,
+    window: WindowScope,
+    table: Option<TableScope>,
 }
 
 #[derive(Clone, Copy)]
@@ -57,7 +55,8 @@ thread_local! {
     static CLIPPERS: RefCell<ClipperRegistry> = RefCell::new(ClipperRegistry::default());
 }
 
-unsafe fn current_scope(context: *mut sys::ImGuiContext, caller: &str) -> ClipperScope {
+unsafe fn current_scope(ui: &Ui, caller: &str) -> ClipperScope {
+    let context = ui.context_raw();
     assert!(
         !context.is_null(),
         "{caller} requires a valid ImGui context"
@@ -67,55 +66,36 @@ unsafe fn current_scope(context: *mut sys::ImGuiContext, caller: &str) -> Clippe
         context,
         "{caller} requires the clipper's ImGui context to be current"
     );
-    let window = unsafe { sys::igGetCurrentWindow() };
-    assert!(
-        !window.is_null(),
-        "{caller} requires an active ImGui window"
-    );
-    let table = unsafe { sys::igGetCurrentTable() };
+    let scope = ui.current_native_scope();
+    let window = scope
+        .window()
+        .unwrap_or_else(|| panic!("{caller} requires an active ImGui window"));
     ClipperScope {
         context,
-        frame: unsafe { (*context).FrameCount },
         window,
-        window_begin_count: unsafe { (*window).BeginCount },
-        table,
-        table_instance: unsafe {
-            if table.is_null() {
-                -1
-            } else {
-                (*table).InstanceCurrent
-            }
-        },
+        table: scope.table(),
     }
 }
 
-unsafe fn try_current_scope(context: *mut sys::ImGuiContext) -> Option<ClipperScope> {
+unsafe fn try_current_scope(ui: &Ui) -> Option<ClipperScope> {
+    if ui.native_scope_recovery_pending() {
+        return None;
+    }
+    let context = ui.context_raw();
     if context.is_null() || unsafe { sys::igGetCurrentContext() } != context {
         return None;
     }
-    let window = unsafe { sys::igGetCurrentWindow() };
-    if window.is_null() {
-        return None;
-    }
-    let table = unsafe { sys::igGetCurrentTable() };
+    let scope = ui.current_native_scope();
     Some(ClipperScope {
         context,
-        frame: unsafe { (*context).FrameCount },
-        window,
-        window_begin_count: unsafe { (*window).BeginCount },
-        table,
-        table_instance: unsafe {
-            if table.is_null() {
-                -1
-            } else {
-                (*table).InstanceCurrent
-            }
-        },
+        window: scope.window()?,
+        table: scope.table(),
     })
 }
 
-pub(super) unsafe fn assert_can_begin(context: *mut sys::ImGuiContext, caller: &str) {
-    let scope = unsafe { current_scope(context, caller) };
+pub(super) unsafe fn assert_can_begin(ui: &Ui, caller: &str) {
+    let scope = unsafe { current_scope(ui, caller) };
+    let context = scope.context;
     CLIPPERS.with(|registry| {
         let registry = registry.borrow();
         let Some(entry) = registry
@@ -133,12 +113,13 @@ pub(super) unsafe fn assert_can_begin(context: *mut sys::ImGuiContext, caller: &
 }
 
 pub(super) unsafe fn register_current(
-    context: *mut sys::ImGuiContext,
+    ui: &Ui,
     ptr: *mut sys::ImGuiListClipper,
     caller: &str,
 ) -> ClipperHandle {
     assert!(!ptr.is_null(), "{caller} received a null list clipper");
-    let scope = unsafe { current_scope(context, caller) };
+    let scope = unsafe { current_scope(ui, caller) };
+    let context = scope.context;
     CLIPPERS.with(|registry| {
         let mut registry = registry.borrow_mut();
         let id = registry.next_id;
@@ -161,10 +142,16 @@ pub(super) unsafe fn register_current(
 }
 
 pub(super) unsafe fn assert_current(
+    ui: &Ui,
     handle: ClipperHandle,
     caller: &str,
 ) -> *mut sys::ImGuiListClipper {
-    let scope = unsafe { current_scope(handle.context, caller) };
+    assert_eq!(
+        handle.context,
+        ui.context_raw(),
+        "{caller} used a list clipper with a foreign Ui"
+    );
+    let scope = unsafe { current_scope(ui, caller) };
     CLIPPERS.with(|registry| {
         let registry = registry.borrow();
         let stack = registry
@@ -194,8 +181,8 @@ pub(super) unsafe fn assert_current(
     })
 }
 
-pub(super) unsafe fn complete(handle: ClipperHandle) {
-    let current_scope = unsafe { try_current_scope(handle.context) };
+pub(super) unsafe fn complete(ui: &Ui, handle: ClipperHandle) {
+    let current_scope = unsafe { try_current_scope(ui) };
     let entries_to_destroy = CLIPPERS.with(|registry| {
         let mut registry = registry.borrow_mut();
         let key = handle.context as usize;
@@ -242,11 +229,11 @@ pub(super) unsafe fn complete(handle: ClipperHandle) {
     }
 }
 
-pub(super) unsafe fn release(handle: ClipperHandle) {
+pub(super) unsafe fn release(ui: &Ui, handle: ClipperHandle) {
     if handle.context.is_null() || handle.ptr.is_null() {
         return;
     }
-    let current_scope = unsafe { try_current_scope(handle.context) };
+    let current_scope = unsafe { try_current_scope(ui) };
 
     let entries_to_destroy = CLIPPERS.with(|registry| {
         let mut registry = registry.borrow_mut();
@@ -292,11 +279,6 @@ pub(super) unsafe fn release(handle: ClipperHandle) {
 unsafe fn destroy_in_original_scope(entry: ClipperEntry) {
     debug_assert_eq!(unsafe { sys::igGetCurrentContext() }, entry.scope.context);
     debug_assert_eq!(unsafe { (*entry.ptr).Ctx }, entry.scope.context);
-
-    debug_assert_eq!(
-        unsafe { try_current_scope(entry.scope.context) },
-        Some(entry.scope)
-    );
     unsafe { sys::ImGuiListClipper_destroy(entry.ptr) };
 }
 

@@ -6,7 +6,7 @@ use super::*;
 use crate::{FrameResources, wgpu};
 use dear_imgui_rs::{
     TextureId,
-    render::{DrawData, DrawIdx, RawCallbackCommand},
+    render::{DrawData, DrawIdx, DrawRequirements, RawCallbackCommand},
 };
 
 // ImGui index type is currently u16 in dear-imgui-rs, but keep this derived so
@@ -17,43 +17,42 @@ const IMGUI_INDEX_FORMAT: wgpu::IndexFormat = if std::mem::size_of::<DrawIdx>() 
     wgpu::IndexFormat::Uint32
 };
 
+/// Physical dimensions of the WGPU render target receiving Dear ImGui commands.
+///
+/// WGPU render passes do not expose attachment dimensions. Applications must therefore pass the
+/// extent of the texture view used to create the render pass instead of asking the renderer to
+/// infer it from Dear ImGui's logical display metrics.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub(super) struct FramebufferExtent {
+pub struct FramebufferExtent {
     width: u32,
     height: u32,
 }
 
 impl FramebufferExtent {
-    pub(super) fn from_draw_data(draw_data: &DrawData) -> RendererResult<Option<Self>> {
-        let size = draw_data.display_size();
-        let scale = draw_data.framebuffer_scale();
-        let width = size[0] * scale[0];
-        let height = size[1] * scale[1];
-        if !width.is_finite() || !height.is_finite() {
-            return Err(RendererError::InvalidRenderState(
-                "draw data produced a non-finite framebuffer extent".to_owned(),
-            ));
-        }
-        if width <= 0.0 || height <= 0.0 {
-            return Ok(None);
-        }
-        if width > u32::MAX as f32 || height > u32::MAX as f32 {
-            return Err(RendererError::InvalidRenderState(
-                "draw data framebuffer extent exceeds WGPU limits".to_owned(),
-            ));
-        }
-        Ok(Some(Self {
-            width: width as u32,
-            height: height as u32,
-        }))
+    /// Creates an extent. A zero width or height represents a target that cannot be drawn yet.
+    pub const fn new(width: u32, height: u32) -> Self {
+        Self { width, height }
     }
 
-    pub(super) const fn explicit(width: u32, height: u32) -> Option<Self> {
-        if width == 0 || height == 0 {
-            None
-        } else {
-            Some(Self { width, height })
-        }
+    /// Returns the extent of a WGPU texture.
+    pub fn from_texture(texture: &wgpu::Texture) -> Self {
+        let size = texture.size();
+        Self::new(size.width, size.height)
+    }
+
+    /// Returns the physical width in pixels.
+    pub const fn width(self) -> u32 {
+        self.width
+    }
+
+    /// Returns the physical height in pixels.
+    pub const fn height(self) -> u32 {
+        self.height
+    }
+
+    /// Returns whether the target has no drawable area.
+    pub const fn is_empty(self) -> bool {
+        self.width == 0 || self.height == 0
     }
 
     fn width_f32(self) -> f32 {
@@ -145,18 +144,16 @@ pub(super) struct PreparedRenderState {
 }
 
 impl WgpuRenderer {
-    pub(super) fn preflight_draw_callback_support(draw_data: &DrawData) -> RendererResult<()> {
+    pub(super) fn preflight_draw_callback_support(
+        requirements: DrawRequirements,
+    ) -> RendererResult<()> {
         #[cfg(target_arch = "wasm32")]
-        for draw_list in draw_data.draw_lists() {
-            for command in draw_list.commands() {
-                if matches!(command, dear_imgui_rs::render::DrawCmd::RawCallback(_)) {
-                    return Err(RendererError::RawDrawCallbackUnsupported);
-                }
-            }
+        if requirements.requires_raw_callback_support() {
+            return Err(RendererError::RawDrawCallbackUnsupported);
         }
 
         #[cfg(not(target_arch = "wasm32"))]
-        let _ = draw_data;
+        let _ = requirements;
 
         Ok(())
     }
@@ -207,7 +204,7 @@ impl WgpuRenderer {
         extent: FramebufferExtent,
         backend_data: &mut WgpuBackendData,
     ) -> RendererResult<PreparedDrawData<'draw>> {
-        Self::preflight_draw_callback_support(draw_data)?;
+        Self::preflight_draw_callback_support(draw_data.requirements())?;
 
         let mut commands = Vec::new();
         let mut global_idx_offset = 0u32;

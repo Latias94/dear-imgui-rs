@@ -8,7 +8,7 @@ use bevy::{
     window::{PresentMode, WindowPlugin, WindowTheme},
 };
 use dear_imgui_bevy::prelude::*;
-use dear_imgui_rs::{Condition, FontId, FontSource};
+use dear_imgui_rs::{Condition, FontId, FontSource, StbTrueTypeFontData};
 
 const ROBOTO_MEDIUM: &[u8] = include_bytes!("../assets/Roboto-Medium.ttf");
 
@@ -29,10 +29,11 @@ fn main() {
             ..Default::default()
         }),
         ..Default::default()
-    }))
-    .add_plugins(ImguiPlugin::default())
-    .insert_non_send(CustomFonts::default())
-    .add_systems(Startup, (setup_scene, configure_fonts));
+    }));
+    app.try_install_imgui(ImguiPlugin::default())
+        .expect("the custom-font example configuration is valid");
+    app.insert_non_send(CustomFonts::default())
+        .add_systems(Startup, (setup_scene, configure_fonts));
     let primary_pass = app.imgui_primary_pass();
     app.add_imgui_systems(&primary_pass, primary_pass.system(custom_font_ui))
         .run();
@@ -50,13 +51,12 @@ fn configure_fonts(
         .primary_id()
         .ok_or("ImguiPlugin should install a primary Context before Startup")?;
 
-    let roboto_medium = contexts.configure(primary, |context| {
+    let roboto = StbTrueTypeFontData::from_slice(ROBOTO_MEDIUM)?;
+    let roboto_medium = contexts.configure(primary, move |context| {
         let atlas = context.font_atlas();
         atlas.add_font(&[FontSource::default_font_with_size(16.0)]);
 
-        // SAFETY: the bundled bytes contain the complete, unmodified Roboto Medium TTF and
-        // remain alive for the duration of this call.
-        let source = unsafe { FontSource::ttf_data_with_size(ROBOTO_MEDIUM, 20.0) };
+        let source = FontSource::stb_truetype_with_size(roboto, 20.0);
         atlas.add_font(&[source])
     })?;
 

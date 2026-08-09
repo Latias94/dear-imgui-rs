@@ -44,14 +44,24 @@ std::uint64_t dear_imgui_sdlgpu3_render_checked(
     const DearImguiSdlGpu3RenderOps& ops,
     SDL_GPUDevice* device,
     SDL_Window* window,
-    ImDrawData* draw_data
+    ImDrawData* draw_data,
+    std::uint64_t* first_fault
 ) {
-    if (device == nullptr || window == nullptr || draw_data == nullptr)
+    if (first_fault != nullptr)
+        *first_fault = 0;
+
+    if (device == nullptr || window == nullptr || draw_data == nullptr) {
+        if (first_fault != nullptr)
+            *first_fault = DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL;
         return DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL;
+    }
 
     SDL_GPUCommandBuffer* command_buffer = ops.acquire_command_buffer(device);
-    if (command_buffer == nullptr)
+    if (command_buffer == nullptr) {
+        if (first_fault != nullptr)
+            *first_fault = DEAR_IMGUI_SDL3_FAULT_SDLGPU_COMMAND_BUFFER;
         return DEAR_IMGUI_SDL3_FAULT_SDLGPU_COMMAND_BUFFER;
+    }
 
     SDL_GPUTexture* swapchain_texture = nullptr;
     if (!ops.acquire_swapchain_texture(
@@ -60,8 +70,12 @@ std::uint64_t dear_imgui_sdlgpu3_render_checked(
             &swapchain_texture,
             nullptr,
             nullptr)) {
-        ops.cancel_command_buffer(command_buffer);
-        return DEAR_IMGUI_SDL3_FAULT_SDLGPU_SWAPCHAIN;
+        std::uint64_t faults = DEAR_IMGUI_SDL3_FAULT_SDLGPU_SWAPCHAIN;
+        if (!ops.cancel_command_buffer(command_buffer))
+            faults |= DEAR_IMGUI_SDL3_FAULT_SDLGPU_CANCEL;
+        if (first_fault != nullptr)
+            *first_fault = DEAR_IMGUI_SDL3_FAULT_SDLGPU_SWAPCHAIN;
+        return faults;
     }
 
     std::uint64_t faults = 0;
@@ -83,6 +97,8 @@ std::uint64_t dear_imgui_sdlgpu3_render_checked(
         );
         if (render_pass == nullptr) {
             faults |= DEAR_IMGUI_SDL3_FAULT_SDLGPU_RENDER_PASS;
+            if (first_fault != nullptr)
+                *first_fault = DEAR_IMGUI_SDL3_FAULT_SDLGPU_RENDER_PASS;
         } else {
             ops.render_draw_data(draw_data, command_buffer, render_pass, nullptr);
             ops.end_render_pass(render_pass);
@@ -91,8 +107,11 @@ std::uint64_t dear_imgui_sdlgpu3_render_checked(
 
     // A swapchain texture may have been acquired, so submit even after a render-pass failure.
     // SDL explicitly forbids cancelling a command buffer after swapchain acquisition.
-    if (!ops.submit_command_buffer(command_buffer))
+    if (!ops.submit_command_buffer(command_buffer)) {
         faults |= DEAR_IMGUI_SDL3_FAULT_SDLGPU_SUBMIT;
+        if (first_fault != nullptr && *first_fault == 0)
+            *first_fault = DEAR_IMGUI_SDL3_FAULT_SDLGPU_SUBMIT;
+    }
     return faults;
 }
 
@@ -107,6 +126,7 @@ enum class DearImguiSdlGpu3FailStage {
 
 struct DearImguiSdlGpu3FakeState {
     DearImguiSdlGpu3FailStage fail_stage = DearImguiSdlGpu3FailStage::None;
+    bool cancel_fails = false;
     int acquire_command_calls = 0;
     int acquire_swapchain_calls = 0;
     int begin_pass_calls = 0;
@@ -163,7 +183,7 @@ bool SDLCALL fake_submit_command_buffer(SDL_GPUCommandBuffer*) {
 
 bool SDLCALL fake_cancel_command_buffer(SDL_GPUCommandBuffer*) {
     fake_render_state.cancel_calls++;
-    return true;
+    return !fake_render_state.cancel_fails;
 }
 
 void fake_prepare_draw_data(ImDrawData*, SDL_GPUCommandBuffer*) {
@@ -194,17 +214,22 @@ const DearImguiSdlGpu3RenderOps fake_render_ops = {
 } // namespace
 
 extern "C" std::uint64_t dear_imgui_sdl3_backend_sdlgpu3_render_viewport(
-    ImGuiViewport* viewport
+    ImGuiViewport* viewport,
+    std::uint64_t* first_fault
 ) {
     ImGui_ImplSDLGPU3_Data* data = ImGui_ImplSDLGPU3_GetBackendData();
-    if (viewport == nullptr || data == nullptr)
+    if (viewport == nullptr || data == nullptr) {
+        if (first_fault != nullptr)
+            *first_fault = DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL;
         return DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL;
+    }
     SDL_Window* window = SDL_GetWindowFromID((SDL_WindowID)(intptr_t)viewport->PlatformHandle);
     return dear_imgui_sdlgpu3_render_checked(
         real_render_ops,
         data->InitInfo.Device,
         window,
-        viewport->DrawData
+        viewport->DrawData,
+        first_fault
     );
 }
 
@@ -214,13 +239,15 @@ extern "C" std::uint64_t dear_imgui_sdl3_backend_sdlgpu3_render_contract_self_te
     SDL_GPUDevice* device = reinterpret_cast<SDL_GPUDevice*>(static_cast<std::uintptr_t>(0x601));
     SDL_Window* window = reinterpret_cast<SDL_Window*>(static_cast<std::uintptr_t>(0x602));
     ImDrawData* draw_data = reinterpret_cast<ImDrawData*>(static_cast<std::uintptr_t>(0x603));
+    std::uint64_t first_fault = 0;
 
     fake_render_state = {};
     fake_render_state.fail_stage = DearImguiSdlGpu3FailStage::CommandBuffer;
     std::uint64_t faults = dear_imgui_sdlgpu3_render_checked(
-        fake_render_ops, device, window, draw_data
+        fake_render_ops, device, window, draw_data, &first_fault
     );
     if (faults != DEAR_IMGUI_SDL3_FAULT_SDLGPU_COMMAND_BUFFER
+        || first_fault != DEAR_IMGUI_SDL3_FAULT_SDLGPU_COMMAND_BUFFER
         || fake_render_state.acquire_swapchain_calls != 0
         || fake_render_state.begin_pass_calls != 0
         || fake_render_state.submit_calls != 0)
@@ -228,8 +255,11 @@ extern "C" std::uint64_t dear_imgui_sdl3_backend_sdlgpu3_render_contract_self_te
 
     fake_render_state = {};
     fake_render_state.fail_stage = DearImguiSdlGpu3FailStage::Swapchain;
-    faults = dear_imgui_sdlgpu3_render_checked(fake_render_ops, device, window, draw_data);
+    faults = dear_imgui_sdlgpu3_render_checked(
+        fake_render_ops, device, window, draw_data, &first_fault
+    );
     if (faults != DEAR_IMGUI_SDL3_FAULT_SDLGPU_SWAPCHAIN
+        || first_fault != DEAR_IMGUI_SDL3_FAULT_SDLGPU_SWAPCHAIN
         || fake_render_state.cancel_calls != 1
         || fake_render_state.prepare_calls != 0
         || fake_render_state.begin_pass_calls != 0
@@ -237,9 +267,27 @@ extern "C" std::uint64_t dear_imgui_sdl3_backend_sdlgpu3_render_contract_self_te
         failures |= UINT64_C(1) << 1;
 
     fake_render_state = {};
+    fake_render_state.fail_stage = DearImguiSdlGpu3FailStage::Swapchain;
+    fake_render_state.cancel_fails = true;
+    faults = dear_imgui_sdlgpu3_render_checked(
+        fake_render_ops, device, window, draw_data, &first_fault
+    );
+    if (faults != (DEAR_IMGUI_SDL3_FAULT_SDLGPU_SWAPCHAIN
+            | DEAR_IMGUI_SDL3_FAULT_SDLGPU_CANCEL)
+        || first_fault != DEAR_IMGUI_SDL3_FAULT_SDLGPU_SWAPCHAIN
+        || fake_render_state.cancel_calls != 1
+        || fake_render_state.prepare_calls != 0
+        || fake_render_state.begin_pass_calls != 0
+        || fake_render_state.submit_calls != 0)
+        failures |= UINT64_C(1) << 4;
+
+    fake_render_state = {};
     fake_render_state.fail_stage = DearImguiSdlGpu3FailStage::RenderPass;
-    faults = dear_imgui_sdlgpu3_render_checked(fake_render_ops, device, window, draw_data);
+    faults = dear_imgui_sdlgpu3_render_checked(
+        fake_render_ops, device, window, draw_data, &first_fault
+    );
     if (faults != DEAR_IMGUI_SDL3_FAULT_SDLGPU_RENDER_PASS
+        || first_fault != DEAR_IMGUI_SDL3_FAULT_SDLGPU_RENDER_PASS
         || fake_render_state.prepare_calls != 1
         || fake_render_state.render_calls != 0
         || fake_render_state.end_pass_calls != 0
@@ -249,8 +297,11 @@ extern "C" std::uint64_t dear_imgui_sdl3_backend_sdlgpu3_render_contract_self_te
 
     fake_render_state = {};
     fake_render_state.fail_stage = DearImguiSdlGpu3FailStage::Submit;
-    faults = dear_imgui_sdlgpu3_render_checked(fake_render_ops, device, window, draw_data);
+    faults = dear_imgui_sdlgpu3_render_checked(
+        fake_render_ops, device, window, draw_data, &first_fault
+    );
     if (faults != DEAR_IMGUI_SDL3_FAULT_SDLGPU_SUBMIT
+        || first_fault != DEAR_IMGUI_SDL3_FAULT_SDLGPU_SUBMIT
         || fake_render_state.prepare_calls != 1
         || fake_render_state.render_calls != 1
         || fake_render_state.end_pass_calls != 1

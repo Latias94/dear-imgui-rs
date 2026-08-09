@@ -12,7 +12,6 @@ fn test_guard() -> std::sync::MutexGuard<'static, ()> {
 
 fn prepare_context(ctx: &mut Context) {
     ctx.prepare_frame(FramePrepareOptions::new([800.0, 600.0], 1.0 / 60.0).renderer_has_textures());
-    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 }
 
@@ -22,7 +21,7 @@ fn extensions_compose_inside_one_engine_managed_imgui_frame() {
 
     let mut imgui = Context::create();
     prepare_context(&mut imgui);
-    let consumer = imgui.create_renderer_consumer().unwrap();
+    let consumer = imgui.create_detached_renderer_consumer().unwrap();
 
     let plot_ctx = dear_implot::PlotContext::create(&imgui);
     let imnodes_ctx = dear_imnodes::Context::create(&imgui);

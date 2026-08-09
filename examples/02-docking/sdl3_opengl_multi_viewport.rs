@@ -32,13 +32,105 @@ struct OpenGlApp {
 struct MainData {
     sdl3_backend: Sdl3OpenGl3Backend,
     imgui: Context,
-    game_tex: glow::Texture,
+    game_tex: Option<glow::Texture>,
     gl: glow::Context,
     gl_context: sdl3::video::GLContext,
     window: sdl3::video::Window,
     _video: sdl3::VideoSubsystem,
     _sdl: sdl3::Sdl,
     last_frame: Instant,
+    backend_shutdown_complete: bool,
+}
+
+impl Drop for MainData {
+    fn drop(&mut self) {
+        if let Err(error) = self.shutdown() {
+            eprintln!("SDL3 OpenGL fallback shutdown failed: {error}");
+        }
+    }
+}
+
+impl MainData {
+    fn restore_main_context(&self, operation: &str) -> Result<(), Box<dyn Error>> {
+        self.window
+            .gl_make_current(&self.gl_context)
+            .map_err(|error| {
+                std::io::Error::other(format!(
+                    "failed to restore the main OpenGL context before {operation}: {error}"
+                ))
+                .into()
+            })
+    }
+
+    fn shutdown(&mut self) -> Result<(), Box<dyn Error>> {
+        if self.backend_shutdown_complete && self.game_tex.is_none() {
+            return Ok(());
+        }
+        self.imgui.end_frame();
+        let mut errors = Vec::new();
+
+        let main_context_current = match self.restore_main_context("backend shutdown") {
+            Ok(()) => true,
+            Err(error) => {
+                errors.push(error.to_string());
+                false
+            }
+        };
+        if !self.backend_shutdown_complete {
+            if main_context_current {
+                match self.sdl3_backend.shutdown(&mut self.imgui) {
+                    Ok(()) => self.backend_shutdown_complete = true,
+                    Err(error) => {
+                        errors.push(format!("SDL3 OpenGL backend shutdown failed: {error}"))
+                    }
+                }
+            } else {
+                errors.push(
+                    "SDL3 OpenGL backend shutdown could not run without the main OpenGL context"
+                        .to_owned(),
+                );
+            }
+        }
+
+        let main_context_current = match self.restore_main_context("texture deletion") {
+            Ok(()) => true,
+            Err(error) => {
+                errors.push(error.to_string());
+                false
+            }
+        };
+        if main_context_current {
+            if let Some(texture) = self.game_tex.take() {
+                use glow::HasContext;
+                unsafe { self.gl.delete_texture(texture) };
+            }
+        } else if self.game_tex.is_some() {
+            errors.push(
+                "application texture deletion could not run without the main OpenGL context"
+                    .to_owned(),
+            );
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(std::io::Error::other(errors.join("; ")).into())
+        }
+    }
+}
+
+fn initialization_failure(
+    stage: &str,
+    error: impl std::fmt::Display,
+    cleanup: Result<(), Box<dyn Error>>,
+) -> Box<dyn Error> {
+    let message = match cleanup {
+        Ok(()) => format!("{stage}: {error}"),
+        Err(cleanup_error) => {
+            format!("{stage}: {error}; initialization rollback failed: {cleanup_error}")
+        }
+    };
+    std::io::Error::other(message).into()
 }
 
 impl OpenGlApp {
@@ -84,8 +176,6 @@ impl OpenGlApp {
 
         // SAFETY: the window's OpenGL context is current on this thread.
         let gl = unsafe { create_glow_context(&video) };
-        // SAFETY: the glow context was created from the current OpenGL context.
-        let game_tex = unsafe { create_game_texture(&gl) };
 
         let mut imgui = Context::create();
         let main_scale = window.display_scale();
@@ -112,37 +202,75 @@ impl OpenGlApp {
         }
 
         // SAFETY: the window and GL context are retained until explicit backend shutdown.
-        let mut sdl3_backend =
+        let sdl3_backend =
             unsafe { Sdl3OpenGl3Backend::init(&mut imgui, &window, &gl_context, "#version 150")? };
-        sdl3_backend.set_gamepad_mode(&mut imgui, GamepadMode::AutoAll)?;
+        let mut main = MainData {
+            sdl3_backend,
+            imgui,
+            game_tex: None,
+            gl,
+            gl_context,
+            window,
+            _video: video,
+            _sdl: sdl,
+            last_frame: Instant::now(),
+            backend_shutdown_complete: false,
+        };
+
+        if let Err(error) = main
+            .sdl3_backend
+            .set_gamepad_mode(&mut main.imgui, GamepadMode::AutoAll)
+        {
+            let cleanup = main.shutdown();
+            return Err(initialization_failure(
+                "SDL3 gamepad initialization failed",
+                error,
+                cleanup,
+            ));
+        }
+
+        if let Err(error) = main.restore_main_context("application texture creation") {
+            let cleanup = main.shutdown();
+            return Err(initialization_failure(
+                "main OpenGL context activation failed",
+                error,
+                cleanup,
+            ));
+        }
+        // SAFETY: the glow context was created from the current OpenGL context, which was restored
+        // immediately above.
+        main.game_tex = match unsafe { create_game_texture(&main.gl) } {
+            Ok(texture) => Some(texture),
+            Err(error) => {
+                let cleanup = main.shutdown();
+                return Err(initialization_failure(
+                    "application texture initialization failed",
+                    error,
+                    cleanup,
+                ));
+            }
+        };
 
         Ok(Self {
             events: Sdl3CallbackEventHandoff::default(),
-            main: MainThreadData::assert_new(RefCell::new(MainData {
-                sdl3_backend,
-                imgui,
-                game_tex,
-                gl,
-                gl_context,
-                window,
-                _video: video,
-                _sdl: sdl,
-                last_frame: Instant::now(),
-            })),
+            main: MainThreadData::assert_new(RefCell::new(main)),
         })
     }
 
     fn process_events(&self) -> AppResult {
-        let mut events = self.events.drain();
+        let mut events = match self.events.try_drain() {
+            Ok(events) => events,
+            Err(error) => {
+                eprintln!("SDL3 callback event handoff failed: {error}");
+                return AppResult::Failure;
+            }
+        };
         let mut main_guard = self.main.assert_get().borrow_mut();
         let main = &mut *main_guard;
         while let Some(event) = events.pop() {
-            let backend_result = event.with_imgui_event(|raw| match raw {
-                // SAFETY: the callback handoff reconstructs the active union variant and owns
-                // every pointer payload for the duration of this closure.
-                Some(raw) => unsafe { main.sdl3_backend.process_raw_event(&mut main.imgui, raw) },
-                None => Ok(false),
-            });
+            let backend_result = main
+                .sdl3_backend
+                .process_callback_event(&mut main.imgui, &event);
             if let Err(error) = backend_result {
                 eprintln!("SDL3 backend event processing failed: {error}");
                 return AppResult::Failure;
@@ -164,8 +292,9 @@ impl OpenGlApp {
         main.last_frame = now;
 
         main.sdl3_backend.new_frame(&mut main.imgui)?;
-        let ui = main.imgui.frame();
-        ui.dockspace_over_main_viewport();
+        let frame = main.imgui.begin_frame();
+        let ui = frame.ui();
+        ui.dockspace().build()?;
 
         ui.window("Main")
             .size([420.0, 260.0], Condition::FirstUseEver)
@@ -176,7 +305,11 @@ impl OpenGlApp {
                 ui.text("Gamepad: SDL3 backend in AutoAll mode (all controllers merged)");
             });
 
-        let game_tex_id = TextureId::from(main.game_tex.0.get());
+        let game_tex = main
+            .game_tex
+            .as_ref()
+            .ok_or("application texture is unavailable after shutdown")?;
+        let game_tex_id = TextureId::from(game_tex.0.get());
         ui.window("Game View")
             .size([420.0, 420.0], Condition::FirstUseEver)
             .build(|| {
@@ -186,7 +319,17 @@ impl OpenGlApp {
                 ui.image(game_tex_id, [side, side]);
             });
 
-        let draw_data = main.imgui.render();
+        let window = &main.window;
+        let gl_context = &main.gl_context;
+        let prepared = main
+            .sdl3_backend
+            .prepare(frame, || window.gl_make_current(gl_context))?;
+        window.gl_make_current(gl_context).map_err(|error| {
+            std::io::Error::other(format!(
+                "failed to restore the main OpenGL context before main rendering: {error}"
+            ))
+        })?;
+
         unsafe {
             use glow::HasContext;
 
@@ -195,28 +338,17 @@ impl OpenGlApp {
             main.gl.clear_color(0.1, 0.12, 0.15, 1.0);
             main.gl.clear(glow::COLOR_BUFFER_BIT);
         }
-        main.sdl3_backend.render(draw_data)?;
-
-        if ENABLE_VIEWPORTS
-            && main
-                .imgui
-                .io()
-                .config_flags()
-                .contains(ConfigFlags::VIEWPORTS_ENABLE)
-        {
-            main.imgui.update_platform_windows();
-            main.imgui.render_platform_windows_default();
-            main.window.gl_make_current(&main.gl_context)?;
-        }
-        main.window.gl_swap_window();
+        main.sdl3_backend.render_main(prepared)?;
+        main.restore_main_context("presenting the main window")?;
+        dear_imgui_examples::sdl3_gl::swap_window(&main.window)?;
         Ok(())
     }
 
     fn shutdown(&self) {
         let mut main_guard = self.main.assert_get().borrow_mut();
         let main = &mut *main_guard;
-        if let Err(error) = main.sdl3_backend.shutdown(&mut main.imgui) {
-            eprintln!("SDL3 OpenGL backend shutdown failed: {error}");
+        if let Err(error) = main.shutdown() {
+            eprintln!("SDL3 OpenGL shutdown failed: {error}");
         }
     }
 }
@@ -283,7 +415,7 @@ unsafe fn create_glow_context(video: &sdl3::VideoSubsystem) -> glow::Context {
 /// # Safety
 ///
 /// The supplied context must be current for the calling thread.
-unsafe fn create_game_texture(gl: &glow::Context) -> glow::Texture {
+unsafe fn create_game_texture(gl: &glow::Context) -> Result<glow::Texture, Box<dyn Error>> {
     use glow::HasContext;
 
     const WIDTH: i32 = 256;
@@ -299,7 +431,8 @@ unsafe fn create_game_texture(gl: &glow::Context) -> glow::Texture {
         }
     }
 
-    let texture = unsafe { gl.create_texture() }.expect("failed to create GL texture");
+    let texture = unsafe { gl.create_texture() }
+        .map_err(|error| std::io::Error::other(format!("failed to create GL texture: {error}")))?;
     unsafe {
         gl.bind_texture(glow::TEXTURE_2D, Some(texture));
         gl.tex_parameter_i32(
@@ -335,5 +468,5 @@ unsafe fn create_game_texture(gl: &glow::Context) -> glow::Texture {
         );
         gl.bind_texture(glow::TEXTURE_2D, None);
     }
-    texture
+    Ok(texture)
 }

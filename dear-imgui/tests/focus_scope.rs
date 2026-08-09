@@ -4,7 +4,11 @@ fn prepare_imgui(ctx: &mut imgui::Context) {
     let io = ctx.io_mut();
     io.set_display_size([800.0, 600.0]);
     io.set_delta_time(1.0 / 60.0);
-    io.set_backend_flags(io.backend_flags() | imgui::BackendFlags::RENDERER_HAS_TEXTURES);
+
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
 }
 
 #[test]

@@ -9,9 +9,14 @@ mod trace;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use runtime::OwningViewportRuntime;
-pub use runtime::{WgpuViewportAttachError, WgpuViewportError, WgpuViewportFrameTraceGuard};
-pub use trace::WgpuViewportFrameTraceReport;
+pub(crate) use runtime::{
+    OwningViewportRuntime, finish_route_preparation, prepare_route_for_context,
+};
+pub use runtime::{
+    WgpuPreparedViewportFrame, WgpuViewportAttachError, WgpuViewportError, WgpuViewportRouteError,
+    WgpuViewportRouteFault,
+};
+pub use trace::WgpuViewportFrameReport;
 
 #[cfg(all(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
 compile_error!(

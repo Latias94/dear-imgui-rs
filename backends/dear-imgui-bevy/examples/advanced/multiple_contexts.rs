@@ -21,6 +21,7 @@ struct SecondaryContextPass;
 #[derive(Resource)]
 struct SecondaryIntegration {
     context_id: Option<ContextId>,
+    retirement: Option<ImguiContextRetirementId>,
     window: Entity,
     camera: Entity,
     route: Entity,
@@ -45,18 +46,19 @@ fn main() {
             ..Default::default()
         }),
         ..Default::default()
-    }))
-    .add_plugins(ImguiPlugin::default())
-    .init_resource::<MultipleContextState>()
-    .add_systems(Startup, setup)
-    .add_systems(
-        Update,
-        (
-            close_on_escape,
-            resize_secondary_camera_viewport,
-            retire_secondary_context,
-        ),
-    );
+    }));
+    app.try_install_imgui(ImguiPlugin::default())
+        .expect("the example configuration is valid");
+    app.init_resource::<MultipleContextState>()
+        .add_systems(Startup, setup)
+        .add_systems(
+            Update,
+            (
+                close_on_escape,
+                resize_secondary_camera_viewport,
+                (retire_secondary_context, finish_secondary_retirement).chain(),
+            ),
+        );
     let primary_pass = app.imgui_primary_pass();
     let secondary_pass = app.declare_imgui_pass::<SecondaryContextPass>();
     app.insert_resource(secondary_pass.clone())
@@ -113,6 +115,7 @@ fn setup(
 
     commands.insert_resource(SecondaryIntegration {
         context_id: Some(secondary_context),
+        retirement: None,
         window: secondary_window,
         camera: secondary_camera,
         route: secondary_route,
@@ -138,7 +141,7 @@ fn resize_secondary_camera_viewport(
     windows: Query<&Window>,
     mut cameras: Query<&mut Camera>,
 ) {
-    if integration.context_id.is_none() {
+    if integration.context_id.is_none() || integration.retirement.is_some() {
         return;
     }
     let (Ok(window), Ok(mut camera)) = (
@@ -158,7 +161,6 @@ fn resize_secondary_camera_viewport(
 }
 
 fn retire_secondary_context(
-    mut commands: Commands,
     mut contexts: NonSendMut<ImguiContexts>,
     mut integration: ResMut<SecondaryIntegration>,
     mut state: ResMut<MultipleContextState>,
@@ -172,16 +174,9 @@ fn retire_secondary_context(
     };
 
     match contexts.remove(context_id) {
-        Ok(_context) => {
-            commands.entity(integration.route).despawn();
-            commands.entity(integration.camera).despawn();
-            commands.entity(integration.window).despawn();
-            integration.context_id = None;
+        Ok(retirement) => {
+            integration.retirement = Some(retirement);
             state.remove_secondary = false;
-            state.retirement_status =
-                "Secondary Context retired; the primary Context is still rendering.".to_owned();
-        }
-        Err(ImguiContextError::RemovalPending { .. }) => {
             state.retirement_status =
                 "Waiting for the secondary renderer and viewport work to drain...".to_owned();
         }
@@ -190,6 +185,30 @@ fn retire_secondary_context(
             state.retirement_status = format!("Secondary Context removal failed: {error}");
         }
     }
+}
+
+fn finish_secondary_retirement(
+    mut commands: Commands,
+    mut completions: MessageReader<ImguiContextRetired>,
+    mut integration: ResMut<SecondaryIntegration>,
+    mut state: ResMut<MultipleContextState>,
+) {
+    let Some(expected) = integration.retirement else {
+        return;
+    };
+    if !completions
+        .read()
+        .any(|completed| completed.retirement() == expected)
+    {
+        return;
+    }
+    commands.entity(integration.route).despawn();
+    commands.entity(integration.camera).despawn();
+    commands.entity(integration.window).despawn();
+    integration.context_id = None;
+    integration.retirement = None;
+    state.retirement_status =
+        "Secondary Context retired; the primary Context is still rendering.".to_owned();
 }
 
 fn close_on_escape(input: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<AppExit>) {
@@ -226,7 +245,9 @@ fn primary_ui(
                 primary_capture.wants_text_input()
             ));
 
-            if let Some(secondary_context) = integration.context_id {
+            if let Some(secondary_context) = integration.context_id
+                && integration.retirement.is_none()
+            {
                 let secondary_capture = capture.context(secondary_context);
                 ui.text(format!(
                     "Secondary capture: mouse={} keyboard={} text={}",
@@ -237,6 +258,8 @@ fn primary_ui(
                 if ui.button("Remove secondary Context") {
                     state.remove_secondary = true;
                 }
+            } else if integration.retirement.is_some() {
+                ui.text("The secondary Context is retiring.");
             } else {
                 ui.text("The secondary Context has been removed.");
             }

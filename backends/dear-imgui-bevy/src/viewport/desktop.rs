@@ -1,9 +1,12 @@
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_ecs::entity::Entity;
 use bevy_math::IVec2;
-use bevy_window::{Monitor, Window, WindowPosition};
+use bevy_window::Window;
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use bevy_window::{Monitor, WindowPosition};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_winit::WINIT_WINDOWS;
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use dear_imgui_rs::sys;
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -27,6 +30,7 @@ pub(super) const fn native_desktop_coordinate_space() -> DesktopCoordinateSpace 
     }
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 fn desktop_position_from_physical(position: IVec2, scale_factor: f32) -> [f32; 2] {
     let position = [position.x as f32, position.y as f32];
     match native_desktop_coordinate_space() {
@@ -38,6 +42,7 @@ fn desktop_position_from_physical(position: IVec2, scale_factor: f32) -> [f32; 2
     }
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 fn desktop_size_from_physical(size: [u32; 2], scale_factor: f32) -> [f32; 2] {
     let size = [size[0] as f32, size[1] as f32];
     match native_desktop_coordinate_space() {
@@ -49,6 +54,7 @@ fn desktop_size_from_physical(size: [u32; 2], scale_factor: f32) -> [f32; 2] {
     }
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(super) fn desktop_framebuffer_scale(scale_factor: f32) -> [f32; 2] {
     match native_desktop_coordinate_space() {
         DesktopCoordinateSpace::Physical => [1.0, 1.0],
@@ -59,6 +65,7 @@ pub(super) fn desktop_framebuffer_scale(scale_factor: f32) -> [f32; 2] {
     }
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(crate) fn desktop_metrics_for_window(window: &Window) -> ([f32; 2], [f32; 2]) {
     let scale_factor = window.scale_factor();
     (
@@ -70,6 +77,7 @@ pub(crate) fn desktop_metrics_for_window(window: &Window) -> ([f32; 2], [f32; 2]
     )
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(super) fn monitor_from_window(window: &Window) -> sys::ImGuiPlatformMonitor {
     let mut monitor = sys::ImGuiPlatformMonitor::default();
     let pos = match window.position {
@@ -94,6 +102,7 @@ pub(super) fn monitor_from_window(window: &Window) -> sys::ImGuiPlatformMonitor 
     monitor
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(crate) fn platform_monitors_from_bevy_monitors(
     monitors: impl IntoIterator<Item = (Monitor, bool)>,
 ) -> Vec<sys::ImGuiPlatformMonitor> {
@@ -111,6 +120,7 @@ pub(crate) fn platform_monitors_from_bevy_monitors(
         .collect()
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 fn platform_monitor_from_bevy_monitor(monitor: &Monitor) -> sys::ImGuiPlatformMonitor {
     let scale = positive_finite_or(monitor.scale_factor as f32, 1.0);
     let pos = desktop_position_from_physical(monitor.physical_position, scale);
@@ -181,6 +191,7 @@ fn window_client_origin_desktop(
     window_position_desktop(position, scale_factor)
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(super) fn window_position_desktop(
     position: &WindowPosition,
     scale_factor: f32,

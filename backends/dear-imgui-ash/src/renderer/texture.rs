@@ -53,12 +53,18 @@ pub(super) struct TextureManager {
     pub(super) textures: HashMap<u64, VulkanTexture>,
     pub(super) managed_textures: HashMap<SnapshotTextureId, ManagedVulkanTexture>,
     pub(super) managed_ids: HashMap<u64, SnapshotTextureId>,
-    /// Last Destroy epoch for identities that may still appear in older in-flight requests.
-    pub(super) destroyed_managed_textures: HashMap<SnapshotTextureId, u64>,
+    /// Destroy tombstones for identities that may still appear in later requests.
+    pub(super) destroyed_managed_textures: HashMap<SnapshotTextureId, ManagedTextureTombstone>,
     pub(super) retiring_textures:
         RetirementQueue<ManagedTextureRetirementKey, RetiredManagedVulkanTexture>,
     pub(super) external_textures: HashMap<u64, ExternalTextureBinding>,
     pub(super) next_id: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ManagedTextureTombstone {
+    latest_destroy_epoch: u64,
+    acknowledged_epoch: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -192,8 +198,35 @@ impl TextureManager {
     fn seal_managed_texture_destroyed(&mut self, texture: SnapshotTextureId, destroy_epoch: u64) {
         self.destroyed_managed_textures
             .entry(texture)
-            .and_modify(|epoch| *epoch = (*epoch).max(destroy_epoch))
-            .or_insert(destroy_epoch);
+            .and_modify(|tombstone| {
+                if destroy_epoch > tombstone.latest_destroy_epoch {
+                    tombstone.latest_destroy_epoch = destroy_epoch;
+                    tombstone.acknowledged_epoch = None;
+                }
+            })
+            .or_insert(ManagedTextureTombstone {
+                latest_destroy_epoch: destroy_epoch,
+                acknowledged_epoch: None,
+            });
+    }
+
+    fn acknowledge_managed_texture_destroyed(
+        &mut self,
+        texture: SnapshotTextureId,
+        destroy_epoch: u64,
+    ) {
+        let tombstone =
+            self.destroyed_managed_textures
+                .entry(texture)
+                .or_insert(ManagedTextureTombstone {
+                    latest_destroy_epoch: destroy_epoch,
+                    acknowledged_epoch: None,
+                });
+        if destroy_epoch < tombstone.latest_destroy_epoch {
+            return;
+        }
+        tombstone.latest_destroy_epoch = destroy_epoch;
+        tombstone.acknowledged_epoch = Some(destroy_epoch);
     }
 
     fn managed_texture_is_destroyed(&self, texture: SnapshotTextureId) -> bool {
@@ -205,8 +238,11 @@ impl TextureManager {
     }
 
     pub(super) fn prune_destroyed_managed_textures(&mut self, completion_watermark: u64) {
-        self.destroyed_managed_textures
-            .retain(|_, destroy_epoch| *destroy_epoch > completion_watermark);
+        self.destroyed_managed_textures.retain(|_, tombstone| {
+            tombstone
+                .acknowledged_epoch
+                .is_none_or(|epoch| epoch > completion_watermark)
+        });
     }
 
     fn complete_managed_retirements(
@@ -840,8 +876,10 @@ impl AshRenderer {
             let snapshot_id = request.texture();
             match request.operation() {
                 TextureOp::Create { .. } | TextureOp::Update { .. } => {
-                    if !self.textures.managed_texture_is_destroyed(snapshot_id) {
-                        feedback.push(self.complete_managed_upload_request(request)?)
+                    if self.textures.managed_texture_is_destroyed(snapshot_id) {
+                        feedback.push(request.superseded());
+                    } else {
+                        feedback.push(self.complete_managed_upload_request(request)?);
                     }
                 }
                 TextureOp::Destroy => {
@@ -858,8 +896,18 @@ impl AshRenderer {
                         upload_wait,
                     )?;
                     match self.textures.request_managed_retirement(snapshot_id) {
-                        Ok(RetirementRequest::Queued(_)) | Ok(RetirementRequest::Pending) => {}
-                        Ok(RetirementRequest::Retired) => feedback.push(request.destroyed()?),
+                        Ok(RetirementRequest::Queued(_)) | Ok(RetirementRequest::Pending) => {
+                            // Moving the resource into the retirement queue is not GPU
+                            // completion. Keep the native destroy request pending until a later
+                            // frame observes fence-proven resource destruction.
+                            feedback.push(request.retry());
+                        }
+                        Ok(RetirementRequest::Retired) => {
+                            let destroyed = request.destroyed()?;
+                            self.textures
+                                .acknowledge_managed_texture_destroyed(snapshot_id, request_epoch);
+                            feedback.push(destroyed);
+                        }
                         Err(()) => {
                             return Err(RendererError::InvalidRenderState(
                                 "managed texture retirement batch space is exhausted".to_string(),
@@ -870,6 +918,7 @@ impl AshRenderer {
             }
         }
 
+        debug_assert_eq!(feedback.len(), requests.len());
         Ok(feedback)
     }
 
@@ -1349,6 +1398,7 @@ pub(super) fn clamp_rect(
 #[cfg(all(test, not(any(feature = "gpu-allocator", feature = "vk-mem"))))]
 mod operational_gate_tests {
     use super::*;
+    use dear_imgui_rs::FramePrepareOptions;
     use dear_imgui_rs::texture::OwnedTextureData;
 
     fn destroyed_renderer(context: &Context) -> AshRenderer {
@@ -1390,7 +1440,8 @@ mod operational_gate_tests {
             .unwrap()
             .batch();
         let texture = TextureId::from(1_u64);
-        let texture_data = OwnedTextureData::new();
+        let texture_data =
+            OwnedTextureData::from_pixels(ImGuiTextureFormat::RGBA32, 1, 1, &[0; 4]).unwrap();
 
         assert_destroyed(renderer.pending_texture_retirement());
         assert_destroyed(renderer.wait_for_texture_retirements(batch));
@@ -1422,11 +1473,13 @@ mod operational_gate_tests {
         assert_destroyed(renderer.update_texture(&texture_data));
         assert_destroyed(unsafe { renderer.update_texture_unchecked(&texture_data) });
 
-        context.io_mut().set_display_size([128.0, 128.0]);
-        assert!(context.font_atlas().build());
+        let consumer = context.create_synchronous_renderer_consumer().unwrap();
+        context.prepare_frame(
+            FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0).renderer_has_textures(),
+        );
         context.frame();
-        let frame = context.render();
-        assert_destroyed(unsafe { renderer.cmd_draw(vk::CommandBuffer::null(), frame) });
+        let frame = context.render(&consumer);
+        assert_destroyed(renderer.prepare_frame(frame));
         assert_destroyed(renderer.shutdown(&mut context));
 
         #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
@@ -1528,6 +1581,7 @@ mod managed_lifecycle_tests {
         assert_eq!(manager.retiring_textures.pending_batch(), None);
         assert!(manager.managed_texture_is_destroyed(snapshot_id));
 
+        manager.acknowledge_managed_texture_destroyed(snapshot_id, destroy_epoch);
         manager.prune_destroyed_managed_textures(destroy_epoch - 1);
         assert!(manager.managed_texture_is_destroyed(snapshot_id));
         manager.prune_destroyed_managed_textures(destroy_epoch);
@@ -1546,13 +1600,39 @@ mod managed_lifecycle_tests {
 
         manager.seal_managed_texture_destroyed(snapshot_id, 8);
         manager.seal_managed_texture_destroyed(snapshot_id, 5);
+        manager.acknowledge_managed_texture_destroyed(snapshot_id, 8);
         manager.prune_destroyed_managed_textures(7);
         assert!(manager.managed_texture_is_destroyed(snapshot_id));
 
         manager.seal_managed_texture_destroyed(snapshot_id, 10);
+        manager.acknowledge_managed_texture_destroyed(snapshot_id, 8);
         manager.prune_destroyed_managed_textures(8);
         assert!(manager.managed_texture_is_destroyed(snapshot_id));
         manager.prune_destroyed_managed_textures(10);
+        assert!(manager.managed_texture_is_destroyed(snapshot_id));
+        manager.acknowledge_managed_texture_destroyed(snapshot_id, 10);
+        manager.prune_destroyed_managed_textures(10);
+        assert!(!manager.managed_texture_is_destroyed(snapshot_id));
+    }
+
+    #[test]
+    fn retry_watermark_cannot_prune_unacknowledged_destroy_tombstone() {
+        let context = Context::create();
+        let snapshot_id = SnapshotTextureId::FontAtlas {
+            context: context.id(),
+            stamp: 12,
+            generation: 5,
+        };
+        let mut manager = TextureManager::new();
+
+        manager.seal_managed_texture_destroyed(snapshot_id, 11);
+        manager.prune_destroyed_managed_textures(u64::MAX);
+        assert!(manager.managed_texture_is_destroyed(snapshot_id));
+
+        manager.acknowledge_managed_texture_destroyed(snapshot_id, 13);
+        manager.prune_destroyed_managed_textures(12);
+        assert!(manager.managed_texture_is_destroyed(snapshot_id));
+        manager.prune_destroyed_managed_textures(13);
         assert!(!manager.managed_texture_is_destroyed(snapshot_id));
     }
 
@@ -1568,6 +1648,7 @@ mod managed_lifecycle_tests {
                 generation: epoch,
             };
             manager.seal_managed_texture_destroyed(snapshot_id, epoch);
+            manager.acknowledge_managed_texture_destroyed(snapshot_id, epoch);
             manager.prune_destroyed_managed_textures(epoch - 1);
             assert_eq!(manager.destroyed_managed_textures.len(), 1);
         }

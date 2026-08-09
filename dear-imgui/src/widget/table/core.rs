@@ -43,6 +43,10 @@ impl Ui {
     /// This does no work on styling the headers (the top row) -- see either
     /// [begin_table_header](Self::begin_table_header) or the more complex
     /// [table_setup_column](Self::table_setup_column).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `column_count` is zero or reaches Dear ImGui's column limit.
     #[must_use = "if return is dropped immediately, table is ended immediately."]
     #[doc(alias = "BeginTable")]
     pub fn begin_table(
@@ -54,6 +58,10 @@ impl Ui {
     }
 
     /// Begins a table with flags and with standard sizing constraints.
+    ///
+    /// # Panics
+    ///
+    /// Panics for an invalid column count or incompatible table options.
     #[must_use = "if return is dropped immediately, table is ended immediately."]
     pub fn begin_table_with_flags(
         &self,
@@ -66,6 +74,12 @@ impl Ui {
 
     /// Begins a table with all flags and sizing constraints. This is the base method,
     /// and gives users the most flexibility.
+    ///
+    /// # Panics
+    ///
+    /// Panics for an invalid column count or table option, non-finite sizing, a negative
+    /// `inner_width` when horizontal scrolling is enabled, or an active table draw-channel scope
+    /// on the current table cell.
     #[must_use = "if return is dropped immediately, table is ended immediately."]
     pub fn begin_table_with_sizing(
         &self,
@@ -94,14 +108,17 @@ impl Ui {
         let outer_size_vec: sys::ImVec2 = outer_size.into();
         let column_count = table_column_count_to_i32(column_count);
 
-        let should_render = self.run_with_bound_context(|| unsafe {
-            sys::igBeginTable(
-                str_id_ptr,
-                column_count,
-                options.raw(),
-                outer_size_vec,
-                inner_width,
-            )
+        let should_render = self.run_with_bound_context(|| {
+            self.assert_no_active_table_channel("Ui::begin_table_with_sizing()");
+            unsafe {
+                sys::igBeginTable(
+                    str_id_ptr,
+                    column_count,
+                    options.raw(),
+                    outer_size_vec,
+                    inner_width,
+                )
+            }
         });
 
         if should_render {
@@ -115,6 +132,11 @@ impl Ui {
     ///
     /// Takes an array of table header information, the length of which determines
     /// how many columns will be created.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the array is empty, reaches Dear ImGui's column limit, or contains invalid column
+    /// setup data.
     #[must_use = "if return is dropped immediately, table is ended immediately."]
     pub fn begin_table_header<Name: AsRef<str>, const N: usize>(
         &self,
@@ -128,6 +150,10 @@ impl Ui {
     ///
     /// Takes an array of table header information, the length of which determines
     /// how many columns will be created.
+    ///
+    /// # Panics
+    ///
+    /// Panics for an invalid column count, table option, or column setup value.
     #[must_use = "if return is dropped immediately, table is ended immediately."]
     pub fn begin_table_header_with_flags<Name: AsRef<str>, const N: usize>(
         &self,
@@ -153,7 +179,12 @@ impl Ui {
         }
     }
 
-    /// Setup a column for the current table
+    /// Setup a column for the current table.
+    ///
+    /// # Panics
+    ///
+    /// Panics outside a table, after table layout has started, after all declared columns have
+    /// already been configured, or for an invalid flag/width combination or non-finite width.
     #[doc(alias = "TableSetupColumn")]
     pub fn table_setup_column(
         &self,
@@ -165,6 +196,10 @@ impl Ui {
     }
 
     /// Setup a column for the current table with opaque application data.
+    ///
+    /// # Panics
+    ///
+    /// Has the same validation and phase requirements as [`Ui::table_setup_column`].
     pub fn table_setup_column_with_user_data(
         &self,
         label: impl AsRef<str>,
@@ -176,6 +211,10 @@ impl Ui {
     }
 
     /// Setup a column for the current table, including explicit indent policy.
+    ///
+    /// # Panics
+    ///
+    /// Has the same validation and phase requirements as [`Ui::table_setup_column`].
     pub fn table_setup_column_with_indent(
         &self,
         label: impl AsRef<str>,
@@ -187,6 +226,12 @@ impl Ui {
     }
 
     /// Setup a column with explicit indent policy and opaque application data.
+    ///
+    /// # Panics
+    ///
+    /// Panics outside a table, after table layout has started, after all declared columns have
+    /// already been configured, or for invalid flags, indent/width combinations, or non-finite
+    /// width/weight values.
     pub fn table_setup_column_with_indent_and_user_data(
         &self,
         label: impl AsRef<str>,
@@ -224,6 +269,10 @@ impl Ui {
     }
 
     /// Setup a column with a fixed initial width.
+    ///
+    /// # Panics
+    ///
+    /// Has the same validation and phase requirements as [`Ui::table_setup_column`].
     pub fn table_setup_column_fixed_width(
         &self,
         label: impl AsRef<str>,
@@ -234,6 +283,10 @@ impl Ui {
     }
 
     /// Setup a column with a stretch weight.
+    ///
+    /// # Panics
+    ///
+    /// Has the same validation and phase requirements as [`Ui::table_setup_column`].
     pub fn table_setup_column_stretch_weight(
         &self,
         label: impl AsRef<str>,
@@ -243,29 +296,53 @@ impl Ui {
         self.table_setup_column(label, flags, Some(TableColumnWidth::Stretch(weight)));
     }
 
-    /// Submit all headers cells based on data provided to TableSetupColumn() + submit context menu
+    /// Submit all header cells based on data provided to `TableSetupColumn()` and submit the
+    /// context-menu target.
+    ///
+    /// # Panics
+    ///
+    /// Panics outside a table or while a table draw-channel scope is active.
     #[doc(alias = "TableHeadersRow")]
     pub fn table_headers_row(&self) {
         self.run_with_bound_context(|| {
             assert_current_table("Ui::table_headers_row()");
+            self.assert_no_active_table_channel("Ui::table_headers_row()");
             unsafe {
                 sys::igTableHeadersRow();
             }
         });
     }
 
-    /// Append into the next column (or first column of next row if currently in last column)
+    /// Append into the next column, or the first column of the next row when currently in the last
+    /// column.
+    ///
+    /// Returns `false` when no table is current.
+    ///
+    /// # Panics
+    ///
+    /// Panics while a table draw-channel scope is active.
     #[doc(alias = "TableNextColumn")]
     pub fn table_next_column(&self) -> bool {
-        self.run_with_bound_context(|| unsafe { sys::igTableNextColumn() })
+        self.run_with_bound_context(|| {
+            self.assert_no_active_table_channel("Ui::table_next_column()");
+            unsafe { sys::igTableNextColumn() }
+        })
     }
 
-    /// Append into the specified column
+    /// Append into the specified column.
+    ///
+    /// Returns `false` when no table is current.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `column` is outside the current table or while a table draw-channel scope is
+    /// active.
     #[doc(alias = "TableSetColumnIndex")]
     pub fn table_set_column_index(&self, column: impl Into<TableColumnIndex>) -> bool {
         let column = column.into();
         let column_n = column.into_i32("Ui::table_set_column_index()");
         self.run_with_bound_context(|| {
+            self.assert_no_active_table_channel("Ui::table_set_column_index()");
             if let Some(table) = current_table_if_any() {
                 assert_valid_table_column_raw_in(table, column_n, "Ui::table_set_column_index()");
             }
@@ -273,20 +350,41 @@ impl Ui {
         })
     }
 
-    /// Append into the next row
+    /// Append into the next row.
+    ///
+    /// # Panics
+    ///
+    /// Panics outside a table or while a table draw-channel scope is active.
     #[doc(alias = "TableNextRow")]
     pub fn table_next_row(&self) {
         self.table_next_row_with_flags(TableRowFlags::NONE, 0.0);
     }
 
-    /// Append into the next row with flags and minimum height
+    /// Append into the next row with flags and minimum height.
+    ///
+    /// # Panics
+    ///
+    /// Panics outside a table, while a table draw-channel scope is active, or when
+    /// `min_row_height` is negative or non-finite.
     pub fn table_next_row_with_flags(&self, flags: TableRowFlags, min_row_height: f32) {
-        self.run_with_bound_context(|| unsafe {
-            sys::igTableNextRow(flags.bits(), min_row_height);
+        assert_non_negative_finite_f32(
+            "Ui::table_next_row_with_flags()",
+            "min_row_height",
+            min_row_height,
+        );
+        self.run_with_bound_context(|| {
+            assert_current_table("Ui::table_next_row_with_flags()");
+            self.assert_no_active_table_channel("Ui::table_next_row_with_flags()");
+            unsafe { sys::igTableNextRow(flags.bits(), min_row_height) };
         });
     }
 
     /// Freeze columns/rows so they stay visible when scrolling.
+    ///
+    /// # Panics
+    ///
+    /// Panics outside a table, after the table setup phase, or when either freeze count exceeds
+    /// Dear ImGui's supported range.
     #[doc(alias = "TableSetupScrollFreeze")]
     pub fn table_setup_scroll_freeze(&self, frozen_cols: usize, frozen_rows: usize) {
         let frozen_cols = table_freeze_count_to_i32(
@@ -307,7 +405,11 @@ impl Ui {
         });
     }
 
-    /// Submit one header cell at current column position.
+    /// Submit one header cell at the current column position.
+    ///
+    /// # Panics
+    ///
+    /// Panics unless a table cell is current.
     #[doc(alias = "TableHeader")]
     pub fn table_header(&self, label: impl AsRef<str>) {
         let label_ptr = self.scratch_txt(label);
@@ -317,7 +419,7 @@ impl Ui {
         });
     }
 
-    /// Return columns count.
+    /// Return the current table's column count, or zero when no table is current.
     #[doc(alias = "TableGetColumnCount")]
     pub fn table_get_column_count(&self) -> usize {
         usize::try_from(self.run_with_bound_context(|| unsafe { sys::igTableGetColumnCount() }))
@@ -345,6 +447,12 @@ impl Ui {
     }
 
     /// Return the name of a column by index.
+    ///
+    /// Returns an empty string when no table is current.
+    ///
+    /// # Panics
+    ///
+    /// Panics when a table is current and the requested/current column is invalid.
     #[doc(alias = "TableGetColumnName")]
     pub fn table_get_column_name(&self, column: impl Into<TableColumnRef>) -> &str {
         let column = column.into();
@@ -368,6 +476,12 @@ impl Ui {
     }
 
     /// Return the flags of a column by index.
+    ///
+    /// Returns empty flags when no table is current.
+    ///
+    /// # Panics
+    ///
+    /// Panics when a table is current and the requested/current column is invalid.
     #[doc(alias = "TableGetColumnFlags")]
     pub fn table_get_column_flags(
         &self,
@@ -394,7 +508,12 @@ impl Ui {
         })
     }
 
-    /// Enable/disable a column by index.
+    /// Enable or disable a column by index.
+    ///
+    /// # Panics
+    ///
+    /// Panics outside a table, when the table lacks [`TableFlags::HIDEABLE`], or when the
+    /// requested/current column is invalid.
     #[doc(alias = "TableSetColumnEnabled")]
     pub fn table_set_column_enabled(&self, column: impl Into<TableColumnRef>, enabled: bool) {
         let column = column.into();
@@ -409,7 +528,8 @@ impl Ui {
         });
     }
 
-    /// Return hovered column index, or -1 when none.
+    /// Return the hovered column, unused table space, or [`TableHoveredColumn::None`] when no
+    /// table column is hovered.
     #[doc(alias = "TableGetHoveredColumn")]
     pub fn table_get_hovered_column(&self) -> TableHoveredColumn {
         self.run_with_bound_context(|| {
@@ -430,7 +550,12 @@ impl Ui {
         })
     }
 
-    /// Set column width (for fixed-width columns).
+    /// Set column width for a fixed-width column.
+    ///
+    /// # Panics
+    ///
+    /// Panics outside a table, after table layout is locked, before layout metrics are available,
+    /// for an invalid column, or when `width` is negative or non-finite.
     #[doc(alias = "TableSetColumnWidth")]
     pub fn table_set_column_width(&self, column: impl Into<TableColumnIndex>, width: f32) {
         assert_non_negative_finite_f32("Ui::table_set_column_width()", "width", width);
@@ -446,6 +571,10 @@ impl Ui {
     ///
     /// Color must be an ImGui-packed ImU32 in ABGR order (IM_COL32).
     /// Use `crate::colors::Color::to_imgui_u32()` to convert RGBA floats.
+    ///
+    /// # Panics
+    ///
+    /// Panics unless a table row is current or when the requested/current column is invalid.
     #[doc(alias = "TableSetBgColor")]
     pub fn table_set_cell_bg_color_u32(&self, color: u32, column: impl Into<TableColumnRef>) {
         let column = column.into();
@@ -461,12 +590,20 @@ impl Ui {
     }
 
     /// Set a table cell background color using RGBA color (0..=1 floats).
+    ///
+    /// # Panics
+    ///
+    /// Has the same phase and column requirements as [`Ui::table_set_cell_bg_color_u32`].
     pub fn table_set_cell_bg_color(&self, rgba: [f32; 4], column: impl Into<TableColumnRef>) {
         let col = crate::colors::Color::from_array(rgba).to_imgui_u32();
         self.table_set_cell_bg_color_u32(col, column);
     }
 
     /// Set the first row background color for the current table row.
+    ///
+    /// # Panics
+    ///
+    /// Panics unless a table row is current.
     #[doc(alias = "TableSetBgColor")]
     pub fn table_set_row_bg0_color_u32(&self, color: u32) {
         self.run_with_bound_context(|| {
@@ -476,12 +613,20 @@ impl Ui {
     }
 
     /// Set the first row background color using RGBA color (0..=1 floats).
+    ///
+    /// # Panics
+    ///
+    /// Panics unless a table row is current.
     pub fn table_set_row_bg0_color(&self, rgba: [f32; 4]) {
         let col = crate::colors::Color::from_array(rgba).to_imgui_u32();
         self.table_set_row_bg0_color_u32(col);
     }
 
     /// Set the second row background color for the current table row.
+    ///
+    /// # Panics
+    ///
+    /// Panics unless a table row is current.
     #[doc(alias = "TableSetBgColor")]
     pub fn table_set_row_bg1_color_u32(&self, color: u32) {
         self.run_with_bound_context(|| {
@@ -491,6 +636,10 @@ impl Ui {
     }
 
     /// Set the second row background color using RGBA color (0..=1 floats).
+    ///
+    /// # Panics
+    ///
+    /// Panics unless a table row is current.
     pub fn table_set_row_bg1_color(&self, rgba: [f32; 4]) {
         let col = crate::colors::Color::from_array(rgba).to_imgui_u32();
         self.table_set_row_bg1_color_u32(col);
@@ -512,12 +661,24 @@ impl Ui {
     }
 
     /// Header row height in pixels.
+    ///
+    /// # Panics
+    ///
+    /// Panics outside a table.
     #[doc(alias = "TableGetHeaderRowHeight")]
     pub fn table_get_header_row_height(&self) -> f32 {
-        self.run_with_bound_context(|| unsafe { sys::igTableGetHeaderRowHeight() })
+        self.run_with_bound_context(|| {
+            assert_current_table("Ui::table_get_header_row_height()");
+            unsafe { sys::igTableGetHeaderRowHeight() }
+        })
     }
 
     /// Set sort direction for a column. Optionally append to existing sort specs (multi-sort).
+    ///
+    /// # Panics
+    ///
+    /// Panics outside a table, when the table lacks [`TableFlags::SORTABLE`], for an invalid
+    /// column, or when [`SortDirection::None`] is used without [`TableFlags::SORT_TRISTATE`].
     #[doc(alias = "TableSetColumnSortDirection")]
     pub fn table_set_column_sort_direction(
         &self,
@@ -526,24 +687,41 @@ impl Ui {
         append_to_sort_specs: bool,
     ) {
         let column = column.into();
-        self.run_with_bound_context(|| unsafe {
+        self.run_with_bound_context(|| {
+            let table = assert_current_table("Ui::table_set_column_sort_direction()");
+            let table_flags = TableFlags::from_bits_retain(unsafe { (*table).Flags });
+            assert!(
+                table_flags.contains(TableFlags::SORTABLE),
+                "Ui::table_set_column_sort_direction() requires the current table to have SORTABLE"
+            );
+            if dir == SortDirection::None {
+                assert!(
+                    table_flags.contains(TableFlags::SORT_TRISTATE),
+                    "Ui::table_set_column_sort_direction() requires SORT_TRISTATE for SortDirection::None"
+                );
+            }
             let column_n =
                 assert_valid_table_column(column, "Ui::table_set_column_sort_direction()");
-            sys::igTableSetColumnSortDirection(column_n, dir.into(), append_to_sort_specs)
+            unsafe {
+                sys::igTableSetColumnSortDirection(column_n, dir.into(), append_to_sort_specs)
+            }
         });
     }
 
     /// Get current table sort specifications, if any.
     /// When non-None and `is_dirty()` is true, the application should sort its data and
-    /// then call `clear_dirty()`.
+    /// then call [`TableSortSpecs::clear_dirty`] while this table is still current. Returns `None`
+    /// outside a table or when the table has no sort specifications. On a sortable table, this may
+    /// lock table layout, so finish all setup calls first.
     #[doc(alias = "TableGetSortSpecs")]
-    pub fn table_get_sort_specs(&self) -> Option<TableSortSpecs<'_>> {
+    pub fn table_get_sort_specs(&self) -> Option<TableSortSpecs> {
         self.run_with_bound_context(|| unsafe {
+            let table = current_table_if_any()?;
             let ptr = sys::igTableGetSortSpecs();
             if ptr.is_null() {
                 None
             } else {
-                Some(TableSortSpecs::from_raw(ptr))
+                Some(TableSortSpecs::from_raw(self, table, ptr))
             }
         })
     }

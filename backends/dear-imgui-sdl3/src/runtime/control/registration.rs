@@ -2,6 +2,7 @@ use super::*;
 
 pub(crate) struct RuntimeRegistration {
     pub(super) control: Rc<RuntimeControl>,
+    pub(super) renderer_consumer: Option<Rc<SynchronousRendererConsumer>>,
     pub(super) baseline: Option<PlatformClaimBaseline>,
     pub(super) platform_attachment: Option<ContextAttachmentLease>,
     pub(super) renderer_attachment: Option<ContextAttachmentLease>,
@@ -12,6 +13,7 @@ impl fmt::Debug for RuntimeRegistration {
         formatter
             .debug_struct("RuntimeRegistration")
             .field("control", &self.control)
+            .field("has_renderer_consumer", &self.renderer_consumer.is_some())
             .field("native_initialization_pending", &self.baseline.is_some())
             .field("platform_attached", &self.platform_attachment.is_some())
             .field("renderer_attached", &self.renderer_attachment.is_some())
@@ -78,6 +80,7 @@ impl RuntimeRegistration {
 
         Ok(Self {
             control,
+            renderer_consumer: None,
             baseline: Some(baseline),
             platform_attachment: Some(platform_attachment),
             renderer_attachment,
@@ -152,6 +155,7 @@ impl RuntimeRegistration {
         self.control.renderer_initialized.set(false);
         self.control.release_platform_session();
         self.control.take_renderer_consumer();
+        self.renderer_consumer.take();
         self.control.renderer_release.set(ReleaseState::Released);
         self.control.platform_release.set(ReleaseState::Released);
         self.control.state.set(RuntimeState::Detached);
@@ -162,14 +166,49 @@ impl RuntimeRegistration {
         &self.control
     }
 
+    pub(crate) fn viewport_renderer_adapter(
+        &self,
+        context: &Context,
+    ) -> Result<Sdl3ViewportRendererAdapter, Sdl3BackendError> {
+        self.control.ensure_entry(context)?;
+        Ok(Sdl3ViewportRendererAdapter {
+            control: Rc::clone(&self.control),
+        })
+    }
+
+    #[cfg(any(
+        feature = "opengl3-renderer",
+        feature = "sdlrenderer3-renderer",
+        feature = "sdlgpu3-renderer"
+    ))]
+    pub(crate) fn install_renderer_consumer(&mut self, consumer: SynchronousRendererConsumer) {
+        let consumer = Rc::new(consumer);
+        self.control.install_renderer_consumer(Rc::clone(&consumer));
+        let previous = self.renderer_consumer.replace(consumer);
+        assert!(
+            previous.is_none(),
+            "SDL3 runtime registration already owns a renderer consumer"
+        );
+    }
+
+    #[cfg(any(
+        feature = "opengl3-renderer",
+        feature = "sdlrenderer3-renderer",
+        feature = "sdlgpu3-renderer"
+    ))]
+    pub(crate) fn renderer_consumer(&self) -> &SynchronousRendererConsumer {
+        self.renderer_consumer
+            .as_deref()
+            .expect("SDL3 renderer consumer is unavailable after renderer shutdown")
+    }
+
+    #[cfg(test)]
     pub(crate) fn poll_fault(&self) -> Result<(), Sdl3BackendError> {
         self.control.poll_fault()
     }
 
-    pub(crate) fn begin_opengl_viewport_frame_trace(
-        &self,
-    ) -> Result<Sdl3OpenGlViewportFrameTrace<'_>, Sdl3OpenGlViewportFrameTraceError> {
-        self.control.begin_opengl_viewport_frame_trace()
+    pub(crate) fn drain_faults(&self) -> Vec<Sdl3BackendError> {
+        self.control.drain_faults()
     }
 
     #[cfg(feature = "multi-viewport")]
@@ -196,26 +235,26 @@ impl RuntimeRegistration {
         feature = "sdlrenderer3-renderer",
         feature = "sdlgpu3-renderer"
     ))]
-    pub(crate) fn destroy_renderer_device_objects(
+    pub(crate) fn reset_renderer_device_objects(
         &self,
         context: &mut Context,
-        destroy_device_objects: impl FnOnce(),
+        reset_native_objects: impl FnOnce(),
     ) -> Result<(), Sdl3BackendError> {
         let entry = self.control.enter(context)?;
         let consumer_guard = self.control.renderer_consumer.borrow();
         let consumer = consumer_guard
             .as_ref()
             .expect("initialized SDL3 renderer lost its renderer consumer");
-        let reset = context.prepare_renderer_texture_reset(consumer)?;
+        let reset = context.prepare_renderer_texture_reset(consumer.as_ref())?;
 
         self.control.binding.try_with_bound_context(|| {
             self.control.destroy_uninstalled_renderer_textures_bound()?;
-            destroy_device_objects();
+            reset_native_objects();
             self.control.forget_textures_destroyed_by_upstream();
             Ok::<(), Sdl3BackendError>(())
         })??;
 
-        let _ = reset.commit();
+        reset.commit();
         drop(consumer_guard);
         self.control.clear_destroyed_textures();
         entry.finish()
@@ -283,7 +322,7 @@ impl RuntimeRegistration {
                     let consumer = consumer
                         .as_ref()
                         .expect("initialized SDL3 renderer lost its renderer consumer");
-                    match context.prepare_renderer_texture_reset(consumer) {
+                    match context.prepare_renderer_texture_reset(consumer.as_ref()) {
                         Ok(reset) => Some(reset),
                         Err(error) => return Err(error.into()),
                     }
@@ -294,12 +333,13 @@ impl RuntimeRegistration {
             let shutdown_result = self.control.shutdown_native_explicit();
             let renderer_released = self.control.renderer_released();
             if renderer_released && let Some(reset) = reset {
-                let _ = reset.commit();
+                reset.commit();
             }
             (pending, shutdown_result, renderer_released)
         };
         if renderer_released {
             self.control.take_renderer_consumer();
+            self.renderer_consumer.take();
             self.control.clear_destroyed_textures();
         }
         if matches!(self.control.state(), RuntimeState::Detached) {

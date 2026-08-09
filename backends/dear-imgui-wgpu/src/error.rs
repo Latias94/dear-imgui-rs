@@ -23,7 +23,7 @@ pub enum RendererError {
 
     /// Secondary viewport rendering began before the Context frame was reconciled.
     #[error(
-        "WGPU secondary viewport rendering requires reconcile_frame(&mut frame) before platform callbacks"
+        "WGPU secondary viewport rendering requires a reconciled frame before platform callbacks"
     )]
     FrameNotPrepared,
 
@@ -128,6 +128,10 @@ pub enum RendererError {
     /// Context-owned renderer consumer state rejected the operation.
     #[error(transparent)]
     RendererConsumer(#[from] dear_imgui_rs::render::RendererConsumerError),
+
+    /// Managed frame finalization or texture-request capture failed.
+    #[error(transparent)]
+    FrameCapture(#[from] dear_imgui_rs::render::SnapshotError),
 
     /// Context attachment registration rejected the renderer's deferred-drop cleanup hook.
     #[error(transparent)]

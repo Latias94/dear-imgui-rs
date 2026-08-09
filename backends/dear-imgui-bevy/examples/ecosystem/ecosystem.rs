@@ -9,7 +9,7 @@ use bevy::{
     window::{PresentMode, WindowPlugin, WindowTheme},
 };
 use dear_imgui_bevy::prelude::*;
-use dear_imgui_rs::{Condition, DockLayout, DockLayoutApply, DockSplit, DockspaceOptions};
+use dear_imgui_rs::{Condition, DockLayout, DockLayoutApply, DockSplit, WindowKey};
 use dear_imguizmo::{DrawListTarget, GuizmoExt, Mat4Like};
 use dear_imnodes::ImNodesExt;
 use dear_implot::ImPlotExt;
@@ -48,6 +48,23 @@ impl Default for EcosystemState {
     }
 }
 
+#[derive(Resource)]
+struct EcosystemWindowKeys {
+    profiler: WindowKey,
+    graph: WindowKey,
+    gizmo: WindowKey,
+}
+
+impl Default for EcosystemWindowKeys {
+    fn default() -> Self {
+        Self {
+            profiler: WindowKey::new("profiler-plot", "Profiler Plot").expect("valid window key"),
+            graph: WindowKey::new("frame-graph", "Frame Graph").expect("valid window key"),
+            gizmo: WindowKey::new("gizmo", "Gizmo").expect("valid window key"),
+        }
+    }
+}
+
 fn main() {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -62,6 +79,7 @@ fn main() {
     }))
     .add_plugins(ImguiPlugin::default())
     .init_resource::<EcosystemState>()
+    .init_resource::<EcosystemWindowKeys>()
     .add_systems(Startup, setup_scene)
     .add_systems(Update, close_on_escape);
     let primary_pass = app.imgui_primary_pass();
@@ -108,6 +126,7 @@ fn install_ecosystem_contexts(app: &mut App) {
 fn ecosystem_ui(
     frame: ImguiFrame<'_>,
     extensions: NonSend<EcosystemContexts>,
+    windows: Res<EcosystemWindowKeys>,
     mut state: ResMut<EcosystemState>,
 ) -> Result {
     let frame_index = frame.frame_index();
@@ -115,18 +134,12 @@ fn ecosystem_ui(
     state.frame_index = frame_index;
 
     let root_id = ui.get_id("DearImguiBevyEcosystemDockspace");
-    let options = match DockspaceOptions::new(root_id) {
-        Ok(options) => options,
-        Err(error) => {
-            error!("invalid ecosystem dockspace options: {error}");
-            return Ok(());
-        }
-    };
-    let dockspace_id = match ui.dockspace_over_main_viewport_with_layout(
-        &options,
-        &ecosystem_dock_layout(),
-        DockLayoutApply::IfMissing,
-    ) {
+    let dockspace_id = match ui
+        .dockspace()
+        .root_id(root_id)
+        .layout(&ecosystem_dock_layout(&windows), DockLayoutApply::IfMissing)
+        .build()
+    {
         Ok(id) => id,
         Err(error) => {
             error!("failed to apply ecosystem dock layout: {error}");
@@ -135,14 +148,14 @@ fn ecosystem_ui(
     };
 
     ui.set_next_window_dock_id_with_cond(dockspace_id, Condition::FirstUseEver);
-    ui.window("Profiler Plot")
+    ui.window(&windows.profiler)
         .size([520.0, 300.0], Condition::FirstUseEver)
         .build(|| {
             render_profiler_plot(ui, &extensions.plot, &state);
         });
 
     ui.set_next_window_dock_id_with_cond(dockspace_id, Condition::FirstUseEver);
-    ui.window("Frame Graph")
+    ui.window(&windows.graph)
         .size([520.0, 560.0], Condition::FirstUseEver)
         .build(|| {
             render_frame_graph(
@@ -154,7 +167,7 @@ fn ecosystem_ui(
         });
 
     ui.set_next_window_dock_id_with_cond(dockspace_id, Condition::FirstUseEver);
-    ui.window("Gizmo")
+    ui.window(&windows.gizmo)
         .size([520.0, 260.0], Condition::FirstUseEver)
         .build(|| {
             render_gizmo(ui, state.frame_index);
@@ -163,17 +176,17 @@ fn ecosystem_ui(
     Ok(())
 }
 
-fn ecosystem_dock_layout() -> DockLayout {
+fn ecosystem_dock_layout(windows: &EcosystemWindowKeys) -> DockLayout {
     DockLayout::split(
         DockSplit::Left,
         0.42,
         DockLayout::split(
             DockSplit::Up,
             0.48,
-            DockLayout::tabs(["Profiler Plot"]),
-            DockLayout::tabs(["Gizmo"]),
+            DockLayout::tabs([&windows.profiler]),
+            DockLayout::tabs([&windows.gizmo]),
         ),
-        DockLayout::tabs(["Frame Graph"]),
+        DockLayout::tabs([&windows.graph]),
     )
 }
 

@@ -54,7 +54,13 @@ impl Ui {
     pub fn drag_drop_target(&self) -> Option<DragDropTarget<'_>> {
         let should_begin = self.run_with_bound_context(|| unsafe { sys::igBeginDragDropTarget() });
         if should_begin {
-            Some(DragDropTarget(self))
+            Some(DragDropTarget(
+                self,
+                self.begin_native_scope(
+                    crate::scope::NativeScopePop::EndDragDropTarget,
+                    "DragDropTarget",
+                ),
+            ))
         } else {
             None
         }

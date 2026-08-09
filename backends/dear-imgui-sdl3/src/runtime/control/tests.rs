@@ -277,6 +277,7 @@ fn registration_with_backend_lifecycle_and_texture_update(
     });
     RuntimeRegistration {
         control,
+        renderer_consumer: None,
         baseline: Some(baseline),
         platform_attachment: Some(platform_attachment),
         renderer_attachment,
@@ -302,61 +303,6 @@ fn test_registration(
     registration.control.platform_initialized.set(true);
     registration.control.renderer_initialized.set(true);
     registration
-}
-
-#[test]
-fn opengl_frame_trace_is_instance_bound_non_nested_and_drop_abortable() {
-    let _guard = crate::tests::test_guard();
-    let context = Context::create();
-    let control = RuntimeControl::new_with_backend(
-        &context,
-        NativeLifecycle::new(None, None, None, Rc::new(|| {})),
-        None,
-        PlatformGraphicsKind::OpenGl,
-        NativeRendererKind::None,
-    );
-
-    let trace = control.begin_opengl_viewport_frame_trace().unwrap();
-    assert!(matches!(
-        control.begin_opengl_viewport_frame_trace(),
-        Err(Sdl3OpenGlViewportFrameTraceError::AlreadyActive)
-    ));
-    control.record_opengl_viewport_context_activated(17);
-    control.record_opengl_viewport_context_activated(9);
-    control.record_opengl_viewport_context_activated(17);
-    control.record_opengl_viewport_swapped(17);
-    let report = trace.finish();
-    assert_eq!(
-        report.context_activated_viewports(),
-        &[Id::from(9), Id::from(17)]
-    );
-    assert_eq!(report.swapped_viewports(), &[Id::from(17)]);
-
-    drop(control.begin_opengl_viewport_frame_trace().unwrap());
-    let report = control
-        .begin_opengl_viewport_frame_trace()
-        .unwrap()
-        .finish();
-    assert!(report.context_activated_viewports().is_empty());
-    assert!(report.swapped_viewports().is_empty());
-}
-
-#[test]
-fn opengl_frame_trace_rejects_an_unrelated_platform_runtime() {
-    let _guard = crate::tests::test_guard();
-    let context = Context::create();
-    let control = RuntimeControl::new_with_backend(
-        &context,
-        NativeLifecycle::new(None, None, None, Rc::new(|| {})),
-        None,
-        PlatformGraphicsKind::Other,
-        NativeRendererKind::None,
-    );
-
-    assert!(matches!(
-        control.begin_opengl_viewport_frame_trace(),
-        Err(Sdl3OpenGlViewportFrameTraceError::RequiresOpenGl)
-    ));
 }
 
 fn synthetic_claimed_registration(

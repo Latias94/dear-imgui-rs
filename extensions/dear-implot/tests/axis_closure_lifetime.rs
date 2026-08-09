@@ -10,17 +10,22 @@ fn test_guard() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|err| err.into_inner())
 }
 
+fn prepare_imgui(imgui: &mut Context) {
+    let io = imgui.io_mut();
+    io.set_display_size([800.0, 600.0]);
+    io.set_delta_time(1.0 / 60.0);
+    imgui
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("headless test requires the legacy font-atlas capability")
+        .build();
+}
+
 #[test]
 fn axis_closure_is_plot_scoped_even_if_token_is_dropped() {
     let _guard = test_guard();
     let mut imgui = Context::create();
-    {
-        use dear_imgui_rs::BackendFlags;
-        let io = imgui.io_mut();
-        io.set_display_size([800.0, 600.0]);
-        io.set_delta_time(1.0 / 60.0);
-        io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_TEXTURES);
-    }
+    prepare_imgui(&mut imgui);
     let plot_ctx = PlotContext::create(&imgui);
 
     {
@@ -47,13 +52,7 @@ fn axis_closure_is_plot_scoped_even_if_token_is_dropped() {
 fn multi_axis_plot_rejects_interior_nul_labels() {
     let _guard = test_guard();
     let mut imgui = Context::create();
-    {
-        use dear_imgui_rs::BackendFlags;
-        let io = imgui.io_mut();
-        io.set_display_size([800.0, 600.0]);
-        io.set_delta_time(1.0 / 60.0);
-        io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_TEXTURES);
-    }
+    prepare_imgui(&mut imgui);
     let plot_ctx = PlotContext::create(&imgui);
 
     let frame = imgui.begin_frame();

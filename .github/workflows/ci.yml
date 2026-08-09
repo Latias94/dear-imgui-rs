@@ -146,6 +146,10 @@ jobs:
       - name: Run dear-imgui-rs multi-viewport acceptance tests
         run: cargo nextest run -p dear-imgui-rs --features multi-viewport
 
+      - name: Run canonical custom renderer example
+        if: runner.os == 'Linux'
+        run: cargo run -p dear-imgui-rs --example custom_renderer_headless
+
       - name: Compare public C++ aggregate layouts on non-Windows ABI
         if: runner.os != 'Windows'
         run: >-
@@ -161,6 +165,9 @@ jobs:
 
       - name: Run reflection acceptance tests
         run: cargo nextest run -p dear-imgui-reflect --features glam,mint
+
+      - name: Run ImPlot3D acceptance tests
+        run: cargo nextest run -p dear-implot3d
 
       - name: Run file browser acceptance tests
         run: cargo nextest run -p dear-file-browser
@@ -184,7 +191,7 @@ jobs:
         run: cargo check -p dear-imgui-examples --features "multi-viewport" --bin multi_viewport_wgpu --bin multi_viewport_ash
 
       - name: Check Ash dynamic-rendering multi-viewport smoke harness
-        run: cargo check -p dear-imgui-examples --features "ash-winit-multi-viewport,ash-dynamic-rendering" --bin multi_viewport_ash
+        run: cargo check -p dear-imgui-examples --features "ash-winit-multi-viewport,ash-dynamic-rendering,ash-validation-smoke" --bin ash_vulkan_validation_smoke
 
       - name: Check SDL3 Glow multi-viewport example
         run: cargo check -p dear-imgui-examples --features "sdl3-glow-multi-viewport" --bin sdl3_glow_multi_viewport
@@ -202,7 +209,7 @@ jobs:
         run: cargo check -p dear-imgui-examples --no-default-features --features "sdl3-ash-multi-viewport,ash-dynamic-rendering" --bin sdl3_ash_multi_viewport
 
       - name: Check SDL3 GPU multi-viewport example
-        run: cargo check -p dear-imgui-examples --features "sdl3-gpu-multi-viewport" --bin sdl3_sdlgpu_multi_view
+        run: cargo check -p dear-imgui-examples --features "sdl3-gpu-multi-viewport" --bin sdl3_sdlgpu_multi_viewport
 
       - name: Restore cached SDL3 runtime
         if: runner.os == 'Windows'
@@ -213,10 +220,22 @@ jobs:
           --github-path "$env:GITHUB_PATH"
 
       - name: Test SDL3 callback event handoff
-        run: cargo nextest run -p dear-imgui-examples --lib --features "sdl3-platform"
+        run: cargo nextest run -p dear-imgui-sdl3 --lib callback_events
+
+      - name: Test SDL3 OpenGL multi-viewport route contracts
+        run: >-
+          cargo nextest run -p dear-imgui-sdl3 --lib
+          --features "opengl3-renderer,multi-viewport"
+          viewport_route_contract_tests
+
+      - name: Test SDL3 GPU multi-viewport route contracts
+        run: >-
+          cargo nextest run -p dear-imgui-sdl3 --lib
+          --features "sdlgpu3-renderer,multi-viewport"
+          viewport_route_contract_tests
 
       - name: Test SDL3 GPU present-mode policy
-        run: cargo nextest run -p dear-imgui-examples --bin sdl3_sdlgpu_multi_view --features "sdl3-gpu-multi-viewport"
+        run: cargo nextest run -p dear-imgui-examples --lib --features "sdl3-gpu-multi-viewport" sdl3_gpu_present
 
       - name: Test SDL3 foreign pointer callback teardown
         run: cargo nextest run -p dear-imgui-sdl3 --lib --features "sdlgpu3-renderer,multi-viewport" pointer_callback_replacement_survives_renderer_shutdown
@@ -228,16 +247,16 @@ jobs:
         run: cargo check -p dear-imgui-examples --features "sdl3-platform" --bin sdl3_wgpu
 
       - name: Check SDLRenderer3 renderer example
-        run: cargo check -p dear-imgui-examples --features "sdl3-sdlrenderer3" --bin sdl3_sdlrenderer
+        run: cargo check -p dear-imgui-examples --features "sdl3-sdlrenderer3" --bin sdl3_sdlrenderer3
 
-      - name: Build examples (test-engine)
-        run: cargo build -p dear-imgui-examples --features "test-engine" --bin imgui_test_engine_basic
+      - name: Build interactive Test Engine example
+        run: cargo build -p dear-imgui-examples --features "test-engine" --bin test_engine_integration
 
       - name: Check WGPU multi-viewport Test Engine smoke harness
-        run: cargo check -p dear-imgui-examples --features "multi-viewport,test-engine" --bin multi_viewport_wgpu
+        run: cargo check -p dear-imgui-examples --features "multi-viewport,test-engine" --bin wgpu_multi_viewport_smoke
 
       - name: Check SDL3 Glow multi-viewport Test Engine smoke harness
-        run: cargo check -p dear-imgui-examples --features "sdl3-glow-multi-viewport,test-engine" --bin sdl3_glow_multi_viewport
+        run: cargo check -p dear-imgui-examples --features "sdl3-glow-multi-viewport,test-engine" --bin sdl3_glow_multi_viewport_smoke
 
       - name: Check test-engine (no capture)
         run: cargo check -p dear-imgui-test-engine --no-default-features
@@ -543,6 +562,14 @@ jobs:
       - name: Test SDL3 public API documentation
         run: cargo +1.95.0 test --doc -p dear-imgui-sdl3 --features multi-viewport
 
+      - name: Test SDL3 OpenGL public API documentation
+        if: runner.os == 'Linux'
+        run: cargo +1.95.0 test --doc -p dear-imgui-sdl3 --features "opengl3-renderer,multi-viewport"
+
+      - name: Test SDL3 GPU public API documentation
+        if: runner.os == 'Linux'
+        run: cargo +1.95.0 test --doc -p dear-imgui-sdl3 --features "sdlgpu3-renderer,multi-viewport"
+
   wgpu-routes:
     name: WGPU ${{ matrix.wgpu }} + ${{ matrix.platform }}
     runs-on: ubuntu-latest
@@ -626,7 +653,8 @@ jobs:
         run: >-
           cargo nextest run -p dear-imgui-wgpu --test integration_test
           --no-default-features --features "${{ matrix.features }}"
-          direct_and_explicit_render_paths_execute_raw_callbacks_with_scoped_state
+          direct_and_split_render_paths_execute_raw_callbacks_with_scoped_state
+          zero_sized_framebuffer_still_reconciles_the_pending_frame
         env:
           DEAR_IMGUI_REQUIRE_WGPU_ADAPTER: "1"
           IMGUI_SYS_FORCE_BUILD: "1"
@@ -817,8 +845,8 @@ jobs:
           IMGUI_SYS_FORCE_BUILD: "1"
           NODE_EDITOR_SYS_FORCE_BUILD: "1"
 
-      - name: Check normal node editor basic example
-        run: cargo check -p dear-imgui-examples --bin node_editor_basic --no-default-features --features node-editor
+      - name: Check normal node editor minimal example
+        run: cargo check -p dear-imgui-examples --bin node_editor_minimal --no-default-features --features node-editor
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
           NODE_EDITOR_SYS_FORCE_BUILD: "1"

@@ -8,11 +8,18 @@
 //! ```no_run
 //! # use dear_imgui_rs::*;
 //! # let mut ctx = Context::create();
-//! // Configure IO before starting a frame
+//! // Claim managed atlas ownership before advertising managed textures.
+//! let _consumer = ctx.create_synchronous_renderer_consumer().unwrap();
+//! // Configure IO before starting the first frame.
 //! let io = ctx.io_mut();
 //! io.set_config_flags(io.config_flags() | ConfigFlags::DOCKING_ENABLE | ConfigFlags::VIEWPORTS_ENABLE);
 //! io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_TEXTURES);
-//! # let _ = ctx.frame();
+//! ```
+//!
+//! Font scaling is style state rather than IO compatibility state:
+//! ```compile_fail
+//! # let mut ctx = dear_imgui_rs::Context::create();
+//! ctx.io_mut().set_font_global_scale(1.25);
 //! ```
 //!
 #![allow(
@@ -27,7 +34,6 @@ mod core;
 mod display;
 mod events;
 mod flags;
-mod font;
 mod input_state;
 mod metrics;
 mod mouse;

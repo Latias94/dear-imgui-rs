@@ -3,43 +3,36 @@ use super::*;
 impl AshRenderer {
     /// Reconcile managed textures before recording any viewport from this frame.
     ///
-    /// Multi-viewport integrations must call this before renderer callbacks can draw secondary
-    /// viewports. The method is idempotent for an already reconciled frame; [`Self::cmd_draw`]
-    /// invokes it automatically for single-viewport integrations.
-    pub fn prepare_frame(
+    /// Multi-viewport integrations must consume the pending frame here before renderer callbacks
+    /// draw secondary viewports. The returned [`ReconciledFrame`] is the only capability that can
+    /// expose draw data. The retirement batch must remain associated with the submission/fence
+    /// that covers every draw which may still reference the retired resources.
+    pub fn prepare_frame<'ctx>(
         &mut self,
-        frame: &mut RenderedFrame<'_>,
-    ) -> RendererResult<Option<TextureRetirementBatch>> {
-        self.ensure_frame_matches(frame)?;
+        frame: PendingFrame<'ctx>,
+    ) -> RendererResult<(ReconciledFrame<'ctx>, Option<TextureRetirementBatch>)> {
+        self.ensure_pending_frame_matches(&frame)?;
         let binding = self.context_state.binding();
         binding
             .try_with_bound_context(|| self.prepare_frame_bound(frame))
             .map_err(|error| RendererError::InvalidRenderState(error.to_string()))?
     }
 
-    fn prepare_frame_bound(
+    fn prepare_frame_bound<'ctx>(
         &mut self,
-        frame: &mut RenderedFrame<'_>,
-    ) -> RendererResult<Option<TextureRetirementBatch>> {
+        frame: PendingFrame<'ctx>,
+    ) -> RendererResult<(ReconciledFrame<'ctx>, Option<TextureRetirementBatch>)> {
         self.reap_completed_uploads()?;
-        if !frame.is_texture_feedback_reconciled() {
-            let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
-            let feedback =
-                self.process_texture_requests(frame.texture_requests(), request_epoch)?;
-            let progress = frame.reconcile_texture_feedback(feedback)?;
-            self.textures
-                .prune_destroyed_managed_textures(progress.watermark());
-        }
-        self.pending_texture_retirement()
+        let request_epoch = frame.epoch().sequence();
+        let feedback = self.process_texture_requests(frame.texture_requests(), request_epoch)?;
+        let frame = frame.reconcile_texture_feedback(feedback)?;
+        self.textures
+            .prune_destroyed_managed_textures(frame.completion_progress().watermark());
+        let pending_retirement = self.pending_texture_retirement()?;
+        Ok((frame, pending_retirement))
     }
 
-    /// Reconcile managed textures and record one Context-borrowed frame.
-    ///
-    /// The returned batch represents every pending managed-texture retirement. Recording this
-    /// command buffer is not GPU completion: do not complete the batch until synchronization for
-    /// every queue that can still use its textures has signaled. With multi-viewport enabled, that
-    /// includes secondary viewport work recorded after this method returns. See
-    /// [`Self::complete_texture_retirements_with_fences`].
+    /// Record a frame previously returned by [`Self::prepare_frame`].
     ///
     /// # Safety
     ///
@@ -55,27 +48,31 @@ impl AshRenderer {
     pub unsafe fn cmd_draw(
         &mut self,
         command_buffer: vk::CommandBuffer,
-        frame: RenderedFrame<'_>,
-    ) -> RendererResult<Option<TextureRetirementBatch>> {
-        self.ensure_frame_matches(&frame)?;
+        frame: ReconciledFrame<'_>,
+    ) -> RendererResult<()> {
+        self.ensure_reconciled_frame_matches(&frame)?;
         let binding = self.context_state.binding();
         binding
-            .try_with_bound_context(|| self.cmd_draw_bound(command_buffer, frame))
+            .try_with_bound_context(|| {
+                let platform_io = platform_io_for_current_context()?;
+                unsafe {
+                    RendererRenderStateGuard::<AshRenderStateStorage>::preflight(platform_io)
+                }
+                .map_err(map_renderer_render_state_error)?;
+                self.cmd_draw_reconciled_bound(command_buffer, frame, platform_io)
+            })
             .map_err(|error| RendererError::InvalidRenderState(error.to_string()))?
     }
 
-    fn cmd_draw_bound(
+    fn cmd_draw_reconciled_bound(
         &mut self,
         command_buffer: vk::CommandBuffer,
-        mut frame: RenderedFrame<'_>,
-    ) -> RendererResult<Option<TextureRetirementBatch>> {
-        let platform_io = platform_io_for_current_context()?;
-        unsafe { RendererRenderStateGuard::<AshRenderStateStorage>::preflight(platform_io) }
-            .map_err(map_renderer_render_state_error)?;
-        let pending_retirement = self.prepare_frame_bound(&mut frame)?;
+        frame: ReconciledFrame<'_>,
+        platform_io: *mut dear_imgui_rs::sys::ImGuiPlatformIO,
+    ) -> RendererResult<()> {
         let draw_data = frame.draw_data();
         if !draw_data.valid() {
-            return Ok(pending_retirement);
+            return Ok(());
         }
 
         let gamma = self.gamma();
@@ -101,7 +98,7 @@ impl AshRenderer {
                 platform_io,
             },
         )?;
-        Ok(pending_retirement)
+        Ok(())
     }
 
     #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
@@ -664,6 +661,144 @@ fn prepare_draw_commands<'draw>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
+    fn complete_initial_texture_requests(frame: PendingFrame<'_>) -> ReconciledFrame<'_> {
+        let feedback = frame
+            .texture_requests()
+            .iter()
+            .enumerate()
+            .map(|(index, request)| match request.kind() {
+                dear_imgui_rs::render::TextureRequestKind::Destroy => request.destroyed().unwrap(),
+                dear_imgui_rs::render::TextureRequestKind::Create
+                | dear_imgui_rs::render::TextureRequestKind::Update => request
+                    .uploaded(TextureId::from(u64::try_from(index + 1).unwrap()))
+                    .unwrap(),
+            })
+            .collect::<Vec<_>>();
+        assert!(!feedback.is_empty());
+        frame
+            .reconcile_texture_feedback(feedback)
+            .expect("synthetic renderer feedback should initialize Context texture bindings")
+    }
+
+    #[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
+    #[test]
+    fn split_prepare_and_record_reconciles_once_and_preserves_retirement_batch() {
+        use crate::renderer::lifecycle::renderer_for_test;
+        use crate::renderer::texture::{
+            ManagedTextureRetirementKey, RetiredManagedVulkanTexture, VulkanTexture,
+        };
+        use dear_imgui_rs::FramePrepareOptions;
+
+        let mut context = Context::create();
+        let mut renderer = renderer_for_test(&mut context);
+        renderer.frames = Frames::new(1);
+
+        context.prepare_frame(
+            FramePrepareOptions::new([0.0, 0.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+        let initial = context
+            .begin_frame()
+            .render(renderer.renderer_consumer().unwrap());
+        drop(complete_initial_texture_requests(initial));
+
+        let reservation = renderer
+            .textures
+            .retiring_textures
+            .reserve()
+            .expect("synthetic retirement queue should have capacity");
+        let expected_batch = reservation.batch();
+        let retirement_key = ManagedTextureRetirementKey::Destroyed(SnapshotTextureId::FontAtlas {
+            context: context.id(),
+            stamp: 7,
+            generation: 11,
+        });
+        let retired = RetiredManagedVulkanTexture {
+            texture_id: TextureId::from(99_u64),
+            texture: VulkanTexture {
+                image: vk::Image::null(),
+                image_mem: vk::DeviceMemory::null(),
+                image_view: vk::ImageView::null(),
+                descriptor_set: vk::DescriptorSet::null(),
+                width: 1,
+                height: 1,
+            },
+        };
+        assert_eq!(
+            renderer
+                .textures
+                .retiring_textures
+                .commit(reservation, retirement_key, retired),
+            expected_batch
+        );
+
+        context.prepare_frame(
+            FramePrepareOptions::new([0.0, 0.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+        let pending = context
+            .begin_frame()
+            .render(renderer.renderer_consumer().unwrap());
+        assert!(pending.texture_requests().is_empty());
+        let (reconciled, prepared_batch) = renderer
+            .prepare_frame(pending)
+            .expect("an empty request phase should reconcile without Vulkan work");
+        assert_eq!(prepared_batch, Some(expected_batch));
+
+        unsafe { renderer.cmd_draw(vk::CommandBuffer::null(), reconciled) }
+            .expect("a zero-sized framebuffer should not issue Vulkan commands");
+        assert_eq!(
+            renderer.pending_texture_retirement().unwrap(),
+            Some(expected_batch)
+        );
+
+        renderer.destroyed = true;
+    }
+
+    #[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
+    #[test]
+    fn rejected_prepare_abandons_the_epoch_and_reissues_requests() {
+        use crate::renderer::lifecycle::renderer_for_test;
+        use dear_imgui_rs::FramePrepareOptions;
+
+        let mut owner = Context::create();
+        let mut renderer = renderer_for_test(&mut owner);
+        let owner = owner.suspend_or_panic();
+
+        let mut foreign = Context::create();
+        foreign.prepare_frame(
+            FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+        let consumer = foreign.create_synchronous_renderer_consumer().unwrap();
+
+        let pending = foreign.begin_frame().render(&consumer);
+        let first_requests = pending
+            .texture_requests()
+            .iter()
+            .map(|request| (request.texture(), request.kind(), request.upload_identity()))
+            .collect::<Vec<_>>();
+        assert!(!first_requests.is_empty());
+        assert!(matches!(
+            renderer.prepare_frame(pending),
+            Err(RendererError::ContextMismatch { .. })
+        ));
+
+        let retry = foreign.begin_frame().render(&consumer);
+        let retried_requests = retry
+            .texture_requests()
+            .iter()
+            .map(|request| (request.texture(), request.kind(), request.upload_identity()))
+            .collect::<Vec<_>>();
+        assert_eq!(retried_requests, first_requests);
+        drop(retry);
+
+        drop(consumer);
+        drop(foreign);
+        let owner = owner.activate().expect("owner Context should reactivate");
+        renderer.destroyed = true;
+        drop(renderer);
+        drop(owner);
+    }
 
     #[test]
     fn element_range_rejects_index_and_vertex_violations() {

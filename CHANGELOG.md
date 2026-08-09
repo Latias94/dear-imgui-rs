@@ -8,37 +8,38 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
-## [0.16.0-alpha.2]
+## [0.16.0-alpha.2] - 2026-08-09
 
-Pending publication.
+This source-breaking prerelease completes the ownership work started in alpha.1. Safe APIs now carry the Context, frame, renderer, native-callback, and GPU-completion capabilities needed for the operation they expose; provisional aliases and manual phase controls were removed instead of becoming permanent compatibility surface.
 
-This prerelease hardens the ownership contracts introduced in alpha.1. It intentionally removes provisional APIs where they could expose transient native state, ambiguous backend ownership, or a live Dear ImGui frame outside its valid execution scope.
+See the [compatibility guide](docs/COMPATIBILITY.md), [custom backend guide](docs/CUSTOM_BACKENDS.md), and [task-oriented examples](examples/README.md) for complete migration patterns.
 
 ### Breaking Changes and Migration
 
-| If you used in alpha.1 | Migrate to |
-| --- | --- |
-| `Viewport::debug_name()` as a borrowed `&str`, or safe `Viewport::{set_flags,set_parent_viewport_id}` writes | Keep the owned `String` returned by `debug_name()`. Treat viewport flags and parent topology as read-only; custom backends may use the documented unsafe raw mutation escape hatch only while upholding native invariants. |
-| Live `Context` values created on independent OS threads | Create and destroy every live Context in the process on one owner thread, and handle `try_create` / `try_create_shared` failure when another thread or a bound Context scope owns Dear ImGui's global state. |
-| `SuspendedContext::try_with_active` while another Context or nested binding scope is active | Suspend the current Context first. Scoped activation now requires no other active Context or binding scope, preventing safe closures from exchanging complete Context owners while native `GImGui` points at one of them. |
-| `DockspaceTarget`, `DockFlags`, or alpha.1's declarative docking options | Submit `DockLayout` with `DockspaceOptions`; use `DockNodeFlags`, `WindowClassDockNodeFlags`, and `WindowClassViewportFlags` for their separate native domains. Submit the dockspace before its windows. |
-| `WgpuRenderer::new_frame()`, `WinitViewportRuntime::new_frame()`, or `Sdl3ViewportRuntime::new_frame()` | Remove the renderer call; call the platform runtime's `reconcile_frame(&mut frame)` before default multi-viewport callbacks. |
-| `WgpuInitInfo::{num_frames_in_flight,with_frames_in_flight}` | Remove the setting. Upload resources are scoped to the Context render epoch because the backend cannot safely infer application queue completion from an internal frame ring. |
-| Safe SDL processing of `&SDL_Event` or `sdl3_poll_event_ll()` | Pass owned `sdl3::event::Event` values to `process_event`. Callback integrations must use unsafe `process_raw_event` and uphold union variant, payload lifetime, thread, and runtime provenance requirements. Keep only one SDL3 ImGui platform runtime active per process. |
-| Bevy `ImguiUi`, `ImguiPrimaryContextPass`, `ImguiContextPass`, or raw `ScheduleLabel` Context configuration | Obtain `app.imgui_primary_pass()` or declare `app.declare_imgui_pass::<P>()`, bind systems with `pass.system(...)`, register them through `app.add_imgui_systems(&pass, ...)`, and pass the same handle to `ImguiContextConfig::new(&pass)`. Systems receive frame-scoped `ImguiFrame<'_, P>`. |
-| Test Engine suite validation from `ResultSummary`, concurrent bound engines, or treating an aborted native test as an unknown result | Pass the exact `RunReport` to `validate_registered_test_suite`, or use `take_terminal_test_suite_result` for a manually pumped suite. Keep one engine bound per process; an upstream abort is reported as safe `RunTestStatus::NotRun`. |
-| `Viewport::draw_data_ref()` | Render through a `RenderedFrame`, or capture a pointer-free `FrameSnapshot`. Custom renderers may read `Viewport::draw_data()` only inside an unsafe, current-frame native render boundary. |
+| Area | Migrate from alpha.1 | Benefit |
+| --- | --- | --- |
+| Context and UI scopes | Keep live Contexts on one owner thread; handle fallible activation/suspension; use lexical `with_*` helpers and provenance-checked tokens instead of manual or unreachable pop/end tokens. | Wrong-Context, wrong-frame, and invalid restoration order fail before FFI while retained owners remain recoverable from errors. |
+| Renderer frames | Replace `RenderedFrame` and mode-selecting `RendererConsumer` with `SynchronousRendererConsumer` plus `PendingFrame -> ReconciledFrame`, or `DetachedRendererConsumer` plus move-only `FrameSnapshot`. Pass frames by value and remove renderer-local frame rings. | Draw data cannot be observed before texture feedback, consumer modes cannot cross, and GPU inputs remain owned by the exact render epoch. |
+| Texture and font data | Construct validated texture pixels with `from_pixels`, `replace_pixels`, or `TextureSubresource`; use nominal Glow texture handles; prefer verified owned TTF sources and explicit atlas capabilities over unchecked borrowed bytes. | Rejected mutations are atomic, stale feedback cannot overwrite newer data, and safe code cannot delete or update a texture owned by another domain. |
+| Docking and viewports | Submit a validated `DockLayout` with `DockspaceBuilder`, use `WindowKey` for stable identity, and treat viewport topology as read-only outside documented unsafe backend boundaries. | Layout replacement is transactional and docking identity survives title, viewport, and native-window changes. |
+| Winit, WGPU, Glow, Ash, and SDL3 | Replace public manual trace/reconcile/callback phases with the owning route's `prepare(...)` or `prepare_frame(...)` transaction followed by `render_main(...)` or Ash `cmd_draw_main(...)`; read WGPU secondary submission evidence from `WgpuViewportFrameReport`; shut down renderer ownership before platform ownership and native GPU/window objects. | Secondary dispatch, fault aggregation, GL restoration, Vulkan retirement, and teardown run in one ordered capability without public phase-skipping aliases. |
+| SDL3 callbacks | Pass owned `sdl3::event::Event` values normally; callback applications enqueue `Sdl3CallbackEventHandoff` events and drain them through the backend owner on its Context thread. | Pointer payloads, union variants, callback panics, and queue faults no longer cross the Safe Rust boundary unowned. |
+| `dear-app` | Use `run_ui` for infallible UI, `run_frame` for fallible/exit-capable frames, or `Application` for initialization, events, GPU recovery, and shutdown. | All three entry points share the same surface admission, presentation, error-source, and exactly-once teardown state machine. |
+| Bevy | Register systems through an App-issued typed pass, configure Contexts fallibly, and request managed retirement instead of extracting or mutating backend-owned Context state. | Live `Ui` access is frame-scoped, route identity is validated, and Context/native-window retirement completes deterministically. |
+| Test Engine and custom drivers | Validate the exact `RunReport`; implement `prepare -> render_main -> present` and preserve the driver's prepare error in the public error type. | Aborted tests, stale results, presentation skips, and infrastructure failures remain distinct and attributable to the current run. |
 
 ### Changed
 
-- Context binding now preserves wrapper identity across unwind and teardown, reclaims attachment releases even when a safe permit is forgotten, commits attachment state before running user destructors, and prevents safe cross-thread ownership of Dear ImGui's process-global Context state.
-- Declarative docking now validates and stages a complete tree before replacing a live root. Failed validation, staging, or same-frame ordering leaves the existing layout unchanged.
 - Winit and SDL3 multi-viewport runtimes now reconcile OS-observed geometry, display work areas, input ownership, capture transfer, callback drift, and terminal teardown through Context-owned runtime state. Winit confirms asynchronous focus changes from native events, while Winit, WGPU, and Ash retain viewport sidecars across ImGui ID changes during redocking. Wayland continues to support docking inside the host window without claiming unavailable global desktop positioning. Reported and tested by [@lysenika](https://github.com/lysenika). [#60](https://github.com/Latias94/dear-imgui-rs/issues/60)
-- WGPU render resources are owned by Context render epochs, keeping main and secondary viewport buffers, uniforms, samplers, surfaces, and terminal faults isolated until completion or explicit recovery. Glow and Ash viewport callback panics now revoke renderer capability and enter terminal recovery; Ash keeps its cleanup callback available until GPU-owned viewport resources are released.
-- Bevy UI access now comes only from App-owned private pass runners as lifetime-bound `ImguiFrame<'_, P>` input. Ordinary Bevy schedules cannot obtain the live `Ui`; registration validates the exact pass identity before the first frame, and deterministic shutdown drains renderer and native-window retirement without running arbitrary user schedules. Native viewport ownership uses Context-scoped generations rather than mutable ImGui IDs, preserving Window and Camera identity across docking transfers while rejecting stale commands after reuse.
-- `dear-app` now retries transient surface acquisition and presentation skips without advancing UI or Test Engine state, while terminal validation, internal, out-of-memory, and device-loss faults remain explicit.
-- Test Engine integration now owns the process-global native binding through an exclusive lease, rolls back failed starts and partial suite registration, and binds validation to an exact engine, run, and test manifest so historical results cannot satisfy the current run. A failed test takes precedence over later `NotRun` entries when stop-on-error aborts the remainder.
+- Public examples now follow a four-level learning path with focused `*_minimal` entries, explicit lifecycle references, smaller showcases, and no CI protocol in copyable code; runtime evidence lives in private backend-specific probes that share the same lifecycle modules.
+- Obsolete compatibility surfaces were removed: use `Style::font_scale_main` instead of the old IO font-scale shims, replace the removed `Color*Flags::ALPHA_PREVIEW` names with `NONE` (the upstream default) or `ALPHA_NO_BG` only when suppressing the checkerboard, and use `ImString` instead of the unused `ImStr` alias and `im_str!` macro.
 - CI pins every third-party Action, cancels stale runs, checks Rust 1.92 and public API doctests, regenerates maintained bindings, and authorizes crates.io Trusted Publishing only from the exact successful run and candidate SHA. Release automation reserves the tag before publishing, rejects stale GitHub Release assets, and treats runtime preparation retries as authoritative only after an initial failure.
+
+### Fixed
+
+- Backend-free examples and ImPlot3D headless tests now declare legacy font-atlas ownership before opening a frame, matching the fail-closed font lifecycle contract.
+- SDL3 OpenGL examples now propagate native swap failures instead of reporting a main window as presented after `SDL_GL_SwapWindow` fails.
+- Common single-level UI scopes no longer allocate a temporary heap-backed stack for every token.
 
 ## [0.16.0-alpha.1] - 2026-08-02
 
@@ -72,7 +73,7 @@ See the [compatibility guide](docs/COMPATIBILITY.md), [custom backend guide](doc
 | Legacy Columns | Use the Tables API. |
 | `table_setup_column*` user IDs or `TableColumnSetup::user_id` | Omit user data with `table_setup_column*`, or use `table_setup_column_with_user_data`, `table_setup_column_with_indent_and_user_data`, and `TableColumnSetup::user_data`. `TableColumnUserData` is an opaque `u32`; zero is valid data, not an absent widget ID. |
 | Assuming `open_popup*` returns `()` | Ignore the returned `bool` for the old behavior, or use `true` to initialize state exactly when Dear ImGui toggles the popup open. |
-| `DockBuilder`, `DockNode`, `SplitDirection`, or `DockspaceTarget` | Submit a declarative `DockLayout` with `DockspaceOptions`; use `IfMissing` for restored layouts and `Replace` only for an intentional reset. Submit the dockspace before its windows. Validation and staging errors preserve the old tree without changing its flags or class. |
+| `DockBuilder`, `DockNode`, `SplitDirection`, or `DockspaceTarget` | Submit a declarative `DockLayout` with `DockspaceBuilder`; use `IfMissing` for restored layouts and `Replace` only for an intentional reset. Submit the dockspace before its windows. Validation and staging errors preserve the old tree without changing its flags or class. |
 | `DockFlags`, direct `WindowClass` field writes, or a safe raw focus-route parent ID | Use `DockNodeFlags` for dockspace submission and `WindowClassDockNodeFlags` for per-window node policy. Use `WindowClass` builders and read-only accessors; raw focus-route parent IDs require explicit `unsafe` calls with their native topology contract upheld. |
 | Escaping state-storage views or raw multi-select begin/end values | Use `Ui::{with_current_state_storage,with_state_storage,with_multi_select}` and retain only owned results. |
 | Boolean `ContextAttachmentLease::detach()` or platform cleanup after a failed detach | Handle `Result<bool, ContextAttachmentDetachError>` and stop cleanup on error. Platform backends must prepare release with the attachment handle, release renderers first, and commit only after native cleanup succeeds. |

@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::fmt;
 use std::ops::{Deref, Index, RangeFull};
 use std::os::raw::c_char;
@@ -215,6 +214,3 @@ impl Index<RangeFull> for ImString {
         self.to_str()
     }
 }
-
-/// Represents a borrowed string that can be either a Rust string slice or an ImString
-pub type ImStr<'a> = Cow<'a, str>;

@@ -1,3 +1,5 @@
+use std::fmt;
+
 use bevy_app::{App, MainScheduleOrder, PostUpdate, PreUpdate};
 use bevy_ecs::{
     prelude::{IntoScheduleConfigs, SystemSet},
@@ -38,6 +40,54 @@ impl Default for ImguiDriverSchedulePlacement {
     }
 }
 
+/// Invalid placement of the private Dear ImGui Context driver schedule.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ImguiDriverScheduleError {
+    /// The App no longer contains Bevy's main schedule ordering resource.
+    MainScheduleOrderMissing,
+    /// Bevy's required Dear ImGui frame interval boundary is absent.
+    FrameBoundaryMissing {
+        /// Missing `PreUpdate` or `PostUpdate` boundary.
+        boundary: InternedScheduleLabel,
+    },
+    /// The configured anchor is not present in Bevy's main schedule order.
+    AnchorMissing {
+        /// Missing schedule anchor.
+        anchor: InternedScheduleLabel,
+    },
+    /// The requested placement would run before input mapping completed or after frame output.
+    OutsideFrameInterval,
+}
+
+impl fmt::Display for ImguiDriverScheduleError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MainScheduleOrderMissing => {
+                formatter.write_str("MainScheduleOrder is missing from the Bevy App")
+            }
+            Self::FrameBoundaryMissing { boundary } => write!(
+                formatter,
+                "required Dear ImGui frame boundary {boundary:?} is not in MainScheduleOrder"
+            ),
+            Self::AnchorMissing { anchor } => write!(
+                formatter,
+                "Dear ImGui driver anchor {anchor:?} is not in MainScheduleOrder"
+            ),
+            Self::OutsideFrameInterval => formatter.write_str(
+                "the Dear ImGui driver must run after PreUpdate completes and before PostUpdate begins",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ImguiDriverScheduleError {}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ValidatedImguiDriverSchedulePlacement {
+    insertion_index: usize,
+}
+
 /// Private exclusive schedule that serially activates every registered Context.
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct ImguiContextDriver;
@@ -51,7 +101,52 @@ pub(crate) enum ImguiContextDriverSystems {
     RetirementFinish,
 }
 
-pub(crate) fn install_imgui_schedules(app: &mut App, placement: ImguiDriverSchedulePlacement) {
+pub(crate) fn validate_imgui_schedule_placement(
+    app: &App,
+    placement: ImguiDriverSchedulePlacement,
+) -> Result<ValidatedImguiDriverSchedulePlacement, ImguiDriverScheduleError> {
+    let order = app
+        .world()
+        .get_resource::<MainScheduleOrder>()
+        .ok_or(ImguiDriverScheduleError::MainScheduleOrderMissing)?;
+    let driver = ImguiContextDriver.intern();
+    let labels = order
+        .labels
+        .iter()
+        .copied()
+        .filter(|label| *label != driver)
+        .collect::<Vec<_>>();
+    let (anchor, after_anchor) = match placement {
+        ImguiDriverSchedulePlacement::Before(anchor) => (anchor, false),
+        ImguiDriverSchedulePlacement::After(anchor) => (anchor, true),
+    };
+    let anchor_index = labels
+        .iter()
+        .position(|label| *label == anchor)
+        .ok_or(ImguiDriverScheduleError::AnchorMissing { anchor })?;
+    let insertion_index = anchor_index + usize::from(after_anchor);
+    let pre_update_index = labels
+        .iter()
+        .position(|label| *label == PreUpdate.intern())
+        .ok_or(ImguiDriverScheduleError::FrameBoundaryMissing {
+            boundary: PreUpdate.intern(),
+        })?;
+    let post_update_index = labels
+        .iter()
+        .position(|label| *label == PostUpdate.intern())
+        .ok_or(ImguiDriverScheduleError::FrameBoundaryMissing {
+            boundary: PostUpdate.intern(),
+        })?;
+    if insertion_index <= pre_update_index || insertion_index > post_update_index {
+        return Err(ImguiDriverScheduleError::OutsideFrameInterval);
+    }
+    Ok(ValidatedImguiDriverSchedulePlacement { insertion_index })
+}
+
+pub(crate) fn install_imgui_schedules(
+    app: &mut App,
+    placement: ValidatedImguiDriverSchedulePlacement,
+) {
     app.init_schedule(ImguiContextDriver)
         .configure_sets(
             ImguiContextDriver,
@@ -67,9 +162,9 @@ pub(crate) fn install_imgui_schedules(app: &mut App, placement: ImguiDriverSched
             ImguiContextDriver,
             (
                 crate::context::drive_imgui_contexts.in_set(ImguiContextDriverSystems::Drive),
-                crate::context::ownership::begin_context_retirements
+                crate::context::begin_context_retirements
                     .in_set(ImguiContextDriverSystems::RetirementBegin),
-                crate::context::ownership::finish_context_retirements
+                crate::context::finish_context_retirements
                     .in_set(ImguiContextDriverSystems::RetirementFinish),
             ),
         );
@@ -77,33 +172,7 @@ pub(crate) fn install_imgui_schedules(app: &mut App, placement: ImguiDriverSched
     let mut order = app.world_mut().resource_mut::<MainScheduleOrder>();
     let driver = ImguiContextDriver.intern();
     order.labels.retain(|label| *label != driver);
-    let (anchor, after_anchor) = match placement {
-        ImguiDriverSchedulePlacement::Before(anchor) => (anchor, false),
-        ImguiDriverSchedulePlacement::After(anchor) => (anchor, true),
-    };
-    let anchor_index = order
-        .labels
-        .iter()
-        .position(|label| *label == anchor)
-        .unwrap_or_else(|| {
-            panic!("Dear ImGui driver anchor {anchor:?} is not in MainScheduleOrder")
-        });
-    let insertion_index = anchor_index + usize::from(after_anchor);
-    let pre_update_index = order
-        .labels
-        .iter()
-        .position(|label| *label == PreUpdate.intern())
-        .expect("PreUpdate must be present in MainScheduleOrder");
-    let post_update_index = order
-        .labels
-        .iter()
-        .position(|label| *label == PostUpdate.intern())
-        .expect("PostUpdate must be present in MainScheduleOrder");
-    assert!(
-        insertion_index > pre_update_index && insertion_index <= post_update_index,
-        "Dear ImGui driver must run after PreUpdate completes and before PostUpdate begins"
-    );
-    order.labels.insert(insertion_index, driver);
+    order.labels.insert(placement.insertion_index, driver);
 }
 
 #[cfg(test)]
@@ -111,20 +180,57 @@ mod tests {
     use super::*;
 
     #[test]
-    #[should_panic(
-        expected = "Dear ImGui driver must run after PreUpdate completes and before PostUpdate begins"
-    )]
     fn driver_rejects_placement_before_pre_update() {
-        let mut app = App::new();
-        install_imgui_schedules(&mut app, ImguiDriverSchedulePlacement::before(PreUpdate));
+        let app = App::new();
+        assert_eq!(
+            validate_imgui_schedule_placement(
+                &app,
+                ImguiDriverSchedulePlacement::before(PreUpdate)
+            ),
+            Err(ImguiDriverScheduleError::OutsideFrameInterval)
+        );
     }
 
     #[test]
-    #[should_panic(
-        expected = "Dear ImGui driver must run after PreUpdate completes and before PostUpdate begins"
-    )]
     fn driver_rejects_placement_after_post_update() {
+        let app = App::new();
+        assert_eq!(
+            validate_imgui_schedule_placement(
+                &app,
+                ImguiDriverSchedulePlacement::after(PostUpdate)
+            ),
+            Err(ImguiDriverScheduleError::OutsideFrameInterval)
+        );
+    }
+
+    #[test]
+    fn driver_reports_a_missing_main_schedule_order() {
         let mut app = App::new();
-        install_imgui_schedules(&mut app, ImguiDriverSchedulePlacement::after(PostUpdate));
+        assert!(
+            app.world_mut()
+                .remove_resource::<MainScheduleOrder>()
+                .is_some()
+        );
+
+        assert_eq!(
+            validate_imgui_schedule_placement(&app, ImguiDriverSchedulePlacement::after(PreUpdate)),
+            Err(ImguiDriverScheduleError::MainScheduleOrderMissing)
+        );
+    }
+
+    #[test]
+    fn driver_reports_a_missing_frame_boundary() {
+        let mut app = App::new();
+        app.world_mut()
+            .resource_mut::<MainScheduleOrder>()
+            .labels
+            .retain(|label| *label != PostUpdate.intern());
+
+        assert_eq!(
+            validate_imgui_schedule_placement(&app, ImguiDriverSchedulePlacement::after(PreUpdate)),
+            Err(ImguiDriverScheduleError::FrameBoundaryMissing {
+                boundary: PostUpdate.intern(),
+            })
+        );
     }
 }

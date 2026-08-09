@@ -83,7 +83,7 @@ impl Drop for RuntimeConstruction<'_> {
 /// Calling [`Context::destroy_platform_windows`] directly also shuts this runtime down. The base
 /// Winit platform remains attached for single-window use; create a new runtime before resuming
 /// multi-viewport work. Prefer [`Self::shutdown`] when the caller needs backend-specific errors.
-pub struct WinitPlatformRuntime {
+pub(crate) struct WinitPlatformRuntime {
     control: Rc<RuntimeControl>,
     platform: Rc<WinitPlatformControl>,
     #[cfg(test)]
@@ -99,7 +99,7 @@ impl WinitPlatformRuntime {
     /// single-window coordinate space, while Winit's native platform-window callbacks operate in
     /// platform-native desktop coordinates and therefore cannot be mixed without incorrect input
     /// and window geometry.
-    pub fn new(
+    pub(crate) fn new(
         context: &mut Context,
         platform: &crate::WinitPlatform,
     ) -> Result<Self, WinitPlatformError> {
@@ -137,6 +137,17 @@ impl WinitPlatformRuntime {
         io.set_display_framebuffer_scale(super::super::framebuffer_scale_for_window(&main_window));
         invalidate_mouse_coordinate_cache(io);
         Ok(runtime)
+    }
+
+    fn from_platform(platform: &crate::WinitPlatform) -> Result<Self, WinitPlatformError> {
+        let platform_control = platform.control();
+        let control = platform_control.runtime_control()?;
+        Ok(Self {
+            control,
+            platform: platform_control,
+            #[cfg(test)]
+            owned_platform: None,
+        })
     }
 
     #[cfg(test)]
@@ -249,18 +260,6 @@ impl WinitPlatformRuntime {
         transaction.commit()
     }
 
-    /// Returns the runtime-owned main window.
-    pub fn main_window(&self) -> Result<Arc<Window>, WinitPlatformError> {
-        self.control
-            .main_window()
-            .ok_or(WinitPlatformError::RuntimeDetached)
-    }
-
-    /// Returns the Dear ImGui Context identity owned by this platform runtime.
-    pub fn context_id(&self) -> ContextId {
-        self.control.binding.id()
-    }
-
     /// Validates that this runtime still owns the active Winit viewport platform contract.
     ///
     /// Renderer backends use this before interpreting `PlatformHandle` values as Winit windows.
@@ -281,32 +280,25 @@ impl WinitPlatformRuntime {
 
     /// Runs `callback` while viewport callbacks may access `event_loop`.
     ///
-    /// Nested scopes restore the outer event loop. Any platform callback fault is returned only
-    /// after the Rust closure regains control, so no unwind crosses the native callback boundary.
-    ///
-    /// ```compile_fail
-    /// use dear_imgui_winit::multi_viewport::WinitPlatformRuntime;
-    /// use winit::event_loop::ActiveEventLoop;
-    ///
-    /// fn leak_event_loop<'a>(
-    ///     runtime: &WinitPlatformRuntime,
-    ///     event_loop: &'a ActiveEventLoop,
-    /// ) -> &'a ActiveEventLoop {
-    ///     runtime
-    ///         .with_event_loop(event_loop, |scope| scope.active_event_loop())
-    ///         .unwrap()
-    /// }
-    /// ```
+    /// Nested scopes restore the outer event loop. The returned attempt keeps the callback output
+    /// separate from every platform fault observed after Rust regains control, so no unwind
+    /// crosses the native callback boundary and a callback `Result` is never hidden by a later
+    /// platform failure.
     pub fn with_event_loop<R>(
         &self,
         event_loop: &ActiveEventLoop,
         callback: impl for<'scope> FnOnce(EventLoopScope<'scope>) -> R,
-    ) -> Result<R, WinitPlatformError> {
-        self.poll_fault()?;
-        self.ensure_attached()?;
-        let result = self.control.enter_event_loop(event_loop, callback);
-        self.poll_fault()?;
-        Ok(result)
+    ) -> WinitViewportAttempt<R> {
+        let faults = self.control.drain_faults();
+        if !faults.is_empty() {
+            return WinitViewportAttempt::skipped(faults);
+        }
+        if let Err(error) = self.ensure_attached() {
+            return WinitViewportAttempt::skipped(vec![error]);
+        }
+
+        let output = self.control.enter_event_loop(event_loop, callback);
+        WinitViewportAttempt::completed(output, self.control.drain_faults())
     }
 
     /// Returns and clears the oldest retryable callback fault.
@@ -316,24 +308,8 @@ impl WinitPlatformRuntime {
         self.control.poll_fault()
     }
 
-    /// Routes a Winit event to the main window and any Dear ImGui secondary viewport.
-    pub fn handle_event<T>(
-        &self,
-        platform: &mut crate::WinitPlatform,
-        context: &mut Context,
-        event: &Event<T>,
-    ) -> Result<bool, WinitPlatformError> {
-        validate_multi_viewport_hidpi_mode(platform.hidpi_mode())?;
-        self.ensure_context(context)?;
-        self.poll_fault()?;
-        self.ensure_attached()?;
-        let consumed = super::super::events::handle_event(self, platform, context, event)?;
-        self.poll_fault()?;
-        Ok(consumed)
-    }
-
-    /// Routes a Winit event only to Dear ImGui-created secondary viewports.
-    pub fn route_secondary_event<T>(
+    #[cfg(test)]
+    pub(in super::super) fn route_secondary_event<T>(
         &self,
         context: &mut Context,
         event: &Event<T>,
@@ -341,7 +317,7 @@ impl WinitPlatformRuntime {
         self.ensure_context(context)?;
         self.poll_fault()?;
         self.ensure_attached()?;
-        let consumed = super::super::events::route_secondary_event(&self.control, context, event);
+        let consumed = super::super::events::route_secondary_event(&self.control, context, event)?;
         self.poll_fault()?;
         Ok(consumed)
     }
@@ -361,16 +337,15 @@ impl WinitPlatformRuntime {
             return Ok(());
         }
         let attachment = self.platform.attachment_handle()?;
-        let (pending_fault, result, released) = {
+        let (result, released) = {
             let mut release = context.prepare_platform_attachment_release(&attachment)?;
             let context = release.context_mut();
-            let pending_fault = self.control.poll_fault().err();
-            let result = self.control.shutdown_explicit(context);
+            let result = self.control.shutdown_from_platform(context);
             let released = matches!(
                 self.control.state(),
                 RuntimeState::Detached | RuntimeState::ContextDestroyed
             );
-            (pending_fault, result, released)
+            (result, released)
         };
         if released {
             self.platform.clear_runtime(&self.control);
@@ -393,14 +368,7 @@ impl WinitPlatformRuntime {
         } else {
             result
         };
-        match (pending_fault, result) {
-            (Some(fault), Err(shutdown_error)) => {
-                self.control.record_fault(shutdown_error);
-                Err(fault)
-            }
-            (Some(fault), Ok(())) => Err(fault),
-            (None, result) => result,
-        }
+        result
     }
 
     fn ensure_context(&self, context: &Context) -> Result<(), WinitPlatformError> {
@@ -423,8 +391,129 @@ impl WinitPlatformRuntime {
             .validate_operational_contract()
     }
 
+    #[cfg(test)]
     pub(in super::super) fn control(&self) -> &Rc<RuntimeControl> {
         &self.control
+    }
+}
+
+impl WinitViewportRendererAdapter {
+    /// Returns the Context identity of this exact platform generation.
+    #[must_use]
+    pub fn context_id(&self) -> dear_imgui_rs::ContextId {
+        self.control.binding().id()
+    }
+
+    /// Runs one renderer route attempt with the active event-loop capability.
+    pub fn with_event_loop<R>(
+        &self,
+        event_loop: &ActiveEventLoop,
+        callback: impl for<'scope> FnOnce(EventLoopScope<'scope>) -> R,
+    ) -> WinitViewportAttempt<R> {
+        let faults = self.control.drain_faults();
+        if !faults.is_empty() {
+            return WinitViewportAttempt::skipped(faults);
+        }
+
+        let runtime = WinitPlatformRuntime {
+            control: Rc::clone(&self.control),
+            platform: Rc::clone(&self.platform),
+            #[cfg(test)]
+            owned_platform: None,
+        };
+        if let Err(error) = runtime.ensure_attached() {
+            return WinitViewportAttempt::skipped(vec![error]);
+        }
+
+        let output = self.control.enter_event_loop(event_loop, callback);
+        WinitViewportAttempt::completed(output, self.control.drain_faults())
+    }
+}
+
+impl crate::WinitPlatform {
+    /// Enable native multi-viewport ownership on this attached platform.
+    ///
+    /// The main window must already be attached with [`crate::HiDpiMode::Default`]. The platform
+    /// remains the sole public owner for main-window input, secondary windows, callback faults,
+    /// and event-loop scopes.
+    pub fn enable_viewports(&mut self, context: &mut Context) -> Result<(), WinitPlatformError> {
+        WinitPlatformRuntime::new(context, self).map(drop)
+    }
+
+    /// Returns whether this platform currently owns native multi-viewport state.
+    #[must_use]
+    pub fn viewports_enabled(&self) -> bool {
+        self.control().has_live_runtime()
+    }
+
+    /// Captures the exact platform generation used by a first-party renderer route.
+    #[doc(hidden)]
+    pub fn viewport_renderer_adapter(
+        &self,
+        context: &Context,
+    ) -> Result<WinitViewportRendererAdapter, WinitPlatformError> {
+        let runtime = WinitPlatformRuntime::from_platform(self)?;
+        runtime.validate_renderer_owner(context)?;
+        Ok(WinitViewportRendererAdapter {
+            control: Rc::clone(&runtime.control),
+            platform: Rc::clone(&runtime.platform),
+        })
+    }
+
+    /// Runs `callback` while native viewport callbacks may access `event_loop`.
+    ///
+    /// The [`super::EventLoopScope`] cannot escape this closure. Nested scopes restore the outer
+    /// event loop, and the returned [`WinitViewportAttempt`] retains both the callback output and
+    /// every deferred fault after Rust regains control.
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_winit::WinitPlatform;
+    /// use winit::event_loop::ActiveEventLoop;
+    ///
+    /// fn leak_event_loop<'a>(
+    ///     platform: &WinitPlatform,
+    ///     event_loop: &'a ActiveEventLoop,
+    /// ) -> &'a ActiveEventLoop {
+    ///     platform
+    ///         .with_event_loop(event_loop, |scope| scope.active_event_loop())
+    ///         .into_parts()
+    ///         .0
+    ///         .unwrap()
+    /// }
+    /// ```
+    pub fn with_event_loop<R>(
+        &self,
+        event_loop: &ActiveEventLoop,
+        callback: impl for<'scope> FnOnce(EventLoopScope<'scope>) -> R,
+    ) -> WinitViewportAttempt<R> {
+        match WinitPlatformRuntime::from_platform(self) {
+            Ok(runtime) => runtime.with_event_loop(event_loop, callback),
+            Err(error) => WinitViewportAttempt::skipped(vec![error]),
+        }
+    }
+
+    /// Returns all deferred multi-viewport faults in observation order.
+    ///
+    /// First-party renderer routes already aggregate these failures into their frame result. This
+    /// method is the advanced escape hatch for custom renderer routes, which must drain faults
+    /// after every native platform-window pass. Retryable faults are removed; a terminal contract
+    /// fault remains observable until shutdown.
+    pub fn drain_viewport_faults(&self) -> Result<Vec<WinitPlatformError>, WinitPlatformError> {
+        Ok(WinitPlatformRuntime::from_platform(self)?
+            .control
+            .drain_faults())
+    }
+
+    /// Disable native multi-viewport ownership while keeping the main platform attached.
+    ///
+    /// Any attached renderer route must be shut down first. The operation is retryable when a
+    /// deferred callback or ownership fault is returned.
+    pub fn disable_viewports(&mut self, context: &mut Context) -> Result<(), WinitPlatformError> {
+        match WinitPlatformRuntime::from_platform(self) {
+            Ok(mut runtime) => runtime.shutdown(context),
+            Err(WinitPlatformError::RuntimeDetached) => Ok(()),
+            Err(error) => Err(error),
+        }
     }
 }
 

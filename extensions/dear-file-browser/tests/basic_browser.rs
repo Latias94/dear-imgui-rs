@@ -13,7 +13,11 @@ fn imgui_file_browser_smoke_test() {
         io.set_delta_time(1.0 / 60.0);
     }
 
-    let _ = imgui.font_atlas().build();
+    imgui
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("headless test requires the legacy font-atlas capability")
+        .build();
     let _ = imgui.set_ini_filename::<std::path::PathBuf>(None);
 
     let ui = imgui.frame();

@@ -1,24 +1,20 @@
+use crate::fonts::atlas::LegacyFontAtlas;
 use crate::fonts::atlas::state::bump_custom_rect_generation;
 use crate::fonts::atlas::validation::frame_count_to_i32;
 use crate::sys;
 
 use super::FontAtlas;
 
-impl FontAtlas {
-    /// Build the font atlas texture
+impl LegacyFontAtlas<'_> {
+    /// Build the legacy font atlas texture.
     ///
-    /// This is a simplified build process. For more control, use the individual build functions.
-    ///
-    /// Note: with Dear ImGui 1.92+ "new backend" texture system, you should generally
-    /// not call `build()` manually. The renderer should set `ImGuiBackendFlags_RendererHasTextures`
-    /// and the atlas will be built/updated on demand.
-    ///
-    /// In particular, calling `build()` before the renderer sets `RendererHasTextures`
-    /// may cause Dear ImGui to assert on the next frame.
+    /// This is the complete build entry point for legacy renderers. Managed renderers build and
+    /// upload the atlas through texture requests owned by their renderer consumer instead.
     #[doc(alias = "Build")]
-    pub fn build(&self) -> bool {
-        self.assert_mutation_allowed("FontAtlas::build()");
-        let raw = self.raw();
+    pub fn build(&self) {
+        self.atlas
+            .assert_mutation_allowed("LegacyFontAtlas::build()");
+        let raw = self.atlas.raw();
         // NOTE: In Dear ImGui, `ImFontAtlasBuildMain()` will call `ImFontAtlasBuildInit()`
         // lazily if needed (Builder == NULL). Calling BuildInit unconditionally would leak
         // the builder and is not idempotent.
@@ -29,10 +25,11 @@ impl FontAtlas {
             if rebuilds_builder {
                 bump_custom_rect_generation(raw);
             }
-            (*raw).TexIsBuilt
         }
     }
+}
 
+impl FontAtlas {
     /// Discard baked font caches.
     ///
     /// This clears cached glyph data (including cached "not found" entries) so that

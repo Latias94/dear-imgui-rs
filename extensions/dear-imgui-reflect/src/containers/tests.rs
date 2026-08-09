@@ -12,7 +12,10 @@ fn new_test_ctx() -> imgui::Context {
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas().build();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("headless test requires the legacy font-atlas capability")
+        .build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     ctx
 }
@@ -56,7 +59,7 @@ fn nested_vec_element_paths_include_index_segments() {
         drop(path);
         inspector.into_response()
     };
-    drop(ctx.render());
+    drop(ctx.render_legacy());
 
     let paths: Vec<Option<String>> = resp
         .events()
@@ -91,7 +94,7 @@ fn nested_array_element_paths_include_index_segments() {
         drop(path);
         inspector.into_response()
     };
-    drop(ctx.render());
+    drop(ctx.render_legacy());
 
     let paths: Vec<Option<String>> = resp
         .events()
@@ -132,7 +135,7 @@ fn nested_map_value_paths_include_key_segments() {
         drop(path);
         inspector.into_response()
     };
-    drop(ctx.render());
+    drop(ctx.render_legacy());
 
     let paths: Vec<Option<String>> = resp
         .events()
@@ -162,7 +165,7 @@ fn nested_tuple_element_paths_include_index_segments() {
         drop(path);
         inspector.into_response()
     };
-    drop(ctx.render());
+    drop(ctx.render_legacy());
 
     let paths: Vec<Option<String>> = resp
         .events()
@@ -190,5 +193,5 @@ fn nested_containers_render_without_reentrant_settings_state() {
         let mut inspector = session.inspector(ui);
         let _ = <Vec<Vec<i32>> as ImGuiValue>::imgui_value(&mut inspector, "nested", &mut values);
     }
-    drop(ctx.render());
+    drop(ctx.render_legacy());
 }

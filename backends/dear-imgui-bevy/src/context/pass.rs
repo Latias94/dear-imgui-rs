@@ -633,11 +633,10 @@ pub(crate) fn configure_sets<P, M>(
         .configure_sets(pass, sets);
 }
 
-pub(crate) fn registry_id(world: &World) -> u64 {
+pub(crate) fn existing_registry_id(world: &World) -> Option<u64> {
     world
         .get_non_send::<ImguiPassRegistry>()
-        .expect("ImguiPlugin must install the pass registry")
-        .registry_id
+        .map(|registry| registry.registry_id)
 }
 
 pub(crate) fn lifecycle(world: &World) -> ImguiAppLifecycle {

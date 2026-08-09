@@ -25,9 +25,7 @@ fn request_test_device() -> Option<(Device, Queue)> {
 }
 
 fn managed_texture_id(context: &mut Context) -> SnapshotTextureId {
-    let mut texture = OwnedTextureData::new();
-    texture.create(TextureFormat::RGBA32, 2, 2);
-    texture.set_data(&[0; 16]);
+    let texture = OwnedTextureData::from_pixels(TextureFormat::RGBA32, 2, 2, &[0; 16]).unwrap();
     SnapshotTextureId::User(context.register_texture(texture))
 }
 
@@ -144,7 +142,7 @@ fn managed_requests_are_idempotent_and_retired_work_cannot_resurrect() -> Render
             &queue,
             &mut render_resources,
         )?,
-        ManagedRequestOutcome::IgnoredRetired
+        ManagedRequestOutcome::Superseded
     );
     assert_eq!(manager.managed_texture_count(), 0);
     manager.clear_managed_textures();
@@ -158,7 +156,7 @@ fn managed_requests_are_idempotent_and_retired_work_cannot_resurrect() -> Render
             &queue,
             &mut render_resources,
         )?,
-        ManagedRequestOutcome::IgnoredRetired
+        ManagedRequestOutcome::Superseded
     );
     manager.prune_destroyed_managed_textures(4);
     assert_eq!(manager.destroyed_managed_texture_count(), 1);
@@ -214,7 +212,7 @@ fn managed_destroy_and_renderer_invalidation_preserve_external_texture_handles()
     assert!(manager.texture_view(external.texture_id()).is_some());
     assert_eq!(manager.texture_count(), 1);
 
-    manager.clear_renderer_owned_textures();
+    manager.clear_managed_textures();
     assert!(manager.contains_texture(external.texture_id()));
     assert_eq!(manager.texture_count(), 1);
 

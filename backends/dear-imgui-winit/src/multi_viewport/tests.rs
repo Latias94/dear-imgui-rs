@@ -9,7 +9,7 @@ use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentRole,
     ContextPlatformAttachmentReleaseError,
 };
-use winit::event::Event;
+use winit::event::{Event, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::WindowId;
 
@@ -1015,6 +1015,50 @@ fn unsupported_viewport_policy_fault_requests_close() {
 }
 
 #[test]
+fn callback_fault_queue_drains_every_failure_in_observation_order() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
+    let first = WinitPlatformError::WindowOperation {
+        operation: "first callback",
+        message: "first failure".to_owned(),
+    };
+    let second = WinitPlatformError::WindowOperation {
+        operation: "second callback",
+        message: "second failure".to_owned(),
+    };
+
+    runtime.control().record_fault(first.clone());
+    runtime.control().record_fault(first.clone());
+    runtime.control().record_fault(second.clone());
+
+    assert_eq!(
+        runtime.control().drain_faults(),
+        vec![first.clone(), first, second]
+    );
+    assert_eq!(runtime.poll_fault(), Ok(()));
+}
+
+#[test]
+fn terminal_fault_is_queued_once_and_remains_sticky() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
+    let first = WinitPlatformError::CallbackPanicked {
+        callback: "first terminal callback",
+    };
+    let ignored = WinitPlatformError::CallbackPanicked {
+        callback: "later terminal callback",
+    };
+
+    runtime.control().record_terminal_fault(first.clone());
+    runtime.control().record_terminal_fault(ignored);
+
+    assert_eq!(runtime.control().drain_faults(), vec![first.clone()]);
+    assert_eq!(runtime.poll_fault(), Err(first));
+}
+
+#[test]
 fn destroy_preserves_foreign_platform_user_data_and_reports_it() {
     let _guard = lock_context();
     let mut context = Context::create();
@@ -1139,6 +1183,168 @@ fn renderer_owner_validation_rejects_a_shutdown_runtime_with_the_same_context_id
         runtime.validate_renderer_owner(&context),
         Err(WinitPlatformError::RuntimeDetached)
     );
+}
+
+#[test]
+fn public_platform_owner_drives_the_installed_viewport_runtime() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let mut platform = crate::WinitPlatform::new(&mut context).unwrap();
+    let runtime = WinitPlatformRuntime::new_for_test_with_platform(&mut context, &platform)
+        .expect("test runtime should attach to the platform owner");
+
+    assert!(platform.viewports_enabled());
+    assert_eq!(platform.context_id(), context.id());
+    assert_eq!(platform.drain_viewport_faults(), Ok(Vec::new()));
+    assert!(platform.viewport_renderer_adapter(&context).is_ok());
+
+    drop(runtime);
+    platform.disable_viewports(&mut context).unwrap();
+    assert!(!platform.viewports_enabled());
+    platform.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn public_platform_shutdown_returns_retryable_faults_before_detaching() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let mut platform = crate::WinitPlatform::new(&mut context).unwrap();
+    let runtime = WinitPlatformRuntime::new_for_test_with_platform(&mut context, &platform)
+        .expect("test runtime should attach to the platform owner");
+    runtime
+        .control()
+        .record_fault(WinitPlatformError::CallbackPanicked {
+            callback: "first queued shutdown fault",
+        });
+    runtime
+        .control()
+        .record_fault(WinitPlatformError::CallbackPanicked {
+            callback: "second queued shutdown fault",
+        });
+
+    assert!(matches!(
+        platform.disable_viewports(&mut context),
+        Err(WinitPlatformError::CallbackPanicked {
+            callback: "first queued shutdown fault"
+        })
+    ));
+    assert!(platform.viewports_enabled());
+    assert!(matches!(
+        platform.disable_viewports(&mut context),
+        Err(WinitPlatformError::CallbackPanicked {
+            callback: "second queued shutdown fault"
+        })
+    ));
+    assert!(platform.viewports_enabled());
+
+    platform.disable_viewports(&mut context).unwrap();
+    assert!(!platform.viewports_enabled());
+    platform.disable_viewports(&mut context).unwrap();
+    platform.shutdown(&mut context).unwrap();
+    drop(runtime);
+}
+
+#[test]
+fn public_platform_owner_rejects_a_foreign_context_without_detaching() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let mut platform = crate::WinitPlatform::new(&mut context).unwrap();
+    let runtime = WinitPlatformRuntime::new_for_test_with_platform(&mut context, &platform)
+        .expect("test runtime should attach to the platform owner");
+    let suspended = context.suspend_or_panic();
+    let mut foreign = Context::create();
+
+    assert_eq!(
+        platform.disable_viewports(&mut foreign),
+        Err(WinitPlatformError::ContextMismatch)
+    );
+    assert!(platform.viewports_enabled());
+
+    drop(foreign);
+    let mut context = suspended.activate().unwrap();
+    platform.disable_viewports(&mut context).unwrap();
+    platform.shutdown(&mut context).unwrap();
+    drop(runtime);
+}
+
+#[test]
+fn full_event_route_rejects_a_foreign_context_before_consuming_faults() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let mut platform = crate::WinitPlatform::new(&mut context).unwrap();
+    let runtime = WinitPlatformRuntime::new_for_test_with_platform(&mut context, &platform)
+        .expect("test runtime should attach to the platform owner");
+    runtime
+        .control()
+        .record_fault(WinitPlatformError::CallbackPanicked {
+            callback: "queued before foreign full event",
+        });
+    let suspended = context.suspend_or_panic();
+    let mut foreign = Context::create();
+    let foreign_flags = foreign.io().backend_flags();
+
+    assert!(matches!(
+        super::events::handle_event(
+            runtime.control(),
+            &mut platform,
+            &mut foreign,
+            &Event::<()>::AboutToWait,
+        ),
+        Err(WinitPlatformError::ContextMismatch)
+    ));
+    assert_eq!(foreign.io().backend_flags(), foreign_flags);
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(WinitPlatformError::CallbackPanicked {
+            callback: "queued before foreign full event"
+        })
+    ));
+
+    drop(foreign);
+    let mut context = suspended.activate().unwrap();
+    platform.disable_viewports(&mut context).unwrap();
+    platform.shutdown(&mut context).unwrap();
+    drop(runtime);
+}
+
+#[test]
+fn secondary_window_route_rejects_a_foreign_context_before_consuming_faults() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let mut platform = crate::WinitPlatform::new(&mut context).unwrap();
+    let runtime = WinitPlatformRuntime::new_for_test_with_platform(&mut context, &platform)
+        .expect("test runtime should attach to the platform owner");
+    runtime
+        .control()
+        .record_fault(WinitPlatformError::CallbackPanicked {
+            callback: "queued before foreign window event",
+        });
+    let suspended = context.suspend_or_panic();
+    let mut foreign = Context::create();
+    let foreign_flags = foreign.io().backend_flags();
+
+    assert!(matches!(
+        super::events::route_secondary_window_event(
+            runtime.control(),
+            &mut foreign,
+            WindowId::dummy(),
+            &WindowEvent::CloseRequested,
+        ),
+        Err(WinitPlatformError::ContextMismatch)
+    ));
+    assert_eq!(foreign.io().backend_flags(), foreign_flags);
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(WinitPlatformError::CallbackPanicked {
+            callback: "queued before foreign window event"
+        })
+    ));
+
+    drop(foreign);
+    let mut context = suspended.activate().unwrap();
+    platform.disable_viewports(&mut context).unwrap();
+    platform.shutdown(&mut context).unwrap();
+    drop(runtime);
 }
 
 #[test]
@@ -1530,7 +1736,11 @@ fn explicit_shutdown_closes_an_open_frame_before_platform_teardown() {
         [320.0, 240.0],
         1.0 / 60.0,
     ));
-    let _ = context.font_atlas().build();
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("the platform teardown test uses headless legacy rendering")
+        .build();
 
     context.frame().text("close before Winit teardown");
     assert_eq!(
@@ -1556,7 +1766,7 @@ fn shutdown_rejects_a_foreign_context_before_changing_runtime_state() {
     let _guard = lock_context();
     let mut context = Context::create();
     let mut runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
-    let suspended = context.suspend();
+    let suspended = context.suspend_or_panic();
     let mut foreign = Context::create();
 
     assert_eq!(

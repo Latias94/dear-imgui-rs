@@ -24,36 +24,12 @@
 //! // Use in your event loop...
 //! ```
 //!
-//! # Example - Multi-Viewport Support
+//! # Multi-Viewport Support
 //!
-//! ```rust,no_run
-//! # #[cfg(feature = "multi-viewport")]
-//! # {
-//! use std::sync::Arc;
-//! use dear_imgui_rs::Context;
-//! use dear_imgui_winit::{WinitPlatform, multi_viewport::WinitPlatformRuntime};
-//! use winit::{event_loop::ActiveEventLoop, window::Window};
-//!
-//! fn attach(
-//!     imgui: &mut Context,
-//!     window: Arc<Window>,
-//!     platform: &mut WinitPlatform,
-//! ) -> Result<WinitPlatformRuntime, Box<dyn std::error::Error>> {
-//!     platform.attach_window(Arc::clone(&window), dear_imgui_winit::HiDpiMode::Default, imgui)?;
-//!     imgui.enable_multi_viewport();
-//!     Ok(WinitPlatformRuntime::new(imgui, platform)?)
-//! }
-//!
-//! fn update(
-//!     runtime: &WinitPlatformRuntime,
-//!     imgui: &mut Context,
-//!     event_loop: &ActiveEventLoop,
-//! ) -> Result<(), Box<dyn std::error::Error>> {
-//!     runtime.with_event_loop(event_loop, |_| imgui.update_platform_windows())?;
-//!     Ok(())
-//! }
-//! # }
-//! ```
+//! `WinitPlatform` owns native windows and event routing, while the selected renderer route owns
+//! the complete viewport-frame transaction. Use that route's `prepare(...)` entry instead of
+//! calling Dear ImGui's platform-window phases directly. See the repository's
+//! `multi_viewport_wgpu` and `multi_viewport_ash` examples for complete integrations.
 
 mod cursor;
 mod events;

@@ -1,4 +1,4 @@
-//! Owning SDL3/Ash multi-viewport renderer runtime.
+//! Owning SDL3/Ash multi-viewport route.
 
 #[cfg(doctest)]
 mod removed_free_api_contracts {
@@ -11,22 +11,84 @@ mod removed_free_api_contracts {
     /// use dear_imgui_ash::multi_viewport_sdl3::shutdown_multi_viewport_support;
     /// ```
     struct Shutdown;
+
+    /// The prepared capability carries same-scope secondary evidence. Retirement state stays
+    /// opaque inside the move-only completion capability.
+    ///
+    /// ```
+    /// use dear_imgui_ash::multi_viewport_sdl3::{
+    ///     AshPreparedViewportFrame, AshViewportFrameCompletion, AshViewportFrameReport,
+    /// };
+    ///
+    /// fn preparation_evidence<'a>(
+    ///     frame: &'a AshPreparedViewportFrame<'_>,
+    /// ) -> &'a AshViewportFrameReport {
+    ///     frame.secondary_report()
+    /// }
+    ///
+    /// fn preserve_retirement(frame: AshPreparedViewportFrame<'_>) -> AshViewportFrameCompletion {
+    ///     frame.skip_main()
+    /// }
+    /// ```
+    ///
+    /// Manual tracing and partially prepared main-viewport entry points are intentionally absent.
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_ash::multi_viewport_sdl3::AshViewportFrameTrace;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_ash::multi_viewport_sdl3::Sdl3ViewportRoute;
+    /// let _ = Sdl3ViewportRoute::begin_frame_trace;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_ash::multi_viewport_sdl3::Sdl3ViewportRoute;
+    /// let _ = Sdl3ViewportRoute::cmd_draw_reconciled;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_ash::multi_viewport_sdl3::Sdl3ViewportRoute;
+    /// let _ = Sdl3ViewportRoute::cmd_draw;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_ash::multi_viewport_sdl3::AshPreparedViewportFrame;
+    /// fn expose_batch(frame: &AshPreparedViewportFrame<'_>) {
+    ///     let _ = frame.texture_retirement();
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_ash::multi_viewport_sdl3::Sdl3ViewportRuntime;
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_ash::multi_viewport_sdl3::AshViewportFrameCompletion;
+    /// fn duplicate(completion: AshViewportFrameCompletion) {
+    ///     let first = completion;
+    ///     let second = completion;
+    ///     drop((first, second));
+    /// }
+    /// ```
+    struct PreparedTransaction;
 }
 
 use super::AshRenderer;
 use super::vulkan_viewport::{self, OwningViewportRuntime, SurfaceAdapter, SurfaceCreateError};
 use ash::vk::{self, Handle};
-use dear_imgui_rs::render::RenderedFrame;
-use dear_imgui_rs::{Context, TextureData, TextureId, platform_io::Viewport};
-use dear_imgui_sdl3::{Sdl3PlatformBackend, Sdl3VulkanSurfaceProvider};
+use dear_imgui_rs::{Context, FrameToken, TextureData, TextureId, platform_io::Viewport};
+use dear_imgui_sdl3::{
+    Sdl3PlatformBackend, Sdl3ViewportRendererAdapter, Sdl3VulkanSurfaceProvider,
+};
 use std::sync::Arc;
 
 pub use super::vulkan_viewport::{
-    AshViewportAttachError, AshViewportError, AshViewportFrameReport, AshViewportFrameTrace,
-    PresentModePolicy, SurfaceFormatPolicy, SurfaceSupportError, ViewportSwapchainPolicy,
-    VulkanViewportConfig,
+    AshPreparedViewportFrame, AshViewportAttachError, AshViewportError, AshViewportFrameCompletion,
+    AshViewportFrameReport, AshViewportRouteError, AshViewportRouteFault, PresentModePolicy,
+    SurfaceFormatPolicy, SurfaceSupportError, ViewportSwapchainPolicy, VulkanViewportConfig,
 };
-use crate::{Options, TextureRetirementBatch, TextureUpdateResult};
+use crate::{Options, TextureUpdateResult};
 
 struct Sdl3SurfaceAdapter {
     provider: Sdl3VulkanSurfaceProvider,
@@ -47,26 +109,31 @@ impl SurfaceAdapter for Sdl3SurfaceAdapter {
     }
 }
 
-/// Owning Ash renderer runtime for the SDL3 Vulkan multi-viewport route.
+/// Owning SDL3/Ash multi-viewport route.
 #[derive(Debug)]
-pub struct Sdl3ViewportRuntime {
+pub struct Sdl3ViewportRoute {
     inner: OwningViewportRuntime,
+    platform: Sdl3ViewportRendererAdapter,
 }
 
-impl Sdl3ViewportRuntime {
+impl Sdl3ViewportRoute {
     /// Transactionally attach an initialized renderer to an SDL3 Vulkan platform runtime.
     ///
     /// # Safety
     ///
     /// Every raw Vulkan handle and queue family in `config` must satisfy
     /// [`VulkanViewportConfig`]'s device-lineage and external host-synchronization contracts. The
-    /// runtime owns renderer address stability; moving this wrapper is safe.
+    /// route owns renderer address stability; moving this wrapper is safe.
     pub unsafe fn attach(
         context: &mut Context,
         platform: &Sdl3PlatformBackend,
         renderer: AshRenderer,
         config: VulkanViewportConfig,
     ) -> Result<Self, AshViewportAttachError> {
+        let platform_adapter = match platform.viewport_renderer_adapter(context) {
+            Ok(platform) => platform,
+            Err(error) => return Err(AshViewportAttachError::new(error.into(), renderer)),
+        };
         let provider = match platform.acquire_vulkan_surface_provider(context) {
             Ok(provider) => provider,
             Err(error) => return Err(AshViewportAttachError::new(error.into(), renderer)),
@@ -79,76 +146,78 @@ impl Sdl3ViewportRuntime {
                 Arc::new(Sdl3SurfaceAdapter { provider }),
             )
         }
-        .map(|inner| Self { inner })
+        .map(|inner| Self {
+            inner,
+            platform: platform_adapter,
+        })
     }
 
-    pub fn poll_fault(&self) -> Result<(), AshViewportError> {
-        self.inner.poll_fault()
-    }
-
-    /// Starts a non-nestable trace of secondary-viewport Vulkan submissions.
-    pub fn begin_frame_trace(&self) -> Result<AshViewportFrameTrace<'_>, AshViewportError> {
-        self.inner.begin_frame_trace()
-    }
-
-    /// Reconcile managed texture requests before any secondary viewport can draw this frame.
-    pub fn prepare_frame(
+    /// Consumes an open frame, reconciles textures, and completes secondary viewports.
+    ///
+    /// Call this before acquiring the application's main surface. Every renderer and platform
+    /// callback fault raised by the exact SDL3 platform generation is returned together without
+    /// losing FIFO order within either source. A frame from another Context is rejected before
+    /// entering the SDL3 platform scope or consuming any deferred route fault.
+    pub fn prepare<'ctx>(
         &self,
-        frame: &mut RenderedFrame<'_>,
-    ) -> Result<Option<TextureRetirementBatch>, AshViewportError> {
-        self.inner.prepare_frame(frame)
+        frame: FrameToken<'ctx>,
+    ) -> Result<
+        AshPreparedViewportFrame<'ctx>,
+        AshViewportRouteError<dear_imgui_sdl3::Sdl3BackendError>,
+    > {
+        let actual = frame.ui().context_id();
+        self.inner.prepare_route_for_context(actual, || {
+            debug_assert_eq!(self.platform.context_id(), self.inner.context_id());
+            self.platform.run(|| self.inner.prepare(frame)).into_parts()
+        })
     }
 
-    /// Records the main viewport through the owned renderer.
+    /// Record the main viewport from a frame whose secondary viewports are already complete.
     ///
     /// # Safety
     ///
-    /// `command_buffer` must satisfy [`AshRenderer::cmd_draw`].
-    pub unsafe fn cmd_draw(
+    /// `command_buffer` must satisfy [`AshRenderer::cmd_draw`]. Queue submission and the GPU
+    /// completion proof remain caller-owned. Pass the returned capability to
+    /// [`Self::wait_for_frame_completion`] or [`Self::complete_frame_with_fences`] only after every
+    /// relevant upload, secondary draw, and main draw has completed.
+    pub unsafe fn cmd_draw_main(
         &self,
         command_buffer: vk::CommandBuffer,
-        frame: RenderedFrame<'_>,
-    ) -> Result<Option<TextureRetirementBatch>, AshViewportError> {
-        unsafe { self.inner.cmd_draw(command_buffer, frame) }
+        prepared: AshPreparedViewportFrame<'_>,
+    ) -> Result<AshViewportFrameCompletion, AshViewportError> {
+        unsafe { self.inner.cmd_draw_main(command_buffer, prepared) }
     }
 
-    /// Return the highest managed-texture resource retirement batch still pending.
-    pub fn pending_texture_retirement(
-        &self,
-    ) -> Result<Option<TextureRetirementBatch>, AshViewportError> {
-        self.inner.pending_texture_retirement()
-    }
-
-    /// Block for device idle and complete managed-texture resource retirement.
+    /// Wait for device idle and complete this frame's managed-texture retirement.
     ///
-    /// The count includes superseded update images and resources pending a logical destroy.
+    /// When no resources are pending, the capability is consumed and the method returns zero
+    /// without waiting. Otherwise the returned count includes superseded update images and
+    /// resources pending a logical destroy.
     /// Recorded but unsubmitted command buffers that reference released resources must not be
     /// submitted afterwards; see [`AshRenderer::cmd_draw`].
-    pub fn wait_for_texture_retirements(
+    pub fn wait_for_frame_completion(
         &self,
-        batch: TextureRetirementBatch,
+        completion: AshViewportFrameCompletion,
     ) -> Result<usize, AshViewportError> {
-        self.inner.wait_for_texture_retirements(batch)
+        self.inner.wait_for_frame_completion(completion)
     }
 
-    /// Complete managed-texture resource retirement after validating fences are signaled.
+    /// Complete this frame's managed-texture retirement after validating fences are signaled.
     ///
     /// The count includes superseded update images and resources pending a logical destroy.
     ///
     /// # Safety
     ///
-    /// Every fence must belong to this renderer's device and together cover all uploads and draws
-    /// on every queue which can reference textures through `batch`. No recorded command buffer
-    /// which references released resources may be submitted afterwards.
-    pub unsafe fn complete_texture_retirements_with_fences(
+    /// Every fence must belong to this renderer's device and together cover every queue operation
+    /// that can reference resources associated with `completion`, including uploads, secondary
+    /// draws, and the main draw when it was recorded. No recorded command buffer which references
+    /// released resources may be submitted afterwards.
+    pub unsafe fn complete_frame_with_fences(
         &self,
-        batch: TextureRetirementBatch,
+        completion: AshViewportFrameCompletion,
         fences: &[vk::Fence],
     ) -> Result<usize, AshViewportError> {
-        unsafe {
-            self.inner
-                .complete_texture_retirements_with_fences(batch, fences)
-        }
+        unsafe { self.inner.complete_frame_with_fences(completion, fences) }
     }
 
     pub fn options(&self) -> Result<Options, AshViewportError> {
@@ -161,14 +230,6 @@ impl Sdl3ViewportRuntime {
 
     pub fn viewport_clear_color(&self) -> Result<[f32; 4], AshViewportError> {
         self.inner.viewport_clear_color()
-    }
-
-    /// Run a read-only, non-escaping renderer inspection.
-    pub fn with_renderer<R>(
-        &self,
-        callback: impl FnOnce(&AshRenderer) -> R,
-    ) -> Result<R, AshViewportError> {
-        self.inner.with_renderer(callback)
     }
 
     /// Register an application-owned sampled image with the shared viewport renderer.

@@ -332,7 +332,11 @@ mod tests {
             io.set_display_size([640.0, 480.0]);
             io.set_delta_time(1.0 / 60.0);
         }
-        let _ = context.font_atlas().build();
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("headless test requires the legacy font-atlas capability")
+            .build();
         let _ = context.set_ini_filename::<std::path::PathBuf>(None);
         context
     }
@@ -457,8 +461,8 @@ mod tests {
                 },
             );
         }
-        drop(first.render());
-        let first: SuspendedContext = first.suspend();
+        drop(first.render_legacy());
+        let first: SuspendedContext = first.suspend_or_panic();
 
         let mut second = test_ui_context();
         {
@@ -474,7 +478,7 @@ mod tests {
                 },
             );
         }
-        drop(second.render());
+        drop(second.render_legacy());
         drop(second);
         drop(first);
     }

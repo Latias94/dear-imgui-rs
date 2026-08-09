@@ -4,6 +4,11 @@ All notable changes to this crate will be documented in this file.
 
 ## Unreleased
 
+### Breaking
+
+- Replace `WinitViewportRuntime` and `Sdl3ViewportRuntime` with `WinitViewportRoute` and `Sdl3ViewportRoute`. Each route captures the exact platform generation at `attach` and exposes one preparation transaction: `prepare(FrameToken)` (plus Winit's `ActiveEventLoop`) reconciles textures, dispatches secondary viewports, and returns all renderer and platform callback faults together. The old `prepare_context`, `prepare_frame`, `poll_fault`, `attach_unchecked`, renderer inspection, and manual trace/bypass entries were removed.
+- Ash multi-viewport routes no longer expose `TextureRetirementBatch`. `cmd_draw_main` and `AshPreparedViewportFrame::skip_main` produce a move-only `AshViewportFrameCompletion`; consume it with `wait_for_frame_completion` or unsafe `complete_frame_with_fences`. Dropping a prepared frame or completion defers retirement instead of freeing Vulkan resources early. The low-level batch API remains available on single-window `AshRenderer`.
+
 ## 0.16.0-alpha.1
 
 ### Breaking

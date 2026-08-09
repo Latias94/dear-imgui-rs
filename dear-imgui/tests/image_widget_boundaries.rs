@@ -11,7 +11,10 @@ fn prepare_context(ctx: &mut imgui::Context) {
     io.set_display_size([800.0, 600.0]);
     io.set_delta_time(1.0 / 60.0);
 
-    let _ = ctx.font_atlas().build();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 }
 
@@ -113,10 +116,13 @@ fn image_button_rejects_invalid_geometry_and_colors_before_ffi() {
 }
 
 fn managed_texture() -> imgui::texture::OwnedTextureData {
-    let mut texture = imgui::texture::OwnedTextureData::new();
-    texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
-    texture.set_data(&[255, 255, 255, 255]);
-    texture
+    imgui::texture::OwnedTextureData::from_pixels(
+        imgui::texture::TextureFormat::RGBA32,
+        1,
+        1,
+        &[255, 255, 255, 255],
+    )
+    .unwrap()
 }
 
 #[test]
@@ -140,8 +146,8 @@ fn managed_images_resolve_only_in_the_owner_context_and_generation() {
             );
         });
     }
-    let _ = owner.render();
-    let suspended_owner = owner.suspend();
+    let _ = owner.render_legacy();
+    let suspended_owner = owner.suspend_or_panic();
 
     let mut foreign = imgui::Context::create();
     prepare_context(&mut foreign);

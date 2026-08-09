@@ -738,11 +738,17 @@ def write_prebuilt_consumer(destination: Path, source_root: Path, profile: str) 
     let mut context = dear_imgui_rs::Context::create();
     context.io_mut().set_display_size([320.0, 240.0]);
     context.io_mut().set_delta_time(1.0 / 60.0);
-    let _ = context.font_atlas().build();
+    {{
+        let mut atlas = context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("the standalone artifact consumer owns legacy atlas rendering");
+        let _ = atlas.build();
+    }}
     {{
         let ui = context.frame();
 {frame_body}    }}
-    assert!(context.render().valid());
+    assert!(context.render_legacy().valid());
     assert!(!dear_imgui_rs::dear_imgui_version().is_empty());
 }}
 """,

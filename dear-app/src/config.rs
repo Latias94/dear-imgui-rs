@@ -22,7 +22,7 @@ impl AddOnsConfig {
     }
 }
 
-/// Complete configuration for [`crate::run`] and [`crate::run_ui`].
+/// Complete configuration shared by [`crate::run_ui`], [`crate::run_frame`], and [`crate::run`].
 pub struct AppConfig {
     pub window_title: String,
     pub window_size: (f64, f64),

@@ -8,7 +8,7 @@ use std::rc::{Rc, Weak};
 
 use thiserror::Error;
 
-use crate::render::RendererConsumer;
+use crate::render::RendererConsumerCapability;
 
 use super::binding::{self, ContextId, ContextLifecycle, ContextState};
 use super::core::Context;
@@ -277,16 +277,15 @@ impl ContextTeardown<'_> {
     /// then runs `release`, and resets Context-owned texture bindings only when `release` returns
     /// `Ok(())`. A failed preflight, a failed release, a panic, or a reentrant call leaves those
     /// native bindings unchanged. The closure receives no Context access.
-    /// On success, the returned count is the number of Context-owned bindings invalidated.
     ///
     /// Attachment hooks are the fail-stop fallback used by `Context::drop`; concrete renderer
     /// shutdown APIs should continue to expose their retryable backend errors before deferring
     /// ownership to the Context.
     pub fn with_renderer_texture_reset(
         &self,
-        consumer: &RendererConsumer,
+        consumer: &impl RendererConsumerCapability,
         release: impl FnOnce() -> Result<(), ContextAttachmentTeardownError>,
-    ) -> Result<usize, ContextAttachmentTeardownError> {
+    ) -> Result<(), ContextAttachmentTeardownError> {
         if self.phase != ContextAttachmentPhase::RendererResources {
             return Err(ContextAttachmentTeardownError::new(format!(
                 "renderer texture reset requires the RendererResources phase, not {:?}",
@@ -323,9 +322,9 @@ impl ContextTeardown<'_> {
         // SAFETY: the preflight's mutable borrow ended before `release` ran. This is the same
         // exclusive Context owner, the phase and lifecycle were validated above, and reentrancy
         // remains blocked until the commit completes.
-        let invalidated = unsafe { &mut *self.owner.as_ptr() }
+        unsafe { &mut *self.owner.as_ptr() }
             .commit_renderer_texture_reset_during_teardown(watermark);
-        Ok(invalidated)
+        Ok(())
     }
 
     #[cfg(test)]

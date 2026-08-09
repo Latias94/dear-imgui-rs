@@ -61,7 +61,7 @@ fn clipboard_callbacks_use_passed_context_not_current_context() {
             .expect("clipboard getter should be installed");
     }
 
-    let suspended_a = ctx_a.suspend();
+    let suspended_a = ctx_a.suspend_or_panic();
 
     let mut ctx_b = imgui::Context::create();
     let shared_b = Arc::new(Mutex::new(Some("b".to_owned())));
@@ -104,7 +104,7 @@ fn clipboard_reentry_into_different_context_is_allowed() {
             .expect("clipboard getter should be installed")
     };
 
-    let suspended_a = ctx_a.suspend();
+    let suspended_a = ctx_a.suspend_or_panic();
 
     struct CrossContextReentrantBackend {
         other_ctx: *mut imgui::sys::ImGuiContext,
@@ -208,7 +208,10 @@ fn ini_disk_helpers_no_panic() {
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas().build();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
 
     let path = std::env::temp_dir().join("dear-imgui-rs-test-imgui.ini");
     let _ = ctx.load_ini_settings_from_disk(&path);

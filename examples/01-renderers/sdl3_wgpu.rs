@@ -21,7 +21,7 @@ use dear_imgui_examples::sdl3_callbacks::{
 };
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
-use dear_imgui_wgpu::{WgpuInitInfo, WgpuRenderer};
+use dear_imgui_wgpu::{FramebufferExtent, WgpuInitInfo, WgpuRenderer};
 use sdl3::video::{SwapInterval, WindowPos};
 use sdl3_main::{AppResult, AppResultWithState, MainThreadData, app_impl};
 
@@ -156,16 +156,19 @@ impl WgpuApp {
     }
 
     fn process_events(&self) -> AppResult {
-        let mut events = self.events.drain();
+        let mut events = match self.events.try_drain() {
+            Ok(events) => events,
+            Err(error) => {
+                eprintln!("SDL3 callback event handoff failed: {error}");
+                return AppResult::Failure;
+            }
+        };
         let mut main_guard = self.main.assert_get().borrow_mut();
         let main = &mut *main_guard;
         while let Some(event) = events.pop() {
-            let backend_result = event.with_imgui_event(|raw| match raw {
-                // SAFETY: the callback handoff reconstructs the active union variant and owns
-                // every pointer payload for the duration of this closure.
-                Some(raw) => unsafe { main.sdl3_backend.process_raw_event(&mut main.imgui, raw) },
-                None => Ok(false),
-            });
+            let backend_result = main
+                .sdl3_backend
+                .process_callback_event(&mut main.imgui, &event);
             if let Err(error) = backend_result {
                 eprintln!("SDL3 backend event processing failed: {error}");
                 return AppResult::Failure;
@@ -215,24 +218,25 @@ impl WgpuApp {
         if main.show_demo {
             ui.show_demo_window(&mut main.show_demo);
         }
-        let draw_data = main.imgui.render();
+        let pending_frame = main.imgui.render(main.renderer.renderer_consumer()?);
 
         let (frame, reconfigure_after_present) = match main.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
             wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
-                drop(draw_data);
+                drop(pending_frame);
                 Self::reconfigure_surface(main);
                 return Ok(());
             }
             wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
-                drop(draw_data);
+                drop(pending_frame);
                 return Ok(());
             }
             wgpu::CurrentSurfaceTexture::Validation => {
                 return Err("surface acquisition failed with a WGPU validation error".into());
             }
         };
+        let framebuffer_extent = FramebufferExtent::from_texture(&frame.texture);
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -263,12 +267,8 @@ impl WgpuApp {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            main.renderer.render_with_fb_size(
-                draw_data,
-                &mut render_pass,
-                main.surface_config.width,
-                main.surface_config.height,
-            )?;
+            main.renderer
+                .render(pending_frame, &mut render_pass, framebuffer_extent)?;
         }
         main.queue.submit(std::iter::once(encoder.finish()));
         main.queue.present(frame);

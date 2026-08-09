@@ -66,6 +66,7 @@ struct DearImguiSdl3NativeTransaction {
     int resolved_swap_interval = 0;
     bool swap_interval_resolved = false;
     std::uint64_t faults = 0;
+    std::uint64_t first_fault = 0;
     SDL_Window* expected_window = nullptr;
 
     SDL_Window* previous_window = nullptr;
@@ -88,6 +89,15 @@ struct DearImguiSdl3NativeTransaction {
 
 thread_local DearImguiSdl3NativeTransaction native_transaction;
 
+void dear_imgui_sdl3_record_fault(
+    DearImguiSdl3NativeTransaction& state,
+    std::uint64_t fault
+) {
+    if (state.first_fault == 0)
+        state.first_fault = fault;
+    state.faults |= fault;
+}
+
 SDL_Window* dear_imgui_sdl3_window_from_viewport(ImGuiViewport* viewport) {
     if (viewport == nullptr || viewport->PlatformHandle == nullptr)
         return nullptr;
@@ -99,18 +109,18 @@ void dear_imgui_sdl3_restore_create_state(DearImguiSdl3NativeTransaction& state)
     if (state.share_attribute_changed && !native_ops->gl_set_attribute(
             SDL_GL_SHARE_WITH_CURRENT_CONTEXT,
             state.previous_share_attribute))
-        state.faults |= DEAR_IMGUI_SDL3_FAULT_GL_RESTORE_SHARE;
+        dear_imgui_sdl3_record_fault(state, DEAR_IMGUI_SDL3_FAULT_GL_RESTORE_SHARE);
 
     if (native_ops->gl_get_current_window() != state.previous_window
         || native_ops->gl_get_current_context() != state.previous_context) {
         if (!native_ops->gl_make_current(state.previous_window, state.previous_context))
-            state.faults |= DEAR_IMGUI_SDL3_FAULT_GL_RESTORE_CONTEXT;
+            dear_imgui_sdl3_record_fault(state, DEAR_IMGUI_SDL3_FAULT_GL_RESTORE_CONTEXT);
     }
 }
 
 void dear_imgui_sdl3_detach_failed_render_context(DearImguiSdl3NativeTransaction& state) {
     if (!native_ops->gl_make_current(nullptr, nullptr))
-        state.faults |= DEAR_IMGUI_SDL3_FAULT_GL_RESTORE_CONTEXT;
+        dear_imgui_sdl3_record_fault(state, DEAR_IMGUI_SDL3_FAULT_GL_RESTORE_CONTEXT);
 }
 
 #if defined(DEAR_IMGUI_SDL3_NATIVE_SELF_TEST)
@@ -316,15 +326,18 @@ std::uint64_t dear_imgui_sdl3_native_begin(
     return 0;
 }
 
-std::uint64_t dear_imgui_sdl3_native_end() {
-    if (!native_transaction.active)
+std::uint64_t dear_imgui_sdl3_native_end(std::uint64_t* first_fault) {
+    if (!native_transaction.active) {
+        if (first_fault != nullptr)
+            *first_fault = DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL;
         return DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL;
+    }
 
     DearImguiSdl3NativeTransaction& state = native_transaction;
     if (state.expects_opengl) {
         if (state.phase == DEAR_IMGUI_SDL3_PHASE_PLATFORM_CREATE) {
             if (state.created_context == nullptr || state.created_context == state.main_context)
-                state.faults |= DEAR_IMGUI_SDL3_FAULT_GL_CREATE_CONTEXT;
+                dear_imgui_sdl3_record_fault(state, DEAR_IMGUI_SDL3_FAULT_GL_CREATE_CONTEXT);
             dear_imgui_sdl3_restore_create_state(state);
         } else if (state.phase == DEAR_IMGUI_SDL3_PHASE_PLATFORM_RENDER) {
             bool current_matches = state.phase_make_current_succeeded
@@ -332,14 +345,14 @@ std::uint64_t dear_imgui_sdl3_native_end() {
                 && native_ops->gl_get_current_window() == state.expected_window
                 && native_ops->gl_get_current_context() != nullptr;
             if (!current_matches) {
-                state.faults |= DEAR_IMGUI_SDL3_FAULT_GL_RENDER_CONTEXT;
+                dear_imgui_sdl3_record_fault(state, DEAR_IMGUI_SDL3_FAULT_GL_RENDER_CONTEXT);
                 dear_imgui_sdl3_detach_failed_render_context(state);
             }
         } else if (state.phase == DEAR_IMGUI_SDL3_PHASE_PLATFORM_SWAP) {
             if (!state.phase_make_current_succeeded)
-                state.faults |= DEAR_IMGUI_SDL3_FAULT_GL_SWAP_CONTEXT;
+                dear_imgui_sdl3_record_fault(state, DEAR_IMGUI_SDL3_FAULT_GL_SWAP_CONTEXT);
             if (!state.phase_swap_succeeded)
-                state.faults |= DEAR_IMGUI_SDL3_FAULT_GL_SWAP_WINDOW;
+                dear_imgui_sdl3_record_fault(state, DEAR_IMGUI_SDL3_FAULT_GL_SWAP_WINDOW);
         }
     }
 
@@ -351,6 +364,8 @@ std::uint64_t dear_imgui_sdl3_native_end() {
     }
 
     std::uint64_t faults = state.faults;
+    if (first_fault != nullptr)
+        *first_fault = state.first_fault;
     state = {};
     return faults;
 }
@@ -373,7 +388,7 @@ std::uint64_t dear_imgui_sdl3_native_contract_self_test() {
     SDL_GLContext created = dear_imgui_sdl3_hook_gl_create_context(fake_native_state.viewport_window);
     dear_imgui_sdl3_hook_gl_set_swap_interval(0);
     dear_imgui_sdl3_hook_gl_make_current(fake_native_state.viewport_window, previous_context);
-    std::uint64_t faults = dear_imgui_sdl3_native_end();
+    std::uint64_t faults = dear_imgui_sdl3_native_end(nullptr);
     if (faults != 0
         || created != fake_native_state.created_context
         || fake_native_state.current_window != previous_window
@@ -396,7 +411,7 @@ std::uint64_t dear_imgui_sdl3_native_contract_self_test() {
     created = dear_imgui_sdl3_hook_gl_create_context(fake_native_state.viewport_window);
     bool accepted_interval = dear_imgui_sdl3_hook_gl_set_swap_interval(0);
     dear_imgui_sdl3_hook_gl_make_current(fake_native_state.viewport_window, previous_context);
-    faults = dear_imgui_sdl3_native_end();
+    faults = dear_imgui_sdl3_native_end(nullptr);
     if (!accepted_interval
         || faults != 0
         || created != fake_native_state.created_context
@@ -417,7 +432,7 @@ std::uint64_t dear_imgui_sdl3_native_contract_self_test() {
     created = dear_imgui_sdl3_hook_gl_create_context(fake_native_state.viewport_window);
     accepted_interval = dear_imgui_sdl3_hook_gl_set_swap_interval(0);
     dear_imgui_sdl3_hook_gl_make_current(fake_native_state.viewport_window, previous_context);
-    faults = dear_imgui_sdl3_native_end();
+    faults = dear_imgui_sdl3_native_end(nullptr);
     if (!accepted_interval
         || faults != 0
         || created != fake_native_state.created_context
@@ -439,7 +454,7 @@ std::uint64_t dear_imgui_sdl3_native_contract_self_test() {
     dear_imgui_sdl3_hook_gl_create_context(fake_native_state.viewport_window);
     dear_imgui_sdl3_hook_gl_set_swap_interval(0);
     dear_imgui_sdl3_hook_gl_make_current(fake_native_state.viewport_window, previous_context);
-    faults = dear_imgui_sdl3_native_end();
+    faults = dear_imgui_sdl3_native_end(nullptr);
     if ((faults & DEAR_IMGUI_SDL3_FAULT_GL_CREATE_CONTEXT) == 0
         || fake_native_state.set_swap_interval_calls != 0
         || fake_native_state.get_swap_interval_index != 0
@@ -449,13 +464,25 @@ std::uint64_t dear_imgui_sdl3_native_contract_self_test() {
         failures |= UINT64_C(1) << 1;
 
     fake_native_state = DearImguiSdl3FakeNativeState{};
+    fake_native_state.fail_set_attribute = true;
+    dear_imgui_sdl3_native_begin(DEAR_IMGUI_SDL3_PHASE_PLATFORM_CREATE, 1, 0, 0, &viewport);
+    dear_imgui_sdl3_hook_gl_set_attribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
+    dear_imgui_sdl3_hook_gl_create_context(fake_native_state.viewport_window);
+    std::uint64_t first_fault = 0;
+    faults = dear_imgui_sdl3_native_end(&first_fault);
+    if ((faults & DEAR_IMGUI_SDL3_FAULT_GL_SHARE_SET) == 0
+        || (faults & DEAR_IMGUI_SDL3_FAULT_GL_CREATE_CONTEXT) == 0
+        || first_fault != DEAR_IMGUI_SDL3_FAULT_GL_SHARE_SET)
+        failures |= UINT64_C(1) << 10;
+
+    fake_native_state = DearImguiSdl3FakeNativeState{};
     fake_native_state.fail_make_current_call = 1;
     dear_imgui_sdl3_native_begin(DEAR_IMGUI_SDL3_PHASE_PLATFORM_RENDER, 1, 0, 0, &viewport);
     dear_imgui_sdl3_hook_gl_make_current(
         fake_native_state.viewport_window,
         fake_native_state.created_context
     );
-    faults = dear_imgui_sdl3_native_end();
+    faults = dear_imgui_sdl3_native_end(nullptr);
     if ((faults & DEAR_IMGUI_SDL3_FAULT_GL_RENDER_CONTEXT) == 0
         || fake_native_state.current_window != nullptr
         || fake_native_state.current_context != nullptr)
@@ -469,7 +496,7 @@ std::uint64_t dear_imgui_sdl3_native_contract_self_test() {
         fake_native_state.created_context
     );
     dear_imgui_sdl3_hook_gl_swap_window(fake_native_state.viewport_window);
-    faults = dear_imgui_sdl3_native_end();
+    faults = dear_imgui_sdl3_native_end(nullptr);
     if ((faults & DEAR_IMGUI_SDL3_FAULT_GL_SWAP_CONTEXT) == 0
         || (faults & DEAR_IMGUI_SDL3_FAULT_GL_SWAP_WINDOW) == 0
         || fake_native_state.swap_window_calls != 0)
@@ -488,7 +515,7 @@ std::uint64_t dear_imgui_sdl3_native_contract_self_test() {
         SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
         SDL_GPU_PRESENTMODE_VSYNC
     );
-    faults = dear_imgui_sdl3_native_end();
+    faults = dear_imgui_sdl3_native_end(nullptr);
     if ((faults & DEAR_IMGUI_SDL3_FAULT_SDLGPU_CLAIM) == 0
         || fake_native_state.gpu_configure_calls != 0
         || fake_native_state.gpu_release_calls != 0)
@@ -507,7 +534,7 @@ std::uint64_t dear_imgui_sdl3_native_contract_self_test() {
         SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
         SDL_GPU_PRESENTMODE_VSYNC
     );
-    faults = dear_imgui_sdl3_native_end();
+    faults = dear_imgui_sdl3_native_end(nullptr);
     if ((faults & DEAR_IMGUI_SDL3_FAULT_SDLGPU_CONFIGURE) == 0
         || fake_native_state.gpu_claim_calls != 1
         || fake_native_state.gpu_configure_calls != 1
@@ -527,7 +554,7 @@ std::uint64_t dear_imgui_sdl3_native_contract_self_test() {
         SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
         SDL_GPU_PRESENTMODE_MAILBOX
     );
-    faults = dear_imgui_sdl3_native_end();
+    faults = dear_imgui_sdl3_native_end(nullptr);
     if (faults != 0
         || fake_native_state.gpu_claim_calls != 1
         || fake_native_state.gpu_configure_calls != 2
@@ -550,7 +577,7 @@ std::uint64_t dear_imgui_sdl3_native_contract_self_test() {
         SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
         SDL_GPU_PRESENTMODE_MAILBOX
     );
-    faults = dear_imgui_sdl3_native_end();
+    faults = dear_imgui_sdl3_native_end(nullptr);
     if ((faults & DEAR_IMGUI_SDL3_FAULT_SDLGPU_CONFIGURE) == 0
         || fake_native_state.gpu_claim_calls != 1
         || fake_native_state.gpu_configure_calls != 2
@@ -570,7 +597,7 @@ std::uint64_t dear_imgui_sdl3_native_contract_self_test() {
     );
     if ((faults & DEAR_IMGUI_SDL3_FAULT_NATIVE_PROTOCOL) == 0)
         failures |= UINT64_C(1) << 6;
-    dear_imgui_sdl3_native_end();
+    dear_imgui_sdl3_native_end(nullptr);
 
 #if defined(DEAR_IMGUI_SDL3_ENABLE_SDLGPU3)
     if (dear_imgui_sdl3_backend_sdlgpu3_render_contract_self_test() != 0)
@@ -589,11 +616,11 @@ bool SDLCALL dear_imgui_sdl3_hook_gl_set_attribute(SDL_GLAttr attribute, int val
         return native_ops->gl_set_attribute(attribute, value);
 
     if (!native_ops->gl_get_attribute(attribute, &state.previous_share_attribute)) {
-        state.faults |= DEAR_IMGUI_SDL3_FAULT_GL_SHARE_CAPTURE;
+        dear_imgui_sdl3_record_fault(state, DEAR_IMGUI_SDL3_FAULT_GL_SHARE_CAPTURE);
         return false;
     }
     if (!native_ops->gl_set_attribute(attribute, value)) {
-        state.faults |= DEAR_IMGUI_SDL3_FAULT_GL_SHARE_SET;
+        dear_imgui_sdl3_record_fault(state, DEAR_IMGUI_SDL3_FAULT_GL_SHARE_SET);
         return false;
     }
     state.share_attribute_changed = true;
@@ -611,7 +638,7 @@ SDL_GLContext SDLCALL dear_imgui_sdl3_hook_gl_create_context(SDL_Window* window)
         return nullptr;
     state.created_context = native_ops->gl_create_context(window);
     if (state.created_context == nullptr || state.created_context == state.main_context)
-        state.faults |= DEAR_IMGUI_SDL3_FAULT_GL_CREATE_CONTEXT;
+        dear_imgui_sdl3_record_fault(state, DEAR_IMGUI_SDL3_FAULT_GL_CREATE_CONTEXT);
     return state.created_context;
 }
 
@@ -625,7 +652,7 @@ bool SDLCALL dear_imgui_sdl3_hook_gl_make_current(SDL_Window* window, SDL_GLCont
         if (state.make_current_calls == 1) {
             state.main_context = context;
             if (!native_ops->gl_make_current(window, context)) {
-                state.faults |= DEAR_IMGUI_SDL3_FAULT_GL_MAIN_CONTEXT;
+                dear_imgui_sdl3_record_fault(state, DEAR_IMGUI_SDL3_FAULT_GL_MAIN_CONTEXT);
                 return false;
             }
             if (state.match_main_swap_interval) {
@@ -651,9 +678,12 @@ bool SDLCALL dear_imgui_sdl3_hook_gl_make_current(SDL_Window* window, SDL_GLCont
         && native_ops->gl_get_current_context() == context
         && context != nullptr;
     if (!state.phase_make_current_succeeded) {
-        state.faults |= state.phase == DEAR_IMGUI_SDL3_PHASE_PLATFORM_RENDER
-            ? DEAR_IMGUI_SDL3_FAULT_GL_RENDER_CONTEXT
-            : DEAR_IMGUI_SDL3_FAULT_GL_SWAP_CONTEXT;
+        dear_imgui_sdl3_record_fault(
+            state,
+            state.phase == DEAR_IMGUI_SDL3_PHASE_PLATFORM_RENDER
+                ? DEAR_IMGUI_SDL3_FAULT_GL_RENDER_CONTEXT
+                : DEAR_IMGUI_SDL3_FAULT_GL_SWAP_CONTEXT
+        );
     }
     return state.phase_make_current_succeeded;
 }
@@ -670,7 +700,7 @@ bool SDLCALL dear_imgui_sdl3_hook_gl_set_swap_interval(int interval) {
     if (state.created_context == nullptr
         || !state.swap_interval_resolved
         || native_ops->gl_get_current_context() != state.created_context) {
-        state.faults |= DEAR_IMGUI_SDL3_FAULT_GL_SET_SWAP_INTERVAL;
+        dear_imgui_sdl3_record_fault(state, DEAR_IMGUI_SDL3_FAULT_GL_SET_SWAP_INTERVAL);
         return false;
     }
 
@@ -689,12 +719,12 @@ bool SDLCALL dear_imgui_sdl3_hook_gl_swap_window(SDL_Window* window) {
         return native_ops->gl_swap_window(window);
 
     if (!state.phase_make_current_succeeded || window != state.expected_window) {
-        state.faults |= DEAR_IMGUI_SDL3_FAULT_GL_SWAP_WINDOW;
+        dear_imgui_sdl3_record_fault(state, DEAR_IMGUI_SDL3_FAULT_GL_SWAP_WINDOW);
         return false;
     }
     state.phase_swap_succeeded = native_ops->gl_swap_window(window);
     if (!state.phase_swap_succeeded)
-        state.faults |= DEAR_IMGUI_SDL3_FAULT_GL_SWAP_WINDOW;
+        dear_imgui_sdl3_record_fault(state, DEAR_IMGUI_SDL3_FAULT_GL_SWAP_WINDOW);
     return state.phase_swap_succeeded;
 }
 
@@ -710,7 +740,7 @@ bool SDLCALL dear_imgui_sdl3_hook_claim_window_for_gpu_device(
     state.claimed_window = window;
     state.gpu_claimed = native_ops->claim_window_for_gpu_device(device, window);
     if (!state.gpu_claimed)
-        state.faults |= DEAR_IMGUI_SDL3_FAULT_SDLGPU_CLAIM;
+        dear_imgui_sdl3_record_fault(state, DEAR_IMGUI_SDL3_FAULT_SDLGPU_CLAIM);
     return state.gpu_claimed;
 }
 
@@ -748,7 +778,7 @@ bool SDLCALL dear_imgui_sdl3_hook_set_gpu_swapchain_parameters(
         );
     }
     if (!state.gpu_configured)
-        state.faults |= DEAR_IMGUI_SDL3_FAULT_SDLGPU_CONFIGURE;
+        dear_imgui_sdl3_record_fault(state, DEAR_IMGUI_SDL3_FAULT_SDLGPU_CONFIGURE);
     return state.gpu_configured;
 }
 
@@ -858,10 +888,6 @@ void dear_imgui_sdl3_backend_sdlrenderer3_new_frame() {
 
 void dear_imgui_sdl3_backend_sdlrenderer3_render_draw_data(ImDrawData* draw_data, SDL_Renderer* renderer) {
     ImGui_ImplSDLRenderer3_RenderDrawData(draw_data, renderer);
-}
-
-void dear_imgui_sdl3_backend_sdlrenderer3_create_device_objects() {
-    ImGui_ImplSDLRenderer3_CreateDeviceObjects();
 }
 
 void dear_imgui_sdl3_backend_sdlrenderer3_destroy_device_objects() {

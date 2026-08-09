@@ -56,6 +56,9 @@ impl<T: AsRef<str>> TabBar<T> {
     ///
     /// Note: the closure is not called if no tabbar content is visible
     pub fn build<R, F: FnOnce() -> R>(self, ui: &Ui, f: F) -> Option<R> {
-        self.begin(ui).map(|_tab| f())
+        let token = self.begin(ui)?;
+        let result = f();
+        drop(token);
+        Some(result)
     }
 }

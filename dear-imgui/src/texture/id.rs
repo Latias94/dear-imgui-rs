@@ -119,7 +119,7 @@ impl<T> From<*mut T> for TextureId {
     }
 }
 
-// Backward compatibility: allow conversion from usize for legacy code
+// Renderer handles are commonly represented as pointer-sized integers.
 impl From<usize> for TextureId {
     #[inline]
     fn from(id: usize) -> Self {

@@ -13,7 +13,11 @@ fn test_guard() -> std::sync::MutexGuard<'static, ()> {
 
 fn prepare_imgui(imgui: &mut Context) {
     imgui.prepare_frame(FramePrepareOptions::new([800.0, 600.0], 1.0 / 60.0));
-    let _ = imgui.font_atlas().build();
+    imgui
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("headless test requires the legacy font-atlas capability")
+        .build();
     let _ = imgui.set_ini_filename::<std::path::PathBuf>(None);
 }
 

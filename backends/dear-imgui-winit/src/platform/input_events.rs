@@ -151,6 +151,21 @@ impl WinitPlatform {
         window: &Window,
         event: &Event<T>,
     ) -> Result<bool, WinitPlatformError> {
+        #[cfg(feature = "multi-viewport")]
+        if self.control.has_live_runtime() {
+            self.control.ensure_context(imgui_ctx)?;
+            let control = self.control.runtime_control()?;
+            return crate::multi_viewport::events::handle_event(&control, self, imgui_ctx, event);
+        }
+        self.handle_main_event(imgui_ctx, window, event)
+    }
+
+    pub(crate) fn handle_main_event<T>(
+        &mut self,
+        imgui_ctx: &mut Context,
+        window: &Window,
+        event: &Event<T>,
+    ) -> Result<bool, WinitPlatformError> {
         if !event_targets_window(window.id(), event) {
             return Ok(false);
         }
@@ -178,6 +193,29 @@ impl WinitPlatform {
         window: &Window,
         event: &WindowEvent,
     ) -> Result<bool, WinitPlatformError> {
+        #[cfg(feature = "multi-viewport")]
+        if self.control.has_live_runtime() {
+            self.control.ensure_context(imgui_ctx)?;
+            let control = self.control.runtime_control()?;
+            control.poll_fault()?;
+            if control
+                .main_window()
+                .is_some_and(|main| main.id() == window.id())
+            {
+                self.control.validate_entry(imgui_ctx, window)?;
+                let consumed = self.handle_window_event_internal(imgui_ctx, window, event);
+                control.poll_fault()?;
+                return Ok(consumed);
+            }
+            let consumed = crate::multi_viewport::events::route_secondary_window_event(
+                &control,
+                imgui_ctx,
+                window.id(),
+                event,
+            )?;
+            control.poll_fault()?;
+            return Ok(consumed);
+        }
         self.control.validate_entry(imgui_ctx, window)?;
         Ok(self.handle_window_event_internal(imgui_ctx, window, event))
     }

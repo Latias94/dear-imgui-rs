@@ -11,8 +11,8 @@ use crate::sys;
 /// an owner-backed atlas lease.
 ///
 /// ```compile_fail
-/// # use dear_imgui_rs::texture::{OwnedTextureData, TextureRef};
-/// let mut texture = OwnedTextureData::new();
+/// # use dear_imgui_rs::texture::{OwnedTextureData, TextureFormat, TextureRef};
+/// let mut texture = OwnedTextureData::from_pixels(TextureFormat::RGBA32, 1, 1, &[0; 4]).unwrap();
 /// let _: TextureRef<'_> = (&mut *texture).into();
 /// ```
 ///

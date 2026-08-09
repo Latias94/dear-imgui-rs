@@ -111,6 +111,10 @@ pub enum RendererError {
     #[error("Renderer consumer error: {0}")]
     RendererConsumer(#[from] dear_imgui_rs::render::RendererConsumerError),
 
+    /// Finalizing the Dear ImGui frame failed before Ash could reconcile it.
+    #[error("failed to finalize the Dear ImGui frame: {0}")]
+    FrameCapture(#[from] dear_imgui_rs::render::SnapshotError),
+
     /// Managed texture feedback did not match its request.
     #[error("Texture feedback error: {0}")]
     TextureFeedback(#[from] dear_imgui_rs::render::TextureFeedbackError),

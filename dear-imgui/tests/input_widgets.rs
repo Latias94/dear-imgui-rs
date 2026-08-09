@@ -16,7 +16,10 @@ fn input_text_growable_buffer_no_panic() {
         io.set_delta_time(1.0 / 60.0);
     }
     // Build font atlas so text widgets don't assert
-    let _ = ctx.font_atlas().build();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     // No ini persistence to avoid filesystem
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
@@ -27,7 +30,7 @@ fn input_text_growable_buffer_no_panic() {
     let _ = ui.input_text("LongText", &mut text).build();
     // ImString variant
     let mut im = imgui::ImString::new("hello");
-    let _ = ui.input_text_imstr("ImStr", &mut im).build();
+    let _ = ui.input_text_imstr("ImString", &mut im).build();
     // Ensure we can render without crashes
     // No render required in headless tests
 }
@@ -41,7 +44,10 @@ fn input_text_multiline_growable_buffer_no_panic() {
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas().build();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
     let mut text = String::from_iter(std::iter::repeat_n('b', 8192));
@@ -53,7 +59,7 @@ fn input_text_multiline_growable_buffer_no_panic() {
     // ImString variant
     let mut im = imgui::ImString::new(String::from_iter(std::iter::repeat_n('c', 4096)));
     let _ = ui
-        .input_text_multiline_imstr("ImStrMultiline", &mut im, [300.0, 120.0])
+        .input_text_multiline_imstr("ImStringMultiline", &mut im, [300.0, 120.0])
         .build();
     // No render required in headless tests
 }
@@ -67,7 +73,10 @@ fn input_scalars_build_no_panic() {
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas().build();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let ui = ctx.frame();
 

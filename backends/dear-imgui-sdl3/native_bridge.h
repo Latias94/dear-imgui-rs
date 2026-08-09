@@ -31,6 +31,7 @@ enum DearImguiSdl3NativeFault : std::uint64_t {
     DEAR_IMGUI_SDL3_FAULT_SDLGPU_SWAPCHAIN = UINT64_C(1) << 15,
     DEAR_IMGUI_SDL3_FAULT_SDLGPU_RENDER_PASS = UINT64_C(1) << 16,
     DEAR_IMGUI_SDL3_FAULT_SDLGPU_SUBMIT = UINT64_C(1) << 17,
+    DEAR_IMGUI_SDL3_FAULT_SDLGPU_CANCEL = UINT64_C(1) << 18,
 };
 
 extern "C" {
@@ -43,7 +44,7 @@ std::uint64_t dear_imgui_sdl3_native_begin(
     ImGuiViewport* viewport
 );
 
-std::uint64_t dear_imgui_sdl3_native_end();
+std::uint64_t dear_imgui_sdl3_native_end(std::uint64_t* first_fault);
 
 bool SDLCALL dear_imgui_sdl3_hook_gl_set_attribute(SDL_GLAttr attribute, int value);
 SDL_GLContext SDLCALL dear_imgui_sdl3_hook_gl_create_context(SDL_Window* window);
@@ -63,7 +64,10 @@ bool SDLCALL dear_imgui_sdl3_hook_set_gpu_swapchain_parameters(
     SDL_GPUPresentMode present_mode
 );
 
-std::uint64_t dear_imgui_sdl3_backend_sdlgpu3_render_viewport(ImGuiViewport* viewport);
+std::uint64_t dear_imgui_sdl3_backend_sdlgpu3_render_viewport(
+    ImGuiViewport* viewport,
+    std::uint64_t* first_fault
+);
 #if defined(DEAR_IMGUI_SDL3_NATIVE_SELF_TEST)
 std::uint64_t dear_imgui_sdl3_backend_sdlgpu3_render_contract_self_test();
 #endif

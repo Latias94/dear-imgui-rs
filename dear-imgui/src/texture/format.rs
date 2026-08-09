@@ -7,11 +7,6 @@ pub(super) fn texture_format_bytes_per_pixel(format: TextureFormat) -> usize {
     }
 }
 
-pub(super) fn texture_format_bytes_per_pixel_i32(format: TextureFormat) -> i32 {
-    i32::try_from(texture_format_bytes_per_pixel(format))
-        .expect("texture format bytes per pixel exceeded i32 range")
-}
-
 /// Texture format supported by Dear ImGui
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 #[repr(i32)]

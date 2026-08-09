@@ -3,7 +3,7 @@ use crate::{
 };
 use dear_imgui_rs::{
     BackendFlags, Context, ContextBinding,
-    render::{RenderedFrame, RendererConsumer},
+    render::{PendingFrame, ReconciledFrame, SynchronousRendererConsumer},
     sys,
 };
 use std::{
@@ -335,7 +335,7 @@ pub struct WgpuRenderer {
     #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     pub(super) viewport_clear_color: Color,
     /// Sole managed-texture consumer generation owned by this renderer.
-    pub(super) renderer_consumer: Option<RendererConsumer>,
+    pub(super) renderer_consumer: Option<SynchronousRendererConsumer>,
     /// Context-owned fallback for a renderer wrapper dropped without explicit shutdown.
     pub(super) drop_deferral: Option<super::lifecycle::RendererDropDeferral>,
 }
@@ -409,13 +409,39 @@ impl WgpuRenderer {
         self.drop_deferral = None;
     }
 
-    pub(super) fn renderer_consumer(&self) -> RendererResult<&RendererConsumer> {
+    /// Returns the synchronous consumer capability owned by this renderer.
+    ///
+    /// Use it with [`Context::render`] when application code needs to reconcile a frame before
+    /// platform-window callbacks or other renderer-managed work.
+    pub fn renderer_consumer(&self) -> RendererResult<&SynchronousRendererConsumer> {
         self.renderer_consumer
             .as_ref()
             .ok_or(RendererError::ContextNotBound)
     }
 
-    pub(super) fn ensure_frame_matches(&self, frame: &RenderedFrame<'_>) -> RendererResult<()> {
+    pub(super) fn ensure_pending_frame_matches(
+        &self,
+        frame: &PendingFrame<'_>,
+    ) -> RendererResult<()> {
+        let consumer = self.renderer_consumer()?;
+        if frame.context_id() != consumer.context_id() {
+            return Err(RendererError::ContextMismatch);
+        }
+        let epoch = frame.epoch();
+        if epoch.consumer_generation() != consumer.generation() {
+            return Err(RendererError::InvalidRenderState(format!(
+                "pending frame uses consumer generation {}, WGPU owns generation {}",
+                epoch.consumer_generation(),
+                consumer.generation()
+            )));
+        }
+        Ok(())
+    }
+
+    pub(super) fn ensure_reconciled_frame_matches(
+        &self,
+        frame: &ReconciledFrame<'_>,
+    ) -> RendererResult<()> {
         let consumer = self.renderer_consumer()?;
         if frame.context_id() != consumer.context_id() {
             return Err(RendererError::ContextMismatch);
@@ -427,7 +453,7 @@ impl WgpuRenderer {
         })?;
         if epoch.consumer_generation() != consumer.generation() {
             return Err(RendererError::InvalidRenderState(format!(
-                "rendered frame uses consumer generation {}, WGPU owns generation {}",
+                "reconciled frame uses consumer generation {}, WGPU owns generation {}",
                 epoch.consumer_generation(),
                 consumer.generation()
             )));

@@ -6,6 +6,8 @@ create_token!(
     #[doc(alias = "EndGroup")]
     pub struct GroupToken<'ui>;
 
+    pop crate::scope::NativeScopePop::EndGroup;
+
     /// Drops the layout group manually. You can also just allow this token
     /// to drop on its own.
     drop { unsafe { sys::igEndGroup() } }

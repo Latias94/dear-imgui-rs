@@ -3,7 +3,7 @@ use super::*;
 impl Ui {
     /// Returns a reference to the main Dear ImGui viewport (safe wrapper)
     ///
-    /// Same viewport used by `dockspace_over_main_viewport()`.
+    /// Same viewport used by [`Ui::dockspace`](crate::Ui::dockspace)'s default host.
     ///
     /// The returned reference is owned by the currently active ImGui context and
     /// must not be used after the context is destroyed.

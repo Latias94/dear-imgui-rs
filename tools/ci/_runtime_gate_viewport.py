@@ -224,7 +224,7 @@ def _validate_sdl3_glow_viewport_payload(
             "render_state_cleared_after_callback",
             "application_gl_state_restored",
         ),
-        schema_version=5,
+        schema_version=6,
     )
     sampler_strategy = payload.get("sampler_strategy")
     if sampler_strategy not in ("sampler_objects", "texture_parameters"):
@@ -232,28 +232,11 @@ def _validate_sdl3_glow_viewport_payload(
             "sampler_strategy must be sampler_objects or texture_parameters, "
             f"got {sampler_strategy!r}"
         )
-    context_ids = _viewport_id_set(
-        payload,
-        "secondary_context_ready_before_main_present_viewport_ids",
-        errors,
-    )
-    rendered_ids = _viewport_id_set(
+    _viewport_id_set(
         payload,
         "secondary_draw_issued_before_main_present_viewport_ids",
         errors,
     )
-    swapped_ids = _viewport_id_set(
-        payload,
-        "secondary_swap_succeeded_before_main_present_viewport_ids",
-        errors,
-    )
-    if context_ids and rendered_ids and swapped_ids and not (
-        context_ids & rendered_ids & swapped_ids
-    ):
-        errors.append(
-            "secondary context-ready, draw-issued, and swap-succeeded stages before "
-            "main present must share a viewport ID"
-        )
     renderer = payload.get("renderer")
     if not isinstance(renderer, dict):
         errors.append("renderer must be a JSON object")
@@ -344,7 +327,7 @@ def _validate_ash_vulkan_viewport_payload(
 _WGPU_VIEWPORT_SMOKE = ViewportSmokeSpec(
     profile=ViewportSmokeProfile.WGPU_VULKAN,
     gate="multi-viewport-smoke",
-    binary="multi_viewport_wgpu",
+    binary="wgpu_multi_viewport_smoke",
     features="multi-viewport,test-engine",
     package_names=(
         "xvfb",
@@ -373,7 +356,7 @@ _WGPU_VIEWPORT_SMOKE = ViewportSmokeSpec(
 _SDL3_GLOW_VIEWPORT_SMOKE = ViewportSmokeSpec(
     profile=ViewportSmokeProfile.SDL3_GLOW,
     gate="sdl3-glow-multi-viewport-smoke",
-    binary="sdl3_glow_multi_viewport",
+    binary="sdl3_glow_multi_viewport_smoke",
     features="sdl3-glow-multi-viewport,test-engine",
     package_names=(
         "xvfb",
@@ -399,8 +382,8 @@ _SDL3_GLOW_VIEWPORT_SMOKE = ViewportSmokeSpec(
 _ASH_VULKAN_VIEWPORT_SMOKE = ViewportSmokeSpec(
     profile=ViewportSmokeProfile.ASH_VULKAN,
     gate="ash-vulkan-validation-smoke",
-    binary="multi_viewport_ash",
-    features="ash-winit-multi-viewport,ash-dynamic-rendering",
+    binary="ash_vulkan_validation_smoke",
+    features="ash-winit-multi-viewport,ash-dynamic-rendering,ash-validation-smoke",
     package_names=(
         "xvfb",
         "openbox",
@@ -563,18 +546,18 @@ def _run_viewport_smoke(
             nonzero_category=GateCategory.INFRASTRUCTURE_UNAVAILABLE,
         )
 
-        child_environment = environment(
-            {
-                "DISPLAY": display,
-                "LIBGL_ALWAYS_SOFTWARE": "1",
-                "GALLIUM_DRIVER": "llvmpipe",
-                "DEAR_IMGUI_VIEWPORT_SMOKE": "1",
-                "DEAR_IMGUI_VIEWPORT_SMOKE_JSON": evidence_dir
-                / "viewport-result.json",
-                "IMGUI_SYS_FORCE_BUILD": "1",
-                **route_environment,
-            }
-        )
+        child_values = {
+            "DISPLAY": display,
+            "LIBGL_ALWAYS_SOFTWARE": "1",
+            "GALLIUM_DRIVER": "llvmpipe",
+            "DEAR_IMGUI_VIEWPORT_SMOKE_JSON": evidence_dir
+            / "viewport-result.json",
+            "IMGUI_SYS_FORCE_BUILD": "1",
+            **route_environment,
+        }
+        if spec.profile is ViewportSmokeProfile.SDL3_GLOW:
+            child_values["DEAR_IMGUI_VIEWPORT_SMOKE"] = "1"
+        child_environment = environment(child_values)
         child_environment.pop("DEAR_IMGUI_UPSTREAM_VIEWPORT_SUITE", None)
         child_environment["XDG_RUNTIME_DIR"] = str(xdg_runtime)
 

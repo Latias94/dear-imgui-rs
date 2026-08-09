@@ -2542,6 +2542,7 @@ dependencies = [
  "dear-imgui-sdl3",
  "dear-imgui-winit",
  "gpu-allocator 0.28.0",
+ "static_assertions",
  "thiserror 2.0.18",
  "vk-mem",
  "winit",
@@ -2631,7 +2632,6 @@ dependencies = [
  "glutin",
  "glutin-winit",
  "image",
- "once_cell",
  "pollster",
  "raw-window-handle",
  "sdl3",
@@ -2639,7 +2639,6 @@ dependencies = [
  "serde_json",
  "tracing",
  "tracing-subscriber",
- "ttf-parser",
  "wgpu 30.0.0",
  "winit",
 ]
@@ -2649,9 +2648,13 @@ name = "dear-imgui-glow"
 version = "0.16.0-alpha.2"
 dependencies = [
  "dear-imgui-rs",
+ "dear-imgui-winit",
  "env_logger",
  "glow 0.17.0",
+ "glutin",
+ "glutin-winit",
  "pollster",
+ "raw-window-handle",
  "static_assertions",
  "thiserror 2.0.18",
  "winit",

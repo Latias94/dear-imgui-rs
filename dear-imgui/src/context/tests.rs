@@ -265,7 +265,7 @@ struct RendererTextureResetObservation {
     release_calls: Cell<usize>,
     release_saw_expected_binding: Cell<bool>,
     reset_rejected: Cell<bool>,
-    invalidated: Cell<Option<usize>>,
+    committed: Cell<bool>,
     binding_after_call: Cell<crate::TextureId>,
     nested_reset_rejected: Cell<bool>,
 }
@@ -276,22 +276,25 @@ impl RendererTextureResetObservation {
             release_calls: Cell::new(0),
             release_saw_expected_binding: Cell::new(false),
             reset_rejected: Cell::new(false),
-            invalidated: Cell::new(None),
+            committed: Cell::new(false),
             binding_after_call: Cell::new(crate::TextureId::null()),
             nested_reset_rejected: Cell::new(false),
         }
     }
 }
 
-struct RendererTextureResetAttachment {
-    consumer: crate::render::RendererConsumer,
+struct RendererTextureResetAttachment<C> {
+    consumer: C,
     expected_binding: crate::TextureId,
     release_fails: bool,
     attempts_reentry: bool,
     observation: Rc<RendererTextureResetObservation>,
 }
 
-impl ContextAttachment for RendererTextureResetAttachment {
+impl<C> ContextAttachment for RendererTextureResetAttachment<C>
+where
+    C: crate::render::RendererConsumerCapability + 'static,
+{
     fn release_renderer_resources(
         &self,
         context: &ContextTeardown<'_>,
@@ -323,7 +326,7 @@ impl ContextAttachment for RendererTextureResetAttachment {
         });
 
         match result {
-            Ok(invalidated) => self.observation.invalidated.set(Some(invalidated)),
+            Ok(()) => self.observation.committed.set(true),
             Err(_) => self.observation.reset_rejected.set(true),
         }
         self.observation
@@ -333,13 +336,16 @@ impl ContextAttachment for RendererTextureResetAttachment {
     }
 }
 
-struct WrongPhaseRendererTextureResetAttachment {
-    consumer: crate::render::RendererConsumer,
+struct WrongPhaseRendererTextureResetAttachment<C> {
+    consumer: C,
     expected_binding: crate::TextureId,
     observation: Rc<RendererTextureResetObservation>,
 }
 
-impl ContextAttachment for WrongPhaseRendererTextureResetAttachment {
+impl<C> ContextAttachment for WrongPhaseRendererTextureResetAttachment<C>
+where
+    C: crate::render::RendererConsumerCapability + 'static,
+{
     fn quiesce(
         &self,
         context: &ContextTeardown<'_>,
@@ -378,20 +384,19 @@ fn font_texture_id_during_teardown(context: &ContextTeardown<'_>) -> crate::Text
 
 fn prepare_managed_font_atlas(
     context: &mut Context,
-) -> (crate::render::RendererConsumer, crate::TextureId) {
+) -> (crate::render::SynchronousRendererConsumer, crate::TextureId) {
     context.prepare_frame(
         super::FramePrepareOptions::new([320.0, 240.0], 1.0 / 60.0).renderer_has_textures(),
     );
-    assert!(context.font_atlas().build());
     let consumer = context
-        .create_renderer_consumer()
+        .create_synchronous_renderer_consumer()
         .expect("test Context must create a renderer consumer");
 
     let frame = context.begin_frame();
     frame.ui().text("initialize the managed font atlas");
-    let mut rendered = frame.render();
+    let pending = frame.render(&consumer);
     let binding = crate::TextureId::new(0xC0FFEE);
-    let feedback = rendered
+    let feedback = pending
         .texture_requests()
         .iter()
         .find(|request| {
@@ -403,24 +408,23 @@ fn prepare_managed_font_atlas(
         .expect("first managed frame must request the font atlas")
         .uploaded(binding)
         .expect("font atlas upload feedback must match the request");
-    rendered
+    let reconciled = pending
         .reconcile_texture_feedback([feedback])
         .expect("test font atlas feedback must reconcile");
-    drop(rendered);
+    drop(reconciled);
 
-    assert_eq!(context.font_atlas().texture_id(), binding);
+    assert_eq!(context.font_atlas().texture_id_internal(), binding);
     (consumer, binding)
 }
 
 fn prepare_managed_font_atlas_for_detached_rendering(
     context: &mut Context,
-) -> (crate::render::RendererConsumer, crate::TextureId) {
+) -> (crate::render::DetachedRendererConsumer, crate::TextureId) {
     context.prepare_frame(
         super::FramePrepareOptions::new([320.0, 240.0], 1.0 / 60.0).renderer_has_textures(),
     );
-    assert!(context.font_atlas().build());
     let consumer = context
-        .create_renderer_consumer()
+        .create_detached_renderer_consumer()
         .expect("test Context must create a renderer consumer");
 
     let frame = context.begin_frame();
@@ -448,7 +452,7 @@ fn prepare_managed_font_atlas_for_detached_rendering(
         .poll_snapshot_completions()
         .expect("test snapshot completion must reconcile");
 
-    assert_eq!(context.font_atlas().texture_id(), binding);
+    assert_eq!(context.font_atlas().texture_id_internal(), binding);
     (consumer, binding)
 }
 
@@ -475,24 +479,112 @@ fn platform_io_shared_and_mut_views_match() {
 }
 
 #[test]
-fn suspend_rejects_an_open_frame_and_context_drop_recovers() {
+fn suspend_rejects_an_open_frame_and_retains_the_context_owner() {
     let _guard = crate::test_support::imgui_context_guard();
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let mut ctx = Context::create();
-        assert!(ctx.font_atlas().build());
-        ctx.io_mut().set_display_size([128.0, 128.0]);
-        ctx.io_mut().set_delta_time(1.0 / 60.0);
-        let _ = ctx.frame();
-        let _ = ctx.suspend();
-    }));
-    assert!(result.is_err());
-
     let mut ctx = Context::create();
-    assert!(ctx.font_atlas().build());
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx.io_mut().set_display_size([128.0, 128.0]);
     ctx.io_mut().set_delta_time(1.0 / 60.0);
-    ctx.frame().text("context recovered after rejected suspend");
-    assert!(ctx.render().valid());
+    let raw = ctx.as_raw();
+    let id = ctx.id();
+    ctx.frame()
+        .text("frame remains owned after rejected suspension");
+
+    let error = ctx
+        .suspend()
+        .expect_err("an open frame must reject suspension");
+    assert_eq!(error.reason(), super::ContextSuspensionReason::FrameOpen);
+    assert_eq!(error.owner().id(), id);
+    assert_eq!(error.owner().as_raw(), raw);
+    assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw);
+
+    let mut ctx = error.into_owner();
+    assert!(ctx.end_frame());
+    let suspended = ctx
+        .suspend()
+        .expect("the retained owner can be suspended after ending its frame");
+    assert_eq!(suspended.id(), id);
+    drop(suspended);
+}
+
+#[test]
+fn suspend_rejects_its_own_binding_scope_without_clearing_current_context() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let context = Context::create();
+    let raw = context.as_raw();
+    let id = context.id();
+    let binding = context.binding();
+
+    let error = binding.with_bound_context(|| {
+        context
+            .suspend()
+            .expect_err("a binding scope must retain the active Context owner")
+    });
+
+    assert_eq!(
+        error.reason(),
+        super::ContextSuspensionReason::BindingScopeActive
+    );
+    assert_eq!(error.owner().id(), id);
+    assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw);
+    drop(error.into_owner());
+}
+
+#[test]
+fn suspend_rejects_a_foreign_binding_scope_and_restores_the_active_context() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let context = Context::create();
+    let context_raw = context.as_raw();
+    let context_id = context.id();
+    let foreign = super::SuspendedContext::create();
+    let foreign_raw = foreign.0.as_raw();
+    let foreign_binding = foreign.0.binding();
+
+    let error = foreign_binding.with_bound_context(|| {
+        assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, foreign_raw);
+        context
+            .suspend()
+            .expect_err("a foreign binding scope must retain the Context owner")
+    });
+
+    assert_eq!(
+        error.reason(),
+        super::ContextSuspensionReason::BindingScopeActive
+    );
+    assert_eq!(error.owner().id(), context_id);
+    assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, context_raw);
+    drop(error.into_owner());
+    drop(foreign);
+}
+
+#[test]
+fn suspend_rejects_a_non_current_context_and_retains_the_owner() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let context = Context::create();
+    let context_raw = context.as_raw();
+    let context_id = context.id();
+    let foreign = super::SuspendedContext::create();
+    let foreign_raw = foreign.0.as_raw();
+
+    unsafe { crate::sys::igSetCurrentContext(foreign_raw) };
+    let error = context
+        .suspend()
+        .expect_err("a non-current Context must retain its owner");
+    assert_eq!(error.reason(), super::ContextSuspensionReason::NotCurrent);
+    assert_eq!(error.owner().id(), context_id);
+    assert_eq!(error.owner().as_raw(), context_raw);
+    assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, foreign_raw);
+
+    let context = error.into_owner();
+    unsafe { crate::sys::igSetCurrentContext(context_raw) };
+    let suspended = context
+        .suspend()
+        .expect("the retained owner must be retryable after it becomes current");
+    drop(suspended);
+    drop(foreign);
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -516,7 +608,10 @@ fn enable_multi_viewport_does_not_enable_docking() {
 fn frame_preserves_imgui_fallback_when_backends_decline_multi_viewport_support() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
-    assert!(ctx.font_atlas().build());
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
     ctx.enable_multi_viewport();
 
@@ -526,7 +621,7 @@ fn frame_preserves_imgui_fallback_when_backends_decline_multi_viewport_support()
             .config_flags()
             .contains(crate::ConfigFlags::VIEWPORTS_ENABLE)
     );
-    drop(ctx.render());
+    drop(ctx.render_legacy());
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -534,7 +629,10 @@ fn frame_preserves_imgui_fallback_when_backends_decline_multi_viewport_support()
 fn frame_rejects_missing_required_platform_callbacks_before_entering_native_code() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
-    assert!(ctx.font_atlas().build());
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
     ctx.enable_multi_viewport();
     let mut backend_flags = ctx.io().backend_flags();
@@ -559,7 +657,10 @@ fn frame_rejects_missing_required_platform_callbacks_before_entering_native_code
 fn frame_rejects_transparent_docking_without_window_alpha_before_native_code() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
-    assert!(ctx.font_atlas().build());
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
     let platform_attachment = install_complete_test_viewport_backend(&mut ctx);
 
@@ -586,11 +687,14 @@ fn frame_rejects_transparent_docking_without_window_alpha_before_native_code() {
 fn frame_rejects_enabling_multi_viewport_between_the_first_and_second_frames() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
-    assert!(ctx.font_atlas().build());
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
 
     ctx.frame().text("first frame without viewports");
-    drop(ctx.render());
+    drop(ctx.render_legacy());
     ctx.enable_multi_viewport();
 
     let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -609,7 +713,10 @@ fn frame_rejects_enabling_multi_viewport_between_the_first_and_second_frames() {
 fn frame_prepares_a_completed_disabled_frame_for_late_multi_viewport_enablement() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
-    assert!(ctx.font_atlas().build());
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
     let platform_attachment = install_complete_test_viewport_backend(&mut ctx);
 
@@ -618,7 +725,7 @@ fn frame_prepares_a_completed_disabled_frame_for_late_multi_viewport_enablement(
 
     for label in ["first disabled frame", "second disabled frame"] {
         ctx.frame().text(label);
-        drop(ctx.render());
+        drop(ctx.render_legacy());
         assert_eq!(
             unsafe { (*ctx.platform_io().as_raw()).Platform_CreateWindow }
                 .map(|callback| callback as usize),
@@ -628,7 +735,7 @@ fn frame_prepares_a_completed_disabled_frame_for_late_multi_viewport_enablement(
 
     ctx.enable_multi_viewport();
     ctx.frame().text("late-enabled viewport frame");
-    drop(ctx.render());
+    drop(ctx.render_legacy());
     ctx.update_platform_windows();
     drop(ctx);
     drop(platform_attachment);
@@ -639,7 +746,10 @@ fn frame_prepares_a_completed_disabled_frame_for_late_multi_viewport_enablement(
 fn platform_window_calls_enforce_the_native_frame_order_in_rust() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
-    assert!(ctx.font_atlas().build());
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
     TEST_RENDER_WINDOW_CALLS.store(0, Ordering::SeqCst);
     unsafe {
@@ -658,7 +768,7 @@ fn platform_window_calls_enforce_the_native_frame_order_in_rust() {
 
     ctx.frame()
         .text("platform lifecycle after normalized teardown");
-    drop(ctx.render());
+    drop(ctx.render_legacy());
     let render_before_update = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         ctx.render_platform_windows_default();
     }));
@@ -780,10 +890,13 @@ fn postflight_platform_window_teardown_error_does_not_leave_the_scope_active() {
 fn default_platform_render_requires_a_callback_render_path() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
-    assert!(ctx.font_atlas().build());
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
     ctx.frame().text("no default renderer callback");
-    drop(ctx.render());
+    drop(ctx.render_legacy());
     ctx.update_platform_windows();
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -796,7 +909,10 @@ fn default_platform_render_requires_a_callback_render_path() {
 fn end_frame_is_idempotent_and_allows_a_new_frame() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
-    assert!(ctx.font_atlas().build());
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
 
     ctx.frame().text("first frame");
@@ -808,7 +924,7 @@ fn end_frame_is_idempotent_and_allows_a_new_frame() {
     );
 
     ctx.frame().text("replacement frame");
-    drop(ctx.render());
+    drop(ctx.render_legacy());
     assert_eq!(
         ctx.frame_lifecycle_state(),
         super::FrameLifecycleState::Rendered
@@ -912,7 +1028,7 @@ fn with_bound_context_restores_previous_context_after_panic() {
     let _guard = crate::test_support::imgui_context_guard();
     let ctx_a = Context::create();
     let raw_a = ctx_a.raw;
-    let suspended_a = ctx_a.suspend();
+    let suspended_a = ctx_a.suspend_or_panic();
     let ctx_b = Context::create();
     let raw_b = ctx_b.raw;
 
@@ -957,13 +1073,18 @@ fn suspended_context_activation_rejects_a_foreign_context_before_the_closure() {
     let suspended_id = suspended.id();
     let closure_called = std::cell::Cell::new(false);
 
-    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = suspended.try_with_active::<(), ()>(|_| {
+    let error = suspended
+        .try_with_active::<(), ()>(|_| {
             closure_called.set(true);
             Ok(())
-        });
-    }));
-    assert!(panic.is_err());
+        })
+        .expect_err("a foreign active Context must reject scoped activation");
+    assert!(matches!(
+        error,
+        super::ScopedActivationError::Scope(super::ContextScopeError::Activation(
+            super::ContextActivationReason::ContextAlreadyActive,
+        ))
+    ));
     assert!(!closure_called.get());
     assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, active_raw);
     assert_eq!(active.id(), active_id);
@@ -981,17 +1102,89 @@ fn suspended_context_activation_rejects_a_foreign_context_before_the_closure() {
 }
 
 #[test]
+fn with_active_or_panic_reports_admission_conflicts_without_consuming_the_owner() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let active = Context::create();
+    let active_raw = active.as_raw();
+    let mut suspended = super::SuspendedContext::create();
+    let suspended_id = suspended.id();
+    let called = Cell::new(false);
+
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        suspended.with_active_or_panic(|_| {
+            called.set(true);
+        });
+    }))
+    .expect_err("the explicit panic wrapper must report admission conflicts");
+    assert!(!called.get());
+    assert!(
+        panic
+            .downcast_ref::<String>()
+            .is_some_and(|message| message.contains("another Context is already active"))
+    );
+    assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, active_raw);
+
+    drop(active);
+    suspended.with_active_or_panic(|context| {
+        assert_eq!(context.id(), suspended_id);
+    });
+    drop(suspended);
+}
+
+#[test]
+fn with_active_or_panic_closes_a_left_open_frame_before_panicking() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut suspended = super::SuspendedContext::create();
+
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        suspended.with_active_or_panic(|context| {
+            context
+                .font_atlas()
+                .try_claim_legacy_renderer()
+                .expect("legacy renderer font atlas should be available")
+                .build();
+            context.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
+            context
+                .frame()
+                .text("left open for the explicit panic wrapper");
+        });
+    }))
+    .expect_err("the explicit panic wrapper must reject a left-open frame");
+    assert!(
+        panic
+            .downcast_ref::<String>()
+            .is_some_and(|message| message.contains("open frame"))
+    );
+    assert!(unsafe { crate::sys::igGetCurrentContext() }.is_null());
+
+    suspended.with_active_or_panic(|context| {
+        assert_ne!(
+            context.frame_lifecycle_state(),
+            super::FrameLifecycleState::InFrame
+        );
+    });
+    drop(suspended);
+}
+
+#[test]
 fn suspended_context_error_closes_an_open_frame_and_can_reenter() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut suspended = super::SuspendedContext::create();
 
     let error = suspended.try_with_active(|context| {
-        assert!(context.font_atlas().build());
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
         context.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
         context.frame().text("frame left open by an error");
         Err::<(), _>("stop")
     });
-    assert_eq!(error, Err("stop"));
+    assert!(matches!(
+        error,
+        Err(super::ScopedActivationError::Closure("stop"))
+    ));
 
     suspended
         .try_with_active(|context| {
@@ -1007,22 +1200,29 @@ fn suspended_context_error_closes_an_open_frame_and_can_reenter() {
 }
 
 #[test]
-fn suspended_context_success_rejects_and_closes_an_open_frame() {
+fn suspended_context_success_reports_and_closes_an_open_frame() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut suspended = super::SuspendedContext::create();
 
-    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = suspended.try_with_active::<(), ()>(|context| {
-            assert!(context.font_atlas().build());
+    let error = suspended
+        .try_with_active::<(), ()>(|context| {
+            context
+                .font_atlas()
+                .try_claim_legacy_renderer()
+                .expect("legacy renderer font atlas should be available")
+                .build();
             context.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
             context
                 .frame()
                 .text("successful closure left this frame open");
             Ok(())
-        });
-    }));
+        })
+        .expect_err("a successful closure must not leave a frame open");
 
-    assert!(panic.is_err());
+    assert!(matches!(
+        error,
+        super::ScopedActivationError::Scope(super::ContextScopeError::FrameLeftOpen)
+    ));
     assert!(unsafe { crate::sys::igGetCurrentContext() }.is_null());
     suspended
         .try_with_active(|context| {
@@ -1044,7 +1244,11 @@ fn suspended_context_panic_closes_an_open_frame_and_preserves_the_payload() {
 
     let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _ = suspended.try_with_active::<(), ()>(|context| {
-            assert!(context.font_atlas().build());
+            context
+                .font_atlas()
+                .try_claim_legacy_renderer()
+                .expect("legacy renderer font atlas should be available")
+                .build();
             context.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
             context.frame().text("panicking frame");
             std::panic::panic_any(0xC0FFEE_u32);
@@ -1080,14 +1284,19 @@ fn nested_suspended_context_activation_is_rejected_before_the_inner_closure() {
             assert_eq!(context_a.as_raw(), raw_a);
             assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_a);
 
-            let _panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = suspended_b.try_with_active::<(), ()>(|context_b| {
+            let error = suspended_b
+                .try_with_active::<(), ()>(|context_b| {
                     inner_called.set(true);
                     assert_eq!(context_b.as_raw(), raw_b);
                     Ok(())
-                });
-            }))
-            .expect_err("nested activation must be rejected");
+                })
+                .expect_err("nested activation must be rejected");
+            assert!(matches!(
+                error,
+                super::ScopedActivationError::Scope(super::ContextScopeError::Activation(
+                    super::ContextActivationReason::BindingScopeActive,
+                ))
+            ));
             assert!(!inner_called.get());
             assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_a);
             Ok::<_, ()>(())
@@ -1116,14 +1325,19 @@ fn suspended_context_rejects_a_potential_owner_swap_before_the_closure() {
     let original_suspended_raw = suspended.0.as_raw();
     let swap_attempted = std::cell::Cell::new(false);
 
-    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = suspended.try_with_active::<(), ()>(|context| {
+    let error = suspended
+        .try_with_active::<(), ()>(|context| {
             swap_attempted.set(true);
             std::mem::swap(context, &mut active);
             Ok(())
-        });
-    }));
-    assert!(panic.is_err());
+        })
+        .expect_err("the active Context must reject entry before the owner swap closure");
+    assert!(matches!(
+        error,
+        super::ScopedActivationError::Scope(super::ContextScopeError::Activation(
+            super::ContextActivationReason::ContextAlreadyActive,
+        ))
+    ));
     assert!(!swap_attempted.get());
 
     assert_eq!(active.id(), original_active_id);
@@ -1247,13 +1461,18 @@ fn suspended_context_activation_waits_for_binding_scope_exit() {
     let candidate = super::SuspendedContext::create();
     let candidate_raw = candidate.0.as_raw();
 
-    let candidate = binding.with_bound_context(|| {
+    let candidate_error = binding.with_bound_context(|| {
         drop(bound_owner);
         assert!(unsafe { crate::sys::igGetCurrentContext() }.is_null());
         candidate
             .activate()
             .expect_err("binding scopes must reject Context owner exchange")
     });
+    assert_eq!(
+        candidate_error.reason(),
+        super::ContextActivationReason::BindingScopeActive
+    );
+    let candidate = candidate_error.into_owner();
 
     assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, previous_raw);
     drop(previous);
@@ -1490,7 +1709,7 @@ fn platform_release_rejects_a_foreign_context_generation_without_mutation() {
         )
         .unwrap();
     let owner_handle = owner_lease.handle();
-    let suspended_owner = owner.suspend();
+    let suspended_owner = owner.suspend_or_panic();
 
     let mut foreign = Context::create();
     let foreign_lease = foreign
@@ -1559,7 +1778,10 @@ fn attachments_use_phased_teardown_and_reject_ordinary_binding() {
 fn context_drop_ends_an_open_frame_before_attachment_quiesce() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
-    assert!(ctx.font_atlas().build());
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
     let attachment = Rc::new(RecordingAttachment::new(Rc::new(RefCell::new(Vec::new()))));
     let frame_closed = Rc::clone(&attachment.frame_closed_before_quiesce);
@@ -1775,7 +1997,7 @@ fn renderer_attachment_reset_releases_before_commit_and_rejects_reentry() {
     assert_eq!(observation.release_calls.get(), 1);
     assert!(observation.release_saw_expected_binding.get());
     assert!(observation.nested_reset_rejected.get());
-    assert!(observation.invalidated.get().is_some_and(|count| count > 0));
+    assert!(observation.committed.get());
     assert_eq!(
         observation.binding_after_call.get(),
         crate::TextureId::null(),
@@ -1808,7 +2030,7 @@ fn renderer_attachment_reset_preserves_native_bindings_when_release_fails() {
     assert_eq!(observation.release_calls.get(), 1);
     assert!(observation.release_saw_expected_binding.get());
     assert!(observation.reset_rejected.get());
-    assert_eq!(observation.invalidated.get(), None);
+    assert!(!observation.committed.get());
     assert_eq!(
         observation.binding_after_call.get(),
         binding,
@@ -1847,7 +2069,7 @@ fn renderer_attachment_reset_rejects_a_foreign_consumer_without_mutating_binding
 
     let mut foreign_context = Context::create();
     let (foreign_consumer, _) = prepare_managed_font_atlas(&mut foreign_context);
-    let foreign_context = foreign_context.suspend();
+    let foreign_context = foreign_context.suspend_or_panic();
 
     let mut context = Context::create();
     let (local_consumer, binding) = prepare_managed_font_atlas(&mut context);
@@ -1927,14 +2149,14 @@ fn renderer_attachment_reset_restores_a_foreign_current_context() {
             attachment,
         )
         .unwrap();
-    let context = context.suspend();
+    let context = context.suspend_or_panic();
 
     let foreign = Context::create();
     let foreign_raw = foreign.as_raw();
     drop(context);
 
     assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, foreign_raw);
-    assert!(observation.invalidated.get().is_some_and(|count| count > 0));
+    assert!(observation.committed.get());
     assert_eq!(
         observation.binding_after_call.get(),
         crate::TextureId::null()
@@ -1973,7 +2195,7 @@ fn io_and_platform_io_accessors_use_self_context_not_current_context() {
         ctx_a.io_mut().set_backend_language_user_data(marker_a);
     }
     let pio_a = ctx_a.platform_io().as_raw();
-    let suspended_a = ctx_a.suspend();
+    let suspended_a = ctx_a.suspend_or_panic();
 
     let mut ctx_b = Context::create();
     let marker_b = std::ptr::NonNull::<u16>::dangling().as_ptr().cast();
@@ -1986,7 +2208,12 @@ fn io_and_platform_io_accessors_use_self_context_not_current_context() {
     assert_ne!(marker_a, marker_b);
     assert_ne!(pio_a, pio_b);
 
-    let ctx_a = suspended_a.activate().expect_err("ctx_b is still active");
+    let activation_error = suspended_a.activate().expect_err("ctx_b is still active");
+    assert_eq!(
+        activation_error.reason(),
+        super::ContextActivationReason::ContextAlreadyActive
+    );
+    let ctx_a = activation_error.into_owner();
     assert_eq!(ctx_a.0.io().backend_language_user_data(), marker_a);
     assert_eq!(ctx_a.0.platform_io().as_raw(), pio_a);
     assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, ctx_b.raw);
@@ -2001,7 +2228,7 @@ fn style_and_main_viewport_accessors_use_self_context_not_current_context() {
     let mut ctx_a = Context::create();
     ctx_a.style_mut().set_alpha(0.25);
     let viewport_a = ctx_a.main_viewport().as_raw();
-    let suspended_a = ctx_a.suspend();
+    let suspended_a = ctx_a.suspend_or_panic();
 
     let mut ctx_b = Context::create();
     ctx_b.style_mut().set_alpha(0.75);
@@ -2009,7 +2236,12 @@ fn style_and_main_viewport_accessors_use_self_context_not_current_context() {
 
     assert_ne!(viewport_a, viewport_b);
 
-    let mut ctx_a = suspended_a.activate().expect_err("ctx_b is still active");
+    let activation_error = suspended_a.activate().expect_err("ctx_b is still active");
+    assert_eq!(
+        activation_error.reason(),
+        super::ContextActivationReason::ContextAlreadyActive
+    );
+    let mut ctx_a = activation_error.into_owner();
     assert_eq!(ctx_a.0.style().alpha(), 0.25);
     assert_eq!(ctx_a.0.main_viewport().as_raw(), viewport_a);
     assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, ctx_b.raw);
@@ -2019,19 +2251,24 @@ fn style_and_main_viewport_accessors_use_self_context_not_current_context() {
 }
 
 #[test]
-fn io_font_global_scale_uses_owner_context_not_current_context() {
+fn style_font_scale_uses_owner_context_not_current_context() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx_a = Context::create();
     ctx_a.style_mut().set_font_scale_main(1.25);
-    let suspended_a = ctx_a.suspend();
+    let suspended_a = ctx_a.suspend_or_panic();
 
     let mut ctx_b = Context::create();
     ctx_b.style_mut().set_font_scale_main(2.0);
 
-    let mut ctx_a = suspended_a.activate().expect_err("ctx_b is still active");
-    assert_eq!(ctx_a.0.io().font_global_scale(), 1.25);
+    let activation_error = suspended_a.activate().expect_err("ctx_b is still active");
+    assert_eq!(
+        activation_error.reason(),
+        super::ContextActivationReason::ContextAlreadyActive
+    );
+    let mut ctx_a = activation_error.into_owner();
+    assert_eq!(ctx_a.0.style().font_scale_main(), 1.25);
 
-    ctx_a.0.io_mut().set_font_global_scale(1.5);
+    ctx_a.0.style_mut().set_font_scale_main(1.5);
 
     assert_eq!(ctx_a.0.style().font_scale_main(), 1.5);
     assert_eq!(ctx_b.style().font_scale_main(), 2.0);
@@ -2045,7 +2282,7 @@ fn io_font_global_scale_uses_owner_context_not_current_context() {
 fn frame_lifecycle_requires_receiver_to_be_current_context() {
     let _guard = crate::test_support::imgui_context_guard();
     let ctx_a = Context::create();
-    let suspended_a = ctx_a.suspend();
+    let suspended_a = ctx_a.suspend_or_panic();
     let ctx_b = Context::create();
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -2068,7 +2305,11 @@ fn ui_stack_tokens_drop_on_owner_context_and_restore_previous_current_context() 
     let raw_b = suspended_b.0.raw;
 
     unsafe { crate::sys::igSetCurrentContext(raw_a) };
-    let _ = ctx_a.font_atlas().build();
+    ctx_a
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx_a.io_mut().set_display_size([128.0, 128.0]);
     ctx_a.io_mut().set_delta_time(1.0 / 60.0);
 
@@ -2093,7 +2334,7 @@ fn ui_stack_tokens_drop_on_owner_context_and_restore_previous_current_context() 
     }
 
     unsafe { crate::sys::igSetCurrentContext(raw_a) };
-    let _ = ctx_a.render();
+    let _ = ctx_a.render_legacy();
 
     drop(ctx_a);
     drop(suspended_b);
@@ -2108,7 +2349,11 @@ fn ui_methods_run_on_owner_context_and_restore_previous_current_context() {
     let raw_b = suspended_b.0.raw;
 
     unsafe { crate::sys::igSetCurrentContext(raw_a) };
-    let _ = ctx_a.font_atlas().build();
+    ctx_a
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx_a.io_mut().set_display_size([128.0, 128.0]);
     ctx_a.io_mut().set_delta_time(1.0 / 60.0);
 
@@ -2168,7 +2413,7 @@ fn ui_methods_run_on_owner_context_and_restore_previous_current_context() {
     }
 
     unsafe { crate::sys::igSetCurrentContext(raw_a) };
-    let _ = ctx_a.render();
+    let _ = ctx_a.render_legacy();
 
     drop(ctx_a);
     drop(suspended_b);
@@ -2183,8 +2428,14 @@ fn font_stack_token_drops_on_owner_context_and_restores_previous_current_context
     let raw_b = suspended_b.0.raw;
 
     unsafe { crate::sys::igSetCurrentContext(raw_a) };
-    let font = ctx_a.font_atlas().add_font_default(None);
-    let _ = ctx_a.font_atlas().build();
+    let font = ctx_a
+        .font_atlas()
+        .add_font(&[crate::FontSource::default_font()]);
+    ctx_a
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     ctx_a.io_mut().set_display_size([128.0, 128.0]);
     ctx_a.io_mut().set_delta_time(1.0 / 60.0);
 
@@ -2198,7 +2449,7 @@ fn font_stack_token_drops_on_owner_context_and_restores_previous_current_context
     assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_b);
 
     unsafe { crate::sys::igSetCurrentContext(raw_a) };
-    let _ = ctx_a.render();
+    let _ = ctx_a.render_legacy();
 
     drop(ctx_a);
     drop(suspended_b);
@@ -2206,13 +2457,13 @@ fn font_stack_token_drops_on_owner_context_and_restores_previous_current_context
 
 #[cfg(feature = "multi-viewport")]
 #[test]
-fn platform_viewport_snapshot_requires_rendered_frame_and_reuses_current_draw_data() {
+fn platform_viewport_snapshot_requires_rendered_lifecycle_state_and_reuses_current_draw_data() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
     ctx.prepare_frame(
         super::FramePrepareOptions::new([320.0, 240.0], 1.0 / 60.0).renderer_has_textures(),
     );
-    let consumer = ctx.create_renderer_consumer().unwrap();
+    let consumer = ctx.create_detached_renderer_consumer().unwrap();
 
     let before_render = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _ = ctx.platform_viewport_snapshot(&consumer);

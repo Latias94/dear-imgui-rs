@@ -17,7 +17,10 @@ fn prepare_context(ctx: &mut imgui::Context) {
     io.set_display_size([800.0, 600.0]);
     io.set_delta_time(1.0 / 60.0);
 
-    let _ = ctx.font_atlas().build();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 }
 
@@ -71,7 +74,7 @@ fn io_delta_time_must_be_positive_after_first_frame() {
     prepare_context(&mut ctx);
 
     let _ = ctx.frame();
-    let _ = ctx.render();
+    let _ = ctx.render_legacy();
 
     let io = ctx.io_mut();
     let previous = io.delta_time();
@@ -222,25 +225,4 @@ fn io_config_floats_reject_invalid_values_before_storing() {
         io.set_key_repeat_rate(f32::NAN);
     });
     assert_eq!(io.key_repeat_rate(), 0.0);
-}
-
-#[test]
-fn io_font_global_scale_rejects_non_positive_values_before_storing() {
-    let _guard = test_guard();
-
-    let mut ctx = imgui::Context::create();
-    let io = ctx.io_mut();
-
-    io.set_font_global_scale(1.5);
-    assert_eq!(io.font_global_scale(), 1.5);
-
-    assert_panics!({
-        io.set_font_global_scale(0.0);
-    });
-    assert_eq!(io.font_global_scale(), 1.5);
-
-    assert_panics!({
-        io.set_font_global_scale(f32::NAN);
-    });
-    assert_eq!(io.font_global_scale(), 1.5);
 }

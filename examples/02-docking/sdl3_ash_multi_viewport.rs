@@ -16,20 +16,23 @@
 use std::cell::RefCell;
 use std::error::Error;
 use std::ffi::CString;
+use std::mem::ManuallyDrop;
 use std::time::Instant;
 
 use ash::khr::{surface as khr_surface, swapchain as khr_swapchain};
 use ash::{Device, Entry, Instance, vk};
 #[cfg(feature = "ash-dynamic-rendering")]
 use dear_imgui_ash::DynamicRendering;
-use dear_imgui_ash::multi_viewport_sdl3::{Sdl3ViewportRuntime, VulkanViewportConfig};
+use dear_imgui_ash::multi_viewport_sdl3::{
+    AshPreparedViewportFrame, AshViewportFrameCompletion, Sdl3ViewportRoute, VulkanViewportConfig,
+};
 use dear_imgui_ash::{
     AshRenderer, AshRendererConfig, Options as AshOptions, TextureRetirementBatch,
 };
 use dear_imgui_examples::sdl3_callbacks::{
     Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
 };
-use dear_imgui_rs::{Condition, ConfigFlags, Context, render::RenderedFrame};
+use dear_imgui_rs::{Condition, ConfigFlags, Context, FrameToken, render::ReconciledFrame};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
 use sdl3::video::{SwapInterval, WindowPos};
 use sdl3_main::{AppResult, AppResultWithState, MainThreadData, app_impl};
@@ -43,6 +46,129 @@ use ash_frame_sync::{
 
 const FRAMES_IN_FLIGHT: usize = 2;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DeviceTeardownState {
+    Pending,
+    Idle,
+    DeviceLost,
+}
+
+impl DeviceTeardownState {
+    const fn permits_native_destruction(self) -> bool {
+        matches!(self, Self::Idle | Self::DeviceLost)
+    }
+}
+
+fn classify_teardown_wait(
+    result: Result<(), vk::Result>,
+) -> Result<DeviceTeardownState, vk::Result> {
+    match result {
+        Ok(()) => Ok(DeviceTeardownState::Idle),
+        Err(vk::Result::ERROR_DEVICE_LOST) => Ok(DeviceTeardownState::DeviceLost),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(test)]
+mod teardown_state_tests {
+    use super::*;
+
+    #[test]
+    fn only_idle_and_device_lost_are_terminal_drop_proofs() {
+        assert!(!DeviceTeardownState::Pending.permits_native_destruction());
+        assert!(DeviceTeardownState::Idle.permits_native_destruction());
+        assert!(DeviceTeardownState::DeviceLost.permits_native_destruction());
+    }
+
+    #[test]
+    fn retryable_wait_errors_do_not_publish_a_terminal_proof() {
+        assert_eq!(
+            classify_teardown_wait(Err(vk::Result::ERROR_OUT_OF_HOST_MEMORY)),
+            Err(vk::Result::ERROR_OUT_OF_HOST_MEMORY)
+        );
+        assert_eq!(
+            classify_teardown_wait(Err(vk::Result::ERROR_DEVICE_LOST)),
+            Ok(DeviceTeardownState::DeviceLost)
+        );
+        assert_eq!(
+            classify_teardown_wait(Ok(())),
+            Ok(DeviceTeardownState::Idle)
+        );
+    }
+}
+
+struct VulkanContextInit {
+    entry: Option<Entry>,
+    instance: Option<Instance>,
+    surface_loader: Option<khr_surface::Instance>,
+    surface: Option<vk::SurfaceKHR>,
+    device: Option<Device>,
+    command_pool: Option<vk::CommandPool>,
+}
+
+impl VulkanContextInit {
+    fn new(entry: Entry) -> Self {
+        Self {
+            entry: Some(entry),
+            instance: None,
+            surface_loader: None,
+            surface: None,
+            device: None,
+            command_pool: None,
+        }
+    }
+
+    fn finish(
+        mut self,
+        physical_device: vk::PhysicalDevice,
+        queue_family_index: u32,
+        queue: vk::Queue,
+    ) -> VulkanContext {
+        VulkanContext {
+            entry: self.entry.take().expect("Vulkan entry was initialized"),
+            instance: self
+                .instance
+                .take()
+                .expect("Vulkan instance was initialized"),
+            surface_loader: self
+                .surface_loader
+                .take()
+                .expect("Vulkan surface loader was initialized"),
+            surface: self.surface.take().expect("Vulkan surface was initialized"),
+            physical_device,
+            queue_family_index,
+            device: self.device.take().expect("Vulkan device was initialized"),
+            queue,
+            command_pool: self
+                .command_pool
+                .take()
+                .expect("Vulkan command pool was initialized"),
+            teardown_state: DeviceTeardownState::Pending,
+        }
+    }
+}
+
+impl Drop for VulkanContextInit {
+    fn drop(&mut self) {
+        unsafe {
+            if let Some(device) = self.device.take() {
+                if let Some(command_pool) = self.command_pool.take() {
+                    device.destroy_command_pool(command_pool, None);
+                }
+                device.destroy_device(None);
+            }
+            if let (Some(surface_loader), Some(surface)) =
+                (self.surface_loader.as_ref(), self.surface.take())
+            {
+                surface_loader.destroy_surface(surface, None);
+            }
+            if let Some(instance) = self.instance.take() {
+                instance.destroy_instance(None);
+            }
+        }
+    }
+}
+
 struct VulkanContext {
     entry: Entry,
     instance: Instance,
@@ -53,12 +179,14 @@ struct VulkanContext {
     device: Device,
     queue: vk::Queue,
     command_pool: vk::CommandPool,
+    teardown_state: DeviceTeardownState,
 }
 
 impl VulkanContext {
     fn new(window: &sdl3::video::Window, title: &str) -> Result<Self, Box<dyn Error>> {
         // Use runtime loader mode so CI/users don't need `vulkan-1.lib` at link time.
         let entry = unsafe { Entry::load()? };
+        let mut init = VulkanContextInit::new(entry);
 
         let app_name = CString::new(title)?;
         let engine_name = CString::new("dear-imgui-examples")?;
@@ -81,42 +209,101 @@ impl VulkanContext {
         let instance_create_info = vk::InstanceCreateInfo::default()
             .application_info(&app_info)
             .enabled_extension_names(&extension_ptrs);
-        let instance = unsafe { entry.create_instance(&instance_create_info, None)? };
+        let instance = unsafe {
+            init.entry
+                .as_ref()
+                .expect("Vulkan entry was initialized")
+                .create_instance(&instance_create_info, None)?
+        };
+        init.instance = Some(instance);
 
-        let surface_loader = khr_surface::Instance::new(&entry, &instance);
-        let surface = unsafe { window.vulkan_create_surface(instance.handle())? };
-
-        let (physical_device, queue_family_index) =
-            pick_physical_device(&instance, &surface_loader, surface)?;
-        let (device, queue) = create_device(&instance, physical_device, queue_family_index)?;
-
-        let command_pool = unsafe {
-            device.create_command_pool(
-                &vk::CommandPoolCreateInfo::default()
-                    .queue_family_index(queue_family_index)
-                    .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER),
-                None,
+        init.surface_loader = Some(khr_surface::Instance::new(
+            init.entry.as_ref().expect("Vulkan entry was initialized"),
+            init.instance
+                .as_ref()
+                .expect("Vulkan instance was initialized"),
+        ));
+        let surface = unsafe {
+            window.vulkan_create_surface(
+                init.instance
+                    .as_ref()
+                    .expect("Vulkan instance was initialized")
+                    .handle(),
             )?
         };
+        init.surface = Some(surface);
 
-        Ok(Self {
-            entry,
-            instance,
-            surface_loader,
+        let (physical_device, queue_family_index) = pick_physical_device(
+            init.instance
+                .as_ref()
+                .expect("Vulkan instance was initialized"),
+            init.surface_loader
+                .as_ref()
+                .expect("Vulkan surface loader was initialized"),
             surface,
+        )?;
+        let (device, queue) = create_device(
+            init.instance
+                .as_ref()
+                .expect("Vulkan instance was initialized"),
             physical_device,
             queue_family_index,
-            device,
-            queue,
-            command_pool,
-        })
+        )?;
+        init.device = Some(device);
+
+        let command_pool = unsafe {
+            init.device
+                .as_ref()
+                .expect("Vulkan device was initialized")
+                .create_command_pool(
+                    &vk::CommandPoolCreateInfo::default()
+                        .queue_family_index(queue_family_index)
+                        .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER),
+                    None,
+                )?
+        };
+        init.command_pool = Some(command_pool);
+
+        Ok(init.finish(physical_device, queue_family_index, queue))
+    }
+
+    fn wait_idle_for_teardown(&mut self) -> Result<(), vk::Result> {
+        match self.teardown_state {
+            DeviceTeardownState::Idle | DeviceTeardownState::DeviceLost => Ok(()),
+            DeviceTeardownState::Pending => {
+                self.teardown_state =
+                    classify_teardown_wait(unsafe { self.device.device_wait_idle() })?;
+                Ok(())
+            }
+        }
+    }
+
+    fn note_renderer_shutdown(&mut self) {
+        // Ash renderer shutdown already waits for the complete device before destroying its
+        // resources, so the native owner must not issue a redundant wait afterwards.
+        if self.teardown_state == DeviceTeardownState::Pending {
+            self.teardown_state = DeviceTeardownState::Idle;
+        }
+    }
+
+    fn device_lost(&self) -> bool {
+        self.teardown_state == DeviceTeardownState::DeviceLost
+    }
+
+    fn teardown_is_proven(&self) -> bool {
+        self.teardown_state.permits_native_destruction()
     }
 }
 
 impl Drop for VulkanContext {
     fn drop(&mut self) {
+        if let Err(error) = self.wait_idle_for_teardown() {
+            eprintln!(
+                "Vulkan device-idle proof failed during fallback teardown; leaking the native context: {error}"
+            );
+            return;
+        }
         unsafe {
-            let _ = self.device.device_wait_idle();
             self.device.destroy_command_pool(self.command_pool, None);
             self.device.destroy_device(None);
             self.surface_loader.destroy_surface(self.surface, None);
@@ -354,7 +541,7 @@ impl SwapchainState {
     }
 }
 
-fn record_command_buffer<F>(
+fn record_command_buffer<F, T>(
     device: &Device,
     command_buffer: vk::CommandBuffer,
     _render_target: MainRenderTarget,
@@ -365,11 +552,11 @@ fn record_command_buffer<F>(
     extent: vk::Extent2D,
     clear_color: [f32; 4],
     record: F,
-) -> Result<Option<TextureRetirementBatch>, Box<dyn Error>>
+) -> Result<T, Box<dyn Error>>
 where
-    F: FnOnce(vk::CommandBuffer) -> Result<Option<TextureRetirementBatch>, Box<dyn Error>>,
+    F: FnOnce(vk::CommandBuffer) -> Result<T, Box<dyn Error>>,
 {
-    let texture_retirement;
+    let result;
     unsafe {
         device.begin_command_buffer(
             command_buffer,
@@ -424,7 +611,7 @@ where
             );
         }
 
-        texture_retirement = record(command_buffer)?;
+        result = record(command_buffer)?;
 
         #[cfg(not(feature = "ash-dynamic-rendering"))]
         device.cmd_end_render_pass(command_buffer);
@@ -441,7 +628,7 @@ where
         }
         device.end_command_buffer(command_buffer)?;
     }
-    Ok(texture_retirement)
+    Ok(result)
 }
 
 #[cfg(not(feature = "ash-dynamic-rendering"))]
@@ -951,56 +1138,79 @@ fn create_external_rgba_texture(
 
 enum RendererRuntime {
     Single(AshRenderer),
-    Viewports(Sdl3ViewportRuntime),
+    Viewports(Sdl3ViewportRoute),
+}
+
+enum RendererFrameCompletion {
+    Single(Option<TextureRetirementBatch>),
+    Viewports(AshViewportFrameCompletion),
+}
+
+enum PreparedRendererFrame<'frame> {
+    Single {
+        frame: ReconciledFrame<'frame>,
+        retirement: Option<TextureRetirementBatch>,
+    },
+    Viewports(AshPreparedViewportFrame<'frame>),
+}
+
+impl PreparedRendererFrame<'_> {
+    fn skip_main(self) -> RendererFrameCompletion {
+        match self {
+            Self::Single { frame, retirement } => {
+                drop(frame);
+                RendererFrameCompletion::Single(retirement)
+            }
+            Self::Viewports(frame) => RendererFrameCompletion::Viewports(frame.skip_main()),
+        }
+    }
 }
 
 impl RendererRuntime {
-    fn poll_fault(&self) -> Result<(), Box<dyn Error>> {
-        if let Self::Viewports(runtime) = self {
-            runtime.poll_fault()?;
-        }
-        Ok(())
-    }
-
-    unsafe fn cmd_draw(
+    unsafe fn cmd_draw_main(
         &mut self,
         command_buffer: vk::CommandBuffer,
-        frame: RenderedFrame<'_>,
-    ) -> Result<Option<TextureRetirementBatch>, Box<dyn Error>> {
-        Ok(match self {
-            Self::Single(renderer) => unsafe { renderer.cmd_draw(command_buffer, frame)? },
-            Self::Viewports(runtime) => unsafe { runtime.cmd_draw(command_buffer, frame)? },
+        prepared: PreparedRendererFrame<'_>,
+    ) -> Result<RendererFrameCompletion, Box<dyn Error>> {
+        Ok(match (self, prepared) {
+            (Self::Single(renderer), PreparedRendererFrame::Single { frame, retirement }) => {
+                unsafe { renderer.cmd_draw(command_buffer, frame) }?;
+                RendererFrameCompletion::Single(retirement)
+            }
+            (Self::Viewports(route), PreparedRendererFrame::Viewports(frame)) => unsafe {
+                RendererFrameCompletion::Viewports(route.cmd_draw_main(command_buffer, frame)?)
+            },
+            _ => return Err("prepared frame does not belong to the active Ash route".into()),
         })
     }
 
-    fn prepare_frame(
+    fn prepare<'ctx>(
         &mut self,
-        frame: &mut RenderedFrame<'_>,
-    ) -> Result<Option<TextureRetirementBatch>, Box<dyn Error>> {
+        frame: FrameToken<'ctx>,
+    ) -> Result<PreparedRendererFrame<'ctx>, Box<dyn Error>> {
         Ok(match self {
-            Self::Single(renderer) => renderer.prepare_frame(frame)?,
-            Self::Viewports(runtime) => runtime.prepare_frame(frame)?,
-        })
-    }
-
-    fn pending_texture_retirement(&self) -> Result<Option<TextureRetirementBatch>, Box<dyn Error>> {
-        Ok(match self {
-            Self::Single(renderer) => renderer.pending_texture_retirement()?,
-            Self::Viewports(runtime) => runtime.pending_texture_retirement()?,
-        })
-    }
-
-    fn wait_for_texture_retirements(
-        &mut self,
-        batch: TextureRetirementBatch,
-    ) -> Result<(), Box<dyn Error>> {
-        match self {
             Self::Single(renderer) => {
+                let pending_frame = frame.try_render(renderer.renderer_consumer()?)?;
+                let (frame, retirement) = renderer.prepare_frame(pending_frame)?;
+                PreparedRendererFrame::Single { frame, retirement }
+            }
+            Self::Viewports(route) => PreparedRendererFrame::Viewports(route.prepare(frame)?),
+        })
+    }
+
+    fn wait_for_frame_completion(
+        &mut self,
+        completion: RendererFrameCompletion,
+    ) -> Result<(), Box<dyn Error>> {
+        match (self, completion) {
+            (Self::Single(renderer), RendererFrameCompletion::Single(Some(batch))) => {
                 renderer.wait_for_texture_retirements(batch)?;
             }
-            Self::Viewports(runtime) => {
-                runtime.wait_for_texture_retirements(batch)?;
+            (Self::Single(_), RendererFrameCompletion::Single(None)) => {}
+            (Self::Viewports(route), RendererFrameCompletion::Viewports(completion)) => {
+                route.wait_for_frame_completion(completion)?;
             }
+            _ => return Err("frame completion does not belong to the active Ash route".into()),
         }
         Ok(())
     }
@@ -1028,13 +1238,13 @@ impl RendererRuntime {
         })
     }
 
-    unsafe fn unregister_texture(
+    unsafe fn unregister_texture_unchecked(
         &mut self,
         texture: dear_imgui_rs::TextureId,
     ) -> Result<(), Box<dyn Error>> {
         match self {
-            Self::Single(renderer) => unsafe { renderer.unregister_texture(texture)? },
-            Self::Viewports(runtime) => unsafe { runtime.unregister_texture(texture)? },
+            Self::Single(renderer) => unsafe { renderer.unregister_texture_unchecked(texture)? },
+            Self::Viewports(runtime) => unsafe { runtime.unregister_texture_unchecked(texture)? },
         }
         Ok(())
     }
@@ -1042,7 +1252,7 @@ impl RendererRuntime {
     fn shutdown(&mut self, context: &mut Context) -> Result<(), Box<dyn Error>> {
         match self {
             Self::Single(renderer) => renderer.shutdown(context)?,
-            Self::Viewports(runtime) => runtime.shutdown(context)?,
+            Self::Viewports(route) => route.shutdown(context)?,
         }
         Ok(())
     }
@@ -1061,7 +1271,8 @@ struct ImguiState {
 }
 
 struct VulkanState {
-    ctx: VulkanContext,
+    // The device owner is released manually only after teardown has a terminal GPU proof.
+    ctx: ManuallyDrop<VulkanContext>,
     render_target: MainRenderTarget,
     swapchain: SwapchainState,
     frames: Vec<FrameSync>,
@@ -1080,26 +1291,166 @@ struct ExternalTexture {
 
 impl Drop for VulkanState {
     fn drop(&mut self) {
-        unsafe {
-            let _ = self.ctx.device.device_wait_idle();
-            destroy_frame_syncs(&self.ctx.device, self.ctx.command_pool, &mut self.frames);
-            self.swapchain.destroy_resources(&self.ctx.device);
+        if let Err(error) = self.ctx.wait_idle_for_teardown() {
+            eprintln!(
+                "Vulkan device-idle proof failed; leaking frame, swapchain, render-target, and device ownership: {error}"
+            );
+            return;
         }
+        destroy_frame_syncs(&self.ctx.device, self.ctx.command_pool, &mut self.frames);
+        self.swapchain.destroy_resources(&self.ctx.device);
         self.render_target.destroy(&self.ctx.device);
+
+        // SAFETY: `ctx` is manually dropped exactly once, after every Vulkan child has been
+        // destroyed and the wait outcome proved idle or terminal device loss.
+        unsafe { ManuallyDrop::drop(&mut self.ctx) };
     }
 }
 
 struct App {
-    enable_viewports: bool,
     // Keep the backend owner before ImguiState so its Drop runs while Context is alive.
-    sdl3_backend: Option<Sdl3PlatformBackend>,
-    imgui: ImguiState,
-    vk: VulkanState,
+    sdl3_backend: ManuallyDrop<Option<Sdl3PlatformBackend>>,
+    imgui: ManuallyDrop<ImguiState>,
+    vk: ManuallyDrop<VulkanState>,
     // Keep the platform window alive until renderer, swapchains, and surfaces have been dropped.
-    window: sdl3::video::Window,
+    window: ManuallyDrop<sdl3::video::Window>,
     gpu_idle_for_shutdown: bool,
     renderer_shutdown_complete: bool,
     platform_shutdown_complete: bool,
+}
+
+struct AppInit {
+    renderer: Option<RendererRuntime>,
+    sdl3_backend: Option<Sdl3PlatformBackend>,
+    context: Option<Context>,
+    frames: Vec<FrameSync>,
+    swapchain: Option<SwapchainState>,
+    render_target: Option<MainRenderTarget>,
+    ctx: Option<VulkanContext>,
+    // The primary SDL window must outlive the Vulkan surface even on initialization rollback.
+    window: Option<sdl3::video::Window>,
+}
+
+impl AppInit {
+    fn new(ctx: VulkanContext, window: sdl3::video::Window) -> Self {
+        Self {
+            renderer: None,
+            sdl3_backend: None,
+            context: None,
+            frames: Vec::new(),
+            swapchain: None,
+            render_target: None,
+            ctx: Some(ctx),
+            window: Some(window),
+        }
+    }
+
+    fn finish(mut self, img_tex: dear_imgui_rs::ManagedTextureId, tex_size: (u32, u32)) -> App {
+        let image_count = self
+            .swapchain
+            .as_ref()
+            .expect("Ash swapchain was initialized")
+            .images
+            .len();
+        App {
+            window: ManuallyDrop::new(self.window.take().expect("SDL3 window was initialized")),
+            sdl3_backend: ManuallyDrop::new(self.sdl3_backend.take()),
+            imgui: ManuallyDrop::new(ImguiState {
+                context: self.context.take().expect("ImGui context was initialized"),
+                renderer: self.renderer.take().expect("Ash renderer was initialized"),
+                last_frame: Instant::now(),
+                clear_color: [0.1, 0.12, 0.15, 1.0],
+                img_tex,
+                tex_size,
+                frame: 0,
+                show_demo: true,
+                external: None,
+            }),
+            vk: ManuallyDrop::new(VulkanState {
+                ctx: ManuallyDrop::new(self.ctx.take().expect("Vulkan context was initialized")),
+                render_target: self
+                    .render_target
+                    .take()
+                    .expect("Ash render target was initialized"),
+                swapchain: self
+                    .swapchain
+                    .take()
+                    .expect("Ash swapchain was initialized"),
+                frames: std::mem::take(&mut self.frames),
+                images_in_flight: vec![vk::Fence::null(); image_count],
+                frame_index: 0,
+                swapchain_dirty: false,
+            }),
+            gpu_idle_for_shutdown: false,
+            renderer_shutdown_complete: false,
+            platform_shutdown_complete: false,
+        }
+    }
+
+    fn leak_ownership_tree(&mut self) {
+        if let Some(renderer) = self.renderer.take() {
+            std::mem::forget(renderer);
+        }
+        if let Some(sdl3_backend) = self.sdl3_backend.take() {
+            std::mem::forget(sdl3_backend);
+        }
+        if let Some(context) = self.context.take() {
+            std::mem::forget(context);
+        }
+        std::mem::forget(std::mem::take(&mut self.frames));
+        if let Some(swapchain) = self.swapchain.take() {
+            std::mem::forget(swapchain);
+        }
+        // MainRenderTarget is a Copy handle wrapper with no Drop; taking it is sufficient to
+        // suppress the explicit Vulkan destroy path.
+        let _ = self.render_target.take();
+        if let Some(ctx) = self.ctx.take() {
+            std::mem::forget(ctx);
+        }
+        if let Some(window) = self.window.take() {
+            std::mem::forget(window);
+        }
+    }
+}
+
+impl Drop for AppInit {
+    fn drop(&mut self) {
+        let wait_error = self
+            .ctx
+            .as_mut()
+            .and_then(|ctx| ctx.wait_idle_for_teardown().err());
+        if let Some(error) = wait_error {
+            eprintln!(
+                "Vulkan initialization rollback lacks a terminal GPU proof; leaking the complete ownership tree: {error}"
+            );
+            self.leak_ownership_tree();
+            return;
+        }
+
+        if let Some(context) = self.context.as_mut() {
+            context.end_frame();
+            if let Some(renderer) = self.renderer.as_mut() {
+                if renderer.shutdown(context).is_ok()
+                    && let Some(ctx) = self.ctx.as_mut()
+                {
+                    ctx.note_renderer_shutdown();
+                }
+            }
+            if let Some(sdl3_backend) = self.sdl3_backend.as_mut() {
+                let _ = sdl3_backend.shutdown(context);
+            }
+        }
+
+        if let Some(ctx) = self.ctx.as_mut() {
+            destroy_frame_syncs(&ctx.device, ctx.command_pool, &mut self.frames);
+            if let Some(swapchain) = self.swapchain.as_mut() {
+                swapchain.destroy_resources(&ctx.device);
+            }
+            if let Some(render_target) = self.render_target.take() {
+                render_target.destroy(&ctx.device);
+            }
+        }
+    }
 }
 
 struct Sdl3AshApp {
@@ -1118,6 +1469,22 @@ impl Drop for App {
     fn drop(&mut self) {
         if let Err(error) = self.shutdown() {
             eprintln!("SDL3 + Ash example fallback shutdown failed: {error}");
+        }
+        if !self.vk.ctx.teardown_is_proven() {
+            eprintln!(
+                "SDL3 + Ash fallback teardown lacks a terminal GPU proof; leaking the platform, ImGui, Vulkan, and window ownership tree"
+            );
+            return;
+        }
+
+        // SAFETY: the terminal GPU proof permits ordered destruction. The platform backend and
+        // ImGui attachments are released while Context, Vulkan, and the SDL window remain live;
+        // Vulkan children and their device are then destroyed before the window.
+        unsafe {
+            ManuallyDrop::drop(&mut self.sdl3_backend);
+            ManuallyDrop::drop(&mut self.imgui);
+            ManuallyDrop::drop(&mut self.vk);
+            ManuallyDrop::drop(&mut self.window);
         }
     }
 }
@@ -1155,9 +1522,25 @@ impl App {
 
         // Vulkan instance/device/surface/swapchain.
         let ctx = VulkanContext::new(&window, "dear-imgui-sdl3-ash-multi-viewport")?;
-        let surface_format = pick_surface_format(&ctx)?;
-        let render_target = MainRenderTarget::new(&ctx.device, surface_format.format)?;
-        let swapchain = SwapchainState::new(&ctx, &window, render_target, surface_format)?;
+        let mut init = AppInit::new(ctx, window);
+        let surface_format =
+            pick_surface_format(init.ctx.as_ref().expect("Vulkan context was initialized"))?;
+        let render_target = MainRenderTarget::new(
+            &init
+                .ctx
+                .as_ref()
+                .expect("Vulkan context was initialized")
+                .device,
+            surface_format.format,
+        )?;
+        init.render_target = Some(render_target);
+        let swapchain = SwapchainState::new(
+            init.ctx.as_ref().expect("Vulkan context was initialized"),
+            init.window.as_ref().expect("SDL3 window was initialized"),
+            render_target,
+            surface_format,
+        )?;
+        init.swapchain = Some(swapchain);
 
         // Dear ImGui context.
         let mut context = Context::create();
@@ -1180,18 +1563,38 @@ impl App {
         if ENABLE_VIEWPORTS {
             context.enable_multi_viewport();
         }
+        init.context = Some(context);
 
         // SDL3 platform backend for Vulkan (sets Platform_CreateVkSurface for multi-viewport).
         // SAFETY: `window` outlives ordered shutdown and Context teardown through App ownership.
-        let mut sdl3_backend =
-            unsafe { Sdl3PlatformBackend::init_for_vulkan(&mut context, &window)? };
-        sdl3_backend.set_gamepad_mode(&mut context, GamepadMode::AutoAll)?;
+        let sdl3_backend = unsafe {
+            let AppInit {
+                context, window, ..
+            } = &mut init;
+            Sdl3PlatformBackend::init_for_vulkan(
+                context.as_mut().expect("ImGui context was initialized"),
+                window.as_ref().expect("SDL3 window was initialized"),
+            )?
+        };
+        init.sdl3_backend = Some(sdl3_backend);
+        {
+            let AppInit {
+                sdl3_backend,
+                context,
+                ..
+            } = &mut init;
+            sdl3_backend
+                .as_mut()
+                .expect("SDL3 platform was initialized")
+                .set_gamepad_mode(
+                    context.as_mut().expect("ImGui context was initialized"),
+                    GamepadMode::AutoAll,
+                )?;
+        }
 
         // Create a managed ImGui texture (CPU-side pixels; backend will create GPU texture).
         let tex_w: u32 = 128;
         let tex_h: u32 = 128;
-        let mut img_tex = dear_imgui_rs::texture::OwnedTextureData::new();
-        img_tex.create(dear_imgui_rs::texture::TextureFormat::RGBA32, tex_w, tex_h);
         let mut pixels = vec![0u8; (tex_w * tex_h * 4) as usize];
         for y in 0..tex_h {
             for x in 0..tex_w {
@@ -1202,24 +1605,59 @@ impl App {
                 pixels[i + 3] = 255;
             }
         }
-        img_tex.set_data(&pixels);
+        let img_tex = dear_imgui_rs::texture::OwnedTextureData::from_pixels(
+            dear_imgui_rs::texture::TextureFormat::RGBA32,
+            tex_w,
+            tex_h,
+            &pixels,
+        )?;
 
-        let img_tex = context.register_texture(img_tex);
+        let img_tex = init
+            .context
+            .as_mut()
+            .expect("ImGui context was initialized")
+            .register_texture(img_tex);
 
         // Renderer.
-        let framebuffer_srgb = is_srgb_format(swapchain.surface_format.format);
+        let framebuffer_srgb = is_srgb_format(
+            init.swapchain
+                .as_ref()
+                .expect("Ash swapchain was initialized")
+                .surface_format
+                .format,
+        );
         #[cfg(not(feature = "ash-dynamic-rendering"))]
         let renderer_config = AshRendererConfig::with_render_pass(
-            ctx.device.clone(),
-            ctx.queue,
-            ctx.command_pool,
+            init.ctx
+                .as_ref()
+                .expect("Vulkan context was initialized")
+                .device
+                .clone(),
+            init.ctx
+                .as_ref()
+                .expect("Vulkan context was initialized")
+                .queue,
+            init.ctx
+                .as_ref()
+                .expect("Vulkan context was initialized")
+                .command_pool,
             render_target.render_pass,
         );
         #[cfg(feature = "ash-dynamic-rendering")]
         let renderer_config = AshRendererConfig::with_dynamic_rendering(
-            ctx.device.clone(),
-            ctx.queue,
-            ctx.command_pool,
+            init.ctx
+                .as_ref()
+                .expect("Vulkan context was initialized")
+                .device
+                .clone(),
+            init.ctx
+                .as_ref()
+                .expect("Vulkan context was initialized")
+                .queue,
+            init.ctx
+                .as_ref()
+                .expect("Vulkan context was initialized")
+                .command_pool,
             DynamicRendering {
                 color_attachment_format: render_target.format,
                 depth_attachment_format: None,
@@ -1232,154 +1670,197 @@ impl App {
         });
         // SAFETY: all handles share ctx's device lineage; the queue and command pool support the
         // upload/graphics work, and the render target matches the swapchain and viewport targets.
-        let mut renderer = unsafe {
-            AshRenderer::with_default_allocator(
-                &ctx.instance,
-                ctx.physical_device,
-                renderer_config,
-                &mut context,
-            )?
+        let mut renderer = {
+            let AppInit { ctx, context, .. } = &mut init;
+            let ctx = ctx.as_ref().expect("Vulkan context was initialized");
+            let context = context.as_mut().expect("ImGui context was initialized");
+            unsafe {
+                AshRenderer::with_default_allocator(
+                    &ctx.instance,
+                    ctx.physical_device,
+                    renderer_config,
+                    context,
+                )?
+            }
         };
         renderer.set_viewport_clear_color([0.1, 0.12, 0.15, 1.0]);
+        init.renderer = Some(RendererRuntime::Single(renderer));
+
+        let renderer = match init.renderer.take() {
+            Some(RendererRuntime::Single(renderer)) => renderer,
+            _ => unreachable!("initial Ash renderer must be in single-viewport state"),
+        };
         let renderer = if ENABLE_VIEWPORTS {
             // SAFETY: the application serializes all host access to ctx.queue and ctx.device while
             // this runtime can submit, present, rebuild swapchains, or wait for device idle.
-            RendererRuntime::Viewports(unsafe {
-                Sdl3ViewportRuntime::attach(
-                    &mut context,
-                    &sdl3_backend,
-                    renderer,
-                    VulkanViewportConfig {
-                        entry: ctx.entry.clone(),
-                        instance: ctx.instance.clone(),
-                        physical_device: ctx.physical_device,
-                        validation_surface: ctx.surface,
-                        present_queue: ctx.queue,
-                        graphics_queue_family_index: ctx.queue_family_index,
-                        present_queue_family_index: ctx.queue_family_index,
-                        swapchain_policy:
-                            dear_imgui_ash::multi_viewport_sdl3::ViewportSwapchainPolicy::from_main_surface(
-                                swapchain.surface_format,
-                                swapchain.present_mode,
-                            ),
-                        swapchain_image_usage: vk::ImageUsageFlags::empty(),
-                    },
-                )?
-            })
+            let viewport_config = {
+                let ctx = init.ctx.as_ref().expect("Vulkan context was initialized");
+                let swapchain = init
+                    .swapchain
+                    .as_ref()
+                    .expect("Ash swapchain was initialized");
+                VulkanViewportConfig {
+                    entry: ctx.entry.clone(),
+                    instance: ctx.instance.clone(),
+                    physical_device: ctx.physical_device,
+                    validation_surface: ctx.surface,
+                    present_queue: ctx.queue,
+                    graphics_queue_family_index: ctx.queue_family_index,
+                    present_queue_family_index: ctx.queue_family_index,
+                    swapchain_policy:
+                        dear_imgui_ash::multi_viewport_sdl3::ViewportSwapchainPolicy::from_main_surface(
+                            swapchain.surface_format,
+                            swapchain.present_mode,
+                        ),
+                    swapchain_image_usage: vk::ImageUsageFlags::empty(),
+                }
+            };
+            let attach_result = {
+                let AppInit {
+                    sdl3_backend,
+                    context,
+                    ..
+                } = &mut init;
+                unsafe {
+                    Sdl3ViewportRoute::attach(
+                        context.as_mut().expect("ImGui context was initialized"),
+                        sdl3_backend
+                            .as_ref()
+                            .expect("SDL3 platform was initialized"),
+                        renderer,
+                        viewport_config,
+                    )
+                }
+            };
+            match attach_result {
+                Ok(route) => RendererRuntime::Viewports(route),
+                Err(error) => {
+                    let (error, renderer) = error.into_parts();
+                    init.renderer = Some(RendererRuntime::Single(renderer));
+                    return Err(error.into());
+                }
+            }
         } else {
             RendererRuntime::Single(renderer)
         };
+        init.renderer = Some(renderer);
 
         // Frame sync objects.
-        let frames = create_frame_syncs(&ctx.device, ctx.command_pool, FRAMES_IN_FLIGHT)?;
-        let images_in_flight = vec![vk::Fence::null(); swapchain.images.len()];
+        init.frames = create_frame_syncs(
+            &init
+                .ctx
+                .as_ref()
+                .expect("Vulkan context was initialized")
+                .device,
+            init.ctx
+                .as_ref()
+                .expect("Vulkan context was initialized")
+                .command_pool,
+            FRAMES_IN_FLIGHT,
+        )?;
 
-        Ok(Self {
-            window,
-            enable_viewports: ENABLE_VIEWPORTS,
-            sdl3_backend: Some(sdl3_backend),
-            imgui: ImguiState {
-                context,
-                renderer,
-                last_frame: Instant::now(),
-                clear_color: [0.1, 0.12, 0.15, 1.0],
-                img_tex,
-                tex_size: (tex_w, tex_h),
-                frame: 0,
-                show_demo: true,
-                external: None,
-            },
-            vk: VulkanState {
-                ctx,
-                render_target,
-                swapchain,
-                frames,
-                images_in_flight,
-                frame_index: 0,
-                swapchain_dirty: false,
-            },
-            gpu_idle_for_shutdown: false,
-            renderer_shutdown_complete: false,
-            platform_shutdown_complete: false,
-        })
+        Ok(init.finish(img_tex, (tex_w, tex_h)))
     }
 
     fn shutdown(&mut self) -> Result<(), Box<dyn Error>> {
+        let mut errors = Vec::new();
         if !self.gpu_idle_for_shutdown {
-            unsafe { self.vk.ctx.device.device_wait_idle()? };
+            self.vk.ctx.wait_idle_for_teardown()?;
             self.gpu_idle_for_shutdown = true;
         }
 
         self.destroy_external_texture()?;
 
         if !self.renderer_shutdown_complete {
-            self.imgui.renderer.shutdown(&mut self.imgui.context)?;
-            self.renderer_shutdown_complete = true;
-            self.enable_viewports = false;
+            let ImguiState {
+                renderer, context, ..
+            } = &mut *self.imgui;
+            match renderer.shutdown(context) {
+                Ok(()) => self.renderer_shutdown_complete = true,
+                Err(error) => {
+                    errors.push(format!("Ash renderer shutdown failed: {error}"));
+                    if self.vk.ctx.device_lost() {
+                        self.renderer_shutdown_complete = true;
+                    }
+                }
+            }
+        }
+        if !self.renderer_shutdown_complete {
+            return Err(errors.join("; ").into());
         }
 
         if !self.platform_shutdown_complete {
-            self.shutdown_platform_backend()?;
-            self.platform_shutdown_complete = true;
+            match self.shutdown_platform_backend() {
+                Ok(()) => self.platform_shutdown_complete = true,
+                Err(error) => errors.push(format!("SDL3 platform shutdown failed: {error}")),
+            }
         }
 
-        Ok(())
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; ").into())
+        }
     }
 
     fn init_external_texture(&mut self) -> Result<(), Box<dyn Error>> {
-        if self.imgui.external.is_some() {
+        let vk = &*self.vk;
+        let imgui = &mut *self.imgui;
+        if imgui.external.is_some() {
             return Ok(());
         }
 
         let external = create_external_rgba_texture(
-            &self.vk.ctx.instance,
-            self.vk.ctx.physical_device,
-            &self.vk.ctx.device,
-            self.vk.ctx.queue,
-            self.vk.ctx.command_pool,
-            &mut self.imgui.renderer,
+            &vk.ctx.instance,
+            vk.ctx.physical_device,
+            &vk.ctx.device,
+            vk.ctx.queue,
+            vk.ctx.command_pool,
+            &mut imgui.renderer,
         )?;
-        self.imgui.external = Some(external);
+        imgui.external = Some(external);
         Ok(())
     }
 
     fn destroy_external_texture(&mut self) -> Result<(), Box<dyn Error>> {
-        let Some(external) = self.imgui.external.take() else {
+        let vk = &*self.vk;
+        let imgui = &mut *self.imgui;
+        let Some(external) = imgui.external.take() else {
             return Ok(());
         };
 
         // SAFETY: shutdown has waited for device idle and no recorded frame command buffer will be
         // submitted again, so the external descriptor has no remaining submitted or future users.
-        if let Err(error) = unsafe { self.imgui.renderer.unregister_texture(external.tex_id) } {
-            self.imgui.external = Some(external);
+        if let Err(error) = unsafe { imgui.renderer.unregister_texture_unchecked(external.tex_id) }
+        {
+            imgui.external = Some(external);
             return Err(error);
         }
 
         unsafe {
-            self.vk
-                .ctx
-                .device
-                .destroy_image_view(external.image_view, None);
-            self.vk.ctx.device.destroy_image(external.image, None);
-            self.vk.ctx.device.free_memory(external.image_mem, None);
+            vk.ctx.device.destroy_image_view(external.image_view, None);
+            vk.ctx.device.destroy_image(external.image, None);
+            vk.ctx.device.free_memory(external.image_mem, None);
         }
         Ok(())
     }
 
     fn shutdown_platform_backend(&mut self) -> Result<(), imgui_sdl3_backend::Sdl3BackendError> {
         if let Some(mut backend) = self.sdl3_backend.take() {
-            if let Err(error) = backend.shutdown(&mut self.imgui.context) {
-                self.sdl3_backend = Some(backend);
+            let imgui = &mut *self.imgui;
+            if let Err(error) = backend.shutdown(&mut imgui.context) {
+                *self.sdl3_backend = Some(backend);
                 return Err(error);
             }
         }
         Ok(())
     }
 
-    fn update_texture(&mut self) {
-        let (w, h) = self.imgui.tex_size;
+    fn update_texture(&mut self) -> Result<(), Box<dyn Error>> {
+        let imgui = &mut *self.imgui;
+        let (w, h) = imgui.tex_size;
         let mut pixels = vec![0u8; (w * h * 4) as usize];
-        let t = self.imgui.frame as f32 * 0.08;
+        let t = imgui.frame as f32 * 0.08;
         for y in 0..h {
             for x in 0..w {
                 let i = ((y * w + x) * 4) as usize;
@@ -1391,35 +1872,30 @@ impl App {
                 pixels[i + 3] = 255;
             }
         }
-        self.imgui
+        imgui
             .context
-            .with_texture_mut(self.imgui.img_tex, |mut texture| texture.set_data(&pixels))
-            .expect("animated texture should remain active");
-        self.imgui.frame = self.imgui.frame.wrapping_add(1);
+            .try_with_texture_mut(imgui.img_tex, |mut texture| texture.replace_pixels(&pixels))?;
+        imgui.frame = imgui.frame.wrapping_add(1);
+        Ok(())
     }
 
     fn process_event(
         &mut self,
-        event: &dear_imgui_examples::sdl3_callbacks::QueuedSdl3Event,
+        event: &dear_imgui_examples::sdl3_callbacks::Sdl3CallbackEvent,
     ) -> Result<AppResult, Box<dyn Error>> {
-        event.with_imgui_event(|raw| -> Result<(), Box<dyn Error>> {
-            if let Some(raw) = raw {
-                let backend = self
-                    .sdl3_backend
-                    .as_mut()
-                    .expect("SDL3 backend must be active while the app is running");
-                // SAFETY: the callback handoff reconstructs the active union variant and owns
-                // every pointer payload for the duration of this closure.
-                let _ = unsafe { backend.process_raw_event(&mut self.imgui.context, raw)? };
-            }
-            Ok(())
-        })?;
+        let window = &*self.window;
+        let imgui = &mut *self.imgui;
+        let backend = self
+            .sdl3_backend
+            .as_mut()
+            .expect("SDL3 backend must be active while the app is running");
+        let _ = backend.process_callback_event(&mut imgui.context, event)?;
 
-        if requests_exit(event, self.window.id()) {
+        if requests_exit(event, window.id()) {
             return Ok(AppResult::Success);
         }
-        if event.is_pixel_size_changed_for(self.window.id()) {
-            let (width, height) = self.window.size_in_pixels();
+        if event.is_pixel_size_changed_for(window.id()) {
+            let (width, height) = window.size_in_pixels();
             if width > 0 && height > 0 {
                 self.vk.swapchain_dirty = true;
             }
@@ -1429,35 +1905,49 @@ impl App {
 
     fn iterate(&mut self) -> Result<(), Box<dyn Error>> {
         self.init_external_texture()?;
+        // Update the managed texture before opening a frame, which marks it for reconciliation.
+        self.update_texture()?;
+
+        let window = &*self.window;
+        let vk = &mut *self.vk;
+        let backend = self
+            .sdl3_backend
+            .as_mut()
+            .expect("SDL3 backend must be active while the app is running");
+        let ImguiState {
+            context,
+            renderer,
+            last_frame,
+            clear_color,
+            img_tex,
+            show_demo,
+            external,
+            ..
+        } = &mut *self.imgui;
 
         let now = Instant::now();
-        let dt = (now - self.imgui.last_frame).as_secs_f32();
-        self.imgui.last_frame = now;
-        self.imgui.context.io_mut().set_delta_time(dt);
+        let dt = (now - *last_frame).as_secs_f32();
+        *last_frame = now;
+        context.io_mut().set_delta_time(dt);
 
-        // Update animated texture (marks WantUpdates).
-        self.update_texture();
+        backend.new_frame(context)?;
+        let frame = context.begin_frame();
+        let ui = frame.ui();
 
-        self.sdl3_backend
-            .as_mut()
-            .expect("SDL3 backend must be active while the app is running")
-            .new_frame(&mut self.imgui.context)?;
-        let ui = self.imgui.context.frame();
-
-        ui.dockspace_over_main_viewport();
+        ui.dockspace().build()?;
 
         ui.window("SDL3 + Ash (multi-viewport)")
             .size([460.0, 280.0], Condition::FirstUseEver)
             .build(|| {
                 ui.text("Drag ImGui windows outside to spawn OS windows.");
                 ui.separator();
-                ui.checkbox("Show demo window", &mut self.imgui.show_demo);
-                ui.color_edit4("Clear color", &mut self.imgui.clear_color);
+                ui.checkbox("Show demo window", show_demo);
+                ui.color_edit4("Clear color", clear_color);
                 ui.separator();
                 ui.text("Animated ImGui-managed texture:");
-                ui.image(self.imgui.img_tex, [256.0, 256.0]);
+                ui.image(*img_tex, [256.0, 256.0]);
 
-                if let Some(external) = self.imgui.external.as_mut() {
+                if let Some(external) = external.as_mut() {
                     ui.separator();
                     ui.text("External Vulkan texture (legacy TextureId):");
 
@@ -1484,49 +1974,24 @@ impl App {
                 ));
             });
 
-        if self.imgui.show_demo {
-            ui.show_demo_window(&mut self.imgui.show_demo);
+        if *show_demo {
+            ui.show_demo_window(show_demo);
         }
 
-        self.imgui
-            .renderer
-            .set_viewport_clear_color(self.imgui.clear_color)?;
+        renderer.set_viewport_clear_color(*clear_color)?;
 
-        let mut frame = self.imgui.context.render();
-        let prepared_texture_retirement = self.imgui.renderer.prepare_frame(&mut frame)?;
+        // Route preparation reconciles managed textures and completes secondary swapchains before
+        // main-surface acquisition, including platform and renderer fault aggregation.
+        let prepared = renderer.prepare(frame)?;
 
-        // Reconcile managed textures before any viewport records commands, then submit secondary
-        // swapchains before acquiring the main surface to avoid overlapping WSI ownership.
-        if self.enable_viewports {
-            frame.update_and_render_platform_windows_default();
-        }
-        self.imgui.renderer.poll_fault()?;
-
-        let clear_color = self.imgui.clear_color;
-        let recorded_texture_retirement = render_main_window(
-            &mut self.vk,
-            &mut self.imgui.renderer,
-            &self.window,
-            clear_color,
-            frame,
-        )?;
-        let texture_retirement = ash_frame_sync::merge_texture_retirement_batches(
-            prepared_texture_retirement,
-            recorded_texture_retirement,
-        )?;
-
-        if let Some(retirement) = texture_retirement {
-            self.imgui
-                .renderer
-                .wait_for_texture_retirements(retirement)?;
-        }
+        let completion = render_main_window(vk, renderer, window, *clear_color, prepared)?;
+        renderer.wait_for_frame_completion(completion)?;
         Ok(())
     }
 }
 
 fn recover_aborted_main_acquire(
     vk_state: &mut VulkanState,
-    renderer: &mut RendererRuntime,
     window: &sdl3::video::Window,
     frame_index: usize,
 ) -> Result<(), Box<dyn Error>> {
@@ -1539,8 +2004,7 @@ fn recover_aborted_main_acquire(
         .ok_or("Ash main frame disappeared during acquire recovery")?;
     let abandoned_fence = frame.fence;
     clear_fence_references(&mut vk_state.images_in_flight, abandoned_fence);
-    let abandoned_retirement =
-        replace_frame_sync(&vk_state.ctx.device, vk_state.ctx.command_pool, frame)?;
+    let _ = replace_frame_sync(&vk_state.ctx.device, vk_state.ctx.command_pool, frame)?;
 
     vk_state
         .swapchain
@@ -1548,12 +2012,6 @@ fn recover_aborted_main_acquire(
     vk_state.images_in_flight = vec![vk::Fence::null(); vk_state.swapchain.images.len()];
     vk_state.swapchain_dirty = false;
 
-    if let Some(retirement) = abandoned_retirement {
-        renderer.wait_for_texture_retirements(retirement)?;
-    }
-    if let Some(retirement) = renderer.pending_texture_retirement()? {
-        renderer.wait_for_texture_retirements(retirement)?;
-    }
     Ok(())
 }
 
@@ -1562,11 +2020,11 @@ fn render_main_window(
     renderer: &mut RendererRuntime,
     window: &sdl3::video::Window,
     clear_color: [f32; 4],
-    rendered_frame: RenderedFrame<'_>,
-) -> Result<Option<TextureRetirementBatch>, Box<dyn Error>> {
+    prepared: PreparedRendererFrame<'_>,
+) -> Result<RendererFrameCompletion, Box<dyn Error>> {
     let (width, height) = window.size_in_pixels();
     if width == 0 || height == 0 {
-        return renderer.pending_texture_retirement();
+        return Ok(prepared.skip_main());
     }
     if vk_state.swapchain_dirty {
         vk_state
@@ -1600,108 +2058,106 @@ fn render_main_window(
         Ok(v) => v,
         Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR) => {
             vk_state.swapchain_dirty = true;
-            return renderer.pending_texture_retirement();
+            return Ok(prepared.skip_main());
         }
         Err(e) => return Err(Box::new(e)),
     };
     let image_index_usize = image_index as usize;
-    let submission =
-        (|| -> Result<(Option<TextureRetirementBatch>, vk::Semaphore), Box<dyn Error>> {
-            let image_fence = vk_state
-                .images_in_flight
-                .get(image_index_usize)
-                .copied()
-                .ok_or("acquired Ash main image has no in-flight fence slot")?;
-            let present_semaphore = vk_state
-                .swapchain
-                .present_semaphores
-                .get(image_index_usize)
-                .copied()
-                .ok_or("acquired Ash main image has no present semaphore")?;
-            #[cfg(not(feature = "ash-dynamic-rendering"))]
-            let framebuffer = vk_state
-                .swapchain
-                .framebuffers
-                .get(image_index_usize)
-                .copied()
-                .ok_or("acquired Ash main image has no framebuffer")?;
-            #[cfg(feature = "ash-dynamic-rendering")]
-            let image = vk_state
-                .swapchain
-                .images
-                .get(image_index_usize)
-                .copied()
-                .ok_or("acquired Ash main image is missing")?;
-            #[cfg(feature = "ash-dynamic-rendering")]
-            let image_view = vk_state
-                .swapchain
-                .image_views
-                .get(image_index_usize)
-                .copied()
-                .ok_or("acquired Ash main image has no image view")?;
-            #[cfg(feature = "ash-dynamic-rendering")]
-            let old_layout = vk_state
-                .swapchain
-                .image_layouts
-                .get(image_index_usize)
-                .copied()
-                .ok_or("acquired Ash main image has no tracked layout")?;
+    let submission = (|| -> Result<(RendererFrameCompletion, vk::Semaphore), Box<dyn Error>> {
+        let image_fence = vk_state
+            .images_in_flight
+            .get(image_index_usize)
+            .copied()
+            .ok_or("acquired Ash main image has no in-flight fence slot")?;
+        let present_semaphore = vk_state
+            .swapchain
+            .present_semaphores
+            .get(image_index_usize)
+            .copied()
+            .ok_or("acquired Ash main image has no present semaphore")?;
+        #[cfg(not(feature = "ash-dynamic-rendering"))]
+        let framebuffer = vk_state
+            .swapchain
+            .framebuffers
+            .get(image_index_usize)
+            .copied()
+            .ok_or("acquired Ash main image has no framebuffer")?;
+        #[cfg(feature = "ash-dynamic-rendering")]
+        let image = vk_state
+            .swapchain
+            .images
+            .get(image_index_usize)
+            .copied()
+            .ok_or("acquired Ash main image is missing")?;
+        #[cfg(feature = "ash-dynamic-rendering")]
+        let image_view = vk_state
+            .swapchain
+            .image_views
+            .get(image_index_usize)
+            .copied()
+            .ok_or("acquired Ash main image has no image view")?;
+        #[cfg(feature = "ash-dynamic-rendering")]
+        let old_layout = vk_state
+            .swapchain
+            .image_layouts
+            .get(image_index_usize)
+            .copied()
+            .ok_or("acquired Ash main image has no tracked layout")?;
 
-            if image_fence != vk::Fence::null() {
-                unsafe {
-                    vk_state
-                        .ctx
-                        .device
-                        .wait_for_fences(&[image_fence], true, u64::MAX)?;
-                }
-            }
+        if image_fence != vk::Fence::null() {
             unsafe {
                 vk_state
                     .ctx
                     .device
-                    .reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::empty())?;
+                    .wait_for_fences(&[image_fence], true, u64::MAX)?;
             }
+        }
+        unsafe {
+            vk_state
+                .ctx
+                .device
+                .reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::empty())?;
+        }
 
-            let texture_retirement = record_command_buffer(
-                &vk_state.ctx.device,
-                command_buffer,
-                vk_state.render_target,
-                #[cfg(not(feature = "ash-dynamic-rendering"))]
-                framebuffer,
-                #[cfg(feature = "ash-dynamic-rendering")]
-                image,
-                #[cfg(feature = "ash-dynamic-rendering")]
-                image_view,
-                #[cfg(feature = "ash-dynamic-rendering")]
-                old_layout,
-                vk_state.swapchain.extent,
-                clear_color,
-                // SAFETY: cmd is recording inside the compatible render pass and is submitted before
-                // any renderer resource can be retired or destroyed.
-                |cmd| unsafe { renderer.cmd_draw(cmd, rendered_frame) },
+        let completion = record_command_buffer(
+            &vk_state.ctx.device,
+            command_buffer,
+            vk_state.render_target,
+            #[cfg(not(feature = "ash-dynamic-rendering"))]
+            framebuffer,
+            #[cfg(feature = "ash-dynamic-rendering")]
+            image,
+            #[cfg(feature = "ash-dynamic-rendering")]
+            image_view,
+            #[cfg(feature = "ash-dynamic-rendering")]
+            old_layout,
+            vk_state.swapchain.extent,
+            clear_color,
+            // SAFETY: cmd is recording inside the compatible render pass and is submitted before
+            // any renderer resource can be retired or destroyed.
+            |cmd| unsafe { renderer.cmd_draw_main(cmd, prepared) },
+        )?;
+
+        let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
+        let submit_info = vk::SubmitInfo::default()
+            .wait_semaphores(std::slice::from_ref(&image_available))
+            .wait_dst_stage_mask(&wait_stages)
+            .command_buffers(std::slice::from_ref(&command_buffer))
+            .signal_semaphores(std::slice::from_ref(&present_semaphore));
+        unsafe {
+            vk_state.ctx.device.reset_fences(&[frame_fence])?;
+            vk_state.ctx.device.queue_submit(
+                vk_state.ctx.queue,
+                std::slice::from_ref(&submit_info),
+                frame_fence,
             )?;
-
-            let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-            let submit_info = vk::SubmitInfo::default()
-                .wait_semaphores(std::slice::from_ref(&image_available))
-                .wait_dst_stage_mask(&wait_stages)
-                .command_buffers(std::slice::from_ref(&command_buffer))
-                .signal_semaphores(std::slice::from_ref(&present_semaphore));
-            unsafe {
-                vk_state.ctx.device.reset_fences(&[frame_fence])?;
-                vk_state.ctx.device.queue_submit(
-                    vk_state.ctx.queue,
-                    std::slice::from_ref(&submit_info),
-                    frame_fence,
-                )?;
-            }
-            Ok((texture_retirement, present_semaphore))
-        })();
-    let (texture_retirement, present_semaphore) = match submission {
+        }
+        Ok((completion, present_semaphore))
+    })();
+    let (completion, present_semaphore) = match submission {
         Ok(submission) => submission,
         Err(error) => {
-            if let Err(recovery_error) =
-                recover_aborted_main_acquire(vk_state, renderer, window, frame_index)
+            if let Err(recovery_error) = recover_aborted_main_acquire(vk_state, window, frame_index)
             {
                 return Err(format!(
                     "Ash main acquire failed before submit: {error}; recovery also failed: {recovery_error}"
@@ -1742,7 +2198,7 @@ fn render_main_window(
     }
 
     vk_state.frame_index = (vk_state.frame_index + 1) % vk_state.frames.len();
-    Ok(texture_retirement)
+    Ok(completion)
 }
 
 #[app_impl]
@@ -1778,7 +2234,13 @@ impl Sdl3AshApp {
     }
 
     fn app_iterate(&self) -> AppResult {
-        let mut events = self.events.drain();
+        let mut events = match self.events.try_drain() {
+            Ok(events) => events,
+            Err(error) => {
+                eprintln!("SDL3 callback event handoff failed: {error}");
+                return AppResult::Failure;
+            }
+        };
         let mut main_guard = self.main.assert_get().borrow_mut();
         let main = &mut main_guard.app;
         while let Some(event) = events.pop() {

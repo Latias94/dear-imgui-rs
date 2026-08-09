@@ -191,7 +191,10 @@ impl Ui {
     where
         F: FnOnce() -> R,
     {
-        self.begin_modal_popup(name).map(|_token| f())
+        let token = self.begin_modal_popup(name)?;
+        let result = f();
+        drop(token);
+        Some(result)
     }
 
     /// Creates a modal popup with an opened-state tracking variable and runs a closure to
@@ -207,8 +210,10 @@ impl Ui {
     where
         F: FnOnce() -> R,
     {
-        self.begin_modal_popup_with_opened(name, opened)
-            .map(|_token| f())
+        let token = self.begin_modal_popup_with_opened(name, opened)?;
+        let result = f();
+        drop(token);
+        Some(result)
     }
 
     /// Closes the current popup.

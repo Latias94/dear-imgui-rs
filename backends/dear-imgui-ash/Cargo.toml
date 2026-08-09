@@ -27,6 +27,9 @@ winit = { workspace = true, optional = true }
 gpu-allocator = { version = "0.28", default-features = false, features = ["std", "vulkan"], optional = true }
 vk-mem = { version = "0.5", optional = true }
 
+[dev-dependencies]
+static_assertions = "1.1"
+
 [features]
 default = []
 # Enable gpu-allocator for internal buffers/textures

@@ -40,9 +40,10 @@ use bevy_input::touch::{TouchInput, TouchPhase};
 use bevy_math::UVec2;
 use bevy_math::{IVec2, Vec2};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-use bevy_render::{Render, RenderApp, extract_plugin::ExtractPlugin};
+use bevy_render::{Render, extract_plugin::ExtractPlugin};
 #[cfg(feature = "render")]
 use bevy_render::{
+    RenderApp,
     camera::CameraRenderGraph,
     render_resource::{Extent3d, TextureDimension, TextureFormat},
     texture::ManualTextureViews,
@@ -199,10 +200,22 @@ fn create_native_viewport_window(
 }
 
 fn prepare_imgui_context(app: &mut App) {
+    #[cfg(feature = "render")]
+    let uses_managed_renderer = app.get_sub_app(RenderApp).is_some();
+    #[cfg(not(feature = "render"))]
+    let uses_managed_renderer = false;
     configure_primary(app, |context| {
         context.io_mut().set_delta_time(1.0 / 60.0);
         context.io_mut().set_config_input_trickle_event_queue(false);
-        let _ = context.font_atlas().build();
+        if !uses_managed_renderer {
+            let legacy = context
+                .font_atlas()
+                .try_claim_legacy_renderer()
+                .expect("the headless input fixture uses a legacy font atlas");
+            if !legacy.is_built() {
+                legacy.build();
+            }
+        }
         let _ = context.set_ini_filename::<std::path::PathBuf>(None);
     });
 }
@@ -275,10 +288,19 @@ fn configure_context<T>(
 
 #[cfg(feature = "render")]
 fn prepare_context(app: &mut App, context_id: ContextId) {
+    let uses_managed_renderer = app.get_sub_app(RenderApp).is_some();
     configure_context(app, context_id, |context| {
         context.io_mut().set_delta_time(1.0 / 60.0);
         context.io_mut().set_config_input_trickle_event_queue(false);
-        let _ = context.font_atlas().build();
+        if !uses_managed_renderer {
+            let legacy = context
+                .font_atlas()
+                .try_claim_legacy_renderer()
+                .expect("the headless routed-input fixture uses a legacy font atlas");
+            if !legacy.is_built() {
+                legacy.build();
+            }
+        }
         let _ = context.set_ini_filename::<std::path::PathBuf>(None);
     });
 }
@@ -352,7 +374,7 @@ fn begin_frame_for_context(
     configure_context(app, context_id, |context| {
         let frame = context.begin_frame();
         assert_ui(frame.ui());
-        let _ = frame.render();
+        let _ = frame.render_legacy();
     });
 }
 

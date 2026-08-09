@@ -155,7 +155,7 @@ mod tests {
 
     #[test]
     fn draw_command_params_resolve_managed_texture_ids() {
-        let mut texture = crate::texture::OwnedTextureData::new();
+        let mut texture = crate::texture::OwnedTextureData::empty();
         let texture_id = TextureId::new(17);
         unsafe {
             // The test-owned texture and synthetic command remain alive for the assertion below.
@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn draw_command_iteration_allows_pending_managed_textures() {
-        let mut texture = crate::texture::OwnedTextureData::new();
+        let mut texture = crate::texture::OwnedTextureData::empty();
         assert!(texture.tex_id().is_null());
 
         let mut command = sys::ImDrawCmd::default();

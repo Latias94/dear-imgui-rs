@@ -24,7 +24,8 @@ use super::{
     surface::render_surface_frame,
 };
 use crate::{
-    AppConfig, Application, GpuGeneration, InitContext, RedrawMode, RunError, ShutdownContext,
+    AppConfig, Application, ApplicationStage, GpuGeneration, InitContext, RedrawMode, RunError,
+    ShutdownContext,
 };
 
 pub(crate) fn run<A: Application + 'static>(
@@ -153,7 +154,9 @@ impl Runtime {
             config,
         };
         let mut gpu = generation.context(window)?;
-        application.initialized(&mut init, &mut gpu)?;
+        application
+            .initialized(&mut init, &mut gpu)
+            .map_err(|error| error.during_application_stage(ApplicationStage::Initialized))?;
         super::state::validate_supported_imgui_config(&ui.context)
     }
 
@@ -184,7 +187,9 @@ impl Runtime {
                 window: &window.window,
                 exit_requested: &mut exit_requested,
             };
-            application.event(&mut context)?;
+            application
+                .event(&mut context)
+                .map_err(|error| error.during_application_stage(ApplicationStage::Event))?;
         }
         super::state::validate_supported_imgui_config(&ui.context)?;
 
@@ -268,7 +273,10 @@ impl Runtime {
             window: &window.window,
             generation,
         };
-        application.shutdown(&mut context).err()
+        application
+            .shutdown(&mut context)
+            .map_err(|error| error.during_application_stage(ApplicationStage::Shutdown))
+            .err()
     }
 
     fn fail(&mut self, error: RunError) {
@@ -306,7 +314,9 @@ impl<A: Application> GenerationRelease<RuntimeGeneration> for RuntimeRecovery<'_
 impl<A: Application> RecoveryEffects<RuntimeGeneration> for RuntimeRecovery<'_, A> {
     fn gpu_lost(&mut self, generation: &mut RuntimeGeneration) -> Result<(), RunError> {
         let mut context = generation.context(self.window)?;
-        self.application.gpu_lost(&mut context)
+        self.application
+            .gpu_lost(&mut context)
+            .map_err(|error| error.during_application_stage(ApplicationStage::GpuLost))
     }
 
     fn invalidate_resources(&mut self, generation: &mut RuntimeGeneration) -> Result<(), RunError> {
@@ -319,7 +329,9 @@ impl<A: Application> RecoveryEffects<RuntimeGeneration> for RuntimeRecovery<'_, 
 
     fn gpu_recreated(&mut self, generation: &mut RuntimeGeneration) -> Result<(), RunError> {
         let mut context = generation.context(self.window)?;
-        self.application.gpu_recreated(&mut context)
+        self.application
+            .gpu_recreated(&mut context)
+            .map_err(|error| error.during_application_stage(ApplicationStage::GpuRecreated))
     }
 }
 

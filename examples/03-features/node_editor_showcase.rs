@@ -1,12 +1,12 @@
 //! Blueprints-style imgui-node-editor example for the `dear-node-editor` safe API.
 
-#[path = "../support/node_editor_blueprint.rs"]
+#[path = "node_editor_showcase_blueprint.rs"]
 mod node_editor_blueprint;
 #[path = "../support/wgpu_init.rs"]
 mod wgpu_init;
 
 use dear_imgui_rs::*;
-use dear_imgui_wgpu::{GammaMode, WgpuInitInfo, WgpuRenderer};
+use dear_imgui_wgpu::{FramebufferExtent, GammaMode, WgpuInitInfo, WgpuRenderer};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform};
 use dear_node_editor::{
     CanvasSizeMode, EditorConfig, EditorContext, FlowDirection, LinkId, NodeEditorFrame,
@@ -485,7 +485,10 @@ impl AppWindow {
         );
 
         self.imgui.platform.prepare_render(&ui, &self.window)?;
-        let draw_data = self.imgui.context.render();
+        let pending_frame = self
+            .imgui
+            .context
+            .render(self.imgui.renderer.renderer_consumer()?);
 
         let (output, reconfigure_after_present) = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
@@ -528,7 +531,11 @@ impl AppWindow {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            self.imgui.renderer.render(draw_data, &mut render_pass)?;
+            self.imgui.renderer.render(
+                pending_frame,
+                &mut render_pass,
+                FramebufferExtent::from_texture(&output.texture),
+            )?;
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -611,13 +618,12 @@ fn load_header_background_texture() -> Result<texture::OwnedTextureData, Box<dyn
 
     let image = ::image::ImageReader::open(&path)?.decode()?.to_rgba8();
     let (width, height) = image.dimensions();
-    let mut texture = texture::OwnedTextureData::new();
-    texture.create(
+    let texture = texture::OwnedTextureData::from_pixels(
         texture::TextureFormat::RGBA32,
         u32::try_from(width).expect("header texture width fits u32"),
         u32::try_from(height).expect("header texture height fits u32"),
-    );
-    texture.set_data(image.as_raw());
+        image.as_raw(),
+    )?;
     Ok(texture)
 }
 

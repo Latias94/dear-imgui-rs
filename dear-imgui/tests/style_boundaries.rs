@@ -1,5 +1,6 @@
 use dear_imgui_rs as imgui;
 use imgui::internal::RawWrapper;
+use std::any::Any;
 use std::sync::{Mutex, OnceLock};
 
 fn test_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -12,7 +13,10 @@ fn prepare_context(ctx: &mut imgui::Context) {
     io.set_display_size([800.0, 600.0]);
     io.set_delta_time(1.0 / 60.0);
 
-    let _ = ctx.font_atlas().build();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 }
 
@@ -21,6 +25,16 @@ fn first_unknown_bit(known_bits: i32) -> i32 {
         .map(|shift| 1_i32 << shift)
         .find(|candidate| known_bits & candidate == 0)
         .expect("test requires at least one spare positive flag bit")
+}
+
+fn panic_message(payload: Box<dyn Any + Send>) -> String {
+    match payload.downcast::<String>() {
+        Ok(message) => *message,
+        Err(payload) => match payload.downcast::<&'static str>() {
+            Ok(message) => (*message).to_owned(),
+            Err(_) => "non-string panic payload".to_owned(),
+        },
+    }
 }
 
 macro_rules! assert_panics {
@@ -166,6 +180,11 @@ fn style_setters_reject_non_finite_or_invalid_runtime_numbers_before_storing() {
 
     assert_panics!({
         style.set_font_scale_main(0.0);
+    });
+    assert_eq!(style.font_scale_main(), 1.2);
+
+    assert_panics!({
+        style.set_font_scale_main(f32::NAN);
     });
     assert_eq!(style.font_scale_main(), 1.2);
 
@@ -383,4 +402,136 @@ fn tree_node_flags_include_public_upstream_draw_line_bits() {
         imgui::TreeNodeFlags::COLLAPSING_HEADER.bits(),
         imgui::sys::ImGuiTreeNodeFlags_CollapsingHeader
     );
+}
+
+#[test]
+fn ui_native_scope_tokens_reject_out_of_order_drop_before_ffi_and_recover() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+
+    let ui = ctx.frame();
+    let baseline = unsafe { ui.style().clone() };
+    let _ = ui.window("native scope order").build(|| {
+        let outer = ui.push_style_color(imgui::StyleColor::Text, [0.2, 0.3, 0.4, 1.0]);
+        let inner = ui.push_style_color(imgui::StyleColor::Button, [0.4, 0.3, 0.2, 1.0]);
+
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(outer)))
+            .expect_err("out-of-order drop should panic");
+        assert!(panic_message(panic).contains("native scope order violation"));
+
+        let blocked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ui.text("must not cross FFI while recovery is pending");
+        }))
+        .expect_err("ordinary UI calls should be blocked during recovery");
+        assert!(panic_message(blocked).contains("native scope order was violated"));
+
+        drop(inner);
+        assert_eq!(
+            unsafe { ui.style().color(imgui::StyleColor::Text) },
+            baseline.color(imgui::StyleColor::Text)
+        );
+        assert_eq!(
+            unsafe { ui.style().color(imgui::StyleColor::Button) },
+            baseline.color(imgui::StyleColor::Button)
+        );
+        ui.text("scope tracker recovered");
+    });
+}
+
+#[test]
+fn independent_native_stacks_can_be_ended_in_either_order() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+
+    let ui = ctx.frame();
+    let baseline = unsafe { ui.style().clone() };
+    let _ = ui.window("independent native stacks").build(|| {
+        let color = ui.push_style_color(imgui::StyleColor::Text, [0.2, 0.3, 0.4, 1.0]);
+        let id = ui.push_id("independent-id");
+
+        color.pop();
+        assert_eq!(
+            unsafe { ui.style().color(imgui::StyleColor::Text) },
+            baseline.color(imgui::StyleColor::Text)
+        );
+        ui.text("ID stack remains active");
+        id.pop();
+        ui.text("both stacks recovered");
+    });
+}
+
+#[test]
+fn style_tokens_may_span_nested_windows_without_escaping_their_source_scope() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+
+    let ui = ctx.frame();
+    let baseline = unsafe { ui.style().color(imgui::StyleColor::Text) };
+    let color = ui.push_style_color(imgui::StyleColor::Text, [0.2, 0.3, 0.4, 1.0]);
+
+    let _ = ui.window("nested style consumer").build(|| {
+        assert_eq!(
+            unsafe { ui.style().color(imgui::StyleColor::Text) },
+            [0.2, 0.3, 0.4, 1.0]
+        );
+        ui.text("the outer style remains active");
+    });
+    color.pop();
+    assert_eq!(
+        unsafe { ui.style().color(imgui::StyleColor::Text) },
+        baseline
+    );
+}
+
+#[test]
+fn style_tokens_cannot_be_popped_from_a_nested_window() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+
+    let ui = ctx.frame();
+    let baseline = unsafe { ui.style().color(imgui::StyleColor::Text) };
+    let color = ui.push_style_color(imgui::StyleColor::Text, [0.2, 0.3, 0.4, 1.0]);
+
+    let _ = ui.window("foreign style consumer").build(|| {
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| color.pop()))
+            .expect_err("a style token must remain in its source window scope");
+        assert!(panic_message(panic).contains("outside its original frame and window Begin scope"));
+    });
+
+    assert_eq!(
+        unsafe { ui.style().color(imgui::StyleColor::Text) },
+        baseline
+    );
+    ui.text("deferred style cleanup restored the source scope");
+}
+
+#[test]
+fn style_tokens_cannot_escape_the_window_that_created_them() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+
+    let ui = ctx.frame();
+    let baseline = unsafe { ui.style().color(imgui::StyleColor::Text) };
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = ui
+            .window("style token source window")
+            .build(|| ui.push_style_color(imgui::StyleColor::Text, [0.2, 0.3, 0.4, 1.0]));
+    }))
+    .expect_err("ending a window with an active style token must panic before FFI");
+    assert!(panic_message(panic).contains("window-local scope"));
+    assert_eq!(
+        unsafe { ui.style().color(imgui::StyleColor::Text) },
+        baseline
+    );
+    ui.text("unwinding restored both the style and window scopes");
 }

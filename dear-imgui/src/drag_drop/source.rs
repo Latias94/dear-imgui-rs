@@ -122,20 +122,34 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
 ///
 /// While this token exists, you can add UI elements that will be shown
 /// as a tooltip during the drag operation.
+///
+/// The token must finish after every nested window-like scope and in its originating window
+/// `Begin` scope. Prefer [`crate::Ui::drag_drop_source_config`] closure composition when possible.
 #[derive(Debug)]
+#[must_use]
 #[doc(alias = "EndDragDropSource")]
 pub struct DragDropSourceTooltip<'ui> {
-    _ui: &'ui Ui,
+    scope: crate::scope::NativeScopeToken<'ui>,
 }
 
 impl<'ui> DragDropSourceTooltip<'ui> {
     fn new(ui: &'ui Ui) -> Self {
-        Self { _ui: ui }
+        Self {
+            scope: ui.begin_native_scope(
+                crate::scope::NativeScopePop::EndDragDropSource,
+                "DragDropSourceTooltip",
+            ),
+        }
     }
 
     /// End the drag source tooltip manually
     ///
     /// This is called automatically when the token is dropped.
+    ///
+    /// # Panics
+    ///
+    /// Panics before FFI if a nested window-like scope is active or this token is outside its
+    /// originating window `Begin` scope.
     pub fn end(self) {
         // Drop will handle cleanup
     }
@@ -143,7 +157,6 @@ impl<'ui> DragDropSourceTooltip<'ui> {
 
 impl Drop for DragDropSourceTooltip<'_> {
     fn drop(&mut self) {
-        self._ui
-            .run_with_bound_context(|| unsafe { sys::igEndDragDropSource() });
+        self.scope.finish();
     }
 }

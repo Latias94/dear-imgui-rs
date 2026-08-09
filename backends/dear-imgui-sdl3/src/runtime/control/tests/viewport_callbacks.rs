@@ -164,10 +164,7 @@ fn real_imgui_destroy_platform_windows_restores_foreign_viewport_state_after_cor
         (*main_viewport).RendererUserData = std::ptr::null_mut();
         (*main_viewport).PlatformWindowCreated = false;
     });
-    let mut faults = Vec::new();
-    while let Err(fault) = runtime.poll_fault() {
-        faults.push(fault);
-    }
+    let faults = runtime.drain_faults();
     assert!(faults.iter().any(|fault| {
         matches!(
             fault,
@@ -179,7 +176,8 @@ fn real_imgui_destroy_platform_windows_restores_foreign_viewport_state_after_cor
     assert!(
         faults
             .iter()
-            .any(|fault| { matches!(fault, Sdl3BackendError::ForeignPlatformUserData) })
+            .all(|fault| !matches!(fault, Sdl3BackendError::ForeignPlatformUserData)),
+        "the terminal foreign-user-data root cause must be reported only once"
     );
     assert!(faults.iter().any(|fault| {
         matches!(
@@ -635,6 +633,35 @@ fn callback_panic_latches_shutdown_after_the_fault_is_consumed() {
     runtime.shutdown_platform(&mut context).unwrap();
 }
 
+#[test]
+fn native_faults_report_the_original_share_configuration_failure_first() {
+    let _guard = crate::tests::test_guard();
+    let mut context = Context::create();
+    let mut runtime = synthetic_claimed_registration(
+        &mut context,
+        Rc::new(Cell::new(0)),
+        Rc::new(Cell::new(0)),
+        Rc::new(Cell::new(0)),
+        synthetic_create_window,
+    );
+    let share_configuration = 1_u64 << 1;
+    let context_creation = 1_u64 << 4;
+
+    runtime
+        .control
+        .record_native_faults(share_configuration | context_creation, share_configuration);
+
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(Sdl3BackendError::ViewportOpenGlShareConfigurationFailed)
+    ));
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(Sdl3BackendError::ViewportOpenGlContextFailed)
+    ));
+    runtime.shutdown_platform(&mut context).unwrap();
+}
+
 #[cfg(feature = "sdlgpu3-renderer")]
 #[test]
 fn sdlgpu_create_failure_clears_upstream_sentinel_before_destroy_can_release_it() {
@@ -651,7 +678,7 @@ fn sdlgpu_create_failure_clears_upstream_sentinel_before_destroy_can_release_it(
         let mut viewport = sys::ImGuiViewport::default();
         viewport.RendererUserData = OWNED_BACKEND_DATA as *mut _;
 
-        runtime.control.record_native_faults(fault);
+        runtime.control.record_native_faults(fault, fault);
         unsafe { finish_sdlgpu_renderer_create(&runtime.control, &mut viewport, fault) };
 
         assert!(viewport.RendererUserData.is_null());
@@ -682,7 +709,13 @@ fn sdlgpu_create_failure_clears_upstream_sentinel_before_destroy_can_release_it(
 #[test]
 fn sdlgpu_secondary_render_faults_are_typed_and_close_the_viewport() {
     let _guard = crate::tests::test_guard();
-    for fault in [1_u64 << 14, 1_u64 << 15, 1_u64 << 16, 1_u64 << 17] {
+    for fault in [
+        1_u64 << 14,
+        1_u64 << 15,
+        1_u64 << 16,
+        1_u64 << 17,
+        1_u64 << 18,
+    ] {
         let mut context = Context::create();
         let mut runtime = synthetic_claimed_registration(
             &mut context,
@@ -693,7 +726,7 @@ fn sdlgpu_secondary_render_faults_are_typed_and_close_the_viewport() {
         );
         let mut viewport = sys::ImGuiViewport::default();
 
-        runtime.control.record_native_faults(fault);
+        runtime.control.record_native_faults(fault, fault);
         runtime.control.mark_viewport_failed(&mut viewport);
 
         assert!(viewport.PlatformRequestClose);
@@ -712,11 +745,45 @@ fn sdlgpu_secondary_render_faults_are_typed_and_close_the_viewport() {
                 error,
                 Err(Sdl3BackendError::ViewportSdlGpuRenderPassFailed)
             )),
-            _ => assert!(matches!(
+            value if value == 1_u64 << 17 => assert!(matches!(
                 error,
                 Err(Sdl3BackendError::ViewportSdlGpuSubmitFailed)
+            )),
+            _ => assert!(matches!(
+                error,
+                Err(Sdl3BackendError::ViewportSdlGpuCommandBufferCancelFailed)
             )),
         }
         runtime.shutdown_platform(&mut context).unwrap();
     }
+}
+
+#[cfg(feature = "sdlgpu3-renderer")]
+#[test]
+fn sdlgpu_swapchain_failure_is_reported_before_command_buffer_cancel_failure() {
+    let _guard = crate::tests::test_guard();
+    let mut context = Context::create();
+    let mut runtime = synthetic_claimed_registration(
+        &mut context,
+        Rc::new(Cell::new(0)),
+        Rc::new(Cell::new(0)),
+        Rc::new(Cell::new(0)),
+        synthetic_create_window,
+    );
+    let swapchain_fault = 1_u64 << 15;
+    let cancel_fault = 1_u64 << 18;
+
+    runtime
+        .control
+        .record_native_faults(swapchain_fault | cancel_fault, swapchain_fault);
+
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(Sdl3BackendError::ViewportSdlGpuSwapchainFailed)
+    ));
+    assert!(matches!(
+        runtime.poll_fault(),
+        Err(Sdl3BackendError::ViewportSdlGpuCommandBufferCancelFailed)
+    ));
+    runtime.shutdown_platform(&mut context).unwrap();
 }

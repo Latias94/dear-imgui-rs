@@ -13,7 +13,7 @@ use dear_imgui_rs::ContextPlatformWindowTeardown;
 use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentHandle, ContextAttachmentLease,
     ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding, ContextDestroyed,
-    ContextTeardown,
+    ContextId, ContextTeardown,
 };
 use winit::window::Window;
 
@@ -407,6 +407,17 @@ impl WinitPlatformControl {
             .is_some_and(|runtime| !runtime.is_released())
     }
 
+    #[cfg(feature = "multi-viewport")]
+    pub(crate) fn runtime_control(
+        &self,
+    ) -> Result<Rc<crate::multi_viewport::RuntimeControl>, WinitPlatformError> {
+        self.runtime
+            .borrow()
+            .clone()
+            .filter(|runtime| !runtime.is_released())
+            .ok_or(WinitPlatformError::RuntimeDetached)
+    }
+
     pub(crate) fn attachment_handle(&self) -> Result<ContextAttachmentHandle, WinitPlatformError> {
         self.attachment_handle
             .borrow()
@@ -530,7 +541,7 @@ impl ContextAttachment for WinitPlatformControl {
         let runtime = self.runtime.borrow().clone();
         context
             .with_bound_context(|| -> Result<(), WinitPlatformError> {
-                // `WinitPlatformRuntime::shutdown` already performed its typed preflight and
+                // `WinitPlatform::disable_viewports` already performed its typed preflight and
                 // opened this callback guard before it entered the core transaction. Preserve
                 // that error path instead of wrapping it through the generic attachment error.
                 if runtime
@@ -643,6 +654,12 @@ impl WinitPlatform {
             ime_auto_manage: true,
             last_frame: Instant::now(),
         })
+    }
+
+    /// Returns the Dear ImGui Context identity owned by this platform backend.
+    #[must_use]
+    pub fn context_id(&self) -> ContextId {
+        self.control.binding.id()
     }
 
     /// Attach the platform to a window.

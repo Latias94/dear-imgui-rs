@@ -223,7 +223,7 @@ mod tests {
         let raw_imgui_a = imgui_a.as_raw();
         let editor_a = EditorContext::create(&imgui_a);
         let raw_editor_a = editor_a.as_raw_native();
-        let suspended_a = imgui_a.suspend();
+        let suspended_a = imgui_a.suspend_or_panic();
 
         let imgui_b = ImGuiContext::create();
         let raw_imgui_b = imgui_b.as_raw();
@@ -275,7 +275,7 @@ mod tests {
         let _guard = test_guard();
         let imgui_a = ImGuiContext::create();
         let editor_a = EditorContext::create(&imgui_a);
-        let suspended_a = imgui_a.suspend();
+        let suspended_a = imgui_a.suspend_or_panic();
 
         let imgui_b = ImGuiContext::create();
         let raw_imgui_b = imgui_b.as_raw();
@@ -340,19 +340,23 @@ mod tests {
         let _guard = test_guard();
         let imgui_a = ImGuiContext::create();
         let editor = EditorContext::create(&imgui_a);
-        let suspended_a = imgui_a.suspend();
+        let suspended_a = imgui_a.suspend_or_panic();
 
         let mut imgui_b = ImGuiContext::create();
         imgui_b.io_mut().set_display_size([640.0, 480.0]);
         imgui_b.io_mut().set_delta_time(1.0 / 60.0);
-        let _ = imgui_b.font_atlas().build();
+        imgui_b
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("headless test requires the legacy font-atlas capability")
+            .build();
         let ui = imgui_b.frame();
 
         let result = catch_unwind(AssertUnwindSafe(|| {
             let _ = ui.node_editor(&editor, "wrong-context", [320.0, 240.0]);
         }));
         assert!(result.is_err());
-        drop(imgui_b.render());
+        drop(imgui_b.render_legacy());
 
         drop(imgui_b);
         let imgui_a = suspended_a.activate().expect("context A should reactivate");
@@ -366,12 +370,16 @@ mod tests {
         let mut imgui = ImGuiContext::create();
         imgui.io_mut().set_display_size([640.0, 480.0]);
         imgui.io_mut().set_delta_time(1.0 / 60.0);
-        let _ = imgui.font_atlas().build();
+        imgui
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("headless test requires the legacy font-atlas capability")
+            .build();
 
         let _editor = EditorContext::create(&imgui);
 
         imgui.frame();
-        drop(imgui.render());
+        drop(imgui.render_legacy());
     }
 
     #[test]
@@ -380,7 +388,11 @@ mod tests {
         let mut imgui = ImGuiContext::create();
         imgui.io_mut().set_display_size([640.0, 480.0]);
         imgui.io_mut().set_delta_time(1.0 / 60.0);
-        let _ = imgui.font_atlas().build();
+        imgui
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("headless test requires the legacy font-atlas capability")
+            .build();
 
         let editor_context = EditorContext::create(&imgui);
         let node_a = NodeId::new(1);
@@ -464,7 +476,7 @@ mod tests {
 
             editor.end();
         });
-        drop(imgui.render());
+        drop(imgui.render_legacy());
     }
 
     #[test]
@@ -473,7 +485,11 @@ mod tests {
         let mut imgui = ImGuiContext::create();
         imgui.io_mut().set_display_size([640.0, 480.0]);
         imgui.io_mut().set_delta_time(1.0 / 60.0);
-        let _ = imgui.font_atlas().build();
+        imgui
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("headless test requires the legacy font-atlas capability")
+            .build();
 
         let editor_a = EditorContext::create(&imgui);
         let editor_b = EditorContext::create(&imgui);
@@ -498,7 +514,7 @@ mod tests {
             drop(frame);
             assert_eq!(unsafe { sys::dne_get_current_editor_raw() }, raw_b);
         });
-        drop(imgui.render());
+        drop(imgui.render_legacy());
 
         unsafe { sys::dne_set_current_editor_raw(ptr::null_mut()) };
 

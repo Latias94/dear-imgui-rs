@@ -11,17 +11,20 @@ use winit::{
 
 use crate::application::DockingController;
 use crate::{
-    AppConfig, Application, GpuApi, GpuContext, GpuGeneration, InitContext, RunError,
-    ShutdownContext, Theme,
+    AppConfig, Application, ApplicationStage, GpuApi, GpuContext, GpuGeneration, InitContext,
+    RunError, ShutdownContext, Theme,
 };
 
 use super::recovery::OwnedGpuGeneration;
 
 pub(crate) fn platform_error(
-    stage: &'static str,
+    operation: &'static str,
     error: dear_imgui_winit::WinitPlatformError,
 ) -> RunError {
-    RunError::application(stage, error.to_string())
+    RunError::Platform {
+        operation,
+        source: error,
+    }
 }
 
 pub(crate) fn preserve_initialization_error(
@@ -48,7 +51,9 @@ fn shutdown_after_initialization_failure<A: Application>(
         window,
         generation: None,
     };
-    application.shutdown(&mut shutdown)
+    application
+        .shutdown(&mut shutdown)
+        .map_err(|error| error.during_application_stage(ApplicationStage::Shutdown))
 }
 
 fn abort_context_initialization<A: Application>(
@@ -312,7 +317,9 @@ impl UiState {
                     window: &window.window,
                     config,
                 };
-                application.configure_imgui(&mut init)?;
+                application.configure_imgui(&mut init).map_err(|error| {
+                    error.during_application_stage(ApplicationStage::ConfigureImgui)
+                })?;
                 validate_supported_imgui_config(context)
             },
             |_, context| {
@@ -585,7 +592,7 @@ mod tests {
     use std::{cell::Cell, rc::Rc};
 
     use super::{initialize_configured_ui, platform_error, preserve_initialization_error};
-    use crate::RunError;
+    use crate::{ApplicationStage, RunError};
 
     #[derive(Debug)]
     struct TestPlatform(Rc<Cell<usize>>);
@@ -605,17 +612,21 @@ mod tests {
     #[test]
     fn initialization_cleanup_runs_once_and_preserves_the_primary_error() {
         let cleanup_calls = Cell::new(0);
-        let primary = RunError::application("initialization", "primary failure");
+        let primary =
+            RunError::application_message(ApplicationStage::ConfigureImgui, "primary failure");
 
         let error = preserve_initialization_error(primary, || {
             cleanup_calls.set(cleanup_calls.get() + 1);
-            Err(RunError::application("shutdown", "cleanup failure"))
+            Err(RunError::application_message(
+                ApplicationStage::Shutdown,
+                "cleanup failure",
+            ))
         });
 
         assert_eq!(cleanup_calls.get(), 1);
         assert_eq!(
             error.to_string(),
-            "application callback failed during initialization: primary failure"
+            "application callback failed during configure_imgui: primary failure"
         );
     }
 
@@ -666,8 +677,8 @@ mod tests {
                         .shutdown(&mut context)
                         .expect("the original platform shutdown must succeed");
                     drop(context);
-                    Err(RunError::application(
-                        "shutdown",
+                    Err(RunError::application_message(
+                        ApplicationStage::Shutdown,
                         "injected cleanup failure",
                     ))
                 })
@@ -680,11 +691,13 @@ mod tests {
 
         assert_eq!(probe.configured, 1);
         assert_eq!(probe.shutdown_calls, 1);
-        assert!(
-            error
-                .to_string()
-                .starts_with("application callback failed during Winit platform initialization:")
-        );
+        assert!(matches!(
+            error,
+            RunError::Platform {
+                operation: "Winit platform initialization",
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -702,10 +715,9 @@ mod tests {
             },
             |_, _| Ok(TestPlatform(Rc::clone(&dropped_platforms))),
             |_, _, _| {
-                Err(RunError::application(
-                    "Winit main-window attachment",
-                    "injected attachment failure",
-                ))
+                Err(RunError::Recovery {
+                    message: "injected attachment failure".to_owned(),
+                })
             },
             |_, _, _| unreachable!("constructor cleanup must not run after attachment failure"),
             |state, context, platform, primary| {
@@ -713,8 +725,8 @@ mod tests {
                     state.shutdown_calls += 1;
                     drop(platform);
                     drop(context);
-                    Err(RunError::application(
-                        "shutdown",
+                    Err(RunError::application_message(
+                        ApplicationStage::Shutdown,
                         "injected cleanup failure",
                     ))
                 })
@@ -727,7 +739,7 @@ mod tests {
         assert_eq!(dropped_platforms.get(), 1);
         assert_eq!(
             error.to_string(),
-            "application callback failed during Winit main-window attachment: injected attachment failure"
+            "GPU generation recovery failed: injected attachment failure"
         );
     }
 }
