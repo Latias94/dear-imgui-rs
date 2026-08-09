@@ -626,7 +626,7 @@ jobs:
         run: >-
           cargo nextest run -p dear-imgui-wgpu --test integration_test
           --no-default-features --features "${{ matrix.features }}"
-          direct_and_explicit_render_paths_execute_raw_callbacks_with_scoped_state
+          direct_and_split_render_paths_execute_raw_callbacks_with_scoped_state
         env:
           DEAR_IMGUI_REQUIRE_WGPU_ADAPTER: "1"
           IMGUI_SYS_FORCE_BUILD: "1"

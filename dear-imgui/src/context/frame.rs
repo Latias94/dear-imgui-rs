@@ -94,7 +94,6 @@ pub struct FrameResult<'ctx, T> {
 
 impl<'ctx, T> FrameResult<'ctx, T> {
     /// Split the closure result from the pending renderer capability.
-    #[must_use]
     pub fn into_parts(self) -> (T, crate::render::PendingFrame<'ctx>) {
         (self.value, self.pending_frame)
     }
