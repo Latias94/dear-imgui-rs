@@ -39,7 +39,7 @@ impl ScopeSnapshot {
         debug_assert_eq!(unsafe { sys::igGetCurrentContext() }, ui.context_raw());
         let context = unsafe { &*ui.context_raw() };
         let frame = context.FrameCount;
-        let window = unsafe { sys::igGetCurrentWindow() };
+        let window = unsafe { sys::igGetCurrentWindowRead() };
         let window = (!window.is_null()).then(|| WindowScope {
             frame,
             window: window as usize,
@@ -896,5 +896,30 @@ impl Ui {
     pub(crate) fn current_native_scope(&self) -> ScopeSnapshot {
         let current = unsafe { ScopeSnapshot::current_raw(self) };
         self.native_scopes.borrow().resolve_scope(current)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn ending_a_top_level_window_does_not_mark_the_fallback_window_written() {
+        let mut ctx = crate::Context::create();
+        ctx.io_mut().set_display_size([128.0, 128.0]);
+        ctx.io_mut().set_delta_time(1.0 / 60.0);
+        ctx.font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("legacy renderer font atlas should be available")
+            .build();
+
+        let ui = ctx.frame();
+        ui.window("Regression").build(|| {});
+
+        let fallback = unsafe { crate::sys::igGetCurrentWindowRead() };
+        assert!(!fallback.is_null());
+        assert!(
+            !unsafe { (*fallback).WriteAccessed },
+            "ending a top-level window must not mark Dear ImGui's implicit \
+             fallback window as written-to"
+        );
     }
 }
