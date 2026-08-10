@@ -168,7 +168,9 @@ jobs:
       - name: Extract release notes
         env:
           RELEASE_TAG: ${{ inputs.tag }}
-        run: python3 -B tools/ci/run_contract.py release-notes --output release-notes.md
+        run: >-
+          python3 -B tools/ci/run_contract.py release-notes
+          --output "$RUNNER_TEMP/release-notes.md"
 
       - name: Verify every crate version is published
         run: >-
@@ -193,7 +195,7 @@ jobs:
           tag_name: ${{ inputs.tag }}
           target_commitish: ${{ github.sha }}
           name: ${{ inputs.tag }}
-          body_path: release-notes.md
+          body_path: ${{ runner.temp }}/release-notes.md
           files: ${{ runner.temp }}/release-assets/*
           fail_on_unmatched_files: true
           overwrite_files: false
