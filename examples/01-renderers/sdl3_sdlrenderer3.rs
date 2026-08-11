@@ -82,7 +82,10 @@ impl SdlRendererApp {
     }
 
     fn iterate(&self) -> Result<AppResult, Box<dyn Error>> {
-        let mut events = self.events.try_drain()?;
+        let mut events = self.events.drain();
+        if let Some(error) = events.first_fault() {
+            return Err(error.into());
+        }
         let mut main_guard = self.main.assert_get().borrow_mut();
         let main = &mut *main_guard;
         while let Some(event) = events.pop() {

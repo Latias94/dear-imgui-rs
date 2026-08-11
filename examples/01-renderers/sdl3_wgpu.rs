@@ -156,13 +156,11 @@ impl WgpuApp {
     }
 
     fn process_events(&self) -> AppResult {
-        let mut events = match self.events.try_drain() {
-            Ok(events) => events,
-            Err(error) => {
-                eprintln!("SDL3 callback event handoff failed: {error}");
-                return AppResult::Failure;
-            }
-        };
+        let mut events = self.events.drain();
+        if let Some(error) = events.first_fault() {
+            eprintln!("SDL3 callback event handoff failed: {error}");
+            return AppResult::Failure;
+        }
         let mut main_guard = self.main.assert_get().borrow_mut();
         let main = &mut *main_guard;
         while let Some(event) = events.pop() {
