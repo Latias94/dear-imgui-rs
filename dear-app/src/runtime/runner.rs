@@ -24,8 +24,8 @@ use super::{
     surface::render_surface_frame,
 };
 use crate::{
-    AppConfig, Application, ApplicationStage, GpuGeneration, InitContext, RedrawMode, RunError,
-    ShutdownContext,
+    AppConfig, Application, ApplicationStage, GpuGeneration, InitializedContext, RedrawMode,
+    RunError,
 };
 
 pub(crate) fn run<A: Application + 'static>(
@@ -148,15 +148,19 @@ impl Runtime {
             .ok_or_else(|| RunError::Recovery {
                 message: "initialized callback requested without a GPU generation".to_owned(),
             })?;
-        let mut init = InitContext {
-            imgui: &mut ui.context,
-            window: &window.window,
-            config,
-        };
-        let mut gpu = generation.context(window)?;
-        application
-            .initialized(&mut init, &mut gpu)
-            .map_err(|error| error.during_application_stage(ApplicationStage::Initialized))?;
+        super::state::run_application_frame_boundary(
+            &mut ui.context,
+            ApplicationStage::Initialized,
+            |context| {
+                let mut initialized = InitializedContext {
+                    imgui: context,
+                    window: &window.window,
+                    config,
+                };
+                let mut gpu = generation.context(window)?;
+                application.initialized(&mut initialized, &mut gpu)
+            },
+        )?;
         super::state::validate_supported_imgui_config(&ui.context)
     }
 
@@ -180,17 +184,19 @@ impl Runtime {
             .map_err(|error| super::state::platform_error("Winit event handling", error))?;
 
         let mut exit_requested = matches!(event, WindowEvent::CloseRequested);
-        {
-            let mut context = crate::EventContext {
-                event,
-                imgui: &mut ui.context,
-                window: &window.window,
-                exit_requested: &mut exit_requested,
-            };
-            application
-                .event(&mut context)
-                .map_err(|error| error.during_application_stage(ApplicationStage::Event))?;
-        }
+        super::state::run_application_frame_boundary(
+            &mut ui.context,
+            ApplicationStage::Event,
+            |imgui| {
+                let mut context = crate::EventContext {
+                    event,
+                    imgui,
+                    window: &window.window,
+                    exit_requested: &mut exit_requested,
+                };
+                application.event(&mut context)
+            },
+        )?;
         super::state::validate_supported_imgui_config(&ui.context)?;
 
         let Some(generation) = generations.current() else {
@@ -268,15 +274,13 @@ impl Runtime {
             generations,
         } = self.ownership.get_mut();
         let generation = generations.current_generation();
-        let mut context = ShutdownContext {
-            imgui: &mut ui.context,
-            window: &window.window,
+        super::state::run_application_shutdown(
+            application,
+            &mut ui.context,
+            &window.window,
             generation,
-        };
-        application
-            .shutdown(&mut context)
-            .map_err(|error| error.during_application_stage(ApplicationStage::Shutdown))
-            .err()
+        )
+        .err()
     }
 
     fn fail(&mut self, error: RunError) {

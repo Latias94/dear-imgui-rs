@@ -149,6 +149,16 @@ pub enum RunError {
     DeviceRequest(#[source] wgpu::RequestDeviceError),
     #[error("Dear ImGui context creation failed: {0}")]
     ImGuiContext(#[source] imgui::ImGuiError),
+    #[error("Dear ImGui frame admission failed: {0}")]
+    ImGuiFrame(#[source] imgui::render::RendererConsumerError),
+    #[error(
+        "application callback during {stage} changed Dear ImGui frame ownership from {before:?} to {after:?}"
+    )]
+    ImGuiFrameOwnership {
+        stage: ApplicationStage,
+        before: imgui::FrameLifecycleStamp,
+        after: imgui::FrameLifecycleStamp,
+    },
     #[error("WGPU renderer initialization failed: {0}")]
     RendererInit(#[source] dear_imgui_wgpu::RendererError),
     #[error("WGPU renderer draw failed: {0}")]
@@ -211,7 +221,9 @@ impl RunError {
     #[must_use]
     pub const fn application_stage(&self) -> Option<ApplicationStage> {
         match self {
-            Self::Application { stage, .. } => Some(*stage),
+            Self::Application { stage, .. } | Self::ImGuiFrameOwnership { stage, .. } => {
+                Some(*stage)
+            }
             _ => None,
         }
     }
@@ -222,13 +234,7 @@ impl RunError {
     }
 
     pub(crate) fn during_application_stage(self, stage: ApplicationStage) -> Self {
-        if matches!(
-            &self,
-            Self::Application {
-                stage: existing,
-                ..
-            } if *existing == stage
-        ) {
+        if self.application_stage() == Some(stage) {
             self
         } else {
             Self::application(stage, self)
@@ -250,7 +256,7 @@ pub trait Application {
     /// Runs exactly once after the window, UI state, and first GPU generation are ready.
     fn initialized(
         &mut self,
-        _init: &mut InitContext<'_>,
+        _context: &mut InitializedContext<'_>,
         _gpu: &mut GpuContext<'_>,
     ) -> Result<(), RunError> {
         Ok(())
@@ -302,6 +308,11 @@ pub struct InitContext<'a> {
 }
 
 impl InitContext<'_> {
+    /// Returns the Context before platform and renderer ownership is attached.
+    ///
+    /// This full capability exists for extension crates whose initialization API requires
+    /// `&mut Context`. The runtime validates the Context identity and frame progress when the
+    /// callback returns. Later lifecycle hooks expose only narrow capabilities.
     pub fn imgui(&mut self) -> &mut imgui::Context {
         self.imgui
     }
@@ -317,6 +328,44 @@ impl InitContext<'_> {
     }
 }
 
+/// Post-attachment initialization capabilities without Context or frame ownership.
+///
+/// ```compile_fail
+/// use dear_app::InitializedContext;
+///
+/// fn replace_context(context: &mut InitializedContext<'_>) {
+///     let _ = std::mem::replace(context.imgui(), dear_app::imgui::Context::create());
+/// }
+/// ```
+pub struct InitializedContext<'a> {
+    pub(crate) imgui: &'a mut imgui::Context,
+    pub(crate) window: &'a Window,
+    pub(crate) config: &'a AppConfig,
+}
+
+impl InitializedContext<'_> {
+    #[must_use]
+    pub fn window(&self) -> &Window {
+        self.window
+    }
+
+    #[must_use]
+    pub fn config(&self) -> &AppConfig {
+        self.config
+    }
+}
+
+/// Event-time capabilities that cannot open or render a Dear ImGui frame.
+///
+/// Frame lifecycle APIs are intentionally unavailable at this boundary:
+///
+/// ```compile_fail
+/// use dear_app::EventContext;
+///
+/// fn steal_frame(context: &mut EventContext<'_>) {
+///     context.imgui().begin_frame();
+/// }
+/// ```
 pub struct EventContext<'a> {
     pub(crate) event: &'a WindowEvent,
     pub(crate) imgui: &'a mut imgui::Context,
@@ -330,10 +379,6 @@ impl EventContext<'_> {
         self.event
     }
 
-    pub fn imgui(&mut self) -> &mut imgui::Context {
-        self.imgui
-    }
-
     #[must_use]
     pub fn window(&self) -> &Window {
         self.window
@@ -345,35 +390,130 @@ impl EventContext<'_> {
     }
 }
 
+/// Terminal resource capabilities without Context or frame ownership.
+///
+/// ```compile_fail
+/// use dear_app::ShutdownContext;
+///
+/// fn replace_context(context: &mut ShutdownContext<'_>) {
+///     let _ = std::mem::replace(context.imgui(), dear_app::imgui::Context::create());
+/// }
+/// ```
 pub struct ShutdownContext<'a> {
     pub(crate) imgui: &'a mut imgui::Context,
     pub(crate) window: &'a Window,
     pub(crate) generation: Option<GpuGeneration>,
 }
 
-/// Pre-frame access to Context-owned resources.
+/// Pre-frame access to Context-owned resources without frame lifecycle authority.
+///
+/// Resource mutations are allowed here, but opening or rendering the frame remains owned by the
+/// runtime:
+///
+/// ```compile_fail
+/// use dear_app::PrepareFrameContext;
+///
+/// fn steal_frame(context: &mut PrepareFrameContext<'_>) {
+///     context.imgui().begin_frame();
+/// }
+/// ```
 pub struct PrepareFrameContext<'a> {
     pub(crate) imgui: &'a mut imgui::Context,
     pub(crate) window: &'a Window,
 }
 
 impl PrepareFrameContext<'_> {
-    /// Returns the Context before its Dear ImGui frame is opened.
-    pub fn imgui(&mut self) -> &mut imgui::Context {
-        self.imgui
-    }
-
     #[must_use]
     pub fn window(&self) -> &Window {
         self.window
     }
 }
 
-impl ShutdownContext<'_> {
-    pub fn imgui(&mut self) -> &mut imgui::Context {
-        self.imgui
-    }
+macro_rules! impl_context_resource_access {
+    ($context:ident) => {
+        impl $context<'_> {
+            /// Borrows Dear ImGui IO without exposing frame lifecycle operations.
+            #[must_use]
+            pub fn io(&self) -> &imgui::Io {
+                self.imgui.io()
+            }
 
+            /// Mutates Dear ImGui IO without exposing frame lifecycle operations.
+            pub fn io_mut(&mut self) -> &mut imgui::Io {
+                self.imgui.io_mut()
+            }
+
+            /// Borrows the global Dear ImGui style.
+            #[must_use]
+            pub fn style(&self) -> &imgui::Style {
+                self.imgui.style()
+            }
+
+            /// Mutates the global Dear ImGui style.
+            pub fn style_mut(&mut self) -> &mut imgui::Style {
+                self.imgui.style_mut()
+            }
+
+            /// Borrows the Context-owned font atlas.
+            #[must_use]
+            pub fn font_atlas(&self) -> &imgui::FontAtlas {
+                self.imgui.font_atlas()
+            }
+
+            /// Transfers an owned texture into the Context-managed texture registry.
+            pub fn register_texture(
+                &mut self,
+                texture: imgui::OwnedTextureData,
+            ) -> imgui::ManagedTextureId {
+                self.imgui.register_texture(texture)
+            }
+
+            /// Reads a managed texture through a non-escaping capability.
+            pub fn with_texture<R>(
+                &self,
+                id: imgui::ManagedTextureId,
+                operation: impl for<'texture> FnOnce(imgui::ManagedTextureRef<'texture>) -> R,
+            ) -> Result<R, imgui::ManagedTextureError> {
+                self.imgui.with_texture(id, operation)
+            }
+
+            /// Mutates a managed texture through a non-escaping capability.
+            pub fn with_texture_mut<R>(
+                &mut self,
+                id: imgui::ManagedTextureId,
+                operation: impl for<'texture> FnOnce(imgui::ManagedTextureMut<'texture>) -> R,
+            ) -> Result<R, imgui::ManagedTextureError> {
+                self.imgui.with_texture_mut(id, operation)
+            }
+
+            /// Mutates a managed texture while flattening access and data-validation errors.
+            pub fn try_with_texture_mut<R>(
+                &mut self,
+                id: imgui::ManagedTextureId,
+                operation: impl for<'texture> FnOnce(
+                    imgui::ManagedTextureMut<'texture>,
+                ) -> Result<R, imgui::TextureDataError>,
+            ) -> Result<R, imgui::ManagedTextureMutationError> {
+                self.imgui.try_with_texture_mut(id, operation)
+            }
+
+            /// Retires a managed texture after outstanding renderer work completes.
+            pub fn remove_texture(
+                &mut self,
+                id: imgui::ManagedTextureId,
+            ) -> Result<(), imgui::ManagedTextureError> {
+                self.imgui.remove_texture(id)
+            }
+        }
+    };
+}
+
+impl_context_resource_access!(EventContext);
+impl_context_resource_access!(InitializedContext);
+impl_context_resource_access!(PrepareFrameContext);
+impl_context_resource_access!(ShutdownContext);
+
+impl ShutdownContext<'_> {
     #[must_use]
     pub fn window(&self) -> &Window {
         self.window
@@ -623,6 +763,23 @@ mod tests {
                 .source()
                 .and_then(|source| source.downcast_ref::<UserError>())
                 .is_some()
+        );
+    }
+
+    #[test]
+    fn frame_ownership_error_reports_its_application_stage() {
+        let _guard = crate::runtime::imgui_test_guard();
+        let context = dear_imgui_rs::Context::create();
+        let stamp = context.frame_lifecycle_stamp();
+        let error = RunError::ImGuiFrameOwnership {
+            stage: ApplicationStage::PrepareFrame,
+            before: stamp,
+            after: stamp,
+        };
+
+        assert_eq!(
+            error.application_stage(),
+            Some(ApplicationStage::PrepareFrame)
         );
     }
 

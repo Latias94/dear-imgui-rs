@@ -35,7 +35,9 @@ pub use self::error::{
     ContextActivationError, ContextActivationReason, ContextScopeError, ContextSuspensionError,
     ContextSuspensionReason, ScopedActivationError,
 };
-pub use self::frame::{FrameLifecycleState, FramePrepareOptions, FrameResult, FrameToken};
+pub use self::frame::{
+    FrameLifecycleStamp, FrameLifecycleState, FramePrepareOptions, FrameResult, FrameToken,
+};
 pub use self::snapshot_hub::RendererTextureReset;
 pub use self::suspended::SuspendedContext;
 pub(crate) use self::texture_registry::SharedTextureRegistry;

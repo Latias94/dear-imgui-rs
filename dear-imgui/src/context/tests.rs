@@ -931,6 +931,26 @@ fn end_frame_is_idempotent_and_allows_a_new_frame() {
     );
 }
 
+#[test]
+fn frame_lifecycle_stamp_observes_an_idle_round_trip() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut ctx = Context::create();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("legacy renderer font atlas should be available")
+        .build();
+    ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
+
+    let before = ctx.frame_lifecycle_stamp();
+    drop(ctx.begin_frame());
+    let after = ctx.frame_lifecycle_stamp();
+
+    assert_eq!(before.context_id(), after.context_id());
+    assert_eq!(before.state(), super::FrameLifecycleState::Idle);
+    assert_eq!(after.state(), super::FrameLifecycleState::Idle);
+    assert_ne!(before, after);
+}
+
 #[cfg(feature = "multi-viewport")]
 #[test]
 fn set_monitors_replaces_and_clears_imgui_owned_storage() {

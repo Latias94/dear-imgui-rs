@@ -26,6 +26,32 @@ pub enum FrameLifecycleState {
     Rendered,
 }
 
+/// Comparable identity and native progress marker for a Context frame boundary.
+///
+/// Integrations can retain a stamp before invoking application code and require the same stamp
+/// afterward. Equality covers the Context generation, native frame sequence, and current lifecycle
+/// state, so an `Idle -> Idle` frame round trip is still observable.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct FrameLifecycleStamp {
+    context: super::ContextId,
+    native_frame: i32,
+    state: FrameLifecycleState,
+}
+
+impl FrameLifecycleStamp {
+    /// Return the Context generation captured by this stamp.
+    #[must_use]
+    pub const fn context_id(self) -> super::ContextId {
+        self.context
+    }
+
+    /// Return the frame lifecycle state captured by this stamp.
+    #[must_use]
+    pub const fn state(self) -> FrameLifecycleState {
+        self.state
+    }
+}
+
 /// Options used by [`Context::prepare_frame`].
 #[derive(Copy, Clone, Debug)]
 pub struct FramePrepareOptions {
@@ -119,9 +145,17 @@ impl Context {
 
     /// Return the current frame lifecycle state for this context.
     pub fn frame_lifecycle_state(&self) -> FrameLifecycleState {
+        self.frame_lifecycle_stamp().state()
+    }
+
+    /// Capture this Context's identity and native frame progress as one comparable value.
+    ///
+    /// This is intended for engine callback boundaries that must reject both an open frame and a
+    /// frame that was opened and closed entirely inside the callback.
+    pub fn frame_lifecycle_stamp(&self) -> FrameLifecycleStamp {
         let _guard = CTX_MUTEX.lock();
-        self.assert_current_context("Context::frame_lifecycle_state()");
-        self.frame_lifecycle_state_unlocked()
+        self.assert_current_context("Context::frame_lifecycle_stamp()");
+        self.frame_lifecycle_stamp_unlocked()
     }
 
     /// End an open frame without producing render data.
@@ -406,14 +440,23 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     }
 
     pub(super) fn frame_lifecycle_state_unlocked(&self) -> FrameLifecycleState {
+        self.frame_lifecycle_stamp_unlocked().state()
+    }
+
+    fn frame_lifecycle_stamp_unlocked(&self) -> FrameLifecycleStamp {
         unsafe {
             let raw = &*self.raw;
-            if raw.WithinFrameScope {
+            let state = if raw.WithinFrameScope {
                 FrameLifecycleState::InFrame
             } else if raw.FrameCountRendered == raw.FrameCount && raw.FrameCount > 0 {
                 FrameLifecycleState::Rendered
             } else {
                 FrameLifecycleState::Idle
+            };
+            FrameLifecycleStamp {
+                context: self.id(),
+                native_frame: raw.FrameCount,
+                state,
             }
         }
     }

@@ -55,21 +55,17 @@ impl ManagedTextureApp {
         pixels
     }
 
-    fn register(
-        &mut self,
-        context: &mut dear_imgui_rs::Context,
-        revision: u32,
-    ) -> Result<(), TextureDataError> {
-        self.texture = Some(context.register_texture(Self::texture_data(revision)?));
+    fn record_registration(&mut self, texture: ManagedTextureId, revision: u32) {
+        self.texture = Some(texture);
         self.revision = revision;
-        Ok(())
     }
 }
 
 impl Application for ManagedTextureApp {
     fn configure_imgui(&mut self, context: &mut InitContext<'_>) -> Result<(), RunError> {
-        self.register(context.imgui(), self.revision)
+        let texture = Self::texture_data(self.revision)
             .map_err(|error| RunError::application(ApplicationStage::ConfigureImgui, error))?;
+        self.record_registration(context.imgui().register_texture(texture), self.revision);
         Ok(())
     }
 
@@ -86,7 +82,6 @@ impl Application for ManagedTextureApp {
                 let revision = self.revision.wrapping_add(1);
                 let pixels = Self::pixels(revision);
                 context
-                    .imgui()
                     .try_with_texture_mut(texture, |mut texture| texture.replace_pixels(&pixels))
                     .map_err(|error| {
                         RunError::application(ApplicationStage::PrepareFrame, error)
@@ -113,7 +108,6 @@ impl Application for ManagedTextureApp {
                     }
                 }
                 context
-                    .imgui()
                     .try_with_texture_mut(texture, |mut texture| {
                         texture
                             .update_subresource(TextureSubresource::new(region, row_pitch, &pixels))
@@ -127,17 +121,18 @@ impl Application for ManagedTextureApp {
                 let Some(texture) = self.texture else {
                     return Ok(());
                 };
-                context.imgui().remove_texture(texture).map_err(|error| {
+                context.remove_texture(texture).map_err(|error| {
                     RunError::application(ApplicationStage::PrepareFrame, error)
                 })?;
                 self.texture = None;
             }
             TextureAction::Recreate => {
                 if self.texture.is_none() {
-                    self.register(context.imgui(), self.revision.wrapping_add(1))
-                        .map_err(|error| {
-                            RunError::application(ApplicationStage::PrepareFrame, error)
-                        })?;
+                    let revision = self.revision.wrapping_add(1);
+                    let texture = Self::texture_data(revision).map_err(|error| {
+                        RunError::application(ApplicationStage::PrepareFrame, error)
+                    })?;
+                    self.record_registration(context.register_texture(texture), revision);
                 }
             }
         }

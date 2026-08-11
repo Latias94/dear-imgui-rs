@@ -200,12 +200,12 @@ impl StyleAndFontsApp {
         context: &mut PrepareFrameContext<'_>,
     ) -> Result<(), RunError> {
         if let Some(theme) = self.pending_theme.take() {
-            theme.theme().apply_to_context(context.imgui());
+            theme.theme().apply_to_style(context.style_mut());
             self.status = format!("Applied {} before opening this frame.", theme.label());
         }
 
         if let Some(scale) = self.pending_global_font_scale.take() {
-            context.imgui().style_mut().set_font_scale_main(scale);
+            context.style_mut().set_font_scale_main(scale);
             self.status = format!("Global font scale is now {scale:.2}x.");
         }
 
@@ -217,7 +217,7 @@ impl StyleAndFontsApp {
                 .ok_or_else(|| Self::missing_fonts(ApplicationStage::PrepareFrame))?;
 
             if fonts.compact.is_none() {
-                let atlas = context.imgui().font_atlas();
+                let atlas = context.font_atlas();
                 let compact = atlas.add_font(&[FontSource::default_bitmap_with_size(13.0)
                     .with_config(FontConfig::new().name("Compact bitmap UI"))]);
 
