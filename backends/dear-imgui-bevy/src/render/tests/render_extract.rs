@@ -52,6 +52,7 @@ fn primary_context_id(app: &App) -> imgui::ContextId {
     app.world()
         .non_send::<ImguiContexts>()
         .primary_id()
+        .expect("Context registry must be active")
         .expect("ImguiPlugin should install a primary Context")
 }
 
@@ -62,6 +63,7 @@ fn configure_primary<T>(app: &mut App, configure: impl FnOnce(&mut imgui::Contex
         .expect("ImguiPlugin should install the Context registry");
     let primary_id = contexts
         .primary_id()
+        .expect("Context registry must be active")
         .expect("ImguiPlugin should install a primary Context");
     contexts
         .configure(primary_id, configure)
@@ -69,11 +71,12 @@ fn configure_primary<T>(app: &mut App, configure: impl FnOnce(&mut imgui::Contex
 }
 
 fn add_secondary_context(app: &mut App) -> imgui::ContextId {
-    let secondary_pass = app.declare_imgui_pass::<SecondaryContextPass>();
+    let secondary_pass = app.declare_imgui_pass::<SecondaryContextPass>().unwrap();
     app.add_imgui_systems(
         &secondary_pass,
         secondary_pass.system(draw_secondary_legacy_texture),
-    );
+    )
+    .unwrap();
     let secondary_id = app
         .world_mut()
         .non_send_mut::<ImguiContexts>()
@@ -277,8 +280,9 @@ fn draw_secondary_legacy_texture(frame: ImguiFrame<'_, SecondaryContextPass>) {
 }
 
 fn add_primary_legacy_draw_system(app: &mut App) {
-    let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_systems(&primary_pass, primary_pass.system(draw_legacy_texture));
+    let primary_pass = app.imgui_primary_pass().unwrap();
+    app.add_imgui_systems(&primary_pass, primary_pass.system(draw_legacy_texture))
+        .unwrap();
 }
 
 #[test]
@@ -286,8 +290,9 @@ fn render_extract_moves_context_owned_managed_frame_and_commits_once() {
     let _guard = imgui_context_guard();
     let (mut app, primary_window, camera, texture_id) = app_with_primary_window();
     let context_id = primary_context_id(&app);
-    let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_systems(&primary_pass, primary_pass.system(draw_managed_texture));
+    let primary_pass = app.imgui_primary_pass().unwrap();
+    app.add_imgui_systems(&primary_pass, primary_pass.system(draw_managed_texture))
+        .unwrap();
 
     app.update();
 
@@ -709,6 +714,7 @@ fn render_extract_prefers_an_explicit_route_over_auto_primary() {
         .world()
         .non_send::<ImguiContexts>()
         .primary_id()
+        .expect("Context registry must be active")
         .expect("the primary Context should exist");
     let primary_target =
         NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap());
@@ -778,6 +784,7 @@ fn render_extract_preserves_explicit_route_viewport_for_render_pass() {
         .world()
         .non_send::<ImguiContexts>()
         .primary_id()
+        .expect("Context registry must be active")
         .expect("the primary Context should exist");
     let primary_target =
         NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap());
@@ -981,6 +988,7 @@ fn render_extract_reports_a_stale_render_view_without_retargeting() {
         .world()
         .non_send::<ImguiContexts>()
         .primary_id()
+        .expect("Context registry must be active")
         .expect("the primary Context should exist");
     let primary_target =
         NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap());
@@ -1046,6 +1054,7 @@ fn render_extract_rejects_output_mode_and_schedule_drift_after_route_resolution(
         .world()
         .non_send::<ImguiContexts>()
         .primary_id()
+        .expect("Context registry must be active")
         .expect("the primary Context should exist");
     let primary_target =
         NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap());
@@ -1121,6 +1130,7 @@ fn render_extract_reports_a_missing_render_view_without_replaying_an_old_target(
         .world()
         .non_send::<ImguiContexts>()
         .primary_id()
+        .expect("Context registry must be active")
         .expect("the primary Context should exist");
     let missing_camera = app
         .world_mut()
@@ -1212,7 +1222,7 @@ fn renderer_prepare_routes_secondary_viewport_and_rejects_relocated_camera_marke
     });
 
     app.init_resource::<SecondaryViewportRouteState>();
-    let primary_pass = app.imgui_primary_pass();
+    let primary_pass = app.imgui_primary_pass().unwrap();
     app.add_imgui_systems(
         &primary_pass,
         primary_pass.system(
@@ -1237,7 +1247,8 @@ fn renderer_prepare_routes_secondary_viewport_and_rejects_relocated_camera_marke
                     });
             },
         ),
-    );
+    )
+    .unwrap();
 
     app.update();
     let secondary_viewport_id = app

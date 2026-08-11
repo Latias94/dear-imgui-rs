@@ -291,7 +291,7 @@ mod retirement_tests {
 
     fn primary_config() -> ImguiContextConfig {
         let mut app = App::new();
-        let pass = crate::context::pass::primary_pass(&mut app);
+        let pass = crate::context::pass::primary_pass(&mut app).unwrap();
         ImguiContextConfig::primary(&pass)
     }
 

@@ -392,7 +392,7 @@ mod tests {
         app.add_plugins(bevy_render::extract_plugin::ExtractPlugin::default());
         app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
         app.add_plugins(crate::ImguiPlugin::default());
-        let recovery_pass = app.declare_imgui_pass::<RecoveryContextPass>();
+        let recovery_pass = app.declare_imgui_pass::<RecoveryContextPass>().unwrap();
         app.world_mut().spawn((Window::default(), PrimaryWindow));
 
         let (context_a, context_b) = {
@@ -400,7 +400,7 @@ mod tests {
                 .world_mut()
                 .get_non_send_mut::<crate::ImguiContexts>()
                 .unwrap();
-            let context_a = contexts.primary_id().unwrap();
+            let context_a = contexts.primary_id().unwrap().unwrap();
             let context_b = contexts
                 .create(crate::ImguiContextConfig::new(&recovery_pass))
                 .unwrap();
@@ -482,6 +482,7 @@ mod tests {
             .get_non_send::<crate::ImguiContexts>()
             .unwrap()
             .primary_id()
+            .unwrap()
             .unwrap();
         let releases = app.world().resource::<ImguiRendererReleases>().clone();
 
@@ -506,6 +507,7 @@ mod tests {
             .get_non_send::<crate::ImguiContexts>()
             .unwrap()
             .primary_id()
+            .unwrap()
             .unwrap();
         let viewport_id = imgui::Id::from(0xA11);
         assert!(
@@ -555,7 +557,8 @@ mod tests {
             app.world()
                 .get_non_send::<crate::ImguiContexts>()
                 .unwrap()
-                .contains(primary_id),
+                .contains(primary_id)
+                .unwrap(),
             "a pending removal must retain Context ownership for retry"
         );
         let requested = releases.requested_releases();
@@ -611,7 +614,8 @@ mod tests {
             !app.world()
                 .get_non_send::<crate::ImguiContexts>()
                 .unwrap()
-                .contains(primary_id),
+                .contains(primary_id)
+                .unwrap(),
             "a completed retry must remove exactly the requested Context"
         );
     }
@@ -1273,6 +1277,7 @@ mod tests {
             .get_non_send::<crate::ImguiContexts>()
             .expect("ImguiPlugin should install the Context registry")
             .primary_id()
+            .expect("Context registry must be active")
             .expect("ImguiPlugin should install the primary Context");
         app.world_mut()
             .get_non_send_mut::<crate::ImguiContexts>()

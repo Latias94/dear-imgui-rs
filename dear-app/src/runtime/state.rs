@@ -27,6 +27,56 @@ pub(crate) fn platform_error(
     }
 }
 
+pub(crate) fn run_application_frame_boundary<T>(
+    context: &mut imgui::Context,
+    stage: ApplicationStage,
+    callback: impl FnOnce(&mut imgui::Context) -> Result<T, RunError>,
+) -> Result<T, RunError> {
+    let before = context.frame_lifecycle_stamp();
+    let result = callback(context);
+    let result = result.map_err(|error| error.during_application_stage(stage));
+    let after = context.frame_lifecycle_stamp();
+    if after == before {
+        return result;
+    }
+
+    if after.state() == imgui::FrameLifecycleState::InFrame {
+        context.end_frame();
+    }
+    let ownership_error = RunError::ImGuiFrameOwnership {
+        stage,
+        before,
+        after,
+    };
+    match result {
+        Ok(_) => Err(ownership_error),
+        Err(primary) => {
+            tracing::warn!(
+                %primary,
+                secondary = %ownership_error,
+                "application callback failed after changing Dear ImGui frame ownership"
+            );
+            Err(primary)
+        }
+    }
+}
+
+pub(crate) fn run_application_shutdown<A: Application>(
+    application: &mut A,
+    context: &mut imgui::Context,
+    window: &Window,
+    generation: Option<GpuGeneration>,
+) -> Result<(), RunError> {
+    run_application_frame_boundary(context, ApplicationStage::Shutdown, |imgui| {
+        let mut shutdown = ShutdownContext {
+            imgui,
+            window,
+            generation,
+        };
+        application.shutdown(&mut shutdown)
+    })
+}
+
 pub(crate) fn preserve_initialization_error(
     primary_error: RunError,
     cleanup: impl FnOnce() -> Result<(), RunError>,
@@ -46,14 +96,7 @@ fn shutdown_after_initialization_failure<A: Application>(
     context: &mut imgui::Context,
     window: &Window,
 ) -> Result<(), RunError> {
-    let mut shutdown = ShutdownContext {
-        imgui: context,
-        window,
-        generation: None,
-    };
-    application
-        .shutdown(&mut shutdown)
-        .map_err(|error| error.during_application_stage(ApplicationStage::Shutdown))
+    run_application_shutdown(application, context, window, None)
 }
 
 fn abort_context_initialization<A: Application>(
@@ -312,14 +355,18 @@ impl UiState {
             context,
             |application, context| {
                 configure_context(context, config);
-                let mut init = InitContext {
-                    imgui: context,
-                    window: &window.window,
-                    config,
-                };
-                application.configure_imgui(&mut init).map_err(|error| {
-                    error.during_application_stage(ApplicationStage::ConfigureImgui)
-                })?;
+                run_application_frame_boundary(
+                    context,
+                    ApplicationStage::ConfigureImgui,
+                    |context| {
+                        let mut init = InitContext {
+                            imgui: context,
+                            window: &window.window,
+                            config,
+                        };
+                        application.configure_imgui(&mut init)
+                    },
+                )?;
                 validate_supported_imgui_config(context)
             },
             |_, context| {
@@ -591,7 +638,12 @@ fn configure_context(context: &mut imgui::Context, config: &AppConfig) {
 mod tests {
     use std::{cell::Cell, rc::Rc};
 
-    use super::{initialize_configured_ui, platform_error, preserve_initialization_error};
+    use dear_imgui_rs::{FrameLifecycleState, FramePrepareOptions};
+
+    use super::{
+        initialize_configured_ui, platform_error, preserve_initialization_error,
+        run_application_frame_boundary,
+    };
     use crate::{ApplicationStage, RunError};
 
     #[derive(Debug)]
@@ -607,6 +659,104 @@ mod tests {
     struct InitializationProbe {
         configured: usize,
         shutdown_calls: usize,
+    }
+
+    fn prepared_context() -> (
+        dear_imgui_rs::Context,
+        dear_imgui_rs::render::SynchronousRendererConsumer,
+    ) {
+        let mut context = dear_imgui_rs::Context::create();
+        context.prepare_frame(
+            FramePrepareOptions::new([640.0, 480.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+        let consumer = context
+            .create_synchronous_renderer_consumer()
+            .expect("the test renderer consumer must attach");
+        (context, consumer)
+    }
+
+    fn leak_open_frame(context: &mut dear_imgui_rs::Context) {
+        let frame = context.begin_frame();
+        std::mem::forget(frame);
+    }
+
+    #[test]
+    fn application_boundary_rejects_and_closes_a_leaked_frame() {
+        let _guard = crate::runtime::imgui_test_guard();
+        let (mut context, _consumer) = prepared_context();
+        let error = run_application_frame_boundary(
+            &mut context,
+            ApplicationStage::PrepareFrame,
+            |context| {
+                leak_open_frame(context);
+                Ok(())
+            },
+        )
+        .expect_err("frame ownership changes must be rejected");
+
+        assert!(matches!(
+            error,
+            RunError::ImGuiFrameOwnership {
+                stage: ApplicationStage::PrepareFrame,
+                before,
+                after,
+            } if before.state() == FrameLifecycleState::Idle
+                && after.state() == FrameLifecycleState::InFrame
+        ));
+        assert_eq!(context.frame_lifecycle_state(), FrameLifecycleState::Idle);
+    }
+
+    #[test]
+    fn application_boundary_rejects_an_idle_to_idle_frame_round_trip() {
+        let _guard = crate::runtime::imgui_test_guard();
+        let (mut context, _consumer) = prepared_context();
+        let error = run_application_frame_boundary(
+            &mut context,
+            ApplicationStage::ConfigureImgui,
+            |context| {
+                drop(context.begin_frame());
+                Ok(())
+            },
+        )
+        .expect_err("opening and ending a frame inside a callback must remain observable");
+
+        assert!(matches!(
+            error,
+            RunError::ImGuiFrameOwnership { before, after, .. }
+                if before.state() == FrameLifecycleState::Idle
+                    && after.state() == FrameLifecycleState::Idle
+                    && before.context_id() == after.context_id()
+                    && before != after
+        ));
+        assert_eq!(context.frame_lifecycle_state(), FrameLifecycleState::Idle);
+    }
+
+    #[test]
+    fn application_boundary_preserves_the_callback_error_and_closes_a_leaked_frame() {
+        let _guard = crate::runtime::imgui_test_guard();
+        let (mut context, _consumer) = prepared_context();
+        let error = run_application_frame_boundary(
+            &mut context,
+            ApplicationStage::ConfigureImgui,
+            |context| {
+                leak_open_frame(context);
+                Err::<(), _>(RunError::application_message(
+                    ApplicationStage::ConfigureImgui,
+                    "primary failure",
+                ))
+            },
+        )
+        .expect_err("the original callback failure must remain primary");
+
+        assert_eq!(
+            error.application_stage(),
+            Some(ApplicationStage::ConfigureImgui)
+        );
+        assert_eq!(
+            error.to_string(),
+            "application callback failed during configure_imgui: primary failure"
+        );
+        assert_eq!(context.frame_lifecycle_state(), FrameLifecycleState::Idle);
     }
 
     #[test]

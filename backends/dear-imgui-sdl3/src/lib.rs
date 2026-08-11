@@ -141,8 +141,8 @@ pub use self::backend::{
     SdlGpu3PreparedViewportFrame, SdlGpu3RenderPassFrame, SdlGpu3RendererBackend,
 };
 pub use self::callback_events::{
-    Sdl3CallbackEvent, Sdl3CallbackEventHandoff, Sdl3CallbackEventHandoffError,
-    Sdl3CallbackEventQueue,
+    Sdl3CallbackEvent, Sdl3CallbackEventBatch, Sdl3CallbackEventHandoff,
+    Sdl3CallbackEventHandoffError,
 };
 #[cfg(feature = "multi-viewport")]
 pub use self::core::Sdl3VulkanSurfaceError;

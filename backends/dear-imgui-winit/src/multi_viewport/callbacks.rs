@@ -3,11 +3,11 @@ use super::coordinates::{
 };
 use super::native_cursor_hittest::{
     MouseCaptureTransfer, focus_and_raise_window, raise_window_without_activation,
-    transfer_mouse_capture,
+    show_window_without_activation, transfer_mouse_capture,
 };
 use super::registry::{
-    insert_viewport_data, preflight_viewport_ownership, remove_viewport_data, with_current_runtime,
-    with_viewport_data,
+    clear_failed_viewport, insert_viewport_data, preflight_viewport_ownership,
+    record_failed_viewport, remove_viewport_data, with_current_runtime, with_viewport_data,
 };
 use super::runtime::RuntimeControl;
 use super::viewport_data::{ViewportData, ViewportWindowPolicy};
@@ -197,10 +197,7 @@ pub(super) fn record_viewport_failure(
     error: WinitPlatformError,
 ) {
     control.record_fault(error);
-    if !viewport.is_null() {
-        // SAFETY: callback callers pass a live viewport from the currently bound Context.
-        unsafe { (*viewport).PlatformRequestClose = true };
-    }
+    record_failed_viewport(control, viewport);
 }
 
 fn sync_window_policy(

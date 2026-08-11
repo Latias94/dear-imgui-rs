@@ -3,15 +3,15 @@
 pub use crate::context::{
     ImguiAppExt, ImguiContextAdmissionError, ImguiContextConfig, ImguiContextError,
     ImguiContextRetired, ImguiContextRetirementId, ImguiContexts, ImguiFrame, ImguiPass,
-    ImguiPluginInstallError, ImguiPrimaryChange, ImguiPrimaryPass, ImguiShutdownError, ImguiSystem,
+    ImguiPassError, ImguiPluginInstallError, ImguiPrimaryChange, ImguiPrimaryPass,
+    ImguiShutdownError, ImguiSystemConfigs, IntoImguiSystemConfigs,
 };
 pub use crate::input::{
-    ImguiInputCapture, ImguiInputCaptureState, ImguiInputSystems,
-    imgui_context_wants_keyboard_input, imgui_context_wants_pointer_input,
-    imgui_context_wants_text_input, imgui_primary_wants_keyboard_input,
-    imgui_primary_wants_pointer_input, imgui_primary_wants_text_input,
-    imgui_window_wants_keyboard_input, imgui_window_wants_pointer_input,
-    imgui_window_wants_text_input,
+    ImguiInputCapture, ImguiInputCaptureState, imgui_context_wants_keyboard_input,
+    imgui_context_wants_pointer_input, imgui_context_wants_text_input,
+    imgui_primary_wants_keyboard_input, imgui_primary_wants_pointer_input,
+    imgui_primary_wants_text_input, imgui_window_wants_keyboard_input,
+    imgui_window_wants_pointer_input, imgui_window_wants_text_input,
 };
 pub use crate::viewport::{
     ImguiViewportCamera, ImguiViewportId, ImguiViewportInstanceId, ImguiViewportWindow,

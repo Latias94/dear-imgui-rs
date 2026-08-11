@@ -41,11 +41,12 @@ fn primary_context(app: &App) -> dear_imgui_bevy::ContextId {
     app.world()
         .non_send::<ImguiContexts>()
         .primary_id()
+        .expect("test registry must remain active")
         .expect("test registry must retain its primary Context")
 }
 
 fn add_secondary_context(app: &mut App) -> dear_imgui_bevy::ContextId {
-    let pass = app.declare_imgui_pass::<SecondaryUi>();
+    let pass = app.declare_imgui_pass::<SecondaryUi>().unwrap();
     app.world_mut()
         .non_send_mut::<ImguiContexts>()
         .create(ImguiContextConfig::new(&pass))

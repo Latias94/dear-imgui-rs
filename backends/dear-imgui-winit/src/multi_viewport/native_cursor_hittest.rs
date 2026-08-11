@@ -118,9 +118,27 @@ pub(super) fn raise_window_without_activation(window: &Window) -> Result<(), Win
         windows::raise_window_without_activation(window)
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        macos::raise_window_without_activation(window)
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         let _ = window;
+        Ok(())
+    }
+}
+
+pub(super) fn show_window_without_activation(window: &Window) -> Result<(), WinitPlatformError> {
+    #[cfg(target_os = "macos")]
+    {
+        macos::raise_window_without_activation(window)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        window.set_visible(true);
         Ok(())
     }
 }
@@ -134,6 +152,45 @@ pub(super) fn focus_and_raise_window(window: &Window) -> Result<(), WinitPlatfor
     #[cfg(not(target_os = "windows"))]
     {
         window.focus_window();
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod macos {
+    use objc2_app_kit::NSView;
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use winit::window::Window;
+
+    use super::WinitPlatformError;
+
+    pub(super) fn raise_window_without_activation(
+        window: &Window,
+    ) -> Result<(), WinitPlatformError> {
+        let handle =
+            window
+                .window_handle()
+                .map_err(|error| WinitPlatformError::WindowOperation {
+                    operation: "access AppKit viewport window handle",
+                    message: error.to_string(),
+                })?;
+        let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+            return Err(WinitPlatformError::WindowOperation {
+                operation: "access AppKit viewport window handle",
+                message: "Winit returned a non-AppKit window handle on macOS".to_owned(),
+            });
+        };
+
+        // SAFETY: Winit's borrowed AppKit handle keeps this NSView alive for the duration of the
+        // call, and multi-viewport callbacks run inside Winit's main-thread event-loop scope.
+        let view = unsafe { &*handle.ns_view.as_ptr().cast::<NSView>() };
+        let native_window = view
+            .window()
+            .ok_or_else(|| WinitPlatformError::WindowOperation {
+                operation: "show AppKit viewport without activation",
+                message: "Winit's NSView is not attached to an NSWindow".to_owned(),
+            })?;
+        native_window.orderFront(None);
         Ok(())
     }
 }

@@ -130,6 +130,13 @@ fn main() -> Result<(), RunError> {
 - `gpu_recreated` runs after a replacement generation is committed.
 - `shutdown` runs once before add-ons and the Dear ImGui context are destroyed.
 
+`InitContext` exposes the complete Dear ImGui `Context` only from `configure_imgui`, before platform
+and renderer attachment, for extension APIs that require it. `initialized` receives
+`InitializedContext`; runtime event, pre-frame, and shutdown hooks likewise expose only narrow IO,
+style, font-atlas, and managed-texture capabilities. The runtime compares the Context identity,
+native frame sequence, and lifecycle state at every callback boundary, so opening and closing a
+frame inside a callback is still reported as `RunError::ImGuiFrameOwnership`.
+
 Every failing hook is wrapped with its typed `ApplicationStage`, while the hook's original
 `RunError` remains in the source chain. The first actual failure remains primary. Shutdown still
 runs exactly once, and a shutdown or backend-release failure is returned only when no earlier

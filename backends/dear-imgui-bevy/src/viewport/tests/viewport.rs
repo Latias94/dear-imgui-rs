@@ -99,8 +99,9 @@ fn empty_secondary_viewport_ui(_frame: ImguiFrame<'_, SecondaryViewportPass>) {}
 
 #[cfg(feature = "multi-viewport")]
 fn declare_secondary_viewport_pass(app: &mut App) -> ImguiPass<SecondaryViewportPass> {
-    let pass = app.declare_imgui_pass::<SecondaryViewportPass>();
-    app.add_imgui_systems(&pass, pass.system(empty_secondary_viewport_ui));
+    let pass = app.declare_imgui_pass::<SecondaryViewportPass>().unwrap();
+    app.add_imgui_systems(&pass, pass.system(empty_secondary_viewport_ui))
+        .unwrap();
     pass
 }
 
@@ -191,6 +192,7 @@ fn primary_context_id(app: &App) -> imgui::ContextId {
         .get_non_send::<ImguiContexts>()
         .expect("plugin should install the ImGui Context registry")
         .primary_id()
+        .expect("ImGui Context registry must be active")
         .expect("plugin should install a primary ImGui Context")
 }
 
@@ -250,7 +252,7 @@ fn additional_context_can_enable_native_viewports_when_primary_does_not() {
 
     let (primary_id, secondary_id) = {
         let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
-        let primary_id = contexts.primary_id().unwrap();
+        let primary_id = contexts.primary_id().unwrap().unwrap();
         let secondary_id = contexts
             .create(ImguiContextConfig::new(&secondary_pass).with_multi_viewport(true))
             .expect("native viewport infrastructure should be available per Context");
@@ -455,11 +457,12 @@ fn create_live_secondary_viewport(app: &mut App) -> (imgui::Id, Entity) {
         context.io_mut().set_config_viewports_no_auto_merge(true);
     });
     app.insert_resource(SubmitLiveSecondaryViewport(true));
-    let primary_pass = app.imgui_primary_pass();
+    let primary_pass = app.imgui_primary_pass().unwrap();
     app.add_imgui_systems(
         &primary_pass,
         primary_pass.system(submit_live_secondary_viewport),
-    );
+    )
+    .unwrap();
     // NoAutoMerge makes the UI window deterministically request its own native viewport. The
     // first frame creates it; the second lets Dear ImGui publish the platform window mapping.
     app.update();

@@ -6,7 +6,7 @@
 
 use dear_app::{
     AppConfig, Application, ApplicationStage, ExternalTextureHandle, FrameContext, GpuApi,
-    GpuContext, InitContext, RedrawMode, RunError, Theme, WgpuConfig, WgpuPreset, run,
+    GpuContext, InitializedContext, RedrawMode, RunError, Theme, WgpuConfig, WgpuPreset, run,
 };
 use dear_imgui_rs::Condition;
 use wgpu as wgpu_rs;
@@ -161,7 +161,7 @@ impl ExternalTextureApp {
 impl Application for ExternalTextureApp {
     fn initialized(
         &mut self,
-        _init: &mut InitContext<'_>,
+        _context: &mut InitializedContext<'_>,
         context: &mut GpuContext<'_>,
     ) -> Result<(), RunError> {
         self.register(context.gpu(), ApplicationStage::Initialized)

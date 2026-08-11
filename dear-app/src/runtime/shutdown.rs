@@ -1,7 +1,7 @@
 //! Runtime initialization rollback and exactly-once shutdown coordination.
 
 use super::state::{UiState, WindowState};
-use crate::{Application, ApplicationStage, RunError, ShutdownContext};
+use crate::{Application, RunError};
 
 pub(super) fn abort_runtime_initialization<A: Application>(
     application: &mut A,
@@ -10,16 +10,12 @@ pub(super) fn abort_runtime_initialization<A: Application>(
     primary_error: RunError,
 ) -> RunError {
     super::state::preserve_initialization_error(primary_error, move || {
-        let application_result = {
-            let mut shutdown = ShutdownContext {
-                imgui: &mut ui.context,
-                window: &window.window,
-                generation: None,
-            };
-            application
-                .shutdown(&mut shutdown)
-                .map_err(|error| error.during_application_stage(ApplicationStage::Shutdown))
-        };
+        let application_result = super::state::run_application_shutdown(
+            application,
+            &mut ui.context,
+            &window.window,
+            None,
+        );
         let platform_result = ui.release_platform_then_teardown_or_quarantine();
         drop(window);
         application_result.and(platform_result)

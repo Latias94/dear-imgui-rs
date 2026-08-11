@@ -47,7 +47,7 @@ pub(crate) use feedback::map_imgui_mouse_cursor;
 #[cfg(not(feature = "render"))]
 pub(crate) use primary::primary_window_input_system;
 #[cfg(feature = "render")]
-pub(crate) use route::{ImguiContextInputMetrics, ImguiInputFrameMetrics};
+pub(crate) use route::{ImguiFrameInputSlot, ImguiInputFrameMetrics};
 #[cfg(feature = "render")]
 use routing::routed_window_input_system;
 pub(crate) use state::ImguiInputState;
@@ -86,9 +86,12 @@ type RoutedInputWindowComponents = (
     Option<&'static ImguiViewportOwner>,
 );
 
-/// System set that injects Bevy window input into Dear ImGui IO.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ImguiInputSystems;
+pub(crate) enum ImguiInputPipelineSystems {
+    PlatformLifecycle,
+    Producers,
+    Commit,
+}
 
 pub(crate) fn install_input_mapping(app: &mut App) {
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -109,14 +112,35 @@ pub(crate) fn install_input_mapping(app: &mut App) {
         .init_resource::<ImguiInputState>()
         .init_resource::<ImguiInputCapture>();
     #[cfg(feature = "render")]
-    app.init_resource::<ImguiContextInputMetrics>().add_systems(
+    app.init_resource::<ImguiFrameInputSlot>();
+    app.configure_sets(
         PreUpdate,
-        routed_window_input_system.in_set(ImguiInputSystems),
+        (
+            ImguiInputPipelineSystems::PlatformLifecycle,
+            ImguiInputPipelineSystems::Producers,
+            ImguiInputPipelineSystems::Commit,
+        )
+            .chain(),
+    );
+    #[cfg(feature = "render")]
+    app.add_systems(
+        PreUpdate,
+        routed_window_input_system.in_set(ImguiInputPipelineSystems::Commit),
     );
     #[cfg(not(feature = "render"))]
     app.add_systems(
         PreUpdate,
-        primary_window_input_system.in_set(ImguiInputSystems),
+        primary_window_input_system.in_set(ImguiInputPipelineSystems::Commit),
+    );
+}
+
+pub(crate) fn add_input_producers<M>(
+    app: &mut App,
+    systems: impl IntoScheduleConfigs<bevy_ecs::system::ScheduleSystem, M>,
+) {
+    app.add_systems(
+        PreUpdate,
+        systems.in_set(ImguiInputPipelineSystems::Producers),
     );
 }
 

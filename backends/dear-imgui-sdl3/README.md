@@ -212,10 +212,16 @@ APIs of interest (see `src/lib.rs` for full docs):
 - `Sdl3CallbackEventHandoff` and `process_callback_event(...)`:
   the safe main-callback path. `push_from_callback(...)` is the single unsafe enqueue boundary: it
   copies every transient payload consumed by the official backend, catches callback-path panics,
-  and makes failures available through `try_drain()` without unwinding through SDL's C ABI. Call
-  `try_drain()` on the main thread and pass each owned event directly to the backend owner; a
-  reported fault leaves queued events available for the next iteration. There is no unchecked
-  drain or separate handoff-fault polling path in the normal API.
+  and contains failures without unwinding through SDL's C ABI. Call `drain()` on the main thread,
+  inspect the returned batch's `faults()`, and pass each owned event directly to the backend owner.
+  Callback events not consumed by the official Dear ImGui backend remain observable as inert
+  application summaries without retaining transient SDL pointers.
+  Events and failures are detached atomically, so sustained overflow cannot starve retained input
+  or lifecycle events. The handoff is bounded; high-frequency motion, geometry, and display state
+  is coalesced by native identity while ordered input and lifecycle events retain reserved capacity.
+  `QueueOverflow` reports any event loss without creating another unbounded fault queue. Use
+  `with_capacity(...)` when the default capacity does not match the application's callback cadence.
+  There is no unchecked drain or separate handoff-fault polling path in the normal API.
 - `unsafe process_raw_event(&mut Context, &SDL_Event)`:
   the low-level escape hatch for foreign event loops. Callback-mode applications should use the
   owned handoff instead of reconstructing and replaying the raw union themselves.

@@ -1014,6 +1014,175 @@ fn unsupported_viewport_policy_fault_requests_close() {
     assert_eq!(runtime.poll_fault(), Err(error));
 }
 
+fn create_headless_secondary_viewport(
+    context: &mut Context,
+) -> *mut dear_imgui_rs::sys::ImGuiViewport {
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("the headless viewport test needs a built font atlas")
+        .build();
+
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_monitors(&[valid_test_monitor()]);
+    }
+    let _temporary_callbacks = super::callbacks::claim_platform_callbacks(context);
+    let main_viewport = unsafe { dear_imgui_rs::sys::igGetMainViewport() };
+    assert!(!main_viewport.is_null());
+    assert!(unsafe { (*main_viewport).PlatformUserData.is_null() });
+    assert!(unsafe { (*main_viewport).PlatformHandle.is_null() });
+    let temporary_handle = std::ptr::dangling_mut::<u8>().cast::<c_void>();
+    unsafe { (*main_viewport).PlatformHandle = temporary_handle };
+
+    let mut backend_flags = context.io().backend_flags();
+    backend_flags
+        .insert(BackendFlags::PLATFORM_HAS_VIEWPORTS | BackendFlags::RENDERER_HAS_VIEWPORTS);
+    context.io_mut().set_backend_flags(backend_flags);
+    context.enable_multi_viewport();
+    context.prepare_frame(dear_imgui_rs::FramePrepareOptions::new(
+        [320.0, 240.0],
+        1.0 / 60.0,
+    ));
+    context
+        .frame()
+        .window("Persistent failed viewport")
+        .position([640.0, 480.0], dear_imgui_rs::Condition::Always)
+        .size([160.0, 120.0], dear_imgui_rs::Condition::Always)
+        .build(|| {});
+    drop(context.render_legacy());
+
+    unsafe {
+        context.platform_io_mut().clear_platform_handlers();
+        (*main_viewport).PlatformHandle = std::ptr::null_mut();
+    }
+    backend_flags.remove(BackendFlags::PLATFORM_HAS_VIEWPORTS);
+    context.io_mut().set_backend_flags(backend_flags);
+
+    let platform_io = context.platform_io().as_raw();
+    unsafe {
+        let viewports = &(*platform_io).Viewports;
+        std::slice::from_raw_parts(viewports.Data, viewports.Size as usize)
+            .iter()
+            .copied()
+            .find(|viewport| *viewport != main_viewport)
+            .expect("the off-screen window should own a secondary viewport")
+    }
+}
+
+#[test]
+fn viewport_failure_survives_imgui_clearing_request_flags() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let secondary_viewport = create_headless_secondary_viewport(&mut context);
+    let runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
+
+    runtime
+        .control()
+        .enter_event_loop_pointer_for_test(std::ptr::null(), || unsafe {
+            winit_create_window(secondary_viewport);
+            assert!((*secondary_viewport).PlatformRequestClose);
+            (*secondary_viewport).PlatformRequestClose = false;
+        });
+
+    assert!(unsafe { (*secondary_viewport).PlatformRequestClose });
+    assert_eq!(
+        runtime.poll_fault(),
+        Err(WinitPlatformError::EventLoopUnavailable)
+    );
+}
+
+#[test]
+fn destroying_a_viewport_clears_its_persistent_failure() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
+    let mut viewport = dear_imgui_rs::sys::ImGuiViewport::default();
+
+    record_viewport_failure(
+        runtime.control(),
+        &mut viewport,
+        WinitPlatformError::EventLoopUnavailable,
+    );
+    assert_eq!(
+        runtime.poll_fault(),
+        Err(WinitPlatformError::EventLoopUnavailable)
+    );
+    unsafe { winit_destroy_window(&mut viewport) };
+    viewport.PlatformRequestClose = false;
+
+    runtime
+        .control()
+        .enter_event_loop_pointer_for_test(std::ptr::null(), || {});
+
+    assert!(!viewport.PlatformRequestClose);
+}
+
+#[test]
+fn persistent_failure_does_not_cross_a_native_ownership_change() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let viewport = create_headless_secondary_viewport(&mut context);
+    let runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
+
+    record_viewport_failure(
+        runtime.control(),
+        viewport,
+        WinitPlatformError::EventLoopUnavailable,
+    );
+    assert_eq!(
+        runtime.poll_fault(),
+        Err(WinitPlatformError::EventLoopUnavailable)
+    );
+    unsafe {
+        (*viewport).PlatformRequestClose = false;
+        (*viewport).PlatformUserData = std::ptr::dangling_mut::<u8>().cast();
+    }
+
+    runtime
+        .control()
+        .enter_event_loop_pointer_for_test(std::ptr::null(), || {});
+    unsafe {
+        (*viewport).PlatformUserData = std::ptr::null_mut();
+    }
+    runtime
+        .control()
+        .enter_event_loop_pointer_for_test(std::ptr::null(), || {});
+
+    assert!(!unsafe { (*viewport).PlatformRequestClose });
+}
+
+#[test]
+fn persistent_failure_does_not_cross_a_viewport_id_generation_change() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let viewport = create_headless_secondary_viewport(&mut context);
+    let runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
+
+    record_viewport_failure(
+        runtime.control(),
+        viewport,
+        WinitPlatformError::EventLoopUnavailable,
+    );
+    assert_eq!(
+        runtime.poll_fault(),
+        Err(WinitPlatformError::EventLoopUnavailable)
+    );
+    let original_id = unsafe { (*viewport).ID };
+    unsafe {
+        (*viewport).PlatformRequestClose = false;
+        (*viewport).ID = original_id.wrapping_add(1);
+    }
+
+    runtime
+        .control()
+        .enter_event_loop_pointer_for_test(std::ptr::null(), || {});
+
+    assert!(!unsafe { (*viewport).PlatformRequestClose });
+    unsafe { (*viewport).ID = original_id };
+}
+
 #[test]
 fn callback_fault_queue_drains_every_failure_in_observation_order() {
     let _guard = lock_context();

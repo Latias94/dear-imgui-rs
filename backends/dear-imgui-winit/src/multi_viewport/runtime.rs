@@ -34,8 +34,9 @@ use super::native_cursor_hittest::query_native_mouse_state;
 #[cfg(target_os = "windows")]
 use super::registry::viewport_id_for_native_window;
 use super::registry::{
-    apply_pending_geometry_refresh, preflight_viewport_ownership, register_runtime,
-    request_geometry_refresh_for_window, secondary_viewport_windows, unregister_runtime,
+    FailedViewport, apply_pending_geometry_refresh, preflight_viewport_ownership,
+    reassert_failed_viewports, register_runtime, request_geometry_refresh_for_window,
+    secondary_viewport_windows, unregister_runtime,
 };
 use super::viewport_data::{init_main_viewport, preflight_main_viewport};
 use crate::cursor::CursorSettings;
@@ -227,6 +228,7 @@ pub(crate) struct RuntimeControl {
     focus: RefCell<ContextFocusState>,
     platform_focus: Cell<PlatformFocusState>,
     pub(super) viewports: RefCell<Vec<super::registry::ViewportEntry>>,
+    pub(super) failed_viewports: RefCell<Vec<FailedViewport>>,
 }
 
 impl RuntimeControl {
@@ -257,6 +259,7 @@ impl RuntimeControl {
             focus: RefCell::new(focus),
             platform_focus: Cell::new(PlatformFocusState::default()),
             viewports: RefCell::new(Vec::new()),
+            failed_viewports: RefCell::new(Vec::new()),
         }
     }
 
@@ -281,6 +284,7 @@ impl RuntimeControl {
             focus: RefCell::new(ContextFocusState::default()),
             platform_focus: Cell::new(PlatformFocusState::default()),
             viewports: RefCell::new(Vec::new()),
+            failed_viewports: RefCell::new(Vec::new()),
         }
     }
 
@@ -674,6 +678,7 @@ impl RuntimeControl {
     }
 
     pub(super) fn drop_all_viewports(&self) {
+        self.failed_viewports.borrow_mut().clear();
         let entries = std::mem::take(&mut *self.viewports.borrow_mut());
         for entry in entries {
             entry.detach_and_drop();
@@ -683,6 +688,7 @@ impl RuntimeControl {
     fn discard_all_viewports_without_touching_native(&self) {
         // Native viewport pointers may have been filtered from the public snapshot or invalidated
         // by core teardown. Dropping the entries releases only Rust-owned windows and sidecars.
+        self.failed_viewports.borrow_mut().clear();
         self.viewports.borrow_mut().clear();
     }
 
@@ -1020,6 +1026,9 @@ struct EventLoopRestore<'a> {
 
 impl Drop for EventLoopRestore<'_> {
     fn drop(&mut self) {
+        // Dear ImGui clears platform request flags after invoking every callback. Reassert failed
+        // viewport closure only after the entire event-loop operation has returned.
+        reassert_failed_viewports(self.control);
         self.control.event_loop.set(self.previous);
     }
 }

@@ -58,7 +58,7 @@ struct PlotDemoContexts {
     plot: dear_implot::PlotContext,
 }
 
-fn main() {
+fn main() -> Result {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
@@ -74,11 +74,12 @@ fn main() {
     .init_resource::<PlotDemoState>()
     .add_systems(Startup, setup_scene)
     .add_systems(Update, (close_on_escape, animate_marker));
-    let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_systems(&primary_pass, primary_pass.system(plot_demo_ui));
+    let primary_pass = app.imgui_primary_pass()?;
+    app.add_imgui_systems(&primary_pass, primary_pass.system(plot_demo_ui))?;
 
     install_plot_context(&mut app);
     app.run();
+    Ok(())
 }
 
 fn setup_scene(mut commands: Commands) {
@@ -102,6 +103,7 @@ fn install_plot_context(app: &mut App) {
             .expect("ImguiPlugin should install ImguiContexts before examples create extensions");
         let primary_id = registry
             .primary_id()
+            .expect("ImguiContexts must remain active during plugin setup")
             .expect("ImguiPlugin should install a primary Context");
         registry
             .configure(primary_id, |context| PlotDemoContexts {

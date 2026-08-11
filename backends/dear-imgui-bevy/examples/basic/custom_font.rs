@@ -18,7 +18,7 @@ struct CustomFonts {
     roboto_medium: Option<FontId>,
 }
 
-fn main() {
+fn main() -> Result {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
@@ -30,13 +30,13 @@ fn main() {
         }),
         ..Default::default()
     }));
-    app.try_install_imgui(ImguiPlugin::default())
-        .expect("the custom-font example configuration is valid");
+    app.try_install_imgui(ImguiPlugin::default())?;
     app.insert_non_send(CustomFonts::default())
         .add_systems(Startup, (setup_scene, configure_fonts));
-    let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_systems(&primary_pass, primary_pass.system(custom_font_ui))
-        .run();
+    let primary_pass = app.imgui_primary_pass()?;
+    app.add_imgui_systems(&primary_pass, primary_pass.system(custom_font_ui))?;
+    app.run();
+    Ok(())
 }
 
 fn setup_scene(mut commands: Commands) {
@@ -48,7 +48,7 @@ fn configure_fonts(
     mut fonts: NonSendMut<CustomFonts>,
 ) -> Result {
     let primary = contexts
-        .primary_id()
+        .primary_id()?
         .ok_or("ImguiPlugin should install a primary Context before Startup")?;
 
     let roboto = StbTrueTypeFontData::from_slice(ROBOTO_MEDIUM)?;

@@ -23,8 +23,12 @@
 //!     .add_systems(Startup, |mut commands: Commands| {
 //!         commands.spawn(Camera2d);
 //!     });
-//! let primary_pass = app.imgui_primary_pass();
-//! app.add_imgui_systems(&primary_pass, primary_pass.system(draw_ui)).run();
+//! let primary_pass = app
+//!     .imgui_primary_pass()
+//!     .expect("the private pass registry must be active");
+//! app.add_imgui_systems(&primary_pass, primary_pass.system(draw_ui))
+//!     .expect("the system must be bound to this App and pass");
+//! app.run();
 //! ```
 //!
 //! Advanced targets use explicit render and input route entities:
@@ -38,7 +42,10 @@
 //!     contexts: NonSend<ImguiContexts>,
 //!     cameras: Query<Entity, With<Camera>>,
 //! ) {
-//!     let context = contexts.primary_id().expect("the plugin installs a primary Context");
+//!     let context = contexts
+//!         .primary_id()
+//!         .expect("the Context registry must be active")
+//!         .expect("the plugin installs a primary Context");
 //!     let camera = cameras.single().expect("this example has one camera");
 //!     commands.spawn((
 //!         ImguiRenderRoute::new(context, camera),
@@ -83,6 +90,10 @@
 //! use dear_imgui_bevy::input::{ImguiInputState, primary_window_input_system};
 //! ```
 //!
+//! ```compile_fail
+//! use dear_imgui_bevy::input::ImguiInputSystems;
+//! ```
+//!
 //! Native viewport markers are read through accessors rather than copied or field-projected:
 //!
 //! ```compile_fail
@@ -114,8 +125,9 @@ pub use self::context::ImguiRendererOwnershipError;
 pub use self::context::{
     ImguiAppExt, ImguiContextAdmissionError, ImguiContextConfig, ImguiContextError,
     ImguiContextRemovalPendingReason, ImguiContextRetired, ImguiContextRetirementId,
-    ImguiContextScopeError, ImguiContexts, ImguiFrame, ImguiPass, ImguiPlugin, ImguiPluginConfig,
-    ImguiPluginInstallError, ImguiPrimaryChange, ImguiPrimaryPass, ImguiShutdownError, ImguiSystem,
+    ImguiContextScopeError, ImguiContexts, ImguiFrame, ImguiPass, ImguiPassError, ImguiPlugin,
+    ImguiPluginConfig, ImguiPluginInstallError, ImguiPrimaryChange, ImguiPrimaryPass,
+    ImguiShutdownError, ImguiSystemConfigs, IntoImguiSystemConfigs,
 };
 #[cfg(feature = "render")]
 pub use self::render::ImguiRenderSystems;

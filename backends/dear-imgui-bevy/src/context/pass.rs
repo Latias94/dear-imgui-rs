@@ -1,5 +1,5 @@
 use std::any::{TypeId, type_name};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 use std::marker::PhantomData;
 use std::panic::{self, AssertUnwindSafe};
@@ -11,8 +11,8 @@ use std::thread::{self, ThreadId};
 use bevy_app::App;
 use bevy_ecs::resource::Resource;
 use bevy_ecs::schedule::{
-    InternedSystemSet, IntoScheduleConfigs, NodeId, Schedule, ScheduleConfigs, ScheduleLabel,
-    SingleThreadedExecutor, SystemSet,
+    InternedSystemSet, IntoScheduleConfigs, IntoSystemSet, Schedule, ScheduleConfigs,
+    ScheduleLabel, SingleThreadedExecutor, SystemCondition, SystemSet,
 };
 use bevy_ecs::system::{
     Adapt, AdapterSystem, FunctionSystem, IntoSystem, NonSendMarker, PipeSystem, RunSystemError,
@@ -27,6 +27,87 @@ static NEXT_REGISTRY_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Type marker for the primary Dear ImGui pass.
 pub enum ImguiPrimaryPass {}
+
+/// Failure to create, query, or configure a private Dear ImGui pass.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ImguiPassError {
+    /// Explicit App shutdown permanently closed the integration.
+    AppTerminated,
+    /// The App previously owned a pass registry that application code removed.
+    PassRegistryMissing,
+    /// Process-wide pass registry identities were exhausted.
+    RegistryIdExhausted,
+    /// This App exhausted its private pass identities.
+    PassIdExhausted,
+    /// The pass handle belongs to another Bevy App.
+    ForeignApp {
+        /// Rust brand of the rejected handle.
+        pass: &'static str,
+    },
+    /// The handle's Rust type no longer matches its private runtime identity.
+    InvalidBrand {
+        /// Rust brand of the rejected handle.
+        pass: &'static str,
+    },
+    /// The pass identity is not registered in this App.
+    UnknownPass {
+        /// Rust brand of the rejected handle.
+        pass: &'static str,
+    },
+    /// A bound system belongs to another runtime pass of the same Rust brand.
+    SystemPassMismatch {
+        /// Rust brand shared by both runtime passes.
+        pass: &'static str,
+        /// App-local identity of the target runtime pass.
+        expected_runtime: u64,
+        /// App-local identity carried by the rejected system configuration.
+        actual_runtime: u64,
+    },
+}
+
+impl fmt::Display for ImguiPassError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AppTerminated => formatter
+                .write_str("the Dear ImGui integration is terminal after explicit App shutdown"),
+            Self::PassRegistryMissing => formatter.write_str(
+                "the App's private Dear ImGui pass registry was removed after it was claimed",
+            ),
+            Self::RegistryIdExhausted => {
+                formatter.write_str("Dear ImGui pass registry identities are exhausted")
+            }
+            Self::PassIdExhausted => {
+                formatter.write_str("Dear ImGui pass identities are exhausted for this App")
+            }
+            Self::ForeignApp { pass } => {
+                write!(formatter, "Dear ImGui pass '{pass}' belongs to another App")
+            }
+            Self::InvalidBrand { pass } => {
+                write!(
+                    formatter,
+                    "Dear ImGui pass '{pass}' has an invalid Rust brand"
+                )
+            }
+            Self::UnknownPass { pass } => {
+                write!(
+                    formatter,
+                    "Dear ImGui pass '{pass}' is not registered in this App"
+                )
+            }
+            Self::SystemPassMismatch {
+                pass,
+                expected_runtime,
+                actual_runtime,
+            } => write!(
+                formatter,
+                "Dear ImGui system bound to runtime pass {actual_runtime} ('{pass}') cannot be registered in runtime pass {expected_runtime}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ImguiPassError {}
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct PassKey(u64);
@@ -78,23 +159,38 @@ impl<P: 'static> ImguiPass<P> {
         self.identity
     }
 
-    /// Bind a frame-input system to this pass so Bevy can configure it like any other system.
+    /// Bind a frame-input system to this exact private pass.
     ///
-    /// Pass the returned system to [`crate::ImguiAppExt::add_imgui_systems`]. Tuples and every
-    /// standard [`IntoScheduleConfigs`] modifier remain available after binding.
+    /// Pass the returned configuration to [`crate::ImguiAppExt::add_imgui_systems`]. The sealed
+    /// [`IntoImguiSystemConfigs`] trait provides the usual Bevy ordering, set, condition, and
+    /// chaining modifiers without allowing the adapted system to enter an ordinary Bevy schedule.
     #[must_use]
-    pub fn system<S>(&self, system: S) -> ImguiSystem<P, S> {
-        ImguiSystem {
-            pass: self.identity,
-            active: Arc::clone(&self.active),
+    pub fn system<S, M>(&self, system: S) -> ImguiSystemConfigs<P>
+    where
+        S: IntoSystem<ImguiFrame<'static, P>, (), M> + 'static,
+        M: 'static,
+    {
+        let system = IntoSystem::into_system(system);
+        let name = system.name();
+        let adapted = AdapterSystem::new(
+            ImguiFrameAdapter {
+                pass: self.identity,
+                active: Arc::clone(&self.active),
+                _brand: PhantomData,
+            },
             system,
+            name.clone(),
+        );
+        let main_thread: MainThreadGateSystem =
+            IntoSystem::into_system(require_main_thread as fn(NonSendMarker));
+        let configs = PipeSystem::new(main_thread, adapted, name).into_configs();
+        ImguiSystemConfigs {
+            identities: vec![self.identity],
+            configs,
             _brand: PhantomData,
         }
     }
 }
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, SystemSet)]
-struct ImguiPassBindingSet(PassIdentity);
 
 impl<P: 'static> Clone for ImguiPass<P> {
     fn clone(&self) -> Self {
@@ -115,50 +211,184 @@ impl<P: 'static> fmt::Debug for ImguiPass<P> {
     }
 }
 
-/// A Dear ImGui frame-input system bound to one private pass.
+/// One or more Dear ImGui systems sealed to a private pass.
 ///
-/// This implements [`IntoScheduleConfigs`] with unit input, so callers can use Bevy's normal
-/// system configuration API before registering it with
-/// [`crate::ImguiAppExt::add_imgui_systems`].
-pub struct ImguiSystem<P: 'static, S> {
-    pass: PassIdentity,
-    active: Arc<ActiveFrameControl>,
-    system: S,
+/// This type deliberately does not implement Bevy's [`IntoScheduleConfigs`]. It can only be
+/// consumed by [`crate::ImguiAppExt::add_imgui_systems`], which validates its exact App and pass
+/// identity before modifying the private runner.
+///
+/// ```compile_fail
+/// use bevy_app::App;
+/// use dear_imgui_bevy::ImguiAppExt;
+///
+/// fn ordinary_bevy_system() {}
+///
+/// let mut app = App::new();
+/// let pass = app.imgui_primary_pass().unwrap();
+/// app.add_imgui_systems(&pass, ordinary_bevy_system);
+/// ```
+pub struct ImguiSystemConfigs<P: 'static> {
+    identities: Vec<PassIdentity>,
+    configs: ScheduleConfigs<ScheduleSystem>,
     _brand: PhantomData<fn() -> P>,
 }
 
 type MainThreadGateSystem = FunctionSystem<fn(NonSendMarker), (), (), fn(NonSendMarker)>;
 
-#[doc(hidden)]
-pub struct ImguiSystemMarker<P, M>(PhantomData<fn() -> (P, M)>);
-
-impl<P, S, M> IntoScheduleConfigs<ScheduleSystem, ImguiSystemMarker<P, M>> for ImguiSystem<P, S>
-where
-    P: 'static,
-    S: IntoSystem<ImguiFrame<'static, P>, (), M> + 'static,
-    M: 'static,
-{
-    fn into_configs(self) -> ScheduleConfigs<ScheduleSystem> {
-        let system = IntoSystem::into_system(self.system);
-        let name = system.name();
-        let adapted = AdapterSystem::new(
-            ImguiFrameAdapter {
-                pass: self.pass,
-                active: self.active,
-                _brand: PhantomData,
-            },
-            system,
-            name.clone(),
-        );
-        let main_thread: MainThreadGateSystem =
-            IntoSystem::into_system(require_main_thread as fn(NonSendMarker));
-        PipeSystem::new(main_thread, adapted, name).in_set(ImguiPassBindingSet(self.pass))
+impl<P: 'static> ImguiSystemConfigs<P> {
+    fn map_configs(
+        mut self,
+        map: impl FnOnce(ScheduleConfigs<ScheduleSystem>) -> ScheduleConfigs<ScheduleSystem>,
+    ) -> Self {
+        self.configs = map(self.configs);
+        self
     }
 }
 
+mod sealed {
+    pub trait Sealed<P: 'static> {}
+}
+
+/// Convert pass-bound systems into one private-runner configuration.
+///
+/// The trait is sealed so applications cannot forge pass ownership metadata. It intentionally
+/// mirrors the common Bevy configuration modifiers while keeping the resulting system out of
+/// public schedules.
+pub trait IntoImguiSystemConfigs<P: 'static>: sealed::Sealed<P> + Sized {
+    #[doc(hidden)]
+    fn into_imgui_system_configs(self) -> ImguiSystemConfigs<P>;
+
+    /// Add these systems to `set` inside the private pass runner.
+    fn in_set(self, set: impl SystemSet) -> ImguiSystemConfigs<P> {
+        self.into_imgui_system_configs()
+            .map_configs(|configs| configs.in_set(set))
+    }
+
+    /// Run these systems before every system in `set`.
+    fn before<M>(self, set: impl IntoSystemSet<M>) -> ImguiSystemConfigs<P> {
+        self.into_imgui_system_configs()
+            .map_configs(|configs| configs.before(set))
+    }
+
+    /// Run these systems after every system in `set`.
+    fn after<M>(self, set: impl IntoSystemSet<M>) -> ImguiSystemConfigs<P> {
+        self.into_imgui_system_configs()
+            .map_configs(|configs| configs.after(set))
+    }
+
+    /// Run before `set` without inserting deferred-command barriers.
+    fn before_ignore_deferred<M>(self, set: impl IntoSystemSet<M>) -> ImguiSystemConfigs<P> {
+        self.into_imgui_system_configs()
+            .map_configs(|configs| configs.before_ignore_deferred(set))
+    }
+
+    /// Run after `set` without inserting deferred-command barriers.
+    fn after_ignore_deferred<M>(self, set: impl IntoSystemSet<M>) -> ImguiSystemConfigs<P> {
+        self.into_imgui_system_configs()
+            .map_configs(|configs| configs.after_ignore_deferred(set))
+    }
+
+    /// Evaluate a cloned condition independently for every contained system.
+    fn distributive_run_if<M>(
+        self,
+        condition: impl SystemCondition<M> + Clone,
+    ) -> ImguiSystemConfigs<P> {
+        self.into_imgui_system_configs()
+            .map_configs(|configs| configs.distributive_run_if(condition))
+    }
+
+    /// Evaluate one condition for this complete configuration.
+    fn run_if<M>(self, condition: impl SystemCondition<M>) -> ImguiSystemConfigs<P> {
+        self.into_imgui_system_configs()
+            .map_configs(|configs| configs.run_if(condition))
+    }
+
+    /// Suppress ambiguity diagnostics against `set`.
+    fn ambiguous_with<M>(self, set: impl IntoSystemSet<M>) -> ImguiSystemConfigs<P> {
+        self.into_imgui_system_configs()
+            .map_configs(|configs| configs.ambiguous_with(set))
+    }
+
+    /// Suppress every ambiguity diagnostic for these systems.
+    fn ambiguous_with_all(self) -> ImguiSystemConfigs<P> {
+        self.into_imgui_system_configs()
+            .map_configs(ScheduleConfigs::ambiguous_with_all)
+    }
+
+    /// Chain each successive configuration with normal deferred-command barriers.
+    fn chain(self) -> ImguiSystemConfigs<P> {
+        self.into_imgui_system_configs()
+            .map_configs(ScheduleConfigs::chain)
+    }
+
+    /// Chain each successive configuration without deferred-command barriers.
+    fn chain_ignore_deferred(self) -> ImguiSystemConfigs<P> {
+        self.into_imgui_system_configs()
+            .map_configs(ScheduleConfigs::chain_ignore_deferred)
+    }
+}
+
+impl<P: 'static> sealed::Sealed<P> for ImguiSystemConfigs<P> {}
+
+impl<P: 'static> IntoImguiSystemConfigs<P> for ImguiSystemConfigs<P> {
+    fn into_imgui_system_configs(self) -> ImguiSystemConfigs<P> {
+        self
+    }
+}
+
+macro_rules! impl_imgui_system_config_tuple {
+    ($($name:ident),+ $(,)?) => {
+        impl<P: 'static, $($name),+> sealed::Sealed<P> for ($($name,)+)
+        where
+            $($name: IntoImguiSystemConfigs<P>,)+
+        {}
+
+        impl<P: 'static, $($name),+> IntoImguiSystemConfigs<P> for ($($name,)+)
+        where
+            $($name: IntoImguiSystemConfigs<P>,)+
+        {
+            #[allow(non_snake_case)]
+            fn into_imgui_system_configs(self) -> ImguiSystemConfigs<P> {
+                let ($($name,)+) = self;
+                let mut identities = Vec::new();
+                $(
+                    let config = $name.into_imgui_system_configs();
+                    identities.extend(config.identities.iter().copied());
+                    let $name = config.configs;
+                )+
+                ImguiSystemConfigs {
+                    identities,
+                    configs: ($($name,)+).into_configs(),
+                    _brand: PhantomData,
+                }
+            }
+        }
+    };
+}
+
+impl_imgui_system_config_tuple!(A);
+impl_imgui_system_config_tuple!(A, B);
+impl_imgui_system_config_tuple!(A, B, C);
+impl_imgui_system_config_tuple!(A, B, C, D);
+impl_imgui_system_config_tuple!(A, B, C, D, E);
+impl_imgui_system_config_tuple!(A, B, C, D, E, F);
+impl_imgui_system_config_tuple!(A, B, C, D, E, F, G);
+impl_imgui_system_config_tuple!(A, B, C, D, E, F, G, H);
+impl_imgui_system_config_tuple!(A, B, C, D, E, F, G, H, I);
+impl_imgui_system_config_tuple!(A, B, C, D, E, F, G, H, I, J);
+impl_imgui_system_config_tuple!(A, B, C, D, E, F, G, H, I, J, K);
+impl_imgui_system_config_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
+impl_imgui_system_config_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M);
+impl_imgui_system_config_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N);
+impl_imgui_system_config_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O);
+impl_imgui_system_config_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, Q);
+impl_imgui_system_config_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, Q, R);
+impl_imgui_system_config_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, Q, R, T);
+impl_imgui_system_config_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, Q, R, T, U);
+impl_imgui_system_config_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, Q, R, T, U, V);
+
 /// Internal unit-input adapter that injects the frame owned by its private pass runner.
-#[doc(hidden)]
-pub struct ImguiFrameAdapter<P: 'static> {
+struct ImguiFrameAdapter<P: 'static> {
     pass: PassIdentity,
     active: Arc<ActiveFrameControl>,
     _brand: PhantomData<fn() -> P>,
@@ -228,8 +458,19 @@ fn require_main_thread(_marker: NonSendMarker) {}
 /// fn draw_b(_frame: ImguiFrame<'_, PassB>) {}
 ///
 /// let mut app = App::new();
-/// let pass_a = app.declare_imgui_pass::<PassA>();
+/// let pass_a = app.declare_imgui_pass::<PassA>().unwrap();
 /// app.add_imgui_systems(&pass_a, pass_a.system(draw_b));
+/// ```
+///
+/// ```compile_fail
+/// use bevy_app::{App, Update};
+/// use dear_imgui_bevy::{ImguiAppExt, ImguiFrame};
+///
+/// fn draw(_frame: ImguiFrame<'_>) {}
+///
+/// let mut app = App::new();
+/// let pass = app.imgui_primary_pass().unwrap();
+/// app.add_systems(Update, pass.system(draw));
 /// ```
 pub struct ImguiFrame<'frame, P: 'static = ImguiPrimaryPass> {
     ui: &'frame Ui,
@@ -388,39 +629,8 @@ impl PassRunner {
         Self { schedule }
     }
 
-    fn add_systems<M>(
-        &mut self,
-        pass: PassIdentity,
-        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
-    ) {
-        let existing_systems = self
-            .schedule
-            .graph()
-            .systems
-            .iter()
-            .map(|(system_key, _, _)| system_key)
-            .collect::<HashSet<_>>();
+    fn add_systems(&mut self, systems: ScheduleConfigs<ScheduleSystem>) {
         self.schedule.add_systems(systems);
-
-        let graph = self.schedule.graph();
-        let binding = ImguiPassBindingSet(pass).intern();
-        let binding_node = graph.system_sets.get_key(binding).map(NodeId::Set);
-        for (system_key, system, _) in graph
-            .systems
-            .iter()
-            .filter(|(system_key, _, _)| !existing_systems.contains(system_key))
-        {
-            assert!(
-                binding_node.is_some_and(|binding_node| {
-                    graph
-                        .hierarchy()
-                        .graph()
-                        .contains_edge(binding_node, NodeId::System(system_key))
-                }),
-                "Dear ImGui system '{}' is not bound to this exact pass",
-                system.name()
-            );
-        }
     }
 
     fn configure_sets<M>(&mut self, sets: impl IntoScheduleConfigs<InternedSystemSet, M>) {
@@ -439,13 +649,12 @@ pub(crate) struct ImguiPassRegistry {
 }
 
 impl ImguiPassRegistry {
-    fn new(lifecycle: ImguiAppLifecycle) -> Self {
-        let registry_id = NEXT_REGISTRY_ID.fetch_add(1, Ordering::Relaxed);
-        assert_ne!(
-            registry_id,
-            u64::MAX,
-            "Dear ImGui pass registry IDs exhausted"
-        );
+    fn new(lifecycle: ImguiAppLifecycle) -> Result<Self, ImguiPassError> {
+        let registry_id = NEXT_REGISTRY_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                current.checked_add(1)
+            })
+            .map_err(|_| ImguiPassError::RegistryIdExhausted)?;
         let mut registry = Self {
             registry_id,
             next_key: 1,
@@ -455,21 +664,33 @@ impl ImguiPassRegistry {
             active: Arc::new(ActiveFrameControl::default()),
             lifecycle,
         };
-        registry.primary = registry.allocate::<ImguiPrimaryPass>().identity.key;
-        registry
+        registry.primary = registry.allocate::<ImguiPrimaryPass>()?.identity.key;
+        Ok(registry)
     }
 
-    fn declare<P: 'static>(&mut self) -> ImguiPass<P> {
+    fn ensure_active(&self) -> Result<(), ImguiPassError> {
+        if self.lifecycle.is_terminal() {
+            Err(ImguiPassError::AppTerminated)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn declare<P: 'static>(&mut self) -> Result<ImguiPass<P>, ImguiPassError> {
+        self.ensure_active()?;
         self.allocate::<P>()
     }
 
-    fn primary_pass(&self) -> ImguiPass<ImguiPrimaryPass> {
-        let (brand, brand_name) = self
-            .identities
-            .get(&self.primary)
-            .copied()
-            .expect("the pass registry must retain its primary pass");
-        ImguiPass::from_identity(
+    fn primary_pass(&self) -> Result<ImguiPass<ImguiPrimaryPass>, ImguiPassError> {
+        self.ensure_active()?;
+        let (brand, brand_name) =
+            self.identities
+                .get(&self.primary)
+                .copied()
+                .ok_or(ImguiPassError::UnknownPass {
+                    pass: type_name::<ImguiPrimaryPass>(),
+                })?;
+        Ok(ImguiPass::from_identity(
             PassIdentity {
                 registry_id: self.registry_id,
                 key: self.primary,
@@ -477,20 +698,20 @@ impl ImguiPassRegistry {
                 brand_name,
             },
             Arc::clone(&self.active),
-        )
+        ))
     }
 
-    fn allocate<P: 'static>(&mut self) -> ImguiPass<P> {
+    fn allocate<P: 'static>(&mut self) -> Result<ImguiPass<P>, ImguiPassError> {
         let brand = TypeId::of::<P>();
         let key = PassKey(self.next_key);
         self.next_key = self
             .next_key
             .checked_add(1)
-            .expect("Dear ImGui pass IDs exhausted");
+            .ok_or(ImguiPassError::PassIdExhausted)?;
         let brand_name = type_name::<P>();
         self.identities.insert(key, (brand, brand_name));
         self.runners.insert(key, PassRunner::new(key));
-        ImguiPass::from_identity(
+        Ok(ImguiPass::from_identity(
             PassIdentity {
                 registry_id: self.registry_id,
                 key,
@@ -498,60 +719,79 @@ impl ImguiPassRegistry {
                 brand_name,
             },
             Arc::clone(&self.active),
-        )
+        ))
     }
 
-    fn validate<P: 'static>(&self, pass: &ImguiPass<P>) {
-        assert_eq!(
-            pass.identity.registry_id, self.registry_id,
-            "Dear ImGui pass handle belongs to another App"
-        );
-        assert_eq!(
-            pass.identity.brand,
-            TypeId::of::<P>(),
-            "Dear ImGui pass handle has an invalid type brand"
-        );
-        assert_eq!(
-            self.identities.get(&pass.identity.key),
-            Some(&(pass.identity.brand, pass.identity.brand_name)),
-            "Dear ImGui pass handle is not registered in this App"
-        );
+    fn validate<P: 'static>(&self, pass: &ImguiPass<P>) -> Result<(), ImguiPassError> {
+        self.ensure_active()?;
+        if pass.identity.registry_id != self.registry_id {
+            return Err(ImguiPassError::ForeignApp {
+                pass: pass.identity.brand_name,
+            });
+        }
+        if pass.identity.brand != TypeId::of::<P>() {
+            return Err(ImguiPassError::InvalidBrand {
+                pass: pass.identity.brand_name,
+            });
+        }
+        if self.identities.get(&pass.identity.key)
+            != Some(&(pass.identity.brand, pass.identity.brand_name))
+        {
+            return Err(ImguiPassError::UnknownPass {
+                pass: pass.identity.brand_name,
+            });
+        }
+        Ok(())
     }
 
-    fn add_systems<P, M>(
+    fn add_systems<P>(
         &mut self,
         pass: &ImguiPass<P>,
-        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
-    ) where
+        systems: ImguiSystemConfigs<P>,
+    ) -> Result<(), ImguiPassError>
+    where
         P: 'static,
     {
-        assert!(
-            !self.lifecycle.is_terminal(),
-            "Dear ImGui App lifecycle is terminal"
-        );
-        self.validate(pass);
+        self.validate(pass)?;
+        for identity in &systems.identities {
+            if identity.registry_id != self.registry_id {
+                return Err(ImguiPassError::ForeignApp {
+                    pass: identity.brand_name,
+                });
+            }
+            if *identity != pass.identity {
+                return Err(ImguiPassError::SystemPassMismatch {
+                    pass: pass.identity.brand_name,
+                    expected_runtime: pass.identity.key.0,
+                    actual_runtime: identity.key.0,
+                });
+            }
+        }
         self.runners
             .get_mut(&pass.identity.key)
-            .expect("a declared Dear ImGui pass must retain its private runner")
-            .add_systems(pass.identity, systems);
+            .ok_or(ImguiPassError::UnknownPass {
+                pass: pass.identity.brand_name,
+            })?
+            .add_systems(systems.configs);
+        Ok(())
     }
 
     fn configure_sets<P, M>(
         &mut self,
         pass: &ImguiPass<P>,
         sets: impl IntoScheduleConfigs<InternedSystemSet, M>,
-    ) where
+    ) -> Result<(), ImguiPassError>
+    where
         P: 'static,
     {
-        assert!(
-            !self.lifecycle.is_terminal(),
-            "Dear ImGui App lifecycle is terminal"
-        );
-        self.validate(pass);
+        self.validate(pass)?;
         self.runners
             .get_mut(&pass.identity.key)
-            .expect("a declared Dear ImGui pass must retain its private runner")
+            .ok_or(ImguiPassError::UnknownPass {
+                pass: pass.identity.brand_name,
+            })?
             .configure_sets(sets);
+        Ok(())
     }
 
     fn take_runner(&mut self, pass: PassIdentity) -> (PassRunner, Arc<ActiveFrameControl>) {
@@ -575,62 +815,81 @@ impl ImguiPassRegistry {
     }
 }
 
-pub(crate) fn install_pass_registry(app: &mut App) {
+pub(crate) fn install_pass_registry(app: &mut App) -> Result<(), ImguiPassError> {
     if !app.world().contains_resource::<ImguiAppLifecycle>() {
         app.init_resource::<ImguiAppLifecycle>();
     }
     let lifecycle = app.world().resource::<ImguiAppLifecycle>().clone();
-    assert!(
-        !lifecycle.is_terminal(),
-        "Dear ImGui App lifecycle is terminal"
-    );
-    if app.world().get_non_send::<ImguiPassRegistry>().is_none() {
-        app.insert_non_send(ImguiPassRegistry::new(lifecycle));
+    if lifecycle.is_terminal() {
+        return Err(ImguiPassError::AppTerminated);
     }
+    if app.world().get_non_send::<ImguiPassRegistry>().is_some() {
+        return if lifecycle.pass_registry_claimed() {
+            Ok(())
+        } else {
+            Err(ImguiPassError::PassRegistryMissing)
+        };
+    }
+    if lifecycle.pass_registry_claimed() {
+        return Err(ImguiPassError::PassRegistryMissing);
+    }
+    let registry = ImguiPassRegistry::new(lifecycle.clone())?;
+    if !lifecycle.try_claim_pass_registry() {
+        return Err(ImguiPassError::PassRegistryMissing);
+    }
+    app.insert_non_send(registry);
+    Ok(())
 }
 
-pub(crate) fn declare_pass<P: 'static>(app: &mut App) -> ImguiPass<P> {
-    install_pass_registry(app);
+pub(crate) fn declare_pass<P: 'static>(app: &mut App) -> Result<ImguiPass<P>, ImguiPassError> {
+    install_pass_registry(app)?;
     app.world_mut()
         .get_non_send_mut::<ImguiPassRegistry>()
         .expect("Dear ImGui pass registry was just installed")
         .declare::<P>()
 }
 
-pub(crate) fn primary_pass(app: &mut App) -> ImguiPass<ImguiPrimaryPass> {
-    install_pass_registry(app);
+pub(crate) fn primary_pass(app: &mut App) -> Result<ImguiPass<ImguiPrimaryPass>, ImguiPassError> {
+    install_pass_registry(app)?;
     app.world()
         .get_non_send::<ImguiPassRegistry>()
         .expect("Dear ImGui pass registry was just installed")
         .primary_pass()
 }
 
-pub(crate) fn add_systems<P, M>(
+pub(crate) fn add_systems<P>(
     app: &mut App,
     pass: &ImguiPass<P>,
-    systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
-) where
+    systems: impl IntoImguiSystemConfigs<P>,
+) -> Result<(), ImguiPassError>
+where
     P: 'static,
 {
-    install_pass_registry(app);
+    let systems = systems.into_imgui_system_configs();
+    install_pass_registry(app)?;
     app.world_mut()
         .get_non_send_mut::<ImguiPassRegistry>()
         .expect("Dear ImGui pass registry was just installed")
-        .add_systems(pass, systems);
+        .add_systems(pass, systems)
 }
 
 pub(crate) fn configure_sets<P, M>(
     app: &mut App,
     pass: &ImguiPass<P>,
     sets: impl IntoScheduleConfigs<InternedSystemSet, M>,
-) where
+) -> Result<(), ImguiPassError>
+where
     P: 'static,
 {
-    install_pass_registry(app);
+    install_pass_registry(app)?;
     app.world_mut()
         .get_non_send_mut::<ImguiPassRegistry>()
         .expect("Dear ImGui pass registry was just installed")
-        .configure_sets(pass, sets);
+        .configure_sets(pass, sets)
+}
+
+pub(crate) fn remove_pass_registry(app: &mut App) {
+    drop(app.world_mut().remove_non_send::<ImguiPassRegistry>());
 }
 
 pub(crate) fn existing_registry_id(world: &World) -> Option<u64> {

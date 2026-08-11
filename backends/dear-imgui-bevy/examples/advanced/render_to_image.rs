@@ -35,7 +35,7 @@ struct RenderToImageState {
     value: f32,
 }
 
-fn main() {
+fn main() -> Result {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
@@ -50,12 +50,13 @@ fn main() {
     .add_plugins(ImguiPlugin::default())
     .add_systems(Startup, setup)
     .add_systems(Update, (close_on_escape, resize_render_target));
-    let primary_pass = app.imgui_primary_pass();
-    let offscreen_pass = app.declare_imgui_pass::<OffscreenContextPass>();
-    app.insert_resource(offscreen_pass.clone())
-        .add_imgui_systems(&primary_pass, primary_pass.system(primary_ui))
-        .add_imgui_systems(&offscreen_pass, offscreen_pass.system(offscreen_ui))
-        .run();
+    let primary_pass = app.imgui_primary_pass()?;
+    let offscreen_pass = app.declare_imgui_pass::<OffscreenContextPass>()?;
+    app.insert_resource(offscreen_pass.clone());
+    app.add_imgui_systems(&primary_pass, primary_pass.system(primary_ui))?;
+    app.add_imgui_systems(&offscreen_pass, offscreen_pass.system(offscreen_ui))?;
+    app.run();
+    Ok(())
 }
 
 fn setup(

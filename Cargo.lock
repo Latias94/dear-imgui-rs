@@ -2795,6 +2795,7 @@ name = "dear-imgui-winit"
 version = "0.16.0-alpha.2"
 dependencies = [
  "dear-imgui-rs",
+ "objc2-app-kit 0.3.2",
  "thiserror 2.0.18",
  "web-sys",
  "web-time",

@@ -148,7 +148,10 @@ fn post_process_and_imgui_pixels_coexist_across_camera_msaa_and_hdr_modes() {
 
     {
         let mut contexts = app.world_mut().non_send_mut::<ImguiContexts>();
-        let primary = contexts.primary_id().expect("primary Context must exist");
+        let primary = contexts
+            .primary_id()
+            .expect("Context registry must be active")
+            .expect("primary Context must exist");
         contexts
             .configure(primary, |context| {
                 let _ = context.set_ini_filename::<std::path::PathBuf>(None);
@@ -331,16 +334,18 @@ fn multiple_contexts_compose_in_route_order_on_one_camera() {
     .init_resource::<CompositionReadbacks>()
     .add_observer(collect_readback);
 
-    let primary_pass = app.imgui_primary_pass();
-    let secondary_pass = app.declare_imgui_pass::<SameCameraSecondaryPass>();
+    let primary_pass = app.imgui_primary_pass().unwrap();
+    let secondary_pass = app.declare_imgui_pass::<SameCameraSecondaryPass>().unwrap();
     app.add_imgui_systems(
         &primary_pass,
         primary_pass.system(draw_primary_context_fixture),
     )
-    .add_imgui_systems(
+    .unwrap();
+    app.add_imgui_systems(
         &secondary_pass,
         secondary_pass.system(draw_secondary_context_fixture),
-    );
+    )
+    .unwrap();
 
     app.world_mut().spawn((
         Window {
@@ -352,7 +357,10 @@ fn multiple_contexts_compose_in_route_order_on_one_camera() {
 
     let (primary, secondary) = {
         let mut contexts = app.world_mut().non_send_mut::<ImguiContexts>();
-        let primary = contexts.primary_id().expect("primary Context must exist");
+        let primary = contexts
+            .primary_id()
+            .expect("Context registry must be active")
+            .expect("primary Context must exist");
         contexts
             .configure(primary, |context| {
                 let _ = context.set_ini_filename::<std::path::PathBuf>(None);
@@ -443,11 +451,12 @@ fn render_ui_order(order: ImguiUiRenderOrder, expectation: CompositionExpectatio
     .init_resource::<CompositionReadbacks>()
     .add_observer(collect_readback);
 
-    let primary_pass = app.imgui_primary_pass();
+    let primary_pass = app.imgui_primary_pass().unwrap();
     app.add_imgui_systems(
         &primary_pass,
         primary_pass.system(draw_composition_fixture::<ImguiPrimaryPass>),
-    );
+    )
+    .unwrap();
 
     app.world_mut().spawn((
         Window {
@@ -458,7 +467,10 @@ fn render_ui_order(order: ImguiUiRenderOrder, expectation: CompositionExpectatio
     ));
     {
         let mut contexts = app.world_mut().non_send_mut::<ImguiContexts>();
-        let primary = contexts.primary_id().expect("primary Context must exist");
+        let primary = contexts
+            .primary_id()
+            .expect("Context registry must be active")
+            .expect("primary Context must exist");
         contexts
             .configure(primary, |context| {
                 let _ = context.set_ini_filename::<std::path::PathBuf>(None);
@@ -481,6 +493,7 @@ fn render_ui_order(order: ImguiUiRenderOrder, expectation: CompositionExpectatio
         .world()
         .non_send::<ImguiContexts>()
         .primary_id()
+        .expect("Context registry must be active")
         .expect("primary Context must exist");
     app.world_mut()
         .spawn(ImguiRenderRoute::new(primary, camera));
@@ -593,11 +606,12 @@ fn spawn_case(app: &mut App, kind: CameraKind, msaa: Msaa, hdr: bool) {
         }
         entity.id()
     };
-    let pass = app.declare_imgui_pass::<CompositionPass>();
+    let pass = app.declare_imgui_pass::<CompositionPass>().unwrap();
     app.add_imgui_systems(
         &pass,
         pass.system(draw_composition_fixture::<CompositionPass>),
-    );
+    )
+    .unwrap();
     let context_id = {
         let mut contexts = app.world_mut().non_send_mut::<ImguiContexts>();
         let context_id = contexts

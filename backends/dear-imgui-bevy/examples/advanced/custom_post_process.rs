@@ -119,7 +119,7 @@ impl FullscreenMaterial for AfterOverlayEffect {
     }
 }
 
-fn main() {
+fn main() -> Result {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
@@ -149,9 +149,10 @@ fn main() {
         Update,
         (close_on_escape, animate_scene, apply_composition_settings),
     );
-    let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_systems(&primary_pass, primary_pass.system(composition_ui))
-        .run();
+    let primary_pass = app.imgui_primary_pass()?;
+    app.add_imgui_systems(&primary_pass, primary_pass.system(composition_ui))?;
+    app.run();
+    Ok(())
 }
 
 fn setup(mut commands: Commands) {

@@ -21,9 +21,10 @@ pub(crate) use driver::{drive_imgui_contexts, install_context_lifecycle};
 #[cfg(feature = "render")]
 pub(crate) use mailbox::{ImguiFrameMailbox, PendingFrame};
 pub(crate) use owner::ContextOwner;
-pub use pass::{ImguiFrame, ImguiPass, ImguiPrimaryPass, ImguiSystem};
-#[doc(hidden)]
-pub use pass::{ImguiFrameAdapter, ImguiSystemMarker};
+pub use pass::{
+    ImguiFrame, ImguiPass, ImguiPassError, ImguiPrimaryPass, ImguiSystemConfigs,
+    IntoImguiSystemConfigs,
+};
 pub(crate) use pass::{PassIdentity, run_pass};
 #[cfg(feature = "render")]
 pub(crate) use plugin::ImguiBackendRuntime;

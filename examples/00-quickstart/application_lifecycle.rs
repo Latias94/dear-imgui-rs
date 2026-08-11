@@ -2,7 +2,7 @@
 
 use dear_app::{
     AppConfig, Application, EventContext, FrameContext, GpuContext, InitContext,
-    PrepareFrameContext, RunError, ShutdownContext, imgui::Condition, run,
+    InitializedContext, PrepareFrameContext, RunError, ShutdownContext, imgui::Condition, run,
 };
 
 /// Long-lived state owned by `Application`; it is not recreated with GPU resources.
@@ -49,7 +49,7 @@ impl Application for LifecycleApp {
 
     fn initialized(
         &mut self,
-        _init: &mut InitContext<'_>,
+        _context: &mut InitializedContext<'_>,
         gpu: &mut GpuContext<'_>,
     ) -> Result<(), RunError> {
         self.initialized_calls += 1;

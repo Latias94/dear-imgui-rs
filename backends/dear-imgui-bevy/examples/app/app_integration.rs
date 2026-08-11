@@ -63,8 +63,11 @@ impl Plugin for DebugUiPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(ImguiPlugin::default())
             .add_systems(Startup, setup_imgui);
-        let primary_pass = app.imgui_primary_pass();
-        app.add_imgui_systems(&primary_pass, primary_pass.system(tools_ui));
+        let primary_pass = app
+            .imgui_primary_pass()
+            .expect("ImguiPlugin should install the primary pass before UI registration");
+        app.add_imgui_systems(&primary_pass, primary_pass.system(tools_ui))
+            .expect("the primary pass should accept its bound UI system");
     }
 }
 

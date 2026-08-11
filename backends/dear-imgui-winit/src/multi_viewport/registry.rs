@@ -25,6 +25,15 @@ pub(super) struct ViewportEntry {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct FailedViewport {
+    identity: ViewportIdentity,
+    viewport_id: u32,
+    platform_user_data: usize,
+    platform_handle: usize,
+    platform_handle_raw: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct ViewportIdentity {
     context: usize,
     address: usize,
@@ -49,6 +58,42 @@ impl ViewportIdentity {
             )
         };
         (!viewport.is_null()).then_some(viewport)
+    }
+}
+
+impl FailedViewport {
+    unsafe fn capture(
+        context: *mut dear_imgui_rs::sys::ImGuiContext,
+        viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+    ) -> Self {
+        let viewport_ref = unsafe { &*viewport };
+        Self {
+            identity: ViewportIdentity::capture(context, viewport),
+            viewport_id: viewport_ref.ID,
+            platform_user_data: viewport_ref.PlatformUserData as usize,
+            platform_handle: viewport_ref.PlatformHandle as usize,
+            platform_handle_raw: viewport_ref.PlatformHandleRaw as usize,
+        }
+    }
+
+    fn matches_address(self, viewport: *mut dear_imgui_rs::sys::ImGuiViewport) -> bool {
+        self.identity.address == viewport as usize
+    }
+
+    unsafe fn reassert_close(self) -> bool {
+        let Some(viewport) = (unsafe { self.identity.resolve() }) else {
+            return false;
+        };
+        let viewport_ref = unsafe { &mut *viewport };
+        if viewport_ref.ID != self.viewport_id
+            || viewport_ref.PlatformUserData as usize != self.platform_user_data
+            || viewport_ref.PlatformHandle as usize != self.platform_handle
+            || viewport_ref.PlatformHandleRaw as usize != self.platform_handle_raw
+        {
+            return false;
+        }
+        viewport_ref.PlatformRequestClose = true;
+        true
     }
 }
 
@@ -202,6 +247,39 @@ pub(super) fn insert_viewport_data(
         data,
     });
     Ok(data_ptr)
+}
+
+pub(super) fn record_failed_viewport(
+    control: &RuntimeControl,
+    viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+) {
+    if viewport.is_null() {
+        return;
+    }
+    let failure = unsafe { FailedViewport::capture(control.context_raw(), viewport) };
+    clear_failed_viewport(control, viewport);
+    control.failed_viewports.borrow_mut().push(failure);
+    unsafe { (*viewport).PlatformRequestClose = true };
+}
+
+pub(super) fn clear_failed_viewport(
+    control: &RuntimeControl,
+    viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+) {
+    if viewport.is_null() {
+        return;
+    }
+    control
+        .failed_viewports
+        .borrow_mut()
+        .retain(|failure| !failure.matches_address(viewport));
+}
+
+pub(super) fn reassert_failed_viewports(control: &RuntimeControl) {
+    control
+        .failed_viewports
+        .borrow_mut()
+        .retain(|failure| unsafe { failure.reassert_close() });
 }
 
 pub(super) fn owns_viewport_data(

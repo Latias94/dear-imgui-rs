@@ -288,13 +288,17 @@ pub(super) fn render_surface_frame<A: Application>(
                 docking,
             } = ui;
 
-            let mut prepare_frame = PrepareFrameContext {
-                imgui: context,
-                window: &window.window,
-            };
-            application
-                .prepare_frame(&mut prepare_frame)
-                .map_err(|error| error.during_application_stage(ApplicationStage::PrepareFrame))?;
+            super::state::run_application_frame_boundary(
+                context,
+                ApplicationStage::PrepareFrame,
+                |context| {
+                    let mut prepare_frame = PrepareFrameContext {
+                        imgui: context,
+                        window: &window.window,
+                    };
+                    application.prepare_frame(&mut prepare_frame)
+                },
+            )?;
             super::state::validate_supported_imgui_config(context)?;
             platform
                 .prepare_frame(context, &window.window)
@@ -360,7 +364,7 @@ pub(super) fn build_frame<'ctx>(
     context: &'ctx mut dear_imgui_rs::Context,
     build: impl FnOnce(&dear_imgui_rs::Ui) -> Result<(), RunError>,
 ) -> Result<FrameToken<'ctx>, RunError> {
-    let frame = context.begin_frame();
+    let frame = context.try_begin_frame().map_err(RunError::ImGuiFrame)?;
     build(frame.ui())?;
     Ok(frame)
 }

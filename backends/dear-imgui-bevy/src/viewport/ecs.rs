@@ -740,7 +740,7 @@ pub(super) fn cleanup_secondary_viewports_when_host_is_unavailable(
     host_queries: SecondaryViewportHostQueries,
     contexts: Option<NonSendMut<crate::ImguiContexts>>,
     bridge: NonSend<ImguiViewportBridge>,
-    #[cfg(feature = "render")] input_metrics: Res<crate::input::ImguiContextInputMetrics>,
+    #[cfg(feature = "render")] frame_input: Res<crate::input::ImguiFrameInputSlot>,
     #[cfg(feature = "render")] resolved_routes: Res<crate::route::ImguiResolvedRoutes>,
 ) {
     let Some(mut contexts) = contexts else {
@@ -753,7 +753,7 @@ pub(super) fn cleanup_secondary_viewports_when_host_is_unavailable(
         .map(|event| event.window)
         .collect::<HashSet<_>>();
     #[cfg(feature = "render")]
-    let primary_context = contexts.primary_id();
+    let primary_context = contexts.primary_id().ok().flatten();
 
     for context_bridge in bridge.contexts() {
         let context_id = context_bridge.context_id;
@@ -766,11 +766,7 @@ pub(super) fn cleanup_secondary_viewports_when_host_is_unavailable(
                     .input_route(context_id)
                     .map(crate::route::ImguiResolvedInputRoute::host_window)
             })
-            .or_else(|| {
-                input_metrics
-                    .get(context_id)
-                    .map(|metrics| metrics.host_window)
-            })
+            .or_else(|| frame_input.latest_host(context_id))
             .or_else(|| {
                 (Some(context_id) == primary_context)
                     .then_some(primary_window)

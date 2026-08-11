@@ -10,13 +10,13 @@ The backend owns Dear ImGui Contexts on Bevy's main thread, routes Bevy window i
 | --- | --- |
 | Rust | `1.95.0` or newer |
 | Bevy | exactly `0.19.0` |
-| dear-imgui-rs | `0.16.0-alpha.2` |
+| dear-imgui-rs | `main` (next prerelease) |
 
 `dear-imgui-bevy` defaults to the renderer plus deterministic Bevy UI ordering. Native multi-viewport is supported through an explicit feature and runtime opt-in. WASM supports the normal and headless feature sets but cannot create native platform windows.
 
 ## Installation
 
-Until `0.16.0-alpha.2` is published:
+This README documents the source-breaking API on `main`. Use matching Git dependencies:
 
 ```toml
 [dependencies]
@@ -25,19 +25,13 @@ dear-imgui-bevy = { git = "https://github.com/Latias94/dear-imgui-rs", branch = 
 dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
 ```
 
-After publication:
-
-```toml
-[dependencies]
-bevy = "=0.19.0"
-dear-imgui-bevy = "=0.16.0-alpha.2"
-dear-imgui-rs = "=0.16.0-alpha.2"
-```
+For the published `0.16.0-alpha.2` API and crates.io dependencies, use the
+[tagged alpha.2 README](https://github.com/Latias94/dear-imgui-rs/blob/v0.16.0-alpha.2/backends/dear-imgui-bevy/README.md).
 
 For a headless integration that drives private UI passes without installing the Bevy renderer:
 
 ```toml
-dear-imgui-bevy = { version = "=0.16.0-alpha.2", default-features = false }
+dear-imgui-bevy = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", default-features = false }
 ```
 
 ## Quick Start
@@ -48,18 +42,18 @@ One primary window and one active primary-window camera are routed automatically
 use bevy::prelude::*;
 use dear_imgui_bevy::prelude::*;
 
-fn main() {
+fn main() -> Result {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins);
-    app.try_install_imgui(ImguiPlugin::default())
-        .expect("the Dear ImGui configuration is valid");
+    app.try_install_imgui(ImguiPlugin::default())?;
     app
         .add_systems(Startup, |mut commands: Commands| {
             commands.spawn(Camera2d);
         });
-    let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_systems(&primary_pass, primary_pass.system(tools_ui))
-        .run();
+    let primary_pass = app.imgui_primary_pass()?;
+    app.add_imgui_systems(&primary_pass, primary_pass.system(tools_ui))?;
+    app.run();
+    Ok(())
 }
 
 fn tools_ui(frame: ImguiFrame<'_>) {
@@ -74,7 +68,7 @@ existing Context registry, and private-driver schedule placement before it mutat
 `app.add_plugins(ImguiPlugin::default())` remains available as an explicit panic-on-invalid-config
 convenience adapter over the same installation transaction.
 
-The plugin opens and closes each frame around a private, runner-owned pass. UI systems borrow the active frame through `ImguiFrame<'_, P>` and must not call `Context::frame()` or `Context::render()` themselves. Bind each UI function with `pass.system(...)`, then register it through `ImguiAppExt::add_imgui_systems`.
+The plugin opens and closes each frame around a private, runner-owned pass. UI systems borrow the active frame through `ImguiFrame<'_, P>` and must not call `Context::frame()` or `Context::render()` themselves. Bind each UI function with `pass.system(...)`, then register it through `ImguiAppExt::add_imgui_systems`. The resulting `ImguiSystemConfigs<P>` is sealed and cannot be added to an ordinary Bevy schedule.
 
 ## Feature Modes
 
@@ -102,7 +96,7 @@ The plugin opens and closes each frame around a private, runner-owned pass. UI s
 | `ImguiViewportWindow { viewport_id }`, `ImguiViewportCamera { viewport_id }`, direct field access, or `.copied()` marker queries | Query markers by reference. Retain `instance_id()` for stable lifecycle identity; call `viewport_id()` only for the current Dear ImGui route. The backend exclusively creates and repairs these projections. |
 | Public begin/end schedules, renderer resources, or viewport queue access | Let the plugin drive frames; order custom passes through `ImguiRenderSystems` and observe only public route, diagnostic, capture, texture, and viewport identity/configuration types. |
 | Reusing an application schedule for an additional Context | Declare an `ImguiPass<P>` and register typed frame systems through `ImguiAppExt`; the private runner cannot be invoked as an application schedule. |
-| Single-system `add_imgui_system` registration | Bind systems with `pass.system(...)`, then pass normal Bevy system configs to `add_imgui_systems`; tuples, `chain`, `before`, `after`, `run_if`, and system sets retain Bevy semantics. |
+| Single-system `add_imgui_system` registration | Bind systems with `pass.system(...)`, combine the sealed configs with tuples and `IntoImguiSystemConfigs` modifiers such as `chain`, `before`, `after`, `run_if`, and `in_set`, then handle the `Result` from `add_imgui_systems`. |
 | Constructing `ImguiContexts::with_primary` and inserting it manually | Call `app.adopt_imgui_primary_context(context)` before adding `ImguiPlugin`; the App-scoped lifecycle prevents registry reconstruction after terminal shutdown. |
 | Wrapper extraction through `into_inner()` | Advanced code that must recover the native owner calls `try_remove_immediately`, advances the required render/viewport schedules on `RemovalPending`, and retries explicitly. Normal removal destroys the Context through the managed queue. |
 
@@ -110,7 +104,7 @@ The plugin opens and closes each frame around a private, runner-owned pass. UI s
 
 ### Contexts and Passes
 
-`ImguiContexts` owns every Dear ImGui Context in deterministic order. `imgui_primary_pass()` returns the stable pass handle owned by the primary Context. Create an independent Context with a private typed pass:
+`ImguiContexts` owns every Dear ImGui Context in deterministic order. `imgui_primary_pass()` returns the stable pass handle owned by the primary Context. Pass lookup and declaration are fallible, so applications should propagate or explicitly handle `ImguiPassError`. Create an independent Context with a private typed pass:
 
 ```rust
 struct InspectorPass;
@@ -127,21 +121,24 @@ fn inspector_ui(frame: ImguiFrame<'_, InspectorPass>) {
     frame.ui().text("Independent inspector Context");
 }
 
-let inspector_pass = app.declare_imgui_pass::<InspectorPass>();
-app.insert_resource(inspector_pass.clone())
-    .add_systems(Startup, create_inspector)
-    .add_imgui_systems(&inspector_pass, inspector_pass.system(inspector_ui));
+fn install_inspector(app: &mut App) -> Result {
+    let inspector_pass = app.declare_imgui_pass::<InspectorPass>()?;
+    app.insert_resource(inspector_pass.clone())
+        .add_systems(Startup, create_inspector);
+    app.add_imgui_systems(&inspector_pass, inspector_pass.system(inspector_ui))?;
+    Ok(())
+}
 ```
 
-Each `declare_imgui_pass::<P>()` call creates a distinct runtime pass, even when `P` is the same type. The handle is `Clone`, not `Copy`; keep the exact handle for `ImguiContextConfig::new(&pass)`, `pass.system(...)`, and `add_imgui_systems`. The type parameter prevents accidental cross-brand registration, while the private runtime identity prevents two Contexts of one brand from sharing a runner. A raw frame-input function cannot be added to a normal Bevy schedule; only the private driver can supply its `ImguiFrame`. A bound system registered elsewhere fails closed before accessing `Ui`, including in a render sub-app or on another thread. Use `frame.context_id()` when a system needs its active Context identity, and use `contexts.configure(context_id, |context| ...)` only outside an active frame for font, ini, style, or other Context configuration.
+Each successful `declare_imgui_pass::<P>()` call creates a distinct runtime pass, even when `P` is the same type. The handle is `Clone`, not `Copy`; keep the exact handle for `ImguiContextConfig::new(&pass)`, `pass.system(...)`, and `add_imgui_systems`. The type parameter prevents accidental cross-brand registration, while the private runtime identity prevents two Contexts of one brand from sharing a runner. Neither a raw frame-input function nor the `ImguiSystemConfigs<P>` produced by `pass.system(...)` can enter a normal Bevy schedule; only the private driver can supply its `ImguiFrame`. A bound system registered elsewhere fails closed before accessing `Ui`, including in a render sub-app or on another thread. Use `frame.context_id()` when a system needs its active Context identity, and use `contexts.configure(context_id, |context| ...)` only outside an active frame for font, ini, style, or other Context configuration.
 
-`add_imgui_systems` and `configure_imgui_sets` forward Bevy's native `SystemConfigs` and set configs into the private pass schedule. Chained systems receive Bevy's normal intermediate `ApplyDeferred` barriers, so commands from one UI system can be observed by the next system in the chain.
+The sealed `IntoImguiSystemConfigs` trait retains the common Bevy modifiers needed inside a private pass: tuples, `in_set`, `before`, `after`, deferred-barrier variants, `run_if`, `distributive_run_if`, ambiguity controls, and chaining. `configure_imgui_sets` continues to accept Bevy's native set configs. Both `add_imgui_systems` and `configure_imgui_sets` return `Result<&mut App, ImguiPassError>` and validate the App lifecycle, runtime pass identity, and Rust brand; system registration also validates the bound-system provenance. Every error is returned before the target runner is modified, so the runner remains unchanged. Chained systems receive Bevy's normal intermediate `ApplyDeferred` barriers, so commands from one UI system can be observed by the next system in the chain.
 
 The serial Context driver runs immediately after `PreUpdate` by default. Bevy input is mapped and `WantCapture*` is sampled before Dear ImGui opens its frame, as required for a stable decision about that input batch. Gameplay systems in `Update` observe that pre-`NewFrame` capture decision together with the current UI output. Use `ImguiPluginConfig::with_driver_before(label)` or `with_driver_after(label)` when an application instead needs UI to observe later gameplay or transform state. A custom anchor must already be present in Bevy's `MainScheduleOrder` when `ImguiPlugin` is added, and the resulting placement must remain after `PreUpdate` completes and before `PostUpdate` begins. Camera and route topology is published in `PostUpdate` for the next frame; moving the driver past that publication boundary is rejected.
 
 `ImguiContexts::promote_primary(context_id)` selects an existing idle Context as the primary input and fallback-window target. `replace_primary(context, config)` first admits a new Context and changes the primary pointer only after admission succeeds; the previous primary remains registered for explicit asynchronous removal. Neither operation silently moves pass ownership, docking settings, or native viewport ownership between Contexts.
 
-An App claims its `ImguiContexts` registry exactly once. Temporarily removing that non-send value from the World does not reopen admission; reinsert the same value before continuing or call terminal shutdown. This prevents two registries from sharing one set of private passes and backend resources.
+An App claims its `ImguiContexts` registry exactly once. Temporarily removing that non-send value from the World does not reopen admission; reinsert the same value before continuing or call terminal shutdown. This prevents two registries from sharing one set of private passes and backend resources. A retained registry becomes explicitly terminal after shutdown: `primary_id`, `ids`, and `contains` return `ImguiContextError::AppTerminated` instead of disguising that state as `None`, an empty iterator, or `false`.
 
 ### Fonts
 
@@ -152,7 +149,7 @@ const ROBOTO_MEDIUM: &[u8] = include_bytes!("../assets/Roboto-Medium.ttf");
 
 fn configure_fonts(mut contexts: NonSendMut<ImguiContexts>) -> Result {
     let primary = contexts
-        .primary_id()
+        .primary_id()?
         .ok_or("ImguiPlugin should install a primary Context before Startup")?;
 
     let roboto = StbTrueTypeFontData::from_slice(ROBOTO_MEDIUM)?;

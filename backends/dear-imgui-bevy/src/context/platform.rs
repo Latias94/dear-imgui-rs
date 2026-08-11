@@ -182,14 +182,12 @@ pub(super) fn sync_context_platform_feedback(
     debug_assert_eq!(ui.context_id(), context_id);
     #[cfg(feature = "render")]
     {
-        let _ = host_window;
-        let default_window = world
-            .get_resource::<crate::input::ImguiContextInputMetrics>()
-            .and_then(|metrics| metrics.get(context_id))
-            .map(|metrics| metrics.host_window);
-        let cursor_target = world
-            .get_resource::<ImguiInputState>()
-            .and_then(|state| state.platform_cursor_window_for_context(context_id, default_window));
+        let Some(host_window) = host_window else {
+            return;
+        };
+        let cursor_target = world.get_resource::<ImguiInputState>().and_then(|state| {
+            state.platform_cursor_window_for_context(context_id, Some(host_window))
+        });
         let Some(cursor_target) = cursor_target else {
             return;
         };
@@ -327,20 +325,13 @@ pub(super) fn record_context_platform_ime_feedback(
     world: &mut World,
     context_id: imgui::ContextId,
     host_window: Option<Entity>,
+    input_enabled: bool,
     context_raw: *mut imgui::sys::ImGuiContext,
 ) {
     // SAFETY: the serial driver retains the owning active Context and keeps its frame open for
     // this call. The raw pointer was captured immediately before `Context::frame()`.
     let ime_data = unsafe { &(*context_raw).PlatformImeData };
     let uses_desktop_coordinates = native_viewports_enabled_for_frame(context_raw);
-    let input_enabled = world
-        .get_resource::<crate::route::ImguiResolvedRoutes>()
-        .is_some_and(|routes| {
-            routes.input_routes().iter().any(|route| {
-                route.context_id() == context_id
-                    && !matches!(route.policy(), crate::route::ImguiInputPolicy::Disabled)
-            })
-        });
     if !input_enabled {
         return;
     }

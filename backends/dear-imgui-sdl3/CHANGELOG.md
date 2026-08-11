@@ -8,10 +8,7 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ### Changed
 
-- SDL callback applications now enqueue pointer-free `Sdl3CallbackEvent` values through
-  `Sdl3CallbackEventHandoff` and replay them with the owning backend's
-  `process_callback_event`. Queue poisoning and caught callback panics are reported without
-  dropping events that have not been processed.
+- SDL callback applications now call `Sdl3CallbackEventHandoff::drain` and inspect the returned atomic `Sdl3CallbackEventBatch` before replaying retained events with the owning backend's `process_callback_event`; the former `try_drain` and `Sdl3CallbackEventQueue` surface was removed. Every distinct queue fault is retained in observation order, and bounded O(1) state-event coalescing prevents sustained callback traffic from starving ordered input.
 - The official OpenGL3 and SDL_GPU renderer owners now consume `FrameToken` through backend-owned
   viewport transactions. Managed-texture reconciliation, capability-aware secondary-window work,
   and ordered fault collection are no longer assembled from public `consumer`, `reconcile_frame`,
