@@ -903,6 +903,7 @@ impl Ui {
 mod tests {
     #[test]
     fn ending_a_top_level_window_does_not_mark_the_fallback_window_written() {
+        let _guard = crate::test_support::imgui_context_guard();
         let mut ctx = crate::Context::create();
         ctx.io_mut().set_display_size([128.0, 128.0]);
         ctx.io_mut().set_delta_time(1.0 / 60.0);
