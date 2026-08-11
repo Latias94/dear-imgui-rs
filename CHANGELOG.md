@@ -8,6 +8,23 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
+### Breaking Changes and Migration
+
+- SDL3 callback-mode applications must replace `Sdl3CallbackEventHandoff::try_drain` and `Sdl3CallbackEventQueue` with `drain`, inspect the returned batch through `faults()`, and then consume its retained events. The atomic batch preserves every distinct deferred fault and keeps ordered input available after overflow or lock-poison recovery.
+- Bevy applications must handle `Result` from `ImguiContexts::{primary_id,ids,contains}`, register application input producers through `ImguiAppExt::add_imgui_input_producers`, and register frame systems through an App-issued `ImguiPass` plus its sealed `ImguiSystemConfigs`. The public `ImguiInputSystems` set was removed so application ordering cannot suspend or split the backend-owned input transaction.
+- In `dear-app`, only `configure_imgui` retains full Dear ImGui `Context` access before platform and renderer attachment. `initialized` now receives `InitializedContext`, while event, pre-frame, and shutdown callbacks use narrow IO, style, font-atlas, and managed-texture capabilities. Every callback boundary validates the Context identity, native frame sequence, and lifecycle state.
+
+### Changed
+
+- Winit multi-viewport failures now retain the exact Context, viewport generation, native handle, and platform userdata until the close request is observed, preventing stale failures from closing a reused viewport. macOS `NO_FOCUS_ON_APPEARING` windows are shown without activating the application.
+- Bevy frame input is now a move-only, exactly-once transaction that binds route epoch, Context metrics, and cursor/IME authority to the same driver run. Terminal registries and private pass lifecycles fail explicitly instead of returning active-looking empty state.
+
+### Fixed
+
+- `Viewport::is_main` now identifies main viewports across all live managed Contexts without depending on whichever native Context is temporarily current.
+- `dear-app` now reports and closes frames leaked by application callbacks while preserving the callback's original error as the primary failure.
+- SDL3 callback coalescing now uses a bounded indexed queue, keeping high-frequency mouse, window, and display state updates O(1) without changing FIFO, reserve, or overflow behavior.
+
 ## [0.16.0-alpha.2] - 2026-08-09
 
 This source-breaking prerelease completes the ownership work started in alpha.1. Safe APIs now carry the Context, frame, renderer, native-callback, and GPU-completion capabilities needed for the operation they expose; provisional aliases and manual phase controls were removed instead of becoming permanent compatibility surface.
