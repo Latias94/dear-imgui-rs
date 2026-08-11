@@ -25,8 +25,7 @@ This crate supports multiple build strategies to fit different development workf
 ### 1. Prebuilt Static Libraries (Recommended)
 
 The fastest way to get started is to use prebuilt static libraries instead of compiling from source.
-`0.16.0-alpha.2` archives are currently published. Until `0.16.0-alpha.3` is published, use a
-repository checkout or build the alpha.3 candidate from source.
+`0.16.0-alpha.3` archives are published for the supported release targets and profiles.
 
 ```bash
 # Option A: Point to the library directory inside an extracted core artifact.
@@ -168,14 +167,7 @@ For a complete, up-to-date guide (including required tools, commands, and troubl
 
 This is a low-level sys crate providing unsafe FFI bindings. Most users should use the higher-level [`dear-imgui-rs`](https://crates.io/crates/dear-imgui-rs) crate instead, which provides safe Rust wrappers.
 
-Until `0.16.0-alpha.3` is published, test this candidate from `main`:
-
-```toml
-[dependencies]
-dear-imgui-sys = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
-```
-
-After publication, use the exact prerelease requirement:
+Use the exact prerelease requirement:
 
 ```toml
 [dependencies]

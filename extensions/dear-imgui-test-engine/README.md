@@ -33,15 +33,7 @@ See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob
 
 ## Quick Start
 
-Until `0.16.0-alpha.3` is published, use matching Git dependencies from `main`:
-
-```toml
-[dependencies]
-dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
-dear-imgui-test-engine = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
-```
-
-After publication, use the exact prerelease requirements:
+Use the exact prerelease requirements:
 
 ```toml
 [dependencies]

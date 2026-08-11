@@ -41,13 +41,11 @@ Typical use cases:
 - `sdlgpu3-renderer`: enables this crate's official SDLGPU3 renderer shim.
 - `multi-viewport`: enables multi-viewport helpers (requires `dear-imgui-rs/multi-viewport`).
 
-Until `0.16.0-alpha.3` is published, test any feature combination from `main`:
+Use the exact prerelease requirement for the desired feature combination:
 
 ```toml
-dear-imgui-sdl3 = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["opengl3-renderer"] }
+dear-imgui-sdl3 = { version = "=0.16.0-alpha.3", features = ["opengl3-renderer"] }
 ```
-
-After publication, use the exact prerelease requirement in the combinations below.
 
 Platform-only usage (SDL3 + WGPU/Glow, no official OpenGL3 renderer):
 

@@ -93,15 +93,7 @@ use one saved value rather than a stack, so avoid nesting `set_*`/`restore_*` or
 
 ## Quick Start
 
-Until `0.16.0-alpha.3` is published, take both crates from `main`:
-
-```toml
-[dependencies]
-dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
-dear-imguizmo-quat = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
-```
-
-After publication, use the exact prerelease requirements:
+Use the exact prerelease requirements:
 
 ```toml
 [dependencies]

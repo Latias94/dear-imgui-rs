@@ -168,25 +168,25 @@ under `examples/ci/` are release evidence and are intentionally excluded from th
 
 ## Installation
 
-The source tree is preparing the unified `0.16.0-alpha.3` release. The latest crates.io prerelease is `0.16.0-alpha.2`, while the latest stable train remains `0.15.1`. Until alpha.3 is published, use Git dependencies on the repository's `main` branch; the published alpha.2 API can be selected with the exact `=0.16.0-alpha.2` requirement. After publication, pin the exact prerelease `=0.16.0-alpha.3`; a broad `"0.16"` requirement does not select a prerelease. Applications staying on `0.15.1` can use the [v0.15.1 README](https://github.com/Latias94/dear-imgui-rs/blob/v0.15.1/README.md) for its API and installation snippets.
+The latest crates.io prerelease is `0.16.0-alpha.3`, while the latest stable train remains `0.15.1`. Pin the exact prerelease `=0.16.0-alpha.3`; a broad `"0.16"` requirement does not select a prerelease. Applications staying on `0.15.1` can use the [v0.15.1 README](https://github.com/Latias94/dear-imgui-rs/blob/v0.15.1/README.md) for its API and installation snippets.
 
 ### Core + Backends
 
 ```toml
 [dependencies]
-dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
+dear-imgui-rs = "=0.16.0-alpha.3"
 # Choose a backend + platform integration
-dear-imgui-wgpu = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }  # or dear-imgui-glow / dear-imgui-ash
-dear-imgui-winit = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" } # or dear-imgui-sdl3
+dear-imgui-wgpu = "=0.16.0-alpha.3"  # or dear-imgui-glow / dear-imgui-ash
+dear-imgui-winit = "=0.16.0-alpha.3" # or dear-imgui-sdl3
 ```
 
 `dear-imgui-wgpu` 0.16 defaults to WGPU 30. WGPU 29, 28, and 27 remain available as separate, mutually exclusive compatibility features:
 
 ```toml
 [dependencies]
-dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
-dear-imgui-wgpu = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", default-features = false, features = ["wgpu-29"] }
-dear-imgui-winit = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
+dear-imgui-rs = "=0.16.0-alpha.3"
+dear-imgui-wgpu = { version = "=0.16.0-alpha.3", default-features = false, features = ["wgpu-29"] }
+dear-imgui-winit = "=0.16.0-alpha.3"
 ```
 
 Replace `wgpu-29` with `wgpu-28` or `wgpu-27` when integrating an older WGPU application.
@@ -195,7 +195,7 @@ Replace `wgpu-29` with `wgpu-28` or `wgpu-27` when integrating an older WGPU app
 
 ```toml
 [dependencies]
-dear-app = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" } # State-owning Winit + WGPU runtime with docking support
+dear-app = "=0.16.0-alpha.3" # State-owning Winit + WGPU runtime with docking support
 ```
 
 ### Apple Platform Examples
@@ -237,8 +237,8 @@ Example: low-level Android route without a dedicated Android convenience crate:
 
 ```toml
 [dependencies]
-dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
-dear-imgui-sys = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["backend-shim-android", "backend-shim-opengl3"] }
+dear-imgui-rs = "=0.16.0-alpha.3"
+dear-imgui-sys = { version = "=0.16.0-alpha.3", features = ["backend-shim-android", "backend-shim-opengl3"] }
 ```
 
 Recommended ownership split:
@@ -268,25 +268,25 @@ assembly.
 ```toml
 [dependencies]
 # Plotting
-dear-implot = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }   # 2D plotting
-dear-implot3d = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" } # 3D plotting
+dear-implot = "=0.16.0-alpha.3"   # 2D plotting
+dear-implot3d = "=0.16.0-alpha.3" # 3D plotting
 
 # 3D Gizmos
-dear-imguizmo = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }      # Standard 3D gizmo + GraphEditor
-dear-imguizmo-quat = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" } # Quaternion-based gizmo
+dear-imguizmo = "=0.16.0-alpha.3"      # Standard 3D gizmo + GraphEditor
+dear-imguizmo-quat = "=0.16.0-alpha.3" # Quaternion-based gizmo
 
 # Node Editor
-dear-imnodes = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
-dear-node-editor = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" } # native-only; add feature "blueprints" for stack layout
+dear-imnodes = "=0.16.0-alpha.3"
+dear-node-editor = "=0.16.0-alpha.3" # native-only; add feature "blueprints" for stack layout
 
 # Test automation
-dear-imgui-test-engine = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
+dear-imgui-test-engine = "=0.16.0-alpha.3"
 
 # File Browser
-dear-file-browser = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" } # Native dialogs + ImGui file browser
+dear-file-browser = "=0.16.0-alpha.3" # Native dialogs + ImGui file browser
 
 # Reflection-based UI helpers
-dear-imgui-reflect = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
+dear-imgui-reflect = "=0.16.0-alpha.3"
 ```
 
 ### Reflection-based UI (dear-imgui-reflect)
@@ -357,9 +357,9 @@ Quick examples (enable auto prebuilt download):
 - Env (Unix): `IMGUI_SYS_USE_PREBUILT=1 cargo build -p dear-imgui-rs --features prebuilt`
 - Env (Windows PowerShell): `$env:IMGUI_SYS_USE_PREBUILT='1'; cargo build -p dear-imgui-rs --features prebuilt`
 
-## Compatibility Candidate (0.16.0-alpha.3)
+## Compatibility (0.16.0-alpha.3)
 
-The workspace follows a release-train model. The table below lists the combinations validated for the 0.16.0-alpha.3 candidate. See [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for version history and compatibility policy.
+The workspace follows a release-train model. The table below lists the combinations validated for the 0.16.0-alpha.3 release. See [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for version history and compatibility policy.
 
 Core
 

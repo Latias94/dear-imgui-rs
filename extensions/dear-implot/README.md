@@ -64,15 +64,7 @@ See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob
 
 This crate integrates with `dear-imgui-rs` directly — add both crates, then build plots inside an ImGui window using a `PlotContext` bound to the current ImGui context.
 
-Until `0.16.0-alpha.3` is published, take both crates from `main`:
-
-```toml
-[dependencies]
-dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
-dear-implot = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
-```
-
-After publication, use the exact prerelease requirements:
+Use the exact prerelease requirements:
 
 ```toml
 [dependencies]

@@ -120,13 +120,7 @@ Use C bindings (cimgui family) + bindgen when available:
 Centralize all prebuilt download/extract/naming logic via the shared helper crate:
 
 - Depend on `dear-imgui-build-support` in your `-sys` crate as a build-dependency.
-  Until `0.16.0-alpha.3` is published, use the candidate source:
-  ```toml
-  [build-dependencies]
-  build-support = { package = "dear-imgui-build-support", git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["binding-spec"] }
-  ```
-
-  After publication, use the exact prerelease requirement:
+  Use the exact prerelease requirement:
   ```toml
   [build-dependencies]
   build-support = { package = "dear-imgui-build-support", version = "=0.16.0-alpha.3", features = ["binding-spec"] }

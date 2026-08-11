@@ -10,28 +10,27 @@ The backend owns Dear ImGui Contexts on Bevy's main thread, routes Bevy window i
 | --- | --- |
 | Rust | `1.95.0` or newer |
 | Bevy | exactly `0.19.0` |
-| dear-imgui-rs | `main` (`0.16.0-alpha.3` candidate) |
+| dear-imgui-rs | exactly `0.16.0-alpha.3` |
 
 `dear-imgui-bevy` defaults to the renderer plus deterministic Bevy UI ordering. Native multi-viewport is supported through an explicit feature and runtime opt-in. WASM supports the normal and headless feature sets but cannot create native platform windows.
 
 ## Installation
 
-This README documents the source-breaking `0.16.0-alpha.3` candidate on `main`. Use matching Git dependencies:
+Use matching exact prerelease dependencies:
 
 ```toml
 [dependencies]
 bevy = "=0.19.0"
-dear-imgui-bevy = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
-dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
+dear-imgui-bevy = "=0.16.0-alpha.3"
+dear-imgui-rs = "=0.16.0-alpha.3"
 ```
 
-For the published `0.16.0-alpha.2` API and crates.io dependencies, use the
-[tagged alpha.2 README](https://github.com/Latias94/dear-imgui-rs/blob/v0.16.0-alpha.2/backends/dear-imgui-bevy/README.md).
+Users upgrading from alpha.2 must apply the Bevy migration steps in the root changelog.
 
 For a headless integration that drives private UI passes without installing the Bevy renderer:
 
 ```toml
-dear-imgui-bevy = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", default-features = false }
+dear-imgui-bevy = { version = "=0.16.0-alpha.3", default-features = false }
 ```
 
 ## Quick Start

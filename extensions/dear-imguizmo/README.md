@@ -74,15 +74,7 @@ All matrix arguments in the API are generic over a `Mat4Like` trait, implemented
 
 ## Quick Start
 
-Until `0.16.0-alpha.3` is published, take both crates from `main`:
-
-```toml
-[dependencies]
-dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
-dear-imguizmo = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
-```
-
-After publication, use the exact prerelease requirements:
+Use the exact prerelease requirements:
 
 ```toml
 [dependencies]

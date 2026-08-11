@@ -8,7 +8,9 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
-The alpha.3 candidate continues the ownership-first 0.16 migration with stricter host-runtime transactions and a focused regression fix for accidental fallback-window rendering. [PR #70](https://github.com/Latias94/dear-imgui-rs/pull/70)
+## [0.16.0-alpha.3] - 2026-08-11
+
+This source-breaking prerelease continues the ownership-first 0.16 migration with stricter host-runtime transactions and a focused regression fix for accidental fallback-window rendering. [PR #70](https://github.com/Latias94/dear-imgui-rs/pull/70)
 
 ### Breaking Changes and Migration
 

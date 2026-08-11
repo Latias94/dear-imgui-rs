@@ -7,14 +7,12 @@
 
 ## Quick Start
 
-Create a binary crate and add the unreleased `0.16.0-alpha.3` candidate from `main`:
+Create a binary crate and add the exact prerelease:
 
 ```toml
 [dependencies]
-dear-app = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", package = "dear-app" }
+dear-app = "=0.16.0-alpha.3"
 ```
-
-After publication, replace that dependency with `dear-app = "=0.16.0-alpha.3"`.
 
 Then use `dear_app::run_ui` for applications that only need persistent UI state:
 
