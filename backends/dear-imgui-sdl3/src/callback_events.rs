@@ -1191,7 +1191,7 @@ mod tests {
         assert_eq!(handoff.ordered_reserve, ORDERED_RESERVE);
         let mut model = VecDeque::new();
         let mut dropped_events = 0usize;
-        let mut random = 0x5eed_cafe_d15c_a11u64;
+        let mut random = 0x05ee_dcaf_ed15_ca11_u64;
 
         for timestamp in 0..5_000u64 {
             random = random

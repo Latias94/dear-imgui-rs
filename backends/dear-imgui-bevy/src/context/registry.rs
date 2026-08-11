@@ -545,7 +545,6 @@ impl ImguiContexts {
     /// Explicit App shutdown makes the retained registry terminal, so callers cannot confuse a
     /// completed lifecycle with an active registry that temporarily has no primary Context.
     /// Returns [`ImguiContextError::AppTerminated`] in that terminal state.
-    #[must_use]
     pub fn primary_id(&self) -> Result<Option<ContextId>, ImguiContextError> {
         self.ensure_active()?;
         Ok(self.primary)
@@ -592,7 +591,6 @@ impl ImguiContexts {
     /// Return whether this registry recognizes `context_id`.
     ///
     /// Returns [`ImguiContextError::AppTerminated`] after explicit App shutdown.
-    #[must_use]
     pub fn contains(&self, context_id: ContextId) -> Result<bool, ImguiContextError> {
         self.ensure_active()?;
         Ok(self.slots.contains_key(&context_id))
