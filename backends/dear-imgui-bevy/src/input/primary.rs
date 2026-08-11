@@ -39,7 +39,7 @@ pub(crate) fn primary_window_input_system(
         discard_all_unread_messages(&mut messages);
         return;
     };
-    let Some(primary_id) = contexts.primary_id() else {
+    let Ok(Some(primary_id)) = contexts.primary_id() else {
         *capture = ImguiInputCapture::default();
         discard_all_unread_messages(&mut messages);
         return;

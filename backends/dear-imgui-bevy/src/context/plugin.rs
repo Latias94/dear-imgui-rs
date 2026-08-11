@@ -102,6 +102,12 @@ pub enum ImguiPluginInstallError {
     ContextRegistryMissing,
     /// A registry exists without the App lifecycle claim that owns it.
     ContextRegistryOwnershipMissing,
+    /// The App lifecycle still owns a private pass registry that application code removed.
+    PassRegistryMissing,
+    /// A private pass registry exists without its App lifecycle ownership claim.
+    PassRegistryOwnershipMissing,
+    /// The private pass registry could not be created or queried.
+    PassRegistry(super::ImguiPassError),
     /// The Context registry and pass registry came from different Apps.
     ForeignPassRegistry,
     /// Core Context construction failed before App mutation began.
@@ -132,6 +138,13 @@ impl fmt::Display for ImguiPluginInstallError {
             Self::ContextRegistryOwnershipMissing => formatter.write_str(
                 "ImguiContexts exists without the App lifecycle ownership claim",
             ),
+            Self::PassRegistryMissing => formatter.write_str(
+                "the private Dear ImGui pass registry was removed after App admission",
+            ),
+            Self::PassRegistryOwnershipMissing => formatter.write_str(
+                "the private Dear ImGui pass registry exists without its App lifecycle ownership claim",
+            ),
+            Self::PassRegistry(error) => error.fmt(formatter),
             Self::ForeignPassRegistry => formatter.write_str(
                 "ImguiContexts was created with pass handles from another Bevy App",
             ),
@@ -150,6 +163,7 @@ impl std::error::Error for ImguiPluginInstallError {
             Self::DriverSchedule(error) => Some(error),
             Self::ContextCreation(error) => Some(error),
             Self::ContextPreflight(error) => Some(error),
+            Self::PassRegistry(error) => Some(error),
             _ => None,
         }
     }
@@ -169,6 +183,19 @@ impl ImguiPlugin {
             .world()
             .get_resource::<super::lifecycle::ImguiAppLifecycle>()
             .cloned();
+        let pass_registry_exists = super::pass::existing_registry_id(app.world()).is_some();
+        match lifecycle.as_ref() {
+            Some(lifecycle) if pass_registry_exists && !lifecycle.pass_registry_claimed() => {
+                return Err(ImguiPluginInstallError::PassRegistryOwnershipMissing);
+            }
+            Some(lifecycle) if !pass_registry_exists && lifecycle.pass_registry_claimed() => {
+                return Err(ImguiPluginInstallError::PassRegistryMissing);
+            }
+            None if pass_registry_exists => {
+                return Err(ImguiPluginInstallError::PassRegistryOwnershipMissing);
+            }
+            _ => {}
+        }
         if lifecycle
             .as_ref()
             .is_some_and(super::lifecycle::ImguiAppLifecycle::is_terminal)
@@ -195,11 +222,11 @@ impl ImguiPlugin {
             let lifecycle = lifecycle
                 .as_ref()
                 .ok_or(ImguiPluginInstallError::ContextRegistryOwnershipMissing)?;
-            if !lifecycle.registry_claimed() {
+            if !lifecycle.context_registry_claimed() {
                 return Err(ImguiPluginInstallError::ContextRegistryOwnershipMissing);
             }
             let pass_registry_id = super::pass::existing_registry_id(app.world())
-                .ok_or(ImguiPluginInstallError::ForeignPassRegistry)?;
+                .ok_or(ImguiPluginInstallError::PassRegistryMissing)?;
             if app
                 .world()
                 .get_non_send::<ImguiContexts>()
@@ -235,7 +262,7 @@ impl ImguiPlugin {
         } else {
             if lifecycle
                 .as_ref()
-                .is_some_and(super::lifecycle::ImguiAppLifecycle::registry_claimed)
+                .is_some_and(super::lifecycle::ImguiAppLifecycle::context_registry_claimed)
             {
                 return Err(ImguiPluginInstallError::ContextRegistryMissing);
             }
@@ -251,10 +278,14 @@ impl ImguiPlugin {
         })
     }
 
-    fn commit_installation(&self, app: &mut App, prepared: PreparedImguiInstallation) {
-        super::pass::install_pass_registry(app);
+    fn commit_installation(
+        &self,
+        app: &mut App,
+        prepared: PreparedImguiInstallation,
+    ) -> Result<(), super::ImguiPassError> {
+        super::pass::install_pass_registry(app)?;
         if let Some(primary) = prepared.primary {
-            let primary_pass = super::pass::primary_pass(app);
+            let primary_pass = super::pass::primary_pass(app)?;
             let lifecycle = super::pass::lifecycle(app.world());
             app.insert_non_send(ImguiContexts::with_primary(
                 primary,
@@ -282,6 +313,7 @@ impl ImguiPlugin {
         viewport::install_viewport_bridge(app);
         refresh_backend_contract(app, self.config.clone(), render_integration_installed)
             .expect("installation preflight must make backend attachment infallible");
+        Ok(())
     }
 }
 
@@ -294,7 +326,8 @@ impl Plugin for ImguiPlugin {
         let prepared = self
             .prepare_installation(app)
             .unwrap_or_else(|error| panic!("ImguiPlugin installation failed: {error}"));
-        self.commit_installation(app, prepared);
+        self.commit_installation(app, prepared)
+            .unwrap_or_else(|error| panic!("ImguiPlugin installation failed: {error}"));
     }
 
     fn finish(&self, _app: &mut App) {
@@ -331,7 +364,9 @@ pub(crate) fn try_install_imgui(
         return Err(ImguiPluginInstallError::PluginLifecycleClosed);
     }
     let prepared = plugin.prepare_installation(app)?;
-    plugin.commit_installation(app, prepared);
+    plugin
+        .commit_installation(app, prepared)
+        .map_err(ImguiPluginInstallError::PassRegistry)?;
     app.add_plugins(plugin.already_installed());
     Ok(app)
 }

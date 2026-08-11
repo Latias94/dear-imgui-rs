@@ -70,7 +70,7 @@ impl Default for EditorWindowKeys {
     }
 }
 
-fn main() {
+fn main() -> Result {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
@@ -91,9 +91,10 @@ fn main() {
     .init_resource::<EditorWindowKeys>()
     .add_systems(Startup, setup)
     .add_systems(Update, (close_on_escape, animate_scene));
-    let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_systems(&primary_pass, primary_pass.system(editor_ui))
-        .run();
+    let primary_pass = app.imgui_primary_pass()?;
+    app.add_imgui_systems(&primary_pass, primary_pass.system(editor_ui))?;
+    app.run();
+    Ok(())
 }
 
 fn setup(

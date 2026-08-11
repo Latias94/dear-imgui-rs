@@ -101,7 +101,8 @@ pub(super) fn resolve_imgui_routes(
     let registered_contexts = params
         .contexts
         .as_deref()
-        .map(|contexts| contexts.ids().collect::<HashSet<_>>())
+        .and_then(|contexts| contexts.ids().ok())
+        .map(|ids| ids.collect::<HashSet<_>>())
         .unwrap_or_default();
     let mut cameras = params
         .cameras
@@ -140,7 +141,7 @@ pub(super) fn resolve_imgui_routes(
         primary_context: params
             .contexts
             .as_deref()
-            .and_then(ImguiContexts::primary_id),
+            .and_then(|contexts| contexts.primary_id().ok().flatten()),
         primary_windows: &primary_windows,
         windows: &windows,
         images,

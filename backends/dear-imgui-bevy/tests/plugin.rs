@@ -76,8 +76,9 @@ fn plugin_registers_the_primary_registry_and_private_driver_schedule() {
         .expect("plugin must install a non-send Context registry");
     let primary = contexts
         .primary_id()
+        .expect("default registry must be active")
         .expect("default registry needs a primary");
-    assert_eq!(contexts.ids().collect::<Vec<_>>(), vec![primary]);
+    assert_eq!(contexts.ids().unwrap().collect::<Vec<_>>(), vec![primary]);
 
     let schedules = app.world().resource::<Schedules>();
     assert!(
@@ -102,7 +103,9 @@ fn fallible_installation_registers_the_plugin_and_rejects_a_duplicate_transactio
     let primary = app
         .world()
         .get_non_send::<ImguiContexts>()
-        .and_then(ImguiContexts::primary_id)
+        .expect("successful installation must retain its Context registry")
+        .primary_id()
+        .expect("successful installation must retain an active Context registry")
         .expect("successful installation must retain its primary Context");
 
     let error = install_error(
@@ -115,7 +118,9 @@ fn fallible_installation_registers_the_plugin_and_rejects_a_duplicate_transactio
     assert_eq!(
         app.world()
             .get_non_send::<ImguiContexts>()
-            .and_then(ImguiContexts::primary_id),
+            .expect("duplicate validation must preserve the Context registry")
+            .primary_id()
+            .expect("duplicate validation must preserve an active registry"),
         Some(primary),
         "duplicate validation must leave the installed registry unchanged"
     );
@@ -261,7 +266,7 @@ fn fallible_installation_rejects_unavailable_native_viewports_before_app_mutatio
 fn plugin_adopts_an_app_scoped_registry_without_replacing_its_primary_context() {
     let _guard = imgui_context_guard();
     let mut app = App::new();
-    let additional_pass = app.declare_imgui_pass::<AdditionalPass>();
+    let additional_pass = app.declare_imgui_pass::<AdditionalPass>().unwrap();
     let primary = dear_imgui_rs::SuspendedContext::create();
     let primary_id = primary.id();
     app.adopt_imgui_primary_context(primary).unwrap();
@@ -276,9 +281,9 @@ fn plugin_adopts_an_app_scoped_registry_without_replacing_its_primary_context() 
     app.add_plugins(ImguiPlugin::new(config));
 
     let contexts = app.world().get_non_send::<ImguiContexts>().unwrap();
-    assert_eq!(contexts.primary_id(), Some(primary_id));
+    assert_eq!(contexts.primary_id().unwrap(), Some(primary_id));
     assert_eq!(
-        contexts.ids().collect::<Vec<_>>(),
+        contexts.ids().unwrap().collect::<Vec<_>>(),
         vec![primary_id, additional_id]
     );
     let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
@@ -329,7 +334,8 @@ fn removing_a_context_clears_only_backend_state_owned_by_bevy() {
         app.world()
             .get_non_send::<ImguiContexts>()
             .unwrap()
-            .primary_id(),
+            .primary_id()
+            .unwrap(),
         None
     );
 }
@@ -375,7 +381,7 @@ fn app_with_render_schedule() -> App {
 fn managed_shared_font_atlas_admission_fails_before_backend_fields_are_mutated() {
     let _guard = imgui_context_guard();
     let mut app = app_with_render_schedule();
-    let additional_pass = app.declare_imgui_pass::<AdditionalPass>();
+    let additional_pass = app.declare_imgui_pass::<AdditionalPass>().unwrap();
     let atlas = dear_imgui_rs::SharedFontAtlas::create();
     let primary =
         dear_imgui_rs::SuspendedContext::try_create_with_shared_font_atlas(atlas.clone()).unwrap();
@@ -431,7 +437,7 @@ fn managed_shared_font_atlas_admission_fails_before_backend_fields_are_mutated()
 fn later_renderer_admission_failure_leaves_earlier_font_atlas_unclaimed() {
     let _guard = imgui_context_guard();
     let mut app = app_with_render_schedule();
-    let additional_pass = app.declare_imgui_pass::<AdditionalPass>();
+    let additional_pass = app.declare_imgui_pass::<AdditionalPass>().unwrap();
     let primary_atlas = dear_imgui_rs::SharedFontAtlas::create();
     let primary =
         dear_imgui_rs::SuspendedContext::try_create_with_shared_font_atlas(primary_atlas.clone())
@@ -502,20 +508,21 @@ fn later_renderer_admission_failure_leaves_earlier_font_atlas_unclaimed() {
 fn renderer_ownership_drift_fails_closed_and_removal_can_be_repaired() {
     let _guard = imgui_context_guard();
     let mut app = app_with_render_schedule();
-    let additional_pass = app.declare_imgui_pass::<AdditionalPass>();
+    let additional_pass = app.declare_imgui_pass::<AdditionalPass>().unwrap();
     app.world_mut().spawn((Window::default(), PrimaryWindow));
     app.init_resource::<UiErrorTrace>();
     app.add_imgui_systems(
         &additional_pass,
         additional_pass.system(observe_additional_context),
-    );
+    )
+    .unwrap();
     app.add_plugins(ImguiPlugin::default());
     let stale = dear_imgui_rs::SuspendedContext::create();
     let stale_id = stale.id();
     drop(stale);
     let (primary_id, additional_id) = {
         let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
-        let primary_id = contexts.primary_id().unwrap();
+        let primary_id = contexts.primary_id().unwrap().unwrap();
         let additional_id = contexts
             .create(ImguiContextConfig::new(&additional_pass))
             .unwrap();
@@ -659,12 +666,12 @@ fn renderer_ownership_drift_fails_closed_and_removal_can_be_repaired() {
 fn renderer_ownership_drift_blocks_shutdown_before_registry_removal_and_can_be_repaired() {
     let _guard = imgui_context_guard();
     let mut app = app_with_render_schedule();
-    let additional_pass = app.declare_imgui_pass::<AdditionalPass>();
+    let additional_pass = app.declare_imgui_pass::<AdditionalPass>().unwrap();
     app.world_mut().spawn((Window::default(), PrimaryWindow));
     app.add_plugins(ImguiPlugin::default());
     let (primary_id, additional_id) = {
         let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
-        let primary_id = contexts.primary_id().unwrap();
+        let primary_id = contexts.primary_id().unwrap().unwrap();
         let additional_id = contexts
             .create(ImguiContextConfig::new(&additional_pass))
             .unwrap();
@@ -704,6 +711,7 @@ fn renderer_ownership_drift_blocks_shutdown_before_registry_removal_and_can_be_r
             .get_non_send::<ImguiContexts>()
             .unwrap()
             .ids()
+            .unwrap()
             .collect::<Vec<_>>(),
         vec![primary_id, additional_id],
         "a later Context failure must preserve every preflighted Context"

@@ -27,8 +27,8 @@ use super::event_ingest::collect_raw_winit_pointer_events;
 use super::event_ingest::{OrderedPointerEvent, append_typed_pointer_event};
 use super::events::{ImguiInputMessageReaders, discard_all_unread_messages};
 use super::route::{
-    ImguiContextInputMetrics, ImguiInputFrameMetrics, ImguiInputSlot, ImguiRoutedWindowState,
-    RoutedInputState, RoutedInputTarget,
+    ImguiFrameInput, ImguiFrameInputSlot, ImguiInputFrameMetrics, ImguiInputSlot,
+    ImguiRoutedWindowState, RoutedInputState, RoutedInputTarget,
 };
 use super::state::{ImguiInputState, ImguiInputWindow};
 
@@ -43,7 +43,7 @@ pub(super) fn routed_window_input_system(
     contexts: Option<NonSendMut<ImguiContexts>>,
     mut input_state: ResMut<ImguiInputState>,
     mut capture: ResMut<ImguiInputCapture>,
-    mut input_metrics: ResMut<ImguiContextInputMetrics>,
+    mut frame_input: ResMut<ImguiFrameInputSlot>,
     mut messages: ImguiInputMessageReaders,
 ) {
     let Some(mut contexts) = contexts else {
@@ -51,11 +51,27 @@ pub(super) fn routed_window_input_system(
         crate::viewport::native_window::release_pointer_capture();
         *input_state = ImguiInputState::default();
         *capture = ImguiInputCapture::default();
-        *input_metrics = ImguiContextInputMetrics::default();
+        frame_input.publish(ImguiFrameInput::new(
+            resolved_routes.render_epoch(),
+            HashMap::new(),
+            HashMap::new(),
+        ));
         discard_all_unread_messages(&mut messages);
         return;
     };
-    let primary_context = contexts.primary_id();
+    let Ok(primary_context) = contexts.primary_id() else {
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+        crate::viewport::native_window::release_pointer_capture();
+        *input_state = ImguiInputState::default();
+        *capture = ImguiInputCapture::default();
+        frame_input.publish(ImguiFrameInput::new(
+            resolved_routes.render_epoch(),
+            HashMap::new(),
+            HashMap::new(),
+        ));
+        discard_all_unread_messages(&mut messages);
+        return;
+    };
     input_state.routed.primary_context = primary_context;
     input_state.routed.primary_window = windows
         .iter()
@@ -115,7 +131,7 @@ pub(super) fn routed_window_input_system(
             continue;
         }
         if primary_window.is_some()
-            || !contexts.contains(context_id)
+            || !matches!(contexts.contains(context_id), Ok(true))
             || !input_enabled_contexts.contains(&context_id)
             || declared_slots.contains(&ImguiInputSlot {
                 context_id,
@@ -159,6 +175,16 @@ pub(super) fn routed_window_input_system(
         .map(|target| (target.context_id, target.host_window))
         .collect::<Vec<_>>();
     capture.begin_routes(primary_context, &capture_routes);
+
+    let mut platform_feedback_hosts = HashMap::new();
+    for target in targets
+        .iter()
+        .filter(|target| !matches!(target.policy, ImguiInputPolicy::Disabled))
+    {
+        platform_feedback_hosts
+            .entry(target.context_id)
+            .or_insert(target.host_window);
+    }
 
     let mut unavailable_contexts = HashSet::new();
     release_stale_routed_input(
@@ -418,7 +444,11 @@ pub(super) fn routed_window_input_system(
         crate::viewport::native_window::release_pointer_capture();
     }
     capture.finish_routes();
-    input_metrics.replace(resolved_routes.epoch(), context_metrics);
+    frame_input.publish(ImguiFrameInput::new(
+        resolved_routes.render_epoch(),
+        context_metrics,
+        platform_feedback_hosts,
+    ));
 }
 
 #[cfg(feature = "render")]

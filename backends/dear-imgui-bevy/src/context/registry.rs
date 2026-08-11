@@ -8,7 +8,7 @@ use dear_imgui_rs::{Context, ContextId, SuspendedContext};
 use super::lifecycle::ImguiAppLifecycle;
 use super::{
     ContextOwner, ImguiContextRemovalPendingReason, ImguiContextRetirementSink, ImguiPass,
-    ImguiPrimaryPass, PassIdentity,
+    ImguiPassError, ImguiPrimaryPass, PassIdentity,
 };
 
 /// Generation-qualified identity of one managed Context retirement request.
@@ -161,6 +161,8 @@ impl ImguiContextConfig {
 pub enum ImguiContextError {
     /// Explicit shutdown committed this App's terminal Dear ImGui lifecycle.
     AppTerminated,
+    /// The App's private pass registry could not serve Context admission.
+    PassRegistry(ImguiPassError),
     /// The App already owns a Context registry.
     ContextRegistryAlreadyInstalled,
     /// No registered Context has this process identity.
@@ -271,6 +273,7 @@ impl fmt::Display for ImguiContextError {
         match self {
             Self::AppTerminated => formatter
                 .write_str("the Dear ImGui integration is terminal after explicit App shutdown"),
+            Self::PassRegistry(error) => error.fmt(formatter),
             Self::ContextRegistryAlreadyInstalled => {
                 formatter.write_str("the Bevy App already owns a Dear ImGui Context registry")
             }
@@ -396,6 +399,7 @@ impl std::error::Error for ImguiContextError {
             Self::ScopedActivation { source, .. } => Some(source),
             Self::FontAtlasMode { source, .. } => Some(source),
             Self::ContextCreation(error) => Some(error),
+            Self::PassRegistry(error) => Some(error),
             Self::RemovalPending { reason, .. } => Some(reason),
             _ => None,
         }
@@ -504,7 +508,7 @@ impl ImguiContexts {
             "the Dear ImGui App lifecycle is terminal"
         );
         assert!(
-            lifecycle.try_claim_registry(),
+            lifecycle.try_claim_context_registry(),
             "the Bevy App already created its Dear ImGui Context registry"
         );
         let primary_id = primary.id();
@@ -537,11 +541,14 @@ impl ImguiContexts {
     }
 
     /// Return the primary Context identity.
+    ///
+    /// Explicit App shutdown makes the retained registry terminal, so callers cannot confuse a
+    /// completed lifecycle with an active registry that temporarily has no primary Context.
+    /// Returns [`ImguiContextError::AppTerminated`] in that terminal state.
     #[must_use]
-    pub fn primary_id(&self) -> Option<ContextId> {
-        (!self.lifecycle.is_terminal())
-            .then_some(self.primary)
-            .flatten()
+    pub fn primary_id(&self) -> Result<Option<ContextId>, ImguiContextError> {
+        self.ensure_active()?;
+        Ok(self.primary)
     }
 
     /// Select an existing idle Context as the primary input and fallback-window target.
@@ -575,23 +582,25 @@ impl ImguiContexts {
     /// A managed-retirement tombstone remains visible until its matching
     /// [`ImguiContextRetired`] completion is emitted, although the private driver no longer opens
     /// frames for it.
-    pub fn ids(&self) -> impl ExactSizeIterator<Item = ContextId> + '_ {
-        let order = if self.lifecycle.is_terminal() {
-            &self.order[0..0]
-        } else {
-            self.order.as_slice()
-        };
-        order.iter().copied()
+    ///
+    /// Returns [`ImguiContextError::AppTerminated`] after explicit App shutdown.
+    pub fn ids(&self) -> Result<impl ExactSizeIterator<Item = ContextId> + '_, ImguiContextError> {
+        self.ensure_active()?;
+        Ok(self.order.iter().copied())
     }
 
     /// Return whether this registry recognizes `context_id`.
+    ///
+    /// Returns [`ImguiContextError::AppTerminated`] after explicit App shutdown.
     #[must_use]
-    pub fn contains(&self, context_id: ContextId) -> bool {
-        !self.lifecycle.is_terminal() && self.slots.contains_key(&context_id)
+    pub fn contains(&self, context_id: ContextId) -> Result<bool, ImguiContextError> {
+        self.ensure_active()?;
+        Ok(self.slots.contains_key(&context_id))
     }
 
     /// Return a Context's latest completed frame index.
     pub fn frame_index(&self, context_id: ContextId) -> Result<u64, ImguiContextError> {
+        self.ensure_active()?;
         self.slots
             .get(&context_id)
             .map(|slot| slot.frame_index)
@@ -603,6 +612,7 @@ impl ImguiContexts {
         &self,
         context_id: ContextId,
     ) -> Result<Option<&ImguiContextError>, ImguiContextError> {
+        self.ensure_active()?;
         self.slots
             .get(&context_id)
             .map(|slot| slot.last_error.as_ref())
@@ -1233,7 +1243,7 @@ mod retirement_generation_tests {
     fn stale_retirement_completion_cannot_remove_a_reused_slot_generation() {
         let _guard = imgui_context_guard();
         let mut app = bevy_app::App::new();
-        let primary_pass = super::super::pass::primary_pass(&mut app);
+        let primary_pass = super::super::pass::primary_pass(&mut app).unwrap();
         let lifecycle = super::super::pass::lifecycle(app.world());
         let primary = SuspendedContext::create();
         let context_id = primary.id();
@@ -1248,7 +1258,7 @@ mod retirement_generation_tests {
         slot.retirement = Some(current);
 
         assert!(!contexts.complete_retirement(stale));
-        assert!(contexts.contains(context_id));
+        assert!(contexts.contains(context_id).unwrap());
         assert_eq!(
             contexts
                 .slots

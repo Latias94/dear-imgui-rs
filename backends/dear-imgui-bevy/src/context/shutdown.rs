@@ -11,7 +11,8 @@ use bevy_render::pipelined_rendering::RenderExtractApp;
 
 use super::{
     ImguiContextAdmissionError, ImguiContextError, ImguiContextRemovalPendingReason,
-    ImguiContextRetirements, ImguiContexts, ImguiPass, ImguiPrimaryPass,
+    ImguiContextRetirements, ImguiContexts, ImguiPass, ImguiPassError, ImguiPrimaryPass,
+    IntoImguiSystemConfigs,
     plugin::{ImguiPlugin, ImguiPluginInstallError},
 };
 use crate::schedule::ImguiContextDriver;
@@ -31,14 +32,25 @@ pub trait ImguiAppExt {
         plugin: ImguiPlugin,
     ) -> Result<&mut Self, ImguiPluginInstallError>;
 
+    /// Register application-owned input producers before the backend commits one frame's input.
+    ///
+    /// Producers may emit Bevy window, keyboard, pointer, touch, or IME messages and may use
+    /// normal Bevy ordering and run conditions. Their conditions affect only those producer
+    /// systems; the backend-owned input transaction still runs and cannot be suspended through a
+    /// public [`bevy_ecs::schedule::SystemSet`].
+    fn add_imgui_input_producers<M>(
+        &mut self,
+        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
+    ) -> &mut Self;
+
     /// Declare a new private Dear ImGui pass branded by `P`.
     ///
     /// Each call creates a distinct runtime pass. `P` prevents accidental cross-brand
     /// registration, while the private runtime key distinguishes multiple passes of one brand.
-    fn declare_imgui_pass<P: 'static>(&mut self) -> ImguiPass<P>;
+    fn declare_imgui_pass<P: 'static>(&mut self) -> Result<ImguiPass<P>, ImguiPassError>;
 
     /// Retrieve the private pass owned by the primary Dear ImGui Context.
-    fn imgui_primary_pass(&mut self) -> ImguiPass<ImguiPrimaryPass>;
+    fn imgui_primary_pass(&mut self) -> Result<ImguiPass<ImguiPrimaryPass>, ImguiPassError>;
 
     /// Adopt a custom suspended Context as this App's initial primary Context.
     ///
@@ -51,14 +63,14 @@ pub trait ImguiAppExt {
 
     /// Register configured unit-input systems in `pass`'s private runner.
     ///
-    /// Bind each frame-input function with [`ImguiPass::system`] first. The supplied Bevy
-    /// [`IntoScheduleConfigs`] is preserved, including ordering, run conditions, system sets, and
-    /// automatically inserted deferred-command barriers.
-    fn add_imgui_systems<P, M>(
+    /// Bind each frame-input function with [`ImguiPass::system`] first. The sealed
+    /// [`IntoImguiSystemConfigs`] surface preserves the usual ordering, run-condition, system-set,
+    /// ambiguity, and deferred-command configuration without exposing an ordinary schedule entry.
+    fn add_imgui_systems<P>(
         &mut self,
         pass: &ImguiPass<P>,
-        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
-    ) -> &mut Self
+        systems: impl IntoImguiSystemConfigs<P>,
+    ) -> Result<&mut Self, ImguiPassError>
     where
         P: 'static;
 
@@ -67,7 +79,7 @@ pub trait ImguiAppExt {
         &mut self,
         pass: &ImguiPass<P>,
         sets: impl IntoScheduleConfigs<InternedSystemSet, M>,
-    ) -> &mut Self
+    ) -> Result<&mut Self, ImguiPassError>
     where
         P: 'static;
 
@@ -144,11 +156,19 @@ impl ImguiAppExt for App {
         super::plugin::try_install_imgui(self, plugin)
     }
 
-    fn declare_imgui_pass<P: 'static>(&mut self) -> ImguiPass<P> {
+    fn add_imgui_input_producers<M>(
+        &mut self,
+        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
+    ) -> &mut Self {
+        crate::input::add_input_producers(self, systems);
+        self
+    }
+
+    fn declare_imgui_pass<P: 'static>(&mut self) -> Result<ImguiPass<P>, ImguiPassError> {
         super::pass::declare_pass::<P>(self)
     }
 
-    fn imgui_primary_pass(&mut self) -> ImguiPass<ImguiPrimaryPass> {
+    fn imgui_primary_pass(&mut self) -> Result<ImguiPass<ImguiPrimaryPass>, ImguiPassError> {
         super::pass::primary_pass(self)
     }
 
@@ -166,15 +186,30 @@ impl ImguiAppExt for App {
                 context,
             ));
         }
-        super::pass::install_pass_registry(self);
+        if let Err(error) = super::pass::install_pass_registry(self) {
+            return Err(ImguiContextAdmissionError::new(
+                ImguiContextError::PassRegistry(error),
+                context,
+            ));
+        }
         let lifecycle = super::pass::lifecycle(self.world());
-        if self.world().get_non_send::<ImguiContexts>().is_some() || lifecycle.registry_claimed() {
+        if self.world().get_non_send::<ImguiContexts>().is_some()
+            || lifecycle.context_registry_claimed()
+        {
             return Err(ImguiContextAdmissionError::new(
                 ImguiContextError::ContextRegistryAlreadyInstalled,
                 context,
             ));
         }
-        let primary_pass = super::pass::primary_pass(self);
+        let primary_pass = match super::pass::primary_pass(self) {
+            Ok(pass) => pass,
+            Err(error) => {
+                return Err(ImguiContextAdmissionError::new(
+                    ImguiContextError::PassRegistry(error),
+                    context,
+                ));
+            }
+        };
         self.insert_non_send(ImguiContexts::with_primary(
             context,
             primary_pass,
@@ -183,28 +218,28 @@ impl ImguiAppExt for App {
         Ok(self)
     }
 
-    fn add_imgui_systems<P, M>(
+    fn add_imgui_systems<P>(
         &mut self,
         pass: &ImguiPass<P>,
-        systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
-    ) -> &mut Self
+        systems: impl IntoImguiSystemConfigs<P>,
+    ) -> Result<&mut Self, ImguiPassError>
     where
         P: 'static,
     {
-        super::pass::add_systems(self, pass, systems);
-        self
+        super::pass::add_systems(self, pass, systems)?;
+        Ok(self)
     }
 
     fn configure_imgui_sets<P, M>(
         &mut self,
         pass: &ImguiPass<P>,
         sets: impl IntoScheduleConfigs<InternedSystemSet, M>,
-    ) -> &mut Self
+    ) -> Result<&mut Self, ImguiPassError>
     where
         P: 'static,
     {
-        super::pass::configure_sets(self, pass, sets);
-        self
+        super::pass::configure_sets(self, pass, sets)?;
+        Ok(self)
     }
 
     fn shutdown_imgui(&mut self) -> Result<(), ImguiShutdownError> {
@@ -218,6 +253,8 @@ impl ImguiAppExt for App {
         self.world()
             .resource::<super::lifecycle::ImguiAppLifecycle>()
             .commit_terminal();
+
+        super::pass::remove_pass_registry(self);
 
         #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
         let native_windows = crate::viewport::retire_native_viewport_windows(self.world_mut());

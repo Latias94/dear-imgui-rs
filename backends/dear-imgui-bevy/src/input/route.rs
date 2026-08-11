@@ -6,7 +6,7 @@ use bevy_ecs::prelude::{Entity, Resource};
 use bevy_math::{Rect, Vec2};
 use dear_imgui_rs::{self as imgui, ContextId};
 
-use crate::route::ImguiInputPolicy;
+use crate::route::{ImguiInputPolicy, ImguiRenderRouteEpoch};
 
 #[cfg(test)]
 use super::ImguiInputWindowState;
@@ -19,34 +19,75 @@ pub(crate) struct ImguiInputFrameMetrics {
     pub(crate) framebuffer_scale: [f32; 2],
 }
 
-#[derive(Resource, Clone, Debug, Default)]
-pub(crate) struct ImguiContextInputMetrics {
-    /// Resolver epoch whose input routes produced `contexts`.
-    epoch: u64,
+/// A complete input transaction prepared for one Dear ImGui driver run.
+///
+/// The transaction intentionally has no `Default` or `Clone` implementation.  A producer must
+/// publish the route snapshot, Context metrics, and platform-feedback authority together, and the
+/// driver consumes that publication exactly once. This prevents a route epoch from being paired
+/// with metrics or cursor/IME permissions from a different schedule run and prevents a missed
+/// input schedule from replaying the previous frame.
+#[derive(Debug)]
+pub(crate) struct ImguiFrameInput {
+    routes: ImguiRenderRouteEpoch,
     contexts: HashMap<ContextId, ImguiInputFrameMetrics>,
+    platform_feedback_hosts: HashMap<ContextId, Entity>,
 }
 
-impl ImguiContextInputMetrics {
-    pub(crate) const fn epoch(&self) -> u64 {
-        self.epoch
+impl ImguiFrameInput {
+    pub(crate) fn new(
+        routes: ImguiRenderRouteEpoch,
+        contexts: HashMap<ContextId, ImguiInputFrameMetrics>,
+        platform_feedback_hosts: HashMap<ContextId, Entity>,
+    ) -> Self {
+        Self {
+            routes,
+            contexts,
+            platform_feedback_hosts,
+        }
+    }
+
+    pub(crate) const fn render_routes(&self) -> &ImguiRenderRouteEpoch {
+        &self.routes
     }
 
     pub(crate) fn get(&self, context_id: ContextId) -> Option<ImguiInputFrameMetrics> {
         self.contexts.get(&context_id).copied()
     }
 
-    pub(super) fn replace(
-        &mut self,
-        epoch: u64,
-        contexts: HashMap<ContextId, ImguiInputFrameMetrics>,
-    ) {
-        self.epoch = epoch;
-        self.contexts = contexts;
+    pub(crate) fn platform_feedback_host(&self, context_id: ContextId) -> Option<Entity> {
+        self.platform_feedback_hosts.get(&context_id).copied()
+    }
+}
+
+#[derive(Debug, Default, Resource)]
+pub(crate) struct ImguiFrameInputSlot {
+    ready: Option<ImguiFrameInput>,
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    latest_hosts: HashMap<ContextId, Entity>,
+}
+
+impl ImguiFrameInputSlot {
+    pub(crate) fn publish(&mut self, input: ImguiFrameInput) {
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+        {
+            self.latest_hosts.clear();
+            self.latest_hosts.extend(
+                input
+                    .contexts
+                    .iter()
+                    .map(|(context_id, metrics)| (*context_id, metrics.host_window)),
+            );
+        }
+        self.ready = Some(input);
     }
 
-    #[cfg(test)]
-    pub(crate) fn set_epoch_for_test(&mut self, epoch: u64) {
-        self.epoch = epoch;
+    pub(crate) fn take(&mut self) -> Option<ImguiFrameInput> {
+        self.ready.take()
+    }
+
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    pub(crate) fn latest_host(&self, context_id: ContextId) -> Option<Entity> {
+        self.latest_hosts.get(&context_id).copied()
     }
 }
 

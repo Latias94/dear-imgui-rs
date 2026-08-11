@@ -13,7 +13,7 @@ use super::ImguiFrameMailbox;
 use super::platform;
 use super::{ImguiActiveRendererContextError, ImguiContextError, ImguiContexts};
 #[cfg(feature = "render")]
-use crate::input::{ImguiContextInputMetrics, ImguiInputFrameMetrics};
+use crate::input::{ImguiFrameInputSlot, ImguiInputFrameMetrics};
 
 pub(crate) fn install_context_lifecycle(app: &mut App) {
     #[cfg(feature = "render")]
@@ -60,80 +60,86 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
         .map(ImguiContexts::drive_order)
         .unwrap_or_default();
     #[cfg(feature = "render")]
-    let routed_input_metrics = world
-        .get_resource::<ImguiContextInputMetrics>()
-        .cloned()
-        .unwrap_or_default();
+    let frame_input = world
+        .get_resource_mut::<ImguiFrameInputSlot>()
+        .and_then(|mut slot| slot.take());
     #[cfg(feature = "render")]
-    let render_route_epoch = world
-        .get_resource::<crate::route::ImguiResolvedRoutes>()
-        .map(crate::route::ImguiResolvedRoutes::render_epoch)
-        .unwrap_or_default();
-    #[cfg(feature = "render")]
-    if routed_input_metrics.epoch() != render_route_epoch.epoch() {
-        return;
-    }
+    let render_route_epoch = frame_input
+        .as_ref()
+        .map(|input| input.render_routes().clone());
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     {
         let native_viewport_contexts = world
             .get_non_send::<ImguiContexts>()
             .map(ImguiContexts::native_viewport_context_ids)
             .unwrap_or_default();
-        world
-            .resource_mut::<crate::ImguiNativeViewportSupport>()
-            .begin_frame(native_viewport_contexts);
+        if frame_input.is_some() {
+            world
+                .resource_mut::<crate::ImguiNativeViewportSupport>()
+                .begin_frame(native_viewport_contexts);
+        }
     }
     let primary_id = world
         .get_non_send::<ImguiContexts>()
-        .and_then(ImguiContexts::primary_id);
+        .and_then(|contexts| contexts.primary_id().ok().flatten());
     let delta_time = frame_delta_time(world);
     let primary_metrics = primary_frame_metrics(world);
     #[cfg(feature = "render")]
     let (routed_render_metrics, routed_platform_hosts) = {
         let metrics = render_route_epoch
-            .render_routes()
-            .iter()
-            .filter(|route| {
-                route
-                    .host_window()
-                    .is_none_or(|host_window| world.get::<Window>(host_window).is_some())
-            })
-            .map(|route| {
-                let framebuffer_scale = finite_framebuffer_scale([
-                    route.target_info().scale_factor,
-                    route.target_info().scale_factor,
-                ]);
-                let physical_size = route.physical_output_size();
-                (
-                    route.context_id(),
-                    RoutedFrameMetrics {
-                        display_size: finite_display_size([
-                            physical_size.x as f32 / framebuffer_scale[0],
-                            physical_size.y as f32 / framebuffer_scale[1],
-                        ]),
-                        framebuffer_scale,
-                    },
-                )
-            })
-            .collect::<HashMap<_, _>>();
+            .as_ref()
+            .map_or_else(HashMap::new, |epoch| {
+                epoch
+                    .render_routes()
+                    .iter()
+                    .filter(|route| {
+                        route
+                            .host_window()
+                            .is_none_or(|host_window| world.get::<Window>(host_window).is_some())
+                    })
+                    .map(|route| {
+                        let framebuffer_scale = finite_framebuffer_scale([
+                            route.target_info().scale_factor,
+                            route.target_info().scale_factor,
+                        ]);
+                        let physical_size = route.physical_output_size();
+                        (
+                            route.context_id(),
+                            RoutedFrameMetrics {
+                                display_size: finite_display_size([
+                                    physical_size.x as f32 / framebuffer_scale[0],
+                                    physical_size.y as f32 / framebuffer_scale[1],
+                                ]),
+                                framebuffer_scale,
+                            },
+                        )
+                    })
+                    .collect()
+            });
         let hosts = render_route_epoch
-            .render_routes()
-            .iter()
-            .filter(|route| {
-                route
-                    .host_window()
-                    .is_none_or(|host_window| world.get::<Window>(host_window).is_some())
-            })
-            .filter_map(|route| {
-                route
-                    .host_window()
-                    .map(|host_window| (route.context_id(), host_window))
-            })
-            .collect::<HashMap<_, _>>();
+            .as_ref()
+            .map_or_else(HashMap::new, |epoch| {
+                epoch
+                    .render_routes()
+                    .iter()
+                    .filter(|route| {
+                        route
+                            .host_window()
+                            .is_none_or(|host_window| world.get::<Window>(host_window).is_some())
+                    })
+                    .filter_map(|route| {
+                        route
+                            .host_window()
+                            .map(|host_window| (route.context_id(), host_window))
+                    })
+                    .collect()
+            });
         (metrics, hosts)
     };
     #[cfg(feature = "render")]
-    platform::begin_platform_feedback(world);
+    if frame_input.is_some() {
+        platform::begin_platform_feedback(world);
+    }
 
     for context_id in order {
         let is_primary = Some(context_id) == primary_id;
@@ -168,8 +174,14 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
             continue;
         }
         #[cfg(feature = "render")]
+        let Some(frame_input) = frame_input.as_ref() else {
+            poll_context_completions_or_quarantine(world, context_id);
+            clear_context_output(world, context_id);
+            continue;
+        };
+        #[cfg(feature = "render")]
         let has_routed_metrics = routed_render_metrics.contains_key(&context_id)
-            || routed_input_metrics
+            || frame_input
                 .get(context_id)
                 .is_some_and(|metrics| world.get::<Window>(metrics.host_window).is_some());
         #[cfg(not(feature = "render"))]
@@ -194,7 +206,7 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
             .then_some(primary_metrics.as_ref())
             .flatten();
         #[cfg(feature = "render")]
-        let routed_input_metrics_for_context = routed_input_metrics
+        let routed_input_metrics_for_context = frame_input
             .get(context_id)
             .filter(|metrics| world.get::<Window>(metrics.host_window).is_some());
         #[cfg(feature = "render")]
@@ -208,6 +220,10 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
             .copied()
             .or_else(|| routed_input_metrics_for_context.map(|metrics| metrics.host_window))
             .or_else(|| primary_metrics_for_context.map(|metrics| metrics.host_window));
+        #[cfg(feature = "render")]
+        let platform_feedback_host = frame_input
+            .platform_feedback_host(context_id)
+            .filter(|host_window| world.get::<Window>(*host_window).is_some());
         #[cfg(not(feature = "render"))]
         let platform_host = primary_metrics_for_context.map(|metrics| metrics.host_window);
         #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -330,10 +346,16 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                         world,
                         context_id,
                         platform_host,
+                        platform_feedback_host.is_some(),
                         context_raw,
                     );
                     #[cfg(feature = "render")]
-                    platform::sync_context_platform_feedback(world, context_id, platform_host, ui);
+                    platform::sync_context_platform_feedback(
+                        world,
+                        context_id,
+                        platform_feedback_host,
+                        ui,
+                    );
                     #[cfg(not(feature = "render"))]
                     if is_primary {
                         platform::sync_context_platform_feedback(
@@ -386,7 +408,10 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                         frame_index,
                         config.multi_viewport(),
                         #[cfg(feature = "render")]
-                        render_route_epoch.clone(),
+                        render_route_epoch
+                            .as_ref()
+                            .expect("frame input must contain a render route epoch")
+                            .clone(),
                         output,
                     );
                 }));
@@ -440,7 +465,9 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
         }
     }
     #[cfg(feature = "render")]
-    platform::finish_platform_feedback(world);
+    if frame_input.is_some() {
+        platform::finish_platform_feedback(world);
+    }
 }
 
 #[cfg(feature = "render")]

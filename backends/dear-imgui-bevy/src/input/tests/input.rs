@@ -151,6 +151,7 @@ fn app_with_primary_window_in(mut app: App, plugin: ImguiPlugin) -> (App, Entity
             .world()
             .non_send::<ImguiContexts>()
             .primary_id()
+            .expect("Context registry must be active")
             .expect("ImguiPlugin should install a primary Context");
         let region = {
             let window = app
@@ -227,6 +228,7 @@ fn configure_primary<T>(app: &mut App, configure: impl FnOnce(&mut imgui::Contex
         .expect("ImguiPlugin should install the Context registry");
     let primary_id = contexts
         .primary_id()
+        .expect("Context registry must be active")
         .expect("ImguiPlugin should install a primary Context");
     contexts
         .configure(primary_id, configure)
@@ -238,6 +240,7 @@ fn primary_context_id(app: &App) -> ContextId {
     app.world()
         .non_send::<ImguiContexts>()
         .primary_id()
+        .expect("Context registry must be active")
         .expect("ImguiPlugin should install a primary Context")
 }
 
@@ -316,6 +319,7 @@ fn routed_input_app() -> (App, ContextId, Entity, Entity) {
         .world()
         .non_send::<ImguiContexts>()
         .primary_id()
+        .expect("Context registry must be active")
         .expect("ImguiPlugin should install a primary Context");
     let mut primary_window = Window {
         resolution: WindowResolution::new(640, 480),
@@ -335,8 +339,9 @@ fn routed_input_app() -> (App, ContextId, Entity, Entity) {
 
 #[cfg(feature = "render")]
 fn add_routed_input_context(app: &mut App) -> (ContextId, ImguiPass<RoutedInputSecondaryUi>) {
-    let pass = app.declare_imgui_pass::<RoutedInputSecondaryUi>();
-    app.add_imgui_systems(&pass, pass.system(empty_routed_input_ui));
+    let pass = app.declare_imgui_pass::<RoutedInputSecondaryUi>().unwrap();
+    app.add_imgui_systems(&pass, pass.system(empty_routed_input_ui))
+        .unwrap();
     let context_id = app
         .world_mut()
         .non_send_mut::<ImguiContexts>()
@@ -772,11 +777,12 @@ fn input_platform_feedback_updates_primary_window_cursor_and_ime_state() {
     let (mut app, primary) = app_with_primary_window();
     app.world_mut().get_mut::<Window>(primary).unwrap().position =
         WindowPosition::At(IVec2::new(100, 150));
-    let primary_pass = app.imgui_primary_pass();
+    let primary_pass = app.imgui_primary_pass().unwrap();
     app.add_imgui_systems(
         &primary_pass,
         primary_pass.system(request_text_cursor_and_ime::<ImguiPrimaryPass>),
-    );
+    )
+    .unwrap();
 
     app.update();
 
@@ -822,11 +828,12 @@ fn input_platform_feedback_updates_secondary_viewport_window_cursor_and_ime_stat
             position: Vec2::new(10.0, 20.0),
             delta: None,
         });
-    let primary_pass = app.imgui_primary_pass();
+    let primary_pass = app.imgui_primary_pass().unwrap();
     app.add_imgui_systems(
         &primary_pass,
         primary_pass.system(request_text_cursor_and_secondary_viewport_ime),
-    );
+    )
+    .unwrap();
 
     app.update();
 
@@ -873,11 +880,12 @@ fn input_platform_feedback_routes_cursor_independently_from_ime_viewport() {
             position: Vec2::new(11.0, 22.0),
             delta: None,
         });
-    let primary_pass = app.imgui_primary_pass();
+    let primary_pass = app.imgui_primary_pass().unwrap();
     app.add_imgui_systems(
         &primary_pass,
         primary_pass.system(request_primary_cursor_and_secondary_viewport_ime),
-    );
+    )
+    .unwrap();
 
     app.update();
 
@@ -923,11 +931,12 @@ fn input_disabled_route_suppresses_native_viewport_ime() {
         .entity_mut(route.0)
         .insert(route.1.with_policy(ImguiInputPolicy::Disabled));
     app.world_mut().run_schedule(PostUpdate);
-    let primary_pass = app.imgui_primary_pass();
+    let primary_pass = app.imgui_primary_pass().unwrap();
     app.add_imgui_systems(
         &primary_pass,
         primary_pass.system(request_primary_cursor_and_secondary_viewport_ime),
-    );
+    )
+    .unwrap();
 
     app.update();
 
@@ -976,7 +985,8 @@ fn input_platform_feedback_enables_ime_for_a_focused_secondary_context_route() {
     app.add_imgui_systems(
         &secondary_pass,
         secondary_pass.system(request_text_cursor_and_ime::<RoutedInputSecondaryUi>),
-    );
+    )
+    .unwrap();
 
     app.world_mut()
         .resource_mut::<Messages<WindowFocused>>()
@@ -1047,12 +1057,14 @@ fn input_platform_feedback_follows_the_current_exclusive_pointer_owner() {
         right,
     ));
     resolve_routed_input(&mut app);
-    let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_systems(&primary_pass, primary_pass.system(request_hidden_cursor));
+    let primary_pass = app.imgui_primary_pass().unwrap();
+    app.add_imgui_systems(&primary_pass, primary_pass.system(request_hidden_cursor))
+        .unwrap();
     app.add_imgui_systems(
         &secondary_pass,
         secondary_pass.system(request_text_cursor_only::<RoutedInputSecondaryUi>),
-    );
+    )
+    .unwrap();
 
     app.world_mut()
         .resource_mut::<Messages<CursorMoved>>()
@@ -1113,11 +1125,12 @@ fn input_platform_feedback_targets_input_host_independently_of_render_host() {
         input_region,
     ));
     resolve_routed_input(&mut app);
-    let primary_pass = app.imgui_primary_pass();
+    let primary_pass = app.imgui_primary_pass().unwrap();
     app.add_imgui_systems(
         &primary_pass,
         primary_pass.system(request_text_cursor_only::<ImguiPrimaryPass>),
-    );
+    )
+    .unwrap();
     app.world_mut()
         .resource_mut::<Messages<CursorMoved>>()
         .write(CursorMoved {
@@ -1162,11 +1175,12 @@ fn input_platform_feedback_does_not_enable_ime_for_a_disabled_route() {
             .with_policy(ImguiInputPolicy::Disabled),
     );
     resolve_routed_input(&mut app);
-    let primary_pass = app.imgui_primary_pass();
+    let primary_pass = app.imgui_primary_pass().unwrap();
     app.add_imgui_systems(
         &primary_pass,
         primary_pass.system(request_text_cursor_and_ime::<ImguiPrimaryPass>),
-    );
+    )
+    .unwrap();
 
     app.update();
 
@@ -1207,11 +1221,12 @@ fn input_platform_feedback_ignores_render_only_context_without_hover_ownership()
     app.world_mut()
         .spawn(ImguiRenderRoute::new(secondary_context, camera));
     resolve_routed_input(&mut app);
-    let primary_pass = app.imgui_primary_pass();
+    let primary_pass = app.imgui_primary_pass().unwrap();
     app.add_imgui_systems(
         &primary_pass,
         primary_pass.system(request_text_cursor_and_ime::<ImguiPrimaryPass>),
-    );
+    )
+    .unwrap();
     app.world_mut()
         .resource_mut::<Messages<CursorMoved>>()
         .write(CursorMoved {
@@ -1248,8 +1263,9 @@ fn input_platform_feedback_hides_os_cursor_when_imgui_draws_software_cursor() {
     app.world_mut()
         .entity_mut(primary)
         .insert(CursorIcon::from(SystemCursorIcon::Pointer));
-    let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_systems(&primary_pass, primary_pass.system(request_software_cursor));
+    let primary_pass = app.imgui_primary_pass().unwrap();
+    app.add_imgui_systems(&primary_pass, primary_pass.system(request_software_cursor))
+        .unwrap();
 
     app.update();
 
@@ -1269,8 +1285,9 @@ fn input_platform_feedback_hides_os_cursor_when_imgui_requests_no_cursor() {
     app.world_mut()
         .entity_mut(primary)
         .insert(CursorIcon::from(SystemCursorIcon::Pointer));
-    let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_systems(&primary_pass, primary_pass.system(request_hidden_cursor));
+    let primary_pass = app.imgui_primary_pass().unwrap();
+    app.add_imgui_systems(&primary_pass, primary_pass.system(request_hidden_cursor))
+        .unwrap();
 
     app.update();
 
@@ -1290,8 +1307,9 @@ fn input_platform_feedback_restores_cursor_on_previous_hovered_window() {
     let fixture =
         create_native_viewport_window(&mut app, imgui::Id::from(0x503), Window::default());
     let secondary = fixture.window();
-    let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_systems(&primary_pass, primary_pass.system(request_software_cursor));
+    let primary_pass = app.imgui_primary_pass().unwrap();
+    app.add_imgui_systems(&primary_pass, primary_pass.system(request_software_cursor))
+        .unwrap();
 
     app.world_mut()
         .resource_mut::<Messages<CursorMoved>>()
@@ -1959,11 +1977,12 @@ fn input_equal_viewport_ids_remain_scoped_to_their_context_windows() {
     let _guard = imgui_context_guard();
     let (mut app, primary_host) = app_with_primary_window_and_native_viewports();
     let primary_context = primary_context_id(&app);
-    let secondary_pass = app.declare_imgui_pass::<RoutedInputSecondaryUi>();
+    let secondary_pass = app.declare_imgui_pass::<RoutedInputSecondaryUi>().unwrap();
     app.add_imgui_systems(
         &secondary_pass,
         secondary_pass.system(empty_routed_input_ui),
-    );
+    )
+    .unwrap();
     let secondary_context = app
         .world_mut()
         .non_send_mut::<ImguiContexts>()
@@ -2566,6 +2585,7 @@ fn primary_capture_queries_follow_legacy_primary_input_without_render_routes() {
         .world()
         .non_send::<ImguiContexts>()
         .primary_id()
+        .expect("Context registry must be active")
         .expect("ImguiPlugin should install a primary Context");
     configure_primary(&mut app, |_| unsafe {
         let io = imgui::sys::igGetIO_Nil();
@@ -3365,11 +3385,12 @@ fn capture_decision_remains_stable_for_the_input_batch_that_update_consumes() {
     ));
     resolve_routed_input(&mut app);
 
-    let primary_pass = app.imgui_primary_pass();
+    let primary_pass = app.imgui_primary_pass().unwrap();
     app.add_imgui_systems(
         &primary_pass,
         primary_pass.system(request_pointer_capture_next_frame),
-    );
+    )
+    .unwrap();
     app.init_resource::<ScopedCaptureRunCount>().add_systems(
         Update,
         count_scoped_capture.run_if(imgui_context_wants_pointer_input(primary_context)),

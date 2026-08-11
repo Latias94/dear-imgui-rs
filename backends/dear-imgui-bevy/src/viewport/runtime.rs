@@ -733,7 +733,8 @@ pub(crate) fn install_viewport_bridge(app: &mut App) {
         app.add_message::<WindowOccluded>();
         app.add_systems(
             PreUpdate,
-            sync_os_viewport_lifecycle_events.before(crate::input::ImguiInputSystems),
+            sync_os_viewport_lifecycle_events
+                .in_set(crate::input::ImguiInputPipelineSystems::PlatformLifecycle),
         );
         app.add_systems(
             crate::schedule::ImguiContextDriver,

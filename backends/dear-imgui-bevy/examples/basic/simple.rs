@@ -17,7 +17,7 @@ struct SimpleUiState {
     show_demo_window: bool,
 }
 
-fn main() {
+fn main() -> Result {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
@@ -33,9 +33,10 @@ fn main() {
     .init_resource::<SimpleUiState>()
     .add_systems(Startup, setup)
     .add_systems(Update, close_on_escape);
-    let primary_pass = app.imgui_primary_pass();
-    app.add_imgui_systems(&primary_pass, primary_pass.system(simple_ui))
-        .run();
+    let primary_pass = app.imgui_primary_pass()?;
+    app.add_imgui_systems(&primary_pass, primary_pass.system(simple_ui))?;
+    app.run();
+    Ok(())
 }
 
 fn setup(mut commands: Commands) {

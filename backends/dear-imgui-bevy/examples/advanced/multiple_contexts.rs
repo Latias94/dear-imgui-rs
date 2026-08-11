@@ -35,7 +35,7 @@ struct MultipleContextState {
     retirement_status: String,
 }
 
-fn main() {
+fn main() -> Result {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
         primary_window: Some(Window {
@@ -47,8 +47,7 @@ fn main() {
         }),
         ..Default::default()
     }));
-    app.try_install_imgui(ImguiPlugin::default())
-        .expect("the example configuration is valid");
+    app.try_install_imgui(ImguiPlugin::default())?;
     app.init_resource::<MultipleContextState>()
         .add_systems(Startup, setup)
         .add_systems(
@@ -59,12 +58,13 @@ fn main() {
                 (retire_secondary_context, finish_secondary_retirement).chain(),
             ),
         );
-    let primary_pass = app.imgui_primary_pass();
-    let secondary_pass = app.declare_imgui_pass::<SecondaryContextPass>();
-    app.insert_resource(secondary_pass.clone())
-        .add_imgui_systems(&primary_pass, primary_pass.system(primary_ui))
-        .add_imgui_systems(&secondary_pass, secondary_pass.system(secondary_ui))
-        .run();
+    let primary_pass = app.imgui_primary_pass()?;
+    let secondary_pass = app.declare_imgui_pass::<SecondaryContextPass>()?;
+    app.insert_resource(secondary_pass.clone());
+    app.add_imgui_systems(&primary_pass, primary_pass.system(primary_ui))?;
+    app.add_imgui_systems(&secondary_pass, secondary_pass.system(secondary_ui))?;
+    app.run();
+    Ok(())
 }
 
 fn setup(
@@ -73,7 +73,7 @@ fn setup(
     secondary_pass: Res<ImguiPass<SecondaryContextPass>>,
 ) -> Result {
     let primary_context = contexts
-        .primary_id()
+        .primary_id()?
         .ok_or("ImguiPlugin should install a primary Context before Startup")?;
     let secondary_context =
         contexts.create(ImguiContextConfig::new(&secondary_pass).with_docking(false))?;
