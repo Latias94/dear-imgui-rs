@@ -1180,6 +1180,275 @@ jobs:
           IMGUI_SYS_FORCE_BUILD: "1"
           RUSTFLAGS: ${{ matrix.rustflags }}
 
+  windows-source-abi:
+    name: Windows source ABI (${{ matrix.lane }})
+    runs-on: windows-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: x64-gnullvm-default
+            target: x86_64-pc-windows-gnullvm
+            target_dir: target/windows-gnullvm-x64-default
+            rustflags: -Cdebuginfo=0
+            llvm_prefix: x86_64-w64-mingw32
+            expected_machine: coff-x86-64
+            full_sys: true
+            runtime_path_policy: include
+            unwind_policy: required
+            msvc: false
+          - lane: x64-gnullvm-crt-static
+            target: x86_64-pc-windows-gnullvm
+            target_dir: target/windows-gnullvm-x64-crt-static
+            rustflags: -Cdebuginfo=0 -C target-feature=+crt-static
+            llvm_prefix: x86_64-w64-mingw32
+            expected_machine: coff-x86-64
+            full_sys: true
+            runtime_path_policy: exclude
+            unwind_policy: forbidden
+            msvc: false
+          - lane: arm64-gnullvm-default
+            target: aarch64-pc-windows-gnullvm
+            target_dir: target/windows-gnullvm-arm64-default
+            rustflags: -Cdebuginfo=0
+            llvm_prefix: aarch64-w64-mingw32
+            expected_machine: coff-arm64
+            full_sys: true
+            runtime_path_policy: none
+            unwind_policy: required
+            msvc: false
+          - lane: arm64-msvc-md
+            target: aarch64-pc-windows-msvc
+            target_dir: target/windows-msvc-arm64-md
+            rustflags: -Cdebuginfo=0
+            llvm_prefix: ''
+            expected_machine: coff-arm64
+            full_sys: false
+            runtime_path_policy: none
+            unwind_policy: none
+            msvc: true
+    env:
+      CARGO_TARGET_DIR: ${{ matrix.target_dir }}
+      CI_TARGET: ${{ matrix.target }}
+      RUSTFLAGS: ${{ matrix.rustflags }}
+      IMGUI_SYS_FORCE_BUILD: "1"
+      IMPLOT_SYS_FORCE_BUILD: "1"
+      IMPLOT3D_SYS_FORCE_BUILD: "1"
+      IMNODES_SYS_FORCE_BUILD: "1"
+      NODE_EDITOR_SYS_FORCE_BUILD: "1"
+      IMGUIZMO_SYS_FORCE_BUILD: "1"
+      IMGUIZMO_QUAT_SYS_FORCE_BUILD: "1"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+
+      - name: Init required nested submodules (selective)
+        run: python tools/ci/update_submodules.py
+
+      - name: Install Rust 1.95.0 and target standard library
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: '1.95.0'
+          targets: ${{ matrix.target }}
+
+      - name: Enter the Arm64 MSVC developer environment
+        if: matrix.msvc == true
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: amd64_arm64
+
+      - name: Install cargo-nextest
+        if: matrix.runtime_path_policy != 'none'
+        uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          cache-bin: "false"
+          key: windows-source-abi-${{ matrix.lane }}
+
+      - name: Download and verify llvm-mingw 20260616
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'llvm-mingw-20260616-ucrt-x86_64.zip'
+          $extractRoot = Join-Path $env:RUNNER_TEMP 'llvm-mingw-20260616'
+          Invoke-WebRequest `
+            -Uri 'https://github.com/mstorsjo/llvm-mingw/releases/download/20260616/llvm-mingw-20260616-ucrt-x86_64.zip' `
+            -OutFile $archive `
+            -ConnectionTimeoutSeconds 30 `
+            -OperationTimeoutSeconds 600 `
+            -MaximumRetryCount 2 `
+            -RetryIntervalSec 5
+
+          $expectedSha256 = 'b9b68a4d276e16fa25802aaba458e4638f64b3884c290aaccdc2d87083b6ca35'
+          $actualSha256 = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256) {
+            throw "llvm-mingw SHA-256 mismatch: expected $expectedSha256, got $actualSha256"
+          }
+
+          Expand-Archive -LiteralPath $archive -DestinationPath $extractRoot
+          $toolchainRoots = @(
+            Get-ChildItem -Path $extractRoot -Directory |
+              Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'bin\llvm-objdump.exe') -PathType Leaf } |
+              ForEach-Object { $_.FullName } |
+              Sort-Object -Unique
+          )
+          if ($toolchainRoots.Count -ne 1) {
+            throw "Expected exactly one extracted llvm-mingw root, found $($toolchainRoots.Count)"
+          }
+
+          $toolchainRoot = $toolchainRoots[0]
+          $toolchainBin = Join-Path $toolchainRoot 'bin'
+          "LLVM_MINGW_ROOT=$toolchainRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "LLVM_MINGW_BIN=$toolchainBin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Configure the gnullvm compiler and linker
+        if: matrix.llvm_prefix != ''
+        run: |
+          $prefix = '${{ matrix.llvm_prefix }}'
+          $cc = Join-Path $env:LLVM_MINGW_BIN "$prefix-clang.exe"
+          $cxx = Join-Path $env:LLVM_MINGW_BIN "$prefix-clang++.exe"
+          $ar = Join-Path $env:LLVM_MINGW_BIN 'llvm-ar.exe'
+          foreach ($tool in @($cc, $cxx, $ar)) {
+            if (-not (Test-Path -LiteralPath $tool -PathType Leaf)) {
+              throw "Required llvm-mingw tool was not found: $tool"
+            }
+          }
+
+          $targetKey = '${{ matrix.target }}'.Replace('-', '_')
+          $cargoTargetKey = $targetKey.ToUpperInvariant()
+          "CARGO_TARGET_${cargoTargetKey}_LINKER=$cc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CC_${targetKey}=$cc" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CXX_${targetKey}=$cxx" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "AR_${targetKey}=$ar" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Final-link the configured native sentinels
+        run: |
+          $sentinels = @(
+            Get-Content -Raw tools/ci/windows_source_sentinels.json |
+              ConvertFrom-Json
+          )
+          if ('${{ matrix.full_sys }}' -ne 'true') {
+            $sentinels = @(
+              $sentinels |
+                Where-Object { $_.package -eq 'dear-imgui-sys' }
+            )
+          }
+          foreach ($sentinel in $sentinels) {
+            cargo +1.95.0 test `
+              -p $sentinel.package `
+              --test $sentinel.test `
+              --target "$env:CI_TARGET" `
+              --no-run
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+          }
+
+      - name: Inspect linked PE machine types and runtime imports
+        run: |
+          $deps = Join-Path $env:CARGO_TARGET_DIR "$env:CI_TARGET\debug\deps"
+          $evidence = "target\ci-evidence\windows-source-abi\${{ matrix.lane }}\pe.txt"
+          $objdump = Join-Path $env:LLVM_MINGW_BIN 'llvm-objdump.exe'
+          $sentinels = @(
+            Get-Content -Raw tools/ci/windows_source_sentinels.json |
+              ConvertFrom-Json
+          )
+          if ('${{ matrix.full_sys }}' -ne 'true') {
+            $sentinels = @(
+              $sentinels |
+                Where-Object { $_.package -eq 'dear-imgui-sys' }
+            )
+          }
+          $binaryPatterns = @($sentinels | ForEach-Object { $_.binary_pattern })
+
+          $contractArgs = @(
+            'tools/ci/run_contract.py',
+            'windows-pe-evidence',
+            '--deps', $deps,
+            '--objdump', $objdump,
+            '--evidence', $evidence,
+            '--expected-machine', '${{ matrix.expected_machine }}'
+          )
+          foreach ($pattern in $binaryPatterns) {
+            $contractArgs += @('--binary-pattern', $pattern)
+          }
+          foreach ($forbiddenImport in @('libstdc++-6.dll', 'libc++.dll', 'libc++abi.dll', 'libwinpthread-1.dll')) {
+            $contractArgs += @('--forbid-import', $forbiddenImport)
+          }
+          switch ('${{ matrix.unwind_policy }}') {
+            'required' {
+              $contractArgs += @('--require-import', 'libunwind.dll')
+            }
+            'forbidden' {
+              $contractArgs += @('--forbid-import', 'libunwind.dll')
+            }
+            'none' {}
+            default {
+              throw "Unknown unwind policy: ${{ matrix.unwind_policy }}"
+            }
+          }
+
+          python @contractArgs
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Run x64 native and aggregate ABI sentinels
+        if: matrix.runtime_path_policy != 'none'
+        run: |
+          $separator = [IO.Path]::PathSeparator
+          $runtimeBin = $env:LLVM_MINGW_BIN.TrimEnd('\')
+          switch ('${{ matrix.runtime_path_policy }}') {
+            'include' {
+              $env:PATH = "$runtimeBin$separator$env:PATH"
+            }
+            'exclude' {
+              $pathEntries = @(
+                $env:PATH.Split($separator) |
+                  Where-Object { $_.TrimEnd('\') -ne $runtimeBin }
+              )
+              $env:PATH = $pathEntries -join $separator
+              if ($env:PATH.Split($separator).TrimEnd('\') -contains $runtimeBin) {
+                throw 'The llvm-mingw runtime directory remained on PATH for the crt-static lane'
+              }
+            }
+            default {
+              throw "Unknown runtime PATH policy: ${{ matrix.runtime_path_policy }}"
+            }
+          }
+
+          cargo +1.95.0 nextest run -j 1 `
+            --target "$env:CI_TARGET" `
+            -p dear-imgui-sys `
+            --test numeric_contract
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+          cargo +1.95.0 nextest run -j 1 `
+            --target "$env:CI_TARGET" `
+            -p dear-imgui-rs `
+            --features multi-viewport,abi-probe `
+            cpp_platform_io_probe_round_trips_all_aggregate_slots `
+            cpp_public_aggregate_layout_probe_matches_rust `
+            public_aggregate_layout_probe_rejects_an_abi_mismatch `
+            context_drop_clears_aggregate_callback_storage
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Retain Windows PE evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: windows-source-abi-${{ matrix.lane }}
+          path: target/ci-evidence/windows-source-abi/${{ matrix.lane }}/
+          if-no-files-found: error
+          retention-days: 14
+
   sys-bindgen-defaults:
     name: Sys crates without bindgen
     runs-on: ubuntu-latest

@@ -8,6 +8,14 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
+### Added
+
+- Added source-build support for `x86_64-pc-windows-gnullvm` and `aarch64-pc-windows-gnullvm` with llvm-mingw. CI final-links the maintained C++ sys crates, runtime/ABI-tests x64 in both default and `+crt-static` modes, and cross-link/PE-tests Arm64 gnullvm plus the existing Arm64 MSVC `/MD` source path. gnullvm prebuilts, FreeType, and SDL3's external native dependency are not included. Fixes [#73](https://github.com/Latias94/dear-imgui-rs/issues/73).
+
+### Breaking Changes and Migration
+
+- `dear-imgui-build-support` callers that construct `TargetFacts`, `NativeAbiTarget`, `BuildRequestInput`, or `BuildRequest` must now provide or handle `target_abi`, normally from `CARGO_CFG_TARGET_ABI`; `prebuilt_cpp_runtime_linkage`, `configure_cpp_runtime_linkage`, and `emit_prebuilt_cpp_runtime_linkage` also take that ABI argument. Windows GNU-GCC continues to link static `stdc++`, while Windows GNU/LLVM links static `c++`.
+
 ## [0.16.0-alpha.3] - 2026-08-11
 
 This source-breaking prerelease continues the ownership-first 0.16 migration with stricter host-runtime transactions and a focused regression fix for accidental fallback-window rendering. [PR #70](https://github.com/Latias94/dear-imgui-rs/pull/70)

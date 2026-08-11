@@ -20,6 +20,7 @@ struct BuildConfig {
     out_dir: PathBuf,
     target_os: String,
     target_env: String,
+    target_abi: String,
     target_arch: String,
     target_endian: String,
     target_pointer_width: String,
@@ -35,6 +36,7 @@ impl BuildConfig {
             out_dir: PathBuf::from(env::var("OUT_DIR").unwrap()),
             target_os: env::var("CARGO_CFG_TARGET_OS").unwrap_or_default(),
             target_env: env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default(),
+            target_abi: env::var("CARGO_CFG_TARGET_ABI").unwrap_or_default(),
             target_arch: env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default(),
             target_endian: env::var("CARGO_CFG_TARGET_ENDIAN").unwrap_or_default(),
             target_pointer_width: env::var("CARGO_CFG_TARGET_POINTER_WIDTH").unwrap_or_default(),
@@ -133,6 +135,7 @@ impl BuildConfig {
             triple: &self.target_triple,
             os: &self.target_os,
             env: &self.target_env,
+            target_abi: &self.target_abi,
             arch: &self.target_arch,
             endian: &self.target_endian,
             pointer_width: &self.target_pointer_width,
@@ -170,6 +173,7 @@ impl BuildConfig {
             target_triple: &self.target_triple,
             target_os: &self.target_os,
             target_env: &self.target_env,
+            target_abi: &self.target_abi,
             target_arch: &self.target_arch,
             target_endian: &self.target_endian,
             target_pointer_width: &self.target_pointer_width,
@@ -911,7 +915,12 @@ fn any_backend_shim_enabled() -> bool {
 fn new_native_cpp_build(cfg: &BuildConfig) -> cc::Build {
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
-    build_support::configure_cpp_runtime_linkage(&mut build, &cfg.target_os, &cfg.target_env);
+    build_support::configure_cpp_runtime_linkage(
+        &mut build,
+        &cfg.target_os,
+        &cfg.target_env,
+        &cfg.target_abi,
+    );
     build.include(cfg.imgui_src());
     build.define("IMGUI_DISABLE_OBSOLETE_FUNCTIONS", None);
     build.define("IMGUI_USE_WCHAR32", None);
@@ -1195,7 +1204,11 @@ fn try_link_prebuilt(dir: &Path, cfg: &BuildConfig) -> bool {
     };
     println!("cargo:rustc-link-search=native={}", dir.display());
     println!("cargo:rustc-link-lib=static=dear_imgui");
-    build_support::emit_prebuilt_cpp_runtime_linkage(&cfg.target_os, &cfg.target_env);
+    build_support::emit_prebuilt_cpp_runtime_linkage(
+        &cfg.target_os,
+        &cfg.target_env,
+        &cfg.target_abi,
+    );
     #[cfg(feature = "freetype")]
     {
         // A freetype-enabled dear_imgui static prebuilt still references the

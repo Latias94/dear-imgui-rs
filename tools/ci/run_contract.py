@@ -35,7 +35,9 @@ from _verification import (  # noqa: E402
     temporary_workspace,
 )
 from _windows_native import (  # noqa: E402
-    ForbiddenImportError,
+    ImportPolicyError,
+    InspectionCommandError,
+    MachineTypeError,
     WindowsNativeError,
     VcpkgTriplet,
     append_github_assignments,
@@ -49,7 +51,7 @@ from _windows_native import (  # noqa: E402
     restore_cached_sdl3_runtime,
     vcpkg_github_environment,
     vcpkg_root_candidates,
-    verify_mingw_imports,
+    verify_windows_pe,
 )
 
 
@@ -389,28 +391,74 @@ def check_windows_mingw_imports(
     objdump: Path,
     evidence: Path,
 ) -> None:
-    """Reject dynamic libstdc++ and retain complete objdump evidence."""
+    """Preserve the legacy CLI as a fixed generic PE import policy."""
+    check_windows_pe_evidence(
+        deps_directory=deps_directory,
+        objdump=objdump,
+        evidence=evidence,
+        binary_patterns=("dear_imgui_sys-*.exe",),
+        required_imports=(),
+        forbidden_imports=("libstdc++-6.dll",),
+        expected_machine=None,
+    )
+
+
+def check_windows_pe_evidence(
+    *,
+    deps_directory: Path,
+    objdump: Path,
+    evidence: Path,
+    binary_patterns: tuple[str, ...],
+    required_imports: tuple[str, ...],
+    forbidden_imports: tuple[str, ...],
+    expected_machine: str | None,
+) -> None:
+    """Verify explicit PE sentinels and persist parsed evidence before failure."""
     try:
-        inspection = verify_mingw_imports(deps_directory, objdump)
+        inspection = verify_windows_pe(
+            deps_directory,
+            objdump,
+            binary_patterns=binary_patterns,
+            required_imports=required_imports,
+            forbidden_imports=forbidden_imports,
+            expected_machine=expected_machine,
+        )
         evidence_text = inspection.evidence_text
-    except ForbiddenImportError as error:
+    except (ImportPolicyError, MachineTypeError, InspectionCommandError) as error:
         evidence_text = error.inspection.evidence_text
-        _write_mingw_evidence(evidence, evidence_text)
+        _write_windows_failure_evidence(evidence, evidence_text)
         raise
-    except (CommandError, WindowsNativeError) as error:
+    except (CommandError, OSError, WindowsNativeError) as error:
         evidence_text = f"{error}\n"
-        _write_mingw_evidence(evidence, evidence_text)
+        _write_windows_failure_evidence(evidence, evidence_text)
         raise
-    _write_mingw_evidence(evidence, evidence_text)
+    _write_windows_evidence(evidence, evidence_text)
     print(evidence_text, end="")
 
 
-def _write_mingw_evidence(path: Path, content: str) -> None:
+def _write_windows_evidence(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     normalized = content.replace("\r\n", "\n").replace("\r", "\n")
     if normalized and not normalized.endswith("\n"):
         normalized += "\n"
     path.write_bytes(normalized.encode("utf-8"))
+
+
+def _write_windows_failure_evidence(path: Path, content: str) -> None:
+    """Persist failure evidence without replacing the original contract error."""
+    try:
+        _write_windows_evidence(path, content)
+    except OSError as error:
+        if content:
+            print(
+                content,
+                end="" if content.endswith("\n") else "\n",
+                file=sys.stderr,
+            )
+        print(
+            f"warning: failed to persist Windows evidence to {path}: {error}",
+            file=sys.stderr,
+        )
 
 
 def _positive_float(value: str) -> float:
@@ -579,6 +627,23 @@ def _build_parser() -> argparse.ArgumentParser:
     mingw_imports.add_argument("--objdump", required=True, type=Path)
     mingw_imports.add_argument("--evidence", required=True, type=Path)
 
+    pe_evidence = commands.add_parser(
+        "windows-pe-evidence",
+        help="Inspect explicit Windows PE sentinels and enforce machine/import policy",
+    )
+    pe_evidence.add_argument("--deps", required=True, type=Path)
+    pe_evidence.add_argument("--objdump", required=True, type=Path)
+    pe_evidence.add_argument("--evidence", required=True, type=Path)
+    pe_evidence.add_argument(
+        "--binary-pattern",
+        action="append",
+        required=True,
+        help="Glob relative to --deps; repeat once per required sentinel",
+    )
+    pe_evidence.add_argument("--require-import", action="append", default=[])
+    pe_evidence.add_argument("--forbid-import", action="append", default=[])
+    pe_evidence.add_argument("--expected-machine")
+
     test_engine_runtime = commands.add_parser(
         "test-engine-runtime",
         help="Execute every stable Test Engine runner outcome",
@@ -692,6 +757,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 deps_directory=args.deps,
                 objdump=args.objdump,
                 evidence=args.evidence,
+            )
+        elif args.contract == "windows-pe-evidence":
+            check_windows_pe_evidence(
+                deps_directory=args.deps,
+                objdump=args.objdump,
+                evidence=args.evidence,
+                binary_patterns=tuple(args.binary_pattern),
+                required_imports=tuple(args.require_import),
+                forbidden_imports=tuple(args.forbid_import),
+                expected_machine=args.expected_machine,
             )
         elif args.contract == "test-engine-runtime":
             candidate_sha = resolve_candidate_sha(WORKSPACE_ROOT, args.candidate_sha)

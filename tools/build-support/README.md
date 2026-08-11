@@ -45,6 +45,31 @@ let lib_name = expected_lib_name(target_env, "dear_imgui");
 let lib_dir = download_prebuilt(&cache_root, url, &lib_name, target_env)?;
 ```
 
+## Build-script target ABI migration
+
+Build scripts must preserve Rust's complete target identity, including `CARGO_CFG_TARGET_ABI`. Populate `TargetFacts::target_abi`, `NativeAbiTarget::target_abi`, and `BuildRequestInput::target_abi` with the exact Rust cfg value (usually an empty string, and `llvm` for Windows gnullvm). `BuildRequest::new` carries that value into the public `BuildRequest::target_abi` field, so callers that construct or destructure `BuildRequest` directly must handle it. The field participates in strict target validation and deterministic binding/build-request hashes.
+
+The shared C++ runtime helpers also require the ABI argument:
+
+```rust
+let target_abi = std::env::var("CARGO_CFG_TARGET_ABI").unwrap_or_default();
+
+build_support::configure_cpp_runtime_linkage(
+    &mut build,
+    &target_os,
+    &target_env,
+    &target_abi,
+);
+let linkage = build_support::prebuilt_cpp_runtime_linkage(
+    &target_os,
+    &target_env,
+    &target_abi,
+);
+build_support::emit_prebuilt_cpp_runtime_linkage(&target_os, &target_env, &target_abi);
+```
+
+On Windows, MSVC keeps its toolchain-default C++ runtime, GNU-GCC links static `stdc++`, and GNU/LLVM (`target_abi="llvm"`) links static `c++`. Callers should not add separate `c++abi`, unwind, or Windows system libraries to compensate for this decision.
+
 ## Blocking HTTP and TLS
 
 HTTP(S) download support is behind the feature `download`, which enables `ureq` (with rustls).

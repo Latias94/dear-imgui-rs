@@ -8,6 +8,7 @@ import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -27,6 +28,40 @@ def write_release_workspace(root: Path) -> None:
         f'[workspace.package]\nversion = "{FIXTURE_VERSION}"\n',
         encoding="utf-8",
     )
+
+
+class WindowsSourceSentinelManifestTests(unittest.TestCase):
+    def test_manifest_covers_every_maintained_sys_crate_once(self):
+        manifest = json.loads(
+            (REPO_ROOT / "tools" / "ci" / "windows_source_sentinels.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        self.assertEqual(
+            tuple(entry["package"] for entry in manifest),
+            CONTRACTS.SYS_CRATES,
+        )
+        self.assertEqual(
+            {tuple(sorted(entry)) for entry in manifest},
+            {("binary_pattern", "package", "test")},
+        )
+        self.assertEqual(
+            len({entry["test"] for entry in manifest}),
+            len(manifest),
+        )
+        self.assertEqual(
+            len({entry["binary_pattern"] for entry in manifest}),
+            len(manifest),
+        )
+        self.assertEqual(
+            manifest[0],
+            {
+                "package": "dear-imgui-sys",
+                "test": "numeric_contract",
+                "binary_pattern": "numeric_contract-*.exe",
+            },
+        )
 
 
 class ExpectedFailureTests(unittest.TestCase):
@@ -241,7 +276,7 @@ class ContractRunnerTests(unittest.TestCase):
             )
             diagnostic = io.StringIO()
             with (
-                patch.object(CONTRACTS, "verify_mingw_imports", side_effect=failure),
+                patch.object(CONTRACTS, "verify_windows_pe", side_effect=failure),
                 redirect_stderr(diagnostic),
             ):
                 result = CONTRACTS.main(
@@ -259,6 +294,150 @@ class ContractRunnerTests(unittest.TestCase):
             self.assertEqual(result, 9)
             self.assertIn("objdump diagnostic", diagnostic.getvalue())
             self.assertIn("exit code 9", evidence.read_text(encoding="utf-8"))
+
+    def test_windows_mingw_cli_routes_through_generic_pe_policy(self):
+        with patch.object(CONTRACTS, "check_windows_pe_evidence") as checker:
+            CONTRACTS.check_windows_mingw_imports(
+                deps_directory=Path("deps"),
+                objdump=Path("objdump.exe"),
+                evidence=Path("imports.txt"),
+            )
+
+        checker.assert_called_once_with(
+            deps_directory=Path("deps"),
+            objdump=Path("objdump.exe"),
+            evidence=Path("imports.txt"),
+            binary_patterns=("dear_imgui_sys-*.exe",),
+            required_imports=(),
+            forbidden_imports=("libstdc++-6.dll",),
+            expected_machine=None,
+        )
+
+    def test_windows_pe_cli_routes_explicit_patterns_and_policies(self):
+        with TemporaryDirectory() as temporary:
+            evidence = Path(temporary) / "logs" / "pe.txt"
+            inspection = SimpleNamespace(
+                evidence_text=(
+                    "Checking PE evidence for numeric_contract-core.exe\n"
+                    "Parsed machine: coff-arm64\n"
+                    "Parsed imports: libunwind.dll\n"
+                )
+            )
+            with patch.object(
+                CONTRACTS,
+                "verify_windows_pe",
+                return_value=inspection,
+            ) as verifier:
+                result = CONTRACTS.main(
+                    (
+                        "windows-pe-evidence",
+                        "--deps",
+                        "deps",
+                        "--objdump",
+                        "llvm-objdump.exe",
+                        "--evidence",
+                        str(evidence),
+                        "--binary-pattern",
+                        "numeric_contract-*.exe",
+                        "--binary-pattern",
+                        "dear_implot_sys-*.exe",
+                        "--require-import",
+                        "libunwind.dll",
+                        "--forbid-import",
+                        "libc++.dll",
+                        "--expected-machine",
+                        "coff-arm64",
+                    )
+                )
+
+            self.assertEqual(result, 0)
+            verifier.assert_called_once_with(
+                Path("deps"),
+                Path("llvm-objdump.exe"),
+                binary_patterns=(
+                    "numeric_contract-*.exe",
+                    "dear_implot_sys-*.exe",
+                ),
+                required_imports=("libunwind.dll",),
+                forbidden_imports=("libc++.dll",),
+                expected_machine="coff-arm64",
+            )
+            self.assertIn("Parsed machine: coff-arm64", evidence.read_text())
+
+    def test_windows_pe_cli_persists_policy_evidence_before_failing(self):
+        with TemporaryDirectory() as temporary:
+            evidence = Path(temporary) / "logs" / "pe.txt"
+            inspection = SimpleNamespace(
+                evidence_text=(
+                    "Checking PE evidence for numeric_contract-core.exe\n"
+                    "Parsed machine: coff-x86-64\n"
+                    "Parsed imports: KERNEL32.dll\n"
+                )
+            )
+            failure = CONTRACTS.ImportPolicyError(
+                inspection,
+                missing_imports=("libunwind.dll",),
+                forbidden_imports=(),
+            )
+            diagnostic = io.StringIO()
+            with (
+                patch.object(CONTRACTS, "verify_windows_pe", side_effect=failure),
+                redirect_stderr(diagnostic),
+            ):
+                result = CONTRACTS.main(
+                    (
+                        "windows-pe-evidence",
+                        "--deps",
+                        "deps",
+                        "--objdump",
+                        "llvm-objdump.exe",
+                        "--evidence",
+                        str(evidence),
+                        "--binary-pattern",
+                        "numeric_contract-*.exe",
+                        "--require-import",
+                        "libunwind.dll",
+                    )
+                )
+
+            self.assertEqual(result, 1)
+            self.assertIn("libunwind.dll", diagnostic.getvalue())
+            persisted = evidence.read_text(encoding="utf-8")
+            self.assertIn("Parsed machine: coff-x86-64", persisted)
+            self.assertIn("KERNEL32.dll", persisted)
+
+    def test_windows_pe_evidence_write_failure_preserves_contract_error(self):
+        inspection = SimpleNamespace(evidence_text="complete PE evidence\n")
+        failure = CONTRACTS.ImportPolicyError(
+            inspection,
+            missing_imports=("libunwind.dll",),
+            forbidden_imports=(),
+        )
+        diagnostic = io.StringIO()
+        with (
+            patch.object(CONTRACTS, "verify_windows_pe", side_effect=failure),
+            patch.object(
+                CONTRACTS,
+                "_write_windows_evidence",
+                side_effect=OSError("disk full"),
+            ),
+            redirect_stderr(diagnostic),
+            self.assertRaises(CONTRACTS.ImportPolicyError) as raised,
+        ):
+            CONTRACTS.check_windows_pe_evidence(
+                deps_directory=Path("deps"),
+                objdump=Path("llvm-objdump.exe"),
+                evidence=Path("pe.txt"),
+                binary_patterns=("numeric_contract-*.exe",),
+                required_imports=("libunwind.dll",),
+                forbidden_imports=(),
+                expected_machine="coff-x86-64",
+            )
+
+        self.assertIs(raised.exception, failure)
+        self.assertIn("complete PE evidence", diagnostic.getvalue())
+        self.assertIn("failed to persist Windows evidence", diagnostic.getvalue())
+        self.assertIn("disk full", diagnostic.getvalue())
 
     def test_runtime_disposition_only_defers_first_infrastructure_failure(self):
         with TemporaryDirectory() as temporary:

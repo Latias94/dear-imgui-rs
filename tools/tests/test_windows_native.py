@@ -389,96 +389,276 @@ class MinGwEnvironmentTests(unittest.TestCase):
         )
 
 
-class MinGwImportTests(unittest.TestCase):
-    def test_finder_returns_zero_one_and_multiple_in_stable_order(self):
+class WindowsPeEvidenceTests(unittest.TestCase):
+    def test_explicit_patterns_require_every_sentinel_and_deduplicate(self):
         with TemporaryDirectory() as temporary:
             deps = Path(temporary)
-            self.assertEqual(WINDOWS_NATIVE.find_mingw_test_executables(deps), ())
-            second = deps / "dear_imgui_sys-B.exe"
-            first = deps / "dear_imgui_sys-a.exe"
-            second.touch()
-            first.touch()
-            (deps / "dear_imgui_sys-object.exe").mkdir()
+            core = deps / "numeric_contract-core.exe"
+            implot = deps / "dear_implot_sys-smoke.exe"
+            core.touch()
+            implot.touch()
 
-            self.assertEqual(
-                WINDOWS_NATIVE.find_mingw_test_executables(deps), (first, second)
+            binaries = WINDOWS_NATIVE.find_windows_test_executables(
+                deps,
+                (
+                    "numeric_contract-*.exe",
+                    "dear_implot_sys-*.exe",
+                    "*.exe",
+                ),
             )
+            self.assertEqual(binaries, (implot, core))
 
-    def test_zero_matches_is_a_typed_error(self):
-        with TemporaryDirectory() as temporary:
             with self.assertRaisesRegex(
-                WINDOWS_NATIVE.MissingTestBinaryError, "no dear_imgui_sys"
+                WINDOWS_NATIVE.MissingTestBinaryError,
+                "dear_imnodes_sys-\\*.exe",
             ):
-                WINDOWS_NATIVE.inspect_mingw_imports(
-                    temporary, "objdump.exe", runner=lambda *_args, **_kwargs: None
+                WINDOWS_NATIVE.find_windows_test_executables(
+                    deps,
+                    ("numeric_contract-*.exe", "dear_imnodes_sys-*.exe"),
                 )
 
-    def test_multiple_binaries_preserve_output_and_parse_imports(self):
-        outputs = {
-            "dear_imgui_sys-a.exe": "DLL Name: KERNEL32.dll\nmarker-a\n",
-            "dear_imgui_sys-b.exe": "marker-b\n  DLL Name: USER32.dll\n",
-        }
+    def test_required_and_forbidden_import_policies_are_case_insensitive(self):
         with TemporaryDirectory() as temporary:
-            deps = Path(temporary)
-            for name in reversed(tuple(outputs)):
-                (deps / name).touch()
-
-            def runner(command, **_kwargs):
-                output = outputs[Path(command[-1]).name]
-                return subprocess.CompletedProcess(command, 0, stdout=output)
-
-            inspection = WINDOWS_NATIVE.verify_mingw_imports(
-                deps, "objdump.exe", runner=runner
-            )
-
-            self.assertEqual(
-                [item.binary.name for item in inspection.evidence],
-                ["dear_imgui_sys-a.exe", "dear_imgui_sys-b.exe"],
-            )
-            self.assertEqual(inspection.evidence[0].imports, ("KERNEL32.dll",))
-            self.assertIn("marker-a", inspection.evidence_text)
-            self.assertIn("marker-b", inspection.evidence_text)
-
-    def test_objdump_failure_preserves_exit_and_output(self):
-        with TemporaryDirectory() as temporary:
-            binary = Path(temporary) / "dear_imgui_sys-a.exe"
-            binary.touch()
-
-            def runner(command, **_kwargs):
-                return subprocess.CompletedProcess(
-                    command, 9, stdout="objdump diagnostic\n"
-                )
-
-            with self.assertRaises(WINDOWS_NATIVE.CommandError) as failure:
-                WINDOWS_NATIVE.inspect_mingw_imports(
-                    temporary, "objdump.exe", runner=runner
-                )
-
-            self.assertEqual(failure.exception.returncode, 9)
-            self.assertIn("objdump diagnostic", failure.exception.output)
-
-    def test_forbidden_import_is_case_insensitive_and_retains_evidence(self):
-        with TemporaryDirectory() as temporary:
-            binary = Path(temporary) / "dear_imgui_sys-a.exe"
+            binary = Path(temporary) / "numeric_contract-core.exe"
             binary.touch()
             raw_output = (
-                "private diagnostic\n"
+                f"{binary}: file format coff-x86-64\n"
                 "  DLL Name: KERNEL32.dll\n"
-                "  DLL Name: LiBsTdC++-6.DlL\n"
+                "  DLL Name: LiBuNwInD.DlL\n"
             )
 
             def runner(command, **_kwargs):
                 return subprocess.CompletedProcess(command, 0, stdout=raw_output)
 
-            with self.assertRaises(WINDOWS_NATIVE.ForbiddenImportError) as failure:
-                WINDOWS_NATIVE.verify_mingw_imports(
-                    temporary, "objdump.exe", runner=runner
+            inspection = WINDOWS_NATIVE.verify_windows_pe(
+                temporary,
+                "llvm-objdump.exe",
+                binary_patterns=("numeric_contract-*.exe",),
+                required_imports=("libunwind.dll",),
+                forbidden_imports=("libstdc++-6.dll", "libc++.dll"),
+                expected_machine="coff-x86-64",
+                runner=runner,
+            )
+            self.assertEqual(
+                inspection.evidence[0].imports,
+                ("KERNEL32.dll", "LiBuNwInD.DlL"),
+            )
+
+            with self.assertRaises(WINDOWS_NATIVE.ImportPolicyError) as forbidden:
+                WINDOWS_NATIVE.verify_windows_pe(
+                    temporary,
+                    "llvm-objdump.exe",
+                    binary_patterns=("numeric_contract-*.exe",),
+                    forbidden_imports=("LIBUNWIND.DLL",),
+                    runner=runner,
+                )
+            self.assertEqual(forbidden.exception.forbidden_imports, ("LiBuNwInD.DlL",))
+            self.assertIn("LiBuNwInD.DlL", forbidden.exception.inspection.evidence_text)
+
+            with self.assertRaises(WINDOWS_NATIVE.ImportPolicyError) as missing:
+                WINDOWS_NATIVE.verify_windows_pe(
+                    temporary,
+                    "llvm-objdump.exe",
+                    binary_patterns=("numeric_contract-*.exe",),
+                    required_imports=("missing-runtime.dll",),
+                    runner=runner,
+                )
+            self.assertEqual(missing.exception.missing_imports, ("missing-runtime.dll",))
+
+    def test_import_policy_is_enforced_for_every_binary(self):
+        with TemporaryDirectory() as temporary:
+            deps = Path(temporary)
+            first = deps / "first-core.exe"
+            second = deps / "second-extension.exe"
+            first.touch()
+            second.touch()
+            outputs = {
+                first.name: (
+                    f"{first}: file format coff-x86-64\n"
+                    "  DLL Name: KERNEL32.dll\n"
+                    "  DLL Name: libunwind.dll\n"
+                ),
+                second.name: (
+                    f"{second}: file format coff-x86-64\n"
+                    "  DLL Name: USER32.dll\n"
+                    "  DLL Name: libunwind.dll\n"
+                ),
+            }
+
+            def runner(command, **_kwargs):
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=outputs[Path(command[-1]).name]
                 )
 
-            inspection = failure.exception.inspection
-            self.assertEqual(len(inspection.forbidden_evidence), 1)
-            self.assertIn(raw_output, inspection.evidence_text)
-            self.assertIn("private diagnostic", str(failure.exception))
+            patterns = ("first-*.exe", "second-*.exe")
+            inspection = WINDOWS_NATIVE.verify_windows_pe(
+                deps,
+                "llvm-objdump.exe",
+                binary_patterns=patterns,
+                required_imports=("libunwind.dll",),
+                runner=runner,
+            )
+            self.assertEqual(len(inspection.evidence), 2)
+
+            outputs[second.name] = (
+                f"{second}: file format coff-x86-64\n"
+                "  DLL Name: USER32.dll\n"
+            )
+            with self.assertRaises(WINDOWS_NATIVE.ImportPolicyError) as missing:
+                WINDOWS_NATIVE.verify_windows_pe(
+                    deps,
+                    "llvm-objdump.exe",
+                    binary_patterns=patterns,
+                    required_imports=("libunwind.dll",),
+                    runner=runner,
+                )
+            self.assertEqual(missing.exception.missing_imports, ("libunwind.dll",))
+            self.assertIn(first.name, missing.exception.inspection.evidence_text)
+            self.assertIn(second.name, missing.exception.inspection.evidence_text)
+
+            outputs[second.name] = (
+                f"{second}: file format coff-x86-64\n"
+                "  DLL Name: libunwind.dll\n"
+                "  DLL Name: libc++.dll\n"
+            )
+            with self.assertRaises(WINDOWS_NATIVE.ImportPolicyError) as forbidden:
+                WINDOWS_NATIVE.verify_windows_pe(
+                    deps,
+                    "llvm-objdump.exe",
+                    binary_patterns=patterns,
+                    required_imports=("libunwind.dll",),
+                    forbidden_imports=("libc++.dll",),
+                    runner=runner,
+                )
+            self.assertEqual(forbidden.exception.forbidden_imports, ("libc++.dll",))
+            self.assertIn(first.name, forbidden.exception.inspection.evidence_text)
+            self.assertIn(second.name, forbidden.exception.inspection.evidence_text)
+
+    def test_machine_policy_reports_parsed_and_expected_values(self):
+        with TemporaryDirectory() as temporary:
+            binary = Path(temporary) / "numeric_contract-arm64.exe"
+            binary.touch()
+            raw_output = f"{binary}: file format coff-arm64\n"
+
+            def runner(command, **_kwargs):
+                return subprocess.CompletedProcess(command, 0, stdout=raw_output)
+
+            inspection = WINDOWS_NATIVE.verify_windows_pe(
+                temporary,
+                "llvm-objdump.exe",
+                binary_patterns=("numeric_contract-*.exe",),
+                expected_machine="coff-arm64",
+                runner=runner,
+            )
+            self.assertEqual(inspection.evidence[0].machine, "coff-arm64")
+            self.assertIn("Parsed machine: coff-arm64", inspection.evidence_text)
+
+            with self.assertRaises(WINDOWS_NATIVE.MachineTypeError) as failure:
+                WINDOWS_NATIVE.verify_windows_pe(
+                    temporary,
+                    "llvm-objdump.exe",
+                    binary_patterns=("numeric_contract-*.exe",),
+                    expected_machine="coff-x86-64",
+                    runner=runner,
+                )
+            self.assertEqual(failure.exception.expected_machine, "coff-x86-64")
+            self.assertEqual(failure.exception.actual_machines, ("coff-arm64",))
+            self.assertIn("coff-arm64", failure.exception.inspection.evidence_text)
+
+    def test_machine_policy_reports_missing_objdump_machine_output(self):
+        with TemporaryDirectory() as temporary:
+            binary = Path(temporary) / "numeric_contract-core.exe"
+            binary.touch()
+            raw_output = "  DLL Name: KERNEL32.dll\n"
+
+            def runner(command, **_kwargs):
+                return subprocess.CompletedProcess(command, 0, stdout=raw_output)
+
+            with self.assertRaises(WINDOWS_NATIVE.MachineTypeError) as failure:
+                WINDOWS_NATIVE.verify_windows_pe(
+                    temporary,
+                    "llvm-objdump.exe",
+                    binary_patterns=("numeric_contract-*.exe",),
+                    expected_machine="coff-x86-64",
+                    runner=runner,
+                )
+
+            self.assertEqual(failure.exception.actual_machines, ("<missing>",))
+            self.assertIn(
+                "Parsed machine: <missing>",
+                failure.exception.inspection.evidence_text,
+            )
+
+    def test_command_failure_retains_prior_and_failed_binary_evidence(self):
+        with TemporaryDirectory() as temporary:
+            deps = Path(temporary)
+            first = deps / "first-a.exe"
+            second = deps / "second-b.exe"
+            first.touch()
+            second.touch()
+
+            def runner(command, **_kwargs):
+                binary = Path(command[-1])
+                if binary == first:
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        stdout=(
+                            f"{binary}: file format coff-x86-64\n"
+                            "  DLL Name: KERNEL32.dll\n"
+                        ),
+                    )
+                return subprocess.CompletedProcess(
+                    command,
+                    9,
+                    stdout="llvm-objdump diagnostic\n",
+                )
+
+            with self.assertRaises(WINDOWS_NATIVE.InspectionCommandError) as failure:
+                WINDOWS_NATIVE.inspect_windows_pe(
+                    deps,
+                    "llvm-objdump.exe",
+                    binary_patterns=("first-*.exe", "second-*.exe"),
+                    runner=runner,
+                )
+
+            self.assertEqual(failure.exception.returncode, 9)
+            evidence = failure.exception.inspection.evidence_text
+            self.assertIn("Parsed machine: coff-x86-64", evidence)
+            self.assertIn("KERNEL32.dll", evidence)
+            self.assertIn("llvm-objdump diagnostic", evidence)
+
+    def test_command_timeout_retains_partial_output_and_uses_default_deadline(self):
+        with TemporaryDirectory() as temporary:
+            binary = Path(temporary) / "numeric_contract-core.exe"
+            binary.touch()
+            observed = {}
+
+            def runner(command, **kwargs):
+                observed.update(kwargs)
+                raise subprocess.TimeoutExpired(
+                    command,
+                    kwargs["timeout"],
+                    output="partial stdout\n",
+                    stderr="partial stderr\n",
+                )
+
+            with self.assertRaises(WINDOWS_NATIVE.InspectionCommandError) as failure:
+                WINDOWS_NATIVE.inspect_windows_pe(
+                    temporary,
+                    "llvm-objdump.exe",
+                    binary_patterns=("numeric_contract-*.exe",),
+                    runner=runner,
+                )
+
+            self.assertEqual(observed["timeout"], 60.0)
+            self.assertIsNone(observed["accepted_returncodes"])
+            self.assertEqual(failure.exception.returncode, -1)
+            self.assertIn("partial stdout", failure.exception.output)
+            self.assertIn("partial stderr", failure.exception.output)
+            evidence = failure.exception.inspection.evidence_text
+            self.assertIn("Exit code: -1", evidence)
+            self.assertIn("timed out after 60 seconds", evidence)
 
 
 if __name__ == "__main__":

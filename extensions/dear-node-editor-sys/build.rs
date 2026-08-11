@@ -17,6 +17,7 @@ struct BuildConfig {
     out_dir: PathBuf,
     target_os: String,
     target_env: String,
+    target_abi: String,
     target_arch: String,
     docs_rs: bool,
 }
@@ -28,6 +29,7 @@ impl BuildConfig {
             out_dir: PathBuf::from(env::var("OUT_DIR").unwrap()),
             target_os: env::var("CARGO_CFG_TARGET_OS").unwrap_or_default(),
             target_env: env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default(),
+            target_abi: env::var("CARGO_CFG_TARGET_ABI").unwrap_or_default(),
             target_arch: env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default(),
             docs_rs: env::var("DOCS_RS").is_ok(),
         }
@@ -374,7 +376,12 @@ fn build_with_cc(
 ) {
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
-    build_support::configure_cpp_runtime_linkage(&mut build, &cfg.target_os, &cfg.target_env);
+    build_support::configure_cpp_runtime_linkage(
+        &mut build,
+        &cfg.target_os,
+        &cfg.target_env,
+        &cfg.target_abi,
+    );
     native_binding_spec().apply_extension_binding_defines(&mut build, env::vars());
     build.include(imgui_src);
     build.include(cimgui_root);
@@ -439,6 +446,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=DEAR_IMGUI_CORE_ARTIFACT_IDENTITY_HASH");
     println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_ARTIFACT_IDENTITY_HASH");
     println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_CANDIDATE_SHA");
+    println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_ABI");
     println!("cargo:rerun-if-env-changed=DOCS_RS");
 
     if cfg!(feature = "package-bin") {

@@ -4,6 +4,7 @@ pub const CORE_BUILD_ENV_VARS: &[&str] = &[
     "BUILD_SUPPORT_GH_OWNER",
     "BUILD_SUPPORT_GH_REPO",
     "BINDGEN_EXTRA_CLANG_ARGS",
+    "CARGO_CFG_TARGET_ABI",
     "CARGO_CFG_TARGET_ARCH",
     "CARGO_CFG_TARGET_ENDIAN",
     "CARGO_CFG_TARGET_ENV",
@@ -171,6 +172,7 @@ pub struct TargetFacts<'a> {
     pub triple: &'a str,
     pub os: &'a str,
     pub env: &'a str,
+    pub target_abi: &'a str,
     pub arch: &'a str,
     pub endian: &'a str,
     pub pointer_width: &'a str,
@@ -182,6 +184,7 @@ pub struct NativeAbiTarget {
     pub clang_target: &'static str,
     pub os: &'static str,
     pub env: &'static str,
+    pub target_abi: &'static str,
     pub arch: &'static str,
     pub endian: &'static str,
     pub pointer_width: &'static str,
@@ -192,6 +195,7 @@ const fn native_target(
     clang_target: &'static str,
     os: &'static str,
     env: &'static str,
+    target_abi: &'static str,
     arch: &'static str,
     pointer_width: &'static str,
 ) -> NativeAbiTarget {
@@ -200,6 +204,7 @@ const fn native_target(
         clang_target,
         os,
         env,
+        target_abi,
         arch,
         endian: "little",
         pointer_width,
@@ -212,6 +217,7 @@ const WINDOWS64_TARGETS: &[NativeAbiTarget] = &[
         "x86_64-pc-windows-msvc",
         "windows",
         "msvc",
+        "",
         "x86_64",
         "64",
     ),
@@ -220,6 +226,7 @@ const WINDOWS64_TARGETS: &[NativeAbiTarget] = &[
         "aarch64-pc-windows-msvc",
         "windows",
         "msvc",
+        "",
         "aarch64",
         "64",
     ),
@@ -228,7 +235,26 @@ const WINDOWS64_TARGETS: &[NativeAbiTarget] = &[
         "x86_64-w64-windows-gnu",
         "windows",
         "gnu",
+        "",
         "x86_64",
+        "64",
+    ),
+    native_target(
+        "x86_64-pc-windows-gnullvm",
+        "x86_64-pc-windows-gnu",
+        "windows",
+        "gnu",
+        "llvm",
+        "x86_64",
+        "64",
+    ),
+    native_target(
+        "aarch64-pc-windows-gnullvm",
+        "aarch64-pc-windows-gnu",
+        "windows",
+        "gnu",
+        "llvm",
+        "aarch64",
         "64",
     ),
 ];
@@ -239,6 +265,7 @@ const NON_WINDOWS_TARGETS: &[NativeAbiTarget] = &[
         "x86_64-unknown-linux-gnu",
         "linux",
         "gnu",
+        "",
         "x86_64",
         "64",
     ),
@@ -247,6 +274,7 @@ const NON_WINDOWS_TARGETS: &[NativeAbiTarget] = &[
         "aarch64-unknown-linux-gnu",
         "linux",
         "gnu",
+        "",
         "aarch64",
         "64",
     ),
@@ -255,6 +283,7 @@ const NON_WINDOWS_TARGETS: &[NativeAbiTarget] = &[
         "x86_64-unknown-linux-musl",
         "linux",
         "musl",
+        "",
         "x86_64",
         "64",
     ),
@@ -263,6 +292,7 @@ const NON_WINDOWS_TARGETS: &[NativeAbiTarget] = &[
         "aarch64-unknown-linux-musl",
         "linux",
         "musl",
+        "",
         "aarch64",
         "64",
     ),
@@ -271,6 +301,7 @@ const NON_WINDOWS_TARGETS: &[NativeAbiTarget] = &[
         "i686-unknown-linux-gnu",
         "linux",
         "gnu",
+        "",
         "x86",
         "32",
     ),
@@ -279,6 +310,7 @@ const NON_WINDOWS_TARGETS: &[NativeAbiTarget] = &[
         "i686-unknown-linux-musl",
         "linux",
         "musl",
+        "",
         "x86",
         "32",
     ),
@@ -286,6 +318,7 @@ const NON_WINDOWS_TARGETS: &[NativeAbiTarget] = &[
         "x86_64-apple-darwin",
         "x86_64-apple-darwin",
         "macos",
+        "",
         "",
         "x86_64",
         "64",
@@ -295,6 +328,7 @@ const NON_WINDOWS_TARGETS: &[NativeAbiTarget] = &[
         "arm64-apple-darwin",
         "macos",
         "",
+        "",
         "aarch64",
         "64",
     ),
@@ -302,6 +336,7 @@ const NON_WINDOWS_TARGETS: &[NativeAbiTarget] = &[
         "aarch64-apple-ios",
         "arm64-apple-ios",
         "ios",
+        "",
         "",
         "aarch64",
         "64",
@@ -311,6 +346,7 @@ const NON_WINDOWS_TARGETS: &[NativeAbiTarget] = &[
         "arm64-apple-ios-simulator",
         "ios",
         "sim",
+        "sim",
         "aarch64",
         "64",
     ),
@@ -318,6 +354,7 @@ const NON_WINDOWS_TARGETS: &[NativeAbiTarget] = &[
         "x86_64-apple-ios",
         "x86_64-apple-ios",
         "ios",
+        "sim",
         "sim",
         "x86_64",
         "64",
@@ -327,6 +364,7 @@ const NON_WINDOWS_TARGETS: &[NativeAbiTarget] = &[
         "aarch64-linux-android",
         "android",
         "",
+        "",
         "aarch64",
         "64",
     ),
@@ -334,6 +372,7 @@ const NON_WINDOWS_TARGETS: &[NativeAbiTarget] = &[
         "x86_64-linux-android",
         "x86_64-linux-android",
         "android",
+        "",
         "",
         "x86_64",
         "64",
@@ -343,6 +382,7 @@ const NON_WINDOWS_TARGETS: &[NativeAbiTarget] = &[
         "i686-linux-android",
         "android",
         "",
+        "",
         "x86",
         "32",
     ),
@@ -351,6 +391,7 @@ const NON_WINDOWS_TARGETS: &[NativeAbiTarget] = &[
         "armv7-linux-androideabi",
         "android",
         "",
+        "eabi",
         "arm",
         "32",
     ),
@@ -359,6 +400,7 @@ const NON_WINDOWS_TARGETS: &[NativeAbiTarget] = &[
         "armv7-unknown-linux-gnueabihf",
         "linux",
         "gnu",
+        "eabihf",
         "arm",
         "32",
     ),
@@ -367,6 +409,7 @@ const NON_WINDOWS_TARGETS: &[NativeAbiTarget] = &[
         "armv7-unknown-linux-musleabihf",
         "linux",
         "musl",
+        "eabihf",
         "arm",
         "32",
     ),
@@ -383,12 +426,14 @@ impl NativeAbiProfile {
                 if (
                     target.os,
                     target.env,
+                    target.target_abi,
                     target.arch,
                     target.endian,
                     target.pointer_width,
                 ) == (
                     expected.os,
                     expected.env,
+                    expected.target_abi,
                     expected.arch,
                     expected.endian,
                     expected.pointer_width,
@@ -397,10 +442,18 @@ impl NativeAbiProfile {
                 }
                 return Err(format!(
                     "Dear ImGui target facts do not match Rust target {}: \
-                     os={}, env={}, arch={}, endian={}, pointer_width={}",
+                     expected os={}, env={}, abi={}, arch={}, endian={}, pointer_width={}; \
+                     got os={}, env={}, abi={}, arch={}, endian={}, pointer_width={}",
                     target.triple,
+                    expected.os,
+                    expected.env,
+                    expected.target_abi,
+                    expected.arch,
+                    expected.endian,
+                    expected.pointer_width,
                     target.os,
                     target.env,
+                    target.target_abi,
                     target.arch,
                     target.endian,
                     target.pointer_width
@@ -580,7 +633,7 @@ impl BindingSpec {
 
     pub fn deterministic_hash(&self) -> String {
         let mut hash = StableHash::new();
-        hash.field("schema", "core-binding-spec-v2");
+        hash.field("schema", "core-binding-spec-v3");
         hash.field("header", self.header);
         hash.field("header_preamble", self.header_preamble);
         hash.begin_list("header_shims", self.header_shims.len());
@@ -649,6 +702,7 @@ impl BindingSpec {
                     hash.field("clang_target", target.clang_target);
                     hash.field("target_os", target.os);
                     hash.field("target_env", target.env);
+                    hash.field("target_abi", target.target_abi);
                     hash.field("target_arch", target.arch);
                     hash.field("target_endian", target.endian);
                     hash.field("target_pointer_width", target.pointer_width);

@@ -133,6 +133,7 @@ def run(
     combine_output: bool = False,
     quiet_stdout: bool = False,
     accepted_returncodes: Iterable[int] | None = (0,),
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run without a shell; use accepted_returncodes=None to preserve any result."""
     rendered_command = [os.fspath(argument) for argument in command]
@@ -155,6 +156,7 @@ def run(
             text=True,
             encoding="utf-8",
             errors="replace",
+            timeout=timeout,
         )
     except OSError as error:
         rendered = subprocess.list2cmdline(rendered_command)

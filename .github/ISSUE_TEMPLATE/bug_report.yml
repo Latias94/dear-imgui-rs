@@ -40,6 +40,10 @@ body:
       options:
         - label: Windows x86_64-pc-windows-msvc (MD)
         - label: Windows x86_64-pc-windows-msvc (MT)
+        - label: Windows x86_64-pc-windows-gnullvm (default)
+        - label: Windows x86_64-pc-windows-gnullvm (+crt-static)
+        - label: Windows aarch64-pc-windows-gnullvm (cross-link)
+        - label: Windows aarch64-pc-windows-msvc (MD, cross-link)
         - label: Linux x86_64-unknown-linux-gnu
         - label: macOS x86_64-apple-darwin
         - label: macOS aarch64-apple-darwin

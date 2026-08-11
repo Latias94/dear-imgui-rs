@@ -80,7 +80,7 @@ target.
 
 | Route | 0.16 contract |
 | --- | --- |
-| Native core | Uses the target-selected `windows64` or `non-windows` pregenerated binding profile. |
+| Native core | Uses the target-selected `windows64` or `non-windows` pregenerated binding profile. Windows GNU/LLVM is source-supported only for the exact x86_64 and aarch64 gnullvm targets listed below. |
 | Native core build strategy | Source is the default. Enable `dear-imgui-rs/prebuilt` for verified release archives or `dear-imgui-rs/build-from-source` to force source; source wins when both are unified. |
 | Native test engine | `test-engine` is source-only, implies `build-from-source`, and is excluded from prebuilt package profiles. |
 | Native blueprint stack layout | Enable `dear-imgui-rs/stack-layout` directly or `dear-node-editor/blueprints`; this selects a distinct patched native artifact. |
@@ -96,6 +96,17 @@ target.
 | Bevy render-only | `default-features = false, features = ["render"]` installs the renderer without Bevy UI ordering. |
 | Bevy native multi-viewport | `multi-viewport` implies `render` and `bevy_winit`; each Context opts in explicitly. Secondary state is keyed by stable `ImguiViewportInstanceId`; the numeric `ViewportId` is only the current routing projection and may change during docking. Wayland falls back to host-window docking because global desktop client coordinates are unavailable; call `ImguiNativeViewportSupport::get(context_id)` for the per-Context runtime status. |
 | Bevy WASM | `wasm` supports both default and headless builds; combining WASM with native `multi-viewport` is rejected. |
+
+Windows source-support evidence is deliberately graded rather than inferred from a successful C++ compile:
+
+| Target and mode | Source support | Official prebuilt | Evidence grade |
+| --- | --- | --- | --- |
+| `x86_64-pc-windows-gnullvm` (default) | Core plus maintained C++ extension sys crates | no | Final-link/import, native runtime, numeric contract, and aggregate ABI tests |
+| `x86_64-pc-windows-gnullvm` (`+crt-static`) | Core plus maintained C++ extension sys crates | no | Isolated final-link/import plus native runtime and aggregate ABI tests without llvm-mingw's runtime directory on `PATH` |
+| `aarch64-pc-windows-gnullvm` (default) | Core plus maintained C++ extension sys crates | no | Cross-link and AArch64 PE/import inspection only; target binaries are not executed |
+| `aarch64-pc-windows-msvc` (`/MD`) | Representative core source path | no | Cross-link and AArch64 PE inspection only; target binaries are not executed |
+
+The gnullvm routes require llvm-mingw and do not require Visual Studio. Their C++ standard library is linked statically as libc++; default Rust CRT mode expects `libunwind.dll` at runtime, while the validated x64 `+crt-static` mode does not. This matrix does not claim gnullvm prebuilts, FreeType, the SDL3 backend's external CMake path, or other optional native dependencies.
 
 The six native safe extension crates forward build strategy through both the
 core and their corresponding sys crate. Select the route on the safe crate:
@@ -275,7 +286,8 @@ Use `run_ui` when a closure-captured state value only needs `&Ui`. Implement `Ap
 
 Native bindings are checked in as two intentional ABI profiles:
 
-- `windows64`: x86_64/aarch64 Windows MSVC and x86_64 Windows GNU
+- `windows64`: x86_64/aarch64 Windows MSVC, x86_64 Windows GNU-GCC, and
+  x86_64/aarch64 Windows GNU/LLVM (`target_abi="llvm"`)
 - `non-windows`: x86_64/aarch64/i686/armv7 Linux, x86_64/aarch64 macOS,
   x86_64/aarch64 iOS device/simulator, and x86/x86_64/aarch64/armv7 Android
   routes

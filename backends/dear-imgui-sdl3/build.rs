@@ -26,6 +26,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=DEP_SDL3_INCLUDE_PATH");
     println!("cargo:rerun-if-env-changed=DEP_SDL3_INCLUDE_DIR");
     println!("cargo:rerun-if-env-changed=DEP_SDL3_OUT_DIR");
+    println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_ABI");
 
     // The upstream SDL3 backend uses Win32 APIs (e.g. GetWindowLong/SetWindowLong) on Windows.
     if env::var("CARGO_CFG_TARGET_OS")
@@ -113,7 +114,8 @@ fn main() {
     }
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-    build_support::configure_cpp_runtime_linkage(&mut build, &target_os, &target_env);
+    let target_abi = env::var("CARGO_CFG_TARGET_ABI").unwrap_or_default();
+    build_support::configure_cpp_runtime_linkage(&mut build, &target_os, &target_env, &target_abi);
     for (key, value) in env::vars() {
         if let Some(define) = key.strip_prefix("DEP_DEAR_IMGUI_DEFINE_") {
             build.define(define, value.as_str());
