@@ -17,26 +17,21 @@ revision instead of renaming its files or remapping it under the v1 module name.
 
 WASM support is explicit and target-specific. The only supported Rust target is
 `wasm32-unknown-unknown`, and every dependency path to the core crate must
-enable the `wasm` feature. Until `0.16.0-alpha.3` is published, use the candidate
-from `main`:
+enable the `wasm` feature. Use the exact prerelease requirement:
 
 ```toml
 [dependencies]
-dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["wasm"] }
+dear-imgui-rs = { version = "=0.16.0-alpha.3", features = ["wasm"] }
 ```
 
 For Bevy, enable `wasm` alongside the features needed by the application and
-take both packages from the same candidate source:
+take both packages from the same release train:
 
 ```toml
 [dependencies]
-dear-imgui-bevy = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["render", "wasm"] }
-dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["wasm"] }
+dear-imgui-bevy = { version = "=0.16.0-alpha.3", features = ["render", "wasm"] }
+dear-imgui-rs = { version = "=0.16.0-alpha.3", features = ["wasm"] }
 ```
-
-After publication, replace those Git dependencies with the exact prerelease
-requirements `dear-imgui-rs = { version = "=0.16.0-alpha.3", features = ["wasm"] }`
-and `dear-imgui-bevy = { version = "=0.16.0-alpha.3", features = ["render", "wasm"] }`.
 
 Five safe native extensions expose the same `wasm` feature and forward it to
 both `dear-imgui-rs` and their matching sys crate:

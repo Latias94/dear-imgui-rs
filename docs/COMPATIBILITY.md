@@ -8,8 +8,8 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 ## Versioning Policy
 
 - Unified release train: all published `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
-- Upcoming train: unified `v0.16.0-alpha.3`. Until it is published, test the candidate with a Git dependency on `main`; after publication, use an exact `=0.16.0-alpha.3` requirement rather than a broad crates.io `0.16` requirement.
-- Current published prerelease: unified `v0.16.0-alpha.2` (use exact requirements such as `version = "=0.16.0-alpha.2"`).
+- Current published prerelease: unified `v0.16.0-alpha.3` (use exact requirements such as `version = "=0.16.0-alpha.3"`).
+- Previous prerelease: unified `v0.16.0-alpha.2`.
 - Current stable train: unified `v0.15.1` (use `version = "0.15"`).
 - Previous train: unified `v0.14.1` (use `version = "0.14"`).
 - Previous train: unified `v0.13.0` (use `version = "0.13"`).
@@ -20,7 +20,7 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 - Previous train: unified `v0.8.0` (use `version = "0.8"`).
 - Internal dependency constraints in this repo pin to the exact current prerelease (for example, `=0.16.0-alpha.3`). Mixing different release trains across our crates is unsupported.
 
-## Release Candidate (0.16.0-alpha.3)
+## Current Prerelease (0.16.0-alpha.3)
 
 Core
 
@@ -68,7 +68,7 @@ Extensions
 
 ## 0.16 Architecture Contracts
 
-The 0.16 train is not source-compatible with 0.15.x, and alpha.2 deliberately removes provisional alpha.1 APIs whose contracts were not sound enough to stabilize. The baseline is Dear ImGui v1.92.9b docking via cimgui, Rust 1.92 for the workspace, Rust 1.95 for the Bevy backend, WGPU 30 by default with explicit 29/28/27 routes, and Bevy 0.19. Alpha.2 migrations live in the `0.16.0-alpha.2` section of `CHANGELOG.md`; applications coming from 0.15.x must also apply the alpha.1 migrations. The alpha.3 candidate migrations are tracked in `Unreleased`.
+The 0.16 train is not source-compatible with 0.15.x, and alpha.2 deliberately removes provisional alpha.1 APIs whose contracts were not sound enough to stabilize. The baseline is Dear ImGui v1.92.9b docking via cimgui, Rust 1.92 for the workspace, Rust 1.95 for the Bevy backend, WGPU 30 by default with explicit 29/28/27 routes, and Bevy 0.19. Alpha.3 migrations live in the `0.16.0-alpha.3` section of `CHANGELOG.md`; applications coming from 0.15.x must also apply the alpha.2 and alpha.1 migrations.
 
 The safe Rust layer intentionally breaks APIs that expose C++ lifecycle
 protocols, wrong-context state, stale GPU handles, or platform-specific ABI
@@ -286,7 +286,7 @@ import-style binding artifact. `xtask verify-bindings` regenerates and compares
 all supported profiles; arbitrary bindgen clang-argument overrides are rejected
 for canonical artifacts.
 
-The binding generator contract, formatter, allow/block lists, enum normalization, header shims, opaque types, provider name, and exact compatibility target facts all participate in the deterministic binding-spec hash. `dear-imgui-build-support` will ship on the same 0.16.0-alpha.3 train as every other publishable crate.
+The binding generator contract, formatter, allow/block lists, enum normalization, header shims, opaque types, provider name, and exact compatibility target facts all participate in the deterministic binding-spec hash. `dear-imgui-build-support` ships on the same 0.16.0-alpha.3 train as every other publishable crate.
 
 Source identity is package data rather than repository state. The exact 40-hex
 cimgui and nested Dear ImGui revisions live in

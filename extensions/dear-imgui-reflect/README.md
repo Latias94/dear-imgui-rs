@@ -19,15 +19,7 @@ Dear ImGui context or panel whose settings and drafts it should retain.
 
 ## Cargo Integration
 
-`0.16.0-alpha.3` is not published yet. Test the candidate from `main`:
-
-```toml
-[dependencies]
-dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
-dear-imgui-reflect = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
-```
-
-After publication, use the exact prerelease requirements:
+Use the exact prerelease requirements:
 
 ```toml
 [dependencies]
