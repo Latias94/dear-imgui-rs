@@ -27,9 +27,9 @@ Safe, idiomatic Rust bindings for [ImNodes](https://github.com/Nelarius/imnodes)
 
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.16.0-alpha.2  |
-| dear-imgui-rs     | 0.16.0-alpha.2  |
-| dear-imnodes-sys  | 0.16.0-alpha.2  |
+| Crate             | 0.16.0-alpha.3  |
+| dear-imgui-rs     | 0.16.0-alpha.3  |
+| dear-imnodes-sys  | 0.16.0-alpha.3  |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 

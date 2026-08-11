@@ -10,13 +10,13 @@ The backend owns Dear ImGui Contexts on Bevy's main thread, routes Bevy window i
 | --- | --- |
 | Rust | `1.95.0` or newer |
 | Bevy | exactly `0.19.0` |
-| dear-imgui-rs | `main` (next prerelease) |
+| dear-imgui-rs | `main` (`0.16.0-alpha.3` candidate) |
 
 `dear-imgui-bevy` defaults to the renderer plus deterministic Bevy UI ordering. Native multi-viewport is supported through an explicit feature and runtime opt-in. WASM supports the normal and headless feature sets but cannot create native platform windows.
 
 ## Installation
 
-This README documents the source-breaking API on `main`. Use matching Git dependencies:
+This README documents the source-breaking `0.16.0-alpha.3` candidate on `main`. Use matching Git dependencies:
 
 ```toml
 [dependencies]

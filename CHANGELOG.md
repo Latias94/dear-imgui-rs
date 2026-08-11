@@ -8,6 +8,8 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
+The alpha.3 candidate continues the ownership-first 0.16 migration with stricter host-runtime transactions and a focused regression fix for accidental fallback-window rendering. [PR #70](https://github.com/Latias94/dear-imgui-rs/pull/70)
+
 ### Breaking Changes and Migration
 
 - SDL3 callback-mode applications must replace `Sdl3CallbackEventHandoff::try_drain` and `Sdl3CallbackEventQueue` with `drain`, inspect the returned batch through `faults()`, and then consume its retained events. The atomic batch preserves every distinct deferred fault and keeps ordered input available after overflow or lock-poison recovery.
@@ -21,9 +23,11 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ### Fixed
 
+- `ScopeSnapshot` now reads Dear ImGui's current window without marking the implicit fallback window as written, so ending an empty top-level window no longer creates an unintended debug window. Thanks to [@jamsterwes](https://github.com/jamsterwes) for the report, fix, and regression test. [PR #69](https://github.com/Latias94/dear-imgui-rs/pull/69)
 - `Viewport::is_main` now identifies main viewports across all live managed Contexts without depending on whichever native Context is temporarily current.
 - `dear-app` now reports and closes frames leaked by application callbacks while preserving the callback's original error as the primary failure.
 - SDL3 callback coalescing now uses a bounded indexed queue, keeping high-frequency mouse, window, and display state updates O(1) without changing FIFO, reserve, or overflow behavior.
+- Release automation now keeps generated release notes outside the checkout, so clean-worktree publication checks remain authoritative. [PR #68](https://github.com/Latias94/dear-imgui-rs/pull/68)
 
 ## [0.16.0-alpha.2] - 2026-08-09
 
