@@ -35,6 +35,13 @@ windows-sys = { workspace = true, features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSView",
+    "NSWindow",
+] }
+
 [features]
 default = []
 # Enable multi-viewport support (WIP). Declared to silence cfg warnings; kept off by default.

@@ -203,7 +203,9 @@ parallel values; a callback `Result` is never discarded by a later platform fail
 integrations may call `drain_viewport_faults()` after a native pass that is not already wrapped by
 `with_event_loop`. First-party routes perform both steps automatically. Ordinary `handle_event` and
 owner methods surface the oldest pending fault before entering Winit. Explicit shutdown is
-idempotent and reports cleanup failures.
+idempotent and reports cleanup failures. A failed viewport remains marked for closure after Dear
+ImGui clears callback request flags, and the failure is retired only when that exact native
+viewport ownership generation is destroyed or replaced.
 Dropping the owner without the mutable Context leaves native cleanup with the Context attachment,
 so teardown still passes through the core open-frame normalization path.
 Explicit shutdown returns `WinitPlatformError::RendererShutdownRequired` while a renderer callback
@@ -246,7 +248,8 @@ PlatformIO state is published because Wayland cannot provide the desktop-space w
 required by Dear ImGui. Runtime construction likewise rejects non-desktop targets; the supported
 window systems are Windows, macOS, and Linux/X11. Windows and macOS honor
 `NO_FOCUS_ON_APPEARING` by creating secondary windows inactive and deciding focus from the final
-flags at show time. Linux/X11 accepts that flag without rejecting the viewport, but its window
+flags at show time. The macOS path uses AppKit's non-activating `orderFront` operation instead of
+Winit's activating `set_visible(true)` implementation. Linux/X11 accepts that flag without rejecting the viewport, but its window
 manager controls the final focus behavior. `NO_FOCUS_ON_CLICK` is accepted as a platform policy:
 Windows installs a native `WM_MOUSEACTIVATE` hook that returns `MA_NOACTIVATE`, while platforms
 without an equivalent Winit hook treat it as best effort. Live decoration and top-most changes are

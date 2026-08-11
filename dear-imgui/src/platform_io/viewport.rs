@@ -177,18 +177,14 @@ impl Viewport {
         }
     }
 
-    /// Check whether this is the currently bound Context's application-owned main viewport.
+    /// Check whether this is an application-owned main viewport.
     ///
-    /// Viewport IDs are not used for this decision because the same numeric ID may appear in
-    /// different Contexts. Returns `false` when no Context is current.
+    /// The owning managed Context is used for this decision, so the result remains stable while
+    /// another managed Context is temporarily bound by a nested safe operation. Viewport IDs are
+    /// not used because the same numeric ID may appear in different Contexts. A viewport created
+    /// through an unmanaged raw FFI path is resolved against the currently bound native Context.
     pub fn is_main(&self) -> bool {
-        unsafe {
-            if sys::igGetCurrentContext().is_null() {
-                return false;
-            }
-            let main = sys::igGetMainViewport();
-            !main.is_null() && std::ptr::eq(self.as_raw(), main.cast_const())
-        }
+        crate::context::binding::viewport_is_main_viewport(self.as_raw())
     }
 
     /// Check whether this is a secondary platform window managed for Dear ImGui.
@@ -453,25 +449,31 @@ mod tests {
     }
 
     #[test]
-    fn main_viewport_identity_is_scoped_to_the_current_context() {
+    fn main_viewport_identity_is_scoped_to_its_managed_context() {
         let _guard = crate::test_support::imgui_context_guard();
         let context_a = Context::create();
         let binding_a = context_a.binding();
         let main_a = unsafe { sys::igGetMainViewport() };
         unsafe { sys::igSetCurrentContext(std::ptr::null_mut()) };
-        let _context_b = Context::create();
+        let context_b = Context::create();
         let main_b = unsafe { sys::igGetMainViewport() };
+        unsafe { sys::igSetCurrentContext(std::ptr::null_mut()) };
 
         unsafe {
             assert_eq!((*main_a).ID, (*main_b).ID);
-            assert!(!Viewport::from_raw(main_a).is_main());
+            assert!(Viewport::from_raw(main_a).is_main());
             assert!(Viewport::from_raw(main_b).is_main());
         }
 
         binding_a.with_bound_context(|| unsafe {
             assert!(Viewport::from_raw(main_a).is_main());
-            assert!(!Viewport::from_raw(main_b).is_main());
+            assert!(Viewport::from_raw(main_b).is_main());
         });
+
+        drop(context_a);
+        assert!(!crate::context::binding::viewport_is_main_viewport(main_a));
+        assert!(crate::context::binding::viewport_is_main_viewport(main_b));
+        drop(context_b);
     }
 
     #[test]

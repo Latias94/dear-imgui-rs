@@ -25,6 +25,11 @@ thread_local! {
     // old Context generation and cannot restore the reused address by mistake.
     static MANAGED_CONTEXTS: RefCell<HashMap<usize, ManagedContextEntry>> =
         RefCell::new(HashMap::new());
+    // Main viewport addresses are stable for the lifetime of their native Context. Keeping a
+    // generation-bound reverse index makes Viewport::is_main independent from GImGui and avoids
+    // scanning historical Context tombstones on every platform snapshot.
+    static LIVE_MAIN_VIEWPORTS: RefCell<HashMap<usize, ContextId>> =
+        RefCell::new(HashMap::new());
     static BOUND_CONTEXT_DEPTH: Cell<usize> = const { Cell::new(0) };
 }
 
@@ -82,6 +87,45 @@ pub(super) fn bound_context_scope_active() -> bool {
     BOUND_CONTEXT_DEPTH.with(|depth| depth.get() != 0)
 }
 
+/// Returns whether `viewport` is the main viewport of one of this thread's live managed Contexts.
+///
+/// The viewport wrapper does not carry an owner field, while Context binding deliberately restores
+/// the previous native Context when a safe closure returns. Keep the ownership lookup here so
+/// viewport predicates do not silently change meaning when another managed Context is current.
+pub(crate) fn viewport_is_main_viewport(viewport: *const sys::ImGuiViewport) -> bool {
+    if viewport.is_null() {
+        return false;
+    }
+
+    if LIVE_MAIN_VIEWPORTS.with(|viewports| viewports.borrow().contains_key(&(viewport as usize))) {
+        return true;
+    }
+
+    // Raw FFI users may construct a Viewport for an unmanaged Context. Preserve that unsafe
+    // escape hatch without making managed secondary viewports call into native state.
+    let _lock = CTX_MUTEX.lock();
+    let current = unsafe { sys::igGetCurrentContext() };
+    if current.is_null() {
+        return false;
+    }
+    let current_is_managed = MANAGED_CONTEXTS.with(|contexts| {
+        matches!(
+            contexts.borrow().get(&(current as usize)),
+            Some(ManagedContextEntry::Live { state, .. })
+                if state.upgrade().is_some_and(|state| {
+                    state.lifecycle() != ContextLifecycle::NativeDestroyed
+                        && state.raw_during_teardown() == current
+                })
+        )
+    });
+    if current_is_managed {
+        return false;
+    }
+
+    let main = unsafe { sys::igGetMainViewport() };
+    !main.is_null() && std::ptr::eq(viewport, main.cast_const())
+}
+
 #[derive(Clone)]
 enum ManagedContextEntry {
     Live {
@@ -128,6 +172,7 @@ pub enum ContextLifecycle {
 pub(crate) struct ContextState {
     id: ContextId,
     address: usize,
+    main_viewport_address: usize,
     raw: Cell<*mut sys::ImGuiContext>,
     lifecycle: Cell<ContextLifecycle>,
     dockspace_submissions: RefCell<FrameIdClaims>,
@@ -168,9 +213,16 @@ impl fmt::Debug for ContextState {
 
 impl ContextState {
     pub(crate) fn new(id: ContextId, raw: *mut sys::ImGuiContext) -> Rc<Self> {
+        let main_viewport = with_bound_context(raw, || unsafe { sys::igGetMainViewport() });
+        assert!(
+            !main_viewport.is_null(),
+            "new ImGui context returned a null main viewport"
+        );
+        let main_viewport_address = main_viewport as usize;
         let state = Rc::new(Self {
             id,
             address: raw as usize,
+            main_viewport_address,
             raw: Cell::new(raw),
             lifecycle: Cell::new(ContextLifecycle::Alive),
             dockspace_submissions: RefCell::new(FrameIdClaims::default()),
@@ -184,6 +236,14 @@ impl ContextState {
                     state: Rc::downgrade(&state),
                 },
             );
+        });
+        LIVE_MAIN_VIEWPORTS.with(|viewports| {
+            let mut viewports = viewports.borrow_mut();
+            debug_assert!(
+                !viewports.contains_key(&main_viewport_address),
+                "two live ImGui contexts exposed the same main viewport address"
+            );
+            viewports.insert(main_viewport_address, id);
         });
         state
     }
@@ -206,13 +266,24 @@ impl ContextState {
     }
 
     pub(crate) fn mark_native_destroyed(&self) {
+        self.unregister_main_viewport();
         self.raw.set(ptr::null_mut());
         self.lifecycle.set(ContextLifecycle::NativeDestroyed);
+    }
+
+    fn unregister_main_viewport(&self) {
+        let _ = LIVE_MAIN_VIEWPORTS.try_with(|viewports| {
+            let mut viewports = viewports.borrow_mut();
+            if viewports.get(&self.main_viewport_address) == Some(&self.id) {
+                viewports.remove(&self.main_viewport_address);
+            }
+        });
     }
 }
 
 impl Drop for ContextState {
     fn drop(&mut self) {
+        self.unregister_main_viewport();
         let _ = MANAGED_CONTEXTS.try_with(|contexts| {
             let mut contexts = contexts.borrow_mut();
             let Some(entry) = contexts.get_mut(&self.address) else {

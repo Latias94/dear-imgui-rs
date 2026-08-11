@@ -71,6 +71,7 @@ pub(in super::super) unsafe extern "C" fn winit_create_window(
             if vp.is_null() {
                 return;
             }
+            clear_failed_viewport(control, vp);
 
             let Some(event_loop) = control.active_event_loop() else {
                 record_viewport_failure(control, vp, WinitPlatformError::EventLoopUnavailable);
@@ -222,6 +223,7 @@ pub(in super::super) unsafe extern "C" fn winit_destroy_window(
         if vp.is_null() {
             return;
         }
+        clear_failed_viewport(control, vp);
         if let Some(Err(error)) = with_viewport_data(control, vp, |data| {
             if data.is_main() {
                 return Ok(());
@@ -267,15 +269,21 @@ pub(in super::super) unsafe extern "C" fn winit_show_window(
                 record_viewport_failure(control, vp, error);
                 return;
             }
-            data.window().set_visible(true);
             if should_focus_on_show(policy) {
+                data.window().set_visible(true);
                 if let Err(error) = request_platform_window_focus(control, data.window()) {
                     record_viewport_failure(control, vp, error);
                 }
-            } else if !policy.cursor_hittest
-                && let Err(error) = raise_window_without_activation(data.window())
-            {
-                record_viewport_failure(control, vp, error);
+            } else {
+                if let Err(error) = show_window_without_activation(data.window()) {
+                    record_viewport_failure(control, vp, error);
+                    return;
+                }
+                if !policy.cursor_hittest
+                    && let Err(error) = raise_window_without_activation(data.window())
+                {
+                    record_viewport_failure(control, vp, error);
+                }
             }
         });
     });
