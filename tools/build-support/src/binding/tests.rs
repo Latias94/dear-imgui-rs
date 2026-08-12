@@ -58,7 +58,7 @@ fn request_with_abi_and_env(target_abi: &str, values: Vec<(&str, Option<&str>)>)
         target_pointer_width: "64",
         cargo_profile: "release",
         artifact_features: vec![
-            "platform-io-aggregate-hooks-v2",
+            "platform-io-aggregate-hooks-v3",
             SAFE_DEMO_FONT_BOUNDARY_ARTIFACT_FEATURE,
             "wchar32",
         ],
@@ -74,7 +74,7 @@ fn profile() -> ArtifactProfile {
         link_type: "static",
         crt: "md",
         features: [
-            "platform-io-aggregate-hooks-v2",
+            "platform-io-aggregate-hooks-v3",
             SAFE_DEMO_FONT_BOUNDARY_ARTIFACT_FEATURE,
             "wchar32",
         ],
@@ -96,7 +96,7 @@ fn extension_core_profile() -> ArtifactProfile {
         link_type: "static",
         crt: "md",
         features: [
-            "platform-io-aggregate-hooks-v2",
+            "platform-io-aggregate-hooks-v3",
             SAFE_DEMO_FONT_BOUNDARY_ARTIFACT_FEATURE,
             "wchar32",
             "freetype",
@@ -716,7 +716,7 @@ fn core_artifact_profile_hash_has_a_cross_language_test_vector() {
         link_type: "static",
         crt: "md",
         features: [
-            "platform-io-aggregate-hooks-v2",
+            "platform-io-aggregate-hooks-v3",
             SAFE_DEMO_FONT_BOUNDARY_ARTIFACT_FEATURE,
             "wchar32",
         ],
@@ -727,12 +727,12 @@ fn core_artifact_profile_hash_has_a_cross_language_test_vector() {
         binding_spec_hash: "fnv1a64:0123456789abcdef".to_owned(),
         source_contract_hash: "fnv1a64:fedcba9876543210".to_owned(),
     });
-    assert_eq!(profile.deterministic_hash(), "fnv1a64:81e611164024011c");
+    assert_eq!(profile.deterministic_hash(), "fnv1a64:24ddf59332529d1d");
 }
 
 #[test]
 fn core_source_contract_hash_covers_versioned_maintained_transforms() {
-    assert_eq!(core_source_contract_hash(), "fnv1a64:07ad0616502f7f61");
+    assert_eq!(core_source_contract_hash(), "fnv1a64:f533ea188de3ac6c");
 }
 
 #[test]

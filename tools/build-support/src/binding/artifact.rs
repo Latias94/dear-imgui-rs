@@ -239,7 +239,7 @@ pub fn core_source_contract_hash() -> String {
     );
     hash.field(
         "native_platform_io_contract",
-        "aggregate-hooks-v2+live-viewport-address-v1",
+        "aggregate-hooks-v3+live-viewport-address-v1",
     );
     hash.finish()
 }

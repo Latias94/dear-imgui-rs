@@ -467,6 +467,30 @@ unsafe extern "C" {
         pos: *const ImVec2,
     ) -> std::os::raw::c_int;
 
+    fn dear_imgui_rs_platform_io_invoke_platform_set_window_size(
+        callbacks: *const ImGuiPlatformIO,
+        viewport: *mut ImGuiViewport,
+        size: *const ImVec2,
+    ) -> std::os::raw::c_int;
+
+    fn dear_imgui_rs_platform_io_invoke_platform_get_window_pos(
+        callbacks: *const ImGuiPlatformIO,
+        viewport: *mut ImGuiViewport,
+        out_pos: *mut ImVec2,
+    ) -> std::os::raw::c_int;
+
+    fn dear_imgui_rs_platform_io_invoke_platform_get_window_size(
+        callbacks: *const ImGuiPlatformIO,
+        viewport: *mut ImGuiViewport,
+        out_size: *mut ImVec2,
+    ) -> std::os::raw::c_int;
+
+    fn dear_imgui_rs_platform_io_invoke_platform_get_window_framebuffer_scale(
+        callbacks: *const ImGuiPlatformIO,
+        viewport: *mut ImGuiViewport,
+        out_scale: *mut ImVec2,
+    ) -> std::os::raw::c_int;
+
     fn dear_imgui_rs_platform_io_invoke_renderer_set_window_size(
         callbacks: *const ImGuiPlatformIO,
         viewport: *mut ImGuiViewport,
@@ -1042,14 +1066,18 @@ pub unsafe fn ImGuiPlatformIO_ProbeAggregateCallbacks(
     }
 }
 
-/// Invoke a saved `Platform_SetWindowPos` callback through C++.
+/// Invoke a saved native `Platform_SetWindowPos` callback through C++.
 ///
 /// This prevents Rust from directly calling a C++ callback slot whose signature contains an
 /// aggregate by value.
 ///
 /// # Safety
 ///
-/// All pointers must be valid live values, and `platform_io` must belong to the current context.
+/// Every non-null pointer must remain valid for the duration of the call. When all pointers are
+/// non-null, `callbacks` must be readable, `viewport` must identify a live viewport accepted by
+/// the saved callback, and `pos` must be readable. The populated callback slot must have been
+/// copied from a C++ ABI-compatible Dear ImGui backend callback table and must remain callable.
+/// The callback must not throw or unwind across the C ABI boundary.
 #[doc(hidden)]
 #[inline]
 pub unsafe fn ImGuiPlatformIO_InvokePlatformSetWindowPos(
@@ -1072,12 +1100,158 @@ pub unsafe fn ImGuiPlatformIO_InvokePlatformSetWindowPos(
     }
 }
 
-/// Invoke a saved `Renderer_SetWindowSize` callback through C++ using a pointer parameter.
+/// Invoke a saved native `Platform_SetWindowSize` callback through C++.
+///
+/// This prevents Rust from directly calling a C++ callback slot whose signature contains an
+/// aggregate by value.
 ///
 /// # Safety
 ///
-/// All pointers must be valid live values. `callbacks` may point to a snapshot of a live callback
-/// table, and the callback must remain callable for the duration of this call.
+/// Every non-null pointer must remain valid for the duration of the call. When all pointers are
+/// non-null, `callbacks` must be readable, `viewport` must identify a live viewport accepted by
+/// the saved callback, and `size` must be readable. The populated callback slot must have been
+/// copied from a C++ ABI-compatible Dear ImGui backend callback table and must remain callable.
+/// The callback must not throw or unwind across the C ABI boundary.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn ImGuiPlatformIO_InvokePlatformSetWindowSize(
+    callbacks: *const ImGuiPlatformIO,
+    viewport: *mut ImGuiViewport,
+    size: *const ImVec2,
+) -> bool {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        return dear_imgui_rs_platform_io_invoke_platform_set_window_size(
+            callbacks, viewport, size,
+        ) != 0;
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        let _ = callbacks;
+        let _ = viewport;
+        let _ = size;
+        false
+    }
+}
+
+/// Invoke a saved native `Platform_GetWindowPos` callback through C++.
+///
+/// # Safety
+///
+/// Every non-null pointer must remain valid for the duration of the call. `out_pos` must be null or
+/// valid for writes. A non-null output is initialized to zero before the other arguments are
+/// validated and is overwritten with the callback result on success. When the callback is invoked,
+/// `callbacks` must be readable, `viewport` must identify a live viewport accepted by the callback,
+/// and the populated slot must have been copied from a C++ ABI-compatible Dear ImGui backend
+/// callback table and remain callable. The callback must not throw or unwind across the C ABI
+/// boundary.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn ImGuiPlatformIO_InvokePlatformGetWindowPos(
+    callbacks: *const ImGuiPlatformIO,
+    viewport: *mut ImGuiViewport,
+    out_pos: *mut ImVec2,
+) -> bool {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        return dear_imgui_rs_platform_io_invoke_platform_get_window_pos(
+            callbacks, viewport, out_pos,
+        ) != 0;
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    unsafe {
+        if !out_pos.is_null() {
+            out_pos.write(ImVec2 { x: 0.0, y: 0.0 });
+        }
+        let _ = callbacks;
+        let _ = viewport;
+        false
+    }
+}
+
+/// Invoke a saved native `Platform_GetWindowSize` callback through C++.
+///
+/// # Safety
+///
+/// Every non-null pointer must remain valid for the duration of the call. `out_size` must be null or
+/// valid for writes. A non-null output is initialized to zero before the other arguments are
+/// validated and is overwritten with the callback result on success. When the callback is invoked,
+/// `callbacks` must be readable, `viewport` must identify a live viewport accepted by the callback,
+/// and the populated slot must have been copied from a C++ ABI-compatible Dear ImGui backend
+/// callback table and remain callable. The callback must not throw or unwind across the C ABI
+/// boundary.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn ImGuiPlatformIO_InvokePlatformGetWindowSize(
+    callbacks: *const ImGuiPlatformIO,
+    viewport: *mut ImGuiViewport,
+    out_size: *mut ImVec2,
+) -> bool {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        return dear_imgui_rs_platform_io_invoke_platform_get_window_size(
+            callbacks, viewport, out_size,
+        ) != 0;
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    unsafe {
+        if !out_size.is_null() {
+            out_size.write(ImVec2 { x: 0.0, y: 0.0 });
+        }
+        let _ = callbacks;
+        let _ = viewport;
+        false
+    }
+}
+
+/// Invoke a saved native `Platform_GetWindowFramebufferScale` callback through C++.
+///
+/// # Safety
+///
+/// Every non-null pointer must remain valid for the duration of the call. `out_scale` must be null
+/// or valid for writes. A non-null output is initialized to zero before the other arguments are
+/// validated and is overwritten with the callback result on success. When the callback is invoked,
+/// `callbacks` must be readable, `viewport` must identify a live viewport accepted by the callback,
+/// and the populated slot must have been copied from a C++ ABI-compatible Dear ImGui backend
+/// callback table and remain callable. The callback must not throw or unwind across the C ABI
+/// boundary.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn ImGuiPlatformIO_InvokePlatformGetWindowFramebufferScale(
+    callbacks: *const ImGuiPlatformIO,
+    viewport: *mut ImGuiViewport,
+    out_scale: *mut ImVec2,
+) -> bool {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        return dear_imgui_rs_platform_io_invoke_platform_get_window_framebuffer_scale(
+            callbacks, viewport, out_scale,
+        ) != 0;
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    unsafe {
+        if !out_scale.is_null() {
+            out_scale.write(ImVec2 { x: 0.0, y: 0.0 });
+        }
+        let _ = callbacks;
+        let _ = viewport;
+        false
+    }
+}
+
+/// Invoke a saved native `Renderer_SetWindowSize` callback through C++.
+///
+/// # Safety
+///
+/// Every non-null pointer must remain valid for the duration of the call. When all pointers are
+/// non-null, `callbacks` must be readable, `viewport` must identify a live viewport accepted by
+/// the saved callback, and `size` must be readable. The populated callback slot must have been
+/// copied from a C++ ABI-compatible Dear ImGui backend callback table and must remain callable.
+/// The callback must not throw or unwind across the C ABI boundary.
 #[doc(hidden)]
 #[inline]
 pub unsafe fn ImGuiPlatformIO_InvokeRendererSetWindowSize(

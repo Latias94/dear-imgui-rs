@@ -55,7 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "stack-layout" => cfg!(feature = "stack-layout"),
             "freetype" => cfg!(feature = "freetype"),
             "test-engine" => cfg!(feature = "test-engine"),
-            "wchar32" | "platform-io-aggregate-hooks-v2" | "safe-demo-font-boundary-v1" => true,
+            "wchar32" | "platform-io-aggregate-hooks-v3" | "safe-demo-font-boundary-v1" => true,
             _ => {
                 return Err(
                     format!("IMGUI_SYS_PKG_FEATURES contains unknown feature {feature}").into(),
