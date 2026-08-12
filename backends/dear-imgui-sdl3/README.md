@@ -587,6 +587,12 @@ published as usable.
 - **SDL3 + WGPU**: multi-viewport is experimental on native targets; WebGPU/wasm is
   single-window to match upstream `imgui_impl_wgpu`.
 
+The SDL3 + SDLRenderer3 entry above is an intentional single-window boundary, not a missing
+feature flag. For the other native routes, the repository-wide evidence matrix distinguishes
+shared tests and examples from route-level smoke coverage; SDL3 + Glow has the strongest current
+smoke evidence, while SDL3 + WGPU and SDL3 + Ash remain `B` until dedicated native smokes are
+available. See the [`renderer route evidence matrix`](../../docs/renderer-route-evidence.md).
+
 - SDL3 + OpenGL3, multi-viewport:
 
   ```bash

@@ -270,6 +270,12 @@ Current support matrix:
   If you need multi-viewport OpenGL today, use the SDL3 routes
   (`sdl3_opengl_multi_viewport` or `sdl3_glow_multi_viewport`).
 
+The repository-wide route evidence matrix separates callback-safety and shared-runtime tests from
+native route smoke evidence. It currently grades Winit + WGPU as an `A` route and keeps the
+Winit + Glow combination out of the published native route inventory; see
+[`docs/renderer-route-evidence.md`](../../docs/renderer-route-evidence.md) before treating an
+example or a shared unit test as a complete platform/renderer validation.
+
 ## Notes & Differences vs imgui-rs
 
 This crate targets the `dear-imgui-rs` bindings in this repository and its API

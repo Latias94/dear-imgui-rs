@@ -30,6 +30,7 @@ This source-breaking prerelease continues the ownership-first 0.16 migration wit
 
 - Winit multi-viewport failures now retain the exact Context, viewport generation, native handle, and platform userdata until the close request is observed, preventing stale failures from closing a reused viewport. macOS `NO_FOCUS_ON_APPEARING` windows are shown without activating the application.
 - Bevy frame input is now a move-only, exactly-once transaction that binds route epoch, Context metrics, and cursor/IME authority to the same driver run. Terminal registries and private pass lifecycles fail explicitly instead of returning active-looking empty state.
+- Bevy native viewports now resolve host and secondary windows through exact `WINIT_WINDOWS` mappings, keep `Show` intent hidden until the native policy is ready, and publish detached monitor facts transactionally. ECS monitor geometry and raw handles are no longer used as native identity fallbacks; lease-first retirement and stable-instance diagnostics cover pending mappings, policy failures, and Entity reuse.
 
 ### Fixed
 

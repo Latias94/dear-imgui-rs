@@ -510,7 +510,7 @@ For binding verification, provider construction, feature-forwarding checks, and 
     - Winit example: `cargo run -p dear-imgui-examples --bin multi_viewport_ash --features ash-winit-multi-viewport`
     - SDL3 example: `cargo run -p dear-imgui-examples --bin sdl3_ash_multi_viewport --features sdl3-ash-multi-viewport`
   - Call `Context::enable_multi_viewport()` for viewports. Enable `ConfigFlags::DOCKING_ENABLE` separately when the application also needs docking.
-  - Bevy native viewports are enabled only when Winit can provide global desktop client coordinates; query `ImguiNativeViewportSupport::get(context_id)` for the per-Context `ImguiNativeViewportStatus`. On Wayland the status is `GlobalDesktopCoordinatesUnavailable` and docking stays inside the host window.
+  - Bevy native viewports use the exact `bevy_winit::WINIT_WINDOWS` mapping and detached Winit monitor snapshots; ECS monitor geometry and raw handles are not identity fallbacks. A secondary window stays hidden until its mapping and native policy lease are ready, with `NO_INPUTS` and `NO_FOCUS_ON_CLICK` enforced at the window boundary. Query `ImguiNativeViewportSupport::get(context_id)` for coordinate capability; on Wayland the status is `GlobalDesktopCoordinatesUnavailable` and docking stays inside the host window.
   - **winit + OpenGL (glow/glutin)**: no official multi-viewport stack at the moment.
     Use SDL3 + OpenGL3 / SDL3 + Glow if you need multi-viewport OpenGL.
 - **WebAssembly (WASM)**: Supported via the import-style build described above; some features

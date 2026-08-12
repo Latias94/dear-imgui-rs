@@ -280,6 +280,15 @@ Each secondary viewport owns a stable `ImguiViewportInstanceId` and a Bevy windo
 
 The backend only advertises native platform viewports when the active Winit display provides global desktop client-area coordinates. Wayland reports `ImguiNativeViewportStatus::GlobalDesktopCoordinatesUnavailable`; native windows are then disabled for that Context while ordinary in-window docking continues. Hosts can read the `ImguiNativeViewportSupport` resource and call `get(context_id)` or `is_available(context_id)`. `PendingNativeWindow` means that the Context's routed host Winit window has not been registered yet; disabled, removed, and not-yet-driven Contexts are absent.
 
+Native viewport readiness is deliberately stricter than ECS window creation. Host and secondary
+entities resolve through Bevy-Winit's exact `WINIT_WINDOWS` mapping; `Show` records intent while a
+secondary window stays hidden until its native policy is installed. `NO_INPUTS` and
+`NO_FOCUS_ON_CLICK` are applied at that native policy boundary. Monitor publication uses one
+transaction of detached Winit facts (including work-area provenance), and a failed or pending
+collection never falls back to ECS monitor geometry. The cross-backend route evidence and its
+remaining native-smoke gaps are recorded in
+[`docs/renderer-route-evidence.md`](../../docs/renderer-route-evidence.md).
+
 Every Context that calls `ImguiContextConfig::with_multi_viewport(true)` requires the native `multi-viewport` Cargo feature. Admission returns `ImguiContextError::NativeMultiViewportUnavailable` when the selected target or feature set cannot provide native windows.
 
 ## Examples

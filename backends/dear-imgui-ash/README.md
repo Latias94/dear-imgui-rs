@@ -366,6 +366,12 @@ runtime reasserts `PlatformRequestClose` after ImGui clears the same-frame reque
 buffer, draw, fence, and submit step either completes or performs an idle-and-rebuild recovery;
 the acquired image and binary semaphore are never silently carried into the next frame.
 
+The Winit route has a native validation smoke covering secondary creation, resize/merge, present,
+and GPU-idle teardown (`A`). The SDL3 route is compiled and covered by shared runtime tests, but
+does not yet have a native SDL3 smoke for the complete present/teardown transaction (`B`). See
+the [`renderer route evidence matrix`](../../docs/renderer-route-evidence.md) for the full claim
+boundary.
+
 Shut down the renderer route before the platform backend:
 
 ```rust,no_run

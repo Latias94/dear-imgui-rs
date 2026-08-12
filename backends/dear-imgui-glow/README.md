@@ -189,6 +189,12 @@ shutdown at a known-current GL boundary.
 capability cannot be paired safely after renderer creation. Use `with_shared_context` so the
 renderer and runtime retain the exact same `Rc<glow::Context>` from initialization onward.
 
+For the supported SDL3 native route, the repository smoke records secondary viewport ordering,
+main-present bracketing, GL state restoration, and texture isolation. Its teardown flags are not
+yet emitted by the smoke, so the route is graded `A-` rather than treated as a complete teardown
+proof; shared runtime tests remain the teardown evidence. See the
+[`renderer route evidence matrix`](../../docs/renderer-route-evidence.md).
+
 ## sRGB / Gamma
 
 - Pipeline choice
