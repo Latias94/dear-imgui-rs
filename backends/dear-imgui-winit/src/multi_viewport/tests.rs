@@ -769,6 +769,96 @@ fn monitor_refresh_replaces_owned_storage_and_restores_the_prior_publication() {
 }
 
 #[test]
+fn monitor_snapshot_refresh_tracks_work_and_provenance_without_partial_replacement() {
+    use crate::native_support::{
+        MonitorIdentity, MonitorSnapshot, PhysicalMonitorRect, WorkAreaProvenance,
+    };
+
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let before = snapshot_publication_state(&context);
+    let mut runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
+    let main = PhysicalMonitorRect::new([0.0, 0.0], [1920.0, 1080.0]).unwrap();
+    let work = PhysicalMonitorRect::new([0.0, 40.0], [1920.0, 1040.0]).unwrap();
+    let snapshot = MonitorSnapshot::from_test(
+        MonitorIdentity::from_test_key("primary"),
+        main,
+        work,
+        1.0,
+        WorkAreaProvenance::WindowsRcWork,
+    );
+
+    assert_eq!(
+        runtime
+            .control()
+            .refresh_monitor_snapshots_for_test(&context, Some(vec![snapshot.clone()])),
+        Ok(true)
+    );
+    let first_data = unsafe { (*context.platform_io().as_raw()).Monitors.Data };
+    assert_eq!(
+        runtime
+            .control()
+            .refresh_monitor_snapshots_for_test(&context, Some(vec![snapshot.clone()])),
+        Ok(false)
+    );
+    assert_eq!(
+        unsafe { (*context.platform_io().as_raw()).Monitors.Data },
+        first_data
+    );
+
+    let provenance_only = MonitorSnapshot::from_test(
+        MonitorIdentity::from_test_key("primary"),
+        main,
+        work,
+        1.0,
+        WorkAreaProvenance::MacOsVisibleFrame,
+    );
+    assert_eq!(
+        runtime
+            .control()
+            .refresh_monitor_snapshots_for_test(&context, Some(vec![provenance_only])),
+        Ok(true)
+    );
+    let provenance_data = unsafe { (*context.platform_io().as_raw()).Monitors.Data };
+    assert_ne!(provenance_data, first_data);
+
+    let changed_work = PhysicalMonitorRect::new([0.0, 60.0], [1920.0, 1020.0]).unwrap();
+    let work_only = MonitorSnapshot::from_test(
+        MonitorIdentity::from_test_key("primary"),
+        main,
+        changed_work,
+        1.0,
+        WorkAreaProvenance::MacOsVisibleFrame,
+    );
+    let expected_work = super::coordinates::monitor_from_snapshot(&work_only).unwrap();
+    assert_eq!(
+        runtime
+            .control()
+            .refresh_monitor_snapshots_for_test(&context, Some(vec![work_only])),
+        Ok(true)
+    );
+    let work_data = unsafe { (*context.platform_io().as_raw()).Monitors.Data };
+    assert_ne!(work_data, provenance_data);
+    let installed = unsafe { &*work_data };
+    assert_eq!(installed.WorkPos, expected_work.WorkPos);
+    assert_eq!(installed.WorkSize, expected_work.WorkSize);
+
+    assert_eq!(
+        runtime
+            .control()
+            .refresh_monitor_snapshots_for_test(&context, None),
+        Ok(false)
+    );
+    assert_eq!(
+        unsafe { (*context.platform_io().as_raw()).Monitors.Data },
+        work_data
+    );
+
+    runtime.shutdown(&mut context).unwrap();
+    assert_publication_state_restored(&context, before);
+}
+
+#[test]
 fn callback_claim_targets_the_passed_context_and_restores_the_previous_one() {
     let _guard = lock_context();
     let mut context_a = Context::create();

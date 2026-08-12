@@ -61,6 +61,13 @@ impl MonitorIdentity {
         };
         Self { key }
     }
+
+    #[cfg(test)]
+    pub(crate) fn from_test_key(key: &str) -> Self {
+        Self {
+            key: key.to_owned(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -109,6 +116,34 @@ pub struct MonitorSnapshot {
     work: PhysicalMonitorRect,
     scale_factor: f64,
     provenance: WorkAreaProvenance,
+}
+
+/// A complete detached monitor batch and the primary identity proven during that same refresh.
+///
+/// `primary_identity` is omitted when the host cannot provide an unambiguous detached match. In
+/// particular, geometry/name fallback identities can collide on identical displays; callers must
+/// not promote an arbitrary candidate to primary in that case.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MonitorSnapshotSet {
+    snapshots: Vec<MonitorSnapshot>,
+    primary_identity: Option<MonitorIdentity>,
+}
+
+impl MonitorSnapshotSet {
+    /// Returns the owned monitor snapshots in collection order.
+    pub fn snapshots(&self) -> &[MonitorSnapshot] {
+        &self.snapshots
+    }
+
+    /// Returns the detached primary identity when it was uniquely proven in this batch.
+    pub fn primary_identity(&self) -> Option<&MonitorIdentity> {
+        self.primary_identity.as_ref()
+    }
+
+    /// Splits the batch into its owned snapshots and detached primary identity.
+    pub fn into_parts(self) -> (Vec<MonitorSnapshot>, Option<MonitorIdentity>) {
+        (self.snapshots, self.primary_identity)
+    }
 }
 
 /// A failure forming a complete set of trusted monitor facts.
@@ -183,6 +218,23 @@ impl MonitorSnapshot {
     pub fn work_area_provenance(&self) -> WorkAreaProvenance {
         self.provenance
     }
+
+    #[cfg(test)]
+    pub(crate) fn from_test(
+        identity: MonitorIdentity,
+        main: PhysicalMonitorRect,
+        work: PhysicalMonitorRect,
+        scale_factor: f64,
+        provenance: WorkAreaProvenance,
+    ) -> Self {
+        Self {
+            identity,
+            main,
+            work,
+            scale_factor,
+            provenance,
+        }
+    }
 }
 
 fn valid_work_geometry(
@@ -201,9 +253,40 @@ fn valid_work_geometry(
 pub fn collect_monitor_snapshots(
     host: &Window,
 ) -> Result<Vec<MonitorSnapshot>, MonitorCollectionError> {
+    Ok(collect_monitor_snapshot_set(host)?.into_parts().0)
+}
+
+/// Collects a complete detached monitor batch and the primary identity proven in that batch.
+///
+/// The primary handle is never retained. Its identity is derived before the platform-specific
+/// collectors consume their monitor handles, then accepted only when exactly one collected
+/// snapshot carries the same detached identity.
+pub fn collect_monitor_snapshot_set(
+    host: &Window,
+) -> Result<MonitorSnapshotSet, MonitorCollectionError> {
     let monitors: Vec<_> = host.available_monitors().collect();
     let backend = monitor_backend(host);
+    let primary = catch_unwind(AssertUnwindSafe(|| host.primary_monitor()))
+        .ok()
+        .flatten();
+    let primary_identity_hint = primary.as_ref().and_then(|monitor| {
+        winit_main_facts(monitor, 0)
+            .ok()
+            .map(|(main, _)| MonitorIdentity::from_monitor(monitor, main, backend))
+    });
+    let snapshots = collect_monitor_snapshots_from_handles(monitors, backend)?;
+    let primary_identity = unique_primary_identity(primary_identity_hint, &snapshots);
 
+    Ok(MonitorSnapshotSet {
+        snapshots,
+        primary_identity,
+    })
+}
+
+fn collect_monitor_snapshots_from_handles(
+    monitors: Vec<MonitorHandle>,
+    backend: MonitorBackend,
+) -> Result<Vec<MonitorSnapshot>, MonitorCollectionError> {
     #[cfg(target_os = "windows")]
     {
         return windows::collect(monitors, backend);
@@ -221,6 +304,19 @@ pub fn collect_monitor_snapshots(
 
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     collect_full_main(monitors, WorkAreaFallback::UnsupportedWindowSystem, backend)
+}
+
+fn unique_primary_identity(
+    candidate: Option<MonitorIdentity>,
+    snapshots: &[MonitorSnapshot],
+) -> Option<MonitorIdentity> {
+    let candidate = candidate?;
+    (snapshots
+        .iter()
+        .filter(|snapshot| snapshot.identity() == &candidate)
+        .count()
+        == 1)
+        .then_some(candidate)
 }
 
 fn monitor_backend(host: &Window) -> MonitorBackend {
@@ -559,6 +655,36 @@ mod linux {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_snapshot(identity: &str, x: f64) -> MonitorSnapshot {
+        let main = PhysicalMonitorRect::new([x, 0.0], [1920.0, 1080.0]).unwrap();
+        MonitorSnapshot::from_test(
+            MonitorIdentity::from_test_key(identity),
+            main,
+            main,
+            1.0,
+            WorkAreaProvenance::FullMain(WorkAreaFallback::SourceUnavailable),
+        )
+    }
+
+    #[test]
+    fn primary_identity_requires_one_detached_match() {
+        let primary = MonitorIdentity::from_test_key("primary");
+        let snapshots = vec![
+            test_snapshot("primary", 0.0),
+            test_snapshot("secondary", 1920.0),
+        ];
+        assert_eq!(
+            unique_primary_identity(Some(primary.clone()), &snapshots),
+            Some(primary.clone())
+        );
+
+        let ambiguous = vec![
+            test_snapshot("primary", 0.0),
+            test_snapshot("primary", 1920.0),
+        ];
+        assert_eq!(unique_primary_identity(Some(primary), &ambiguous), None);
+    }
 
     #[test]
     fn fallback_provenance_requires_exact_positive_main_geometry() {

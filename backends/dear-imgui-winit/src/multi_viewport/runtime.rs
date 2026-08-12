@@ -959,6 +959,21 @@ impl RuntimeControl {
             super::callbacks::refresh_monitors_for_test(context, monitors, ownership)
         })?
     }
+
+    #[cfg(test)]
+    pub(super) fn refresh_monitor_snapshots_for_test(
+        &self,
+        context: &Context,
+        snapshots: Option<Vec<crate::native_support::MonitorSnapshot>>,
+    ) -> Result<bool, WinitPlatformError> {
+        self.binding.try_with_bound_context(|| {
+            let mut ownership = self.monitor_ownership.borrow_mut();
+            let Some(ownership) = ownership.as_mut() else {
+                return Err(WinitPlatformError::RuntimeDetached);
+            };
+            super::callbacks::refresh_monitor_snapshots_for_test(context, snapshots, ownership)
+        })?
+    }
 }
 
 impl RuntimeControl {
