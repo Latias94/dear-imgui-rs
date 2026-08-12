@@ -36,6 +36,8 @@ mod events;
 mod input;
 #[cfg(feature = "multi-viewport")]
 pub mod multi_viewport;
+#[cfg(feature = "native-platform-support")]
+pub mod native_support;
 mod platform;
 mod sanitize;
 #[cfg(test)]
