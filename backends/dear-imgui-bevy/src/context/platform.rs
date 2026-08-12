@@ -12,7 +12,9 @@ use crate::input::{ImguiInputState, map_imgui_mouse_cursor};
 use crate::{ImguiViewportWindow, viewport::ImguiViewportOwner};
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-use bevy_window::{Monitor, PrimaryMonitor};
+use bevy_winit::WINIT_WINDOWS;
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use dear_imgui_winit::native_support::collect_monitor_snapshot_set;
 
 #[cfg(feature = "render")]
 #[derive(Resource, Default)]
@@ -122,14 +124,14 @@ pub(super) fn prepare_context_platform_frame(
             .entity_mut(entity)
             .insert(ImguiViewportWindow::new(instance_id, viewport_id));
     }
-    let monitors = {
-        let mut query = world.query::<(&Monitor, Option<&PrimaryMonitor>)>();
-        crate::viewport::platform_monitors_from_bevy_monitors(
-            query
-                .iter(world)
-                .map(|(monitor, primary)| (monitor.clone(), primary.is_some())),
-        )
-    };
+    // The ECS monitor list is not an exact proof of the host's native display source. Bevy-Winit
+    // creates that mapping asynchronously, so a missing mapping is an explicit pending state and
+    // must not be replaced with a guessed primary monitor or host-window rectangle.
+    let monitor_publication = WINIT_WINDOWS.with_borrow(|windows| {
+        let host = windows.get_window(host_window)?;
+        let snapshot_set = collect_monitor_snapshot_set(host).ok()?;
+        crate::viewport::monitor_publication_from_snapshot_set(snapshot_set)
+    });
     let viewport_feedback = viewport_windows
         .iter()
         .map(|(entity, window, instance_id)| {
@@ -162,7 +164,7 @@ pub(super) fn prepare_context_platform_frame(
         &bridge,
         host_window,
         &host_window_state,
-        &monitors,
+        monitor_publication.as_ref(),
         viewport_feedback.into_iter(),
         crate::viewport::NativeViewportFrameSupport::new(
             render_integration_installed,

@@ -219,7 +219,7 @@ pub(crate) fn prepare_platform_viewports_for_frame(
     bridge: &ImguiViewportBridgeContext,
     primary_window: Entity,
     window: &Window,
-    monitors: &[sys::ImGuiPlatformMonitor],
+    monitor_publication: Option<&super::desktop::ImguiMonitorPublication>,
     viewport_windows: impl Iterator<
         Item = (
             Entity,
@@ -308,15 +308,12 @@ pub(crate) fn prepare_platform_viewports_for_frame(
         main_viewport.set_platform_user_data(main_viewport_handle);
     }
 
-    let fallback_monitor = desktop::monitor_from_window(window);
-    let monitors = if monitors.is_empty() {
-        std::slice::from_ref(&fallback_monitor)
-    } else {
-        monitors
-    };
-    // SAFETY: Bevy owns any monitor handles and keeps them valid until this list is replaced.
-    unsafe { context.platform_io_mut().set_monitors(monitors) };
-    bridge.inner.record_monitor_contract(context, monitors);
+    if let Some(publication) = monitor_publication {
+        bridge
+            .inner
+            .publish_monitor_publication(context, publication)
+            .map_err(ImguiViewportRuntimeError::CallbackOwnership)?;
+    }
 
     let io = context.io_mut();
     let mut backend_flags = io.backend_flags();
@@ -325,7 +322,12 @@ pub(crate) fn prepare_platform_viewports_for_frame(
             | imgui::BackendFlags::RENDERER_HAS_VIEWPORTS
             | imgui::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT,
     );
-    let native_viewports_available = support.allows_native_viewports();
+    // A desktop capability alone is insufficient: the host monitor batch is the proof that the
+    // exact native display source was resolved for this frame. Keep in-window docking available
+    // when the batch is pending or failed, but never enable native top-level viewports from a
+    // guessed or stale monitor list.
+    let native_viewports_available =
+        monitor_publication.is_some() && support.allows_native_viewports();
     if native_viewports_available {
         backend_flags |= imgui::BackendFlags::PLATFORM_HAS_VIEWPORTS
             | imgui::BackendFlags::RENDERER_HAS_VIEWPORTS;

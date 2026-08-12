@@ -14,6 +14,7 @@ keywords.workspace = true
 
 [dependencies]
 dear-imgui-rs.workspace = true
+dear-imgui-winit = { workspace = true, optional = true }
 
 # Bevy subcrates use semver-compatible internal dependencies, so exact pins keep
 # the app/ECS/window/input/render slices on the same checked release train.
@@ -61,6 +62,8 @@ wasm = ["dear-imgui-rs/wasm"]
 multi-viewport = [
     "render",
     "dear-imgui-rs/multi-viewport",
+    "dep:dear-imgui-winit",
+    "dear-imgui-winit/native-platform-support",
     "dep:bevy_winit",
     "dep:raw-window-handle",
     "dep:winit",

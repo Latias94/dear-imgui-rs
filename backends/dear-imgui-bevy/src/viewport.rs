@@ -71,7 +71,7 @@ pub use capability::{ImguiNativeViewportStatus, ImguiNativeViewportSupport};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(crate) use desktop::{
     desktop_metrics_for_window, desktop_to_window_client_logical,
-    platform_monitors_from_bevy_monitors, viewport_feedback_from_window,
+    monitor_publication_from_snapshot_set, viewport_feedback_from_window,
     window_client_logical_to_desktop,
 };
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]

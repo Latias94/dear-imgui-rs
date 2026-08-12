@@ -533,6 +533,22 @@ pub enum ImguiDiagnosticOrigin {
     RenderExtraction,
     /// Bevy image and Dear ImGui texture integration.
     Texture,
+    /// Native Dear ImGui viewport mapping and window policy.
+    NativeViewport,
+}
+
+/// Stable reason for a native Dear ImGui viewport policy failure.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[non_exhaustive]
+pub enum ImguiNativeViewportPolicyFailure {
+    NativeWindowPending,
+    WindowHandleUnavailable,
+    UnexpectedHandleKind,
+    WindowOwnerUnavailable,
+    WrongWindowThread,
+    InstallFailed,
+    HookDetached,
+    WindowDestroyed,
 }
 
 /// Render target category used by route diagnostics.
@@ -600,6 +616,15 @@ pub enum ImguiDiagnosticKind {
     InvalidLogicalInputRegion,
     /// Equal-priority exclusive input regions overlap on one host window.
     AmbiguousExclusiveInput { priority: i32 },
+    /// A viewport ECS window exists but its exact native Winit mapping is not ready.
+    NativeViewportWindowPending {
+        viewport: crate::viewport::ImguiViewportInstanceId,
+    },
+    /// Installing or updating the native viewport window policy failed.
+    NativeViewportPolicyInstallFailed {
+        viewport: crate::viewport::ImguiViewportInstanceId,
+        reason: ImguiNativeViewportPolicyFailure,
+    },
 }
 
 /// One diagnostic payload before or after it is published in a batch.
@@ -609,6 +634,7 @@ pub struct ImguiDiagnostic {
     context_id: Option<ContextId>,
     route_entity: Option<Entity>,
     camera: Option<Entity>,
+    viewport_instance: Option<crate::viewport::ImguiViewportInstanceId>,
 }
 
 impl ImguiDiagnostic {
@@ -620,6 +646,7 @@ impl ImguiDiagnostic {
             context_id: None,
             route_entity: None,
             camera: None,
+            viewport_instance: None,
         }
     }
 
@@ -641,6 +668,16 @@ impl ImguiDiagnostic {
     #[must_use]
     pub const fn with_camera(mut self, camera: Entity) -> Self {
         self.camera = Some(camera);
+        self
+    }
+
+    /// Attach the stable native viewport instance identity.
+    #[must_use]
+    pub const fn with_viewport_instance(
+        mut self,
+        viewport_instance: crate::viewport::ImguiViewportInstanceId,
+    ) -> Self {
+        self.viewport_instance = Some(viewport_instance);
         self
     }
 
@@ -668,11 +705,18 @@ impl ImguiDiagnostic {
         self.camera
     }
 
+    /// Return the affected stable native viewport instance, if any.
+    #[must_use]
+    pub const fn viewport_instance(&self) -> Option<crate::viewport::ImguiViewportInstanceId> {
+        self.viewport_instance
+    }
+
     fn stable_cmp(&self, other: &Self) -> Ordering {
         resolver::optional_context_key(self.context_id)
             .cmp(&resolver::optional_context_key(other.context_id))
             .then_with(|| self.route_entity.cmp(&other.route_entity))
             .then_with(|| self.camera.cmp(&other.camera))
+            .then_with(|| self.viewport_instance.cmp(&other.viewport_instance))
             .then_with(|| self.kind.cmp(&other.kind))
     }
 }

@@ -2579,6 +2579,7 @@ dependencies = [
  "bevy_winit",
  "bytemuck",
  "dear-imgui-rs",
+ "dear-imgui-winit",
  "dear-imguizmo",
  "dear-imnodes",
  "dear-implot",

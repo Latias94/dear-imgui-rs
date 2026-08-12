@@ -29,7 +29,8 @@ pub use crate::ImguiUiRenderOrder;
 #[cfg(feature = "render")]
 pub use crate::route::{
     ImguiCameraInputSource, ImguiDiagnostic, ImguiDiagnosticKind, ImguiDiagnostics,
-    ImguiInputPolicy, ImguiInputRoute, ImguiInputSource, ImguiLogicalInputSource, ImguiRenderRoute,
+    ImguiInputPolicy, ImguiInputRoute, ImguiInputSource, ImguiLogicalInputSource,
+    ImguiNativeViewportPolicyFailure, ImguiRenderRoute,
 };
 #[cfg(feature = "render")]
 pub use crate::{ImguiBevyTextures, ImguiTexture, ImguiTextureRegistrationError};

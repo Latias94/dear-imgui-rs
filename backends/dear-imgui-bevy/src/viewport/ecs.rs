@@ -4,6 +4,9 @@ use super::frame::{
 };
 use super::*;
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use bevy_winit::WINIT_WINDOWS;
+
 fn with_window_mut(
     windows: &mut Query<&mut Window>,
     bridge: &ImguiViewportBridgeContext,
@@ -148,18 +151,106 @@ pub(super) fn apply_viewport_commands_system(
     bridge: NonSend<ImguiViewportBridge>,
     backend_runtime: Res<crate::context::ImguiBackendRuntime>,
     winit_settings: Option<Res<WinitSettings>>,
+    #[cfg(feature = "render")] diagnostics: Option<Res<crate::route::ImguiDiagnostics>>,
+    #[cfg(feature = "render")] mut native_diagnostic_epoch: Local<u64>,
     mut queries: ViewportCommandQueries,
 ) {
     let contexts = bridge.contexts();
+    let uses_winit_window_lifecycle = winit_settings.is_some();
+    #[cfg(feature = "render")]
+    let mut native_diagnostics = Vec::new();
     for context in contexts {
         apply_viewport_commands_for_context(
             &mut ecs_commands,
             &context,
             backend_runtime.config(),
-            winit_settings.is_some(),
+            uses_winit_window_lifecycle,
             &mut queries,
         );
+        #[cfg(feature = "render")]
+        if uses_winit_window_lifecycle {
+            native_diagnostics.extend(context.native_policy_diagnostics().into_iter().map(
+                |(viewport, failure)| {
+                    native_viewport_diagnostic(context.context_id, viewport, failure)
+                },
+            ));
+        }
     }
+    #[cfg(feature = "render")]
+    if let Some(diagnostics) = diagnostics {
+        *native_diagnostic_epoch = native_diagnostic_epoch.saturating_add(1);
+        diagnostics.replace(
+            crate::route::ImguiDiagnosticOrigin::NativeViewport,
+            *native_diagnostic_epoch,
+            native_diagnostics,
+        );
+    }
+}
+
+#[cfg(all(
+    feature = "multi-viewport",
+    feature = "render",
+    not(target_arch = "wasm32")
+))]
+fn native_viewport_diagnostic(
+    context_id: imgui::ContextId,
+    viewport: ImguiViewportInstanceId,
+    failure: NativeViewportPolicyFailure,
+) -> crate::route::ImguiDiagnostic {
+    use crate::route::{
+        ImguiDiagnostic, ImguiDiagnosticKind, ImguiNativeViewportPolicyFailure as PublicFailure,
+    };
+
+    let diagnostic = match failure {
+        NativeViewportPolicyFailure::NativeWindowPending => {
+            ImguiDiagnostic::new(ImguiDiagnosticKind::NativeViewportWindowPending { viewport })
+        }
+        NativeViewportPolicyFailure::WindowHandleUnavailable => {
+            ImguiDiagnostic::new(ImguiDiagnosticKind::NativeViewportPolicyInstallFailed {
+                viewport,
+                reason: PublicFailure::WindowHandleUnavailable,
+            })
+        }
+        NativeViewportPolicyFailure::UnexpectedHandleKind => {
+            ImguiDiagnostic::new(ImguiDiagnosticKind::NativeViewportPolicyInstallFailed {
+                viewport,
+                reason: PublicFailure::UnexpectedHandleKind,
+            })
+        }
+        NativeViewportPolicyFailure::WindowOwnerUnavailable => {
+            ImguiDiagnostic::new(ImguiDiagnosticKind::NativeViewportPolicyInstallFailed {
+                viewport,
+                reason: PublicFailure::WindowOwnerUnavailable,
+            })
+        }
+        NativeViewportPolicyFailure::WrongWindowThread => {
+            ImguiDiagnostic::new(ImguiDiagnosticKind::NativeViewportPolicyInstallFailed {
+                viewport,
+                reason: PublicFailure::WrongWindowThread,
+            })
+        }
+        NativeViewportPolicyFailure::InstallFailed => {
+            ImguiDiagnostic::new(ImguiDiagnosticKind::NativeViewportPolicyInstallFailed {
+                viewport,
+                reason: PublicFailure::InstallFailed,
+            })
+        }
+        NativeViewportPolicyFailure::HookDetached => {
+            ImguiDiagnostic::new(ImguiDiagnosticKind::NativeViewportPolicyInstallFailed {
+                viewport,
+                reason: PublicFailure::HookDetached,
+            })
+        }
+        NativeViewportPolicyFailure::WindowDestroyed => {
+            ImguiDiagnostic::new(ImguiDiagnosticKind::NativeViewportPolicyInstallFailed {
+                viewport,
+                reason: PublicFailure::WindowDestroyed,
+            })
+        }
+    };
+    diagnostic
+        .with_context(context_id)
+        .with_viewport_instance(viewport)
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -282,6 +373,8 @@ fn apply_viewport_commands_for_context(
                     let Some(record) = state.record_mut(instance_id) else {
                         continue;
                     };
+                    record.native_policy.release();
+                    record.show_requested = false;
                     record.flags = Some(snapshot.flags);
                     record.pending_client_placement = if uses_winit_window_lifecycle
                         && !snapshot.flags.contains(imgui::ViewportFlags::NO_DECORATION)
@@ -372,6 +465,7 @@ fn apply_viewport_commands_for_context(
             }
             ImguiViewportCommand::Show { .. } => {
                 let should_focus = context.show_should_focus(instance_id);
+                context.request_show(instance_id);
                 let show_is_deferred = {
                     let mut state = context.inner.state.borrow_mut();
                     state
@@ -383,23 +477,8 @@ fn apply_viewport_commands_for_context(
                             true
                         })
                 };
-                if !show_is_deferred {
-                    if let Some(window) = pending_windows.get_mut(&instance_id) {
-                        window.visible = true;
-                        if should_focus {
-                            window.focused = false;
-                        }
-                    } else {
-                        with_window_mut(windows, context, instance_id, |window| {
-                            window.visible = true;
-                            if should_focus {
-                                window.focused = false;
-                            }
-                        });
-                    }
-                    if should_focus {
-                        context.request_focus_next_frame(instance_id);
-                    }
+                if !show_is_deferred && should_focus {
+                    context.request_focus_next_frame(instance_id);
                 }
                 feedback_candidates.insert(instance_id);
             }
@@ -549,7 +628,12 @@ fn apply_viewport_commands_for_context(
     }
 
     let pending_instance_ids = pending_windows.keys().copied().collect::<HashSet<_>>();
-    for (instance_id, window) in pending_windows {
+    if !uses_winit_window_lifecycle {
+        for (instance_id, window) in &mut pending_windows {
+            window.visible = context.show_requested(*instance_id);
+        }
+    }
+    for (instance_id, window) in pending_windows.drain() {
         if let Some(entity) = context.viewport_window_for_instance(instance_id) {
             let previous = context.viewport_feedback_for_instance(instance_id);
             context.set_viewport_feedback(
@@ -582,7 +666,14 @@ fn apply_viewport_commands_for_context(
         }
     }
 
-    apply_pending_viewport_focus_requests(windows, context);
+    sync_native_policy_and_visibility(
+        windows,
+        context,
+        uses_winit_window_lifecycle,
+        &mut pending_windows,
+    );
+
+    apply_pending_viewport_focus_requests(windows, context, uses_winit_window_lifecycle);
 
     for (window_entity, marker, owner) in viewport_windows.iter() {
         let Some((context_id, instance_id)) = owner.window_identity() else {
@@ -640,6 +731,34 @@ fn apply_viewport_commands_for_context(
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn sync_native_policy_and_visibility(
+    windows: &mut Query<&mut Window>,
+    context: &ImguiViewportBridgeContext,
+    uses_winit_window_lifecycle: bool,
+    pending_windows: &mut HashMap<ImguiViewportInstanceId, Window>,
+) {
+    for (instance_id, entity, flags, show_requested, placement_ready) in
+        context.native_policy_targets()
+    {
+        let ready = if uses_winit_window_lifecycle {
+            WINIT_WINDOWS.with_borrow(|winit_windows| {
+                let native_window = winit_windows.get_window(entity).map(|window| &**window);
+                context.sync_native_policy(instance_id, entity, native_window, flags)
+            })
+        } else {
+            true
+        };
+        if let Some(window) = pending_windows.get_mut(&instance_id) {
+            window.visible = ready && show_requested && placement_ready;
+            continue;
+        }
+        if let Ok(mut window) = windows.get_mut(entity) {
+            window.visible = ready && show_requested && placement_ready;
+        }
+    }
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(super) fn acknowledge_viewport_ecs_despawns_system(
     bridge: NonSend<ImguiViewportBridge>,
     entities: Query<Entity>,
@@ -653,30 +772,44 @@ pub(super) fn acknowledge_viewport_ecs_despawns_system(
 fn apply_pending_viewport_focus_requests(
     windows: &mut Query<&mut Window>,
     bridge: &ImguiViewportBridgeContext,
+    uses_winit_window_lifecycle: bool,
 ) {
-    let ready = bridge
-        .inner
-        .state
-        .borrow_mut()
-        .viewports
-        .iter_mut()
-        .filter_map(|(&instance_id, record)| {
-            let ready = record.focus_ready;
-            record.focus_ready = false;
-            ready.then_some(instance_id)
-        })
-        .collect::<Vec<_>>();
+    let ready = {
+        let mut state = bridge.inner.state.borrow_mut();
+        state
+            .viewports
+            .iter_mut()
+            .filter_map(|(&instance_id, record)| {
+                let native_ready = !uses_winit_window_lifecycle
+                    || record.flags.is_none()
+                    || record.native_policy.is_ready();
+                let placement_ready = record.pending_client_placement.is_none();
+                let can_focus = record.show_requested && native_ready && placement_ready;
+                let should_focus = record.focus_ready && can_focus;
+                if should_focus {
+                    record.focus_ready = false;
+                } else if !record.focus_ready {
+                    // Keep the existing one-frame delay, but retain the request until the
+                    // exact native window and client placement are ready.
+                    record.focus_ready = record.focus_next_frame;
+                }
+                record.focus_next_frame = false;
+                should_focus.then_some(instance_id)
+            })
+            .collect::<Vec<_>>()
+    };
     for instance_id in ready {
         if let Some(entity) = bridge.viewport_window_for_instance(instance_id)
             && let Ok(mut window) = windows.get_mut(entity)
         {
-            window.focused = true;
+            if window.visible {
+                window.focused = true;
+            } else if let Some(record) = bridge.inner.state.borrow_mut().record_mut(instance_id) {
+                record.focus_ready = true;
+            }
+        } else if let Some(record) = bridge.inner.state.borrow_mut().record_mut(instance_id) {
+            record.focus_ready = true;
         }
-    }
-    let mut state = bridge.inner.state.borrow_mut();
-    for record in state.viewports.values_mut() {
-        record.focus_ready = record.focus_next_frame;
-        record.focus_next_frame = false;
     }
 }
 
@@ -717,7 +850,7 @@ pub(crate) fn settle_pending_client_placements(
         bridge.remove_pending_client_placement(instance_id);
         bridge.record_position_request(instance_id, placement.pos, placement.dpi_scale);
         if placement.show_requested {
-            window.visible = true;
+            bridge.request_show(instance_id);
         }
         if placement.focus_requested {
             window.focused = false;

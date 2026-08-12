@@ -27,8 +27,6 @@ use bevy_render::{Render, RenderApp, extract_plugin::ExtractPlugin};
 #[cfg(feature = "multi-viewport")]
 use bevy_window::CompositeAlphaMode;
 #[cfg(feature = "multi-viewport")]
-use bevy_window::Monitor;
-#[cfg(feature = "multi-viewport")]
 use bevy_window::WindowCloseRequested;
 #[cfg(feature = "multi-viewport")]
 use bevy_window::WindowClosing;
@@ -957,61 +955,6 @@ fn viewport_window_factory_sanitizes_non_finite_platform_values() {
     assert_eq!(window.resolution.width(), 1.0);
     assert_eq!(window.resolution.height(), 1.0);
     assert_eq!(window.resolution.scale_factor(), 1.0);
-}
-
-#[cfg(feature = "multi-viewport")]
-#[test]
-fn viewport_platform_monitors_preserve_non_overlapping_native_desktop_space() {
-    #[cfg(not(target_os = "macos"))]
-    let primary_physical_x = 1920;
-    #[cfg(target_os = "macos")]
-    let primary_physical_x = 3840;
-    let primary = Monitor {
-        name: Some("primary".to_owned()),
-        physical_width: 2560,
-        physical_height: 1600,
-        physical_position: bevy_math::IVec2::new(primary_physical_x, 0),
-        refresh_rate_millihertz: Some(60_000),
-        scale_factor: 2.0,
-        video_modes: Vec::new(),
-    };
-    let secondary = Monitor {
-        name: Some("secondary".to_owned()),
-        physical_width: 1920,
-        physical_height: 1080,
-        physical_position: bevy_math::IVec2::new(0, 0),
-        refresh_rate_millihertz: Some(144_000),
-        scale_factor: 1.0,
-        video_modes: Vec::new(),
-    };
-
-    let monitors = dear_imgui_bevy::viewport::platform_monitors_from_bevy_monitors([
-        (secondary, false),
-        (primary, true),
-    ]);
-
-    assert_eq!(monitors.len(), 2);
-    assert_eq!(monitors[0].MainPos.x, 1920.0);
-    assert_eq!(monitors[0].MainPos.y, 0.0);
-    #[cfg(not(target_os = "macos"))]
-    assert_eq!(monitors[0].MainSize.x, 2560.0);
-    #[cfg(not(target_os = "macos"))]
-    assert_eq!(monitors[0].MainSize.y, 1600.0);
-    #[cfg(target_os = "macos")]
-    assert_eq!(monitors[0].MainSize.x, 1280.0);
-    #[cfg(target_os = "macos")]
-    assert_eq!(monitors[0].MainSize.y, 800.0);
-    assert_eq!(monitors[0].DpiScale, 2.0);
-    assert_eq!(monitors[1].MainPos.x, 0.0);
-    assert_eq!(monitors[1].MainPos.y, 0.0);
-    assert_eq!(monitors[1].MainSize.x, 1920.0);
-    assert_eq!(monitors[1].MainSize.y, 1080.0);
-    assert_eq!(monitors[1].DpiScale, 1.0);
-    assert_eq!(
-        monitors[1].MainPos.x + monitors[1].MainSize.x,
-        monitors[0].MainPos.x,
-        "adjacent mixed-DPI monitors must not overlap or gain an artificial gap"
-    );
 }
 
 #[cfg(feature = "multi-viewport")]

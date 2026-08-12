@@ -58,6 +58,18 @@ Winit platform runtime.
 - Monitor cache, primary ordering, coordinate conversion, transactional
   `ImGuiPlatformIO::Monitors` publication, and window retirement remain in the
   owning backend.
+- The Bevy owner must resolve its host and secondary windows through
+  `bevy_winit::WINIT_WINDOWS` on the Winit thread. An ECS `Window`, a Bevy
+  `Monitor`, a raw window handle, or a cached HWND is not an exact native
+  mapping proof.
+- Bevy's `Show` command is an intent. Secondary windows remain hidden while
+  the exact mapping is pending or a policy lease is being installed. The
+  stable `ImguiViewportInstanceId`, rather than a recyclable ECS entity, owns
+  the policy state and preserves show intent across handle replacement.
+- A failed monitor batch is observable as a missing current publication, not
+  as a fabricated primary monitor. Owners may retain the previous complete
+  publication, but must keep native global viewports disabled until a complete
+  exact batch is available.
 - The Windows lease can be installed only from a borrowed exact `Window`, is
   neither `Clone`, `Send`, nor `Sync`, and tolerates lease-first or
   native-window-first destruction without freeing callback state prematurely.

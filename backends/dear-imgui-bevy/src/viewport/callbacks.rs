@@ -297,6 +297,8 @@ unsafe extern "C" fn platform_destroy_window(viewport: *mut imgui::Viewport) {
                 })
             };
             if let Some(record) = bridge.record_mut(instance_id) {
+                record.native_policy.release();
+                record.show_requested = false;
                 record.flags = None;
                 record.focus_next_frame = false;
                 record.focus_ready = false;

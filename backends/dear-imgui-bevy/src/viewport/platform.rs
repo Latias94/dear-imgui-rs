@@ -532,8 +532,14 @@ pub(crate) fn retire_native_viewport_windows(
     let mut entities = world
         .get_non_send::<ImguiViewportBridge>()
         .map(|bridge| {
-            bridge
-                .contexts()
+            let contexts = bridge.contexts();
+            for context in &contexts {
+                // Release the opaque policy leases before removing the exact Winit mappings.
+                // The lease is keyed by stable viewport instance identity, not by this reusable
+                // ECS entity, so the release must happen while the bridge still owns that map.
+                context.release_all_native_policies();
+            }
+            contexts
                 .into_iter()
                 .flat_map(|context| context.mapped_window_entities())
                 .collect::<HashSet<_>>()
