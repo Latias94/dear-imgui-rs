@@ -941,6 +941,11 @@ class ConsumerContractTests(unittest.TestCase):
                 "ImGuiPlatformIO_InvokePlatformGetWindowSize",
                 "ImGuiPlatformIO_InvokePlatformGetWindowFramebufferScale",
                 "ImGuiPlatformIO_InvokeRendererSetWindowSize",
+                "ImGuiPlatformIO_PlatformSetWindowPosPointerParam",
+                "ImGuiPlatformIO_PlatformSetWindowSizePointerParam",
+                "ImGuiPlatformIO_PlatformGetWindowPosOutParam",
+                "ImGuiPlatformIO_PlatformGetWindowSizeOutParam",
+                "ImGuiPlatformIO_PlatformGetWindowFramebufferScaleOutParam",
             ):
                 self.assertIn(symbol, source)
 

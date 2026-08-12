@@ -20,6 +20,7 @@ macro_rules! for_each_callback {
         $macro!(Platform_CreateWindow);
         $macro!(Platform_DestroyWindow);
         $macro!(Platform_ShowWindow);
+        $macro!(Platform_UpdateWindow);
         $macro!(Platform_SetWindowPos);
         $macro!(Platform_GetWindowPos);
         $macro!(Platform_SetWindowSize);
@@ -29,13 +30,9 @@ macro_rules! for_each_callback {
         $macro!(Platform_GetWindowFocus);
         $macro!(Platform_GetWindowMinimized);
         $macro!(Platform_SetWindowTitle);
-        $macro!(Platform_SetWindowAlpha);
-        $macro!(Platform_UpdateWindow);
         $macro!(Platform_RenderWindow);
         $macro!(Platform_SwapBuffers);
-        $macro!(Platform_GetWindowDpiScale);
-        $macro!(Platform_OnChangedViewport);
-        $macro!(Platform_GetWindowWorkAreaInsets);
+        $macro!(Platform_SetWindowAlpha);
         $macro!(Platform_CreateVkSurface);
     };
 }
@@ -45,6 +42,7 @@ macro_rules! for_each_platform_window_callback {
         $macro!(Platform_CreateWindow);
         $macro!(Platform_DestroyWindow);
         $macro!(Platform_ShowWindow);
+        $macro!(Platform_UpdateWindow);
         $macro!(Platform_SetWindowPos);
         $macro!(Platform_GetWindowPos);
         $macro!(Platform_SetWindowSize);
@@ -54,13 +52,9 @@ macro_rules! for_each_platform_window_callback {
         $macro!(Platform_GetWindowFocus);
         $macro!(Platform_GetWindowMinimized);
         $macro!(Platform_SetWindowTitle);
-        $macro!(Platform_SetWindowAlpha);
-        $macro!(Platform_UpdateWindow);
         $macro!(Platform_RenderWindow);
         $macro!(Platform_SwapBuffers);
-        $macro!(Platform_GetWindowDpiScale);
-        $macro!(Platform_OnChangedViewport);
-        $macro!(Platform_GetWindowWorkAreaInsets);
+        $macro!(Platform_SetWindowAlpha);
         $macro!(Platform_CreateVkSurface);
     };
 }
@@ -605,3 +599,41 @@ pub(super) use native_callbacks::{
 pub(super) use native_callbacks::{
     renderer_render_window_callback_for_test, renderer_set_window_size_callback_for_test,
 };
+
+#[cfg(test)]
+mod inventory_tests {
+    #[test]
+    fn platform_window_callback_inventory_matches_imgui_impl_sdl3() {
+        let mut callbacks = Vec::new();
+        macro_rules! collect_callback {
+            ($field:ident) => {
+                callbacks.push(stringify!($field));
+            };
+        }
+
+        for_each_platform_window_callback!(collect_callback);
+
+        assert_eq!(
+            callbacks,
+            [
+                "Platform_CreateWindow",
+                "Platform_DestroyWindow",
+                "Platform_ShowWindow",
+                "Platform_UpdateWindow",
+                "Platform_SetWindowPos",
+                "Platform_GetWindowPos",
+                "Platform_SetWindowSize",
+                "Platform_GetWindowSize",
+                "Platform_GetWindowFramebufferScale",
+                "Platform_SetWindowFocus",
+                "Platform_GetWindowFocus",
+                "Platform_GetWindowMinimized",
+                "Platform_SetWindowTitle",
+                "Platform_RenderWindow",
+                "Platform_SwapBuffers",
+                "Platform_SetWindowAlpha",
+                "Platform_CreateVkSurface",
+            ]
+        );
+    }
+}

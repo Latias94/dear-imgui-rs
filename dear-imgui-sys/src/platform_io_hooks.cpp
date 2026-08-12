@@ -382,6 +382,81 @@ extern "C" void dear_imgui_rs_platform_io_set_platform_get_window_framebuffer_sc
     platform_io->Platform_GetWindowFramebufferScale = DearImguiRsPlatformGetWindowFramebufferScaleHook;
 }
 
+extern "C" int dear_imgui_rs_platform_io_get_platform_set_window_pos_pointer_param(
+    ImGuiPlatformIO* platform_io,
+    void (**out_callback)(ImGuiViewport* vp, const ImVec2* pos))
+{
+    DearImguiRsPlatformIoHookStorage* storage = DearImguiRsFindPlatformIoHookStorage(platform_io);
+    if (platform_io == nullptr
+        || storage == nullptr
+        || out_callback == nullptr
+        || platform_io->Platform_SetWindowPos != DearImguiRsPlatformSetWindowPosHook
+        || storage->Platform_SetWindowPos == nullptr)
+        return 0;
+    *out_callback = storage->Platform_SetWindowPos;
+    return 1;
+}
+
+extern "C" int dear_imgui_rs_platform_io_get_platform_set_window_size_pointer_param(
+    ImGuiPlatformIO* platform_io,
+    void (**out_callback)(ImGuiViewport* vp, const ImVec2* size))
+{
+    DearImguiRsPlatformIoHookStorage* storage = DearImguiRsFindPlatformIoHookStorage(platform_io);
+    if (platform_io == nullptr
+        || storage == nullptr
+        || out_callback == nullptr
+        || platform_io->Platform_SetWindowSize != DearImguiRsPlatformSetWindowSizeHook
+        || storage->Platform_SetWindowSize == nullptr)
+        return 0;
+    *out_callback = storage->Platform_SetWindowSize;
+    return 1;
+}
+
+extern "C" int dear_imgui_rs_platform_io_get_platform_get_window_pos_out_param(
+    ImGuiPlatformIO* platform_io,
+    void (**out_callback)(ImGuiViewport* vp, ImVec2* out_pos))
+{
+    DearImguiRsPlatformIoHookStorage* storage = DearImguiRsFindPlatformIoHookStorage(platform_io);
+    if (platform_io == nullptr
+        || storage == nullptr
+        || out_callback == nullptr
+        || platform_io->Platform_GetWindowPos != DearImguiRsPlatformGetWindowPosHook
+        || storage->Platform_GetWindowPos == nullptr)
+        return 0;
+    *out_callback = storage->Platform_GetWindowPos;
+    return 1;
+}
+
+extern "C" int dear_imgui_rs_platform_io_get_platform_get_window_size_out_param(
+    ImGuiPlatformIO* platform_io,
+    void (**out_callback)(ImGuiViewport* vp, ImVec2* out_size))
+{
+    DearImguiRsPlatformIoHookStorage* storage = DearImguiRsFindPlatformIoHookStorage(platform_io);
+    if (platform_io == nullptr
+        || storage == nullptr
+        || out_callback == nullptr
+        || platform_io->Platform_GetWindowSize != DearImguiRsPlatformGetWindowSizeHook
+        || storage->Platform_GetWindowSize == nullptr)
+        return 0;
+    *out_callback = storage->Platform_GetWindowSize;
+    return 1;
+}
+
+extern "C" int dear_imgui_rs_platform_io_get_platform_get_window_framebuffer_scale_out_param(
+    ImGuiPlatformIO* platform_io,
+    void (**out_callback)(ImGuiViewport* vp, ImVec2* out_scale))
+{
+    DearImguiRsPlatformIoHookStorage* storage = DearImguiRsFindPlatformIoHookStorage(platform_io);
+    if (platform_io == nullptr
+        || storage == nullptr
+        || out_callback == nullptr
+        || platform_io->Platform_GetWindowFramebufferScale != DearImguiRsPlatformGetWindowFramebufferScaleHook
+        || storage->Platform_GetWindowFramebufferScale == nullptr)
+        return 0;
+    *out_callback = storage->Platform_GetWindowFramebufferScale;
+    return 1;
+}
+
 extern "C" void dear_imgui_rs_platform_io_set_platform_get_window_work_area_insets(
     ImGuiPlatformIO* platform_io,
     void (*user_callback)(ImGuiViewport* vp, ImVec4* out_insets))
@@ -710,6 +785,41 @@ extern "C" void dear_imgui_rs_platform_io_set_platform_get_window_framebuffer_sc
     ImGuiPlatformIO*,
     void (*)(ImGuiViewport*, ImVec2*))
 {
+}
+
+extern "C" int dear_imgui_rs_platform_io_get_platform_set_window_pos_pointer_param(
+    ImGuiPlatformIO*,
+    void (**)(ImGuiViewport*, const ImVec2*))
+{
+    return 0;
+}
+
+extern "C" int dear_imgui_rs_platform_io_get_platform_set_window_size_pointer_param(
+    ImGuiPlatformIO*,
+    void (**)(ImGuiViewport*, const ImVec2*))
+{
+    return 0;
+}
+
+extern "C" int dear_imgui_rs_platform_io_get_platform_get_window_pos_out_param(
+    ImGuiPlatformIO*,
+    void (**)(ImGuiViewport*, ImVec2*))
+{
+    return 0;
+}
+
+extern "C" int dear_imgui_rs_platform_io_get_platform_get_window_size_out_param(
+    ImGuiPlatformIO*,
+    void (**)(ImGuiViewport*, ImVec2*))
+{
+    return 0;
+}
+
+extern "C" int dear_imgui_rs_platform_io_get_platform_get_window_framebuffer_scale_out_param(
+    ImGuiPlatformIO*,
+    void (**)(ImGuiViewport*, ImVec2*))
+{
+    return 0;
 }
 
 extern "C" void dear_imgui_rs_platform_io_set_platform_get_window_work_area_insets(

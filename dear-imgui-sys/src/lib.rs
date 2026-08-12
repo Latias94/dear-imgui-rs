@@ -429,6 +429,39 @@ unsafe extern "C" {
         user_callback: unsafe extern "C" fn(vp: *mut ImGuiViewport, out_scale: *mut ImVec2),
     ) -> std::os::raw::c_int;
 
+    fn dear_imgui_rs_platform_io_get_platform_set_window_pos_pointer_param(
+        platform_io: *mut ImGuiPlatformIO,
+        out_callback: *mut Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, pos: *const ImVec2)>,
+    ) -> std::os::raw::c_int;
+
+    fn dear_imgui_rs_platform_io_get_platform_set_window_size_pointer_param(
+        platform_io: *mut ImGuiPlatformIO,
+        out_callback: *mut Option<
+            unsafe extern "C" fn(vp: *mut ImGuiViewport, size: *const ImVec2),
+        >,
+    ) -> std::os::raw::c_int;
+
+    fn dear_imgui_rs_platform_io_get_platform_get_window_pos_out_param(
+        platform_io: *mut ImGuiPlatformIO,
+        out_callback: *mut Option<
+            unsafe extern "C" fn(vp: *mut ImGuiViewport, out_pos: *mut ImVec2),
+        >,
+    ) -> std::os::raw::c_int;
+
+    fn dear_imgui_rs_platform_io_get_platform_get_window_size_out_param(
+        platform_io: *mut ImGuiPlatformIO,
+        out_callback: *mut Option<
+            unsafe extern "C" fn(vp: *mut ImGuiViewport, out_size: *mut ImVec2),
+        >,
+    ) -> std::os::raw::c_int;
+
+    fn dear_imgui_rs_platform_io_get_platform_get_window_framebuffer_scale_out_param(
+        platform_io: *mut ImGuiPlatformIO,
+        out_callback: *mut Option<
+            unsafe extern "C" fn(vp: *mut ImGuiViewport, out_scale: *mut ImVec2),
+        >,
+    ) -> std::os::raw::c_int;
+
     fn dear_imgui_rs_platform_io_clear_platform_get_window_work_area_insets_if_out_param(
         platform_io: *mut ImGuiPlatformIO,
         user_callback: unsafe extern "C" fn(vp: *mut ImGuiViewport, out_insets: *mut ImVec4),
@@ -905,6 +938,59 @@ pub unsafe fn ImGuiPlatformIO_ClearPlatformGetWindowFramebufferScaleIfOutParam(
         false
     }
 }
+
+macro_rules! define_platform_callback_getter {
+    ($name:ident, $native:ident, $callback:ty) => {
+        /// Return the exact callback stored behind a shared C++ aggregate hook.
+        ///
+        /// The query is observationally read-only and returns `None` when the raw slot no longer
+        /// points at this repository's hook.
+        #[doc(hidden)]
+        #[inline]
+        pub unsafe fn $name(platform_io: *mut ImGuiPlatformIO) -> Option<$callback> {
+            #[cfg(dear_imgui_rs_platform_io_hooks)]
+            unsafe {
+                let mut callback = None;
+                if $native(platform_io, &mut callback) != 0 {
+                    return callback;
+                }
+                None
+            }
+
+            #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+            {
+                let _ = platform_io;
+                None
+            }
+        }
+    };
+}
+
+define_platform_callback_getter!(
+    ImGuiPlatformIO_PlatformSetWindowPosPointerParam,
+    dear_imgui_rs_platform_io_get_platform_set_window_pos_pointer_param,
+    unsafe extern "C" fn(*mut ImGuiViewport, *const ImVec2)
+);
+define_platform_callback_getter!(
+    ImGuiPlatformIO_PlatformSetWindowSizePointerParam,
+    dear_imgui_rs_platform_io_get_platform_set_window_size_pointer_param,
+    unsafe extern "C" fn(*mut ImGuiViewport, *const ImVec2)
+);
+define_platform_callback_getter!(
+    ImGuiPlatformIO_PlatformGetWindowPosOutParam,
+    dear_imgui_rs_platform_io_get_platform_get_window_pos_out_param,
+    unsafe extern "C" fn(*mut ImGuiViewport, *mut ImVec2)
+);
+define_platform_callback_getter!(
+    ImGuiPlatformIO_PlatformGetWindowSizeOutParam,
+    dear_imgui_rs_platform_io_get_platform_get_window_size_out_param,
+    unsafe extern "C" fn(*mut ImGuiViewport, *mut ImVec2)
+);
+define_platform_callback_getter!(
+    ImGuiPlatformIO_PlatformGetWindowFramebufferScaleOutParam,
+    dear_imgui_rs_platform_io_get_platform_get_window_framebuffer_scale_out_param,
+    unsafe extern "C" fn(*mut ImGuiViewport, *mut ImVec2)
+);
 
 /// Clear `Platform_GetWindowWorkAreaInsets` only when it is still owned by the given callback.
 #[doc(hidden)]
@@ -1458,6 +1544,108 @@ mod aggregate_setter_fallback_tests {
             ImGuiPlatformIO_Set_Renderer_SetWindowSize_PointerParam(&mut platform_io, None);
         }
         assert!(platform_io.Renderer_SetWindowSize.is_none());
+    }
+}
+
+#[cfg(all(test, dear_imgui_rs_platform_io_hooks))]
+mod aggregate_callback_identity_tests {
+    use super::*;
+
+    type SetCallback = unsafe extern "C" fn(*mut ImGuiViewport, *const ImVec2);
+    type GetCallback = unsafe extern "C" fn(*mut ImGuiViewport, *mut ImVec2);
+
+    unsafe extern "C" fn set_a(_viewport: *mut ImGuiViewport, _value: *const ImVec2) {}
+
+    unsafe extern "C" fn set_b(_viewport: *mut ImGuiViewport, _value: *const ImVec2) {}
+
+    unsafe extern "C" fn get_a(_viewport: *mut ImGuiViewport, _value: *mut ImVec2) {}
+
+    unsafe extern "C" fn get_b(_viewport: *mut ImGuiViewport, _value: *mut ImVec2) {}
+
+    fn assert_set_identity(
+        platform_io: &mut ImGuiPlatformIO,
+        install: unsafe fn(*mut ImGuiPlatformIO, Option<SetCallback>),
+        raw_slot_address: fn(&ImGuiPlatformIO) -> usize,
+        query: unsafe fn(*mut ImGuiPlatformIO) -> Option<SetCallback>,
+    ) {
+        unsafe { install(platform_io, Some(set_a)) };
+        let hook = raw_slot_address(platform_io);
+        unsafe { install(platform_io, Some(set_b)) };
+        assert_eq!(raw_slot_address(platform_io), hook);
+        assert!(std::ptr::fn_addr_eq(
+            unsafe { query(platform_io) }.unwrap(),
+            set_b as SetCallback
+        ));
+        assert!(
+            raw_slot_address(platform_io) == hook,
+            "query must not mutate the raw slot"
+        );
+        assert!(
+            std::ptr::fn_addr_eq(unsafe { query(platform_io) }.unwrap(), set_b as SetCallback),
+            "query must not mutate hook storage"
+        );
+        unsafe { install(platform_io, None) };
+    }
+
+    fn assert_get_identity(
+        platform_io: &mut ImGuiPlatformIO,
+        install: unsafe fn(*mut ImGuiPlatformIO, Option<GetCallback>),
+        raw_slot_address: fn(&ImGuiPlatformIO) -> usize,
+        query: unsafe fn(*mut ImGuiPlatformIO) -> Option<GetCallback>,
+    ) {
+        unsafe { install(platform_io, Some(get_a)) };
+        let hook = raw_slot_address(platform_io);
+        unsafe { install(platform_io, Some(get_b)) };
+        assert_eq!(raw_slot_address(platform_io), hook);
+        assert!(std::ptr::fn_addr_eq(
+            unsafe { query(platform_io) }.unwrap(),
+            get_b as GetCallback
+        ));
+        assert!(
+            raw_slot_address(platform_io) == hook,
+            "query must not mutate the raw slot"
+        );
+        assert!(
+            std::ptr::fn_addr_eq(unsafe { query(platform_io) }.unwrap(), get_b as GetCallback),
+            "query must not mutate hook storage"
+        );
+        unsafe { install(platform_io, None) };
+    }
+
+    #[test]
+    fn platform_vec2_hooks_expose_exact_callback_identity_without_mutation() {
+        let mut platform_io = ImGuiPlatformIO::default();
+
+        assert_set_identity(
+            &mut platform_io,
+            ImGuiPlatformIO_Set_Platform_SetWindowPos_PointerParam,
+            |io| io.Platform_SetWindowPos.unwrap() as usize,
+            ImGuiPlatformIO_PlatformSetWindowPosPointerParam,
+        );
+        assert_set_identity(
+            &mut platform_io,
+            ImGuiPlatformIO_Set_Platform_SetWindowSize_PointerParam,
+            |io| io.Platform_SetWindowSize.unwrap() as usize,
+            ImGuiPlatformIO_PlatformSetWindowSizePointerParam,
+        );
+        assert_get_identity(
+            &mut platform_io,
+            ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam,
+            |io| io.Platform_GetWindowPos.unwrap() as usize,
+            ImGuiPlatformIO_PlatformGetWindowPosOutParam,
+        );
+        assert_get_identity(
+            &mut platform_io,
+            ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam,
+            |io| io.Platform_GetWindowSize.unwrap() as usize,
+            ImGuiPlatformIO_PlatformGetWindowSizeOutParam,
+        );
+        assert_get_identity(
+            &mut platform_io,
+            ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam,
+            |io| io.Platform_GetWindowFramebufferScale.unwrap() as usize,
+            ImGuiPlatformIO_PlatformGetWindowFramebufferScaleOutParam,
+        );
     }
 }
 

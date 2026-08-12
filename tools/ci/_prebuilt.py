@@ -781,6 +781,26 @@ def write_prebuilt_consumer(destination: Path, source_root: Path, profile: str) 
             std::ptr::null_mut(),
             std::ptr::from_ref(&input),
         ));
+        assert!(sys::ImGuiPlatformIO_PlatformSetWindowPosPointerParam(
+            std::ptr::null_mut(),
+        )
+        .is_none());
+        assert!(sys::ImGuiPlatformIO_PlatformSetWindowSizePointerParam(
+            std::ptr::null_mut(),
+        )
+        .is_none());
+        assert!(sys::ImGuiPlatformIO_PlatformGetWindowPosOutParam(
+            std::ptr::null_mut(),
+        )
+        .is_none());
+        assert!(sys::ImGuiPlatformIO_PlatformGetWindowSizeOutParam(
+            std::ptr::null_mut(),
+        )
+        .is_none());
+        assert!(sys::ImGuiPlatformIO_PlatformGetWindowFramebufferScaleOutParam(
+            std::ptr::null_mut(),
+        )
+        .is_none());
     }}
 }}
 
