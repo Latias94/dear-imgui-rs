@@ -90,6 +90,7 @@ target.
 | WGPU renderer | WGPU 30 is the default; 29, 28, and 27 are separate mutually exclusive features. Native Winit and SDL3 multi-viewport adapters are also mutually exclusive. |
 | Glow renderer | Requires OpenGL 3.0+, OpenGL ES 3.0+, or WebGL 2. Sampler objects are selected from the live context; older desktop contexts use a temporary filter override that restores application texture parameters before the draw scope ends. |
 | Ash renderer | Native Vulkan via Ash 0.38. Winit and SDL3 multi-viewport surface adapters are mutually exclusive and share one swapchain runtime. |
+| SDLRenderer3 renderer | The official SDLRenderer3 integration is single-window. It does not provide a native multi-viewport renderer route. |
 | Browser multi-viewport | Unsupported. Browser integrations render one main canvas. |
 | Bevy default | `dear-imgui-bevy` enables `render` and `bevy-ui`; the primary Context automatically targets the unique eligible primary-window camera. |
 | Bevy headless | `default-features = false` retains all Context schedules/lifecycle and primary-Context input/capture without RenderApp extraction; explicit multi-Context input routes require `render`. |

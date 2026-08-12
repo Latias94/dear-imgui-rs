@@ -51,7 +51,9 @@ impl RuntimeControl {
             owned_renderer_viewports: RefCell::new(HashMap::new()),
             deferred_platform_viewports: RefCell::new(HashMap::new()),
             deferred_renderer_viewports: RefCell::new(HashMap::new()),
-            failed_viewports: RefCell::new(HashSet::new()),
+            failed_viewports: RefCell::new(HashMap::new()),
+            dispatch_depth: Cell::new(0),
+            dispatch_failures: RefCell::new(Vec::new()),
             faults: RefCell::new(VecDeque::new()),
             reported_replacements: RefCell::new(HashSet::new()),
             foreign_platform_user_data_reported: Cell::new(false),
@@ -172,6 +174,131 @@ impl RuntimeControl {
 
     fn release_platform_session(&self) {
         self.platform_session.borrow_mut().take();
+    }
+
+    fn platform_session_generation(&self) -> Option<u64> {
+        self.platform_session
+            .borrow()
+            .as_ref()
+            .map(Sdl3PlatformSession::generation)
+    }
+
+    fn resolve_live_viewport(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+    ) -> Option<*mut sys::ImGuiViewport> {
+        if viewport.is_null() || self.platform_session_generation().is_none() {
+            return None;
+        }
+        let context = unsafe { sys::igGetCurrentContext() };
+        if context.is_null() {
+            return None;
+        }
+        let address = viewport as usize;
+        let live = unsafe { sys::ImGuiContext_FindLiveViewportByAddress(context, address) };
+        (live == viewport && !live.is_null()).then_some(live)
+    }
+
+    fn viewport_key(&self, viewport: *mut sys::ImGuiViewport) -> Option<ViewportLeaseKey> {
+        let generation = self.platform_session_generation()?;
+        let live = self.resolve_live_viewport(viewport)?;
+        Some(ViewportLeaseKey {
+            context: self.binding.id(),
+            generation,
+            address: live as usize,
+            id: unsafe { (*live).ID },
+        })
+    }
+
+    pub(crate) fn begin_platform_dispatch(&self) -> PlatformDispatchGuard<'_> {
+        // The depth is diagnostic state only; native callback entry must never panic because a
+        // re-entrant application exceeded the counter's representable range. The scope stack is
+        // the authoritative failure state and remains intact even when the counter saturates.
+        let depth = self.dispatch_depth.get().saturating_add(1);
+        self.dispatch_depth.set(depth);
+        self.dispatch_failures.borrow_mut().push(HashMap::new());
+        PlatformDispatchGuard {
+            control: self,
+            active: true,
+        }
+    }
+
+    pub(crate) fn live_viewport(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+    ) -> Option<*mut sys::ImGuiViewport> {
+        self.resolve_live_viewport(viewport).or_else(|| {
+            #[cfg(test)]
+            {
+                self.synthetic_viewport_key(viewport).map(|_| viewport)
+            }
+            #[cfg(not(test))]
+            {
+                None
+            }
+        })
+    }
+
+    pub(crate) unsafe fn capture_viewport_platform_state(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+    ) -> Option<ViewportPlatformState> {
+        self.live_viewport(viewport)
+            .map(|live| unsafe { ViewportPlatformState::capture(live) })
+    }
+
+    pub(crate) unsafe fn viewport_renderer_user_data(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+    ) -> Option<*mut std::ffi::c_void> {
+        self.live_viewport(viewport)
+            .map(|live| unsafe { (*live).RendererUserData })
+    }
+
+    pub(crate) unsafe fn set_viewport_renderer_user_data(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+        user_data: *mut std::ffi::c_void,
+    ) -> bool {
+        let Some(live) = self.live_viewport(viewport) else {
+            return false;
+        };
+        unsafe { (*live).RendererUserData = user_data };
+        true
+    }
+
+    pub(crate) unsafe fn clear_viewport_platform_state(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+    ) -> bool {
+        let Some(live) = self.live_viewport(viewport) else {
+            return false;
+        };
+        unsafe { ViewportPlatformState::clear(live) };
+        true
+    }
+
+    pub(crate) unsafe fn restore_viewport_platform_state(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+        state: ViewportPlatformState,
+    ) -> bool {
+        let Some(live) = self.live_viewport(viewport) else {
+            return false;
+        };
+        unsafe { state.restore(live) };
+        true
+    }
+
+    fn request_viewport_close(&self, viewport: *mut sys::ImGuiViewport) -> bool {
+        let Some(live) = self.live_viewport(viewport) else {
+            return false;
+        };
+        unsafe {
+            (*live).PlatformRequestClose = true;
+            (*live).DrawData = std::ptr::null_mut();
+        }
+        true
     }
 
     fn release_renderer_device_objects_bound(&self) -> Result<(), Sdl3BackendError> {
@@ -636,40 +763,32 @@ impl RuntimeControl {
         Ok(())
     }
 
-    pub(crate) fn original_create_window(
-        &self,
-    ) -> Option<unsafe extern "C" fn(*mut sys::ImGuiViewport)> {
+    pub(crate) fn original_platform_callbacks(&self) -> Option<PlatformCallbacks> {
         self.callbacks
             .borrow()
             .as_ref()
-            .and_then(PlatformCallbackOwnership::original_create_window)
+            .map(PlatformCallbackOwnership::original_callbacks)
     }
 
-    pub(crate) fn original_destroy_window(
-        &self,
-    ) -> Option<unsafe extern "C" fn(*mut sys::ImGuiViewport)> {
-        self.callbacks
-            .borrow()
-            .as_ref()
-            .and_then(PlatformCallbackOwnership::original_destroy_window)
-    }
+    pub(crate) fn validate_platform_callback_slot(&self, slot: PlatformCallbackSlot) -> bool {
+        let owns_slot = {
+            let callbacks = self.callbacks.borrow();
+            let Some(callbacks) = callbacks.as_ref() else {
+                self.record_platform_state_replaced("platform callback ownership");
+                return false;
+            };
+            unsafe { callbacks.owns_live_slot(slot) }
+        };
+        if owns_slot {
+            return true;
+        }
 
-    pub(crate) fn original_render_window(
-        &self,
-    ) -> Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut std::ffi::c_void)> {
-        self.callbacks
-            .borrow()
-            .as_ref()
-            .and_then(PlatformCallbackOwnership::original_render_window)
-    }
-
-    pub(crate) fn original_swap_buffers(
-        &self,
-    ) -> Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut std::ffi::c_void)> {
-        self.callbacks
-            .borrow()
-            .as_ref()
-            .and_then(PlatformCallbackOwnership::original_swap_buffers)
+        // Re-run the complete publication check before revoking capabilities.
+        // A foreign backend may have replaced every SDL-owned slot in one
+        // transaction; in that case its capability bits remain valid even
+        // though this trampoline must no longer call through the slot.
+        let _ = self.validate_platform_ownership_bound();
+        false
     }
 
     pub(crate) fn original_renderer_create_window(
@@ -756,10 +875,21 @@ impl RuntimeControl {
         if !self.callback_teardown_active() || viewport.is_null() || state.is_empty() {
             return;
         }
-        let id = unsafe { (*viewport).ID };
+        let Some(key) = self.viewport_key(viewport).or_else(|| {
+            #[cfg(test)]
+            {
+                return self.synthetic_viewport_key(viewport);
+            }
+            #[cfg(not(test))]
+            {
+                None
+            }
+        }) else {
+            return;
+        };
         self.deferred_platform_viewports.borrow_mut().insert(
             viewport as usize,
-            DeferredPlatformViewportState { id, state },
+            DeferredPlatformViewportState { key, state },
         );
     }
 
@@ -774,10 +904,12 @@ impl RuntimeControl {
         if self.owned_renderer_viewport(viewport) == Some(user_data) {
             return;
         }
-        let id = unsafe { (*viewport).ID };
+        let Some(key) = self.current_or_test_viewport_key(viewport) else {
+            return;
+        };
         self.deferred_renderer_viewports.borrow_mut().insert(
             viewport as usize,
-            DeferredRendererViewportState { id, user_data },
+            DeferredRendererViewportState { key, user_data },
         );
     }
 
@@ -789,12 +921,20 @@ impl RuntimeControl {
 
         for (address, deferred) in platform {
             let viewport = address as *mut sys::ImGuiViewport;
-            let can_restore = unsafe {
-                (*viewport).ID == deferred.id && ViewportPlatformState::capture(viewport).is_empty()
-            };
+            let can_restore = self
+                .current_or_test_viewport_key(viewport)
+                .is_some_and(|key| {
+                    key.same_identity(deferred.key)
+                        && key.id == deferred.key.id
+                        && unsafe {
+                            self.capture_viewport_platform_state(viewport)
+                                .is_some_and(|state| state.is_empty())
+                        }
+                });
             if can_restore {
-                unsafe { deferred.state.restore(viewport) };
-                restored_platform.insert(address);
+                if unsafe { self.restore_viewport_platform_state(viewport, deferred.state) } {
+                    restored_platform.insert(address);
+                }
             }
         }
 
@@ -803,15 +943,26 @@ impl RuntimeControl {
             let platform_is_compatible = if platform_keys.contains(&address) {
                 restored_platform.contains(&address)
             } else {
-                unsafe { ViewportPlatformState::capture(viewport).is_empty() }
+                self.current_or_test_viewport_key(viewport).is_some()
+                    && unsafe {
+                        self.capture_viewport_platform_state(viewport)
+                            .is_some_and(|state| state.is_empty())
+                    }
             };
-            let can_restore = unsafe {
-                (*viewport).ID == deferred.id
-                    && (*viewport).RendererUserData.is_null()
-                    && platform_is_compatible
-            };
+            let can_restore = self
+                .current_or_test_viewport_key(viewport)
+                .is_some_and(|key| {
+                    key.same_identity(deferred.key)
+                        && key.id == deferred.key.id
+                        && unsafe {
+                            self.viewport_renderer_user_data(viewport)
+                                .is_some_and(|user_data| user_data.is_null())
+                        }
+                        && platform_is_compatible
+                });
             if can_restore {
-                unsafe { (*viewport).RendererUserData = deferred.user_data };
+                let _ =
+                    unsafe { self.set_viewport_renderer_user_data(viewport, deferred.user_data) };
             }
         }
     }
@@ -827,28 +978,98 @@ impl RuntimeControl {
         viewport: *mut sys::ImGuiViewport,
         state: ViewportPlatformState,
     ) {
+        let Some(key) = self.viewport_key(viewport).or_else(|| {
+            #[cfg(test)]
+            {
+                return self.synthetic_viewport_key(viewport);
+            }
+            #[cfg(not(test))]
+            {
+                None
+            }
+        }) else {
+            return;
+        };
         self.owned_viewports
             .borrow_mut()
-            .insert(viewport as usize, state);
+            .insert(viewport as usize, OwnedViewportLease { key, state });
     }
 
     pub(crate) fn take_owned_viewport(
         &self,
         viewport: *mut sys::ImGuiViewport,
     ) -> Option<ViewportPlatformState> {
-        self.owned_viewports
-            .borrow_mut()
-            .remove(&(viewport as usize))
+        let key = self.current_or_test_viewport_key(viewport)?;
+        let actual = unsafe { self.capture_viewport_platform_state(viewport) }?;
+        let address = viewport as usize;
+        let mut owned = self.owned_viewports.borrow_mut();
+        let lease = owned.get(&address).copied()?;
+        if !lease.key.same_identity(key) {
+            owned.remove(&address);
+            return None;
+        }
+        if lease.key.id != key.id && lease.state != actual {
+            // A matching address is not sufficient authority after Dear ImGui has changed the
+            // numeric ID. Docking may mutate an ID in place, but only an exact sidecar match proves
+            // that the lease still belongs to that live viewport rather than a reused allocation.
+            owned.remove(&address);
+            return None;
+        }
+        owned.remove(&address).map(|lease| lease.state)
     }
 
-    pub(crate) fn owned_viewport(
+    pub(crate) fn inspect_owned_viewport(
         &self,
         viewport: *mut sys::ImGuiViewport,
-    ) -> Option<ViewportPlatformState> {
-        self.owned_viewports
-            .borrow()
-            .get(&(viewport as usize))
-            .copied()
+    ) -> Option<(ViewportPlatformState, ViewportPlatformState)> {
+        let key = self.current_or_test_viewport_key(viewport)?;
+        let address = viewport as usize;
+        let mut owned = self.owned_viewports.borrow_mut();
+        let lease = owned.get_mut(&address)?;
+        if !lease.key.same_identity(key) {
+            owned.remove(&address);
+            return None;
+        }
+        let expected = lease.state;
+        let actual = unsafe { ViewportPlatformState::capture(viewport) };
+        if expected == actual {
+            // Docking may change the numeric ID in place. Refresh it only after the complete
+            // platform sidecar still proves that this is the same owned viewport.
+            lease.key.id = key.id;
+        }
+        Some((expected, actual))
+    }
+
+    fn current_or_test_viewport_key(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+    ) -> Option<ViewportLeaseKey> {
+        self.viewport_key(viewport).or_else(|| {
+            #[cfg(test)]
+            {
+                return self.synthetic_viewport_key(viewport);
+            }
+            #[cfg(not(test))]
+            {
+                None
+            }
+        })
+    }
+
+    #[cfg(test)]
+    fn synthetic_viewport_key(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+    ) -> Option<ViewportLeaseKey> {
+        if viewport.is_null() {
+            return None;
+        }
+        Some(ViewportLeaseKey {
+            context: self.binding.id(),
+            generation: self.platform_session_generation().unwrap_or(0),
+            address: viewport as usize,
+            id: unsafe { (*viewport).ID },
+        })
     }
 
     pub(crate) fn remember_owned_renderer_viewport(
@@ -857,9 +1078,13 @@ impl RuntimeControl {
         user_data: *mut std::ffi::c_void,
     ) {
         if !viewport.is_null() && !user_data.is_null() {
-            self.owned_renderer_viewports
-                .borrow_mut()
-                .insert(viewport as usize, user_data);
+            let Some(key) = self.current_or_test_viewport_key(viewport) else {
+                return;
+            };
+            self.owned_renderer_viewports.borrow_mut().insert(
+                viewport as usize,
+                OwnedRendererViewportLease { key, user_data },
+            );
         }
     }
 
@@ -867,63 +1092,130 @@ impl RuntimeControl {
         &self,
         viewport: *mut sys::ImGuiViewport,
     ) -> Option<*mut std::ffi::c_void> {
-        self.owned_renderer_viewports
-            .borrow()
-            .get(&(viewport as usize))
-            .copied()
+        let key = self.current_or_test_viewport_key(viewport)?;
+        let actual = unsafe { self.viewport_renderer_user_data(viewport) }?;
+        let mut owned = self.owned_renderer_viewports.borrow_mut();
+        let lease = owned.get_mut(&(viewport as usize))?;
+        if !lease.key.same_identity(key) {
+            owned.remove(&(viewport as usize));
+            return None;
+        }
+        if lease.key.id != key.id && lease.user_data != actual {
+            owned.remove(&(viewport as usize));
+            return None;
+        }
+        if lease.user_data == actual {
+            // As with platform sidecars, an ID refresh is valid only after the renderer sidecar
+            // itself still matches this runtime's lease.
+            lease.key.id = key.id;
+        }
+        Some(lease.user_data)
     }
 
     pub(crate) fn forget_owned_renderer_viewport(
         &self,
         viewport: *mut sys::ImGuiViewport,
     ) -> Option<*mut std::ffi::c_void> {
-        self.owned_renderer_viewports
-            .borrow_mut()
+        let key = self.current_or_test_viewport_key(viewport)?;
+        let mut owned = self.owned_renderer_viewports.borrow_mut();
+        let lease = owned.get(&(viewport as usize)).copied()?;
+        if !lease.key.same_identity(key) {
+            owned.remove(&(viewport as usize));
+            return None;
+        }
+        let actual = unsafe { self.viewport_renderer_user_data(viewport) }?;
+        if lease.key.id != key.id && lease.user_data != actual {
+            owned.remove(&(viewport as usize));
+            return None;
+        }
+        owned
             .remove(&(viewport as usize))
+            .map(|lease| lease.user_data)
     }
 
     pub(crate) fn mark_viewport_failed(&self, viewport: *mut sys::ImGuiViewport) {
-        if viewport.is_null() {
+        let Some(key) = self.current_or_test_viewport_key(viewport) else {
             return;
+        };
+        self.failed_viewports
+            .borrow_mut()
+            .insert(viewport as usize, key);
+        if let Some(current) = self.dispatch_failures.borrow_mut().last_mut() {
+            current.insert(viewport as usize, key);
         }
-        self.failed_viewports.borrow_mut().insert(viewport as usize);
-        unsafe {
-            (*viewport).PlatformRequestClose = true;
-            (*viewport).DrawData = std::ptr::null_mut();
-        }
+        let _ = self.request_viewport_close(viewport);
     }
 
     pub(crate) fn viewport_failed(&self, viewport: *mut sys::ImGuiViewport) -> bool {
-        !viewport.is_null()
-            && self
-                .failed_viewports
-                .borrow()
-                .contains(&(viewport as usize))
+        let Some(key) = self.current_or_test_viewport_key(viewport) else {
+            return false;
+        };
+        let address = viewport as usize;
+        let persistent = self.failed_viewports.borrow().get(&address).copied();
+        if let Some(persistent) = persistent {
+            if persistent == key {
+                return true;
+            }
+            self.failed_viewports.borrow_mut().remove(&address);
+        }
+        self.dispatch_failures
+            .borrow()
+            .iter()
+            .rev()
+            .any(|failures| failures.get(&address).is_some_and(|failed| *failed == key))
     }
 
     pub(crate) fn forget_failed_viewport(&self, viewport: *mut sys::ImGuiViewport) -> bool {
-        !viewport.is_null()
-            && self
-                .failed_viewports
-                .borrow_mut()
-                .remove(&(viewport as usize))
+        let Some(key) = self.current_or_test_viewport_key(viewport) else {
+            return false;
+        };
+        let address = viewport as usize;
+        let removed = self
+            .failed_viewports
+            .borrow_mut()
+            .remove(&address)
+            .is_some_and(|failed| failed == key);
+        for failures in self.dispatch_failures.borrow_mut().iter_mut() {
+            if failures.get(&address).is_some_and(|failed| *failed == key) {
+                failures.remove(&address);
+            }
+        }
+        removed
     }
 
     fn request_failed_viewport_closes(&self) {
-        let viewports = self
+        let failed = self
             .failed_viewports
             .borrow()
             .iter()
-            .copied()
+            .map(|(address, key)| (*address, *key))
             .collect::<Vec<_>>();
         let _ = self.binding.try_with_bound_context(|| {
-            for viewport in viewports {
-                let viewport = viewport as *mut sys::ImGuiViewport;
-                if !viewport.is_null() {
-                    unsafe {
-                        (*viewport).PlatformRequestClose = true;
-                        (*viewport).DrawData = std::ptr::null_mut();
-                    }
+            let context = unsafe { sys::igGetCurrentContext() };
+            let mut stale = Vec::new();
+            for (address, key) in failed {
+                let viewport =
+                    unsafe { sys::ImGuiContext_FindLiveViewportByAddress(context, address) };
+                let current = if viewport.is_null() {
+                    None
+                } else {
+                    self.viewport_key(viewport)
+                };
+                if current.is_none_or(|current| {
+                    current.context != key.context
+                        || current.generation != key.generation
+                        || current.address != key.address
+                        || current.id != key.id
+                }) {
+                    stale.push(address);
+                    continue;
+                }
+                let _ = self.request_viewport_close(viewport);
+            }
+            if !stale.is_empty() {
+                let mut failures = self.failed_viewports.borrow_mut();
+                for address in stale {
+                    failures.remove(&address);
                 }
             }
         });
@@ -1202,7 +1494,10 @@ impl Sdl3ViewportRendererAdapter {
             return Sdl3ViewportAttempt::skipped(faults);
         }
 
-        let output = callback();
+        let output = {
+            let _dispatch = self.control.begin_platform_dispatch();
+            callback()
+        };
         Sdl3ViewportAttempt::completed(output, self.control.drain_faults())
     }
 }

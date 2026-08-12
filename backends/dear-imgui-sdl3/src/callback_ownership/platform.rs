@@ -1,5 +1,4 @@
 use std::cell::Cell;
-use std::ffi::c_void;
 use std::rc::Rc;
 
 use dear_imgui_rs::sys;
@@ -9,15 +8,17 @@ use crate::core::ffi;
 use crate::runtime::RuntimeControl;
 
 use super::native_callbacks::{
-    register_runtime, sdl3_create_window, sdl3_destroy_window, sdl3_render_window,
-    sdl3_swap_buffers,
+    register_runtime, sdl3_create_vk_surface, sdl3_create_window, sdl3_destroy_window,
+    sdl3_get_window_focus, sdl3_get_window_framebuffer_scale, sdl3_get_window_minimized,
+    sdl3_get_window_pos, sdl3_get_window_size, sdl3_render_window, sdl3_set_window_alpha,
+    sdl3_set_window_focus, sdl3_set_window_pos, sdl3_set_window_size, sdl3_set_window_title,
+    sdl3_show_window, sdl3_swap_buffers, sdl3_update_window,
 };
 use super::{
-    BackendState, MonitorState, PlatformCallbackOwnership, PlatformCallbacks,
+    BackendState, MonitorState, PlatformCallbackOwnership, PlatformCallbackSlot, PlatformCallbacks,
     PlatformClaimBaseline, PlatformShutdownRestore, SDL_PLATFORM_RESERVED_FLAGS,
-    SDL_PLATFORM_STABLE_FLAGS, ViewportPlatformState, callback_eq, for_each_callback,
-    for_each_platform_service_callback, for_each_platform_window_callback, for_each_user_data,
-    restored_owned_pointer,
+    SDL_PLATFORM_STABLE_FLAGS, ViewportPlatformState, callback_eq,
+    for_each_platform_service_callback, for_each_user_data, restored_owned_pointer,
 };
 
 impl PlatformCallbackOwnership {
@@ -35,17 +36,71 @@ impl PlatformCallbackOwnership {
         let original = unsafe { PlatformCallbacks::capture(platform_io) };
         register_runtime(control);
         unsafe {
-            if original.raw.Platform_CreateWindow.is_some() {
+            if original.window_callback_is_some(PlatformCallbackSlot::CreateWindow) {
                 (*platform_io).Platform_CreateWindow = Some(sdl3_create_window);
             }
-            if original.raw.Platform_DestroyWindow.is_some() {
+            if original.window_callback_is_some(PlatformCallbackSlot::DestroyWindow) {
                 (*platform_io).Platform_DestroyWindow = Some(sdl3_destroy_window);
             }
-            if original.raw.Platform_RenderWindow.is_some() {
+            if original.window_callback_is_some(PlatformCallbackSlot::ShowWindow) {
+                (*platform_io).Platform_ShowWindow = Some(sdl3_show_window);
+            }
+            if original.window_callback_is_some(PlatformCallbackSlot::UpdateWindow) {
+                (*platform_io).Platform_UpdateWindow = Some(sdl3_update_window);
+            }
+            if original.window_callback_is_some(PlatformCallbackSlot::SetWindowPos) {
+                sys::ImGuiPlatformIO_Set_Platform_SetWindowPos_PointerParam(
+                    platform_io,
+                    Some(sdl3_set_window_pos),
+                );
+            }
+            if original.window_callback_is_some(PlatformCallbackSlot::GetWindowPos) {
+                sys::ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(
+                    platform_io,
+                    Some(sdl3_get_window_pos),
+                );
+            }
+            if original.window_callback_is_some(PlatformCallbackSlot::SetWindowSize) {
+                sys::ImGuiPlatformIO_Set_Platform_SetWindowSize_PointerParam(
+                    platform_io,
+                    Some(sdl3_set_window_size),
+                );
+            }
+            if original.window_callback_is_some(PlatformCallbackSlot::GetWindowSize) {
+                sys::ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(
+                    platform_io,
+                    Some(sdl3_get_window_size),
+                );
+            }
+            if original.window_callback_is_some(PlatformCallbackSlot::GetWindowFramebufferScale) {
+                sys::ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(
+                    platform_io,
+                    Some(sdl3_get_window_framebuffer_scale),
+                );
+            }
+            if original.window_callback_is_some(PlatformCallbackSlot::SetWindowFocus) {
+                (*platform_io).Platform_SetWindowFocus = Some(sdl3_set_window_focus);
+            }
+            if original.window_callback_is_some(PlatformCallbackSlot::GetWindowFocus) {
+                (*platform_io).Platform_GetWindowFocus = Some(sdl3_get_window_focus);
+            }
+            if original.window_callback_is_some(PlatformCallbackSlot::GetWindowMinimized) {
+                (*platform_io).Platform_GetWindowMinimized = Some(sdl3_get_window_minimized);
+            }
+            if original.window_callback_is_some(PlatformCallbackSlot::SetWindowTitle) {
+                (*platform_io).Platform_SetWindowTitle = Some(sdl3_set_window_title);
+            }
+            if original.window_callback_is_some(PlatformCallbackSlot::RenderWindow) {
                 (*platform_io).Platform_RenderWindow = Some(sdl3_render_window);
             }
-            if original.raw.Platform_SwapBuffers.is_some() {
+            if original.window_callback_is_some(PlatformCallbackSlot::SwapBuffers) {
                 (*platform_io).Platform_SwapBuffers = Some(sdl3_swap_buffers);
+            }
+            if original.window_callback_is_some(PlatformCallbackSlot::SetWindowAlpha) {
+                (*platform_io).Platform_SetWindowAlpha = Some(sdl3_set_window_alpha);
+            }
+            if original.window_callback_is_some(PlatformCallbackSlot::CreateVkSurface) {
+                (*platform_io).Platform_CreateVkSurface = Some(sdl3_create_vk_surface);
             }
         }
         let installed = unsafe { PlatformCallbacks::capture(platform_io) };
@@ -81,7 +136,7 @@ impl PlatformCallbackOwnership {
         let current_main_viewport = unsafe { ViewportPlatformState::capture(main_viewport) };
         let current_monitors = unsafe { MonitorState::capture(platform_io) };
         let complete_foreign_takeover = self.is_complete_foreign_takeover(
-            &current.raw,
+            &current,
             current_backend,
             current_main_viewport,
             current_monitors,
@@ -90,14 +145,11 @@ impl PlatformCallbackOwnership {
             control.capabilities_were_revoked(SDL_PLATFORM_RESERVED_FLAGS);
         let monitors_owned = current_monitors == self.owned_monitors.get();
 
-        macro_rules! detect_window_replacement {
-            ($field:ident) => {
-                if !callback_eq!(self.installed.raw.$field, current.raw.$field) {
-                    control.record_callback_replaced(stringify!($field));
-                }
-            };
+        for slot in PlatformCallbackSlot::ALL {
+            if !self.installed.same_window_callback(&current, slot) {
+                control.record_callback_replaced(slot.name());
+            }
         }
-        for_each_platform_window_callback!(detect_window_replacement);
 
         if self.baseline.backend.user_data != self.installed_backend.user_data
             && self.installed_backend.user_data != current_backend.user_data
@@ -149,12 +201,7 @@ impl PlatformCallbackOwnership {
                 };
             }
             for_each_platform_service_callback!(restore_owned_service_callback);
-            macro_rules! restore_owned_window_callback {
-                ($field:ident) => {
-                    (*platform_io).$field = self.installed.raw.$field;
-                };
-            }
-            for_each_platform_window_callback!(restore_owned_window_callback);
+            self.installed.install_window_callbacks(platform_io);
 
             macro_rules! restore_owned_user_data {
                 ($field:ident) => {
@@ -205,7 +252,7 @@ impl PlatformCallbackOwnership {
         }
 
         unsafe {
-            macro_rules! restore_callback {
+            macro_rules! restore_service_callback {
                 ($field:ident) => {
                     if callback_eq!(
                         self.baseline.callbacks.raw.$field,
@@ -220,7 +267,29 @@ impl PlatformCallbackOwnership {
                     }
                 };
             }
-            for_each_callback!(restore_callback);
+            for_each_platform_service_callback!(restore_service_callback);
+
+            if PlatformCallbackSlot::ALL.into_iter().all(|slot| {
+                self.installed
+                    .same_window_callback(&restore.callbacks, slot)
+            }) {
+                self.baseline
+                    .callbacks
+                    .install_window_callbacks(platform_io);
+            } else {
+                for slot in PlatformCallbackSlot::ALL {
+                    if self
+                        .installed
+                        .same_window_callback(&restore.callbacks, slot)
+                    {
+                        self.baseline
+                            .callbacks
+                            .install_window_callback(platform_io, slot);
+                    } else {
+                        restore.callbacks.install_window_callback(platform_io, slot);
+                    }
+                }
+            }
 
             macro_rules! restore_user_data {
                 ($field:ident) => {
@@ -284,30 +353,6 @@ impl PlatformCallbackOwnership {
         Ok(())
     }
 
-    pub(crate) fn original_create_window(
-        &self,
-    ) -> Option<unsafe extern "C" fn(*mut sys::ImGuiViewport)> {
-        self.original.raw.Platform_CreateWindow
-    }
-
-    pub(crate) fn original_destroy_window(
-        &self,
-    ) -> Option<unsafe extern "C" fn(*mut sys::ImGuiViewport)> {
-        self.original.raw.Platform_DestroyWindow
-    }
-
-    pub(crate) fn original_render_window(
-        &self,
-    ) -> Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void)> {
-        self.original.raw.Platform_RenderWindow
-    }
-
-    pub(crate) fn original_swap_buffers(
-        &self,
-    ) -> Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void)> {
-        self.original.raw.Platform_SwapBuffers
-    }
-
     pub(crate) unsafe fn detect_replacements(&self, control: &RuntimeControl) -> bool {
         let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
         let io = unsafe { sys::igGetIO_Nil() };
@@ -316,7 +361,7 @@ impl PlatformCallbackOwnership {
             control.record_platform_state_replaced("platform callback table");
             return false;
         }
-        let current = unsafe { &*platform_io };
+        let current = unsafe { PlatformCallbacks::capture(platform_io) };
         // Snapshot every compared value before recording a fault. Recording revokes this
         // runtime's capability bits, which must not be mistaken for a second external drift in
         // the same validation pass.
@@ -324,7 +369,7 @@ impl PlatformCallbackOwnership {
         let current_main_viewport = unsafe { ViewportPlatformState::capture(main_viewport) };
         let current_monitors = unsafe { MonitorState::capture(platform_io) };
         let complete_foreign_takeover = self.is_complete_foreign_takeover(
-            current,
+            &current,
             current_backend,
             current_main_viewport,
             current_monitors,
@@ -332,15 +377,12 @@ impl PlatformCallbackOwnership {
         let capabilities_were_revoked =
             control.capabilities_were_revoked(SDL_PLATFORM_RESERVED_FLAGS);
         let mut owned = true;
-        macro_rules! detect_window_replacement {
-            ($field:ident) => {
-                if !callback_eq!(self.installed.raw.$field, current.$field) {
-                    control.record_callback_replaced(stringify!($field));
-                    owned = false;
-                }
-            };
+        for slot in PlatformCallbackSlot::ALL {
+            if !self.installed.same_window_callback(&current, slot) {
+                control.record_callback_replaced(slot.name());
+                owned = false;
+            }
         }
-        for_each_platform_window_callback!(detect_window_replacement);
 
         if self.baseline.backend.user_data != self.installed_backend.user_data
             && self.installed_backend.user_data != current_backend.user_data
@@ -395,7 +437,7 @@ impl PlatformCallbackOwnership {
 
     fn is_complete_foreign_takeover(
         &self,
-        current: &sys::ImGuiPlatformIO,
+        current: &PlatformCallbacks,
         current_backend: BackendState,
         current_main_viewport: ViewportPlatformState,
         current_monitors: MonitorState,
@@ -414,20 +456,22 @@ impl PlatformCallbackOwnership {
             return false;
         }
 
-        let mut all_owned_callbacks_replaced = true;
-        macro_rules! require_owned_callback_replacement {
-            ($field:ident) => {
-                if !callback_eq!(
-                    self.baseline.callbacks.raw.$field,
-                    self.installed.raw.$field
-                ) && (current.$field.is_none()
-                    || callback_eq!(self.installed.raw.$field, current.$field))
-                {
-                    all_owned_callbacks_replaced = false;
-                }
-            };
-        }
-        for_each_platform_window_callback!(require_owned_callback_replacement);
+        let all_owned_callbacks_replaced = PlatformCallbackSlot::ALL.into_iter().all(|slot| {
+            if self.original.window_callback_is_some(slot) {
+                // Every callback claimed by this registration must now point at a foreign
+                // implementation. A baseline callback that was already foreign is not evidence
+                // of a takeover, but it also must not make the predicate fail.
+                self.baseline
+                    .callbacks
+                    .same_window_callback(&self.installed, slot)
+                    || (current.window_callback_is_some(slot)
+                        && !self.installed.same_window_callback(current, slot))
+            } else {
+                // Filling a slot that was empty before the claim is a foreign partial write, not
+                // evidence that another backend completed a takeover.
+                !current.window_callback_is_some(slot)
+            }
+        });
 
         let owned_monitors = self.owned_monitors.get();
         let monitors_transferred = owned_monitors.is_empty()

@@ -580,6 +580,9 @@ published as usable.
 
 - **SDL3 + OpenGL3**: multi-viewport is provided by the upstream C++ backends and
   considered stable for desktop use.
+- **SDL3 + SDLRenderer3**: this crate currently exposes the official single-window renderer
+  only. It does not publish a native multi-viewport renderer route; use OpenGL3, Glow, WGPU, Ash,
+  or SDLGPU3 when secondary OS windows are required.
 - **SDL3 + Glow**: multi-viewport is experimental but functional on native targets.
 - **SDL3 + WGPU**: multi-viewport is experimental on native targets; WebGPU/wasm is
   single-window to match upstream `imgui_impl_wgpu`.
