@@ -44,10 +44,15 @@ impl Drop for TestDirectory {
 }
 
 fn request_with_env(values: Vec<(&str, Option<&str>)>) -> BuildRequest {
+    request_with_abi_and_env("", values)
+}
+
+fn request_with_abi_and_env(target_abi: &str, values: Vec<(&str, Option<&str>)>) -> BuildRequest {
     BuildRequest::new(BuildRequestInput {
         target_triple: "x86_64-pc-windows-msvc",
         target_os: "windows",
         target_env: "msvc",
+        target_abi,
         target_arch: "x86_64",
         target_endian: "little",
         target_pointer_width: "64",
@@ -200,12 +205,15 @@ fn native_and_wasm_share_forbidden_aggregate_helpers() {
 #[test]
 fn binding_spec_hash_is_stable_and_covers_target_policy() {
     let native = BindingSpec::core_native(NativeAbiProfile::Windows64);
+    let non_windows = BindingSpec::core_native(NativeAbiProfile::NonWindows);
     let wasm = BindingSpec::core_wasm("imgui-sys-v1");
 
     assert_eq!(native.deterministic_hash(), native.deterministic_hash());
+    assert_eq!(native.deterministic_hash(), "fnv1a64:b7fbb34dde098a66");
+    assert_eq!(non_windows.deterministic_hash(), "fnv1a64:56a8814db35b4c70");
     assert_ne!(
         native.deterministic_hash(),
-        BindingSpec::core_native(NativeAbiProfile::NonWindows).deterministic_hash()
+        non_windows.deterministic_hash()
     );
     assert_ne!(native.deterministic_hash(), wasm.deterministic_hash());
     assert_ne!(
@@ -298,6 +306,7 @@ fn native_abi_profiles_cover_only_the_verified_target_matrix() {
                     triple: target.rust_target,
                     os: target.os,
                     env: target.env,
+                    target_abi: target.target_abi,
                     arch: target.arch,
                     endian: target.endian,
                     pointer_width: target.pointer_width,
@@ -314,12 +323,29 @@ fn native_abi_profiles_cover_only_the_verified_target_matrix() {
         .find(|target| target.rust_target == "x86_64-pc-windows-gnu")
         .unwrap();
     assert_eq!(windows_gnu.clang_target, "x86_64-w64-windows-gnu");
+    assert_eq!(windows_gnu.target_abi, "");
+
+    for (rust_target, expected_abi) in [
+        ("aarch64-apple-ios-sim", "sim"),
+        ("x86_64-apple-ios", "sim"),
+        ("armv7-linux-androideabi", "eabi"),
+        ("armv7-unknown-linux-gnueabihf", "eabihf"),
+        ("armv7-unknown-linux-musleabihf", "eabihf"),
+    ] {
+        let target = NativeAbiProfile::NonWindows
+            .compatibility_targets()
+            .iter()
+            .find(|target| target.rust_target == rust_target)
+            .unwrap();
+        assert_eq!(target.target_abi, expected_abi, "{rust_target}");
+    }
 
     for facts in [
         TargetFacts {
             triple: "aarch64-pc-windows-gnu",
             os: "windows",
             env: "gnu",
+            target_abi: "",
             arch: "aarch64",
             endian: "little",
             pointer_width: "64",
@@ -328,6 +354,7 @@ fn native_abi_profiles_cover_only_the_verified_target_matrix() {
             triple: "armv5te-unknown-linux-gnueabi",
             os: "linux",
             env: "gnu",
+            target_abi: "eabi",
             arch: "arm",
             endian: "little",
             pointer_width: "32",
@@ -336,6 +363,7 @@ fn native_abi_profiles_cover_only_the_verified_target_matrix() {
             triple: "armv7-unknown-linux-gnu",
             os: "linux",
             env: "gnu",
+            target_abi: "",
             arch: "arm",
             endian: "little",
             pointer_width: "32",
@@ -344,6 +372,7 @@ fn native_abi_profiles_cover_only_the_verified_target_matrix() {
             triple: "aarch64-apple-ios-macabi",
             os: "ios",
             env: "macabi",
+            target_abi: "macabi",
             arch: "aarch64",
             endian: "little",
             pointer_width: "64",
@@ -357,6 +386,7 @@ fn native_abi_profiles_cover_only_the_verified_target_matrix() {
             triple: "aarch64-unknown-linux-gnu",
             os: "linux",
             env: "gnu",
+            target_abi: "",
             arch: "aarch64",
             endian: "big",
             pointer_width: "64",
@@ -368,12 +398,100 @@ fn native_abi_profiles_cover_only_the_verified_target_matrix() {
             triple: "x86_64-unknown-freebsd",
             os: "freebsd",
             env: "",
+            target_abi: "",
             arch: "x86_64",
             endian: "little",
             pointer_width: "64",
         })
         .is_err()
     );
+
+    let error = NativeAbiProfile::for_target(TargetFacts {
+        triple: "aarch64-apple-ios-sim",
+        os: "ios",
+        env: "sim",
+        target_abi: "",
+        arch: "aarch64",
+        endian: "little",
+        pointer_width: "64",
+    })
+    .unwrap_err();
+    assert!(
+        error.contains("expected os=ios, env=sim, abi=sim"),
+        "{error}"
+    );
+    assert!(error.contains("got os=ios, env=sim, abi="), "{error}");
+}
+
+#[test]
+fn windows_gnullvm_targets_use_the_verified_windows64_profile() {
+    assert_eq!(
+        NativeAbiProfile::Windows64
+            .compatibility_targets()
+            .iter()
+            .map(|target| target.rust_target)
+            .collect::<Vec<_>>(),
+        [
+            "x86_64-pc-windows-msvc",
+            "aarch64-pc-windows-msvc",
+            "x86_64-pc-windows-gnu",
+            "x86_64-pc-windows-gnullvm",
+            "aarch64-pc-windows-gnullvm",
+        ],
+    );
+
+    for (rust_target, clang_target, arch) in [
+        (
+            "x86_64-pc-windows-gnullvm",
+            "x86_64-pc-windows-gnu",
+            "x86_64",
+        ),
+        (
+            "aarch64-pc-windows-gnullvm",
+            "aarch64-pc-windows-gnu",
+            "aarch64",
+        ),
+    ] {
+        let target = NativeAbiProfile::Windows64
+            .compatibility_targets()
+            .iter()
+            .find(|target| target.rust_target == rust_target)
+            .unwrap_or_else(|| panic!("missing exact compatibility target {rust_target}"));
+        assert_eq!(target.clang_target, clang_target, "{rust_target}");
+        assert_eq!(target.os, "windows", "{rust_target}");
+        assert_eq!(target.env, "gnu", "{rust_target}");
+        assert_eq!(target.target_abi, "llvm", "{rust_target}");
+        assert_eq!(target.arch, arch, "{rust_target}");
+        assert_eq!(target.endian, "little", "{rust_target}");
+        assert_eq!(target.pointer_width, "64", "{rust_target}");
+
+        assert_eq!(
+            NativeAbiProfile::for_target(TargetFacts {
+                triple: rust_target,
+                os: "windows",
+                env: "gnu",
+                target_abi: "llvm",
+                arch,
+                endian: "little",
+                pointer_width: "64",
+            })
+            .unwrap(),
+            NativeAbiProfile::Windows64,
+        );
+
+        let error = NativeAbiProfile::for_target(TargetFacts {
+            triple: rust_target,
+            os: "windows",
+            env: "gnu",
+            target_abi: "",
+            arch,
+            endian: "little",
+            pointer_width: "64",
+        })
+        .unwrap_err();
+        assert!(error.contains("expected os=windows, env=gnu, abi=llvm"));
+        assert!(error.contains("got os=windows, env=gnu, abi="));
+    }
 }
 
 #[test]
@@ -457,6 +575,8 @@ fn sanitization_policies_are_independent() {
 
 #[test]
 fn every_supported_environment_input_changes_the_build_request() {
+    assert!(CORE_BUILD_ENV_VARS.contains(&"CARGO_CFG_TARGET_ABI"));
+
     let baseline = request_with_env(
         CORE_BUILD_ENV_VARS
             .iter()
@@ -484,6 +604,7 @@ fn every_supported_environment_input_changes_the_build_request() {
         target_triple: "x86_64-unknown-linux-gnu",
         target_os: "linux",
         target_env: "gnu",
+        target_abi: "",
         target_arch: "x86_64",
         target_endian: "little",
         target_pointer_width: "64",
@@ -495,6 +616,7 @@ fn every_supported_environment_input_changes_the_build_request() {
         target_triple: "x86_64-unknown-linux-gnu",
         target_os: "linux",
         target_env: "gnu",
+        target_abi: "",
         target_arch: "x86_64",
         target_endian: "little",
         target_pointer_width: "64",
@@ -506,6 +628,19 @@ fn every_supported_environment_input_changes_the_build_request() {
         separated.deterministic_hash(),
         shifted.deterministic_hash(),
         "feature/environment list boundaries must participate in BuildRequest hashes"
+    );
+}
+
+#[test]
+fn target_abi_participates_in_build_request_identity() {
+    let empty_abi = request_with_abi_and_env("", Vec::new());
+    let llvm_abi = request_with_abi_and_env("llvm", Vec::new());
+
+    assert_eq!(empty_abi.target_abi, "");
+    assert_eq!(llvm_abi.target_abi, "llvm");
+    assert_ne!(
+        empty_abi.deterministic_hash(),
+        llvm_abi.deterministic_hash()
     );
 }
 

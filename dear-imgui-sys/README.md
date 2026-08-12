@@ -11,7 +11,7 @@ This crate provides unsafe Rust bindings to Dear ImGui v1.92.9b (docking branch)
 - **cimgui C API**: A deliberate C boundary for the core `ig*` API
 - **Docking Support**: Full docking support; PlatformIO primitives for backend-specific native multi-viewport routes
 - **Modern Dear ImGui**: Based on Dear ImGui v1.92.9b docking branch
-- **Cross-platform**: Consistent builds on Windows (MSVC/MinGW), Linux, macOS, and WebAssembly
+- **Cross-platform**: Consistent builds on Windows (MSVC, MinGW-GCC, and GNU/LLVM), Linux, macOS, and WebAssembly
 - **Prebuilt Binaries**: Optional prebuilt static libraries for faster builds
 - **Offline-friendly**: Pregenerated bindings for normal builds, docs.rs, and offline environments
 - **Optional backend shim ABI**: Shared low-level self-contained backend shim modules for downstream backend crates and engine integrations
@@ -69,9 +69,10 @@ Bindgen is only needed when regenerating bindings.
 
 **Requirements by platform:**
 
-- **Windows**: Visual Studio Build Tools or Visual Studio with C++ support
+- **Windows MSVC**: Visual Studio Build Tools or Visual Studio with C++ support
   - Optional `freetype` source builds can use vcpkg:
     `vcpkg install freetype:x64-windows-static-md`
+- **Windows GNU/LLVM (`*-pc-windows-gnullvm`)**: llvm-mingw with its target-prefixed Clang drivers and `llvm-ar`; Visual Studio is not required
 - **Linux**: `build-essential`, `pkg-config`
   ```bash
   sudo apt-get install build-essential pkg-config
@@ -80,6 +81,21 @@ Bindgen is only needed when regenerating bindings.
   ```bash
   xcode-select --install
   ```
+
+For an x64 gnullvm source build, point Cargo and `cc` at the same llvm-mingw installation:
+
+```powershell
+$llvmMingw = 'C:\llvm-mingw'
+$env:CARGO_TARGET_X86_64_PC_WINDOWS_GNULLVM_LINKER = "$llvmMingw\bin\x86_64-w64-mingw32-clang.exe"
+$env:CC_x86_64_pc_windows_gnullvm = "$llvmMingw\bin\x86_64-w64-mingw32-clang.exe"
+$env:CXX_x86_64_pc_windows_gnullvm = "$llvmMingw\bin\x86_64-w64-mingw32-clang++.exe"
+$env:AR_x86_64_pc_windows_gnullvm = "$llvmMingw\bin\llvm-ar.exe"
+cargo build -p dear-imgui-sys --target x86_64-pc-windows-gnullvm
+```
+
+For `aarch64-pc-windows-gnullvm`, use the equivalent `aarch64_pc_windows_gnullvm` environment-variable suffix and the `aarch64-w64-mingw32-clang[++]` drivers. Both gnullvm targets link libc++ statically. Default Rust CRT mode still requires llvm-mingw's `libunwind.dll` at runtime; `-C target-feature=+crt-static` removes that dynamic unwind dependency on x64. CI executes and ABI-tests x64 in both modes, but only cross-links and inspects the Arm64 target.
+
+Official gnullvm prebuilts are not published. This source-build contract covers the default native core and maintained C++ extension paths; optional FreeType and the SDL3 backend's external native dependency remain separate support work.
 
 When the `freetype` feature is enabled, `dear-imgui-sys` must find real
 FreeType development files. The build script tries `pkg-config freetype2` first

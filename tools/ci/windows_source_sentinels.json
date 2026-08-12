@@ -1,0 +1,42 @@
+[
+  {
+    "package": "dear-imgui-sys",
+    "test": "numeric_contract",
+    "binary_pattern": "numeric_contract-*.exe"
+  },
+  {
+    "package": "dear-implot-sys",
+    "test": "native_link_implot",
+    "binary_pattern": "native_link_implot-*.exe"
+  },
+  {
+    "package": "dear-imnodes-sys",
+    "test": "native_link_imnodes",
+    "binary_pattern": "native_link_imnodes-*.exe"
+  },
+  {
+    "package": "dear-node-editor-sys",
+    "test": "native_link_node_editor",
+    "binary_pattern": "native_link_node_editor-*.exe"
+  },
+  {
+    "package": "dear-implot3d-sys",
+    "test": "native_link_implot3d",
+    "binary_pattern": "native_link_implot3d-*.exe"
+  },
+  {
+    "package": "dear-imguizmo-sys",
+    "test": "native_link_imguizmo",
+    "binary_pattern": "native_link_imguizmo-*.exe"
+  },
+  {
+    "package": "dear-imguizmo-quat-sys",
+    "test": "native_link_imguizmo_quat",
+    "binary_pattern": "native_link_imguizmo_quat-*.exe"
+  },
+  {
+    "package": "dear-imgui-test-engine-sys",
+    "test": "ffi_boundary",
+    "binary_pattern": "ffi_boundary-*.exe"
+  }
+]

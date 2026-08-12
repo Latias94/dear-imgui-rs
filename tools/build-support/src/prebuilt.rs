@@ -46,12 +46,20 @@ pub enum CppRuntimeLinkage {
     StaticBundle(&'static str),
 }
 
-pub fn prebuilt_cpp_runtime_linkage(target_os: &str, target_env: &str) -> CppRuntimeLinkage {
+pub fn prebuilt_cpp_runtime_linkage(
+    target_os: &str,
+    target_env: &str,
+    target_abi: &str,
+) -> CppRuntimeLinkage {
     if target_env == "msvc" {
         return CppRuntimeLinkage::None;
     }
     if should_static_link_cpp_stdlib(target_os, target_env) {
-        return CppRuntimeLinkage::StaticBundle("stdc++");
+        return CppRuntimeLinkage::StaticBundle(if target_abi == "llvm" {
+            "c++"
+        } else {
+            "stdc++"
+        });
     }
     if matches!(
         target_os,
@@ -66,8 +74,8 @@ pub fn prebuilt_cpp_runtime_linkage(target_os: &str, target_env: &str) -> CppRun
     CppRuntimeLinkage::Dynamic("stdc++")
 }
 
-pub fn emit_prebuilt_cpp_runtime_linkage(target_os: &str, target_env: &str) {
-    match prebuilt_cpp_runtime_linkage(target_os, target_env) {
+pub fn emit_prebuilt_cpp_runtime_linkage(target_os: &str, target_env: &str, target_abi: &str) {
+    match prebuilt_cpp_runtime_linkage(target_os, target_env, target_abi) {
         CppRuntimeLinkage::None => {}
         CppRuntimeLinkage::Dynamic(library) => {
             println!("cargo:rustc-link-lib={library}");
@@ -80,8 +88,13 @@ pub fn emit_prebuilt_cpp_runtime_linkage(target_os: &str, target_env: &str) {
     }
 }
 
-pub fn configure_cpp_runtime_linkage(build: &mut cc::Build, target_os: &str, target_env: &str) {
-    match prebuilt_cpp_runtime_linkage(target_os, target_env) {
+pub fn configure_cpp_runtime_linkage(
+    build: &mut cc::Build,
+    target_os: &str,
+    target_env: &str,
+    target_abi: &str,
+) {
+    match prebuilt_cpp_runtime_linkage(target_os, target_env, target_abi) {
         CppRuntimeLinkage::None => {
             build.cpp_link_stdlib(None);
         }
@@ -92,7 +105,7 @@ pub fn configure_cpp_runtime_linkage(build: &mut cc::Build, target_os: &str, tar
         }
         CppRuntimeLinkage::StaticBundle(_) => {
             build.cpp_link_stdlib(None);
-            emit_prebuilt_cpp_runtime_linkage(target_os, target_env);
+            emit_prebuilt_cpp_runtime_linkage(target_os, target_env, target_abi);
         }
     }
 }
@@ -638,23 +651,27 @@ mod tests {
     #[test]
     fn prebuilt_cpp_runtime_matches_cc_defaults_and_windows_policy() {
         assert_eq!(
-            prebuilt_cpp_runtime_linkage("windows", "msvc"),
+            prebuilt_cpp_runtime_linkage("windows", "msvc", ""),
             CppRuntimeLinkage::None
         );
         assert_eq!(
-            prebuilt_cpp_runtime_linkage("windows", "gnu"),
+            prebuilt_cpp_runtime_linkage("windows", "gnu", ""),
             CppRuntimeLinkage::StaticBundle("stdc++")
         );
         assert_eq!(
-            prebuilt_cpp_runtime_linkage("macos", ""),
+            prebuilt_cpp_runtime_linkage("windows", "gnu", "llvm"),
+            CppRuntimeLinkage::StaticBundle("c++")
+        );
+        assert_eq!(
+            prebuilt_cpp_runtime_linkage("macos", "", ""),
             CppRuntimeLinkage::Dynamic("c++")
         );
         assert_eq!(
-            prebuilt_cpp_runtime_linkage("linux", "gnu"),
+            prebuilt_cpp_runtime_linkage("linux", "gnu", "eabihf"),
             CppRuntimeLinkage::Dynamic("stdc++")
         );
         assert_eq!(
-            prebuilt_cpp_runtime_linkage("android", ""),
+            prebuilt_cpp_runtime_linkage("android", "", ""),
             CppRuntimeLinkage::Dynamic("c++_shared")
         );
     }

@@ -9,6 +9,7 @@ struct BuildConfig {
     out_dir: PathBuf,
     target_os: String,
     target_env: String,
+    target_abi: String,
     target_arch: String,
     docs_rs: bool,
 }
@@ -20,6 +21,7 @@ impl BuildConfig {
             out_dir: PathBuf::from(env::var("OUT_DIR").unwrap()),
             target_os: env::var("CARGO_CFG_TARGET_OS").unwrap_or_default(),
             target_env: env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default(),
+            target_abi: env::var("CARGO_CFG_TARGET_ABI").unwrap_or_default(),
             target_arch: env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default(),
             docs_rs: env::var("DOCS_RS").is_ok(),
         }
@@ -228,7 +230,12 @@ fn build_with_cc(
 ) {
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
-    build_support::configure_cpp_runtime_linkage(&mut build, &cfg.target_os, &cfg.target_env);
+    build_support::configure_cpp_runtime_linkage(
+        &mut build,
+        &cfg.target_os,
+        &cfg.target_env,
+        &cfg.target_abi,
+    );
 
     native_binding_spec().apply_extension_binding_defines(&mut build, env::vars());
     build.define(
@@ -451,6 +458,13 @@ fn build_with_cc(
     }
 
     build.compile("dear_imgui_test_engine");
+
+    if cfg.is_windows() && cfg.target_env == "gnu" && cfg.target_abi == "llvm" {
+        // Upstream selects its pthread thread-naming path for MinGW. llvm-mingw
+        // provides that implementation as a static compatibility archive, but
+        // rustc's gnullvm linker driver does not add it implicitly.
+        println!("cargo:rustc-link-lib=static:-bundle=pthread");
+    }
 }
 
 fn ensure_imgui_test_engine_enabled() {
@@ -536,6 +550,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_DEFINE_IMGUI_ENABLE_TEST_ENGINE");
     println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_DEFINE_IMGUITEST");
     println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_REGEN_BINDINGS");
+    println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_ABI");
     println!("cargo:rerun-if-env-changed=DOCS_RS");
     println!("cargo:rerun-if-env-changed=IMGUI_TEST_ENGINE_SYS_SKIP_CC");
 

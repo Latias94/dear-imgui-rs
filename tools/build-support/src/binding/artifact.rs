@@ -14,6 +14,7 @@ pub struct BuildRequestInput<'a> {
     pub target_triple: &'a str,
     pub target_os: &'a str,
     pub target_env: &'a str,
+    pub target_abi: &'a str,
     pub target_arch: &'a str,
     pub target_endian: &'a str,
     pub target_pointer_width: &'a str,
@@ -27,6 +28,7 @@ pub struct BuildRequest {
     pub target_triple: String,
     pub target_os: String,
     pub target_env: String,
+    pub target_abi: String,
     pub target_arch: String,
     pub target_endian: String,
     pub target_pointer_width: String,
@@ -52,6 +54,7 @@ impl BuildRequest {
             target_triple: input.target_triple.to_owned(),
             target_os: input.target_os.to_owned(),
             target_env: input.target_env.to_owned(),
+            target_abi: input.target_abi.to_owned(),
             target_arch: input.target_arch.to_owned(),
             target_endian: input.target_endian.to_owned(),
             target_pointer_width: input.target_pointer_width.to_owned(),
@@ -63,10 +66,11 @@ impl BuildRequest {
 
     pub fn deterministic_hash(&self) -> String {
         let mut hash = StableHash::new();
-        hash.field("schema", "core-build-request-v2");
+        hash.field("schema", "core-build-request-v3");
         hash.field("target_triple", &self.target_triple);
         hash.field("target_os", &self.target_os);
         hash.field("target_env", &self.target_env);
+        hash.field("target_abi", &self.target_abi);
         hash.field("target_arch", &self.target_arch);
         hash.field("target_endian", &self.target_endian);
         hash.field("target_pointer_width", &self.target_pointer_width);

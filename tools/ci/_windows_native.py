@@ -27,7 +27,7 @@ _MSVC_ARCHITECTURES = {
 _CRT_SUFFIXES = {"md": "-static-md", "mt": "-static"}
 _ENVIRONMENT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _DLL_IMPORT = re.compile(r"^\s*DLL Name:\s*(.*?)\s*$", re.MULTILINE)
-_FORBIDDEN_CPP_RUNTIME = "libstdc++-6.dll"
+_PE_MACHINE = re.compile(r"\bfile format\s+(\S+)", re.IGNORECASE)
 _SDL3_RUNTIME_NAME = "SDL3.dll"
 
 
@@ -44,21 +44,64 @@ class VcpkgStatusError(WindowsNativeError):
 
 
 class MissingTestBinaryError(WindowsNativeError):
-    """The MinGW test build produced no matching executable."""
+    """A Windows PE contract produced no matching sentinel executable."""
 
 
-class ForbiddenImportError(WindowsNativeError):
-    """A MinGW executable dynamically imports the GNU C++ runtime."""
+class ImportPolicyError(WindowsNativeError):
+    """A PE executable violated required or forbidden import policy."""
 
-    def __init__(self, inspection: "ImportInspection") -> None:
+    def __init__(
+        self,
+        inspection: "PeInspection",
+        *,
+        missing_imports: Sequence[str],
+        forbidden_imports: Sequence[str],
+    ) -> None:
         self.inspection = inspection
-        binaries = ", ".join(
-            evidence.binary.name for evidence in inspection.forbidden_evidence
-        )
+        self.missing_imports = tuple(missing_imports)
+        self.forbidden_imports = tuple(forbidden_imports)
+        details = []
+        if self.missing_imports:
+            details.append(f"missing required imports: {', '.join(self.missing_imports)}")
+        if self.forbidden_imports:
+            details.append(f"forbidden imports: {', '.join(self.forbidden_imports)}")
         super().__init__(
-            f"forbidden import {_FORBIDDEN_CPP_RUNTIME!r} found in: {binaries}\n"
+            f"PE import policy failed ({'; '.join(details)})\n"
             f"{inspection.evidence_text.rstrip()}"
         )
+
+
+class MachineTypeError(WindowsNativeError):
+    """A PE executable has a missing or unexpected COFF machine type."""
+
+    def __init__(
+        self,
+        inspection: "PeInspection",
+        expected_machine: str,
+        actual_machines: Sequence[str],
+    ) -> None:
+        self.inspection = inspection
+        self.expected_machine = expected_machine
+        self.actual_machines = tuple(actual_machines)
+        actual = ", ".join(self.actual_machines)
+        super().__init__(
+            f"PE machine mismatch: expected {expected_machine}, found {actual}\n"
+            f"{inspection.evidence_text.rstrip()}"
+        )
+
+
+class InspectionCommandError(CommandError):
+    """PE inspection failed after retaining all available command evidence."""
+
+    def __init__(
+        self,
+        inspection: "PeInspection",
+        command: Sequence[str],
+        returncode: int,
+        output: str,
+    ) -> None:
+        self.inspection = inspection
+        super().__init__(command, returncode, output)
 
 
 @dataclass(frozen=True)
@@ -189,27 +232,14 @@ class ObjdumpEvidence:
     command: tuple[str, ...]
     output: str
     imports: tuple[str, ...]
-
-    @property
-    def forbidden_imports(self) -> tuple[str, ...]:
-        """Return forbidden imports using Windows case-insensitive matching."""
-        return tuple(
-            imported
-            for imported in self.imports
-            if imported.casefold() == _FORBIDDEN_CPP_RUNTIME.casefold()
-        )
-
+    machine: str | None
+    returncode: int = 0
 
 @dataclass(frozen=True)
-class ImportInspection:
-    """Stable objdump evidence for every matching MinGW test executable."""
+class PeInspection:
+    """Stable objdump evidence for every matching Windows PE sentinel."""
 
     evidence: tuple[ObjdumpEvidence, ...]
-
-    @property
-    def forbidden_evidence(self) -> tuple[ObjdumpEvidence, ...]:
-        """Return executable evidence containing a forbidden import."""
-        return tuple(item for item in self.evidence if item.forbidden_imports)
 
     @property
     def evidence_text(self) -> str:
@@ -219,7 +249,16 @@ class ImportInspection:
             output = item.output
             if output and not output.endswith("\n"):
                 output += "\n"
-            sections.append(f"Checking imports for {item.binary}\n{output}")
+            imports = ", ".join(item.imports) if item.imports else "<none>"
+            machine = item.machine or "<missing>"
+            sections.append(
+                f"Checking PE evidence for {item.binary}\n"
+                f"Command: {subprocess.list2cmdline(item.command)}\n"
+                f"Exit code: {item.returncode}\n"
+                f"Parsed machine: {machine}\n"
+                f"Parsed imports: {imports}\n"
+                f"Raw output:\n{output}"
+            )
         return "".join(sections)
 
 
@@ -566,16 +605,30 @@ def calculate_mingw_environment(
     )
 
 
-def find_mingw_test_executables(
+def find_windows_test_executables(
     deps_directory: PathInput,
-    pattern: str = "dear_imgui_sys-*.exe",
+    patterns: Sequence[str],
 ) -> tuple[Path, ...]:
-    """Find only files and sort them deterministically across host filesystems."""
+    """Resolve every explicit PE sentinel pattern and return a stable union."""
     directory = Path(deps_directory)
+    if not patterns:
+        raise MissingTestBinaryError("at least one PE test-binary pattern is required")
+
+    binaries: set[Path] = set()
+    for pattern in patterns:
+        if not pattern:
+            raise MissingTestBinaryError("PE test-binary patterns must not be empty")
+        matches = tuple(path for path in directory.glob(pattern) if path.is_file())
+        if not matches:
+            raise MissingTestBinaryError(
+                f"no test binaries matched pattern {pattern!r} in {directory}"
+            )
+        binaries.update(matches)
+
     return tuple(
         sorted(
-            (path for path in directory.glob(pattern) if path.is_file()),
-            key=lambda path: (path.name.casefold(), path.name),
+            binaries,
+            key=lambda path: (path.name.casefold(), path.name, os.fspath(path)),
         )
     )
 
@@ -585,54 +638,176 @@ def parse_objdump_imports(output: str) -> tuple[str, ...]:
     return tuple(match.group(1) for match in _DLL_IMPORT.finditer(output))
 
 
-def inspect_mingw_imports(
+def parse_objdump_machine(output: str) -> str | None:
+    """Parse llvm-objdump's COFF format identifier."""
+    match = _PE_MACHINE.search(output)
+    return match.group(1).casefold() if match else None
+
+
+def _timeout_output(error: subprocess.TimeoutExpired, timeout: float) -> str:
+    def text(value: str | bytes | None) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace")
+        return value
+
+    output = ""
+    for partial in (text(error.stdout), text(error.stderr)):
+        if not partial:
+            continue
+        output += partial
+        if not partial.endswith("\n"):
+            output += "\n"
+    return f"{output}llvm-objdump timed out after {timeout:g} seconds\n"
+
+
+def inspect_windows_pe(
     deps_directory: PathInput,
     objdump_executable: PathInput,
     *,
+    binary_patterns: Sequence[str],
     runner: Runner = run,
-) -> ImportInspection:
-    """Run objdump for every test executable and retain complete raw output."""
+    timeout: float = 60.0,
+) -> PeInspection:
+    """Inspect explicit PE sentinels and retain raw plus parsed evidence."""
     directory = Path(deps_directory)
-    binaries = find_mingw_test_executables(directory)
-    if not binaries:
-        raise MissingTestBinaryError(
-            f"no dear_imgui_sys test binaries found in {directory}"
-        )
-    evidence = []
+    binaries = find_windows_test_executables(directory, binary_patterns)
+    evidence: list[ObjdumpEvidence] = []
     for binary in binaries:
         command = (os.fspath(objdump_executable), "-p", os.fspath(binary))
-        result = runner(
-            command,
-            capture_output=True,
-            combine_output=True,
-            accepted_returncodes=(0,),
-        )
+        try:
+            result = runner(
+                command,
+                capture_output=True,
+                combine_output=True,
+                accepted_returncodes=None,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as error:
+            output = _timeout_output(error, timeout)
+            evidence.append(
+                ObjdumpEvidence(
+                    binary=binary,
+                    command=command,
+                    output=output,
+                    imports=parse_objdump_imports(output),
+                    machine=parse_objdump_machine(output),
+                    returncode=-1,
+                )
+            )
+            inspection = PeInspection(tuple(evidence))
+            raise InspectionCommandError(inspection, command, -1, output) from error
+        except CommandError as error:
+            output = error.output
+            evidence.append(
+                ObjdumpEvidence(
+                    binary=binary,
+                    command=command,
+                    output=output,
+                    imports=parse_objdump_imports(output),
+                    machine=parse_objdump_machine(output),
+                    returncode=error.returncode,
+                )
+            )
+            inspection = PeInspection(tuple(evidence))
+            raise InspectionCommandError(
+                inspection,
+                error.command,
+                error.returncode,
+                error.output,
+            ) from error
+
         output = result.stdout or ""
         if result.stderr:
             output += result.stderr
-        if result.returncode != 0:
-            raise CommandError(command, result.returncode, output)
         evidence.append(
             ObjdumpEvidence(
                 binary=binary,
                 command=command,
                 output=output,
                 imports=parse_objdump_imports(output),
+                machine=parse_objdump_machine(output),
+                returncode=result.returncode,
             )
         )
-    return ImportInspection(tuple(evidence))
+        if result.returncode != 0:
+            inspection = PeInspection(tuple(evidence))
+            raise InspectionCommandError(
+                inspection,
+                command,
+                result.returncode,
+                output,
+            )
+    return PeInspection(tuple(evidence))
 
 
-def verify_mingw_imports(
+def _unique_casefolded(values: Sequence[str]) -> tuple[str, ...]:
+    seen = set()
+    unique = []
+    for value in values:
+        folded = value.casefold()
+        if not value or folded in seen:
+            continue
+        seen.add(folded)
+        unique.append(value)
+    return tuple(unique)
+
+
+def verify_windows_pe(
     deps_directory: PathInput,
     objdump_executable: PathInput,
     *,
+    binary_patterns: Sequence[str],
+    required_imports: Sequence[str] = (),
+    forbidden_imports: Sequence[str] = (),
+    expected_machine: str | None = None,
     runner: Runner = run,
-) -> ImportInspection:
-    """Reject any case variant of the dynamic GNU C++ runtime import."""
-    inspection = inspect_mingw_imports(
-        deps_directory, objdump_executable, runner=runner
+    timeout: float = 60.0,
+) -> PeInspection:
+    """Verify concrete PE machine and import policies for every sentinel."""
+    inspection = inspect_windows_pe(
+        deps_directory,
+        objdump_executable,
+        binary_patterns=binary_patterns,
+        runner=runner,
+        timeout=timeout,
     )
-    if inspection.forbidden_evidence:
-        raise ForbiddenImportError(inspection)
+
+    if expected_machine is not None:
+        expected = expected_machine.casefold()
+        mismatches = tuple(
+            item.machine or "<missing>"
+            for item in inspection.evidence
+            if item.machine is None or item.machine.casefold() != expected
+        )
+        if mismatches:
+            raise MachineTypeError(inspection, expected_machine, mismatches)
+
+    required = _unique_casefolded(required_imports)
+    forbidden = _unique_casefolded(forbidden_imports)
+    missing = tuple(
+        required_name
+        for required_name in required
+        if any(
+            required_name.casefold()
+            not in {imported.casefold() for imported in item.imports}
+            for item in inspection.evidence
+        )
+    )
+    forbidden_keys = {name.casefold() for name in forbidden}
+    forbidden_found = _unique_casefolded(
+        tuple(
+            imported
+            for item in inspection.evidence
+            for imported in item.imports
+            if imported.casefold() in forbidden_keys
+        )
+    )
+    if missing or forbidden_found:
+        raise ImportPolicyError(
+            inspection,
+            missing_imports=missing,
+            forbidden_imports=forbidden_found,
+        )
     return inspection
