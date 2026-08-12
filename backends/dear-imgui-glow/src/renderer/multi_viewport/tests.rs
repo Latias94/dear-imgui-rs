@@ -18,6 +18,10 @@ use crate::renderer::callbacks::{
     draw_callback_reset_render_state, draw_callback_set_sampler_linear,
     draw_callback_set_sampler_nearest,
 };
+use crate::shaders::test_support::{
+    FakeFailure, TEST_LOCK as DEVICE_TEST_LOCK, fake_gl as device_fake_gl,
+    reset as reset_device_gl, snapshot as device_gl_snapshot,
+};
 use crate::{GlowRenderer, RenderError};
 use crate::{shaders::Shaders, texture::TextureRegistry, versions::GlVersion};
 
@@ -233,6 +237,16 @@ fn destroy_returned_renderer(
     context: &mut Context,
 ) {
     renderer.shutdown_with_context(gl, context).unwrap();
+}
+
+fn render_empty_runtime_frame(context: &mut Context, runtime: &GlowViewportRuntime) {
+    context.prepare_frame(FramePrepareOptions::new([0.0, 0.0], 1.0 / 60.0).renderer_has_textures());
+    let frame = context.begin_frame();
+    let prepared = runtime.prepare_frame(frame).unwrap();
+    let rendered = runtime
+        .render_main(prepared, || Ok::<(), ()>(()), || Vec::<()>::new())
+        .unwrap();
+    assert!(rendered.secondary_report().rendered_viewports().is_empty());
 }
 
 #[test]
@@ -468,6 +482,75 @@ fn runtime_external_texture_lifecycle_never_deletes_application_resources() {
 
     runtime.shutdown(&mut context).unwrap();
     assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn runtime_device_recreation_preserves_external_texture_across_frames_and_shutdown() {
+    let _device_guard = DEVICE_TEST_LOCK.lock().unwrap();
+    let _guard = test_guard();
+    reset_device_gl(FakeFailure::None);
+    let gl = Rc::new(device_fake_gl());
+    let mut context = Context::create();
+    let _platform = attach_test_platform(&mut context);
+    let renderer = GlowRenderer::with_shared_context(Rc::clone(&gl), &mut context).unwrap();
+    let mut runtime = unsafe { GlowViewportRuntime::attach(&mut context, renderer) }.unwrap();
+    let control = runtime.control_for_test();
+    let external_gl = glow::NativeTexture(NonZeroU32::new(900).unwrap());
+    let external = runtime.register_external_texture(external_gl).unwrap();
+
+    reset_device_gl(FakeFailure::None);
+    {
+        let mut renderer = control.borrow_renderer_for_test();
+        let renderer = renderer.as_deref_mut().unwrap();
+        renderer.destroy_device_objects(&mut context).unwrap();
+        assert!(!renderer.device_objects_ready());
+        assert_eq!(
+            renderer.texture_registry.external(external),
+            Some(external_gl)
+        );
+    }
+    assert_eq!(device_gl_snapshot().deleted_textures, 0);
+
+    render_empty_runtime_frame(&mut context, &runtime);
+    let first_frame = device_gl_snapshot();
+    assert_eq!(first_frame.generated_buffers, 2);
+    assert_eq!(first_frame.generated_samplers, 2);
+    {
+        let renderer = control.borrow_renderer_for_test();
+        let renderer = renderer.as_deref().unwrap();
+        assert!(renderer.device_objects_ready());
+        assert_eq!(
+            renderer.texture_registry.external(external),
+            Some(external_gl)
+        );
+    }
+
+    render_empty_runtime_frame(&mut context, &runtime);
+    let second_frame = device_gl_snapshot();
+    assert_eq!(
+        second_frame.generated_buffers,
+        first_frame.generated_buffers
+    );
+    assert_eq!(
+        second_frame.generated_samplers,
+        first_frame.generated_samplers
+    );
+    assert_eq!(
+        second_frame.generated_textures,
+        first_frame.generated_textures
+    );
+    {
+        let renderer = control.borrow_renderer_for_test();
+        let renderer = renderer.as_deref().unwrap();
+        assert_eq!(
+            renderer.texture_registry.external(external),
+            Some(external_gl)
+        );
+    }
+
+    runtime.shutdown(&mut context).unwrap();
+    let shutdown = device_gl_snapshot();
+    assert_eq!(shutdown.deleted_textures, shutdown.generated_textures);
 }
 
 #[test]
