@@ -29,7 +29,15 @@ impl Ui {
 
     /// Returns the viewport of the current window.
     ///
-    /// This requires a current window (i.e. must be called between `Begin`/`End`).
+    /// Dear ImGui keeps an implicit fallback window current for the duration of an open frame, so
+    /// this may be called before, after, or outside an explicit user window's `Begin`/`End` scope.
+    /// Inside an explicit window it returns that window's viewport; after the window ends it
+    /// returns the fallback window's viewport again.
+    ///
+    /// # Panics
+    ///
+    /// Panics if raw/native API use has cleared the current viewport while this [`Ui`] still
+    /// represents an active frame.
     #[doc(alias = "GetWindowViewport")]
     pub fn window_viewport(&self) -> &crate::platform_io::Viewport {
         self.run_with_bound_context(|| unsafe {
