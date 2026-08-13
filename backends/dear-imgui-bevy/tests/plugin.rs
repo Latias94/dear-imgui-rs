@@ -86,10 +86,10 @@ fn plugin_registers_the_primary_registry_and_private_driver_schedule() {
         "the plugin must install its private serial driver schedule"
     );
 
-    assert_eq!(BEVY_TARGET_VERSION, "0.19.0");
+    assert_eq!(BEVY_TARGET_VERSION, "0.19.1");
     assert_eq!(
         BEVY_TARGET_COMMIT,
-        "c6f634ca9f406d68ba5109d921247b654cb42c10"
+        "b56fc29d3016e641754765244b5ba3f9cc504671"
     );
     assert_eq!(WGPU_TARGET_VERSION, "29.0.3");
 }

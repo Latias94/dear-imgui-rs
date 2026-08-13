@@ -34,7 +34,7 @@
   - `dear-imgui-sys` — low-level FFI via cimgui (docking branch), with pregenerated bindings for Dear ImGui v1.92.9b
   - `dear-imgui-rs` — safe, idiomatic Rust API (RAII + builder style similar to imgui-rs)
   - Backends: `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-ash`, `dear-imgui-winit`, `dear-imgui-sdl3`, `dear-imgui-bevy`
-    - `dear-imgui-bevy` is an experimental Bevy-native backend on Bevy `0.19.0`, with docking,
+    - `dear-imgui-bevy` is an experimental Bevy-native backend on Bevy `0.19.1`, with docking,
       texture interop, and native multi-viewport on supported targets.
   - `dear-app` — generation-aware Winit + WGPU application runtime (docking, themes, add-ons)
 - Extensions
@@ -379,7 +379,7 @@ Backends
 | dear-imgui-ash   | 0.16.0-alpha.3 | ash = 0.38        | Native Vulkan renderer with Winit/SDL3 multi-viewport adapters |
 | dear-imgui-winit | 0.16.0-alpha.3 | winit = 0.30.13   | Winit platform backend         |
 | dear-imgui-sdl3  | 0.16.0-alpha.3 | sdl3 = 0.18.4     | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
-| dear-imgui-bevy  | 0.16.0-alpha.3 | Bevy = 0.19.0     | Experimental Bevy-native backend with docking, texture interop, and native multi-viewport |
+| dear-imgui-bevy  | 0.16.0-alpha.3 | Bevy = 0.19.1     | Experimental Bevy-native backend with docking, texture interop, and native multi-viewport |
 
 Application Runtime
 

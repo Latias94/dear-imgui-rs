@@ -9,7 +9,7 @@ The backend owns Dear ImGui Contexts on Bevy's main thread, routes Bevy window i
 | Component | Version |
 | --- | --- |
 | Rust | `1.95.0` or newer |
-| Bevy | exactly `0.19.0` |
+| Bevy | exactly `0.19.1` |
 | dear-imgui-rs | exactly `0.16.0-alpha.3` |
 
 `dear-imgui-bevy` defaults to the renderer plus deterministic Bevy UI ordering. Native multi-viewport is supported through an explicit feature and runtime opt-in. WASM supports the normal and headless feature sets but cannot create native platform windows.
@@ -20,7 +20,7 @@ Use matching exact prerelease dependencies:
 
 ```toml
 [dependencies]
-bevy = "=0.19.0"
+bevy = "=0.19.1"
 dear-imgui-bevy = "=0.16.0-alpha.3"
 dear-imgui-rs = "=0.16.0-alpha.3"
 ```

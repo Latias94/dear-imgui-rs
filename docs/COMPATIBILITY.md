@@ -38,7 +38,7 @@ Backends
 | dear-imgui-ash    | 0.16.0-alpha.3  | ash = 0.38             | Native Vulkan renderer; shared Winit/SDL3 multi-viewport runtime |
 | dear-imgui-winit  | 0.16.0-alpha.3  | winit = 0.30.13        | Winit platform backend |
 | dear-imgui-sdl3   | 0.16.0-alpha.3  | sdl3 = 0.18.4, sdl3-sys 0.6 | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
-| dear-imgui-bevy   | 0.16.0-alpha.3  | Bevy = 0.19.0          | Bevy-native backend; default renderer and Bevy UI ordering, explicit advanced routes, Rust 1.95 minimum |
+| dear-imgui-bevy   | 0.16.0-alpha.3  | Bevy = 0.19.1          | Bevy-native backend; default renderer and Bevy UI ordering, explicit advanced routes, Rust 1.95 minimum |
 
 Utilities
 
@@ -68,7 +68,7 @@ Extensions
 
 ## 0.16 Architecture Contracts
 
-The 0.16 train is not source-compatible with 0.15.x, and alpha.2 deliberately removes provisional alpha.1 APIs whose contracts were not sound enough to stabilize. The baseline is Dear ImGui v1.92.9b docking via cimgui, Rust 1.92 for the workspace, Rust 1.95 for the Bevy backend, WGPU 30 by default with explicit 29/28/27 routes, and Bevy 0.19. Alpha.3 migrations live in the `0.16.0-alpha.3` section of `CHANGELOG.md`; applications coming from 0.15.x must also apply the alpha.2 and alpha.1 migrations.
+The 0.16 train is not source-compatible with 0.15.x, and alpha.2 deliberately removes provisional alpha.1 APIs whose contracts were not sound enough to stabilize. The baseline is Dear ImGui v1.92.9b docking via cimgui, Rust 1.92 for the workspace, Rust 1.95 for the Bevy backend, WGPU 30 by default with explicit 29/28/27 routes, and Bevy 0.19.1. Alpha.3 migrations live in the `0.16.0-alpha.3` section of `CHANGELOG.md`; applications coming from 0.15.x must also apply the alpha.2 and alpha.1 migrations.
 
 The safe Rust layer intentionally breaks APIs that expose C++ lifecycle
 protocols, wrong-context state, stale GPU handles, or platform-specific ABI
