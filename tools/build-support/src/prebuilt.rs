@@ -104,9 +104,30 @@ pub fn configure_cpp_runtime_linkage(
             build.cpp_link_stdlib(library);
         }
         CppRuntimeLinkage::StaticBundle(_) => {
+            // `static:-bundle` must be emitted after the C++ archive. Emitting it here would
+            // place the runtime before the archive on Cargo versions that preserve build-script
+            // directive order, so GNU linkers would never revisit it to resolve C++ symbols.
             build.cpp_link_stdlib(None);
-            emit_prebuilt_cpp_runtime_linkage(target_os, target_env, target_abi);
         }
+    }
+}
+
+pub fn compile_cpp_archive(
+    build: &mut cc::Build,
+    library: &str,
+    target_os: &str,
+    target_env: &str,
+    target_abi: &str,
+) {
+    build.compile(library);
+
+    if let CppRuntimeLinkage::StaticBundle(runtime) =
+        prebuilt_cpp_runtime_linkage(target_os, target_env, target_abi)
+    {
+        // Repeat this after every archive rather than deduplicating it. A build script may emit
+        // several C++ archives, and each archive must have a following runtime occurrence for
+        // single-pass static linkers.
+        println!("cargo:rustc-link-lib=static:-bundle={runtime}");
     }
 }
 

@@ -60,6 +60,13 @@ build_support::configure_cpp_runtime_linkage(
     &target_env,
     &target_abi,
 );
+build_support::compile_cpp_archive(
+    &mut build,
+    "native_archive",
+    &target_os,
+    &target_env,
+    &target_abi,
+);
 let linkage = build_support::prebuilt_cpp_runtime_linkage(
     &target_os,
     &target_env,
@@ -68,7 +75,7 @@ let linkage = build_support::prebuilt_cpp_runtime_linkage(
 build_support::emit_prebuilt_cpp_runtime_linkage(&target_os, &target_env, &target_abi);
 ```
 
-On Windows, MSVC keeps its toolchain-default C++ runtime, GNU-GCC links static `stdc++`, and GNU/LLVM (`target_abi="llvm"`) links static `c++`. Callers should not add separate `c++abi`, unwind, or Windows system libraries to compensate for this decision.
+On Windows, MSVC keeps its toolchain-default C++ runtime, GNU-GCC links static `stdc++`, and GNU/LLVM (`target_abi="llvm"`) links static `c++`. Source builds must finish with `compile_cpp_archive` instead of calling `cc::Build::compile` directly so the static runtime follows every emitted archive. Prebuilt callers emit the runtime immediately after their own `rustc-link-lib` directive. Callers should not add separate `c++abi`, unwind, or Windows system libraries to compensate for this decision.
 
 ## Blocking HTTP and TLS
 

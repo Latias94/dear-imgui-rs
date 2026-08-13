@@ -321,7 +321,13 @@ fn build_with_cc(
         );
     }
 
-    build.compile("dear_implot");
+    build_support::compile_cpp_archive(
+        &mut build,
+        "dear_implot",
+        &cfg.target_os,
+        &cfg.target_env,
+        &cfg.target_abi,
+    );
 }
 
 fn patched_cimplot_cpp(cfg: &BuildConfig, src: &Path) -> PathBuf {

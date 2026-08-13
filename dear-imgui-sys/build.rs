@@ -730,7 +730,13 @@ fn build_with_cc_cfg(
         );
     }
 
-    build.compile("dear_imgui");
+    build_support::compile_cpp_archive(
+        &mut build,
+        "dear_imgui",
+        &cfg.target_os,
+        &cfg.target_env,
+        &cfg.target_abi,
+    );
 }
 
 fn write_safe_demo_patched_imgui_cpp(cfg: &BuildConfig, imgui_cpp: &Path) -> PathBuf {
@@ -1095,7 +1101,13 @@ fn build_backend_shim_from_spec(cfg: &BuildConfig, spec: &BackendShimSpec) {
     let mut build = new_native_cpp_build(cfg);
     build.file(imgui_src.join("backends").join(spec.upstream_source));
     build.file(shim_root.join(spec.shim_source));
-    build.compile(spec.output_lib);
+    build_support::compile_cpp_archive(
+        &mut build,
+        spec.output_lib,
+        &cfg.target_os,
+        &cfg.target_env,
+        &cfg.target_abi,
+    );
 
     for link_lib in spec.link_libs {
         if backend_shim_target_matches(link_lib.target, cfg) {
