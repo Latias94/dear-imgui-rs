@@ -136,6 +136,29 @@ pub(super) fn prepare_context_platform_frame(
     // The ECS monitor list is not an exact proof of the host's native display source. Bevy-Winit
     // creates that mapping asynchronously, so a missing mapping is an explicit pending state and
     // must not be replaced with a guessed primary monitor or host-window rectangle.
+    #[cfg(test)]
+    let monitor_publication_override = world
+        .get_resource::<crate::viewport::native_window::DesktopPositionSupportOverride>()
+        .filter(|support| {
+            support.0 == crate::viewport::native_window::DesktopPositionSupport::Available
+        })
+        .map(|_| crate::viewport::ImguiMonitorPublication {
+            facts: None,
+            values: vec![crate::viewport::monitor_from_window(&host_window_state)],
+        });
+    #[cfg(test)]
+    let (monitor_publication, monitor_diagnostics) = monitor_publication_override.map_or_else(
+        || {
+            WINIT_WINDOWS.with_borrow(|windows| {
+                let Some(host) = windows.get_window(host_window) else {
+                    return (None, Vec::new());
+                };
+                collect_native_monitor_publication(context_id, host)
+            })
+        },
+        |publication| (Some(publication), Vec::new()),
+    );
+    #[cfg(not(test))]
     let (monitor_publication, monitor_diagnostics) = WINIT_WINDOWS.with_borrow(|windows| {
         let Some(host) = windows.get_window(host_window) else {
             return (None, Vec::new());

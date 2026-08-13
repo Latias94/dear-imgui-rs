@@ -39,7 +39,6 @@ thread_local! {
     static RENDERER_DESTROY_OBSERVED_USER_DATA: Cell<usize> = const { Cell::new(0) };
     #[cfg(feature = "multi-viewport")]
     static VULKAN_SURFACE_CREATE_COUNT: Cell<usize> = const { Cell::new(0) };
-    #[cfg(feature = "multi-viewport")]
     static FOREIGN_VULKAN_SURFACE_CREATE_COUNT: Cell<usize> = const { Cell::new(0) };
 }
 
@@ -507,7 +506,6 @@ unsafe extern "C" fn synthetic_create_vk_surface(
     0
 }
 
-#[cfg(feature = "multi-viewport")]
 unsafe extern "C" fn foreign_create_vk_surface(
     _viewport: *mut sys::ImGuiViewport,
     _instance: sys::ImU64,

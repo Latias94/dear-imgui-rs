@@ -878,7 +878,7 @@ impl RuntimeControl {
         let Some(key) = self.viewport_key(viewport).or_else(|| {
             #[cfg(test)]
             {
-                return self.synthetic_viewport_key(viewport);
+                self.synthetic_viewport_key(viewport)
             }
             #[cfg(not(test))]
             {
@@ -981,7 +981,7 @@ impl RuntimeControl {
         let Some(key) = self.viewport_key(viewport).or_else(|| {
             #[cfg(test)]
             {
-                return self.synthetic_viewport_key(viewport);
+                self.synthetic_viewport_key(viewport)
             }
             #[cfg(not(test))]
             {
@@ -1047,7 +1047,7 @@ impl RuntimeControl {
         self.viewport_key(viewport).or_else(|| {
             #[cfg(test)]
             {
-                return self.synthetic_viewport_key(viewport);
+                self.synthetic_viewport_key(viewport)
             }
             #[cfg(not(test))]
             {

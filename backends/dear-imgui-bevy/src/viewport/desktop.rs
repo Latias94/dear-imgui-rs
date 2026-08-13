@@ -78,8 +78,8 @@ pub(crate) fn desktop_metrics_for_window(window: &Window) -> ([f32; 2], [f32; 2]
     )
 }
 
-#[cfg(test)]
-pub(super) fn monitor_from_window(window: &Window) -> sys::ImGuiPlatformMonitor {
+#[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
+pub(crate) fn monitor_from_window(window: &Window) -> sys::ImGuiPlatformMonitor {
     let mut monitor = sys::ImGuiPlatformMonitor::default();
     let pos = match window.position {
         WindowPosition::At(pos) => desktop_position_from_physical(pos, window.scale_factor()),
@@ -110,6 +110,7 @@ pub(crate) struct ImguiMonitorPublication {
     pub(crate) values: Vec<sys::ImGuiPlatformMonitor>,
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 impl ImguiMonitorPublication {
     pub(crate) fn equivalent_to(&self, other: &Self) -> bool {
         self.values == other.values

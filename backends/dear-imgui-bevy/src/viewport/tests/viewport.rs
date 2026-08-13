@@ -2671,6 +2671,9 @@ fn viewport_id_change_preserves_the_native_instance_and_bevy_entities() {
             c"docking-rebound".as_ptr(),
         );
         (*platform_io)
+            .Platform_ShowWindow
+            .expect("the Context should own Platform_ShowWindow")(raw_viewport);
+        (*platform_io)
             .Platform_SetWindowFocus
             .expect("the Context should own Platform_SetWindowFocus")(raw_viewport);
     });

@@ -51,7 +51,9 @@ impl NativeViewportPolicyFailure {
     }
 }
 
+#[derive(Default)]
 pub(super) enum NativeViewportPolicyState {
+    #[default]
     Unmapped,
     Ready {
         entity: Entity,
@@ -66,12 +68,6 @@ pub(super) enum NativeViewportPolicyState {
         policy: DesiredNativeWindowPolicy,
         reason: NativeViewportPolicyFailure,
     },
-}
-
-impl Default for NativeViewportPolicyState {
-    fn default() -> Self {
-        Self::Unmapped
-    }
 }
 
 impl NativeViewportPolicyState {
@@ -268,9 +264,8 @@ mod tests {
 
         assert!(!policy.accepts_pointer_input);
         assert!(policy.no_focus_on_click);
-        assert_eq!(
-            DesiredNativeWindowPolicy::from_flags(ViewportFlags::empty()).accepts_pointer_input,
-            true
+        assert!(
+            DesiredNativeWindowPolicy::from_flags(ViewportFlags::empty()).accepts_pointer_input
         );
     }
 }

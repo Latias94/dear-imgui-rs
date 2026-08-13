@@ -765,12 +765,17 @@ fn platform_capabilities_follow_native_desktop_position_support() {
         ));
     }
 
+    let window = Window::default();
+    let monitor_publication = ImguiMonitorPublication {
+        facts: None,
+        values: vec![monitor_from_window(&window)],
+    };
     prepare_platform_viewports_for_frame(
         &mut context,
         &context_bridge,
         primary_window,
-        &Window::default(),
-        None,
+        &window,
+        Some(&monitor_publication),
         std::iter::empty(),
         NativeViewportFrameSupport::new(true, native_window::DesktopPositionSupport::Available),
     )
