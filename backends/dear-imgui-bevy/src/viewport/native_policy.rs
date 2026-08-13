@@ -26,12 +26,19 @@ impl DesiredNativeWindowPolicy {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum NativeViewportPolicyFailure {
     NativeWindowPending,
+    #[cfg(target_os = "windows")]
     WindowHandleUnavailable,
+    #[cfg(target_os = "windows")]
     UnexpectedHandleKind,
+    #[cfg(target_os = "windows")]
     WindowOwnerUnavailable,
+    #[cfg(target_os = "windows")]
     WrongWindowThread,
+    #[cfg(target_os = "windows")]
     InstallFailed,
+    #[cfg(target_os = "windows")]
     HookDetached,
+    #[cfg(target_os = "windows")]
     WindowDestroyed,
 }
 
@@ -62,6 +69,7 @@ pub(super) enum NativeViewportPolicyState {
         #[cfg(target_os = "windows")]
         lease: WindowPolicyLease,
     },
+    #[cfg(target_os = "windows")]
     Failed {
         entity: Entity,
         window_id: WindowId,
@@ -79,15 +87,16 @@ impl NativeViewportPolicyState {
         match self {
             Self::Unmapped => Some(NativeViewportPolicyFailure::NativeWindowPending),
             Self::Ready { .. } => None,
+            #[cfg(target_os = "windows")]
             Self::Failed { reason, .. } => Some(*reason),
         }
     }
 
     pub(super) fn release(&mut self) {
-        let previous = std::mem::take(self);
-        drop(previous);
+        let _previous = std::mem::take(self);
     }
 
+    #[cfg(target_os = "windows")]
     fn same_failed_target(
         &self,
         entity: Entity,
@@ -139,6 +148,7 @@ impl NativeViewportPolicyState {
             return;
         };
         let window_id = window.id();
+        #[cfg(target_os = "windows")]
         if self.same_failed_target(entity, window_id, policy) {
             return;
         }

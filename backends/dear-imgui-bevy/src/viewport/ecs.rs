@@ -197,50 +197,57 @@ fn native_viewport_diagnostic(
     viewport: ImguiViewportInstanceId,
     failure: NativeViewportPolicyFailure,
 ) -> crate::route::ImguiDiagnostic {
-    use crate::route::{
-        ImguiDiagnostic, ImguiDiagnosticKind, ImguiNativeViewportPolicyFailure as PublicFailure,
-    };
+    #[cfg(target_os = "windows")]
+    use crate::route::ImguiNativeViewportPolicyFailure as PublicFailure;
+    use crate::route::{ImguiDiagnostic, ImguiDiagnosticKind};
 
     let diagnostic = match failure {
         NativeViewportPolicyFailure::NativeWindowPending => {
             ImguiDiagnostic::new(ImguiDiagnosticKind::NativeViewportWindowPending { viewport })
         }
+        #[cfg(target_os = "windows")]
         NativeViewportPolicyFailure::WindowHandleUnavailable => {
             ImguiDiagnostic::new(ImguiDiagnosticKind::NativeViewportPolicyInstallFailed {
                 viewport,
                 reason: PublicFailure::WindowHandleUnavailable,
             })
         }
+        #[cfg(target_os = "windows")]
         NativeViewportPolicyFailure::UnexpectedHandleKind => {
             ImguiDiagnostic::new(ImguiDiagnosticKind::NativeViewportPolicyInstallFailed {
                 viewport,
                 reason: PublicFailure::UnexpectedHandleKind,
             })
         }
+        #[cfg(target_os = "windows")]
         NativeViewportPolicyFailure::WindowOwnerUnavailable => {
             ImguiDiagnostic::new(ImguiDiagnosticKind::NativeViewportPolicyInstallFailed {
                 viewport,
                 reason: PublicFailure::WindowOwnerUnavailable,
             })
         }
+        #[cfg(target_os = "windows")]
         NativeViewportPolicyFailure::WrongWindowThread => {
             ImguiDiagnostic::new(ImguiDiagnosticKind::NativeViewportPolicyInstallFailed {
                 viewport,
                 reason: PublicFailure::WrongWindowThread,
             })
         }
+        #[cfg(target_os = "windows")]
         NativeViewportPolicyFailure::InstallFailed => {
             ImguiDiagnostic::new(ImguiDiagnosticKind::NativeViewportPolicyInstallFailed {
                 viewport,
                 reason: PublicFailure::InstallFailed,
             })
         }
+        #[cfg(target_os = "windows")]
         NativeViewportPolicyFailure::HookDetached => {
             ImguiDiagnostic::new(ImguiDiagnosticKind::NativeViewportPolicyInstallFailed {
                 viewport,
                 reason: PublicFailure::HookDetached,
             })
         }
+        #[cfg(target_os = "windows")]
         NativeViewportPolicyFailure::WindowDestroyed => {
             ImguiDiagnostic::new(ImguiDiagnosticKind::NativeViewportPolicyInstallFailed {
                 viewport,
