@@ -15,7 +15,7 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ### Fixed
 
-- Preserve secondary viewport client geometry when positioning undecorated Windows windows, changing native decorations, crossing physical-coordinate DPI boundaries without viewport scaling, or creating decorated X11 windows before their frame extents settle. This fixes detached title-bar dragging and prevents native/ImGui geometry and initial X11 DPI drift.
+- Preserve secondary viewport client geometry when positioning undecorated Windows windows, changing native decorations, crossing physical-coordinate DPI boundaries without viewport scaling, or creating decorated X11 windows before their frame extents settle. Geometry and visibility events now wake the main window and retain unfinished reconciliation under `ControlFlow::Wait`. This fixes detached title-bar dragging and prevents native/ImGui geometry and initial X11 DPI drift.
 
 ## [0.16.0-alpha.1]
 

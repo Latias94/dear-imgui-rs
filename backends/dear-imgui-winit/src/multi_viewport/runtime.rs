@@ -834,7 +834,15 @@ impl RuntimeControl {
     }
 
     pub(crate) fn note_window_geometry(&self, window_id: WindowId, position: bool, size: bool) {
-        request_geometry_refresh_for_window(self, window_id, position, size);
+        if request_geometry_refresh_for_window(self, window_id, position, size) {
+            self.request_main_window_redraw();
+        }
+    }
+
+    pub(crate) fn request_main_window_redraw(&self) {
+        if let Some(main_window) = self.main_window() {
+            main_window.request_redraw();
+        }
     }
 
     pub(crate) fn reconcile_geometry_state(&self) {

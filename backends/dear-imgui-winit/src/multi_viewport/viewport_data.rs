@@ -197,6 +197,22 @@ mod client_geometry_reconciliation_tests {
     }
 
     #[test]
+    fn visibility_wait_preserves_the_transaction_for_the_visible_observation() {
+        let pending =
+            ClientGeometryReconciliation::new([120.0, 240.0], [640.0, 480.0], Some([0.0, 0.0]), 7);
+
+        let (pending, action) =
+            pending.observe(8, false, [120.0, 240.0], [640.0, 480.0], Some([0.0, 0.0]));
+        assert_eq!(action, ClientGeometryReconciliationAction::Wait);
+
+        let (pending, action) = pending
+            .expect("an invisible window must retain its reconciliation")
+            .observe(8, true, [120.0, 240.0], [640.0, 480.0], Some([0.0, 0.0]));
+        assert!(pending.is_some());
+        assert_eq!(action, ClientGeometryReconciliationAction::PublishNative);
+    }
+
+    #[test]
     fn changed_frame_extents_are_corrected_then_native_geometry_wins() {
         let pending =
             ClientGeometryReconciliation::new([120.0, 240.0], [640.0, 480.0], Some([0.0, 0.0]), 7);

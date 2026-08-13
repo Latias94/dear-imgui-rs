@@ -232,6 +232,7 @@ pub(super) fn record_viewport_failure(
 }
 
 fn sync_window_policy(
+    control: &RuntimeControl,
     data: &ViewportData,
     next: ViewportWindowPolicy,
     viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
@@ -273,6 +274,7 @@ fn sync_window_policy(
             // ImGui clears request flags at the end of the current platform update pass. Queue
             // the refresh so the next frame observes the settled native client geometry.
             data.request_geometry_refresh(true, true);
+            control.request_main_window_redraw();
         }
     }
     if current.top_most != next.top_most {

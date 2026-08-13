@@ -360,7 +360,7 @@ pub(super) fn request_geometry_refresh_for_window(
     window_id: WindowId,
     position: bool,
     size: bool,
-) {
+) -> bool {
     if let Some(entry) = control
         .viewports
         .borrow()
@@ -368,6 +368,9 @@ pub(super) fn request_geometry_refresh_for_window(
         .find(|entry| entry.data.window().id() == window_id)
     {
         entry.data.request_geometry_refresh(position, size);
+        true
+    } else {
+        false
     }
 }
 
@@ -404,7 +407,15 @@ pub(super) fn apply_pending_geometry_refresh(control: &RuntimeControl) {
                 continue;
             };
             match decision.action {
-                ClientGeometryReconciliationAction::Wait => continue,
+                ClientGeometryReconciliationAction::Wait => {
+                    // Waiting for a native geometry or visibility event must not consume the
+                    // transaction's only refresh. The event that makes progress requests the
+                    // main-window redraw, so retaining this state does not create a busy loop.
+                    entry
+                        .data
+                        .request_geometry_refresh(refresh.position, refresh.size);
+                    continue;
+                }
                 ClientGeometryReconciliationAction::ApplyTarget => {
                     let dpi_scale = unsafe { viewport_target_dpi_scale(viewport) };
                     request_client_geometry(window, decision.position, decision.size, dpi_scale);

@@ -265,7 +265,7 @@ pub(in super::super) unsafe extern "C" fn winit_show_window(
         }
         let policy = ViewportWindowPolicy::from_flags(unsafe { (*vp).Flags });
         with_viewport_data(control, vp, |data| {
-            if let Err(error) = sync_window_policy(data, policy, vp) {
+            if let Err(error) = sync_window_policy(control, data, policy, vp) {
                 record_viewport_failure(control, vp, error);
                 return;
             }
@@ -438,6 +438,7 @@ pub(in super::super) unsafe extern "C" fn winit_set_window_size(
                 .is_some()
             {
                 data.request_geometry_refresh(false, true);
+                control.request_main_window_redraw();
             }
         });
     });
@@ -606,7 +607,7 @@ pub(in super::super) unsafe extern "C" fn winit_update_window(
         }
         let policy = ViewportWindowPolicy::from_flags(unsafe { (*vp).Flags });
         with_viewport_data(control, vp, |data| {
-            if let Err(error) = sync_window_policy(data, policy, vp) {
+            if let Err(error) = sync_window_policy(control, data, policy, vp) {
                 record_viewport_failure(control, vp, error);
             }
         });
