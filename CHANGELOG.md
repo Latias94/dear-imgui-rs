@@ -14,7 +14,12 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ### Breaking Changes and Migration
 
+- `dear-imgui-glow` now uses `glow` 0.18. Applications that construct or pass a `glow::Context` must update their direct `glow` dependency to the 0.18 release line.
 - `dear-imgui-build-support` callers that construct `TargetFacts`, `NativeAbiTarget`, `BuildRequestInput`, or `BuildRequest` must now provide or handle `target_abi`, normally from `CARGO_CFG_TARGET_ABI`; `prebuilt_cpp_runtime_linkage`, `configure_cpp_runtime_linkage`, and `emit_prebuilt_cpp_runtime_linkage` also take that ABI argument. Windows GNU-GCC continues to link static `stdc++`, while Windows GNU/LLVM links static `c++`.
+
+### Changed
+
+- Updated the workspace's direct `pollster` dependency from 0.4 to 1.0 for WGPU application helpers, examples, and tests.
 
 ## [0.16.0-alpha.3] - 2026-08-11
 

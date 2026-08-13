@@ -6,6 +6,10 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+### Breaking
+
+- Updated the renderer dependency from `glow` 0.17 to 0.18. Applications must construct and pass a `glow` 0.18 `Context`.
+
 ### Changed
 
 - OpenGL capabilities are now detected from the live context. The renderer requires OpenGL 3.0+,
