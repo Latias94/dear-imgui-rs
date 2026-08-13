@@ -29,6 +29,7 @@ This source-breaking prerelease continues the ownership-first 0.16 migration wit
 ### Changed
 
 - Updated the exact Bevy backend train from 0.19.0 to 0.19.1 while retaining Rust 1.95 and WGPU 29 compatibility.
+- Updated the reflection derive implementation to syn 3 after validating the generated macro surface against the full reflection test suite.
 - Winit multi-viewport failures now retain the exact Context, viewport generation, native handle, and platform userdata until the close request is observed, preventing stale failures from closing a reused viewport. macOS `NO_FOCUS_ON_APPEARING` windows are shown without activating the application.
 - Bevy frame input is now a move-only, exactly-once transaction that binds route epoch, Context metrics, and cursor/IME authority to the same driver run. Terminal registries and private pass lifecycles fail explicitly instead of returning active-looking empty state.
 - Winit and Bevy native viewports now publish detached monitor facts transactionally and expose work-area provenance or retained-transaction failures without live native handles. Initial or primary-unproven batches fail closed instead of inventing a monitor; Bevy also resolves host and secondary windows through exact `WINIT_WINDOWS` mappings, keeps `Show` intent hidden until the native policy is ready, and uses lease-first retirement with stable-instance diagnostics.
