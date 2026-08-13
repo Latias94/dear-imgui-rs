@@ -28,8 +28,12 @@ This source-breaking prerelease continues the ownership-first 0.16 migration wit
 
 ### Changed
 
+- Updated the exact Bevy backend train from 0.19.0 to 0.19.1 while retaining Rust 1.95 and WGPU 29 compatibility.
+- Updated the reflection derive implementation to syn 3 after validating the generated macro surface against the full reflection test suite.
+- Refreshed the compatible dependency lock set, including SDL 3.4.14 and WGPU 29.0.4 patch updates, while retaining the stable Winit 0.30 line and the workspace's Rust 1.92 contract.
 - Winit multi-viewport failures now retain the exact Context, viewport generation, native handle, and platform userdata until the close request is observed, preventing stale failures from closing a reused viewport. macOS `NO_FOCUS_ON_APPEARING` windows are shown without activating the application.
 - Bevy frame input is now a move-only, exactly-once transaction that binds route epoch, Context metrics, and cursor/IME authority to the same driver run. Terminal registries and private pass lifecycles fail explicitly instead of returning active-looking empty state.
+- Winit and Bevy native viewports now publish detached monitor facts transactionally and expose work-area provenance or retained-transaction failures without live native handles. Initial or primary-unproven batches fail closed instead of inventing a monitor; Bevy also resolves host and secondary windows through exact `WINIT_WINDOWS` mappings, keeps `Show` intent hidden until the native policy is ready, and uses lease-first retirement with stable-instance diagnostics.
 
 ### Fixed
 
@@ -126,7 +130,7 @@ See the [compatibility guide](docs/COMPATIBILITY.md), [custom backend guide](doc
 | WASM provider artifacts or import maps using `imgui-sys-v0` | Rebuild the provider and use `imgui-sys-v1`. Renaming or remapping a v0 artifact is insufficient because v1 identifies the checked native numeric formatting and parsing contract. |
 | Old provisional aliases | Use `frame_with_result`, `selectable_config`, `slider_config`, `OwnedTextureData::new`, `TextureRef::from`, and `Direction`; the old aliases are removed. |
 | `dear_imgui_sys::IMGUI_VERSION` | Use `BINDING_VERSION` for the Rust crate version or `igGetVersion()` for the linked Dear ImGui runtime. |
-| Raw aggregate `PlatformIO` callbacks or a pre-0.16 native prebuilt | Rust callback signatures use pointer/out parameters while C++ owns the by-value ABI; native archives must advertise `platform-io-aggregate-hooks-v2`, and older archives are rejected before linking. |
+| Raw aggregate `PlatformIO` callbacks or a pre-0.16 native prebuilt | Rust callback signatures use pointer/out parameters while C++ owns the by-value ABI; native archives must advertise `platform-io-aggregate-hooks-v3`, and older archives are rejected before linking. |
 | Exact matches on `DockLayoutError::RootResetFailed`, `AshViewportError::PlatformBackendMismatch`, `AshViewportError::PlatformCreateVkSurfaceUnavailable`, or `Sdl3BackendError` | Match current typed ownership/callback errors and retain a wildcard arm. `Sdl3BackendError` is now `non_exhaustive`; the removed provisional variants have no compatibility alias. |
 | Direct `DrawData` field access in a custom renderer | Use `display_pos()`, `display_size()`, `framebuffer_scale()`, `draw_lists_count()`, `total_idx_count()`, `total_vtx_count()`, `owner_viewport()`, and `frame_count()`; the wrapper now delegates to the generated native layout instead of mirroring it by hand. |
 | `ui.set_color_edit_options(...)` | Use `ctx.io_mut().set_color_edit_options(...)`; the setting is Context IO state in Dear ImGui v1.92.9. |

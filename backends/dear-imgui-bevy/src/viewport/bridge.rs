@@ -1,6 +1,9 @@
 use super::*;
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use winit::window::Window as WinitWindow;
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 impl ImguiViewportBridge {
     #[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
     pub(crate) fn commands(&self) -> Vec<ImguiViewportCommand> {
@@ -363,7 +366,102 @@ impl ImguiViewportBridgeContext {
 
     pub(super) fn set_viewport_window(&self, instance_id: ImguiViewportInstanceId, entity: Entity) {
         if let Some(record) = self.inner.state.borrow_mut().record_mut(instance_id) {
+            if record.window != Some(entity) {
+                record.native_policy.release();
+            }
             record.window = Some(entity);
+        }
+    }
+
+    /// Return the stable-instance policy targets that currently have an ECS window and flags.
+    ///
+    /// The instance id, rather than the ECS entity, owns the policy state. The entity is only the
+    /// current lookup key into Bevy-Winit's exact `WINIT_WINDOWS` mapping.
+    pub(super) fn native_policy_targets(
+        &self,
+    ) -> Vec<(
+        ImguiViewportInstanceId,
+        Entity,
+        imgui::ViewportFlags,
+        bool,
+        bool,
+    )> {
+        self.inner
+            .state
+            .borrow()
+            .viewports
+            .iter()
+            .filter_map(|(&instance_id, record)| {
+                Some((
+                    instance_id,
+                    record.window?,
+                    record.flags?,
+                    record.show_requested,
+                    record.pending_client_placement.is_none(),
+                ))
+            })
+            .collect()
+    }
+
+    /// Synchronize one stable instance with an exact Winit window borrowed from `WINIT_WINDOWS`.
+    pub(super) fn sync_native_policy(
+        &self,
+        instance_id: ImguiViewportInstanceId,
+        entity: Entity,
+        native_window: Option<&WinitWindow>,
+        flags: imgui::ViewportFlags,
+    ) -> bool {
+        let mut state = self.inner.state.borrow_mut();
+        let Some(record) = state.record_mut(instance_id) else {
+            return false;
+        };
+        debug_assert_eq!(record.window, Some(entity));
+        record.native_policy.sync(
+            entity,
+            native_window,
+            DesiredNativeWindowPolicy::from_flags(flags),
+        );
+        record.native_policy.is_ready()
+    }
+
+    pub(super) fn native_policy_diagnostics(
+        &self,
+    ) -> Vec<(ImguiViewportInstanceId, NativeViewportPolicyFailure)> {
+        self.inner
+            .state
+            .borrow()
+            .viewports
+            .iter()
+            .filter_map(|(&instance_id, record)| {
+                record
+                    .flags
+                    .is_some()
+                    .then(|| record.native_policy.diagnostic_failure())
+                    .flatten()
+                    .map(|failure| (instance_id, failure))
+            })
+            .collect()
+    }
+
+    pub(super) fn request_show(&self, instance_id: ImguiViewportInstanceId) {
+        if let Some(record) = self.inner.state.borrow_mut().record_mut(instance_id) {
+            record.show_requested = true;
+        }
+    }
+
+    pub(super) fn show_requested(&self, instance_id: ImguiViewportInstanceId) -> bool {
+        self.inner
+            .state
+            .borrow()
+            .record(instance_id)
+            .is_some_and(|record| record.show_requested)
+    }
+
+    pub(super) fn release_all_native_policies(&self) {
+        let mut state = self.inner.state.borrow_mut();
+        for record in state.viewports.values_mut() {
+            record.native_policy.release();
+            record.show_requested = false;
         }
     }
 
@@ -399,11 +497,11 @@ impl ImguiViewportBridgeContext {
         &self,
         instance_id: ImguiViewportInstanceId,
     ) -> Option<Entity> {
-        self.inner
-            .state
-            .borrow_mut()
-            .record_mut(instance_id)
-            .and_then(|record| record.window.take())
+        let mut state = self.inner.state.borrow_mut();
+        let record = state.record_mut(instance_id)?;
+        record.native_policy.release();
+        record.show_requested = false;
+        record.window.take()
     }
 
     #[cfg(feature = "render")]
@@ -574,6 +672,7 @@ impl ImguiViewportBridgeContext {
     pub(super) fn remove_viewport_flags(&self, instance_id: ImguiViewportInstanceId) {
         if let Some(record) = self.inner.state.borrow_mut().record_mut(instance_id) {
             record.flags = None;
+            record.native_policy.release();
         }
     }
 

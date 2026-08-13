@@ -64,6 +64,39 @@ fn renderer_adapter_skips_callback_and_drains_all_preexisting_faults() {
 }
 
 #[test]
+fn nested_dispatch_failure_merges_into_the_outer_scope_and_then_clears() {
+    let _guard = crate::tests::test_guard();
+    let mut context = Context::create();
+    let mut runtime = synthetic_claimed_registration(
+        &mut context,
+        Rc::new(Cell::new(0)),
+        Rc::new(Cell::new(0)),
+        Rc::new(Cell::new(0)),
+        synthetic_create_window,
+    );
+    let mut viewport = sys::ImGuiViewport::default();
+
+    {
+        let _outer = runtime.control.begin_platform_dispatch();
+        {
+            let _inner = runtime.control.begin_platform_dispatch();
+            runtime.control.mark_viewport_failed(&mut viewport);
+            assert!(runtime.control.viewport_failed(&mut viewport));
+        }
+        assert!(
+            runtime.control.viewport_failed(&mut viewport),
+            "the outer dispatch must inherit an inner callback failure"
+        );
+        runtime.control.forget_failed_viewport(&mut viewport);
+        assert!(!runtime.control.viewport_failed(&mut viewport));
+    }
+
+    assert_eq!(runtime.control.dispatch_depth.get(), 0);
+    assert!(runtime.control.dispatch_failures.borrow().is_empty());
+    runtime.shutdown_platform(&mut context).unwrap();
+}
+
+#[test]
 fn platform_only_shutdown_rejects_an_active_renderer_before_closing_the_frame() {
     let _guard = crate::tests::test_guard();
     let mut context = Context::create();

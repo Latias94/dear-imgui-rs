@@ -34,7 +34,7 @@
   - `dear-imgui-sys` — low-level FFI via cimgui (docking branch), with pregenerated bindings for Dear ImGui v1.92.9b
   - `dear-imgui-rs` — safe, idiomatic Rust API (RAII + builder style similar to imgui-rs)
   - Backends: `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-ash`, `dear-imgui-winit`, `dear-imgui-sdl3`, `dear-imgui-bevy`
-    - `dear-imgui-bevy` is an experimental Bevy-native backend on Bevy `0.19.0`, with docking,
+    - `dear-imgui-bevy` is an experimental Bevy-native backend on Bevy `0.19.1`, with docking,
       texture interop, and native multi-viewport on supported targets.
   - `dear-app` — generation-aware Winit + WGPU application runtime (docking, themes, add-ons)
 - Extensions
@@ -379,7 +379,7 @@ Backends
 | dear-imgui-ash   | 0.16.0-alpha.3 | ash = 0.38        | Native Vulkan renderer with Winit/SDL3 multi-viewport adapters |
 | dear-imgui-winit | 0.16.0-alpha.3 | winit = 0.30.13   | Winit platform backend         |
 | dear-imgui-sdl3  | 0.16.0-alpha.3 | sdl3 = 0.18.4     | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
-| dear-imgui-bevy  | 0.16.0-alpha.3 | Bevy = 0.19.0     | Experimental Bevy-native backend with docking, texture interop, and native multi-viewport |
+| dear-imgui-bevy  | 0.16.0-alpha.3 | Bevy = 0.19.1     | Experimental Bevy-native backend with docking, texture interop, and native multi-viewport |
 
 Application Runtime
 
@@ -510,7 +510,7 @@ For binding verification, provider construction, feature-forwarding checks, and 
     - Winit example: `cargo run -p dear-imgui-examples --bin multi_viewport_ash --features ash-winit-multi-viewport`
     - SDL3 example: `cargo run -p dear-imgui-examples --bin sdl3_ash_multi_viewport --features sdl3-ash-multi-viewport`
   - Call `Context::enable_multi_viewport()` for viewports. Enable `ConfigFlags::DOCKING_ENABLE` separately when the application also needs docking.
-  - Bevy native viewports are enabled only when Winit can provide global desktop client coordinates; query `ImguiNativeViewportSupport::get(context_id)` for the per-Context `ImguiNativeViewportStatus`. On Wayland the status is `GlobalDesktopCoordinatesUnavailable` and docking stays inside the host window.
+  - Bevy native viewports use the exact `bevy_winit::WINIT_WINDOWS` mapping and detached Winit monitor snapshots; ECS monitor geometry and raw handles are not identity fallbacks. A secondary window stays hidden until its mapping and native policy lease are ready, with `NO_INPUTS` and `NO_FOCUS_ON_CLICK` enforced at the window boundary. Query `ImguiNativeViewportSupport::get(context_id)` for coordinate capability and the `NativeMonitor` diagnostic batch for collection/provenance degradation; on Wayland the status is `GlobalDesktopCoordinatesUnavailable` and docking stays inside the host window.
   - **winit + OpenGL (glow/glutin)**: no official multi-viewport stack at the moment.
     Use SDL3 + OpenGL3 / SDL3 + Glow if you need multi-viewport OpenGL.
 - **WebAssembly (WASM)**: Supported via the import-style build described above; some features

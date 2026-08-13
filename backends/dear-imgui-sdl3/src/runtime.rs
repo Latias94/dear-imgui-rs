@@ -10,9 +10,10 @@ use std::sync::{Arc, atomic::AtomicBool};
 #[cfg(feature = "multi-viewport")]
 use crate::callback_ownership::validate_platform_viewport_state;
 use crate::callback_ownership::{
-    PlatformCallbackOwnership, PlatformClaimBaseline, RendererCallbackOwnership,
-    RendererShutdownRestore, SDL_PLATFORM_RESERVED_FLAGS, SDL_RENDERER_RESERVED_FLAGS,
-    ViewportPlatformState, preflight_platform_claim, restore_baseline_after_failed_initialization,
+    PlatformCallbackOwnership, PlatformCallbackSlot, PlatformCallbacks, PlatformClaimBaseline,
+    RendererCallbackOwnership, RendererShutdownRestore, SDL_PLATFORM_RESERVED_FLAGS,
+    SDL_RENDERER_RESERVED_FLAGS, ViewportPlatformState, preflight_platform_claim,
+    restore_baseline_after_failed_initialization,
 };
 #[cfg(feature = "multi-viewport")]
 use crate::core::Sdl3VulkanSurfaceError;
@@ -61,6 +62,10 @@ impl Sdl3PlatformSession {
             .compare_exchange(0, generation, Ordering::AcqRel, Ordering::Acquire)
             .map_err(|_| Sdl3BackendError::PlatformSessionOccupied)?;
         Ok(Self { generation })
+    }
+
+    fn generation(&self) -> u64 {
+        self.generation
     }
 }
 
@@ -396,11 +401,13 @@ pub(super) struct RuntimeControl {
         feature = "sdlgpu3-renderer"
     ))]
     renderer_textures: RefCell<RendererTextureStore>,
-    owned_viewports: RefCell<HashMap<usize, ViewportPlatformState>>,
-    owned_renderer_viewports: RefCell<HashMap<usize, *mut std::ffi::c_void>>,
+    owned_viewports: RefCell<HashMap<usize, OwnedViewportLease>>,
+    owned_renderer_viewports: RefCell<HashMap<usize, OwnedRendererViewportLease>>,
     deferred_platform_viewports: RefCell<HashMap<usize, DeferredPlatformViewportState>>,
     deferred_renderer_viewports: RefCell<HashMap<usize, DeferredRendererViewportState>>,
-    failed_viewports: RefCell<HashSet<usize>>,
+    failed_viewports: RefCell<HashMap<usize, ViewportLeaseKey>>,
+    dispatch_depth: Cell<u32>,
+    dispatch_failures: RefCell<Vec<HashMap<usize, ViewportLeaseKey>>>,
     faults: RefCell<VecDeque<RuntimeFault>>,
     reported_replacements: RefCell<HashSet<&'static str>>,
     foreign_platform_user_data_reported: Cell<bool>,
@@ -460,13 +467,66 @@ impl fmt::Debug for Sdl3ViewportRendererAdapter {
 
 #[derive(Clone, Copy)]
 struct DeferredPlatformViewportState {
-    id: sys::ImGuiID,
+    key: ViewportLeaseKey,
     state: ViewportPlatformState,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(super) struct ViewportLeaseKey {
+    context: ContextId,
+    generation: u64,
+    address: usize,
+    id: sys::ImGuiID,
+}
+
+impl ViewportLeaseKey {
+    fn same_identity(self, other: Self) -> bool {
+        self.context == other.context
+            && self.generation == other.generation
+            && self.address == other.address
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct OwnedViewportLease {
+    key: ViewportLeaseKey,
+    state: ViewportPlatformState,
+}
+
+pub(super) struct PlatformDispatchGuard<'a> {
+    control: &'a RuntimeControl,
+    active: bool,
+}
+
+impl Drop for PlatformDispatchGuard<'_> {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        let mut scopes = self.control.dispatch_failures.borrow_mut();
+        let completed = scopes.pop();
+        if let Some(completed) = completed {
+            if let Some(parent) = scopes.last_mut() {
+                parent.extend(completed);
+            }
+        }
+        drop(scopes);
+        self.control
+            .dispatch_depth
+            .set(self.control.dispatch_depth.get().saturating_sub(1));
+        self.active = false;
+    }
 }
 
 #[derive(Clone, Copy)]
 struct DeferredRendererViewportState {
-    id: sys::ImGuiID,
+    key: ViewportLeaseKey,
+    user_data: *mut std::ffi::c_void,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct OwnedRendererViewportLease {
+    key: ViewportLeaseKey,
     user_data: *mut std::ffi::c_void,
 }
 

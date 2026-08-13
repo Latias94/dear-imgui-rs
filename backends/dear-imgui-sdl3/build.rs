@@ -188,5 +188,11 @@ fn main() {
     // C wrappers used by Rust FFI (see wrapper.cpp).
     build.file("wrapper.cpp");
 
-    build.compile("dear-imgui-sdl3-backend");
+    build_support::compile_cpp_archive(
+        &mut build,
+        "dear-imgui-sdl3-backend",
+        &target_os,
+        &target_env,
+        &target_abi,
+    );
 }

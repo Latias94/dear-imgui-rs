@@ -9,6 +9,8 @@ use build_support::binding::{
     core_source_contract_hash, is_supported_wasm_target, validate_wasm_feature_contract,
 };
 
+const PLATFORM_IO_AGGREGATE_HOOKS_FEATURE: &str = "platform-io-aggregate-hooks-v3";
+
 fn core_wasm_import_module() -> &'static str {
     &build_support::source_inventory::SourceInventory::embedded().wasm_import_module
 }
@@ -89,7 +91,7 @@ impl BuildConfig {
     }
     fn artifact_features(&self) -> Vec<&'static str> {
         let mut features = vec![
-            "platform-io-aggregate-hooks-v2",
+            PLATFORM_IO_AGGREGATE_HOOKS_FEATURE,
             build_support::SAFE_DEMO_FONT_BOUNDARY_ARTIFACT_FEATURE,
             "wchar32",
         ];
@@ -361,7 +363,7 @@ fn main() {
         try_link_prebuilt_all(&cfg)
     };
     if linked_prebuilt {
-        // `try_link_prebuilt` accepts only archives that declare the aggregate hook capability.
+        // `try_link_prebuilt` accepts only archives that declare the v3 aggregate hook capability.
         // The hook object is part of the same `dear_imgui` archive and therefore shares its C++
         // compiler, CRT, defines, and source profile.
         has_platform_io_hooks = true;
@@ -728,7 +730,13 @@ fn build_with_cc_cfg(
         );
     }
 
-    build.compile("dear_imgui");
+    build_support::compile_cpp_archive(
+        &mut build,
+        "dear_imgui",
+        &cfg.target_os,
+        &cfg.target_env,
+        &cfg.target_abi,
+    );
 }
 
 fn write_safe_demo_patched_imgui_cpp(cfg: &BuildConfig, imgui_cpp: &Path) -> PathBuf {
@@ -1093,7 +1101,13 @@ fn build_backend_shim_from_spec(cfg: &BuildConfig, spec: &BackendShimSpec) {
     let mut build = new_native_cpp_build(cfg);
     build.file(imgui_src.join("backends").join(spec.upstream_source));
     build.file(shim_root.join(spec.shim_source));
-    build.compile(spec.output_lib);
+    build_support::compile_cpp_archive(
+        &mut build,
+        spec.output_lib,
+        &cfg.target_os,
+        &cfg.target_env,
+        &cfg.target_abi,
+    );
 
     for link_lib in spec.link_libs {
         if backend_shim_target_matches(link_lib.target, cfg) {
@@ -1162,7 +1176,13 @@ fn validate_prebuilt_artifact_profile(
     cfg: &BuildConfig,
 ) -> Result<CoreArtifactIdentity, String> {
     let profile = cfg.artifact_profile();
-    let identity = profile.validate_release_manifest_bytes(&read_prebuilt_manifest(dir)?)?;
+    let manifest = read_prebuilt_manifest(dir)?;
+    if manifest_declares_artifact_feature(&manifest, "platform-io-aggregate-hooks-v2") {
+        return Err(format!(
+            "artifact declares obsolete platform-io-aggregate-hooks-v2; regenerate the archive with {PLATFORM_IO_AGGREGATE_HOOKS_FEATURE} or remove the prebuilt override and use a source build"
+        ));
+    }
+    let identity = profile.validate_release_manifest_bytes(&manifest)?;
     if let Ok(expected_candidate) = env::var(RELEASE_CANDIDATE_SHA_ENV) {
         let expected_identity = CoreArtifactIdentity::new(&profile, &expected_candidate)?;
         if identity != expected_identity {
@@ -1173,6 +1193,17 @@ fn validate_prebuilt_artifact_profile(
         }
     }
     Ok(identity)
+}
+
+fn manifest_declares_artifact_feature(manifest: &[u8], feature: &str) -> bool {
+    std::str::from_utf8(manifest)
+        .ok()
+        .and_then(|manifest| {
+            manifest
+                .lines()
+                .find_map(|line| line.strip_prefix("features="))
+        })
+        .is_some_and(|features| features.split(',').any(|value| value == feature))
 }
 
 fn assert_explicit_artifact_profile(dir: &Path, cfg: &BuildConfig, source: &str) {

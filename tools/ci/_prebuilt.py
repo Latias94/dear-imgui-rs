@@ -16,7 +16,7 @@ from _verification import VerificationError, temporary_workspace
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
-PLATFORM_IO_AGGREGATE_HOOKS_FEATURE = "platform-io-aggregate-hooks-v2"
+PLATFORM_IO_AGGREGATE_HOOKS_FEATURE = "platform-io-aggregate-hooks-v3"
 SAFE_DEMO_FONT_BOUNDARY_FEATURE = "safe-demo-font-boundary-v1"
 
 
@@ -330,6 +330,12 @@ def core_artifact_profile_hash(fields: dict[str, str], archive: Path) -> str:
             f"foreign core artifact in {archive}: crate={fields['crate_name']!r}"
         )
     features = _canonical_features(fields, archive)
+    if "platform-io-aggregate-hooks-v2" in features:
+        raise VerificationError(
+            f"prebuilt {archive} declares obsolete "
+            "platform-io-aggregate-hooks-v2; regenerate the archive with "
+            f"{PLATFORM_IO_AGGREGATE_HOOKS_FEATURE} or use a source build"
+        )
     _validate_candidate_sha(fields["candidate_sha"])
     for revision in ("cimgui_revision", "imgui_revision"):
         if not GIT_SHA_PATTERN.fullmatch(fields[revision]):
@@ -734,7 +740,72 @@ def write_prebuilt_consumer(destination: Path, source_root: Path, profile: str) 
     else:
         frame_body = '        ui.text("normal artifact");\n'
     source_dir.joinpath("main.rs").write_text(
-        f"""fn main() {{
+        f"""fn verify_platform_io_aggregate_v3_symbols() {{
+    use dear_imgui_rs::sys;
+
+    let input = sys::ImVec2::new(3.0, 4.0);
+    let mut output = sys::ImVec2::new(-1.0, -1.0);
+    unsafe {{
+        assert!(!sys::ImGuiPlatformIO_InvokePlatformSetWindowPos(
+            std::ptr::null(),
+            std::ptr::null_mut(),
+            std::ptr::from_ref(&input),
+        ));
+        assert!(!sys::ImGuiPlatformIO_InvokePlatformSetWindowSize(
+            std::ptr::null(),
+            std::ptr::null_mut(),
+            std::ptr::from_ref(&input),
+        ));
+        assert!(!sys::ImGuiPlatformIO_InvokePlatformGetWindowPos(
+            std::ptr::null(),
+            std::ptr::null_mut(),
+            std::ptr::from_mut(&mut output),
+        ));
+        assert_eq!((output.x, output.y), (0.0, 0.0));
+        output = sys::ImVec2::new(-1.0, -1.0);
+        assert!(!sys::ImGuiPlatformIO_InvokePlatformGetWindowSize(
+            std::ptr::null(),
+            std::ptr::null_mut(),
+            std::ptr::from_mut(&mut output),
+        ));
+        assert_eq!((output.x, output.y), (0.0, 0.0));
+        output = sys::ImVec2::new(-1.0, -1.0);
+        assert!(!sys::ImGuiPlatformIO_InvokePlatformGetWindowFramebufferScale(
+            std::ptr::null(),
+            std::ptr::null_mut(),
+            std::ptr::from_mut(&mut output),
+        ));
+        assert_eq!((output.x, output.y), (0.0, 0.0));
+        assert!(!sys::ImGuiPlatformIO_InvokeRendererSetWindowSize(
+            std::ptr::null(),
+            std::ptr::null_mut(),
+            std::ptr::from_ref(&input),
+        ));
+        assert!(sys::ImGuiPlatformIO_PlatformSetWindowPosPointerParam(
+            std::ptr::null_mut(),
+        )
+        .is_none());
+        assert!(sys::ImGuiPlatformIO_PlatformSetWindowSizePointerParam(
+            std::ptr::null_mut(),
+        )
+        .is_none());
+        assert!(sys::ImGuiPlatformIO_PlatformGetWindowPosOutParam(
+            std::ptr::null_mut(),
+        )
+        .is_none());
+        assert!(sys::ImGuiPlatformIO_PlatformGetWindowSizeOutParam(
+            std::ptr::null_mut(),
+        )
+        .is_none());
+        assert!(sys::ImGuiPlatformIO_PlatformGetWindowFramebufferScaleOutParam(
+            std::ptr::null_mut(),
+        )
+        .is_none());
+    }}
+}}
+
+fn main() {{
+    verify_platform_io_aggregate_v3_symbols();
     let mut context = dear_imgui_rs::Context::create();
     context.io_mut().set_display_size([320.0, 240.0]);
     context.io_mut().set_delta_time(1.0 / 60.0);

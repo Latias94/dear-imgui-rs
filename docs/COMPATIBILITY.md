@@ -38,7 +38,7 @@ Backends
 | dear-imgui-ash    | 0.16.0-alpha.3  | ash = 0.38             | Native Vulkan renderer; shared Winit/SDL3 multi-viewport runtime |
 | dear-imgui-winit  | 0.16.0-alpha.3  | winit = 0.30.13        | Winit platform backend |
 | dear-imgui-sdl3   | 0.16.0-alpha.3  | sdl3 = 0.18.4, sdl3-sys 0.6 | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
-| dear-imgui-bevy   | 0.16.0-alpha.3  | Bevy = 0.19.0          | Bevy-native backend; default renderer and Bevy UI ordering, explicit advanced routes, Rust 1.95 minimum |
+| dear-imgui-bevy   | 0.16.0-alpha.3  | Bevy = 0.19.1          | Bevy-native backend; default renderer and Bevy UI ordering, explicit advanced routes, Rust 1.95 minimum |
 
 Utilities
 
@@ -68,7 +68,7 @@ Extensions
 
 ## 0.16 Architecture Contracts
 
-The 0.16 train is not source-compatible with 0.15.x, and alpha.2 deliberately removes provisional alpha.1 APIs whose contracts were not sound enough to stabilize. The baseline is Dear ImGui v1.92.9b docking via cimgui, Rust 1.92 for the workspace, Rust 1.95 for the Bevy backend, WGPU 30 by default with explicit 29/28/27 routes, and Bevy 0.19. Alpha.3 migrations live in the `0.16.0-alpha.3` section of `CHANGELOG.md`; applications coming from 0.15.x must also apply the alpha.2 and alpha.1 migrations.
+The 0.16 train is not source-compatible with 0.15.x, and alpha.2 deliberately removes provisional alpha.1 APIs whose contracts were not sound enough to stabilize. The baseline is Dear ImGui v1.92.9b docking via cimgui, Rust 1.92 for the workspace, Rust 1.95 for the Bevy backend, WGPU 30 by default with explicit 29/28/27 routes, and Bevy 0.19.1. Alpha.3 migrations live in the `0.16.0-alpha.3` section of `CHANGELOG.md`; applications coming from 0.15.x must also apply the alpha.2 and alpha.1 migrations.
 
 The safe Rust layer intentionally breaks APIs that expose C++ lifecycle
 protocols, wrong-context state, stale GPU handles, or platform-specific ABI
@@ -90,12 +90,30 @@ target.
 | WGPU renderer | WGPU 30 is the default; 29, 28, and 27 are separate mutually exclusive features. Native Winit and SDL3 multi-viewport adapters are also mutually exclusive. |
 | Glow renderer | Requires OpenGL 3.0+, OpenGL ES 3.0+, or WebGL 2. Sampler objects are selected from the live context; older desktop contexts use a temporary filter override that restores application texture parameters before the draw scope ends. |
 | Ash renderer | Native Vulkan via Ash 0.38. Winit and SDL3 multi-viewport surface adapters are mutually exclusive and share one swapchain runtime. |
+| SDLRenderer3 renderer | The official SDLRenderer3 integration is single-window. It does not provide a native multi-viewport renderer route. |
 | Browser multi-viewport | Unsupported. Browser integrations render one main canvas. |
 | Bevy default | `dear-imgui-bevy` enables `render` and `bevy-ui`; the primary Context automatically targets the unique eligible primary-window camera. |
 | Bevy headless | `default-features = false` retains all Context schedules/lifecycle and primary-Context input/capture without RenderApp extraction; explicit multi-Context input routes require `render`. |
 | Bevy render-only | `default-features = false, features = ["render"]` installs the renderer without Bevy UI ordering. |
-| Bevy native multi-viewport | `multi-viewport` implies `render` and `bevy_winit`; each Context opts in explicitly. Secondary state is keyed by stable `ImguiViewportInstanceId`; the numeric `ViewportId` is only the current routing projection and may change during docking. Wayland falls back to host-window docking because global desktop client coordinates are unavailable; call `ImguiNativeViewportSupport::get(context_id)` for the per-Context runtime status. |
+| Bevy native multi-viewport | `multi-viewport` implies `render`, `bevy_winit`, and the narrow `dear-imgui-winit/native-platform-support` capability layer; it does not instantiate a second Winit platform runtime. Each Context opts in explicitly. Secondary state is keyed by stable `ImguiViewportInstanceId`; the numeric `ViewportId` is only the current routing projection and may change during docking. The host and secondary ECS entities must resolve through exact `WINIT_WINDOWS` mappings. `Show` remains hidden until the mapping and Windows policy lease are ready, and `NO_INPUTS`/`NO_FOCUS_ON_CLICK` are enforced by the native policy. Monitor facts are published transactionally from detached Winit snapshots; ECS monitor geometry is not a fallback. `ImguiNativeViewportSupport` reports coordinate capability, while the independent `NativeMonitor` diagnostic batch reports collection, primary-identity, and work-area fallback state. Wayland falls back to host-window docking because global desktop client coordinates are unavailable. |
 | Bevy WASM | `wasm` supports both default and headless builds; combining WASM with native `multi-viewport` is rejected. |
+
+Native desktop evidence is graded separately from implementation and compile coverage. The current
+worktree did not execute the complete manual desktop checklist below, so these rows must not be
+reported as newly verified native behavior without a named CI or PR test environment:
+
+| Native behavior | Implemented source and repository evidence | Current claim |
+| --- | --- | --- |
+| Windows work area and viewport policy | `MONITORINFO.rcWork`, exact WindowId/HWND policy lease, pure lease/geometry tests, and Windows compilation | Native implementation present; mixed-DPI/taskbar-edge and first/repeated-click checklist unverified in this worktree. Inspect Winit `monitor_publication_report()` or Bevy `NativeMonitor` diagnostics at runtime. |
+| macOS work area and show policy | `NSScreen.visibleFrame` conversion, main-thread validation, and conversion tests | Native implementation present; Retina/menu-bar/Dock/Spaces checklist unverified in this worktree. Runtime provenance must report `MacOsVisibleFrame` before an exact work-area claim. |
+| Linux/X11 work area | X11 display detection plus conservative `FullMain(AmbiguousDesktopScope)` snapshots | Fallback-only by design. GNOME/KWin panel attribution has not been proven, so no per-monitor `_NET_WORKAREA` precision is claimed. |
+| Linux/Wayland | Early native multi-viewport rejection and `FullMain(Wayland)` provenance; ordinary in-window docking remains independent | Native multi-viewport unsupported. The compositor checklist was not executed in this worktree; no synthetic global coordinates are provided. |
+
+For Winit, an initial unavailable or primary-unproven monitor batch rejects viewport attachment;
+later failures retain the last complete transaction and set
+`WinitMonitorPublicationState::RetainedAfterCollectionFailure`. Bevy disables native viewports for
+the affected frame and atomically publishes the reason under `ImguiDiagnosticOrigin::NativeMonitor`.
+Neither backend exposes a live native monitor handle through its report surface.
 
 Windows source-support evidence is deliberately graded rather than inferred from a successful C++ compile:
 
@@ -314,7 +332,7 @@ requested artifact profile:
 - crate name and version
 - target triple, static link type, and MSVC CRT (`md` or `mt`)
 - normalized core artifact features, including `wchar32`,
-  `platform-io-aggregate-hooks-v2`, `safe-demo-font-boundary-v1`, and optional
+  `platform-io-aggregate-hooks-v3`, `safe-demo-font-boundary-v1`, and optional
   `stack-layout` or `freetype`
 - the exact 40-hex cimgui and nested Dear ImGui source revisions
 - the deterministic binding-spec hash

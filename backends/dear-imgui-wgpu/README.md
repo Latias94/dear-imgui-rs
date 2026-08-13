@@ -184,6 +184,12 @@ python3 tools/ci/run_contract.py multi-viewport-smoke
 Linux CI supplies Xvfb and Mesa/Lavapipe. Missing display or software-GPU infrastructure is an
 infrastructure failure, not a skipped success.
 
+The current route evidence is intentionally asymmetric: Winit + WGPU has a route-level native
+smoke (`A`), while the SDL3 route has the intended example and shared-runtime coverage but no
+dedicated native smoke (`B`). Consult the
+[`renderer route evidence matrix`](../../docs/renderer-route-evidence.md) for the exact claim
+boundary and follow-up gaps.
+
 Shut down renderer ownership before disabling platform viewport ownership:
 
 ```rust,no_run

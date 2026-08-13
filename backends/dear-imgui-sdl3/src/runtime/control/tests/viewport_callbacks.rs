@@ -241,6 +241,70 @@ fn deferred_restore_rejects_a_reused_viewport_address_with_a_new_id() {
 }
 
 #[test]
+fn owned_platform_lease_accepts_an_in_place_docking_id_change() {
+    let _guard = crate::tests::test_guard();
+    let mut context = Context::create();
+    let mut runtime = synthetic_claimed_registration(
+        &mut context,
+        Rc::new(Cell::new(0)),
+        Rc::new(Cell::new(0)),
+        Rc::new(Cell::new(0)),
+        synthetic_create_window,
+    );
+    let mut viewport = sys::ImGuiViewport::default();
+    viewport.ID = 41;
+    viewport.PlatformUserData = OWNED_VIEWPORT_DATA as *mut _;
+    viewport.PlatformHandle = OWNED_VIEWPORT_HANDLE as *mut _;
+    runtime
+        .control
+        .remember_owned_viewport(&mut viewport, unsafe {
+            ViewportPlatformState::capture(&viewport)
+        });
+
+    viewport.ID = 42;
+    let expected = runtime
+        .control
+        .take_owned_viewport(&mut viewport)
+        .expect("an exact platform sidecar proves that docking changed the existing viewport");
+
+    assert_eq!(expected, unsafe {
+        ViewportPlatformState::capture(&viewport)
+    });
+    runtime.shutdown_platform(&mut context).unwrap();
+}
+
+#[test]
+fn owned_platform_lease_rejects_reused_address_with_foreign_sidecar() {
+    let _guard = crate::tests::test_guard();
+    let mut context = Context::create();
+    let mut runtime = synthetic_claimed_registration(
+        &mut context,
+        Rc::new(Cell::new(0)),
+        Rc::new(Cell::new(0)),
+        Rc::new(Cell::new(0)),
+        synthetic_create_window,
+    );
+    let mut viewport = sys::ImGuiViewport::default();
+    viewport.ID = 41;
+    viewport.PlatformUserData = OWNED_VIEWPORT_DATA as *mut _;
+    viewport.PlatformHandle = OWNED_VIEWPORT_HANDLE as *mut _;
+    runtime
+        .control
+        .remember_owned_viewport(&mut viewport, unsafe {
+            ViewportPlatformState::capture(&viewport)
+        });
+
+    viewport.ID = 42;
+    viewport.PlatformUserData = FOREIGN_VIEWPORT_DATA as *mut _;
+    viewport.PlatformHandle = FOREIGN_VIEWPORT_HANDLE as *mut _;
+
+    assert!(runtime.control.take_owned_viewport(&mut viewport).is_none());
+    assert_eq!(viewport.PlatformUserData as usize, FOREIGN_VIEWPORT_DATA);
+    assert_eq!(viewport.PlatformHandle as usize, FOREIGN_VIEWPORT_HANDLE);
+    runtime.shutdown_platform(&mut context).unwrap();
+}
+
+#[test]
 fn destroy_callback_never_revisits_a_reused_viewport_address() {
     let _guard = crate::tests::test_guard();
     DESTROY_OBSERVED_USER_DATA.with(|observed| observed.set(0));
@@ -502,9 +566,36 @@ fn complete_foreign_platform_takeover_preserves_capability_flags() {
         (*platform_io).Platform_SetImeDataFn = original_service_callbacks.3;
         (*platform_io).Platform_CreateWindow = Some(foreign_create_window);
         (*platform_io).Platform_DestroyWindow = Some(foreign_destroy_window);
+        (*platform_io).Platform_ShowWindow = Some(foreign_show_window);
+        (*platform_io).Platform_UpdateWindow = Some(foreign_update_window);
+        sys::ImGuiPlatformIO_Set_Platform_SetWindowPos_PointerParam(
+            platform_io,
+            Some(foreign_set_window_pos),
+        );
+        sys::ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(
+            platform_io,
+            Some(foreign_get_window_pos),
+        );
+        sys::ImGuiPlatformIO_Set_Platform_SetWindowSize_PointerParam(
+            platform_io,
+            Some(foreign_set_window_size),
+        );
+        sys::ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(
+            platform_io,
+            Some(foreign_get_window_size),
+        );
+        sys::ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(
+            platform_io,
+            Some(foreign_get_window_framebuffer_scale),
+        );
+        (*platform_io).Platform_SetWindowFocus = Some(foreign_set_window_focus);
+        (*platform_io).Platform_GetWindowFocus = Some(foreign_get_window_focus);
+        (*platform_io).Platform_GetWindowMinimized = Some(foreign_get_window_minimized);
+        (*platform_io).Platform_SetWindowTitle = Some(foreign_set_window_title);
         (*platform_io).Platform_RenderWindow = Some(foreign_platform_render_window);
         (*platform_io).Platform_SwapBuffers = Some(foreign_platform_swap_buffers);
         (*platform_io).Platform_SetWindowAlpha = Some(foreign_set_window_alpha);
+        (*platform_io).Platform_CreateVkSurface = Some(foreign_create_vk_surface);
         (*platform_io).Platform_ClipboardUserData = FOREIGN_PLATFORM_DATA as *mut _;
         (*io).BackendPlatformUserData = FOREIGN_BACKEND_DATA as *mut _;
         (*io).BackendPlatformName = FOREIGN_BACKEND_NAME.as_ptr().cast();
@@ -557,7 +648,7 @@ fn complete_foreign_platform_takeover_preserves_capability_flags() {
 }
 
 #[test]
-fn foreign_write_to_reserved_empty_platform_slot_blocks_direct_trampoline() {
+fn foreign_write_to_reserved_platform_slot_blocks_direct_trampoline() {
     let _guard = crate::tests::test_guard();
     let mut context = Context::create();
     let mut runtime = synthetic_claimed_registration(
@@ -569,7 +660,6 @@ fn foreign_write_to_reserved_empty_platform_slot_blocks_direct_trampoline() {
     );
     context.binding().with_bound_context(|| unsafe {
         let platform_io = sys::igGetPlatformIO_Nil();
-        assert!((*platform_io).Platform_SetWindowAlpha.is_none());
         (*platform_io).Platform_SetWindowAlpha = Some(foreign_set_window_alpha);
     });
     let mut viewport = sys::ImGuiViewport::default();

@@ -1,4 +1,10 @@
+use super::super::coordinates::monitor_from_snapshot;
 use super::*;
+use crate::multi_viewport::{
+    WinitMonitorCollectionFailure, WinitMonitorPublicationReport, WinitMonitorPublicationState,
+};
+use crate::native_support::{MonitorSnapshot, collect_monitor_snapshot_set};
+use std::cmp::Ordering;
 
 #[derive(Clone, Copy)]
 struct MonitorVectorState {
@@ -40,12 +46,17 @@ impl MonitorVectorState {
 
 pub(in super::super) struct PreparedMonitors {
     storage: Option<MonitorVectorState>,
+    facts: Option<Vec<MonitorSnapshot>>,
+    values: Vec<dear_imgui_rs::sys::ImGuiPlatformMonitor>,
+    state: WinitMonitorPublicationState,
 }
 
 impl PreparedMonitors {
     fn allocate(
         context: &Context,
+        facts: Option<Vec<MonitorSnapshot>>,
         monitors: &[dear_imgui_rs::sys::ImGuiPlatformMonitor],
+        state: WinitMonitorPublicationState,
     ) -> Result<Self, WinitPlatformError> {
         validate_monitors(monitors)?;
         let count =
@@ -65,6 +76,9 @@ impl PreparedMonitors {
                 size: count,
                 capacity: count,
             }),
+            facts,
+            values: monitors.to_vec(),
+            state,
         })
     }
 
@@ -72,6 +86,22 @@ impl PreparedMonitors {
         self.storage
             .take()
             .expect("prepared monitor storage can only be published once")
+    }
+
+    fn take_publication(
+        &mut self,
+    ) -> (
+        MonitorVectorState,
+        Option<Vec<MonitorSnapshot>>,
+        Vec<dear_imgui_rs::sys::ImGuiPlatformMonitor>,
+        WinitMonitorPublicationState,
+    ) {
+        (
+            self.take_storage(),
+            self.facts.take(),
+            std::mem::take(&mut self.values),
+            self.state,
+        )
     }
 }
 
@@ -86,6 +116,9 @@ impl Drop for PreparedMonitors {
 pub(in super::super) struct MonitorOwnership {
     prior: MonitorVectorState,
     installed: MonitorVectorState,
+    facts: Option<Vec<MonitorSnapshot>>,
+    values: Vec<dear_imgui_rs::sys::ImGuiPlatformMonitor>,
+    state: WinitMonitorPublicationState,
 }
 
 impl MonitorOwnership {
@@ -94,36 +127,6 @@ impl MonitorOwnership {
         raw: *mut dear_imgui_rs::sys::ImGuiPlatformIO,
     ) -> bool {
         unsafe { self.installed.matches(raw) }
-    }
-
-    unsafe fn installed_equals(
-        &self,
-        raw: *mut dear_imgui_rs::sys::ImGuiPlatformIO,
-        monitors: &[dear_imgui_rs::sys::ImGuiPlatformMonitor],
-    ) -> Result<bool, WinitPlatformError> {
-        if !unsafe { self.installed.matches(raw) } {
-            return Err(WinitPlatformError::PlatformStateReplaced {
-                field: "PlatformIO.Monitors",
-            });
-        }
-        let count = usize::try_from(self.installed.size).map_err(|_| {
-            WinitPlatformError::PlatformStateReplaced {
-                field: "PlatformIO.Monitors",
-            }
-        })?;
-        if count != monitors.len() {
-            return Ok(false);
-        }
-        if count == 0 {
-            return Ok(true);
-        }
-        if self.installed.data.is_null() {
-            return Err(WinitPlatformError::PlatformStateReplaced {
-                field: "PlatformIO.Monitors",
-            });
-        }
-        let installed = unsafe { std::slice::from_raw_parts(self.installed.data, count) };
-        Ok(installed == monitors)
     }
 
     unsafe fn replace_installed(
@@ -136,11 +139,22 @@ impl MonitorOwnership {
                 field: "PlatformIO.Monitors",
             });
         }
-        let replacement = prepared.take_storage();
+        let (replacement, facts, values, state) = prepared.take_publication();
         unsafe { replacement.install_into(raw) };
         let previous = std::mem::replace(&mut self.installed, replacement);
+        self.facts = facts;
+        self.values = values;
+        self.state = state;
         unsafe { previous.free() };
         Ok(())
+    }
+
+    pub(in super::super) fn report(&self) -> WinitMonitorPublicationReport {
+        WinitMonitorPublicationReport::new(self.state, self.facts.clone())
+    }
+
+    fn retain_after_failure(&mut self, reason: WinitMonitorCollectionFailure) {
+        self.state = WinitMonitorPublicationState::RetainedAfterCollectionFailure { reason };
     }
 
     pub(in super::super) unsafe fn restore_if_owned(
@@ -173,52 +187,105 @@ pub(in super::super) fn prepare_monitors(
     context: &Context,
     window: &winit::window::Window,
 ) -> Result<PreparedMonitors, WinitPlatformError> {
-    let monitors = collect_monitors(window);
-    PreparedMonitors::allocate(context, &monitors)
-}
-
-fn move_primary_to_front<T: Eq>(monitors: &mut Vec<T>, primary: Option<T>) {
-    let Some(primary) = primary else {
-        return;
+    let publication = match collect_monitor_publication(window) {
+        MonitorCollection::Available(publication) => publication,
+        MonitorCollection::Unavailable(reason) => {
+            return Err(WinitPlatformError::MonitorCollectionUnavailable { reason });
+        }
     };
-    if let Some(index) = monitors.iter().position(|monitor| *monitor == primary) {
-        let primary = monitors.remove(index);
-        monitors.insert(0, primary);
-    } else {
-        monitors.insert(0, primary);
-    }
+    PreparedMonitors::allocate(
+        context,
+        publication.facts,
+        &publication.values,
+        WinitMonitorPublicationState::NativeSnapshot,
+    )
 }
 
-pub(in super::super) fn collect_monitors(
-    window: &winit::window::Window,
-) -> Vec<dear_imgui_rs::sys::ImGuiPlatformMonitor> {
-    let mut monitor_handles = window.available_monitors().collect::<Vec<_>>();
-    monitor_handles.sort_by_key(|monitor| {
-        let position = monitor.position();
-        let size = monitor.size();
-        (
-            position.x,
-            position.y,
-            size.width,
-            size.height,
-            monitor.name(),
-        )
-    });
-    move_primary_to_front(&mut monitor_handles, window.primary_monitor());
-    let mut monitors = monitor_handles
-        .into_iter()
-        .map(|monitor| {
-            monitor_from_physical(monitor.position(), monitor.size(), monitor.scale_factor())
-        })
-        .collect::<Vec<_>>();
-    if monitors.is_empty() {
-        monitors.push(monitor_from_physical(
-            PhysicalPosition::new(0, 0),
-            window.inner_size(),
-            window.scale_factor(),
-        ));
+#[derive(Clone, Debug, PartialEq)]
+struct MonitorPublication {
+    facts: Option<Vec<MonitorSnapshot>>,
+    values: Vec<dear_imgui_rs::sys::ImGuiPlatformMonitor>,
+}
+
+enum MonitorCollection {
+    Available(MonitorPublication),
+    Unavailable(WinitMonitorCollectionFailure),
+}
+
+fn snapshot_order(left: &MonitorSnapshot, right: &MonitorSnapshot) -> Ordering {
+    left.identity()
+        .cmp(right.identity())
+        .then_with(|| compare_f64_pair(left.main().position(), right.main().position()))
+        .then_with(|| compare_f64_pair(left.main().size(), right.main().size()))
+        .then_with(|| left.scale_factor().total_cmp(&right.scale_factor()))
+}
+
+fn compare_f64_pair(left: [f64; 2], right: [f64; 2]) -> Ordering {
+    left[0]
+        .total_cmp(&right[0])
+        .then_with(|| left[1].total_cmp(&right[1]))
+}
+
+fn normalize_snapshots(
+    mut snapshots: Vec<MonitorSnapshot>,
+    primary: Option<&crate::native_support::MonitorIdentity>,
+) -> Vec<MonitorSnapshot> {
+    snapshots.sort_by(snapshot_order);
+    // Only remove exact duplicate facts. Detached fallback identities can collide for identical
+    // displays; dropping a distinct work rectangle would silently lose native evidence.
+    snapshots.dedup_by(|left, right| left == right);
+    if let Some(primary) = primary
+        && let Some(index) = snapshots
+            .iter()
+            .position(|snapshot| snapshot.identity() == primary)
+    {
+        let primary = snapshots.remove(index);
+        snapshots.insert(0, primary);
     }
-    monitors
+    snapshots
+}
+
+fn collect_monitor_publication(window: &winit::window::Window) -> MonitorCollection {
+    let publication = match collect_monitor_snapshot_set(window) {
+        Ok(publication) => publication,
+        Err(error) => {
+            return MonitorCollection::Unavailable(WinitMonitorCollectionFailure::Native(error));
+        }
+    };
+    let (snapshots, primary) = publication.into_parts();
+    monitor_collection_from_snapshots(snapshots, primary.as_ref())
+}
+
+fn monitor_collection_from_snapshots(
+    snapshots: Vec<MonitorSnapshot>,
+    primary: Option<&crate::native_support::MonitorIdentity>,
+) -> MonitorCollection {
+    if snapshots.is_empty() {
+        return MonitorCollection::Unavailable(WinitMonitorCollectionFailure::EmptyCollection);
+    }
+    if snapshots.len() > 1 && primary.is_none() {
+        return MonitorCollection::Unavailable(
+            WinitMonitorCollectionFailure::PrimaryIdentityUnproven,
+        );
+    }
+    let snapshots = normalize_snapshots(snapshots, primary);
+    if snapshots.is_empty() {
+        return MonitorCollection::Unavailable(WinitMonitorCollectionFailure::EmptyCollection);
+    }
+    let Some(values) = snapshots
+        .iter()
+        .map(monitor_from_snapshot)
+        .collect::<Option<Vec<_>>>()
+    else {
+        return MonitorCollection::Unavailable(WinitMonitorCollectionFailure::ProjectionInvalid);
+    };
+    if validate_monitors(&values).is_err() {
+        return MonitorCollection::Unavailable(WinitMonitorCollectionFailure::ProjectionInvalid);
+    }
+    MonitorCollection::Available(MonitorPublication {
+        facts: Some(snapshots),
+        values,
+    })
 }
 
 pub(in super::super) fn refresh_monitors(
@@ -226,24 +293,49 @@ pub(in super::super) fn refresh_monitors(
     window: &winit::window::Window,
     ownership: &mut MonitorOwnership,
 ) -> Result<bool, WinitPlatformError> {
-    let monitors = collect_monitors(window);
-    refresh_published_monitors(context, &monitors, ownership)
+    refresh_monitor_collection(context, collect_monitor_publication(window), ownership)
+}
+
+fn refresh_monitor_collection(
+    context: &Context,
+    collection: MonitorCollection,
+    ownership: &mut MonitorOwnership,
+) -> Result<bool, WinitPlatformError> {
+    let publication = match collection {
+        MonitorCollection::Available(publication) => publication,
+        MonitorCollection::Unavailable(reason) => {
+            ownership.retain_after_failure(reason);
+            return Ok(false);
+        }
+    };
+    refresh_published_monitors(context, publication, ownership)
 }
 
 fn refresh_published_monitors(
     context: &Context,
-    monitors: &[dear_imgui_rs::sys::ImGuiPlatformMonitor],
+    publication: MonitorPublication,
     ownership: &mut MonitorOwnership,
 ) -> Result<bool, WinitPlatformError> {
-    validate_monitors(monitors)?;
+    validate_monitors(&publication.values)?;
     let raw = unsafe { dear_imgui_rs::sys::igGetPlatformIO_Nil() };
     if raw.is_null() {
         return Err(WinitPlatformError::ContextMismatch);
     }
-    if unsafe { ownership.installed_equals(raw, monitors)? } {
+    if !unsafe { ownership.installed.matches(raw) } {
+        return Err(WinitPlatformError::PlatformStateReplaced {
+            field: "PlatformIO.Monitors",
+        });
+    }
+    if ownership.facts == publication.facts && ownership.values == publication.values {
+        ownership.state = WinitMonitorPublicationState::NativeSnapshot;
         return Ok(false);
     }
-    let prepared = PreparedMonitors::allocate(context, monitors)?;
+    let prepared = PreparedMonitors::allocate(
+        context,
+        publication.facts,
+        &publication.values,
+        WinitMonitorPublicationState::NativeSnapshot,
+    )?;
     unsafe { ownership.replace_installed(raw, prepared)? };
     Ok(true)
 }
@@ -254,7 +346,30 @@ pub(in super::super) fn refresh_monitors_for_test(
     monitors: &[dear_imgui_rs::sys::ImGuiPlatformMonitor],
     ownership: &mut MonitorOwnership,
 ) -> Result<bool, WinitPlatformError> {
-    refresh_published_monitors(context, monitors, ownership)
+    refresh_published_monitors(
+        context,
+        MonitorPublication {
+            facts: None,
+            values: monitors.to_vec(),
+        },
+        ownership,
+    )
+}
+
+#[cfg(test)]
+pub(in super::super) fn refresh_monitor_snapshots_for_test(
+    context: &Context,
+    snapshots: Option<Vec<MonitorSnapshot>>,
+    ownership: &mut MonitorOwnership,
+) -> Result<bool, WinitPlatformError> {
+    let collection = snapshots
+        .map(|snapshots| monitor_collection_from_snapshots(snapshots, None))
+        .unwrap_or(MonitorCollection::Unavailable(
+            WinitMonitorCollectionFailure::Native(
+                crate::native_support::MonitorCollectionError::MainFactsUnavailable { monitor: 0 },
+            ),
+        ));
+    refresh_monitor_collection(context, collection, ownership)
 }
 
 #[cfg(test)]
@@ -262,7 +377,12 @@ pub(in super::super) fn prepare_monitors_for_test(
     context: &Context,
     monitors: Vec<dear_imgui_rs::sys::ImGuiPlatformMonitor>,
 ) -> Result<PreparedMonitors, WinitPlatformError> {
-    PreparedMonitors::allocate(context, &monitors)
+    PreparedMonitors::allocate(
+        context,
+        None,
+        &monitors,
+        WinitMonitorPublicationState::NativeSnapshot,
+    )
 }
 
 pub(in super::super) fn publish_monitors(
@@ -272,9 +392,15 @@ pub(in super::super) fn publish_monitors(
     context.binding().with_bound_context(|| unsafe {
         let raw = context.platform_io_mut().as_raw_mut();
         let prior = MonitorVectorState::from_platform_io(raw);
-        let installed = prepared.take_storage();
+        let (installed, facts, values, state) = prepared.take_publication();
         installed.install_into(raw);
-        MonitorOwnership { prior, installed }
+        MonitorOwnership {
+            prior,
+            installed,
+            facts,
+            values,
+            state,
+        }
     })
 }
 
@@ -355,18 +481,65 @@ fn validate_monitors(
 
 #[cfg(test)]
 mod tests {
-    use super::move_primary_to_front;
+    use super::{
+        MonitorCollection, MonitorSnapshot, monitor_collection_from_snapshots, normalize_snapshots,
+    };
+    use crate::multi_viewport::WinitMonitorCollectionFailure;
+    use crate::native_support::{
+        MonitorIdentity, PhysicalMonitorRect, WorkAreaFallback, WorkAreaProvenance,
+    };
 
     #[test]
-    fn primary_monitor_is_first_without_duplication() {
-        let mut monitors = vec![2, 1, 3];
-        move_primary_to_front(&mut monitors, Some(1));
-        assert_eq!(monitors, vec![1, 2, 3]);
+    fn detached_primary_identity_is_promoted_without_fabrication() {
+        let main = PhysicalMonitorRect::new([0.0, 0.0], [1920.0, 1080.0]).unwrap();
+        let primary = MonitorSnapshot::from_test(
+            MonitorIdentity::from_test_key("primary"),
+            main,
+            main,
+            1.0,
+            WorkAreaProvenance::FullMain(WorkAreaFallback::SourceUnavailable),
+        );
+        let secondary_main = PhysicalMonitorRect::new([1920.0, 0.0], [1920.0, 1080.0]).unwrap();
+        let secondary = MonitorSnapshot::from_test(
+            MonitorIdentity::from_test_key("secondary"),
+            secondary_main,
+            secondary_main,
+            1.0,
+            WorkAreaProvenance::FullMain(WorkAreaFallback::SourceUnavailable),
+        );
 
-        move_primary_to_front(&mut monitors, Some(4));
-        assert_eq!(monitors, vec![4, 1, 2, 3]);
+        let primary_identity = MonitorIdentity::from_test_key("primary");
+        let snapshots = normalize_snapshots(vec![secondary, primary], Some(&primary_identity));
+        assert_eq!(snapshots[0].identity(), &primary_identity);
+        assert_eq!(snapshots.len(), 2);
+    }
 
-        move_primary_to_front(&mut monitors, Some(3));
-        assert_eq!(monitors, vec![3, 4, 1, 2]);
+    #[test]
+    fn multiple_monitors_require_a_proven_primary_but_one_monitor_does_not() {
+        let main = PhysicalMonitorRect::new([0.0, 0.0], [1920.0, 1080.0]).unwrap();
+        let primary = MonitorSnapshot::from_test(
+            MonitorIdentity::from_test_key("primary"),
+            main,
+            main,
+            1.0,
+            WorkAreaProvenance::FullMain(WorkAreaFallback::SourceUnavailable),
+        );
+        let secondary_main = PhysicalMonitorRect::new([1920.0, 0.0], [1920.0, 1080.0]).unwrap();
+        let secondary = MonitorSnapshot::from_test(
+            MonitorIdentity::from_test_key("secondary"),
+            secondary_main,
+            secondary_main,
+            1.0,
+            WorkAreaProvenance::FullMain(WorkAreaFallback::SourceUnavailable),
+        );
+
+        assert!(matches!(
+            monitor_collection_from_snapshots(vec![primary.clone(), secondary], None),
+            MonitorCollection::Unavailable(WinitMonitorCollectionFailure::PrimaryIdentityUnproven),
+        ));
+        assert!(matches!(
+            monitor_collection_from_snapshots(vec![primary], None),
+            MonitorCollection::Available(_),
+        ));
     }
 }

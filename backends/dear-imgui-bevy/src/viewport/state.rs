@@ -81,6 +81,8 @@ pub(super) struct ImguiViewportRecord {
     pub(super) camera: Option<Entity>,
     pub(super) feedback: Option<ImguiViewportFeedback>,
     pub(super) flags: Option<imgui::ViewportFlags>,
+    pub(super) show_requested: bool,
+    pub(super) native_policy: NativeViewportPolicyState,
     pub(super) pending_client_placement: Option<PendingClientPlacement>,
     pub(super) geometry: geometry::ViewportGeometryReconciler,
     pub(super) handle: Option<ImguiViewportPlatformHandleState>,
@@ -98,6 +100,8 @@ impl ImguiViewportRecord {
             camera: None,
             feedback: None,
             flags: None,
+            show_requested: false,
+            native_policy: NativeViewportPolicyState::default(),
             pending_client_placement: None,
             geometry: geometry::ViewportGeometryReconciler::default(),
             handle: None,
@@ -107,10 +111,12 @@ impl ImguiViewportRecord {
     }
 
     pub(super) fn clear_ecs_state(&mut self) {
+        self.native_policy.release();
         self.window = None;
         self.camera = None;
         self.feedback = None;
         self.flags = None;
+        self.show_requested = false;
         self.pending_client_placement = None;
         self.geometry = geometry::ViewportGeometryReconciler::default();
         self.focus_next_frame = false;

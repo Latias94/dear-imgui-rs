@@ -2,7 +2,7 @@ use super::*;
 #[cfg(feature = "sdlgpu3-renderer")]
 use crate::callback_ownership::finish_sdlgpu_renderer_create;
 use crate::callback_ownership::{
-    create_window_callback_for_test, destroy_window_callback_for_test,
+    PlatformCallbackSlot, create_window_callback_for_test, destroy_window_callback_for_test,
     render_window_callback_for_test, swap_buffers_callback_for_test,
 };
 #[cfg(any(
@@ -39,7 +39,6 @@ thread_local! {
     static RENDERER_DESTROY_OBSERVED_USER_DATA: Cell<usize> = const { Cell::new(0) };
     #[cfg(feature = "multi-viewport")]
     static VULKAN_SURFACE_CREATE_COUNT: Cell<usize> = const { Cell::new(0) };
-    #[cfg(feature = "multi-viewport")]
     static FOREIGN_VULKAN_SURFACE_CREATE_COUNT: Cell<usize> = const { Cell::new(0) };
 }
 
@@ -63,6 +62,65 @@ unsafe extern "C" fn synthetic_destroy_window(viewport: *mut sys::ImGuiViewport)
 unsafe extern "C" fn foreign_create_window(_viewport: *mut sys::ImGuiViewport) {}
 
 unsafe extern "C" fn foreign_destroy_window(_viewport: *mut sys::ImGuiViewport) {}
+
+unsafe extern "C" fn foreign_show_window(_viewport: *mut sys::ImGuiViewport) {}
+
+unsafe extern "C" fn foreign_update_window(_viewport: *mut sys::ImGuiViewport) {}
+
+unsafe extern "C" fn foreign_set_window_pos(
+    _viewport: *mut sys::ImGuiViewport,
+    _pos: *const sys::ImVec2,
+) {
+}
+
+unsafe extern "C" fn foreign_get_window_pos(
+    _viewport: *mut sys::ImGuiViewport,
+    out_pos: *mut sys::ImVec2,
+) {
+    if let Some(out_pos) = unsafe { out_pos.as_mut() } {
+        *out_pos = sys::ImVec2 { x: 0.0, y: 0.0 };
+    }
+}
+
+unsafe extern "C" fn foreign_set_window_size(
+    _viewport: *mut sys::ImGuiViewport,
+    _size: *const sys::ImVec2,
+) {
+}
+
+unsafe extern "C" fn foreign_get_window_size(
+    _viewport: *mut sys::ImGuiViewport,
+    out_size: *mut sys::ImVec2,
+) {
+    if let Some(out_size) = unsafe { out_size.as_mut() } {
+        *out_size = sys::ImVec2 { x: 0.0, y: 0.0 };
+    }
+}
+
+unsafe extern "C" fn foreign_get_window_framebuffer_scale(
+    _viewport: *mut sys::ImGuiViewport,
+    out_scale: *mut sys::ImVec2,
+) {
+    if let Some(out_scale) = unsafe { out_scale.as_mut() } {
+        *out_scale = sys::ImVec2 { x: 1.0, y: 1.0 };
+    }
+}
+
+unsafe extern "C" fn foreign_set_window_focus(_viewport: *mut sys::ImGuiViewport) {}
+
+unsafe extern "C" fn foreign_get_window_focus(_viewport: *mut sys::ImGuiViewport) -> bool {
+    false
+}
+
+unsafe extern "C" fn foreign_get_window_minimized(_viewport: *mut sys::ImGuiViewport) -> bool {
+    false
+}
+
+unsafe extern "C" fn foreign_set_window_title(
+    _viewport: *mut sys::ImGuiViewport,
+    _title: *const std::ffi::c_char,
+) {
+}
 
 unsafe extern "C" fn foreign_get_clipboard_text(
     _context: *mut sys::ImGuiContext,
@@ -201,6 +259,94 @@ unsafe extern "C" fn foreign_renderer_destroy_window(_viewport: *mut sys::ImGuiV
 unsafe extern "C" fn failing_create_window(_viewport: *mut sys::ImGuiViewport) {}
 
 unsafe extern "C" fn foreign_set_window_alpha(_viewport: *mut sys::ImGuiViewport, _alpha: f32) {}
+
+unsafe extern "C" fn synthetic_show_window(_viewport: *mut sys::ImGuiViewport) {}
+
+unsafe extern "C" fn synthetic_update_window(_viewport: *mut sys::ImGuiViewport) {}
+
+unsafe extern "C" fn synthetic_set_window_pos(
+    _viewport: *mut sys::ImGuiViewport,
+    _pos: sys::ImVec2_c,
+) {
+}
+
+unsafe extern "C" fn synthetic_get_window_pos(_viewport: *mut sys::ImGuiViewport) -> sys::ImVec2_c {
+    sys::ImVec2_c { x: 1.0, y: 2.0 }
+}
+
+unsafe extern "C" fn synthetic_set_window_size(
+    _viewport: *mut sys::ImGuiViewport,
+    _size: sys::ImVec2_c,
+) {
+}
+
+unsafe extern "C" fn synthetic_get_window_size(
+    _viewport: *mut sys::ImGuiViewport,
+) -> sys::ImVec2_c {
+    sys::ImVec2_c { x: 3.0, y: 4.0 }
+}
+
+unsafe extern "C" fn synthetic_get_window_framebuffer_scale(
+    _viewport: *mut sys::ImGuiViewport,
+) -> sys::ImVec2_c {
+    sys::ImVec2_c { x: 1.5, y: 1.5 }
+}
+
+unsafe extern "C" fn synthetic_set_window_focus(_viewport: *mut sys::ImGuiViewport) {}
+
+unsafe extern "C" fn synthetic_get_window_focus(_viewport: *mut sys::ImGuiViewport) -> bool {
+    true
+}
+
+unsafe extern "C" fn synthetic_get_window_minimized(_viewport: *mut sys::ImGuiViewport) -> bool {
+    false
+}
+
+unsafe extern "C" fn synthetic_set_window_title(
+    _viewport: *mut sys::ImGuiViewport,
+    _title: *const std::ffi::c_char,
+) {
+}
+
+unsafe extern "C" fn synthetic_set_window_alpha(_viewport: *mut sys::ImGuiViewport, _alpha: f32) {}
+
+unsafe extern "C" fn synthetic_create_vk_surface_for_claim(
+    _viewport: *mut sys::ImGuiViewport,
+    _instance: sys::ImU64,
+    _allocators: *const std::ffi::c_void,
+    surface: *mut sys::ImU64,
+) -> std::os::raw::c_int {
+    if let Some(surface) = unsafe { surface.as_mut() } {
+        *surface = 0x7171;
+    }
+    0
+}
+
+unsafe fn install_synthetic_platform_callback_inventory(
+    platform_io: *mut sys::ImGuiPlatformIO,
+    create_window: unsafe extern "C" fn(*mut sys::ImGuiViewport),
+) {
+    unsafe {
+        (*platform_io).Platform_CreateWindow = Some(create_window);
+        (*platform_io).Platform_DestroyWindow = Some(synthetic_destroy_window);
+        (*platform_io).Platform_ShowWindow = Some(synthetic_show_window);
+        (*platform_io).Platform_UpdateWindow = Some(synthetic_update_window);
+        (*platform_io).Platform_SetWindowPos = Some(synthetic_set_window_pos);
+        (*platform_io).Platform_GetWindowPos = Some(synthetic_get_window_pos);
+        (*platform_io).Platform_SetWindowSize = Some(synthetic_set_window_size);
+        (*platform_io).Platform_GetWindowSize = Some(synthetic_get_window_size);
+        (*platform_io).Platform_GetWindowFramebufferScale =
+            Some(synthetic_get_window_framebuffer_scale);
+        (*platform_io).Platform_SetWindowFocus = Some(synthetic_set_window_focus);
+        (*platform_io).Platform_GetWindowFocus = Some(synthetic_get_window_focus);
+        (*platform_io).Platform_GetWindowMinimized = Some(synthetic_get_window_minimized);
+        (*platform_io).Platform_SetWindowTitle = Some(synthetic_set_window_title);
+        (*platform_io).Platform_RenderWindow = Some(synthetic_platform_render_window);
+        (*platform_io).Platform_SwapBuffers = Some(synthetic_platform_swap_buffers);
+        (*platform_io).Platform_SetWindowAlpha = Some(synthetic_set_window_alpha);
+        (*platform_io).Platform_CreateVkSurface = Some(synthetic_create_vk_surface_for_claim);
+    }
+}
 
 fn registration_with_lifecycle(
     context: &mut Context,
@@ -360,7 +506,6 @@ unsafe extern "C" fn synthetic_create_vk_surface(
     0
 }
 
-#[cfg(feature = "multi-viewport")]
 unsafe extern "C" fn foreign_create_vk_surface(
     _viewport: *mut sys::ImGuiViewport,
     _instance: sys::ImU64,
@@ -435,13 +580,16 @@ fn synthetic_claimed_registration_with_graphics(
             | sys::ImGuiBackendFlags_HasSetMousePos as i32
             | sys::ImGuiBackendFlags_PlatformHasViewports as i32
             | sys::ImGuiBackendFlags_HasParentViewport as i32;
-        (*platform_io).Platform_CreateWindow = Some(create_window);
-        (*platform_io).Platform_DestroyWindow = Some(synthetic_destroy_window);
-        (*platform_io).Platform_RenderWindow = Some(synthetic_platform_render_window);
-        (*platform_io).Platform_SwapBuffers = Some(synthetic_platform_swap_buffers);
+        install_synthetic_platform_callback_inventory(platform_io, create_window);
         #[cfg(feature = "multi-viewport")]
         {
-            (*platform_io).Platform_CreateVkSurface = create_vk_surface;
+            if platform_graphics == PlatformGraphicsKind::Vulkan {
+                // Keep the Vulkan-unavailable fixture honest: the generic inventory installs
+                // every optional slot, but this case specifically exercises a missing callback.
+                (*platform_io).Platform_CreateVkSurface = create_vk_surface;
+            } else if let Some(create_vk_surface) = create_vk_surface {
+                (*platform_io).Platform_CreateVkSurface = Some(create_vk_surface);
+            }
         }
         (*platform_io).Platform_ClipboardUserData = OWNED_PLATFORM_DATA as *mut _;
         (*main_viewport).PlatformUserData = OWNED_VIEWPORT_DATA as *mut _;

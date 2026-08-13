@@ -85,6 +85,36 @@ fn removing_viewport_feedback_discards_geometry_before_id_reuse() {
 }
 
 #[test]
+fn replacing_native_entity_preserves_show_intent_for_stable_instance() {
+    let context_id = test_context_id();
+    let mut bridge = ImguiViewportBridge::default();
+    let keepalive = bridge.keepalive();
+    bridge.register_context(context_id, Rc::clone(&keepalive));
+    let viewport_id = ImguiViewportId::from(0xC1A1_u32);
+    let instance_id = register_test_viewport(&keepalive, context_id, viewport_id);
+    let context_bridge = bridge
+        .context(context_id)
+        .expect("the context bridge should remain registered");
+    let old_entity = Entity::from_raw_u32(11).expect("the old entity index should be valid");
+    let new_entity = Entity::from_raw_u32(12).expect("the new entity index should be valid");
+
+    context_bridge.set_viewport_window(instance_id, old_entity);
+    context_bridge.request_show(instance_id);
+    context_bridge.set_viewport_window(instance_id, new_entity);
+
+    assert!(context_bridge.show_requested(instance_id));
+    let state = keepalive.state.borrow();
+    let record = state
+        .record(instance_id)
+        .expect("the stable viewport record should remain live");
+    assert_eq!(record.window, Some(new_entity));
+    assert!(
+        !record.native_policy.is_ready(),
+        "rebinding must release the old lease before the new exact Winit mapping is ready"
+    );
+}
+
+#[test]
 fn mixed_dpi_client_and_desktop_positions_round_trip() {
     let entity = Entity::from_raw_u32(1).expect("test entity index should be valid");
     let window_position = WindowPosition::At(IVec2::new(1920, -200));
@@ -339,7 +369,7 @@ fn run_viewport_command_schedule(world: &mut World) {
 }
 
 #[test]
-fn pending_decorated_window_is_positioned_by_client_origin_before_show() {
+fn pending_decorated_window_is_positioned_and_kept_hidden_until_native_ready() {
     fn settle_with_test_decoration(
         mut windows: Query<&mut Window>,
         bridge: NonSend<ImguiViewportBridge>,
@@ -394,12 +424,13 @@ fn pending_decorated_window_is_positioned_by_client_origin_before_show() {
         .get::<Window>(entity)
         .expect("the pending viewport Window should remain live");
     assert_eq!(window.position, WindowPosition::At(IVec2::new(96, 185)));
-    assert!(window.visible);
+    assert!(!window.visible);
     let state = keepalive.state.borrow();
     let record = state
         .record(instance_id)
         .expect("the synthetic viewport record should remain live");
     assert!(record.pending_client_placement.is_none());
+    assert!(record.show_requested);
     assert!(record.focus_next_frame);
     assert_eq!(
         record
@@ -709,7 +740,7 @@ fn platform_capabilities_follow_native_desktop_position_support() {
             &context_bridge,
             primary_window,
             &Window::default(),
-            &[],
+            None,
             std::iter::empty(),
             NativeViewportFrameSupport::new(true, support),
         )
@@ -734,12 +765,17 @@ fn platform_capabilities_follow_native_desktop_position_support() {
         ));
     }
 
+    let window = Window::default();
+    let monitor_publication = ImguiMonitorPublication {
+        facts: None,
+        values: vec![monitor_from_window(&window)],
+    };
     prepare_platform_viewports_for_frame(
         &mut context,
         &context_bridge,
         primary_window,
-        &Window::default(),
-        &[],
+        &window,
+        Some(&monitor_publication),
         std::iter::empty(),
         NativeViewportFrameSupport::new(true, native_window::DesktopPositionSupport::Available),
     )
@@ -1508,7 +1544,7 @@ fn prepare_platform_viewports_rejects_each_replaced_main_viewport_field() {
                 &context_bridge,
                 primary_window,
                 &Window::default(),
-                &[],
+                None,
                 std::iter::empty(),
                 NativeViewportFrameSupport::new(
                     true,
@@ -1527,7 +1563,7 @@ fn prepare_platform_viewports_rejects_each_replaced_main_viewport_field() {
                     &context_bridge,
                     primary_window,
                     &Window::default(),
-                    &[],
+                    None,
                     std::iter::empty(),
                     NativeViewportFrameSupport::new(
                         true,
@@ -1593,7 +1629,7 @@ fn direct_callback_preserves_complete_foreign_platform_takeover() {
         &context_bridge,
         primary_window,
         &Window::default(),
-        &[],
+        None,
         std::iter::empty(),
         NativeViewportFrameSupport::new(true, native_window::DesktopPositionSupport::Available),
     )
@@ -1706,7 +1742,7 @@ fn prepare_platform_viewports_clears_ecs_state_for_missing_instances() {
         &context_bridge,
         primary_window,
         &Window::default(),
-        &[],
+        None,
         std::iter::once((secondary_window, live_instance, feedback())),
         NativeViewportFrameSupport::new(true, native_window::DesktopPositionSupport::Available),
     )
@@ -1773,7 +1809,7 @@ fn cleanup_clears_handles_filtered_from_the_public_viewport_snapshot() {
         &context_bridge,
         primary_window,
         &Window::default(),
-        &[],
+        None,
         std::iter::empty(),
         NativeViewportFrameSupport::new(true, native_window::DesktopPositionSupport::Available),
     )

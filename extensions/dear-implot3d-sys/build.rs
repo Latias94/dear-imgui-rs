@@ -446,7 +446,13 @@ fn build_with_cc(
         );
     }
 
-    build.compile("dear_implot3d");
+    build_support::compile_cpp_archive(
+        &mut build,
+        "dear_implot3d",
+        &cfg.target_os,
+        &cfg.target_env,
+        &cfg.target_abi,
+    );
 }
 
 fn build_surface_test_probe(
@@ -473,8 +479,14 @@ fn build_surface_test_probe(
         .include(cimgui_root)
         .include(cimplot3d_root)
         .include(cimplot3d_root.join("implot3d"))
-        .file(cfg.manifest_dir.join("src/surface_test_probe.cpp"))
-        .compile("dear_implot3d_surface_test_probe");
+        .file(cfg.manifest_dir.join("src/surface_test_probe.cpp"));
+    build_support::compile_cpp_archive(
+        &mut build,
+        "dear_implot3d_surface_test_probe",
+        &cfg.target_os,
+        &cfg.target_env,
+        &cfg.target_abi,
+    );
 }
 
 fn docsrs_build(cfg: &BuildConfig, cimplot3d_root: &Path, imgui_src: &Path, cimgui_root: &Path) {

@@ -53,7 +53,7 @@ fn prepare_secondary_viewport_frame(
             context_bridge,
             primary_window,
             &Window::default(),
-            &[],
+            None,
             std::iter::once((entity, instance_id, feedback)),
             crate::viewport::NativeViewportFrameSupport::new(
                 true,

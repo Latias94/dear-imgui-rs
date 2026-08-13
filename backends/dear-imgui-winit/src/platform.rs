@@ -87,6 +87,12 @@ pub enum WinitPlatformError {
     /// Winit did not expose any monitor geometry that can back Dear ImGui viewports.
     #[error("Winit did not expose any monitor geometry")]
     NoMonitors,
+    /// Winit could not form a complete native monitor publication.
+    #[cfg(feature = "multi-viewport")]
+    #[error("Winit native monitor collection is unavailable: {reason}")]
+    MonitorCollectionUnavailable {
+        reason: crate::multi_viewport::WinitMonitorCollectionFailure,
+    },
     /// Winit exposed monitor geometry that violates Dear ImGui's platform contract.
     #[error("Winit monitor {monitor} is invalid: {reason}")]
     InvalidMonitorGeometry {

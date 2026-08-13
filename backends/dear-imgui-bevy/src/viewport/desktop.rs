@@ -1,16 +1,17 @@
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use super::protocol::ImguiViewportFeedback;
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_ecs::entity::Entity;
 use bevy_math::IVec2;
 use bevy_window::Window;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-use bevy_window::{Monitor, WindowPosition};
+use bevy_window::WindowPosition;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_winit::WINIT_WINDOWS;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use dear_imgui_rs::sys;
-
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-use super::protocol::ImguiViewportFeedback;
+use dear_imgui_winit::native_support::{MonitorSnapshot, MonitorSnapshotSet};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(dead_code)] // Exactly one variant is constructed on each native target.
@@ -77,8 +78,8 @@ pub(crate) fn desktop_metrics_for_window(window: &Window) -> ([f32; 2], [f32; 2]
     )
 }
 
-#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-pub(super) fn monitor_from_window(window: &Window) -> sys::ImGuiPlatformMonitor {
+#[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
+pub(crate) fn monitor_from_window(window: &Window) -> sys::ImGuiPlatformMonitor {
     let mut monitor = sys::ImGuiPlatformMonitor::default();
     let pos = match window.position {
         WindowPosition::At(pos) => desktop_position_from_physical(pos, window.scale_factor()),
@@ -103,41 +104,126 @@ pub(super) fn monitor_from_window(window: &Window) -> sys::ImGuiPlatformMonitor 
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-pub(crate) fn platform_monitors_from_bevy_monitors(
-    monitors: impl IntoIterator<Item = (Monitor, bool)>,
-) -> Vec<sys::ImGuiPlatformMonitor> {
-    let mut monitors = monitors.into_iter().collect::<Vec<_>>();
-    monitors.sort_by_key(|(monitor, is_primary)| {
-        (
-            !*is_primary,
-            monitor.physical_position.x,
-            monitor.physical_position.y,
-        )
-    });
-    monitors
-        .into_iter()
-        .map(|(monitor, _)| platform_monitor_from_bevy_monitor(&monitor))
-        .collect()
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ImguiMonitorPublication {
+    pub(crate) facts: Option<Vec<MonitorSnapshot>>,
+    pub(crate) values: Vec<sys::ImGuiPlatformMonitor>,
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-fn platform_monitor_from_bevy_monitor(monitor: &Monitor) -> sys::ImGuiPlatformMonitor {
-    let scale = positive_finite_or(monitor.scale_factor as f32, 1.0);
-    let pos = desktop_position_from_physical(monitor.physical_position, scale);
-    let size = desktop_size_from_physical([monitor.physical_width, monitor.physical_height], scale);
-    let mut platform_monitor = sys::ImGuiPlatformMonitor::default();
-    platform_monitor.MainPos = sys::ImVec2 {
-        x: pos[0],
-        y: pos[1],
-    };
-    platform_monitor.MainSize = sys::ImVec2 {
-        x: size[0],
-        y: size[1],
-    };
-    platform_monitor.WorkPos = platform_monitor.MainPos;
-    platform_monitor.WorkSize = platform_monitor.MainSize;
-    platform_monitor.DpiScale = scale;
-    platform_monitor
+impl ImguiMonitorPublication {
+    pub(crate) fn equivalent_to(&self, other: &Self) -> bool {
+        self.values == other.values
+            && match (&self.facts, &other.facts) {
+                (Some(left), Some(right)) => left == right,
+                (None, None) => true,
+                // A detached facts batch is stronger evidence than a legacy numeric-only seam;
+                // publish it even when the projected ImGui values happen to be unchanged.
+                _ => false,
+            }
+    }
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+pub(crate) fn monitor_publication_from_snapshot_set(
+    snapshot_set: MonitorSnapshotSet,
+) -> Option<ImguiMonitorPublication> {
+    let (mut snapshots, primary_identity) = snapshot_set.into_parts();
+    snapshots.sort_by(|left, right| {
+        let left_primary = primary_identity
+            .as_ref()
+            .is_some_and(|identity| identity == left.identity());
+        let right_primary = primary_identity
+            .as_ref()
+            .is_some_and(|identity| identity == right.identity());
+        right_primary
+            .cmp(&left_primary)
+            .then_with(|| left.identity().cmp(right.identity()))
+            .then_with(|| left.main().position()[0].total_cmp(&right.main().position()[0]))
+            .then_with(|| left.main().position()[1].total_cmp(&right.main().position()[1]))
+            .then_with(|| left.main().size()[0].total_cmp(&right.main().size()[0]))
+            .then_with(|| left.main().size()[1].total_cmp(&right.main().size()[1]))
+            .then_with(|| left.scale_factor().total_cmp(&right.scale_factor()))
+            .then_with(|| left.work().position()[0].total_cmp(&right.work().position()[0]))
+            .then_with(|| left.work().position()[1].total_cmp(&right.work().position()[1]))
+            .then_with(|| left.work().size()[0].total_cmp(&right.work().size()[0]))
+            .then_with(|| left.work().size()[1].total_cmp(&right.work().size()[1]))
+    });
+    // Detached fallback identities can collide for identical displays. Only exact duplicate
+    // facts are redundant; identity equality alone is not sufficient evidence to drop a monitor.
+    snapshots.dedup();
+    let values = snapshots
+        .iter()
+        .map(platform_monitor_from_snapshot)
+        .collect::<Option<Vec<_>>>()?;
+    (!values.is_empty()).then_some(ImguiMonitorPublication {
+        facts: Some(snapshots),
+        values,
+    })
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn platform_monitor_from_snapshot(snapshot: &MonitorSnapshot) -> Option<sys::ImGuiPlatformMonitor> {
+    let scale = f32_from_f64(snapshot.scale_factor())?;
+    let main_pos = desktop_position_from_physical_f64(snapshot.main().position(), scale)?;
+    let main_size = desktop_size_from_physical_f64(snapshot.main().size(), scale)?;
+    let work_pos = desktop_position_from_physical_f64(snapshot.work().position(), scale)?;
+    let work_size = desktop_size_from_physical_f64(snapshot.work().size(), scale)?;
+    Some(sys::ImGuiPlatformMonitor {
+        MainPos: sys::ImVec2 {
+            x: main_pos[0],
+            y: main_pos[1],
+        },
+        MainSize: sys::ImVec2 {
+            x: main_size[0],
+            y: main_size[1],
+        },
+        WorkPos: sys::ImVec2 {
+            x: work_pos[0],
+            y: work_pos[1],
+        },
+        WorkSize: sys::ImVec2 {
+            x: work_size[0],
+            y: work_size[1],
+        },
+        DpiScale: scale,
+        ..sys::ImGuiPlatformMonitor::default()
+    })
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn f32_from_f64(value: f64) -> Option<f32> {
+    let value = value as f32;
+    value.is_finite().then_some(value)
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn desktop_position_from_physical_f64(position: [f64; 2], scale_factor: f32) -> Option<[f32; 2]> {
+    let position = [f32_from_f64(position[0])?, f32_from_f64(position[1])?];
+    match native_desktop_coordinate_space() {
+        DesktopCoordinateSpace::Physical => Some(position),
+        DesktopCoordinateSpace::Logical => {
+            let scale_factor = positive_finite_or(scale_factor, 1.0);
+            let position = [position[0] / scale_factor, position[1] / scale_factor];
+            position.into_iter().all(f32::is_finite).then_some(position)
+        }
+    }
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn desktop_size_from_physical_f64(size: [f64; 2], scale_factor: f32) -> Option<[f32; 2]> {
+    let size = [f32_from_f64(size[0])?, f32_from_f64(size[1])?];
+    if size.iter().any(|value| *value < 0.0) {
+        return None;
+    }
+    match native_desktop_coordinate_space() {
+        DesktopCoordinateSpace::Physical => Some(size),
+        DesktopCoordinateSpace::Logical => {
+            let scale_factor = positive_finite_or(scale_factor, 1.0);
+            let size = [size[0] / scale_factor, size[1] / scale_factor];
+            size.into_iter().all(f32::is_finite).then_some(size)
+        }
+    }
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]

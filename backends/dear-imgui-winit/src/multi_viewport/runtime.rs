@@ -920,6 +920,19 @@ impl RuntimeControl {
         })?
     }
 
+    pub(crate) fn monitor_publication_report(
+        &self,
+    ) -> Result<super::WinitMonitorPublicationReport, WinitPlatformError> {
+        if self.state() != RuntimeState::Attached {
+            return Err(WinitPlatformError::RuntimeDetached);
+        }
+        self.monitor_ownership
+            .borrow()
+            .as_ref()
+            .map(MonitorOwnership::report)
+            .ok_or(WinitPlatformError::RuntimeDetached)
+    }
+
     #[cfg(target_os = "windows")]
     pub(crate) fn refresh_native_mouse(
         &self,
@@ -957,6 +970,21 @@ impl RuntimeControl {
                 return Err(WinitPlatformError::RuntimeDetached);
             };
             super::callbacks::refresh_monitors_for_test(context, monitors, ownership)
+        })?
+    }
+
+    #[cfg(test)]
+    pub(super) fn refresh_monitor_snapshots_for_test(
+        &self,
+        context: &Context,
+        snapshots: Option<Vec<crate::native_support::MonitorSnapshot>>,
+    ) -> Result<bool, WinitPlatformError> {
+        self.binding.try_with_bound_context(|| {
+            let mut ownership = self.monitor_ownership.borrow_mut();
+            let Some(ownership) = ownership.as_mut() else {
+                return Err(WinitPlatformError::RuntimeDetached);
+            };
+            super::callbacks::refresh_monitor_snapshots_for_test(context, snapshots, ownership)
         })?
     }
 }

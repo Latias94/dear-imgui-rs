@@ -27,25 +27,34 @@ web-sys = { workspace = true, features = [
 ] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { workspace = true, features = [
-    "Win32_Foundation",
-    "Win32_UI_HiDpi",
-    "Win32_UI_Input_KeyboardAndMouse",
-    "Win32_UI_Shell",
-    "Win32_UI_WindowsAndMessaging",
-] }
+windows-sys = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3", default-features = false, features = [
-    "std",
-    "NSResponder",
-    "NSView",
-    "NSWindow",
-] }
+objc2 = { version = "0.6", default-features = false, features = ["std"], optional = true }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std"], optional = true }
 
 [features]
 default = []
+native-platform-support = [
+    "dep:objc2",
+    "dep:objc2-app-kit",
+    "dep:windows-sys",
+    "objc2-app-kit/NSScreen",
+    "windows-sys/Win32_Foundation",
+    "windows-sys/Win32_Graphics_Gdi",
+    "windows-sys/Win32_System_Threading",
+    "windows-sys/Win32_UI_Shell",
+    "windows-sys/Win32_UI_WindowsAndMessaging",
+]
 # Enable multi-viewport support (WIP). Declared to silence cfg warnings; kept off by default.
-multi-viewport = ["dear-imgui-rs/multi-viewport"]
+multi-viewport = [
+    "dear-imgui-rs/multi-viewport",
+    "native-platform-support",
+    "objc2-app-kit/NSResponder",
+    "objc2-app-kit/NSView",
+    "objc2-app-kit/NSWindow",
+    "windows-sys/Win32_UI_HiDpi",
+    "windows-sys/Win32_UI_Input_KeyboardAndMouse",
+]
 # Debug logging for multi-viewport paths (see mvlog! macro in src/multi_viewport.rs).
 mv-log = []

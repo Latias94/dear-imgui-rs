@@ -844,7 +844,7 @@ mod tests {
             &context_bridge,
             primary_window,
             &bevy_window::Window::default(),
-            &[],
+            None,
             std::iter::empty(),
             viewport::NativeViewportFrameSupport::new(
                 true,

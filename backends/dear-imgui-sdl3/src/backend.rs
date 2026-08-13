@@ -156,9 +156,14 @@ fn capture_renderer_frame<'ctx>(
 }
 
 #[cfg(any(feature = "opengl3-renderer", feature = "sdlgpu3-renderer"))]
-fn pump_platform_windows(frame: &mut ReconciledFrame<'_>, enabled: bool) {
+fn pump_platform_windows(
+    runtime: &RuntimeRegistration,
+    frame: &mut ReconciledFrame<'_>,
+    enabled: bool,
+) {
     #[cfg(feature = "multi-viewport")]
     if enabled {
+        let _dispatch = runtime.control().begin_platform_dispatch();
         frame.update_and_render_platform_windows_default();
     }
 
@@ -1211,6 +1216,7 @@ impl Sdl3OpenGl3Backend {
 
             if route_allows_native_viewport_pump(faults.is_empty(), native_viewports_pumped) {
                 pump_platform_windows(
+                    &self.runtime,
                     reconciled
                         .as_mut()
                         .expect("successful frame capture retains a reconciled frame"),
@@ -1426,6 +1432,7 @@ impl SdlGpu3RendererBackend {
 
             if route_allows_native_viewport_pump(faults.is_empty(), native_viewports_pumped) {
                 pump_platform_windows(
+                    &self.runtime,
                     reconciled
                         .as_mut()
                         .expect("successful frame capture retains a reconciled frame"),

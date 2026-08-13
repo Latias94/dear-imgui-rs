@@ -9,130 +9,415 @@ use crate::core::ffi;
 use crate::runtime::NativeRendererKind;
 use crate::runtime::{RuntimeControl, with_current_runtime};
 
-use super::ViewportPlatformState;
+use super::{PlatformCallbackSlot, PlatformCallbacks, ViewportPlatformState};
 
 pub(super) fn register_runtime(control: &Rc<RuntimeControl>) {
     crate::runtime::register_runtime(control);
 }
 
 pub(super) unsafe extern "C" fn sdl3_create_window(viewport: *mut sys::ImGuiViewport) {
-    run_callback("Platform_CreateWindow", (), |control| unsafe {
-        if viewport.is_null() {
-            return;
-        }
-        if !(*viewport).PlatformUserData.is_null() {
-            control.record_foreign_platform_user_data();
-            (*viewport).PlatformRequestClose = true;
-            return;
-        }
-        let Some(callback) = control.original_create_window() else {
-            return;
-        };
-        let Some(transaction) = NativeTransaction::begin(control, NativePhase::Create, viewport)
-        else {
-            control.mark_viewport_failed(viewport);
-            return;
-        };
-        callback(viewport);
-        let native_faults = transaction.finish();
-        let state = ViewportPlatformState::capture(viewport);
-        if !state.user_data.is_null() {
-            control.remember_owned_viewport(viewport, state);
-        }
-        if state.user_data.is_null() || state.handle.is_null() || native_faults != 0 {
-            control.record_viewport_creation_failed();
-            control.mark_viewport_failed(viewport);
-        }
-    });
+    run_platform_callback(
+        PlatformCallbackSlot::CreateWindow,
+        (),
+        |control, callbacks| unsafe {
+            if viewport.is_null() || !control.validate_platform_ownership_bound() {
+                return;
+            }
+            let Some(live) = control.live_viewport(viewport) else {
+                control.record_platform_state_replaced("Viewport liveness");
+                return;
+            };
+            let Some(initial_state) = control.capture_viewport_platform_state(live) else {
+                control.record_platform_state_replaced("Viewport liveness");
+                return;
+            };
+            if !initial_state.user_data.is_null() {
+                control.record_foreign_platform_user_data();
+                (*live).PlatformRequestClose = true;
+                return;
+            }
+            let Some(callback) = callbacks.create_window() else {
+                return;
+            };
+            let Some(transaction) =
+                NativeTransaction::begin(control, NativePhase::Create, viewport)
+            else {
+                control.mark_viewport_failed(viewport);
+                return;
+            };
+            callback(viewport);
+            let native_faults = transaction.finish();
+            let Some(live) = control.live_viewport(viewport) else {
+                control.record_viewport_creation_failed();
+                return;
+            };
+            let Some(state) = control.capture_viewport_platform_state(live) else {
+                control.record_viewport_creation_failed();
+                return;
+            };
+            if !state.user_data.is_null() {
+                control.remember_owned_viewport(viewport, state);
+            }
+            if state.user_data.is_null() || state.handle.is_null() || native_faults != 0 {
+                control.record_viewport_creation_failed();
+                control.mark_viewport_failed(viewport);
+            }
+        },
+    );
 }
 
 pub(super) unsafe extern "C" fn sdl3_destroy_window(viewport: *mut sys::ImGuiViewport) {
-    let invoked = run_callback("Platform_DestroyWindow", false, |control| unsafe {
-        if viewport.is_null() {
-            return false;
-        }
-        control.forget_failed_viewport(viewport);
-        let Some(callback) = control.original_destroy_window() else {
-            return false;
-        };
-        let actual = ViewportPlatformState::capture(viewport);
-        let Some(expected) = control.take_owned_viewport(viewport) else {
-            record_viewport_replacements(control, None, actual);
-            control.defer_platform_viewport_restore(viewport, actual);
-            ViewportPlatformState::clear(viewport);
-            return true;
-        };
+    let _ = run_platform_callback(
+        PlatformCallbackSlot::DestroyWindow,
+        false,
+        |control, callbacks| unsafe {
+            if viewport.is_null() {
+                return false;
+            }
+            let Some(live) = control.live_viewport(viewport) else {
+                control.record_platform_state_replaced("Viewport liveness");
+                return false;
+            };
+            let Some(actual) = control.capture_viewport_platform_state(live) else {
+                control.record_platform_state_replaced("Viewport liveness");
+                return false;
+            };
+            control.forget_failed_viewport(viewport);
+            let Some(callback) = callbacks.destroy_window() else {
+                return false;
+            };
+            let Some(expected) = control.take_owned_viewport(viewport) else {
+                record_viewport_replacements(control, None, actual);
+                control.defer_platform_viewport_restore(viewport, actual);
+                control.clear_viewport_platform_state(viewport);
+                return true;
+            };
 
-        if viewport_platform_state_eq(actual, expected) {
+            if viewport_platform_state_eq(actual, expected) {
+                callback(viewport);
+                control.clear_viewport_platform_state(viewport);
+                return true;
+            }
+
+            record_viewport_replacements(control, Some(expected), actual);
+            if !control.restore_viewport_platform_state(viewport, expected) {
+                control.record_platform_state_replaced("Viewport liveness");
+                return false;
+            }
             callback(viewport);
-            ViewportPlatformState::clear(viewport);
-            return true;
-        }
+            control.clear_viewport_platform_state(viewport);
+            control.defer_platform_viewport_restore(viewport, actual);
+            true
+        },
+    );
+}
 
-        record_viewport_replacements(control, Some(expected), actual);
-        expected.restore(viewport);
-        callback(viewport);
-        ViewportPlatformState::clear(viewport);
-        control.defer_platform_viewport_restore(viewport, actual);
-        true
-    });
-    if invoked && !viewport.is_null() {
-        unsafe { ViewportPlatformState::clear(viewport) };
+pub(super) unsafe extern "C" fn sdl3_show_window(viewport: *mut sys::ImGuiViewport) {
+    run_owned_platform_callback(
+        PlatformCallbackSlot::ShowWindow,
+        viewport,
+        (),
+        |_, callbacks| unsafe {
+            if let Some(callback) = callbacks.show_window() {
+                callback(viewport);
+            }
+        },
+    );
+}
+
+pub(super) unsafe extern "C" fn sdl3_update_window(viewport: *mut sys::ImGuiViewport) {
+    run_owned_platform_callback(
+        PlatformCallbackSlot::UpdateWindow,
+        viewport,
+        (),
+        |_, callbacks| unsafe {
+            if let Some(callback) = callbacks.update_window() {
+                callback(viewport);
+            }
+        },
+    );
+}
+
+pub(super) unsafe extern "C" fn sdl3_set_window_pos(
+    viewport: *mut sys::ImGuiViewport,
+    pos: *const sys::ImVec2,
+) {
+    if pos.is_null() {
+        return;
     }
+    run_owned_platform_callback(
+        PlatformCallbackSlot::SetWindowPos,
+        viewport,
+        (),
+        |_, callbacks| {
+            let _ = unsafe { callbacks.invoke_set_window_pos(viewport, pos) };
+        },
+    );
+}
+
+pub(super) unsafe extern "C" fn sdl3_get_window_pos(
+    viewport: *mut sys::ImGuiViewport,
+    out_pos: *mut sys::ImVec2,
+) {
+    if out_pos.is_null() {
+        return;
+    }
+    let fallback = sys::ImVec2 { x: 0.0, y: 0.0 };
+    unsafe { out_pos.write(fallback) };
+    run_owned_platform_callback(
+        PlatformCallbackSlot::GetWindowPos,
+        viewport,
+        (),
+        |control, callbacks| unsafe {
+            let Some(live) = control.live_viewport(viewport) else {
+                return;
+            };
+            let mut result = (*live).Pos;
+            if callbacks.invoke_get_window_pos(viewport, &mut result) {
+                out_pos.write(result);
+            }
+        },
+    );
+}
+
+pub(super) unsafe extern "C" fn sdl3_set_window_size(
+    viewport: *mut sys::ImGuiViewport,
+    size: *const sys::ImVec2,
+) {
+    if size.is_null() {
+        return;
+    }
+    run_owned_platform_callback(
+        PlatformCallbackSlot::SetWindowSize,
+        viewport,
+        (),
+        |_, callbacks| {
+            let _ = unsafe { callbacks.invoke_set_window_size(viewport, size) };
+        },
+    );
+}
+
+pub(super) unsafe extern "C" fn sdl3_get_window_size(
+    viewport: *mut sys::ImGuiViewport,
+    out_size: *mut sys::ImVec2,
+) {
+    if out_size.is_null() {
+        return;
+    }
+    let fallback = sys::ImVec2 { x: 0.0, y: 0.0 };
+    unsafe { out_size.write(fallback) };
+    run_owned_platform_callback(
+        PlatformCallbackSlot::GetWindowSize,
+        viewport,
+        (),
+        |control, callbacks| unsafe {
+            let Some(live) = control.live_viewport(viewport) else {
+                return;
+            };
+            let mut result = (*live).Size;
+            if callbacks.invoke_get_window_size(viewport, &mut result) {
+                out_size.write(result);
+            }
+        },
+    );
+}
+
+pub(super) unsafe extern "C" fn sdl3_get_window_framebuffer_scale(
+    viewport: *mut sys::ImGuiViewport,
+    out_scale: *mut sys::ImVec2,
+) {
+    if out_scale.is_null() {
+        return;
+    }
+    let fallback = sys::ImVec2 { x: 0.0, y: 0.0 };
+    unsafe { out_scale.write(fallback) };
+    run_owned_platform_callback(
+        PlatformCallbackSlot::GetWindowFramebufferScale,
+        viewport,
+        (),
+        |control, callbacks| unsafe {
+            let Some(live) = control.live_viewport(viewport) else {
+                return;
+            };
+            let mut result = (*live).FramebufferScale;
+            if callbacks.invoke_get_window_framebuffer_scale(viewport, &mut result) {
+                out_scale.write(result);
+            }
+        },
+    );
+}
+
+pub(super) unsafe extern "C" fn sdl3_set_window_focus(viewport: *mut sys::ImGuiViewport) {
+    run_owned_platform_callback(
+        PlatformCallbackSlot::SetWindowFocus,
+        viewport,
+        (),
+        |_, callbacks| unsafe {
+            if let Some(callback) = callbacks.set_window_focus() {
+                callback(viewport);
+            }
+        },
+    );
+}
+
+pub(super) unsafe extern "C" fn sdl3_get_window_focus(viewport: *mut sys::ImGuiViewport) -> bool {
+    run_owned_platform_callback(
+        PlatformCallbackSlot::GetWindowFocus,
+        viewport,
+        false,
+        |control, callbacks| unsafe {
+            let Some(live) = control.live_viewport(viewport) else {
+                return false;
+            };
+            callbacks.get_window_focus().map_or(
+                (*live).Flags & sys::ImGuiViewportFlags_IsFocused != 0,
+                |callback| callback(viewport),
+            )
+        },
+    )
+}
+
+pub(super) unsafe extern "C" fn sdl3_get_window_minimized(
+    viewport: *mut sys::ImGuiViewport,
+) -> bool {
+    run_owned_platform_callback(
+        PlatformCallbackSlot::GetWindowMinimized,
+        viewport,
+        false,
+        |control, callbacks| unsafe {
+            let Some(live) = control.live_viewport(viewport) else {
+                return false;
+            };
+            callbacks.get_window_minimized().map_or(
+                (*live).Flags & sys::ImGuiViewportFlags_IsMinimized != 0,
+                |callback| callback(viewport),
+            )
+        },
+    )
+}
+
+pub(super) unsafe extern "C" fn sdl3_set_window_title(
+    viewport: *mut sys::ImGuiViewport,
+    title: *const std::ffi::c_char,
+) {
+    if title.is_null() {
+        return;
+    }
+    run_owned_platform_callback(
+        PlatformCallbackSlot::SetWindowTitle,
+        viewport,
+        (),
+        |_, callbacks| unsafe {
+            if let Some(callback) = callbacks.set_window_title() {
+                callback(viewport, title);
+            }
+        },
+    );
 }
 
 pub(super) unsafe extern "C" fn sdl3_render_window(
     viewport: *mut sys::ImGuiViewport,
     render_argument: *mut c_void,
 ) {
-    run_callback("Platform_RenderWindow", (), |control| unsafe {
-        if viewport.is_null() || control.viewport_failed(viewport) {
-            return;
-        }
-        if !validate_platform_viewport_state(control, viewport) {
-            control.mark_viewport_failed(viewport);
-            return;
-        }
-        let Some(callback) = control.original_render_window() else {
-            return;
-        };
-        let Some(transaction) = NativeTransaction::begin(control, NativePhase::Render, viewport)
-        else {
-            control.mark_viewport_failed(viewport);
-            return;
-        };
-        callback(viewport, render_argument);
-        if transaction.finish() != 0 {
-            control.mark_viewport_failed(viewport);
-        }
-    });
+    run_platform_callback(
+        PlatformCallbackSlot::RenderWindow,
+        (),
+        |control, callbacks| unsafe {
+            if viewport.is_null() || control.viewport_failed(viewport) {
+                return;
+            }
+            if !validate_platform_viewport_state(control, viewport) {
+                control.mark_viewport_failed(viewport);
+                return;
+            }
+            let Some(callback) = callbacks.render_window() else {
+                return;
+            };
+            let Some(transaction) =
+                NativeTransaction::begin(control, NativePhase::Render, viewport)
+            else {
+                control.mark_viewport_failed(viewport);
+                return;
+            };
+            callback(viewport, render_argument);
+            if transaction.finish() != 0 {
+                control.mark_viewport_failed(viewport);
+            }
+        },
+    );
 }
 
 pub(super) unsafe extern "C" fn sdl3_swap_buffers(
     viewport: *mut sys::ImGuiViewport,
     render_argument: *mut c_void,
 ) {
-    run_callback("Platform_SwapBuffers", (), |control| unsafe {
-        if viewport.is_null() || control.viewport_failed(viewport) {
-            return;
-        }
-        if !validate_platform_viewport_state(control, viewport) {
-            control.mark_viewport_failed(viewport);
-            return;
-        }
-        let Some(callback) = control.original_swap_buffers() else {
-            return;
-        };
-        let Some(transaction) = NativeTransaction::begin(control, NativePhase::Swap, viewport)
-        else {
-            control.mark_viewport_failed(viewport);
-            return;
-        };
-        callback(viewport, render_argument);
-        if transaction.finish() != 0 {
-            control.mark_viewport_failed(viewport);
-        }
-    });
+    run_platform_callback(
+        PlatformCallbackSlot::SwapBuffers,
+        (),
+        |control, callbacks| unsafe {
+            if viewport.is_null() || control.viewport_failed(viewport) {
+                return;
+            }
+            if !validate_platform_viewport_state(control, viewport) {
+                control.mark_viewport_failed(viewport);
+                return;
+            }
+            let Some(callback) = callbacks.swap_buffers() else {
+                return;
+            };
+            let Some(transaction) = NativeTransaction::begin(control, NativePhase::Swap, viewport)
+            else {
+                control.mark_viewport_failed(viewport);
+                return;
+            };
+            callback(viewport, render_argument);
+            if transaction.finish() != 0 {
+                control.mark_viewport_failed(viewport);
+            }
+        },
+    );
+}
+
+pub(super) unsafe extern "C" fn sdl3_set_window_alpha(
+    viewport: *mut sys::ImGuiViewport,
+    alpha: f32,
+) {
+    run_owned_platform_callback(
+        PlatformCallbackSlot::SetWindowAlpha,
+        viewport,
+        (),
+        |_, callbacks| unsafe {
+            if let Some(callback) = callbacks.set_window_alpha() {
+                callback(viewport, alpha);
+            }
+        },
+    );
+}
+
+pub(super) unsafe extern "C" fn sdl3_create_vk_surface(
+    viewport: *mut sys::ImGuiViewport,
+    instance: sys::ImU64,
+    allocators: *const c_void,
+    out_surface: *mut sys::ImU64,
+) -> std::os::raw::c_int {
+    if out_surface.is_null() {
+        return 1;
+    }
+    unsafe { out_surface.write(0) };
+    let result = run_owned_platform_callback(
+        PlatformCallbackSlot::CreateVkSurface,
+        viewport,
+        1,
+        |_, callbacks| unsafe {
+            callbacks.create_vk_surface().map_or(1, |callback| {
+                callback(viewport, instance, allocators, out_surface)
+            })
+        },
+    );
+    if result != 0 {
+        unsafe { out_surface.write(0) };
+    }
+    result
 }
 
 pub(super) unsafe extern "C" fn sdl3_renderer_create_window(viewport: *mut sys::ImGuiViewport) {
@@ -146,7 +431,10 @@ pub(super) unsafe extern "C" fn sdl3_renderer_create_window(viewport: *mut sys::
             control.mark_viewport_failed(viewport);
             return;
         }
-        if !(*viewport).RendererUserData.is_null() {
+        let actual_renderer = control
+            .viewport_renderer_user_data(viewport)
+            .unwrap_or(std::ptr::null_mut());
+        if !actual_renderer.is_null() {
             control.record_renderer_state_replaced("Viewport.RendererUserData");
             control.mark_viewport_failed(viewport);
             return;
@@ -157,14 +445,24 @@ pub(super) unsafe extern "C" fn sdl3_renderer_create_window(viewport: *mut sys::
         #[cfg(not(feature = "sdlgpu3-renderer"))]
         {
             callback(viewport);
-            control.remember_owned_renderer_viewport(viewport, (*viewport).RendererUserData);
+            if let Some(renderer_user_data) = control.viewport_renderer_user_data(viewport) {
+                control.remember_owned_renderer_viewport(viewport, renderer_user_data);
+            } else {
+                control.record_renderer_state_replaced("Viewport liveness(create)");
+                control.mark_viewport_failed(viewport);
+            }
         }
 
         #[cfg(feature = "sdlgpu3-renderer")]
         {
             if control.native_renderer() != NativeRendererKind::SdlGpu3 {
                 callback(viewport);
-                control.remember_owned_renderer_viewport(viewport, (*viewport).RendererUserData);
+                if let Some(renderer_user_data) = control.viewport_renderer_user_data(viewport) {
+                    control.remember_owned_renderer_viewport(viewport, renderer_user_data);
+                } else {
+                    control.record_renderer_state_replaced("Viewport liveness(create)");
+                    control.mark_viewport_failed(viewport);
+                }
                 return;
             }
             let Some(transaction) =
@@ -190,11 +488,15 @@ pub(crate) unsafe fn finish_sdlgpu_renderer_create(
         // Upstream assigns its sentinel even when SDL rejected claim/configuration. Clearing it
         // prevents DestroyWindow from releasing an unclaimed window or releasing a
         // configure-failure claim that the native transaction already rolled back.
-        unsafe { (*viewport).RendererUserData = std::ptr::null_mut() };
+        let _ = control.set_viewport_renderer_user_data(viewport, std::ptr::null_mut());
         control.mark_viewport_failed(viewport);
         return;
     }
-    let renderer_user_data = unsafe { (*viewport).RendererUserData };
+    let Some(renderer_user_data) = control.viewport_renderer_user_data(viewport) else {
+        control.record_renderer_state_replaced("Viewport liveness(create)");
+        control.mark_viewport_failed(viewport);
+        return;
+    };
     if renderer_user_data.is_null() {
         control.record_renderer_state_replaced("Viewport.RendererUserData(create)");
         control.mark_viewport_failed(viewport);
@@ -204,36 +506,46 @@ pub(crate) unsafe fn finish_sdlgpu_renderer_create(
 }
 
 pub(super) unsafe extern "C" fn sdl3_renderer_destroy_window(viewport: *mut sys::ImGuiViewport) {
-    let invoked = run_callback("Renderer_DestroyWindow", false, |control| unsafe {
+    let _ = run_callback("Renderer_DestroyWindow", false, |control| unsafe {
         if viewport.is_null() {
             return false;
         }
+        if control.live_viewport(viewport).is_none() {
+            control.record_renderer_state_replaced("Viewport liveness");
+            return false;
+        }
+        let actual_renderer = control
+            .viewport_renderer_user_data(viewport)
+            .unwrap_or(std::ptr::null_mut());
         if !control.validate_renderer_ownership_bound() {
-            control.defer_renderer_viewport_restore(viewport, (*viewport).RendererUserData);
-            (*viewport).RendererUserData = std::ptr::null_mut();
+            control.defer_renderer_viewport_restore(viewport, actual_renderer);
+            let _ = control.set_viewport_renderer_user_data(viewport, std::ptr::null_mut());
             return true;
         }
         let Some(callback) = control.original_renderer_destroy_window() else {
-            control.defer_renderer_viewport_restore(viewport, (*viewport).RendererUserData);
-            (*viewport).RendererUserData = std::ptr::null_mut();
+            control.defer_renderer_viewport_restore(viewport, actual_renderer);
+            let _ = control.set_viewport_renderer_user_data(viewport, std::ptr::null_mut());
             return true;
         };
-        let Some(expected_platform) = control.owned_viewport(viewport) else {
-            record_viewport_replacements(control, None, ViewportPlatformState::capture(viewport));
-            control.defer_renderer_viewport_restore(viewport, (*viewport).RendererUserData);
-            (*viewport).RendererUserData = std::ptr::null_mut();
+        let Some((expected_platform, actual_platform)) = control.inspect_owned_viewport(viewport)
+        else {
+            let Some(actual_platform) = control.capture_viewport_platform_state(viewport) else {
+                control.record_platform_state_replaced("Viewport liveness");
+                return false;
+            };
+            record_viewport_replacements(control, None, actual_platform);
+            control.defer_renderer_viewport_restore(viewport, actual_renderer);
+            let _ = control.set_viewport_renderer_user_data(viewport, std::ptr::null_mut());
             return true;
         };
-        let actual_platform = ViewportPlatformState::capture(viewport);
         let expected_renderer = control.owned_renderer_viewport(viewport);
-        let actual_renderer = (*viewport).RendererUserData;
         if expected_renderer.is_none() && actual_renderer.is_null() {
             return true;
         }
         let Some(expected_renderer) = expected_renderer else {
             control.record_renderer_state_replaced("Viewport.RendererUserData");
             control.defer_renderer_viewport_restore(viewport, actual_renderer);
-            (*viewport).RendererUserData = std::ptr::null_mut();
+            let _ = control.set_viewport_renderer_user_data(viewport, std::ptr::null_mut());
             return true;
         };
 
@@ -247,16 +559,18 @@ pub(super) unsafe extern "C" fn sdl3_renderer_destroy_window(viewport: *mut sys:
             control.defer_renderer_viewport_restore(viewport, actual_renderer);
         }
 
-        expected_platform.restore(viewport);
-        (*viewport).RendererUserData = expected_renderer;
+        if !control.restore_viewport_platform_state(viewport, expected_platform) {
+            control.record_platform_state_replaced("Viewport liveness");
+            return false;
+        }
+        if !control.set_viewport_renderer_user_data(viewport, expected_renderer) {
+            return false;
+        }
         callback(viewport);
-        (*viewport).RendererUserData = std::ptr::null_mut();
+        let _ = control.set_viewport_renderer_user_data(viewport, std::ptr::null_mut());
         control.forget_owned_renderer_viewport(viewport);
         true
     });
-    if invoked && !viewport.is_null() {
-        unsafe { (*viewport).RendererUserData = std::ptr::null_mut() };
-    }
 }
 
 pub(super) unsafe extern "C" fn sdl3_renderer_render_window(
@@ -392,12 +706,17 @@ pub(crate) unsafe fn validate_platform_viewport_state(
     control: &RuntimeControl,
     viewport: *mut sys::ImGuiViewport,
 ) -> bool {
-    let actual = unsafe { ViewportPlatformState::capture(viewport) };
-    let expected = control.owned_viewport(viewport);
-    if expected.is_some_and(|expected| viewport_platform_state_eq(actual, expected)) {
+    if viewport.is_null() {
+        return false;
+    }
+    let Some((expected, actual)) = control.inspect_owned_viewport(viewport) else {
+        control.record_platform_state_replaced("Viewport liveness");
+        return false;
+    };
+    if viewport_platform_state_eq(actual, expected) {
         return true;
     }
-    record_viewport_replacements(control, expected, actual);
+    record_viewport_replacements(control, Some(expected), actual);
     false
 }
 
@@ -405,7 +724,10 @@ unsafe fn validate_renderer_viewport_state(
     control: &RuntimeControl,
     viewport: *mut sys::ImGuiViewport,
 ) -> bool {
-    let actual = unsafe { (*viewport).RendererUserData };
+    let Some(actual) = (unsafe { control.viewport_renderer_user_data(viewport) }) else {
+        control.record_renderer_state_replaced("Viewport liveness");
+        return false;
+    };
     match control.owned_renderer_viewport(viewport) {
         Some(expected) if expected == actual => true,
         None if actual.is_null() => true,
@@ -446,6 +768,51 @@ fn record_viewport_replacements(
     }) {
         control.record_platform_state_replaced("Viewport.PlatformHandleRaw");
     }
+}
+
+fn run_platform_callback<R: Copy>(
+    slot: PlatformCallbackSlot,
+    fallback: R,
+    callback: impl FnOnce(&RuntimeControl, &PlatformCallbacks) -> R,
+) -> R {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        with_current_runtime(|control| {
+            if !control.validate_platform_callback_slot(slot) {
+                return fallback;
+            }
+            let Some(callbacks) = control.original_platform_callbacks() else {
+                control.record_platform_state_replaced("platform callback ownership");
+                return fallback;
+            };
+            callback(control, &callbacks)
+        })
+        .unwrap_or(fallback)
+    }));
+    match result {
+        Ok(result) => result,
+        Err(_) => {
+            let _ = with_current_runtime(|control| control.record_callback_panicked(slot.name()));
+            fallback
+        }
+    }
+}
+
+fn run_owned_platform_callback<R: Copy>(
+    slot: PlatformCallbackSlot,
+    viewport: *mut sys::ImGuiViewport,
+    fallback: R,
+    callback: impl FnOnce(&RuntimeControl, &PlatformCallbacks) -> R,
+) -> R {
+    run_platform_callback(slot, fallback, |control, callbacks| {
+        if viewport.is_null() || control.viewport_failed(viewport) {
+            return fallback;
+        }
+        if unsafe { !validate_platform_viewport_state(control, viewport) } {
+            control.mark_viewport_failed(viewport);
+            return fallback;
+        }
+        callback(control, callbacks)
+    })
 }
 
 fn run_callback<R: Copy>(

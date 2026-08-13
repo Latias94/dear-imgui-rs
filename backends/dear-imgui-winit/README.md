@@ -233,7 +233,12 @@ native desktop coordinate space required by Dear ImGui: Windows and X11 use phys
 pixels with `FramebufferScale = (1, 1)`, while macOS uses Cocoa points with its backing scale.
 `DpiScale` remains separate from framebuffer scale, so mixed-DPI monitor layouts are supported
 without overlapping or discontinuous monitor rectangles. The monitor publication is refreshed at
-the frame-preparation boundary and preserves the prior PlatformIO owner during teardown. Runtime
+the frame-preparation boundary and preserves the prior PlatformIO owner during teardown. Call
+`WinitPlatform::monitor_publication_report()` to inspect the installed detached snapshots and each
+snapshot's `WorkAreaProvenance`. A transient collection failure retains the previous complete
+transaction and reports `RetainedAfterCollectionFailure`; initial attachment fails instead of
+publishing a main-window rectangle as a monitor. A multi-monitor batch whose primary identity
+cannot be proven is likewise rejected rather than promoting an arbitrary candidate. Runtime
 attachment invalidates mouse coordinates cached in the single-window coordinate space; shutdown
 restores the base logical display metrics and invalidates the desktop-space cache before returning
 control to the single-window backend. On Windows, decorated client positions are converted with the
@@ -269,6 +274,12 @@ Current support matrix:
 - **winit + OpenGL (glow/glutin)**: no official multi-viewport stack yet.
   If you need multi-viewport OpenGL today, use the SDL3 routes
   (`sdl3_opengl_multi_viewport` or `sdl3_glow_multi_viewport`).
+
+The repository-wide route evidence matrix separates callback-safety and shared-runtime tests from
+native route smoke evidence. It currently grades Winit + WGPU as an `A` route and keeps the
+Winit + Glow combination out of the published native route inventory; see
+[`docs/renderer-route-evidence.md`](../../docs/renderer-route-evidence.md) before treating an
+example or a shared unit test as a complete platform/renderer validation.
 
 ## Notes & Differences vs imgui-rs
 

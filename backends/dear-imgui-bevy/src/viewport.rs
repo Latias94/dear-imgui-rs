@@ -69,9 +69,15 @@ use std::rc::Weak;
 
 pub use capability::{ImguiNativeViewportStatus, ImguiNativeViewportSupport};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+pub(crate) use desktop::ImguiMonitorPublication;
+#[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
+pub(crate) use desktop::monitor_from_window;
+#[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
+use desktop::window_position_desktop;
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(crate) use desktop::{
     desktop_metrics_for_window, desktop_to_window_client_logical,
-    platform_monitors_from_bevy_monitors, viewport_feedback_from_window,
+    monitor_publication_from_snapshot_set, viewport_feedback_from_window,
     window_client_logical_to_desktop,
 };
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -80,8 +86,6 @@ use desktop::{
     physical_outer_pos_for_client_pos, physical_pos_from_desktop, positive_finite_or,
     set_window_desktop_size, winit_window_decoration_offset_desktop,
 };
-#[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
-use desktop::{monitor_from_window, window_position_desktop};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(crate) use error::ImguiViewportCallbackInstallError;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]

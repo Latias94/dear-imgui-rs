@@ -60,10 +60,10 @@ pub(super) fn mouse_pos_for_window(
                 return pos;
             };
             let scale_factor = positive_finite_or(_window.scale_factor, 1.0);
-            return [
+            [
                 pos[0] + window_pos.x as f32 / scale_factor,
                 pos[1] + window_pos.y as f32 / scale_factor,
-            ];
+            ]
         }
         #[cfg(feature = "render")]
         pos

@@ -417,7 +417,13 @@ fn build_with_cc(
         build.flag("/D_ITERATOR_DEBUG_LEVEL=0");
     }
 
-    build.compile("dear_node_editor");
+    build_support::compile_cpp_archive(
+        &mut build,
+        "dear_node_editor",
+        &cfg.target_os,
+        &cfg.target_env,
+        &cfg.target_abi,
+    );
 }
 
 fn main() {

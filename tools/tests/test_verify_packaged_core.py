@@ -28,15 +28,15 @@ CLI = importlib.import_module("verify_packaged_core")
 
 
 PROFILE_FEATURES = {
-    "normal": "platform-io-aggregate-hooks-v2,safe-demo-font-boundary-v1,wchar32",
+    "normal": "platform-io-aggregate-hooks-v3,safe-demo-font-boundary-v1,wchar32",
     "freetype": (
-        "freetype,platform-io-aggregate-hooks-v2,safe-demo-font-boundary-v1,wchar32"
+        "freetype,platform-io-aggregate-hooks-v3,safe-demo-font-boundary-v1,wchar32"
     ),
     "stack-layout": (
-        "platform-io-aggregate-hooks-v2,safe-demo-font-boundary-v1,stack-layout,wchar32"
+        "platform-io-aggregate-hooks-v3,safe-demo-font-boundary-v1,stack-layout,wchar32"
     ),
     "stack-layout-freetype": (
-        "freetype,platform-io-aggregate-hooks-v2,safe-demo-font-boundary-v1,stack-layout,wchar32"
+        "freetype,platform-io-aggregate-hooks-v3,safe-demo-font-boundary-v1,stack-layout,wchar32"
     ),
 }
 CANDIDATE_SHA = "cccccccccccccccccccccccccccccccccccccccc"
@@ -251,21 +251,21 @@ class PrebuiltArchiveSelectionTests(unittest.TestCase):
                     profile_scope="base",
                 )
 
-    def test_rejects_legacy_aggregate_hook_profile_before_link(self):
+    def test_rejects_v2_aggregate_hook_profile_before_link_with_regeneration_guidance(self):
         with TemporaryDirectory() as temporary:
             package_dir = Path(temporary)
             write_prebuilt_archive(
                 package_dir,
                 "normal",
                 artifact_features=(
-                    "platform-io-aggregate-hooks,"
+                    "platform-io-aggregate-hooks-v2,"
                     "safe-demo-font-boundary-v1,wchar32"
                 ),
             )
 
             with self.assertRaisesRegex(
                 PREBUILT.VerificationError,
-                "unsupported dear_imgui artifact profile",
+                "platform-io-aggregate-hooks-v2.*regenerate.*source build",
             ):
                 PREBUILT.select_core_prebuilt_archives(
                     package_dir,
@@ -286,7 +286,7 @@ class PrebuiltArchiveSelectionTests(unittest.TestCase):
 
             self.assertEqual(
                 PREBUILT.core_artifact_profile_hash(fields, archive),
-                "fnv1a64:81e611164024011c",
+                "fnv1a64:24ddf59332529d1d",
             )
 
     def test_core_identity_anchors_candidate_and_rejects_legacy_manifests(self):
@@ -933,6 +933,21 @@ class ConsumerContractTests(unittest.TestCase):
             self.assertEqual(
                 dependency["features"], ["prebuilt", "stack-layout", "freetype"]
             )
+            source = destination.joinpath("src/main.rs").read_text(encoding="utf-8")
+            for symbol in (
+                "ImGuiPlatformIO_InvokePlatformSetWindowPos",
+                "ImGuiPlatformIO_InvokePlatformSetWindowSize",
+                "ImGuiPlatformIO_InvokePlatformGetWindowPos",
+                "ImGuiPlatformIO_InvokePlatformGetWindowSize",
+                "ImGuiPlatformIO_InvokePlatformGetWindowFramebufferScale",
+                "ImGuiPlatformIO_InvokeRendererSetWindowSize",
+                "ImGuiPlatformIO_PlatformSetWindowPosPointerParam",
+                "ImGuiPlatformIO_PlatformSetWindowSizePointerParam",
+                "ImGuiPlatformIO_PlatformGetWindowPosOutParam",
+                "ImGuiPlatformIO_PlatformGetWindowSizeOutParam",
+                "ImGuiPlatformIO_PlatformGetWindowFramebufferScaleOutParam",
+            ):
+                self.assertIn(symbol, source)
 
     def test_extension_consumer_uses_safe_and_exact_matching_sys_crates(self):
         with TemporaryDirectory() as temporary:

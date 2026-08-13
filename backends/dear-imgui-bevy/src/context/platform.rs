@@ -1,3 +1,5 @@
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use std::collections::BTreeSet;
 #[cfg(feature = "render")]
 use std::collections::{HashMap, HashSet};
 
@@ -12,7 +14,12 @@ use crate::input::{ImguiInputState, map_imgui_mouse_cursor};
 use crate::{ImguiViewportWindow, viewport::ImguiViewportOwner};
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-use bevy_window::{Monitor, PrimaryMonitor};
+use bevy_winit::WINIT_WINDOWS;
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use dear_imgui_winit::native_support::{
+    MonitorCollectionError, MonitorSnapshotSet, WorkAreaFallback, WorkAreaProvenance,
+    collect_monitor_snapshot_set,
+};
 
 #[cfg(feature = "render")]
 #[derive(Resource, Default)]
@@ -21,6 +28,10 @@ pub(super) struct ImguiPlatformFeedback {
     ime_requests: HashMap<Entity, ImguiPlatformImeRequest>,
     previous_cursor_windows: HashSet<Entity>,
     cursor_requests: HashMap<Entity, ImguiPlatformCursorRequest>,
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    native_monitor_diagnostics: Vec<crate::route::ImguiDiagnostic>,
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    native_monitor_diagnostic_epoch: u64,
 }
 
 #[cfg(feature = "render")]
@@ -122,14 +133,42 @@ pub(super) fn prepare_context_platform_frame(
             .entity_mut(entity)
             .insert(ImguiViewportWindow::new(instance_id, viewport_id));
     }
-    let monitors = {
-        let mut query = world.query::<(&Monitor, Option<&PrimaryMonitor>)>();
-        crate::viewport::platform_monitors_from_bevy_monitors(
-            query
-                .iter(world)
-                .map(|(monitor, primary)| (monitor.clone(), primary.is_some())),
-        )
-    };
+    // The ECS monitor list is not an exact proof of the host's native display source. Bevy-Winit
+    // creates that mapping asynchronously, so a missing mapping is an explicit pending state and
+    // must not be replaced with a guessed primary monitor or host-window rectangle.
+    #[cfg(test)]
+    let monitor_publication_override = world
+        .get_resource::<crate::viewport::native_window::DesktopPositionSupportOverride>()
+        .filter(|support| {
+            support.0 == crate::viewport::native_window::DesktopPositionSupport::Available
+        })
+        .map(|_| crate::viewport::ImguiMonitorPublication {
+            facts: None,
+            values: vec![crate::viewport::monitor_from_window(&host_window_state)],
+        });
+    #[cfg(test)]
+    let (monitor_publication, monitor_diagnostics) = monitor_publication_override.map_or_else(
+        || {
+            WINIT_WINDOWS.with_borrow(|windows| {
+                let Some(host) = windows.get_window(host_window) else {
+                    return (None, Vec::new());
+                };
+                collect_native_monitor_publication(context_id, host)
+            })
+        },
+        |publication| (Some(publication), Vec::new()),
+    );
+    #[cfg(not(test))]
+    let (monitor_publication, monitor_diagnostics) = WINIT_WINDOWS.with_borrow(|windows| {
+        let Some(host) = windows.get_window(host_window) else {
+            return (None, Vec::new());
+        };
+        collect_native_monitor_publication(context_id, host)
+    });
+    world
+        .resource_mut::<ImguiPlatformFeedback>()
+        .native_monitor_diagnostics
+        .extend(monitor_diagnostics);
     let viewport_feedback = viewport_windows
         .iter()
         .map(|(entity, window, instance_id)| {
@@ -162,7 +201,7 @@ pub(super) fn prepare_context_platform_frame(
         &bridge,
         host_window,
         &host_window_state,
-        &monitors,
+        monitor_publication.as_ref(),
         viewport_feedback.into_iter(),
         crate::viewport::NativeViewportFrameSupport::new(
             render_integration_installed,
@@ -171,6 +210,123 @@ pub(super) fn prepare_context_platform_frame(
     )?;
     Ok(desktop_position_support
         != crate::viewport::native_window::DesktopPositionSupport::PendingWindow)
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn collect_native_monitor_publication(
+    context_id: imgui::ContextId,
+    host: &winit::window::Window,
+) -> (
+    Option<crate::viewport::ImguiMonitorPublication>,
+    Vec<crate::route::ImguiDiagnostic>,
+) {
+    let snapshot_set = match collect_monitor_snapshot_set(host) {
+        Ok(snapshot_set) => snapshot_set,
+        Err(error) => {
+            return (
+                None,
+                vec![native_monitor_diagnostic(
+                    context_id,
+                    crate::route::ImguiDiagnosticKind::NativeMonitorCollectionFailed {
+                        reason: native_monitor_collection_failure(error),
+                    },
+                )],
+            );
+        }
+    };
+    if snapshot_set.snapshots().is_empty() {
+        return (
+            None,
+            vec![native_monitor_diagnostic(
+                context_id,
+                crate::route::ImguiDiagnosticKind::NativeMonitorCollectionFailed {
+                    reason: crate::route::ImguiNativeMonitorFailure::EmptyCollection,
+                },
+            )],
+        );
+    }
+    if snapshot_set.snapshots().len() > 1 && snapshot_set.primary_identity().is_none() {
+        return (
+            None,
+            vec![native_monitor_diagnostic(
+                context_id,
+                crate::route::ImguiDiagnosticKind::NativeMonitorPrimaryUnproven,
+            )],
+        );
+    }
+
+    let mut diagnostics = native_monitor_snapshot_diagnostics(context_id, &snapshot_set);
+    let publication = crate::viewport::monitor_publication_from_snapshot_set(snapshot_set);
+    if publication.is_none() {
+        diagnostics.push(native_monitor_diagnostic(
+            context_id,
+            crate::route::ImguiDiagnosticKind::NativeMonitorCollectionFailed {
+                reason: crate::route::ImguiNativeMonitorFailure::ProjectionInvalid,
+            },
+        ));
+    }
+    (publication, diagnostics)
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn native_monitor_snapshot_diagnostics(
+    context_id: imgui::ContextId,
+    snapshot_set: &MonitorSnapshotSet,
+) -> Vec<crate::route::ImguiDiagnostic> {
+    let mut diagnostics = Vec::new();
+    let fallbacks = snapshot_set
+        .snapshots()
+        .iter()
+        .filter_map(|snapshot| match snapshot.work_area_provenance() {
+            WorkAreaProvenance::FullMain(reason) => Some(native_monitor_fallback(reason)),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    diagnostics.extend(fallbacks.into_iter().map(|reason| {
+        native_monitor_diagnostic(
+            context_id,
+            crate::route::ImguiDiagnosticKind::NativeMonitorWorkAreaFallback { reason },
+        )
+    }));
+    diagnostics
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn native_monitor_diagnostic(
+    context_id: imgui::ContextId,
+    kind: crate::route::ImguiDiagnosticKind,
+) -> crate::route::ImguiDiagnostic {
+    crate::route::ImguiDiagnostic::new(kind).with_context(context_id)
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn native_monitor_collection_failure(
+    error: MonitorCollectionError,
+) -> crate::route::ImguiNativeMonitorFailure {
+    use crate::route::ImguiNativeMonitorFailure as Failure;
+
+    match error {
+        MonitorCollectionError::MainFactsUnavailable { .. } => Failure::MainFactsUnavailable,
+        MonitorCollectionError::InvalidMainGeometry { .. } => Failure::InvalidMainGeometry,
+        MonitorCollectionError::InvalidScaleFactor { .. } => Failure::InvalidScaleFactor,
+        MonitorCollectionError::InvalidWorkGeometry { .. } => Failure::InvalidWorkGeometry,
+        _ => Failure::Unclassified,
+    }
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn native_monitor_fallback(fallback: WorkAreaFallback) -> crate::route::ImguiNativeMonitorFallback {
+    use crate::route::ImguiNativeMonitorFallback as Fallback;
+
+    match fallback {
+        WorkAreaFallback::Wayland => Fallback::Wayland,
+        WorkAreaFallback::UnsupportedWindowSystem => Fallback::UnsupportedWindowSystem,
+        WorkAreaFallback::SourceUnavailable => Fallback::SourceUnavailable,
+        WorkAreaFallback::InvalidNativeData => Fallback::InvalidNativeData,
+        WorkAreaFallback::MainThreadUnavailable => Fallback::MainThreadUnavailable,
+        WorkAreaFallback::AmbiguousDesktopScope => Fallback::AmbiguousDesktopScope,
+        _ => Fallback::Unclassified,
+    }
 }
 
 pub(super) fn sync_context_platform_feedback(
@@ -318,6 +474,8 @@ pub(super) fn begin_platform_feedback(world: &mut World) {
     let mut feedback = world.resource_mut::<ImguiPlatformFeedback>();
     feedback.ime_requests.clear();
     feedback.cursor_requests.clear();
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    feedback.native_monitor_diagnostics.clear();
 }
 
 #[cfg(feature = "render")]
@@ -376,6 +534,16 @@ pub(super) fn record_context_platform_ime_feedback(
 
 #[cfg(feature = "render")]
 pub(super) fn finish_platform_feedback(world: &mut World) {
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    let (native_monitor_diagnostics, native_monitor_diagnostic_epoch) = {
+        let mut feedback = world.resource_mut::<ImguiPlatformFeedback>();
+        feedback.native_monitor_diagnostic_epoch =
+            feedback.native_monitor_diagnostic_epoch.saturating_add(1);
+        (
+            std::mem::take(&mut feedback.native_monitor_diagnostics),
+            feedback.native_monitor_diagnostic_epoch,
+        )
+    };
     let (ime_requests, previous_ime_windows, cursor_requests, previous_cursor_windows) = {
         let mut feedback = world.resource_mut::<ImguiPlatformFeedback>();
         let ime_requests = std::mem::take(&mut feedback.ime_requests);
@@ -395,6 +563,12 @@ pub(super) fn finish_platform_feedback(world: &mut World) {
             previous_cursor_windows,
         )
     };
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    world.resource::<crate::route::ImguiDiagnostics>().replace(
+        crate::route::ImguiDiagnosticOrigin::NativeMonitor,
+        native_monitor_diagnostic_epoch,
+        native_monitor_diagnostics,
+    );
     let mut affected_cursor_windows = previous_cursor_windows;
     affected_cursor_windows.extend(cursor_requests.keys().copied());
     let mut cursor_edits = Vec::new();
@@ -542,5 +716,73 @@ fn native_viewports_enabled_for_frame(context_raw: *mut imgui::sys::ImGuiContext
     // SAFETY: callers retain the owning active Context while platform feedback is collected.
     unsafe {
         (*context_raw).ConfigFlagsCurrFrame & imgui::ConfigFlags::VIEWPORTS_ENABLE.bits() != 0
+    }
+}
+
+#[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use crate::route::{
+        ImguiNativeMonitorFailure as Failure, ImguiNativeMonitorFallback as Fallback,
+    };
+    use dear_imgui_winit::native_support::RectValidationError;
+
+    #[test]
+    fn monitor_collection_failures_are_reduced_to_stable_public_reasons() {
+        assert_eq!(
+            native_monitor_collection_failure(MonitorCollectionError::MainFactsUnavailable {
+                monitor: 3,
+            }),
+            Failure::MainFactsUnavailable,
+        );
+        assert_eq!(
+            native_monitor_collection_failure(MonitorCollectionError::InvalidMainGeometry {
+                monitor: 4,
+                reason: RectValidationError::EdgeOverflow,
+            }),
+            Failure::InvalidMainGeometry,
+        );
+        assert_eq!(
+            native_monitor_collection_failure(MonitorCollectionError::InvalidScaleFactor {
+                monitor: 5,
+            }),
+            Failure::InvalidScaleFactor,
+        );
+        assert_eq!(
+            native_monitor_collection_failure(MonitorCollectionError::InvalidWorkGeometry {
+                monitor: 6,
+            }),
+            Failure::InvalidWorkGeometry,
+        );
+    }
+
+    #[test]
+    fn work_area_fallbacks_are_reduced_to_stable_public_reasons() {
+        let cases = [
+            (WorkAreaFallback::Wayland, Fallback::Wayland),
+            (
+                WorkAreaFallback::UnsupportedWindowSystem,
+                Fallback::UnsupportedWindowSystem,
+            ),
+            (
+                WorkAreaFallback::SourceUnavailable,
+                Fallback::SourceUnavailable,
+            ),
+            (
+                WorkAreaFallback::InvalidNativeData,
+                Fallback::InvalidNativeData,
+            ),
+            (
+                WorkAreaFallback::MainThreadUnavailable,
+                Fallback::MainThreadUnavailable,
+            ),
+            (
+                WorkAreaFallback::AmbiguousDesktopScope,
+                Fallback::AmbiguousDesktopScope,
+            ),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(native_monitor_fallback(input), expected);
+        }
     }
 }

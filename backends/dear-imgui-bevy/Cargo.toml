@@ -3,7 +3,7 @@ name = "dear-imgui-bevy"
 version.workspace = true
 edition.workspace = true
 rust-version = "1.95.0"
-description = "Bevy-native backend for dear-imgui-rs on Bevy 0.19.0"
+description = "Bevy-native backend for dear-imgui-rs on Bevy 0.19.1"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -14,33 +14,34 @@ keywords.workspace = true
 
 [dependencies]
 dear-imgui-rs.workspace = true
+dear-imgui-winit = { workspace = true, optional = true }
 
 # Bevy subcrates use semver-compatible internal dependencies, so exact pins keep
 # the app/ECS/window/input/render slices on the same checked release train.
-bevy_app = { version = "=0.19.0", default-features = false, features = ["std"] }
-bevy_ecs = { version = "=0.19.0", default-features = false, features = ["std"] }
-bevy_input = { version = "=0.19.0", default-features = false, features = ["std", "keyboard", "mouse", "touch"] }
-bevy_math = { version = "=0.19.0", default-features = false, features = ["std"] }
-bevy_window = { version = "=0.19.0", default-features = false, features = ["std"] }
-bevy_asset = { version = "=0.19.0", default-features = false, optional = true }
-bevy_camera = { version = "=0.19.0", default-features = false, optional = true }
-bevy_color = { version = "=0.19.0", default-features = false, optional = true }
-bevy_core_pipeline = { version = "=0.19.0", default-features = false, optional = true }
-bevy_derive = "=0.19.0"
-bevy_ecs_macro_logic = "=0.19.0"
-bevy_ecs_macros = "=0.19.0"
-bevy_image = { version = "=0.19.0", default-features = false, optional = true }
-bevy_macro_utils = "=0.19.0"
-bevy_mesh = { version = "=0.19.0", default-features = false, optional = true }
-bevy_platform = { version = "=0.19.0", default-features = false }
-bevy_ptr = "=0.19.0"
-bevy_render = { version = "=0.19.0", default-features = false, optional = true }
-bevy_shader = { version = "=0.19.0", default-features = false, optional = true }
-bevy_tasks = { version = "=0.19.0", default-features = false }
-bevy_time = { version = "=0.19.0", default-features = false, features = ["std"] }
-bevy_ui_render = { version = "=0.19.0", default-features = false, optional = true }
-bevy_utils = { version = "=0.19.0", default-features = false }
-bevy_winit = { version = "=0.19.0", default-features = false, features = ["x11"], optional = true }
+bevy_app = { version = "=0.19.1", default-features = false, features = ["std"] }
+bevy_ecs = { version = "=0.19.1", default-features = false, features = ["std"] }
+bevy_input = { version = "=0.19.1", default-features = false, features = ["std", "keyboard", "mouse", "touch"] }
+bevy_math = { version = "=0.19.1", default-features = false, features = ["std"] }
+bevy_window = { version = "=0.19.1", default-features = false, features = ["std"] }
+bevy_asset = { version = "=0.19.1", default-features = false, optional = true }
+bevy_camera = { version = "=0.19.1", default-features = false, optional = true }
+bevy_color = { version = "=0.19.1", default-features = false, optional = true }
+bevy_core_pipeline = { version = "=0.19.1", default-features = false, optional = true }
+bevy_derive = "=0.19.1"
+bevy_ecs_macro_logic = "=0.19.1"
+bevy_ecs_macros = "=0.19.1"
+bevy_image = { version = "=0.19.1", default-features = false, optional = true }
+bevy_macro_utils = "=0.19.1"
+bevy_mesh = { version = "=0.19.1", default-features = false, optional = true }
+bevy_platform = { version = "=0.19.1", default-features = false }
+bevy_ptr = "=0.19.1"
+bevy_render = { version = "=0.19.1", default-features = false, optional = true }
+bevy_shader = { version = "=0.19.1", default-features = false, optional = true }
+bevy_tasks = { version = "=0.19.1", default-features = false }
+bevy_time = { version = "=0.19.1", default-features = false, features = ["std"] }
+bevy_ui_render = { version = "=0.19.1", default-features = false, optional = true }
+bevy_utils = { version = "=0.19.1", default-features = false }
+bevy_winit = { version = "=0.19.1", default-features = false, features = ["x11"], optional = true }
 bytemuck = { workspace = true, features = ["derive"], optional = true }
 raw-window-handle = { workspace = true, optional = true }
 winit = { workspace = true, optional = true }
@@ -49,7 +50,7 @@ winit = { workspace = true, optional = true }
 x11-dl = { workspace = true, optional = true }
 
 [dev-dependencies]
-bevy = { version = "=0.19.0", default-features = false, features = ["2d", "default_platform", "ui"] }
+bevy = { version = "=0.19.1", default-features = false, features = ["2d", "default_platform", "ui"] }
 dear-imguizmo.workspace = true
 dear-imnodes.workspace = true
 dear-implot.workspace = true
@@ -61,6 +62,8 @@ wasm = ["dear-imgui-rs/wasm"]
 multi-viewport = [
     "render",
     "dear-imgui-rs/multi-viewport",
+    "dep:dear-imgui-winit",
+    "dear-imgui-winit/native-platform-support",
     "dep:bevy_winit",
     "dep:raw-window-handle",
     "dep:winit",

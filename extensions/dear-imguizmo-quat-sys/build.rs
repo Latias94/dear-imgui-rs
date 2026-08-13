@@ -468,7 +468,13 @@ fn build_with_cc(
         }
         build.flag("/D_ITERATOR_DEBUG_LEVEL=0");
     }
-    build.compile("dear_imguizmo_quat");
+    build_support::compile_cpp_archive(
+        &mut build,
+        "dear_imguizmo_quat",
+        &cfg.target_os,
+        &cfg.target_env,
+        &cfg.target_abi,
+    );
 }
 
 fn main() {

@@ -1,6 +1,7 @@
 use winit::dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize, Position, Size};
 use winit::window::Window;
 
+use crate::native_support::MonitorSnapshot;
 use crate::sanitize;
 
 /// Dear ImGui requires every monitor rectangle, platform window rectangle, and mouse position to
@@ -65,6 +66,30 @@ fn desktop_size_from_physical_values(
     ]
 }
 
+fn checked_desktop_size_from_physical_values(
+    space: DesktopCoordinateSpace,
+    size: [f64; 2],
+    scale: f64,
+) -> Option<[f32; 2]> {
+    let size = match space {
+        DesktopCoordinateSpace::Physical => size,
+        DesktopCoordinateSpace::Logical => {
+            let scale = sanitized_scale(scale);
+            [size[0] / scale, size[1] / scale]
+        }
+    };
+    if !size
+        .into_iter()
+        .all(|value| value.is_finite() && value >= 0.0)
+    {
+        return None;
+    }
+    Some([
+        sanitize::finite_non_negative_f64_to_f32(size[0])?,
+        sanitize::finite_non_negative_f64_to_f32(size[1])?,
+    ])
+}
+
 pub(super) fn desktop_position_from_physical(
     position: PhysicalPosition<i32>,
     scale: f64,
@@ -81,41 +106,60 @@ fn desktop_input_position_from_physical(position: [f64; 2], scale: f64) -> Optio
     desktop_position_from_physical_values(native_desktop_coordinate_space(), position, scale)
 }
 
-pub(super) fn monitor_from_physical(
-    position: PhysicalPosition<i32>,
-    size: PhysicalSize<u32>,
-    scale: f64,
-) -> dear_imgui_rs::sys::ImGuiPlatformMonitor {
-    let scale = sanitized_scale(scale);
-    let position = desktop_position_from_physical(position, scale).unwrap_or([0.0, 0.0]);
-    let size = desktop_size_from_physical_values(
+/// Converts detached native monitor facts into the coordinate model used by Winit viewports.
+///
+/// Main and work rectangles are converted independently. The conversion is fallible so native
+/// values that cannot be represented as finite ImGui `f32` values are rejected instead of being
+/// silently clamped into a different geometry.
+pub(super) fn monitor_from_snapshot(
+    snapshot: &MonitorSnapshot,
+) -> Option<dear_imgui_rs::sys::ImGuiPlatformMonitor> {
+    let scale = sanitized_scale(snapshot.scale_factor());
+    let main = snapshot.main();
+    let work = snapshot.work();
+    let main_position = desktop_position_from_physical_values(
         native_desktop_coordinate_space(),
-        [f64::from(size.width), f64::from(size.height)],
+        main.position(),
         scale,
-    );
+    )
+    .and_then(sanitize::finite_vec2_f64_to_f32)?;
+    let work_position = desktop_position_from_physical_values(
+        native_desktop_coordinate_space(),
+        work.position(),
+        scale,
+    )
+    .and_then(sanitize::finite_vec2_f64_to_f32)?;
+    let main_size = checked_desktop_size_from_physical_values(
+        native_desktop_coordinate_space(),
+        main.size(),
+        scale,
+    )?;
+    let work_size = checked_desktop_size_from_physical_values(
+        native_desktop_coordinate_space(),
+        work.size(),
+        scale,
+    )?;
 
-    dear_imgui_rs::sys::ImGuiPlatformMonitor {
+    Some(dear_imgui_rs::sys::ImGuiPlatformMonitor {
         MainPos: dear_imgui_rs::sys::ImVec2 {
-            x: position[0],
-            y: position[1],
+            x: main_position[0],
+            y: main_position[1],
         },
         MainSize: dear_imgui_rs::sys::ImVec2 {
-            x: size[0],
-            y: size[1],
+            x: main_size[0],
+            y: main_size[1],
         },
-        // Winit does not expose platform work areas, so the whole monitor remains the portable
-        // fallback until a backend-specific work-area callback is available.
         WorkPos: dear_imgui_rs::sys::ImVec2 {
-            x: position[0],
-            y: position[1],
+            x: work_position[0],
+            y: work_position[1],
         },
         WorkSize: dear_imgui_rs::sys::ImVec2 {
-            x: size[0],
-            y: size[1],
+            x: work_size[0],
+            y: work_size[1],
         },
         DpiScale: sanitize::positive_finite_f32_or(scale as f32, 1.0),
         PlatformHandle: std::ptr::null_mut(),
-    }
+    })
 }
 
 pub(crate) fn desktop_size_for_window(window: &Window) -> [f32; 2] {
@@ -385,6 +429,38 @@ mod tests {
         assert_eq!(monitor.WorkPos, monitor.MainPos);
         assert_eq!(monitor.WorkSize, monitor.MainSize);
         assert_eq!(monitor.DpiScale, 1.0);
+    }
+
+    #[test]
+    fn snapshot_conversion_preserves_distinct_main_and_work_rectangles() {
+        use crate::native_support::{
+            MonitorIdentity, MonitorSnapshot, PhysicalMonitorRect, WorkAreaProvenance,
+        };
+
+        let main = PhysicalMonitorRect::new([-1920.0, 0.0], [1920.0, 1080.0]).unwrap();
+        let work = PhysicalMonitorRect::new([-1920.0, 45.0], [1920.0, 1035.0]).unwrap();
+        let snapshot = MonitorSnapshot::from_test(
+            MonitorIdentity::from_test_key("secondary"),
+            main,
+            work,
+            1.5,
+            WorkAreaProvenance::WindowsRcWork,
+        );
+
+        let monitor = monitor_from_snapshot(&snapshot).unwrap();
+        let divisor = match native_desktop_coordinate_space() {
+            DesktopCoordinateSpace::Physical => 1.0,
+            DesktopCoordinateSpace::Logical => 1.5,
+        };
+        assert_eq!(monitor.MainPos.x, (-1920.0 / divisor) as f32);
+        assert_eq!(monitor.MainPos.y, 0.0);
+        assert_eq!(monitor.MainSize.x, (1920.0 / divisor) as f32);
+        assert_eq!(monitor.MainSize.y, (1080.0 / divisor) as f32);
+        assert_eq!(monitor.WorkPos.x, (-1920.0 / divisor) as f32);
+        assert_eq!(monitor.WorkPos.y, (45.0 / divisor) as f32);
+        assert_eq!(monitor.WorkSize.x, (1920.0 / divisor) as f32);
+        assert_eq!(monitor.WorkSize.y, (1035.0 / divisor) as f32);
+        assert_eq!(monitor.DpiScale, 1.5);
     }
 
     #[test]

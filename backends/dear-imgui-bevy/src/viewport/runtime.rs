@@ -1,3 +1,5 @@
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use super::desktop::ImguiMonitorPublication;
 use super::*;
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -17,11 +19,16 @@ mod ecs;
 #[path = "frame.rs"]
 mod frame;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+#[path = "native_policy.rs"]
+mod native_policy;
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[path = "platform.rs"]
 mod platform;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[path = "state.rs"]
 mod state;
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use native_policy::*;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use state::*;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -154,7 +161,7 @@ struct ImguiViewportMonitorContract {
     data: *mut sys::ImGuiPlatformMonitor,
     size: i32,
     capacity: i32,
-    monitors: Vec<sys::ImGuiPlatformMonitor>,
+    publication: ImguiMonitorPublication,
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -291,6 +298,8 @@ impl ImguiViewportBridgeShared {
         let mut state = self.state.borrow_mut();
         let main_instance = state.instance_for_id(main_viewport_id);
         if let Some(record) = main_instance.and_then(|instance_id| state.record_mut(instance_id)) {
+            record.native_policy.release();
+            record.show_requested = false;
             record.window = None;
             record.camera = None;
         }
@@ -315,6 +324,8 @@ impl ImguiViewportBridgeShared {
                 }),
         );
         for record in state.viewports.values_mut() {
+            record.native_policy.release();
+            record.show_requested = false;
             record.feedback = None;
             record.flags = None;
             record.pending_client_placement = None;
@@ -365,6 +376,8 @@ impl ImguiViewportBridgeShared {
             .collect::<Vec<_>>();
         state.pending_ecs_despawns.extend(mapped);
         for record in state.viewports.values_mut() {
+            record.native_policy.release();
+            record.show_requested = false;
             record.window = None;
             record.camera = None;
             record.pending_client_placement = None;
@@ -444,22 +457,48 @@ impl ImguiViewportBridgeShared {
     fn record_monitor_contract(
         &self,
         context: &imgui::Context,
-        monitors: &[sys::ImGuiPlatformMonitor],
+        publication: ImguiMonitorPublication,
     ) {
         let raw = unsafe { &(*context.platform_io().as_raw()).Monitors };
-        debug_assert_eq!(raw.Size, i32::try_from(monitors.len()).unwrap());
+        debug_assert_eq!(raw.Size, i32::try_from(publication.values.len()).unwrap());
         debug_assert_eq!(raw.Capacity, raw.Size);
         debug_assert_eq!(
-            unsafe { std::slice::from_raw_parts(raw.Data, monitors.len()) },
-            monitors
+            unsafe { std::slice::from_raw_parts(raw.Data, publication.values.len()) },
+            publication.values.as_slice()
         );
         self.monitor_contract
             .replace(Some(ImguiViewportMonitorContract {
                 data: raw.Data,
                 size: raw.Size,
                 capacity: raw.Capacity,
-                monitors: monitors.to_vec(),
+                publication,
             }));
+    }
+
+    fn publish_monitor_publication(
+        &self,
+        context: &mut imgui::Context,
+        publication: &ImguiMonitorPublication,
+    ) -> Result<bool, ImguiViewportCallbackOwnershipError> {
+        if publication.values.is_empty() {
+            return Ok(false);
+        }
+        if !self.owns_current_monitors(context) {
+            return Err(ImguiViewportCallbackOwnershipError::PlatformMonitorsReplaced);
+        }
+        if self
+            .monitor_contract
+            .borrow()
+            .as_ref()
+            .is_some_and(|current| current.publication.equivalent_to(publication))
+        {
+            return Ok(false);
+        }
+        // SAFETY: `owns_current_monitors` proves that the existing allocation is either empty or
+        // the bridge-owned allocation. Dear ImGui owns the replacement storage after this call.
+        unsafe { context.platform_io_mut().set_monitors(&publication.values) };
+        self.record_monitor_contract(context, publication.clone());
+        Ok(true)
     }
 
     fn owns_current_monitors(&self, context: &imgui::Context) -> bool {
@@ -484,8 +523,9 @@ impl ImguiViewportBridgeShared {
 
         // The storage address still matches the Dear ImGui allocation published by this bridge.
         // Comparing its contents also detects a backend that rewrote the vector in place.
-        let actual = unsafe { std::slice::from_raw_parts(raw.Data, expected.monitors.len()) };
-        actual == expected.monitors.as_slice()
+        let actual =
+            unsafe { std::slice::from_raw_parts(raw.Data, expected.publication.values.len()) };
+        actual == expected.publication.values.as_slice()
     }
 
     fn retains_any_platform_identity_raw(

@@ -457,7 +457,13 @@ fn build_with_cc(
         build.flag("/D_ITERATOR_DEBUG_LEVEL=0");
     }
 
-    build.compile("dear_imgui_test_engine");
+    build_support::compile_cpp_archive(
+        &mut build,
+        "dear_imgui_test_engine",
+        &cfg.target_os,
+        &cfg.target_env,
+        &cfg.target_abi,
+    );
 
     if cfg.is_windows() && cfg.target_env == "gnu" && cfg.target_abi == "llvm" {
         // Upstream selects its pthread thread-naming path for MinGW. llvm-mingw

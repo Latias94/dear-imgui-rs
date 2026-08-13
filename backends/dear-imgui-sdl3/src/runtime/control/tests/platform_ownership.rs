@@ -1,6 +1,40 @@
 use super::*;
 
 #[test]
+fn platform_claim_wraps_every_official_sdl3_window_callback() {
+    let _guard = crate::tests::test_guard();
+    let mut context = Context::create();
+    let mut runtime = synthetic_claimed_registration(
+        &mut context,
+        Rc::new(Cell::new(0)),
+        Rc::new(Cell::new(0)),
+        Rc::new(Cell::new(0)),
+        synthetic_create_window,
+    );
+
+    context.binding().with_bound_context(|| {
+        let callbacks = runtime.control.callbacks.borrow();
+        let ownership = callbacks
+            .as_ref()
+            .expect("synthetic registration must own the callback table");
+        for slot in PlatformCallbackSlot::ALL {
+            assert!(
+                ownership.wraps_slot(slot),
+                "{} was not wrapped",
+                slot.name()
+            );
+            assert!(
+                unsafe { ownership.owns_live_slot(slot) },
+                "{} did not retain exact live ownership",
+                slot.name()
+            );
+        }
+    });
+
+    runtime.shutdown_platform(&mut context).unwrap();
+}
+
+#[test]
 fn attachment_teardown_reports_renderer_panic_without_hidden_retry() {
     let _guard = crate::tests::test_guard();
     let renderer_count = Rc::new(Cell::new(0));

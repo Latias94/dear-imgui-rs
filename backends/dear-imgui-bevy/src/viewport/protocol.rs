@@ -17,6 +17,21 @@ pub struct ImguiViewportInstanceId {
     pub(super) generation: std::num::NonZeroU64,
 }
 
+impl Ord for ImguiViewportInstanceId {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.context_id
+            .get()
+            .cmp(&other.context_id.get())
+            .then_with(|| self.generation.cmp(&other.generation))
+    }
+}
+
+impl PartialOrd for ImguiViewportInstanceId {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl ImguiViewportInstanceId {
     /// Returns the Context which owns this viewport instance.
     #[must_use]
