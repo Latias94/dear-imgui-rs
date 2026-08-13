@@ -289,17 +289,17 @@ fn collect_monitor_snapshots_from_handles(
 ) -> Result<Vec<MonitorSnapshot>, MonitorCollectionError> {
     #[cfg(target_os = "windows")]
     {
-        return windows::collect(monitors, backend);
+        windows::collect(monitors, backend)
     }
 
     #[cfg(target_os = "macos")]
     {
-        return macos::collect(monitors, backend);
+        macos::collect(monitors, backend)
     }
 
     #[cfg(target_os = "linux")]
     {
-        return linux::collect(monitors, backend);
+        linux::collect(monitors, backend)
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
@@ -323,20 +323,20 @@ fn monitor_backend(host: &Window) -> MonitorBackend {
     #[cfg(target_os = "windows")]
     {
         let _ = host;
-        return MonitorBackend::Windows;
+        MonitorBackend::Windows
     }
     #[cfg(target_os = "macos")]
     {
         let _ = host;
-        return MonitorBackend::MacOs;
+        MonitorBackend::MacOs
     }
     #[cfg(target_os = "linux")]
     {
-        return match host.display_handle().ok().map(|handle| handle.as_raw()) {
+        match host.display_handle().ok().map(|handle| handle.as_raw()) {
             Some(RawDisplayHandle::Xlib(_)) => MonitorBackend::X11,
             Some(RawDisplayHandle::Wayland(_)) => MonitorBackend::Wayland,
             _ => MonitorBackend::Other,
-        };
+        }
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {

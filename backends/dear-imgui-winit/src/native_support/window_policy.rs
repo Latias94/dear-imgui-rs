@@ -1,9 +1,7 @@
 use std::cell::Cell;
 use std::io;
-use std::marker::PhantomData;
 use std::ptr::null_mut;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use thiserror::Error;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
@@ -73,8 +71,8 @@ struct LeaseState {
     owner_thread_id: u32,
     phase: Cell<LeasePhase>,
     callback_ref_owned: Cell<bool>,
-    accepts_pointer_input: std::sync::atomic::AtomicBool,
-    no_focus_on_click: std::sync::atomic::AtomicBool,
+    accepts_pointer_input: Cell<bool>,
+    no_focus_on_click: Cell<bool>,
 }
 
 /// An exact-window policy lease.
@@ -97,9 +95,7 @@ struct LeaseState {
 /// requires_send_sync::<WindowPolicyLease>();
 /// ```
 pub struct WindowPolicyLease {
-    state: Arc<LeaseState>,
-    // Win32 subclass procedures are thread-affine. This marker makes that contract explicit.
-    _not_send_sync: PhantomData<Rc<()>>,
+    state: Rc<LeaseState>,
 }
 
 impl WindowPolicyLease {
@@ -108,17 +104,17 @@ impl WindowPolicyLease {
         let (hwnd, window_id) = window_handle(window)?;
         let owner_thread_id = window_owner_thread(hwnd)?;
         validate_owner_thread(owner_thread_id, current_thread_id())?;
-        let state = Arc::new(LeaseState {
+        let state = Rc::new(LeaseState {
             hwnd,
             window_id,
             subclass_id: next_subclass_id(),
             owner_thread_id,
             phase: Cell::new(LeasePhase::Installed),
             callback_ref_owned: Cell::new(true),
-            accepts_pointer_input: std::sync::atomic::AtomicBool::new(policy.accepts_pointer_input),
-            no_focus_on_click: std::sync::atomic::AtomicBool::new(policy.no_focus_on_click),
+            accepts_pointer_input: Cell::new(policy.accepts_pointer_input),
+            no_focus_on_click: Cell::new(policy.no_focus_on_click),
         });
-        let callback_ref = Arc::into_raw(Arc::clone(&state)) as usize;
+        let callback_ref = Rc::into_raw(Rc::clone(&state)) as usize;
         let installed = unsafe {
             SetWindowSubclass(
                 hwnd,
@@ -129,16 +125,13 @@ impl WindowPolicyLease {
         };
         if installed == 0 {
             // The callback reference never became owned by USER32.
-            unsafe { drop(Arc::from_raw(callback_ref as *const LeaseState)) };
+            unsafe { drop(Rc::from_raw(callback_ref as *const LeaseState)) };
             state.callback_ref_owned.set(false);
             return Err(WindowPolicyError::InstallFailed {
                 message: io::Error::last_os_error().to_string(),
             });
         }
-        Ok(Self {
-            state,
-            _not_send_sync: PhantomData,
-        })
+        Ok(Self { state })
     }
 
     /// Updates policy bits without changing the leased HWND.
@@ -153,13 +146,10 @@ impl WindowPolicyLease {
             LeasePhase::Installed => {}
         }
         validate_state_thread(&self.state)?;
-        use std::sync::atomic::Ordering;
         self.state
             .accepts_pointer_input
-            .store(policy.accepts_pointer_input, Ordering::Release);
-        self.state
-            .no_focus_on_click
-            .store(policy.no_focus_on_click, Ordering::Release);
+            .set(policy.accepts_pointer_input);
+        self.state.no_focus_on_click.set(policy.no_focus_on_click);
         Ok(())
     }
 
@@ -208,7 +198,7 @@ fn release_callback_ref(state: &LeaseState) {
         // The raw pointer is the one passed as dwRefData. It is recovered only after USER32 has
         // stopped dispatching the subclass, or after WM_NCDESTROY has become terminal.
         let raw = state as *const LeaseState;
-        unsafe { drop(Arc::from_raw(raw)) };
+        unsafe { drop(Rc::from_raw(raw)) };
     }
 }
 
@@ -290,11 +280,12 @@ unsafe extern "system" fn window_policy_subclass(
         return unsafe { DefSubclassProc(hwnd, message, wparam, lparam) };
     }
 
-    // Hold a temporary Arc while the callback executes. This protects the state if the owning
+    // Hold a temporary Rc while the callback executes. USER32 invokes the subclass on the HWND
+    // owner thread, so the thread-affine state does not need cross-thread synchronization. The
+    // temporary strong reference protects the state if the owning
     // lease is dropped reentrantly from code reached by DefSubclassProc.
-    unsafe { Arc::increment_strong_count(raw) };
-    let callback_state = unsafe { Arc::from_raw(raw) };
-    use std::sync::atomic::Ordering;
+    unsafe { Rc::increment_strong_count(raw) };
+    let callback_state = unsafe { Rc::from_raw(raw) };
 
     if message == WM_NCDESTROY {
         // Mark destruction before forwarding: reentrant Drop must not call USER32 on a dying HWND.
@@ -322,10 +313,10 @@ unsafe extern "system" fn window_policy_subclass(
     ) {
         return unsafe { DefSubclassProc(hwnd, message, wparam, lparam) };
     }
-    if message == WM_NCHITTEST && !callback_state.accepts_pointer_input.load(Ordering::Acquire) {
+    if message == WM_NCHITTEST && !callback_state.accepts_pointer_input.get() {
         return HTTRANSPARENT as LRESULT;
     }
-    if message == WM_MOUSEACTIVATE && callback_state.no_focus_on_click.load(Ordering::Acquire) {
+    if message == WM_MOUSEACTIVATE && callback_state.no_focus_on_click.get() {
         return MA_NOACTIVATE as LRESULT;
     }
     unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
@@ -334,7 +325,6 @@ unsafe extern "system" fn window_policy_subclass(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::Ordering;
 
     #[test]
     fn policy_defaults_to_interactive_and_focusable() {
@@ -360,7 +350,7 @@ mod tests {
     }
 
     #[test]
-    fn callback_state_changes_are_atomic() {
+    fn callback_state_changes_are_visible_to_the_owner_thread() {
         let state = LeaseState {
             hwnd: std::ptr::null_mut(),
             window_id: WindowId::dummy(),
@@ -368,13 +358,13 @@ mod tests {
             owner_thread_id: 1,
             phase: Cell::new(LeasePhase::Installed),
             callback_ref_owned: Cell::new(false),
-            accepts_pointer_input: std::sync::atomic::AtomicBool::new(true),
-            no_focus_on_click: std::sync::atomic::AtomicBool::new(false),
+            accepts_pointer_input: Cell::new(true),
+            no_focus_on_click: Cell::new(false),
         };
-        state.accepts_pointer_input.store(false, Ordering::Release);
-        state.no_focus_on_click.store(true, Ordering::Release);
-        assert!(!state.accepts_pointer_input.load(Ordering::Acquire));
-        assert!(state.no_focus_on_click.load(Ordering::Acquire));
+        state.accepts_pointer_input.set(false);
+        state.no_focus_on_click.set(true);
+        assert!(!state.accepts_pointer_input.get());
+        assert!(state.no_focus_on_click.get());
     }
 
     #[test]
@@ -386,8 +376,8 @@ mod tests {
             owner_thread_id: 1,
             phase: Cell::new(LeasePhase::Destroyed),
             callback_ref_owned: Cell::new(false),
-            accepts_pointer_input: std::sync::atomic::AtomicBool::new(true),
-            no_focus_on_click: std::sync::atomic::AtomicBool::new(false),
+            accepts_pointer_input: Cell::new(true),
+            no_focus_on_click: Cell::new(false),
         };
         release_callback_ref(&state);
         assert!(!state.callback_ref_owned.get());
