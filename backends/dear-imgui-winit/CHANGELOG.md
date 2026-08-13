@@ -13,6 +13,10 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 - Make `WinitPlatform` the sole public multi-viewport owner. `with_event_loop` now returns `WinitViewportAttempt`, which preserves the callback output and every deferred platform fault as parallel values instead of dropping one side through nested `Result` precedence.
 - Replace one-at-a-time `poll_viewport_fault` with the advanced `drain_viewport_faults` escape hatch. First-party renderer routes retain an exact-generation platform adapter and aggregate the complete ordered fault batch automatically.
 
+### Fixed
+
+- Preserve secondary viewport client geometry when positioning undecorated Windows windows, changing native decorations, crossing physical-coordinate DPI boundaries without viewport scaling, or creating decorated X11 windows before their frame extents settle. This fixes detached title-bar dragging and prevents native/ImGui geometry and initial X11 DPI drift.
+
 ## [0.16.0-alpha.1]
 
 ### Breaking Changes

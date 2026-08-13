@@ -1,4 +1,8 @@
-use super::coordinates::{desktop_position_from_physical, outer_position_from_client};
+use super::coordinates::{
+    decoration_offset, desktop_position_from_physical, framebuffer_scale_for_dpi_scale,
+    outer_position_from_client, request_client_geometry, validate_viewport_position,
+    validate_viewport_size, viewport_target_dpi_scale,
+};
 use super::native_cursor_hittest::{
     MouseCaptureTransfer, focus_and_raise_window, raise_window_without_activation,
     show_window_without_activation, transfer_mouse_capture,
@@ -122,6 +126,36 @@ fn should_focus_on_show(policy: ViewportWindowPolicy) -> bool {
     !policy.no_focus_on_appearing
 }
 
+fn requires_client_geometry_reconciliation(
+    current: ViewportWindowPolicy,
+    next: ViewportWindowPolicy,
+) -> bool {
+    current.decorations != next.decorations
+}
+
+fn requires_async_client_geometry_reconciliation() -> bool {
+    cfg!(target_os = "linux")
+}
+
+fn viewport_client_geometry(
+    viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+) -> Result<([f32; 2], [f32; 2]), WinitPlatformError> {
+    let viewport = unsafe { viewport.as_ref() }.ok_or(WinitPlatformError::ContextMismatch)?;
+    let position = validate_viewport_position([viewport.Pos.x, viewport.Pos.y]).ok_or(
+        WinitPlatformError::InvalidViewportGeometry {
+            operation: "client geometry reconciliation",
+            reason: "position must be finite and representable by a native window",
+        },
+    )?;
+    let size = validate_viewport_size([viewport.Size.x, viewport.Size.y]).ok_or(
+        WinitPlatformError::InvalidViewportGeometry {
+            operation: "client geometry reconciliation",
+            reason: "size must be finite, positive, and representable by a native window",
+        },
+    )?;
+    Ok((position, size))
+}
+
 fn request_platform_window_focus(
     control: &RuntimeControl,
     window: &winit::window::Window,
@@ -200,12 +234,19 @@ pub(super) fn record_viewport_failure(
 fn sync_window_policy(
     data: &ViewportData,
     next: ViewportWindowPolicy,
+    viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
 ) -> Result<(), WinitPlatformError> {
     let current = data.window_policy.get();
     let taskbar_capability = skip_taskbar_capability();
     validate_policy_transition(current, next, taskbar_capability)?;
+    let client_geometry = requires_client_geometry_reconciliation(current, next)
+        .then(|| viewport_client_geometry(viewport))
+        .transpose()?;
 
     let window = data.window();
+    let decoration_offset_before_policy_change = client_geometry
+        .filter(|_| requires_async_client_geometry_reconciliation())
+        .and_then(|_| decoration_offset(window));
     if current.cursor_hittest != next.cursor_hittest {
         if !next.cursor_hittest {
             // A moving viewport becomes hit-test transparent so the backend can identify the
@@ -218,8 +259,21 @@ fn sync_window_policy(
     if current.no_focus_on_click != next.no_focus_on_click {
         data.set_no_focus_on_click(next.no_focus_on_click)?;
     }
-    if current.decorations != next.decorations {
+    if let Some((position, size)) = client_geometry {
         window.set_decorations(next.decorations);
+        let dpi_scale = unsafe { viewport_target_dpi_scale(viewport) };
+        request_client_geometry(window, position, size, dpi_scale);
+        if requires_async_client_geometry_reconciliation() {
+            data.request_client_geometry_reconciliation(
+                position,
+                size,
+                decoration_offset_before_policy_change,
+            );
+        } else {
+            // ImGui clears request flags at the end of the current platform update pass. Queue
+            // the refresh so the next frame observes the settled native client geometry.
+            data.request_geometry_refresh(true, true);
+        }
     }
     if current.top_most != next.top_most {
         window.set_window_level(if next.top_most {

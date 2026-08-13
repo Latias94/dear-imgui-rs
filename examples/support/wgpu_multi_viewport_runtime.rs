@@ -46,6 +46,8 @@ pub(crate) trait ViewportScenario {
 
     fn extend_main_window(&mut self, _ui: &Ui, _viewport_count: &mut i32) {}
 
+    fn extend_game_window(&mut self, _ui: &Ui) {}
+
     fn after_ui(&mut self, _ui: &Ui, _viewport_count: i32) {}
 
     fn trace_secondary_submissions(&self) -> bool {
@@ -621,6 +623,7 @@ impl<S: ViewportScenario> AppWindow<S> {
             ui.window("Game View")
                 .size([520.0, 540.0], Condition::FirstUseEver)
                 .build(|| {
+                    scenario.extend_game_window(ui);
                     let avail = ui.content_region_avail();
                     let side = avail[0].min(avail[1]).max(64.0);
                     ui.text("Offscreen WGPU texture rendered each frame:");

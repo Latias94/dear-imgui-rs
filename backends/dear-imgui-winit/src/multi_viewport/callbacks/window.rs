@@ -155,7 +155,7 @@ pub(in super::super) unsafe extern "C" fn winit_create_window(
                     //
                     // ImGui platform coordinates are relative to the *client* origin, while winit only lets us
                     // position by outer window coordinates. Adjust by decoration offset when available.
-                    let dpi_scale = unsafe { viewport_target_dpi_scale(vp, position) };
+                    let dpi_scale = unsafe { viewport_target_dpi_scale(vp) };
                     let outer_target = outer_position_from_client(&window, position, dpi_scale);
                     window.set_outer_position(window_position_from_desktop(outer_target));
 
@@ -192,9 +192,9 @@ pub(in super::super) unsafe extern "C" fn winit_create_window(
 
                     // DPI controls UI scaling while framebuffer scale converts this backend's
                     // desktop coordinate unit into render-target pixels.
-                    let scale = sanitize::positive_finite_f32_or(window.scale_factor() as f32, 1.0);
+                    let scale = sanitize::positive_finite_f32_or(dpi_scale, 1.0);
                     vp_ref.DpiScale = scale;
-                    let framebuffer_scale = framebuffer_scale_for_window(&window);
+                    let framebuffer_scale = framebuffer_scale_for_dpi_scale(f64::from(scale));
                     vp_ref.FramebufferScale.x = framebuffer_scale[0];
                     vp_ref.FramebufferScale.y = framebuffer_scale[1];
 
@@ -265,10 +265,23 @@ pub(in super::super) unsafe extern "C" fn winit_show_window(
         }
         let policy = ViewportWindowPolicy::from_flags(unsafe { (*vp).Flags });
         with_viewport_data(control, vp, |data| {
-            if let Err(error) = sync_window_policy(data, policy) {
+            if let Err(error) = sync_window_policy(data, policy, vp) {
                 record_viewport_failure(control, vp, error);
                 return;
             }
+            let reconciliation =
+                if requires_async_client_geometry_reconciliation() && policy.decorations {
+                    let geometry = match viewport_client_geometry(vp) {
+                        Ok(geometry) => geometry,
+                        Err(error) => {
+                            record_viewport_failure(control, vp, error);
+                            return;
+                        }
+                    };
+                    Some((geometry, decoration_offset(data.window())))
+                } else {
+                    None
+                };
             if should_focus_on_show(policy) {
                 data.window().set_visible(true);
                 if let Err(error) = request_platform_window_focus(control, data.window()) {
@@ -284,6 +297,13 @@ pub(in super::super) unsafe extern "C" fn winit_show_window(
                 {
                     record_viewport_failure(control, vp, error);
                 }
+            }
+            if let Some(((position, size), decoration_offset_before_show)) = reconciliation {
+                data.request_client_geometry_reconciliation(
+                    position,
+                    size,
+                    decoration_offset_before_show,
+                );
             }
         });
     });
@@ -315,112 +335,6 @@ pub(in super::super) unsafe extern "C" fn winit_get_window_pos_out(
     });
 }
 
-fn validate_viewport_position(position: [f32; 2]) -> Option<[f32; 2]> {
-    let position = sanitize::finite_vec2_f32(position)?;
-    let minimum = f64::from(i32::MIN);
-    let maximum = f64::from(i32::MAX);
-    position
-        .into_iter()
-        .map(f64::from)
-        .all(|value| value >= minimum && value <= maximum)
-        .then_some(position)
-}
-
-fn validate_viewport_size(size: [f32; 2]) -> Option<[f32; 2]> {
-    let size = sanitize::finite_vec2_f32(size)?;
-    let maximum = f64::from(i32::MAX);
-    size.into_iter()
-        .map(f64::from)
-        .all(|value| value > 0.0 && value <= maximum)
-        .then_some(size)
-}
-
-fn target_monitor_dpi_scale(
-    viewport_dpi_scale: f32,
-    position: [f32; 2],
-    size: [f32; 2],
-    monitors: &[dear_imgui_rs::sys::ImGuiPlatformMonitor],
-) -> f32 {
-    let fallback = sanitize::positive_finite_f32_or(viewport_dpi_scale, 1.0);
-    if monitors.is_empty() {
-        return fallback;
-    }
-
-    let viewport_min = position;
-    let viewport_max = [
-        position[0] + size[0].max(0.0),
-        position[1] + size[1].max(0.0),
-    ];
-    let surface_threshold = (size[0].max(0.0) * size[1].max(0.0) * 0.5).max(1.0);
-    let mut best_index = 0;
-    let mut best_surface = 0.001;
-
-    for (index, monitor) in monitors.iter().enumerate() {
-        let monitor_min = [monitor.MainPos.x, monitor.MainPos.y];
-        let monitor_max = [
-            monitor.MainPos.x + monitor.MainSize.x,
-            monitor.MainPos.y + monitor.MainSize.y,
-        ];
-        let contains = viewport_min[0] >= monitor_min[0]
-            && viewport_min[1] >= monitor_min[1]
-            && viewport_max[0] <= monitor_max[0]
-            && viewport_max[1] <= monitor_max[1];
-        if contains {
-            best_index = index;
-            break;
-        }
-
-        let overlap_width =
-            (viewport_max[0].min(monitor_max[0]) - viewport_min[0].max(monitor_min[0])).max(0.0);
-        let overlap_height =
-            (viewport_max[1].min(monitor_max[1]) - viewport_min[1].max(monitor_min[1])).max(0.0);
-        let overlap_surface = overlap_width * overlap_height;
-        if overlap_surface >= best_surface {
-            best_surface = overlap_surface;
-            best_index = index;
-        }
-        if best_surface >= surface_threshold {
-            break;
-        }
-    }
-
-    sanitize::positive_finite_f32_or(monitors[best_index].DpiScale, fallback)
-}
-
-unsafe fn viewport_target_dpi_scale(
-    vp: *mut dear_imgui_rs::sys::ImGuiViewport,
-    position: [f32; 2],
-) -> f32 {
-    let Some(viewport) = (unsafe { vp.as_ref() }) else {
-        return 1.0;
-    };
-    let fallback = sanitize::positive_finite_f32_or(viewport.DpiScale, 1.0);
-    let platform_io = unsafe { dear_imgui_rs::sys::igGetPlatformIO_Nil() };
-    let Some(platform_io) = (unsafe { platform_io.as_ref() }) else {
-        return fallback;
-    };
-    let native_monitors = &platform_io.Monitors;
-    let Ok(count) = usize::try_from(native_monitors.Size) else {
-        return fallback;
-    };
-    if native_monitors.Capacity < native_monitors.Size
-        || count > 0 && native_monitors.Data.is_null()
-    {
-        return fallback;
-    }
-    let monitors = if count == 0 {
-        &[][..]
-    } else {
-        unsafe { std::slice::from_raw_parts(native_monitors.Data, count) }
-    };
-    target_monitor_dpi_scale(
-        viewport.DpiScale,
-        position,
-        [viewport.Size.x, viewport.Size.y],
-        monitors,
-    )
-}
-
 /// Set window position
 pub(in super::super) unsafe extern "C" fn winit_set_window_pos(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
@@ -445,11 +359,30 @@ pub(in super::super) unsafe extern "C" fn winit_set_window_pos(
 
         with_viewport_data(control, vp, |data| {
             let [x, y] = requested_position;
-            let dpi_scale = unsafe { viewport_target_dpi_scale(vp, [x, y]) };
+            let dpi_scale = unsafe { viewport_target_dpi_scale(vp) };
             let window = data.window();
             let desired_client = [x, y];
+            let requires_reconciliation =
+                requires_async_client_geometry_reconciliation() && window.is_decorated();
+            let decoration_offset_before_move = requires_reconciliation
+                .then(|| decoration_offset(window))
+                .flatten();
             let outer_target = outer_position_from_client(window, desired_client, dpi_scale);
             window.set_outer_position(window_position_from_desktop(outer_target));
+            if requires_reconciliation {
+                let size = unsafe { &*vp }.Size;
+                if let Some(size) = validate_viewport_size([size.x, size.y]) {
+                    data.request_client_geometry_reconciliation(
+                        desired_client,
+                        size,
+                        decoration_offset_before_move,
+                    );
+                } else {
+                    data.update_reconciling_client_position(desired_client);
+                }
+            } else {
+                data.update_reconciling_client_position(desired_client);
+            }
         });
     });
 }
@@ -499,6 +432,7 @@ pub(in super::super) unsafe extern "C" fn winit_set_window_size(
 
         with_viewport_data(control, vp, |data| {
             let window = data.window();
+            data.update_reconciling_client_size(size);
             if window
                 .request_inner_size(window_size_from_desktop(size))
                 .is_some()
@@ -672,7 +606,7 @@ pub(in super::super) unsafe extern "C" fn winit_update_window(
         }
         let policy = ViewportWindowPolicy::from_flags(unsafe { (*vp).Flags });
         with_viewport_data(control, vp, |data| {
-            if let Err(error) = sync_window_policy(data, policy) {
+            if let Err(error) = sync_window_policy(data, policy, vp) {
                 record_viewport_failure(control, vp, error);
             }
         });
@@ -744,6 +678,28 @@ mod policy_tests {
     }
 
     #[test]
+    fn changing_decorations_requires_client_geometry_reconciliation() {
+        let current = ViewportWindowPolicy::default();
+        let decorations_changed = ViewportWindowPolicy {
+            decorations: false,
+            ..current
+        };
+        let top_most_changed = ViewportWindowPolicy {
+            top_most: true,
+            ..current
+        };
+
+        assert!(requires_client_geometry_reconciliation(
+            current,
+            decorations_changed
+        ));
+        assert!(!requires_client_geometry_reconciliation(
+            current,
+            top_most_changed
+        ));
+    }
+
+    #[test]
     fn late_focus_and_unsupported_taskbar_changes_fail_closed() {
         let current = ViewportWindowPolicy::default();
         let late_no_focus = ViewportWindowPolicy {
@@ -769,37 +725,6 @@ mod policy_tests {
         assert!(
             validate_policy_transition(current, taskbar_change, SkipTaskbarCapability::Inherent)
                 .is_ok()
-        );
-    }
-
-    #[test]
-    fn window_positioning_uses_the_destination_monitor_dpi() {
-        fn monitor(dpi_scale: f32) -> dear_imgui_rs::sys::ImGuiPlatformMonitor {
-            dear_imgui_rs::sys::ImGuiPlatformMonitor {
-                MainPos: dear_imgui_rs::sys::ImVec2 { x: 0.0, y: 0.0 },
-                MainSize: dear_imgui_rs::sys::ImVec2 { x: 1.0, y: 1.0 },
-                WorkPos: dear_imgui_rs::sys::ImVec2 { x: 0.0, y: 0.0 },
-                WorkSize: dear_imgui_rs::sys::ImVec2 { x: 1.0, y: 1.0 },
-                DpiScale: dpi_scale,
-                PlatformHandle: std::ptr::null_mut(),
-            }
-        }
-        let mut monitors = [monitor(1.0), monitor(1.5)];
-        monitors[0].MainSize = dear_imgui_rs::sys::ImVec2 { x: 100.0, y: 100.0 };
-        monitors[1].MainPos.x = 100.0;
-        monitors[1].MainSize = dear_imgui_rs::sys::ImVec2 { x: 100.0, y: 100.0 };
-
-        assert_eq!(
-            target_monitor_dpi_scale(1.0, [20.0, 20.0], [20.0, 20.0], &monitors),
-            1.0
-        );
-        assert_eq!(
-            target_monitor_dpi_scale(1.0, [120.0, 20.0], [20.0, 20.0], &monitors),
-            1.5
-        );
-        assert_eq!(
-            target_monitor_dpi_scale(1.25, [0.0, 0.0], [10.0, 10.0], &[]),
-            1.25
         );
     }
 }

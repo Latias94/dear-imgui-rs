@@ -51,6 +51,7 @@ struct LifecycleSmokeState {
     saw_secondary_viewport: bool,
     saw_secondary_while_held: bool,
     saw_merged_viewport: bool,
+    game_window_pos: [f32; 2],
     secondary_submission_before_main_acquire: Option<SecondarySubmissionEvidence>,
     main_present_bracketed_by_test_engine: bool,
 }
@@ -370,6 +371,7 @@ impl ViewportScenario for ViewportSmokeScenario {
             winit::dpi::PhysicalSize::new(main_size.width as f32, main_size.height as f32),
         );
         let external_pos = [main_pos.x + main_size.width + 100.0, main_pos.y + 100.0];
+        let detached_drag_pos = [external_pos[0] + 160.0, external_pos[1] + 120.0];
         let redock_pos = [
             main_pos.x + main_size.width * 0.5,
             main_pos.y + main_size.height * 0.5,
@@ -432,6 +434,25 @@ impl ViewportScenario for ViewportSmokeScenario {
                         test.mouse_up(MouseButton::Left)?;
                         test.yield_frames(ScriptCount::new(30)?)?;
                         test.assert_item_read_int_eq("Main/Viewport Count", 1)?;
+
+                        // Exercise the original regression path: WindowMove resolves the live
+                        // tab/title-bar point and drives a real mouse drag. Repeating it after
+                        // detachment proves the standalone viewport remains draggable there.
+                        test.window_move("Game View", external_pos[0], external_pos[1])?;
+                        test.yield_frames(ScriptCount::new(30)?)?;
+                        test.assert_item_read_int_eq("Main/Viewport Count", 2)?;
+                        test.window_move("Game View", detached_drag_pos[0], detached_drag_pos[1])?;
+                        test.yield_frames(ScriptCount::new(30)?)?;
+                        test.assert_item_read_float_eq(
+                            "Main/Game View Pos X",
+                            detached_drag_pos[0],
+                            4.0,
+                        )?;
+                        test.assert_item_read_float_eq(
+                            "Main/Game View Pos Y",
+                            detached_drag_pos[1],
+                            4.0,
+                        )?;
                     } else {
                         test.window_move("Game View", external_pos[0], external_pos[1])?;
                         test.yield_frames(ScriptCount::new(30)?)?;
@@ -454,6 +475,7 @@ impl ViewportScenario for ViewportSmokeScenario {
                     saw_secondary_viewport: false,
                     saw_secondary_while_held: false,
                     saw_merged_viewport: false,
+                    game_window_pos: [0.0, 0.0],
                     secondary_submission_before_main_acquire: None,
                     main_present_bracketed_by_test_engine: false,
                 })
@@ -488,9 +510,22 @@ impl ViewportScenario for ViewportSmokeScenario {
         let Some(ViewportSmokeMode::Lifecycle(lifecycle)) = self.mode.as_mut() else {
             return;
         };
+        ui.input_float_config("Game View Pos X")
+            .flags(dear_imgui_rs::InputScalarFlags::READ_ONLY)
+            .build(&mut lifecycle.game_window_pos[0]);
+        ui.input_float_config("Game View Pos Y")
+            .flags(dear_imgui_rs::InputScalarFlags::READ_ONLY)
+            .build(&mut lifecycle.game_window_pos[1]);
         if lifecycle.require_secondary_while_held && ui.button("Begin Held Drag Probe") {
             lifecycle.held_probe_armed = true;
         }
+    }
+
+    fn extend_game_window(&mut self, ui: &Ui) {
+        let Some(ViewportSmokeMode::Lifecycle(lifecycle)) = self.mode.as_mut() else {
+            return;
+        };
+        lifecycle.game_window_pos = ui.window_pos();
     }
 
     fn after_ui(&mut self, ui: &Ui, viewport_count: i32) {

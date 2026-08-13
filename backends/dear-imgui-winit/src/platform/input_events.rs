@@ -248,10 +248,20 @@ impl WinitPlatform {
                     .set_display_size(sanitize::finite_non_negative_size(logical_size));
                 false
             }
-            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+            WindowEvent::ScaleFactorChanged {
+                scale_factor,
+                inner_size_writer,
+            } => {
                 let new_hidpi = self.hidpi_factor_for_scale(*scale_factor);
                 #[cfg(feature = "multi-viewport")]
                 if self.control.has_live_runtime() {
+                    if let Some(size) = crate::multi_viewport::scale_factor_inner_size_override(
+                        imgui_ctx.io().config_dpi_scale_viewports(),
+                        window.inner_size(),
+                    ) {
+                        let mut inner_size_writer = inner_size_writer.clone();
+                        let _ = inner_size_writer.request_inner_size(size);
+                    }
                     self.control
                         .note_runtime_window_geometry(window.id(), true, true);
                     // Native desktop coordinates do not change when a viewport crosses a DPI

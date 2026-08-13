@@ -33,19 +33,27 @@ pub(crate) fn route_secondary_window_event(
             // machine. The event only invalidates geometry so the registered callbacks query
             // the new values at the next update boundary.
             match event {
-                WindowEvent::Moved(_) => unsafe {
+                WindowEvent::Moved(_) => {
+                    data.note_geometry_event();
                     data.request_geometry_refresh(true, false);
-                    (*viewport).PlatformRequestMove = true;
-                },
-                WindowEvent::Resized(_) => unsafe {
+                }
+                WindowEvent::Resized(_) => {
+                    data.note_geometry_event();
                     data.request_geometry_refresh(false, true);
-                    (*viewport).PlatformRequestResize = true;
-                },
-                WindowEvent::ScaleFactorChanged { .. } => unsafe {
+                }
+                WindowEvent::ScaleFactorChanged {
+                    inner_size_writer, ..
+                } => {
+                    if let Some(size) = super::scale_factor_inner_size_override(
+                        context.io().config_dpi_scale_viewports(),
+                        window.inner_size(),
+                    ) {
+                        let mut inner_size_writer = inner_size_writer.clone();
+                        let _ = inner_size_writer.request_inner_size(size);
+                    }
+                    data.note_geometry_event();
                     data.request_geometry_refresh(true, true);
-                    (*viewport).PlatformRequestMove = true;
-                    (*viewport).PlatformRequestResize = true;
-                },
+                }
                 WindowEvent::CloseRequested => unsafe {
                     (*viewport).PlatformRequestClose = true;
                 },
