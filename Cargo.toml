@@ -99,7 +99,7 @@ glam = "0.32"
 # Graphics and windowing
 wgpu = "30.0"
 winit = "0.30.13"
-glow = "0.17"
+glow = "0.18"
 glutin = "0.32"
 glutin-winit = "0.5"
 raw-window-handle = "0.6"
@@ -124,7 +124,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 # Utility
 mint = "0.5.9"
 env_logger = "0.11"
-pollster = "0.4"
+pollster = "1.0"
 web-time = "1.1"
 
 # WASM dependencies

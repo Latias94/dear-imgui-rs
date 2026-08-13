@@ -2512,7 +2512,7 @@ dependencies = [
  "dear-imnodes",
  "dear-implot",
  "dear-implot3d",
- "pollster",
+ "pollster 1.0.1",
  "thiserror 2.0.20",
  "tracing",
  "wgpu 30.0.0",
@@ -2527,7 +2527,7 @@ dependencies = [
  "dear-imgui-rs",
  "image",
  "indexmap",
- "pollster",
+ "pollster 1.0.1",
  "regex",
  "rfd",
  "thiserror 2.0.20",
@@ -2631,11 +2631,11 @@ dependencies = [
  "dear-node-editor",
  "env_logger",
  "glam",
- "glow 0.17.0",
+ "glow 0.18.0",
  "glutin",
  "glutin-winit",
  "image",
- "pollster",
+ "pollster 1.0.1",
  "raw-window-handle",
  "sdl3",
  "sdl3-main",
@@ -2653,10 +2653,10 @@ dependencies = [
  "dear-imgui-rs",
  "dear-imgui-winit",
  "env_logger",
- "glow 0.17.0",
+ "glow 0.18.0",
  "glutin",
  "glutin-winit",
- "pollster",
+ "pollster 1.0.1",
  "raw-window-handle",
  "static_assertions",
  "thiserror 2.0.20",
@@ -2762,7 +2762,7 @@ dependencies = [
  "dear-implot",
  "dear-implot3d",
  "log",
- "pollster",
+ "pollster 1.0.1",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -2780,7 +2780,7 @@ dependencies = [
  "dear-imgui-sdl3",
  "dear-imgui-winit",
  "objc2 0.6.4",
- "pollster",
+ "pollster 1.0.1",
  "raw-window-handle",
  "sdl3-sys",
  "static_assertions",
@@ -3576,6 +3576,18 @@ name = "glow"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29038e1c483364cc6bb3cf78feee1816002e127c331a1eec55a4d202b9e1adb5"
+dependencies = [
+ "js-sys",
+ "slotmap",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "glow"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "263218b0ba2b0715c3370fb04674f5f8aa331594b521c94ff0a8e4a8472d1386"
 dependencies = [
  "js-sys",
  "slotmap",
@@ -5353,6 +5365,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
 
 [[package]]
+name = "pollster"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc6355899e1c9462875b6757c79f3caa011a1fdae12bbb1a2e72dd1f234f8336"
+
+[[package]]
 name = "portable-atomic"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5820,7 +5838,7 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
  "percent-encoding",
- "pollster",
+ "pollster 0.4.0",
  "raw-window-handle",
  "wasm-bindgen",
  "wasm-bindgen-futures",
