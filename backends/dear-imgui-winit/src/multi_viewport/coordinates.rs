@@ -29,6 +29,26 @@ fn sanitized_scale(scale: f64) -> f64 {
     sanitize::positive_finite_or(scale, 1.0)
 }
 
+pub(super) fn validate_viewport_position(position: [f32; 2]) -> Option<[f32; 2]> {
+    let position = sanitize::finite_vec2_f32(position)?;
+    let minimum = f64::from(i32::MIN);
+    let maximum = f64::from(i32::MAX);
+    position
+        .into_iter()
+        .map(f64::from)
+        .all(|value| value >= minimum && value <= maximum)
+        .then_some(position)
+}
+
+pub(super) fn validate_viewport_size(size: [f32; 2]) -> Option<[f32; 2]> {
+    let size = sanitize::finite_vec2_f32(size)?;
+    let maximum = f64::from(i32::MAX);
+    size.into_iter()
+        .map(f64::from)
+        .all(|value| value > 0.0 && value <= maximum)
+        .then_some(size)
+}
+
 fn desktop_position_from_physical_values(
     space: DesktopCoordinateSpace,
     position: [f64; 2],
@@ -102,10 +122,6 @@ pub(super) fn desktop_position_from_physical(
     .and_then(sanitize::finite_vec2_f64_to_f32)
 }
 
-fn desktop_input_position_from_physical(position: [f64; 2], scale: f64) -> Option<[f64; 2]> {
-    desktop_position_from_physical_values(native_desktop_coordinate_space(), position, scale)
-}
-
 /// Converts detached native monitor facts into the coordinate model used by Winit viewports.
 ///
 /// Main and work rectangles are converted independently. The conversion is fallible so native
@@ -162,6 +178,19 @@ pub(super) fn monitor_from_snapshot(
     })
 }
 
+pub(super) unsafe fn viewport_target_dpi_scale(
+    viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+) -> f32 {
+    let Some(viewport_ref) = (unsafe { viewport.as_ref() }) else {
+        return 1.0;
+    };
+    let fallback = sanitize::positive_finite_f32_or(viewport_ref.DpiScale, 1.0);
+    let monitor = unsafe { dear_imgui_rs::sys::igGetViewportPlatformMonitor(viewport) };
+    unsafe { monitor.as_ref() }
+        .map(|monitor| sanitize::positive_finite_f32_or(monitor.DpiScale, fallback))
+        .unwrap_or(fallback)
+}
+
 pub(crate) fn desktop_size_for_window(window: &Window) -> [f32; 2] {
     desktop_size_from_physical(window.inner_size(), window.scale_factor())
 }
@@ -194,6 +223,25 @@ pub(crate) fn framebuffer_scale_for_window(window: &Window) -> [f32; 2] {
     framebuffer_scale_for_space(native_desktop_coordinate_space(), window.scale_factor())
 }
 
+pub(crate) fn scale_factor_inner_size_override(
+    scale_viewports: bool,
+    current_size: PhysicalSize<u32>,
+) -> Option<PhysicalSize<u32>> {
+    scale_factor_inner_size_override_for_space(
+        native_desktop_coordinate_space(),
+        scale_viewports,
+        current_size,
+    )
+}
+
+fn scale_factor_inner_size_override_for_space(
+    space: DesktopCoordinateSpace,
+    scale_viewports: bool,
+    current_size: PhysicalSize<u32>,
+) -> Option<PhysicalSize<u32>> {
+    (matches!(space, DesktopCoordinateSpace::Physical) && !scale_viewports).then_some(current_size)
+}
+
 fn framebuffer_scale_for_space(space: DesktopCoordinateSpace, scale: f64) -> [f32; 2] {
     match space {
         // The ImGui coordinate unit already is a framebuffer pixel on Windows and X11.
@@ -203,6 +251,10 @@ fn framebuffer_scale_for_space(space: DesktopCoordinateSpace, scale: f64) -> [f3
             [scale, scale]
         }
     }
+}
+
+pub(super) fn framebuffer_scale_for_dpi_scale(scale: f64) -> [f32; 2] {
+    framebuffer_scale_for_space(native_desktop_coordinate_space(), scale)
 }
 
 pub(crate) fn window_position_from_desktop(position: [f32; 2]) -> Position {
@@ -228,12 +280,27 @@ pub(crate) fn window_size_from_desktop(size: [f32; 2]) -> Size {
     }
 }
 
+pub(super) fn request_client_geometry(
+    window: &Window,
+    position: [f32; 2],
+    size: [f32; 2],
+    dpi_scale: f32,
+) {
+    let _ = window.request_inner_size(window_size_from_desktop(size));
+    let outer_position = outer_position_from_client(window, position, dpi_scale);
+    window.set_outer_position(window_position_from_desktop(outer_position));
+}
+
 pub(crate) fn client_physical_to_screen_pos(
     window: &Window,
     client_position: [f64; 2],
 ) -> Option<[f32; 2]> {
     let scale = window.scale_factor();
-    let client = desktop_input_position_from_physical(client_position, scale)?;
+    let client = desktop_position_from_physical_values(
+        native_desktop_coordinate_space(),
+        client_position,
+        scale,
+    )?;
     let origin = window.inner_position().ok()?;
     let origin = desktop_position_from_physical_values(
         native_desktop_coordinate_space(),
@@ -243,10 +310,41 @@ pub(crate) fn client_physical_to_screen_pos(
     sanitize::finite_vec2_f64_to_f32([origin[0] + client[0], origin[1] + client[1]])
 }
 
-pub(super) fn decoration_offset(window: &Window) -> Option<(f64, f64)> {
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ObservedClientGeometry {
+    pub(super) position: [f32; 2],
+    pub(super) size: [f32; 2],
+    pub(super) decoration_offset: Option<[f32; 2]>,
+}
+
+pub(super) fn observe_client_geometry(window: &Window) -> Option<ObservedClientGeometry> {
+    let scale = window.scale_factor();
+    let inner = window.inner_position().ok()?;
+    let position = desktop_position_from_physical(inner, scale)?;
+    let size = desktop_size_from_physical(window.inner_size(), scale);
+    let decoration_offset = window
+        .outer_position()
+        .ok()
+        .and_then(|outer| decoration_offset_from_positions(inner, outer, scale));
+    Some(ObservedClientGeometry {
+        position,
+        size,
+        decoration_offset,
+    })
+}
+
+pub(super) fn decoration_offset(window: &Window) -> Option<[f32; 2]> {
     let scale = window.scale_factor();
     let inner = window.inner_position().ok()?;
     let outer = window.outer_position().ok()?;
+    decoration_offset_from_positions(inner, outer, scale)
+}
+
+fn decoration_offset_from_positions(
+    inner: PhysicalPosition<i32>,
+    outer: PhysicalPosition<i32>,
+    scale: f64,
+) -> Option<[f32; 2]> {
     let inner = desktop_position_from_physical_values(
         native_desktop_coordinate_space(),
         [f64::from(inner.x), f64::from(inner.y)],
@@ -257,9 +355,7 @@ pub(super) fn decoration_offset(window: &Window) -> Option<(f64, f64)> {
         [f64::from(outer.x), f64::from(outer.y)],
         scale,
     )?;
-    let offset = [inner[0] - outer[0], inner[1] - outer[1]];
-    sanitize::finite_vec2_f64_to_f32(offset)?;
-    Some((offset[0], offset[1]))
+    sanitize::finite_vec2_f64_to_f32([inner[0] - outer[0], inner[1] - outer[1]])
 }
 
 pub(super) fn outer_position_from_client(
@@ -268,20 +364,37 @@ pub(super) fn outer_position_from_client(
     dpi_scale: f32,
 ) -> [f32; 2] {
     #[cfg(target_os = "windows")]
-    if let Some(position) = windows::outer_position_from_client(window, client_position, dpi_scale)
+    if !window.is_decorated() {
+        // Undecorated Winit windows retain resize-capable Win32 style bits while WM_NCCALCSIZE
+        // makes the client area cover the window. Inferring decorations from those styles would
+        // invent a title-bar offset and desynchronize ImGui hit testing from the native client
+        // origin.
+        return client_position;
+    }
+
+    // Decorated Windows windows need the destination monitor DPI, which is not necessarily the
+    // current live decoration offset. Other platforms use Winit's observed client/outer geometry.
+    #[cfg(target_os = "windows")]
+    if let Some(position) =
+        windows::outer_position_from_client_style(window, client_position, dpi_scale)
     {
         return position;
     }
 
     let _ = dpi_scale;
     decoration_offset(window)
-        .and_then(|(dx, dy)| {
-            sanitize::finite_vec2_f32([
-                client_position[0] - dx as f32,
-                client_position[1] - dy as f32,
-            ])
-        })
+        .and_then(|offset| outer_position_from_decoration_offset(client_position, offset))
         .unwrap_or(client_position)
+}
+
+fn outer_position_from_decoration_offset(
+    client_position: [f32; 2],
+    decoration_offset: [f32; 2],
+) -> Option<[f32; 2]> {
+    sanitize::finite_vec2_f32([
+        client_position[0] - decoration_offset[0],
+        client_position[1] - decoration_offset[1],
+    ])
 }
 
 pub(crate) fn ime_cursor_area_for_viewport(
@@ -330,7 +443,7 @@ mod windows {
 
     use crate::sanitize;
 
-    pub(super) fn outer_position_from_client(
+    pub(super) fn outer_position_from_client_style(
         window: &Window,
         client_position: [f32; 2],
         dpi_scale: f32,
@@ -518,6 +631,51 @@ mod tests {
 
         assert_eq!(position, LogicalPosition::new(200.0, 240.0));
         assert_eq!(size, LogicalSize::new(20.0, 20.0));
+    }
+
+    #[test]
+    fn undecorated_client_origin_needs_no_outer_position_offset() {
+        assert_eq!(
+            outer_position_from_decoration_offset([2447.0, 802.0], [0.0, 0.0]),
+            Some([2447.0, 802.0])
+        );
+    }
+
+    #[test]
+    fn observed_decoration_offset_positions_the_client_origin() {
+        assert_eq!(
+            outer_position_from_decoration_offset([2447.0, 802.0], [11.0, 45.0]),
+            Some([2436.0, 757.0])
+        );
+    }
+
+    #[test]
+    fn scale_factor_change_preserves_the_backends_desktop_size_unit() {
+        let current = PhysicalSize::new(800, 600);
+        assert_eq!(
+            scale_factor_inner_size_override_for_space(
+                DesktopCoordinateSpace::Physical,
+                false,
+                current,
+            ),
+            Some(current)
+        );
+        assert_eq!(
+            scale_factor_inner_size_override_for_space(
+                DesktopCoordinateSpace::Physical,
+                true,
+                current,
+            ),
+            None
+        );
+        assert_eq!(
+            scale_factor_inner_size_override_for_space(
+                DesktopCoordinateSpace::Logical,
+                false,
+                current,
+            ),
+            None
+        );
     }
 
     fn client_to_screen_for_space(

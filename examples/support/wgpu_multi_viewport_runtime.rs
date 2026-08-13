@@ -42,9 +42,11 @@ pub(crate) trait ViewportScenario {
         true
     }
 
-    fn before_ui(&mut self, _viewport_count: i32) {}
+    fn before_ui(&mut self, _viewport_count: i32, _secondary_window: Option<&Window>) {}
 
     fn extend_main_window(&mut self, _ui: &Ui, _viewport_count: &mut i32) {}
+
+    fn extend_game_window(&mut self, _ui: &Ui) {}
 
     fn after_ui(&mut self, _ui: &Ui, _viewport_count: i32) {}
 
@@ -69,6 +71,10 @@ pub(crate) trait ViewportScenario {
 
     fn complete(&self) -> bool {
         false
+    }
+
+    fn redraw_continuously(&self) -> bool {
+        true
     }
 
     fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -596,7 +602,19 @@ impl<S: ViewportScenario> AppWindow<S> {
         self.platform.prepare_frame(&mut self.imgui, &self.window)?;
         let mut viewport_count =
             i32::try_from(self.imgui.platform_io().viewports_iter().count()).unwrap_or(i32::MAX);
-        self.scenario.before_ui(viewport_count);
+        let secondary_window = self
+            .imgui
+            .platform_io()
+            .viewports_iter()
+            .find(|viewport| viewport.is_platform_window() && viewport.platform_window_created())
+            .and_then(|viewport| {
+                let handle = viewport.platform_handle().cast::<Window>();
+                // SAFETY: Dear ImGui's Winit platform backend stores a live `winit::Window`
+                // pointer in PlatformHandle for the lifetime of the platform viewport. The
+                // reference remains scoped to this frame and is not retained by the scenario.
+                unsafe { handle.as_ref() }
+            });
+        self.scenario.before_ui(viewport_count, secondary_window);
         let frame = self.imgui.begin_frame();
         let ui = frame.ui();
         if self.scenario.show_example_ui() {
@@ -621,6 +639,7 @@ impl<S: ViewportScenario> AppWindow<S> {
             ui.window("Game View")
                 .size([520.0, 540.0], Condition::FirstUseEver)
                 .build(|| {
+                    scenario.extend_game_window(ui);
                     let avail = ui.content_region_avail();
                     let side = avail[0].min(avail[1]).max(64.0);
                     ui.text("Offscreen WGPU texture rendered each frame:");
@@ -712,9 +731,17 @@ impl<S: ViewportScenario> ApplicationHandler for App<S> {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if let Some(app) = &self.window {
-            app.window.request_redraw();
+            let redraw_continuously = app.scenario.redraw_continuously();
+            event_loop.set_control_flow(if redraw_continuously {
+                ControlFlow::Poll
+            } else {
+                ControlFlow::Wait
+            });
+            if redraw_continuously {
+                app.window.request_redraw();
+            }
         }
     }
 
@@ -748,7 +775,8 @@ impl<S: ViewportScenario> ApplicationHandler for App<S> {
             }
             WindowEvent::RedrawRequested if is_main_window => match app.redraw(event_loop) {
                 Ok(()) if app.scenario.complete() => event_loop.exit(),
-                Ok(()) => app.window.request_redraw(),
+                Ok(()) if app.scenario.redraw_continuously() => app.window.request_redraw(),
+                Ok(()) => {}
                 Err(error) => {
                     self.error = Some(error.to_string());
                     event_loop.exit();
@@ -763,7 +791,11 @@ pub(crate) fn run<S: ViewportScenario>(
     scenario: S,
 ) -> Result<Option<S::Output>, Box<dyn std::error::Error>> {
     let event_loop = EventLoop::new()?;
-    event_loop.set_control_flow(ControlFlow::Poll);
+    event_loop.set_control_flow(if scenario.redraw_continuously() {
+        ControlFlow::Poll
+    } else {
+        ControlFlow::Wait
+    });
     let mut app = App::new(scenario);
     let event_loop_result = event_loop.run_app(&mut app);
     let app_error = app.error.take();

@@ -51,6 +51,12 @@ struct LifecycleSmokeState {
     saw_secondary_viewport: bool,
     saw_secondary_while_held: bool,
     saw_merged_viewport: bool,
+    game_window_pos: [f32; 2],
+    wait_move_probe_requested: bool,
+    wait_move_probe_issued: bool,
+    wait_move_probe_resumed: bool,
+    wait_move_probe_target: Option<[i32; 2]>,
+    wait_move_probe_error: Option<String>,
     secondary_submission_before_main_acquire: Option<SecondarySubmissionEvidence>,
     main_present_bracketed_by_test_engine: bool,
 }
@@ -370,6 +376,7 @@ impl ViewportScenario for ViewportSmokeScenario {
             winit::dpi::PhysicalSize::new(main_size.width as f32, main_size.height as f32),
         );
         let external_pos = [main_pos.x + main_size.width + 100.0, main_pos.y + 100.0];
+        let detached_drag_pos = [external_pos[0] + 160.0, external_pos[1] + 120.0];
         let redock_pos = [
             main_pos.x + main_size.width * 0.5,
             main_pos.y + main_size.height * 0.5,
@@ -432,6 +439,28 @@ impl ViewportScenario for ViewportSmokeScenario {
                         test.mouse_up(MouseButton::Left)?;
                         test.yield_frames(ScriptCount::new(30)?)?;
                         test.assert_item_read_int_eq("Main/Viewport Count", 1)?;
+
+                        // Exercise the original regression path: WindowMove resolves the live
+                        // tab/title-bar point and drives a real mouse drag. Repeating it after
+                        // detachment proves the standalone viewport remains draggable there.
+                        test.window_move("Game View", external_pos[0], external_pos[1])?;
+                        test.yield_frames(ScriptCount::new(30)?)?;
+                        test.assert_item_read_int_eq("Main/Viewport Count", 2)?;
+                        test.window_move("Game View", detached_drag_pos[0], detached_drag_pos[1])?;
+                        test.yield_frames(ScriptCount::new(30)?)?;
+                        test.assert_item_read_float_eq(
+                            "Main/Game View Pos X",
+                            detached_drag_pos[0],
+                            4.0,
+                        )?;
+                        test.assert_item_read_float_eq(
+                            "Main/Game View Pos Y",
+                            detached_drag_pos[1],
+                            4.0,
+                        )?;
+                        test.item_click("Main/Begin Wait Move Probe")?;
+                        test.yield_frames(ScriptCount::new(30)?)?;
+                        test.assert_item_read_int_eq("Main/Wait Move Probe", 1)?;
                     } else {
                         test.window_move("Game View", external_pos[0], external_pos[1])?;
                         test.yield_frames(ScriptCount::new(30)?)?;
@@ -454,6 +483,12 @@ impl ViewportScenario for ViewportSmokeScenario {
                     saw_secondary_viewport: false,
                     saw_secondary_while_held: false,
                     saw_merged_viewport: false,
+                    game_window_pos: [0.0, 0.0],
+                    wait_move_probe_requested: false,
+                    wait_move_probe_issued: false,
+                    wait_move_probe_resumed: false,
+                    wait_move_probe_target: None,
+                    wait_move_probe_error: None,
                     secondary_submission_before_main_acquire: None,
                     main_present_bracketed_by_test_engine: false,
                 })
@@ -470,14 +505,73 @@ impl ViewportScenario for ViewportSmokeScenario {
         )
     }
 
-    fn before_ui(&mut self, viewport_count: i32) {
+    fn before_ui(&mut self, viewport_count: i32, secondary_window: Option<&Window>) {
         let Some(ViewportSmokeMode::Lifecycle(lifecycle)) = self.mode.as_mut() else {
             return;
         };
+        if lifecycle.wait_move_probe_issued && !lifecycle.wait_move_probe_resumed {
+            let Some(window) = secondary_window else {
+                lifecycle.wait_move_probe_error =
+                    Some("Wait move probe lost its secondary Winit window".into());
+                return;
+            };
+            let Some(target) = lifecycle.wait_move_probe_target else {
+                lifecycle.wait_move_probe_error =
+                    Some("Wait move probe did not record its native target position".into());
+                return;
+            };
+            match window.outer_position() {
+                Ok(position)
+                    if position.x.abs_diff(target[0]) <= 4
+                        && position.y.abs_diff(target[1]) <= 4 =>
+                {
+                    // Continuous redraw remains disabled until the native position actually
+                    // changes. Reaching the target therefore proves a secondary window event
+                    // woke the main window while the event loop was waiting.
+                    lifecycle.wait_move_probe_resumed = true;
+                }
+                Ok(position) => {
+                    lifecycle.wait_move_probe_error = Some(format!(
+                        "Wait move probe observed native position ({}, {}) instead of ({}, {})",
+                        position.x, position.y, target[0], target[1]
+                    ));
+                    return;
+                }
+                Err(error) => {
+                    lifecycle.wait_move_probe_error = Some(format!(
+                        "Wait move probe could not verify native position: {error}"
+                    ));
+                    return;
+                }
+            }
+        }
         if viewport_count > 1 {
             lifecycle.saw_secondary_viewport = true;
         } else if lifecycle.saw_secondary_viewport {
             lifecycle.saw_merged_viewport = true;
+        }
+        if lifecycle.wait_move_probe_requested && !lifecycle.wait_move_probe_issued {
+            let Some(window) = secondary_window else {
+                lifecycle.wait_move_probe_error =
+                    Some("Wait move probe could not find a created secondary Winit window".into());
+                return;
+            };
+            match window.outer_position() {
+                Ok(position) => {
+                    let target = winit::dpi::PhysicalPosition::new(
+                        position.x.saturating_add(32),
+                        position.y.saturating_add(24),
+                    );
+                    window.set_outer_position(target);
+                    lifecycle.wait_move_probe_target = Some([target.x, target.y]);
+                    lifecycle.wait_move_probe_issued = true;
+                }
+                Err(error) => {
+                    lifecycle.wait_move_probe_error = Some(format!(
+                        "Wait move probe could not read native position: {error}"
+                    ));
+                }
+            }
         }
     }
 
@@ -488,9 +582,29 @@ impl ViewportScenario for ViewportSmokeScenario {
         let Some(ViewportSmokeMode::Lifecycle(lifecycle)) = self.mode.as_mut() else {
             return;
         };
+        ui.input_float_config("Game View Pos X")
+            .flags(dear_imgui_rs::InputScalarFlags::READ_ONLY)
+            .build(&mut lifecycle.game_window_pos[0]);
+        ui.input_float_config("Game View Pos Y")
+            .flags(dear_imgui_rs::InputScalarFlags::READ_ONLY)
+            .build(&mut lifecycle.game_window_pos[1]);
         if lifecycle.require_secondary_while_held && ui.button("Begin Held Drag Probe") {
             lifecycle.held_probe_armed = true;
         }
+        if lifecycle.require_secondary_while_held && ui.button("Begin Wait Move Probe") {
+            lifecycle.wait_move_probe_requested = true;
+        }
+        let mut wait_move_probe = i32::from(lifecycle.wait_move_probe_resumed);
+        ui.input_int_config("Wait Move Probe")
+            .flags(dear_imgui_rs::InputScalarFlags::READ_ONLY)
+            .build(&mut wait_move_probe);
+    }
+
+    fn extend_game_window(&mut self, ui: &Ui) {
+        let Some(ViewportSmokeMode::Lifecycle(lifecycle)) = self.mode.as_mut() else {
+            return;
+        };
+        lifecycle.game_window_pos = ui.window_pos();
     }
 
     fn after_ui(&mut self, ui: &Ui, viewport_count: i32) {
@@ -546,6 +660,11 @@ impl ViewportScenario for ViewportSmokeScenario {
         presented: bool,
         secondary_submission_evidence: Option<SecondarySubmissionEvidence>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(ViewportSmokeMode::Lifecycle(lifecycle)) = self.mode.as_mut()
+            && let Some(error) = lifecycle.wait_move_probe_error.take()
+        {
+            return Err(error.into());
+        }
         let bracketed_present = self
             .last_drive_presented
             .take()
@@ -599,16 +718,19 @@ impl ViewportScenario for ViewportSmokeScenario {
                 }
                 if !lifecycle.saw_secondary_viewport
                     || lifecycle.require_secondary_while_held
-                        && (!lifecycle.held_probe_complete || !lifecycle.saw_secondary_while_held)
+                        && (!lifecycle.held_probe_complete
+                            || !lifecycle.saw_secondary_while_held
+                            || !lifecycle.wait_move_probe_resumed)
                     || !lifecycle.saw_merged_viewport
                     || lifecycle.secondary_submission_before_main_acquire.is_none()
                     || !lifecycle.main_present_bracketed_by_test_engine
                 {
                     return Err(format!(
-                        "viewport smoke did not observe the complete lifecycle and presentation order: secondary={}, secondary_while_held={}, held_probe_complete={}, merged={}, secondary_submission_before_main_acquire={:?}, main_present_bracketed={}",
+                        "viewport smoke did not observe the complete lifecycle and presentation order: secondary={}, secondary_while_held={}, held_probe_complete={}, wait_move_probe_resumed={}, merged={}, secondary_submission_before_main_acquire={:?}, main_present_bracketed={}",
                         lifecycle.saw_secondary_viewport,
                         lifecycle.saw_secondary_while_held,
                         lifecycle.held_probe_complete,
+                        lifecycle.wait_move_probe_resumed,
                         lifecycle.saw_merged_viewport,
                         lifecycle.secondary_submission_before_main_acquire,
                         lifecycle.main_present_bracketed_by_test_engine,
@@ -625,6 +747,14 @@ impl ViewportScenario for ViewportSmokeScenario {
 
     fn complete(&self) -> bool {
         self.complete
+    }
+
+    fn redraw_continuously(&self) -> bool {
+        !matches!(
+            self.mode.as_ref(),
+            Some(ViewportSmokeMode::Lifecycle(lifecycle))
+                if lifecycle.wait_move_probe_issued && !lifecycle.wait_move_probe_resumed
+        )
     }
 
     fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {

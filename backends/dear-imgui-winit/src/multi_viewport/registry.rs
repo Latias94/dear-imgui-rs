@@ -6,8 +6,11 @@ use dear_imgui_rs::{ContextId, ContextLifecycle};
 use winit::window::{Window, WindowId};
 
 use super::WinitPlatformError;
+use super::coordinates::{
+    observe_client_geometry, request_client_geometry, viewport_target_dpi_scale,
+};
 use super::runtime::RuntimeControl;
-use super::viewport_data::ViewportData;
+use super::viewport_data::{ClientGeometryReconciliationAction, ViewportData};
 
 struct RegisteredRuntime {
     context_raw: *mut dear_imgui_rs::sys::ImGuiContext,
@@ -357,7 +360,7 @@ pub(super) fn request_geometry_refresh_for_window(
     window_id: WindowId,
     position: bool,
     size: bool,
-) {
+) -> bool {
     if let Some(entry) = control
         .viewports
         .borrow()
@@ -365,12 +368,15 @@ pub(super) fn request_geometry_refresh_for_window(
         .find(|entry| entry.data.window().id() == window_id)
     {
         entry.data.request_geometry_refresh(position, size);
+        true
+    } else {
+        false
     }
 }
 
 pub(super) fn apply_pending_geometry_refresh(control: &RuntimeControl) {
     for entry in control.viewports.borrow().iter() {
-        let refresh = entry.data.take_geometry_refresh();
+        let mut refresh = entry.data.take_geometry_refresh();
         if refresh.is_empty() {
             continue;
         }
@@ -379,6 +385,47 @@ pub(super) fn apply_pending_geometry_refresh(control: &RuntimeControl) {
         };
         if unsafe { entry.native_ownership_loss(viewport).is_some() } {
             continue;
+        }
+        if entry.data.has_client_geometry_reconciliation() {
+            let window = entry.data.window();
+            let Some(observed) = observe_client_geometry(window) else {
+                entry.data.cancel_client_geometry_reconciliation();
+                refresh.position = true;
+                refresh.size = true;
+                unsafe {
+                    (*viewport).PlatformRequestMove |= refresh.position;
+                    (*viewport).PlatformRequestResize |= refresh.size;
+                }
+                continue;
+            };
+            let Some(decision) = entry.data.observe_client_geometry_reconciliation(
+                window.is_visible() == Some(true),
+                observed.position,
+                observed.size,
+                observed.decoration_offset,
+            ) else {
+                continue;
+            };
+            match decision.action {
+                ClientGeometryReconciliationAction::Wait => {
+                    // Waiting for a native geometry or visibility event must not consume the
+                    // transaction's only refresh. The event that makes progress requests the
+                    // main-window redraw, so retaining this state does not create a busy loop.
+                    entry
+                        .data
+                        .request_geometry_refresh(refresh.position, refresh.size);
+                    continue;
+                }
+                ClientGeometryReconciliationAction::ApplyTarget => {
+                    let dpi_scale = unsafe { viewport_target_dpi_scale(viewport) };
+                    request_client_geometry(window, decision.position, decision.size, dpi_scale);
+                    continue;
+                }
+                ClientGeometryReconciliationAction::PublishNative => {
+                    refresh.position = true;
+                    refresh.size = true;
+                }
+            }
         }
         unsafe {
             (*viewport).PlatformRequestMove |= refresh.position;

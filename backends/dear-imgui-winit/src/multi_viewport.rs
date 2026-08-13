@@ -42,8 +42,8 @@ use crate::native_support::{MonitorCollectionError, MonitorSnapshot};
 
 pub(crate) use self::coordinates::{
     client_physical_to_screen_pos, desktop_size_for_window, framebuffer_scale_for_window,
-    ime_cursor_area_for_viewport, single_window_display_metrics, window_position_from_desktop,
-    window_size_from_desktop,
+    ime_cursor_area_for_viewport, scale_factor_inner_size_override, single_window_display_metrics,
+    window_position_from_desktop, window_size_from_desktop,
 };
 pub(crate) use self::runtime::RuntimeControl;
 pub use self::runtime::{EventLoopScope, WinitViewportAttempt, WinitViewportRendererAdapter};
