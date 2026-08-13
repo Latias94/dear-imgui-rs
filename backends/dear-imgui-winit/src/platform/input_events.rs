@@ -252,6 +252,8 @@ impl WinitPlatform {
                 scale_factor,
                 inner_size_writer,
             } => {
+                #[cfg(not(feature = "multi-viewport"))]
+                let _ = inner_size_writer;
                 let new_hidpi = self.hidpi_factor_for_scale(*scale_factor);
                 #[cfg(feature = "multi-viewport")]
                 if self.control.has_live_runtime() {
