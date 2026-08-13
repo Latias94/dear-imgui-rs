@@ -1,4 +1,6 @@
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use super::protocol::ImguiViewportFeedback;
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_ecs::entity::Entity;
 use bevy_math::IVec2;
 use bevy_window::Window;
@@ -10,11 +12,6 @@ use bevy_winit::WINIT_WINDOWS;
 use dear_imgui_rs::sys;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use dear_imgui_winit::native_support::{MonitorSnapshot, MonitorSnapshotSet};
-#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-use std::collections::HashSet;
-
-#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-use super::protocol::ImguiViewportFeedback;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(dead_code)] // Exactly one variant is constructed on each native target.
@@ -151,11 +148,9 @@ pub(crate) fn monitor_publication_from_snapshot_set(
             .then_with(|| left.work().size()[0].total_cmp(&right.work().size()[0]))
             .then_with(|| left.work().size()[1].total_cmp(&right.work().size()[1]))
     });
-    // Keep the first record for each detached identity after deterministic ordering. This avoids
-    // publishing duplicate monitors when the same native display reports different work-area
-    // provenance during one refresh.
-    let mut seen_identities = HashSet::with_capacity(snapshots.len());
-    snapshots.retain(|snapshot| seen_identities.insert(snapshot.identity().clone()));
+    // Detached fallback identities can collide for identical displays. Only exact duplicate
+    // facts are redundant; identity equality alone is not sufficient evidence to drop a monitor.
+    snapshots.dedup();
     let values = snapshots
         .iter()
         .map(platform_monitor_from_snapshot)

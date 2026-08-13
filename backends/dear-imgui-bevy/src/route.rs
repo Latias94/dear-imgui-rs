@@ -533,8 +533,36 @@ pub enum ImguiDiagnosticOrigin {
     RenderExtraction,
     /// Bevy image and Dear ImGui texture integration.
     Texture,
+    /// Native monitor collection and work-area provenance.
+    NativeMonitor,
     /// Native Dear ImGui viewport mapping and window policy.
     NativeViewport,
+}
+
+/// Stable reason that a complete native monitor publication could not be formed.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[non_exhaustive]
+pub enum ImguiNativeMonitorFailure {
+    MainFactsUnavailable,
+    InvalidMainGeometry,
+    InvalidScaleFactor,
+    InvalidWorkGeometry,
+    EmptyCollection,
+    ProjectionInvalid,
+    Unclassified,
+}
+
+/// Stable reason that a native monitor uses its full rectangle as work area.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[non_exhaustive]
+pub enum ImguiNativeMonitorFallback {
+    Wayland,
+    UnsupportedWindowSystem,
+    SourceUnavailable,
+    InvalidNativeData,
+    MainThreadUnavailable,
+    AmbiguousDesktopScope,
+    Unclassified,
 }
 
 /// Stable reason for a native Dear ImGui viewport policy failure.
@@ -616,6 +644,12 @@ pub enum ImguiDiagnosticKind {
     InvalidLogicalInputRegion,
     /// Equal-priority exclusive input regions overlap on one host window.
     AmbiguousExclusiveInput { priority: i32 },
+    /// Native monitor collection failed before a complete publication could be formed.
+    NativeMonitorCollectionFailed { reason: ImguiNativeMonitorFailure },
+    /// The monitor batch could not prove one unique detached primary identity.
+    NativeMonitorPrimaryUnproven,
+    /// A monitor uses its full rectangle because an exact work area was unavailable.
+    NativeMonitorWorkAreaFallback { reason: ImguiNativeMonitorFallback },
     /// A viewport ECS window exists but its exact native Winit mapping is not ready.
     NativeViewportWindowPending {
         viewport: crate::viewport::ImguiViewportInstanceId,
@@ -978,6 +1012,22 @@ mod tests {
             ImguiDiagnosticKind::AmbiguousExclusiveInput { priority: -3 },
             ImguiDiagnosticKind::AmbiguousExclusiveInput { priority: 8 },
         );
+        assert_payload_order(
+            ImguiDiagnosticKind::NativeMonitorCollectionFailed {
+                reason: ImguiNativeMonitorFailure::MainFactsUnavailable,
+            },
+            ImguiDiagnosticKind::NativeMonitorCollectionFailed {
+                reason: ImguiNativeMonitorFailure::ProjectionInvalid,
+            },
+        );
+        assert_payload_order(
+            ImguiDiagnosticKind::NativeMonitorWorkAreaFallback {
+                reason: ImguiNativeMonitorFallback::Wayland,
+            },
+            ImguiDiagnosticKind::NativeMonitorWorkAreaFallback {
+                reason: ImguiNativeMonitorFallback::AmbiguousDesktopScope,
+            },
+        );
 
         let unsorted = [
             ImguiDiagnostic::new(ImguiDiagnosticKind::AmbiguousExclusiveInput { priority: 8 }),
@@ -1047,6 +1097,39 @@ mod tests {
         assert_eq!(
             diagnostics.epoch(ImguiDiagnosticOrigin::RenderRouting),
             Some(9),
+        );
+    }
+
+    #[test]
+    fn native_monitor_and_viewport_diagnostic_batches_recover_independently() {
+        let diagnostics = ImguiDiagnostics::default();
+        assert!(diagnostics.replace(
+            ImguiDiagnosticOrigin::NativeMonitor,
+            1,
+            [ImguiDiagnostic::new(
+                ImguiDiagnosticKind::NativeMonitorPrimaryUnproven,
+            )],
+        ));
+        assert!(diagnostics.replace(
+            ImguiDiagnosticOrigin::NativeViewport,
+            4,
+            [ImguiDiagnostic::new(
+                ImguiDiagnosticKind::MissingPrimaryWindow,
+            )],
+        ));
+
+        assert!(diagnostics.replace(ImguiDiagnosticOrigin::NativeMonitor, 2, std::iter::empty(),));
+        assert!(
+            diagnostics
+                .entries_for(ImguiDiagnosticOrigin::NativeMonitor)
+                .next()
+                .is_none()
+        );
+        assert_eq!(
+            diagnostics
+                .entries_for(ImguiDiagnosticOrigin::NativeViewport)
+                .count(),
+            1
         );
     }
 }

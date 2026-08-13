@@ -95,8 +95,25 @@ target.
 | Bevy default | `dear-imgui-bevy` enables `render` and `bevy-ui`; the primary Context automatically targets the unique eligible primary-window camera. |
 | Bevy headless | `default-features = false` retains all Context schedules/lifecycle and primary-Context input/capture without RenderApp extraction; explicit multi-Context input routes require `render`. |
 | Bevy render-only | `default-features = false, features = ["render"]` installs the renderer without Bevy UI ordering. |
-| Bevy native multi-viewport | `multi-viewport` implies `render`, `bevy_winit`, and the narrow `dear-imgui-winit/native-platform-support` capability layer; it does not instantiate a second Winit platform runtime. Each Context opts in explicitly. Secondary state is keyed by stable `ImguiViewportInstanceId`; the numeric `ViewportId` is only the current routing projection and may change during docking. The host and secondary ECS entities must resolve through exact `WINIT_WINDOWS` mappings. `Show` remains hidden until the mapping and Windows policy lease are ready, and `NO_INPUTS`/`NO_FOCUS_ON_CLICK` are enforced by the native policy. Monitor facts are published transactionally from detached Winit snapshots; ECS monitor geometry is not a fallback. Wayland falls back to host-window docking because global desktop client coordinates are unavailable; call `ImguiNativeViewportSupport::get(context_id)` for the coordinate capability status. |
+| Bevy native multi-viewport | `multi-viewport` implies `render`, `bevy_winit`, and the narrow `dear-imgui-winit/native-platform-support` capability layer; it does not instantiate a second Winit platform runtime. Each Context opts in explicitly. Secondary state is keyed by stable `ImguiViewportInstanceId`; the numeric `ViewportId` is only the current routing projection and may change during docking. The host and secondary ECS entities must resolve through exact `WINIT_WINDOWS` mappings. `Show` remains hidden until the mapping and Windows policy lease are ready, and `NO_INPUTS`/`NO_FOCUS_ON_CLICK` are enforced by the native policy. Monitor facts are published transactionally from detached Winit snapshots; ECS monitor geometry is not a fallback. `ImguiNativeViewportSupport` reports coordinate capability, while the independent `NativeMonitor` diagnostic batch reports collection, primary-identity, and work-area fallback state. Wayland falls back to host-window docking because global desktop client coordinates are unavailable. |
 | Bevy WASM | `wasm` supports both default and headless builds; combining WASM with native `multi-viewport` is rejected. |
+
+Native desktop evidence is graded separately from implementation and compile coverage. The current
+worktree did not execute the complete manual desktop checklist below, so these rows must not be
+reported as newly verified native behavior without a named CI or PR test environment:
+
+| Native behavior | Implemented source and repository evidence | Current claim |
+| --- | --- | --- |
+| Windows work area and viewport policy | `MONITORINFO.rcWork`, exact WindowId/HWND policy lease, pure lease/geometry tests, and Windows compilation | Native implementation present; mixed-DPI/taskbar-edge and first/repeated-click checklist unverified in this worktree. Inspect Winit `monitor_publication_report()` or Bevy `NativeMonitor` diagnostics at runtime. |
+| macOS work area and show policy | `NSScreen.visibleFrame` conversion, main-thread validation, and conversion tests | Native implementation present; Retina/menu-bar/Dock/Spaces checklist unverified in this worktree. Runtime provenance must report `MacOsVisibleFrame` before an exact work-area claim. |
+| Linux/X11 work area | X11 display detection plus conservative `FullMain(AmbiguousDesktopScope)` snapshots | Fallback-only by design. GNOME/KWin panel attribution has not been proven, so no per-monitor `_NET_WORKAREA` precision is claimed. |
+| Linux/Wayland | Early native multi-viewport rejection and `FullMain(Wayland)` provenance; ordinary in-window docking remains independent | Native multi-viewport unsupported. The compositor checklist was not executed in this worktree; no synthetic global coordinates are provided. |
+
+For Winit, an initial unavailable or primary-unproven monitor batch rejects viewport attachment;
+later failures retain the last complete transaction and set
+`WinitMonitorPublicationState::RetainedAfterCollectionFailure`. Bevy disables native viewports for
+the affected frame and atomically publishes the reason under `ImguiDiagnosticOrigin::NativeMonitor`.
+Neither backend exposes a live native monitor handle through its report surface.
 
 Windows source-support evidence is deliberately graded rather than inferred from a successful C++ compile:
 

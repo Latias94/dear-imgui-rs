@@ -38,6 +38,10 @@ provenance. Bevy converts that batch to its coordinate model and replaces
 `PlatformIO::Monitors` atomically. A missing host mapping or failed collection
 does not publish an ECS-monitor or host-window approximation; the last complete
 publication may remain installed while native platform viewports stay disabled.
+Monitor collection and work-area degradation publish a separate `NativeMonitor`
+diagnostic batch. The batch contains stable reasons rather than native handles or
+volatile operating-system strings; recovery replaces it atomically without
+overwriting per-viewport native policy diagnostics.
 
 Retirement is lease-first: destroy intents are applied, native policy leases
 are released, Winit mappings are retired while wrappers remain available for

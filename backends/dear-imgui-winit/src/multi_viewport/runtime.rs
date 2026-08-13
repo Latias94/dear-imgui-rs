@@ -920,6 +920,19 @@ impl RuntimeControl {
         })?
     }
 
+    pub(crate) fn monitor_publication_report(
+        &self,
+    ) -> Result<super::WinitMonitorPublicationReport, WinitPlatformError> {
+        if self.state() != RuntimeState::Attached {
+            return Err(WinitPlatformError::RuntimeDetached);
+        }
+        self.monitor_ownership
+            .borrow()
+            .as_ref()
+            .map(MonitorOwnership::report)
+            .ok_or(WinitPlatformError::RuntimeDetached)
+    }
+
     #[cfg(target_os = "windows")]
     pub(crate) fn refresh_native_mouse(
         &self,

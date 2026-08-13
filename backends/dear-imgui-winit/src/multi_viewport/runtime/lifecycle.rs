@@ -504,6 +504,21 @@ impl crate::WinitPlatform {
             .drain_faults())
     }
 
+    /// Returns the owned native facts and collection state for the installed monitor transaction.
+    ///
+    /// A refresh failure retains the previous complete transaction and changes only the report
+    /// state to
+    /// [`crate::multi_viewport::WinitMonitorPublicationState::RetainedAfterCollectionFailure`]. Inspect
+    /// each returned snapshot's work-area provenance to distinguish exact native work rectangles
+    /// from conservative full-main fallbacks without accessing live native monitor handles.
+    pub fn monitor_publication_report(
+        &self,
+    ) -> Result<crate::multi_viewport::WinitMonitorPublicationReport, WinitPlatformError> {
+        WinitPlatformRuntime::from_platform(self)?
+            .control
+            .monitor_publication_report()
+    }
+
     /// Disable native multi-viewport ownership while keeping the main platform attached.
     ///
     /// Any attached renderer route must be shut down first. The operation is retryable when a

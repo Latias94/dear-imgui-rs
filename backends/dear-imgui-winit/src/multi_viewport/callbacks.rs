@@ -1,6 +1,4 @@
-use super::coordinates::{
-    desktop_position_from_physical, monitor_from_physical, outer_position_from_client,
-};
+use super::coordinates::{desktop_position_from_physical, outer_position_from_client};
 use super::native_cursor_hittest::{
     MouseCaptureTransfer, focus_and_raise_window, raise_window_without_activation,
     show_window_without_activation, transfer_mouse_capture,
@@ -17,7 +15,6 @@ use dear_imgui_rs::Context;
 use std::ffi::{CStr, c_char, c_void};
 use std::rc::Rc;
 use std::sync::Arc;
-use winit::dpi::PhysicalPosition;
 #[cfg(target_os = "windows")]
 use winit::platform::windows::{WindowAttributesExtWindows, WindowExtWindows};
 #[cfg(target_os = "linux")]

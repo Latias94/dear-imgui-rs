@@ -770,6 +770,7 @@ fn monitor_refresh_replaces_owned_storage_and_restores_the_prior_publication() {
 
 #[test]
 fn monitor_snapshot_refresh_tracks_work_and_provenance_without_partial_replacement() {
+    use crate::multi_viewport::{WinitMonitorCollectionFailure, WinitMonitorPublicationState};
     use crate::native_support::{
         MonitorIdentity, MonitorSnapshot, PhysicalMonitorRect, WorkAreaProvenance,
     };
@@ -830,6 +831,7 @@ fn monitor_snapshot_refresh_tracks_work_and_provenance_without_partial_replaceme
         1.0,
         WorkAreaProvenance::MacOsVisibleFrame,
     );
+    let work_only_report = work_only.clone();
     let expected_work = super::coordinates::monitor_from_snapshot(&work_only).unwrap();
     assert_eq!(
         runtime
@@ -853,6 +855,30 @@ fn monitor_snapshot_refresh_tracks_work_and_provenance_without_partial_replaceme
         unsafe { (*context.platform_io().as_raw()).Monitors.Data },
         work_data
     );
+    let report = runtime.control().monitor_publication_report().unwrap();
+    assert_eq!(
+        report.state(),
+        WinitMonitorPublicationState::RetainedAfterCollectionFailure {
+            reason: WinitMonitorCollectionFailure::Native(
+                crate::native_support::MonitorCollectionError::MainFactsUnavailable { monitor: 0 },
+            ),
+        }
+    );
+    assert_eq!(report.snapshots().unwrap(), &[work_only_report]);
+
+    let recovered = report.snapshots().unwrap()[0].clone();
+    assert_eq!(
+        runtime
+            .control()
+            .refresh_monitor_snapshots_for_test(&context, Some(vec![recovered.clone()])),
+        Ok(false),
+    );
+    let recovered_report = runtime.control().monitor_publication_report().unwrap();
+    assert_eq!(
+        recovered_report.state(),
+        WinitMonitorPublicationState::NativeSnapshot,
+    );
+    assert_eq!(recovered_report.snapshots().unwrap(), &[recovered]);
 
     runtime.shutdown(&mut context).unwrap();
     assert_publication_state_restored(&context, before);

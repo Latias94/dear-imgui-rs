@@ -51,6 +51,11 @@ Winit platform runtime.
 - Native source failures are explicit through owned provenance and typed
   collection errors; platform owners decide when to retain their last complete
   publication.
+- Winit exposes the installed facts through `monitor_publication_report`; a
+  transient failure marks the report `RetainedAfterCollectionFailure` while
+  preserving the last complete vector. Bevy publishes equivalent stable reasons
+  through its `NativeMonitor` diagnostic batch. Neither surface exposes live
+  monitor handles.
 - `collect_monitor_snapshots` enumerates monitors through the supplied
   `Window`, so the host display and monitor handles come from one Winit source
   and refresh generation. `MonitorIdentity` is a detached value; it never
@@ -66,10 +71,12 @@ Winit platform runtime.
   the exact mapping is pending or a policy lease is being installed. The
   stable `ImguiViewportInstanceId`, rather than a recyclable ECS entity, owns
   the policy state and preserves show intent across handle replacement.
-- A failed monitor batch is observable as a missing current publication, not
-  as a fabricated primary monitor. Owners may retain the previous complete
-  publication, but must keep native global viewports disabled until a complete
-  exact batch is available.
+- A failed initial monitor batch is observable and never replaced by a fabricated
+  host-window monitor. During a later refresh, owners may retain the previous
+  complete publication and report the failure; Bevy keeps native global viewports
+  disabled for that frame, while Winit keeps the last complete transaction and
+  exposes its retained state. A multi-monitor batch without one proven detached
+  primary identity is rejected rather than arbitrarily promoting a candidate.
 - The Windows lease can be installed only from a borrowed exact `Window`, is
   neither `Clone`, `Send`, nor `Sync`, and tolerates lease-first or
   native-window-first destruction without freeing callback state prematurely.

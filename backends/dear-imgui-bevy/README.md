@@ -289,6 +289,13 @@ collection never falls back to ECS monitor geometry. The cross-backend route evi
 remaining native-smoke gaps are recorded in
 [`docs/renderer-route-evidence.md`](../../docs/renderer-route-evidence.md).
 
+`ImguiNativeViewportStatus::Available` describes the host's coordinate capability; the backend
+still enables native viewports for a frame only after a complete monitor publication exists.
+Inspect `ImguiDiagnostics::entries_for(ImguiDiagnosticOrigin::NativeMonitor)` for collection
+failure, unproven primary identity, or `FullMain` fallback reasons. These monitor diagnostics use a
+separate atomic batch from `NativeViewport`, so a monitor recovery cannot erase a secondary-window
+policy failure (or vice versa).
+
 Every Context that calls `ImguiContextConfig::with_multi_viewport(true)` requires the native `multi-viewport` Cargo feature. Admission returns `ImguiContextError::NativeMultiViewportUnavailable` when the selected target or feature set cannot provide native windows.
 
 ## Examples

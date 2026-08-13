@@ -106,43 +106,6 @@ fn desktop_input_position_from_physical(position: [f64; 2], scale: f64) -> Optio
     desktop_position_from_physical_values(native_desktop_coordinate_space(), position, scale)
 }
 
-pub(super) fn monitor_from_physical(
-    position: PhysicalPosition<i32>,
-    size: PhysicalSize<u32>,
-    scale: f64,
-) -> dear_imgui_rs::sys::ImGuiPlatformMonitor {
-    let scale = sanitized_scale(scale);
-    let position = desktop_position_from_physical(position, scale).unwrap_or([0.0, 0.0]);
-    let size = desktop_size_from_physical_values(
-        native_desktop_coordinate_space(),
-        [f64::from(size.width), f64::from(size.height)],
-        scale,
-    );
-
-    dear_imgui_rs::sys::ImGuiPlatformMonitor {
-        MainPos: dear_imgui_rs::sys::ImVec2 {
-            x: position[0],
-            y: position[1],
-        },
-        MainSize: dear_imgui_rs::sys::ImVec2 {
-            x: size[0],
-            y: size[1],
-        },
-        // Winit does not expose platform work areas, so the whole monitor remains the portable
-        // fallback until a backend-specific work-area callback is available.
-        WorkPos: dear_imgui_rs::sys::ImVec2 {
-            x: position[0],
-            y: position[1],
-        },
-        WorkSize: dear_imgui_rs::sys::ImVec2 {
-            x: size[0],
-            y: size[1],
-        },
-        DpiScale: sanitize::positive_finite_f32_or(scale as f32, 1.0),
-        PlatformHandle: std::ptr::null_mut(),
-    }
-}
-
 /// Converts detached native monitor facts into the coordinate model used by Winit viewports.
 ///
 /// Main and work rectangles are converted independently. The conversion is fallible so native

@@ -69,6 +69,8 @@ use std::rc::Weak;
 
 pub use capability::{ImguiNativeViewportStatus, ImguiNativeViewportSupport};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+pub(crate) use desktop::ImguiMonitorPublication;
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(crate) use desktop::{
     desktop_metrics_for_window, desktop_to_window_client_logical,
     monitor_publication_from_snapshot_set, viewport_feedback_from_window,
