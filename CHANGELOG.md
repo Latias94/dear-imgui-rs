@@ -8,18 +8,55 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
-### Added
+## [0.16.0] - 2026-08-14
 
-- Added source-build support for `x86_64-pc-windows-gnullvm` and `aarch64-pc-windows-gnullvm` with llvm-mingw. CI final-links the maintained C++ sys crates, runtime/ABI-tests x64 in both default and `+crt-static` modes, and cross-link/PE-tests Arm64 gnullvm plus the existing Arm64 MSVC `/MD` source path. gnullvm prebuilts, FreeType, and SDL3's external native dependency are not included. Fixes [#73](https://github.com/Latias94/dear-imgui-rs/issues/73).
+0.16 is an intentionally source-breaking release that finalizes the ownership-first API introduced through the alpha train. Context, frame, texture, font, native callback, renderer, platform-window, and GPU-completion state now move through explicit capabilities instead of remaining reachable through stale pointers or manual phase controls. See the [compatibility guide](https://github.com/Latias94/dear-imgui-rs/blob/v0.16.0/docs/COMPATIBILITY.md), [custom backend guide](https://github.com/Latias94/dear-imgui-rs/blob/v0.16.0/docs/CUSTOM_BACKENDS.md), and [task-oriented examples](https://github.com/Latias94/dear-imgui-rs/blob/v0.16.0/examples/README.md) for complete integration patterns; the tagged [changelog](https://github.com/Latias94/dear-imgui-rs/blob/v0.16.0/CHANGELOG.md) preserves the detailed prerelease migration history.
+
+### Highlights
+
+- Upgraded the native baseline to Dear ImGui v1.92.9b docking through cimgui and aligned the Test Engine and maintained extensions with its metadata and rendering contracts. Native, WASM, prebuilt, stack-layout, and Test Engine profiles now carry reproducible binding and artifact provenance.
+- Replaced broadly accessible native frame and draw state with one-use synchronous render capabilities or pointer-free detached snapshots. Managed texture feedback, font-atlas ownership, external texture handles, and renderer teardown are bound to the exact Context and render epoch that created them.
+- Added declarative, transactionally validated docking layouts, stable window identity, checked numeric format contracts, and lexical UI scopes that restore native state on ordinary errors without exposing unsafe end/pop protocols.
+- Unified Winit, SDL3, WGPU, Glow, Ash, and Bevy multi-viewport ownership around exact Context generations, callback leases, renderer-before-platform teardown, complete deferred-fault batches, and native-identity validation. Winit and Bevy publish detached monitor facts transactionally and keep secondary windows hidden until their exact native mapping and input/focus policy are ready. [PR #75](https://github.com/Latias94/dear-imgui-rs/pull/75)
+- Redesigned `dear-app` as a state-owning Winit + WGPU runtime with shared surface admission, frame, presentation, recovery, Test Engine, and exactly-once shutdown paths.
+- Added source-build support for `x86_64-pc-windows-gnullvm` and `aarch64-pc-windows-gnullvm` with llvm-mingw. x64 is runtime/ABI-tested in default and `+crt-static` modes; Arm64 gnullvm and Arm64 MSVC `/MD` are cross-link/PE-tested only. gnullvm prebuilts, FreeType, and SDL3's external native dependency are outside this support claim. [PR #74](https://github.com/Latias94/dear-imgui-rs/pull/74), [#73](https://github.com/Latias94/dear-imgui-rs/issues/73)
 
 ### Breaking Changes and Migration
 
-- `dear-imgui-glow` now uses `glow` 0.18. Applications that construct or pass a `glow::Context` must update their direct `glow` dependency to the 0.18 release line.
-- `dear-imgui-build-support` callers that construct `TargetFacts`, `NativeAbiTarget`, `BuildRequestInput`, or `BuildRequest` must now provide or handle `target_abi`, normally from `CARGO_CFG_TARGET_ABI`; `prebuilt_cpp_runtime_linkage`, `configure_cpp_runtime_linkage`, and `emit_prebuilt_cpp_runtime_linkage` also take that ABI argument. Windows GNU-GCC continues to link static `stdc++`, while Windows GNU/LLVM links static `c++`.
+| Area | Required migration |
+| --- | --- |
+| Context and UI scopes | Keep live Contexts on one owner thread, handle fallible activation and suspension, and use lexical `with_*` helpers plus provenance-checked tokens instead of manually ending or popping native scopes. |
+| Renderer frames | Use `SynchronousRendererConsumer` with `PendingFrame -> ReconciledFrame`, or `DetachedRendererConsumer` with move-only `FrameSnapshot`; pass frame capabilities by value and remove renderer-local frame rings or cloned draw lists. |
+| Textures and fonts | Register Context-owned texture data through typed managed/external handles, reconcile request-bound feedback, retain `FontId`, and inspect baked glyph data only through frame-local font capabilities. Arbitrary external font bytes and device-lineage operations remain explicit unsafe contracts. |
+| Docking and viewports | Submit a validated `DockLayout` through `DockspaceBuilder`, use `WindowKey` for stable identity, enable docking separately from native multi-viewport, and treat native viewport topology as backend-owned state. |
+| Winit and renderer routes | Use the owning platform or renderer route's `prepare`/`prepare_frame` transaction followed by its main render or command path. Shut down renderer ownership before the platform runtime and native GPU/window objects; custom compatible platforms use the documented unsafe attachment escape hatch. |
+| SDL3 callbacks | Pass owned `sdl3::event::Event` values. Callback-mode applications drain an atomic `Sdl3CallbackEventBatch`, inspect every retained fault, and replay events through the owning backend rather than borrowing or fabricating pointer-bearing `SDL_Event` values. |
+| Bevy | Install Context work through App-issued typed passes and sealed system configurations, handle fallible Context registry queries, register application input producers through `ImguiAppExt`, and request managed retirement instead of extracting backend-owned Context or native-window state. |
+| `dear-app` | Use `run_ui`, `run_frame`, or `Application`; application callbacks receive narrow lifecycle capabilities rather than unrestricted Context access after platform/renderer attachment. |
+| Native ABI and prebuilts | Regenerate native core prebuilts with `platform-io-aggregate-hooks-v3`; older archives are rejected. Raw aggregate PlatformIO callbacks must use the pointer/out-parameter hooks and repository C++ invocation bridges documented for 0.16. |
+| Build support | `dear-imgui-build-support` callers constructing target/build facts must provide or handle `target_abi`, normally from `CARGO_CFG_TARGET_ABI`; C++ runtime-linkage helpers also take the ABI argument. |
+| Direct dependencies | Applications constructing or passing a `glow::Context` must update to `glow` 0.18. WGPU 30 is the default; WGPU 29, 28, and 27 remain explicit mutually exclusive compatibility features. |
 
 ### Changed
 
-- Updated the workspace's direct `pollster` dependency from 0.4 to 1.0 for WGPU application helpers, examples, and tests.
+- Updated the Bevy backend to 0.19.1, the reflection derive parser to syn 3, and the compatible dependency lock set while retaining Winit 0.30 and Rust 1.92 for the workspace. The Bevy backend requires Rust 1.95. [PR #75](https://github.com/Latias94/dear-imgui-rs/pull/75)
+- Updated the workspace and iOS smoke applications to `pollster` 1.0 alongside the Glow 0.18 upgrade. [PR #77](https://github.com/Latias94/dear-imgui-rs/pull/77)
+- WGPU defaults to version 30 with opt-in 29/28/27 routes; Glow uses 0.18; Ash uses 0.38; SDL3 uses the 0.18 line. Select exactly one WGPU major and one native platform adapter for a multi-viewport renderer route.
+- Releases use one candidate-bound 27-crate train with exact-SHA CI, crates.io Trusted Publishing, complete prebuilt producer/consumer validation, deterministic checksums, and resumable publication that rejects mismatched existing crates, tags, or Release assets.
+
+### Fixed
+
+- Preserved detached Winit viewport client geometry across undecorated Windows positioning, decoration changes, mixed-DPI physical coordinates, and asynchronous X11 frame extents. Secondary input, geometry, close, redraw, and X11 visibility events wake event-driven main loops, so title/tab dragging and native geometry reconciliation continue under `ControlFlow::Wait`. [PR #76](https://github.com/Latias94/dear-imgui-rs/pull/76)
+- Hardened Winit, SDL3, and Bevy native callback ownership against reused viewport pointers, replacement callbacks, incomplete monitor collections, asynchronous native-window creation, and window-first or Context-first teardown. Recoverable monitor failures retain the last complete publication instead of exposing partial or invented geometry. [PR #75](https://github.com/Latias94/dear-imgui-rs/pull/75)
+- Fixed release-note extraction without dirtying verification checkouts. [PR #68](https://github.com/Latias94/dear-imgui-rs/pull/68)
+- Fixed scope snapshots to use Dear ImGui's read-only current-window query. [PR #69](https://github.com/Latias94/dear-imgui-rs/pull/69)
+- Fixed accidental fallback debug-window creation, main-viewport detection across managed Contexts, leaked callback frames, and bounded SDL3 callback coalescing. [PR #70](https://github.com/Latias94/dear-imgui-rs/pull/70)
+- Fixed managed texture and renderer resource lifetime across detached work, atlas repacks, callback replacement, WGPU device recreation, Vulkan retirement, Glow device-object recreation, and failed surface acquisition or presentation.
+- Fixed WGPU secondary surface configuration and loss handling, Bevy overlay composition and startup presentation, font reference-size selection, Windows GNU C++ runtime linkage, SDL3 move/resize responsiveness, and close-time native viewport teardown. [#36](https://github.com/Latias94/dear-imgui-rs/issues/36), [#49](https://github.com/Latias94/dear-imgui-rs/issues/49), [#51](https://github.com/Latias94/dear-imgui-rs/issues/51), [#54](https://github.com/Latias94/dear-imgui-rs/issues/54), [#58](https://github.com/Latias94/dear-imgui-rs/issues/58)
+
+### Known Platform Boundaries
+
+- Wayland continues to support docking inside the host window but not native multi-viewport, because the compositor does not provide the global desktop coordinates required by Dear ImGui. X11 monitor work areas remain conservative full-monitor fallbacks when panel attribution is ambiguous. See the compatibility matrix for the current native evidence grades. [#60](https://github.com/Latias94/dear-imgui-rs/issues/60)
 
 ## [0.16.0-alpha.3] - 2026-08-11
 
@@ -33,12 +70,8 @@ This source-breaking prerelease continues the ownership-first 0.16 migration wit
 
 ### Changed
 
-- Updated the exact Bevy backend train from 0.19.0 to 0.19.1 while retaining Rust 1.95 and WGPU 29 compatibility.
-- Updated the reflection derive implementation to syn 3 after validating the generated macro surface against the full reflection test suite.
-- Refreshed the compatible dependency lock set, including SDL 3.4.14 and WGPU 29.0.4 patch updates, while retaining the stable Winit 0.30 line and the workspace's Rust 1.92 contract.
 - Winit multi-viewport failures now retain the exact Context, viewport generation, native handle, and platform userdata until the close request is observed, preventing stale failures from closing a reused viewport. macOS `NO_FOCUS_ON_APPEARING` windows are shown without activating the application.
 - Bevy frame input is now a move-only, exactly-once transaction that binds route epoch, Context metrics, and cursor/IME authority to the same driver run. Terminal registries and private pass lifecycles fail explicitly instead of returning active-looking empty state.
-- Winit and Bevy native viewports now publish detached monitor facts transactionally and expose work-area provenance or retained-transaction failures without live native handles. Initial or primary-unproven batches fail closed instead of inventing a monitor; Bevy also resolves host and secondary windows through exact `WINIT_WINDOWS` mappings, keeps `Show` intent hidden until the native policy is ready, and uses lease-first retirement with stable-instance diagnostics.
 
 ### Fixed
 

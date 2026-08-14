@@ -189,6 +189,8 @@ class ReleaseTaskTests(unittest.TestCase):
                 ],
                 [
                     TASKS.sys.executable,
+                    "-X",
+                    "utf8",
                     "-B",
                     "-m",
                     "unittest",
@@ -252,7 +254,7 @@ class ReleaseTaskTests(unittest.TestCase):
         self.assertTrue(all("--locked" in command for command in commands[2:5]))
         self.assertIn("--dry-run", commands[5])
         self.assertEqual(
-            commands[6][1:5], ["-B", "-m", "unittest", "discover"]
+            commands[6][1:7], ["-X", "utf8", "-B", "-m", "unittest", "discover"]
         )
         self.assertEqual(len(commands), 7)
         self.assertIn("cargo metadata --no-deps --format-version 1", output.getvalue())

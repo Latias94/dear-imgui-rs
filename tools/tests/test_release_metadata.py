@@ -204,12 +204,15 @@ class MetadataTests(unittest.TestCase):
 
 
 class CurrentReleaseTrainTests(unittest.TestCase):
-    def test_release_train_uses_exact_catalog_requirements(self):
+    def test_release_train_uses_canonical_catalog_requirements(self):
         workspace = tomllib.loads(
             REPO_ROOT.joinpath("Cargo.toml").read_text(encoding="utf-8")
         )
         version = workspace["workspace"]["package"]["version"]
         catalog = workspace["workspace"]["dependencies"]
+        expected_requirement = release_metadata.expected_internal_requirement(
+            version
+        ).removeprefix("^")
 
         self.assertEqual(
             {
@@ -217,7 +220,7 @@ class CurrentReleaseTrainTests(unittest.TestCase):
                 for dependency in catalog.values()
                 if "path" in dependency
             },
-            {f"={version}"},
+            {expected_requirement},
         )
 
         metadata = release_metadata.load_workspace_metadata(REPO_ROOT)

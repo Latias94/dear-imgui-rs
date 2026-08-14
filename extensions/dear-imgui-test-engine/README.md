@@ -25,20 +25,20 @@ For native build/link options, see `extensions/dear-imgui-test-engine-sys/README
 
 | Item                        | Version |
 |-----------------------------|---------|
-| Crate                       | 0.16.0-alpha.3  |
-| dear-imgui-rs               | 0.16.0-alpha.3  |
-| dear-imgui-test-engine-sys  | 0.16.0-alpha.3  |
+| Crate                       | 0.16.0  |
+| dear-imgui-rs               | 0.16.0  |
+| dear-imgui-test-engine-sys  | 0.16.0  |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md).
 
 ## Quick Start
 
-Use the exact prerelease requirements:
+Use compatible stable requirements:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "=0.16.0-alpha.3"
-dear-imgui-test-engine = "=0.16.0-alpha.3"
+dear-imgui-rs = "0.16"
+dear-imgui-test-engine = "0.16"
 ```
 
 ```rust

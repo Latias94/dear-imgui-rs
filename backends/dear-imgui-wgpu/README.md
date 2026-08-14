@@ -226,28 +226,28 @@ replacements are preserved rather than overwritten.
 
 ## Selecting wgpu version
 
-The `0.16.0-alpha.3` release defaults to WGPU 30:
+The `0.16.0` release defaults to WGPU 30:
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = "=0.16.0-alpha.3"
+dear-imgui-wgpu = "0.16"
 ```
 
 If your ecosystem is pinned to `wgpu` v29, v28, or v27, select it explicitly:
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "=0.16.0-alpha.3", default-features = false, features = ["wgpu-29"] }
+dear-imgui-wgpu = { version = "0.16", default-features = false, features = ["wgpu-29"] }
 ```
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "=0.16.0-alpha.3", default-features = false, features = ["wgpu-28"] }
+dear-imgui-wgpu = { version = "0.16", default-features = false, features = ["wgpu-28"] }
 ```
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "=0.16.0-alpha.3", default-features = false, features = ["wgpu-27"] }
+dear-imgui-wgpu = { version = "0.16", default-features = false, features = ["wgpu-27"] }
 ```
 
 ## What You Get
@@ -266,7 +266,7 @@ dear-imgui-wgpu = { version = "=0.16.0-alpha.3", default-features = false, featu
 
 | Track | wgpu support |
 |-------|--------------|
-| `0.16.0-alpha.3` | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
+| `0.16.0` | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 

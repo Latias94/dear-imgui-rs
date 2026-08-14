@@ -19,18 +19,18 @@ Dear ImGui context or panel whose settings and drafts it should retain.
 
 ## Cargo Integration
 
-Use the exact prerelease requirements:
+Use compatible stable requirements:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "=0.16.0-alpha.3"
-dear-imgui-reflect = "=0.16.0-alpha.3"
+dear-imgui-rs = "0.16"
+dear-imgui-reflect = "0.16"
 ```
 
 Optional math support:
 
 ```toml
-dear-imgui-reflect = { version = "=0.16.0-alpha.3", features = ["glam", "mint"] }
+dear-imgui-reflect = { version = "0.16", features = ["glam", "mint"] }
 glam = "0.32"
 mint = "0.5"
 ```
@@ -199,8 +199,8 @@ See `examples/03-features/reflect_demo.rs` for a complete inspector and
 
 | Item | Version |
 |---|---|
-| Crate | 0.16.0-alpha.3 |
-| dear-imgui-rs | 0.16.0-alpha.3 |
+| Crate | 0.16.0 |
+| dear-imgui-rs | 0.16.0 |
 
 ## License
 

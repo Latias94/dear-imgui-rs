@@ -8,6 +8,8 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-08-14
+
 ### Breaking Changes
 
 - Make `WinitPlatform` the sole public multi-viewport owner. `with_event_loop` now returns `WinitViewportAttempt`, which preserves the callback output and every deferred platform fault as parallel values instead of dropping one side through nested `Result` precedence.

@@ -367,6 +367,8 @@ def task_release_prepare(args, repo_root: Path) -> int:
                 lambda: run_command(
                     [
                         sys.executable,
+                        "-X",
+                        "utf8",
                         "-B",
                         "-m",
                         "unittest",
