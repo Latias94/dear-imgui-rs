@@ -6,6 +6,8 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-08-14
+
 ### Changed
 
 - SDL callback applications now call `Sdl3CallbackEventHandoff::drain` and inspect the returned atomic `Sdl3CallbackEventBatch` before replaying retained events with the owning backend's `process_callback_event`; the former `try_drain` and `Sdl3CallbackEventQueue` surface was removed. Every distinct queue fault is retained in observation order, and bounded O(1) state-event coalescing prevents sustained callback traffic from starving ordered input.

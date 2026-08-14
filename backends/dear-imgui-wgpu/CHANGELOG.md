@@ -6,6 +6,8 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-08-14
+
 ### Breaking
 
 - Replace `WinitViewportRuntime` and `Sdl3ViewportRuntime` with `WinitViewportRoute` and `Sdl3ViewportRoute`. Each route captures the exact live platform generation at safe attachment and exposes one frame path: `prepare(FrameToken)` followed by `render_main(prepared, pass, FramebufferExtent)`. The prepared frame exposes its same-frame secondary submission evidence as `WgpuViewportFrameReport`; the obsolete manual-trace report name is not retained.

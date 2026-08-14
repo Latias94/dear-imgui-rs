@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.16.0 - 2026-08-14
+
 ### Breaking Changes
 
 - `ImguiContexts::{primary_id,ids,contains}` now return `Result` so a retained registry reports terminal App shutdown instead of looking like an active empty registry.

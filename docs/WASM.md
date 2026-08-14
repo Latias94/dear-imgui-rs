@@ -17,11 +17,11 @@ revision instead of renaming its files or remapping it under the v1 module name.
 
 WASM support is explicit and target-specific. The only supported Rust target is
 `wasm32-unknown-unknown`, and every dependency path to the core crate must
-enable the `wasm` feature. Use the exact prerelease requirement:
+enable the `wasm` feature. Use the compatible stable requirement:
 
 ```toml
 [dependencies]
-dear-imgui-rs = { version = "=0.16.0-alpha.3", features = ["wasm"] }
+dear-imgui-rs = { version = "0.16", features = ["wasm"] }
 ```
 
 For Bevy, enable `wasm` alongside the features needed by the application and
@@ -29,8 +29,8 @@ take both packages from the same release train:
 
 ```toml
 [dependencies]
-dear-imgui-bevy = { version = "=0.16.0-alpha.3", features = ["render", "wasm"] }
-dear-imgui-rs = { version = "=0.16.0-alpha.3", features = ["wasm"] }
+dear-imgui-bevy = { version = "0.16", features = ["render", "wasm"] }
+dear-imgui-rs = { version = "0.16", features = ["wasm"] }
 ```
 
 Five safe native extensions expose the same `wasm` feature and forward it to

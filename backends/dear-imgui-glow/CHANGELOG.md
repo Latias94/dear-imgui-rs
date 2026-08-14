@@ -6,6 +6,8 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-08-14
+
 ### Breaking
 
 - Updated the renderer dependency from `glow` 0.17 to 0.18. Applications must construct and pass a `glow` 0.18 `Context`.

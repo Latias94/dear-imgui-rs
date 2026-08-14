@@ -8,9 +8,9 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 ## Versioning Policy
 
 - Unified release train: all published `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
-- Current published prerelease: unified `v0.16.0-alpha.3` (use exact requirements such as `version = "=0.16.0-alpha.3"`).
-- Previous prerelease: unified `v0.16.0-alpha.2`.
-- Current stable train: unified `v0.15.1` (use `version = "0.15"`).
+- Stable 0.16 train: unified `v0.16.0` (use `version = "0.16"`).
+- Previous prerelease: unified `v0.16.0-alpha.3` (prereleases require exact requirements).
+- Previous stable train: unified `v0.15.1` (use `version = "0.15"`).
 - Previous train: unified `v0.14.1` (use `version = "0.14"`).
 - Previous train: unified `v0.13.0` (use `version = "0.13"`).
 - Previous train: unified `v0.12.0` (use `version = "0.12"`).
@@ -18,57 +18,57 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 - Previous train: unified `v0.10.4` (use `version = "0.10"`).
 - Previous train: unified `v0.9.0` (use `version = "0.9"`).
 - Previous train: unified `v0.8.0` (use `version = "0.8"`).
-- Internal dependency constraints in this repo pin to the exact current prerelease (for example, `=0.16.0-alpha.3`). Mixing different release trains across our crates is unsupported.
+- Internal dependency constraints use the compatible current stable minor (`0.16`); prerelease trains use exact requirements. Mixing different release trains across our crates is unsupported.
 
-## Current Prerelease (0.16.0-alpha.3)
+## 0.16 Stable Release
 
 Core
 
 | Crate           | Version | Upstream        | Notes                                     |
 |-----------------|---------|-----------------|-------------------------------------------|
-| dear-imgui-rs   | 0.16.0-alpha.3  | —               | Safe Rust API over dear-imgui-sys         |
-| dear-imgui-sys  | 0.16.0-alpha.3  | ImGui v1.92.9b  | Docking branch via cimgui; three binding profiles |
+| dear-imgui-rs   | 0.16.0  | —               | Safe Rust API over dear-imgui-sys         |
+| dear-imgui-sys  | 0.16.0  | ImGui v1.92.9b  | Docking branch via cimgui; three binding profiles |
 
 Backends
 
 | Crate             | Version | External deps           | Notes |
 |-------------------|---------|-------------------------|-------|
-| dear-imgui-wgpu   | 0.16.0-alpha.3  | wgpu = 30/29/28/27     | WGPU 30 default; native Winit/SDL3 multi-viewport; browser single-window |
-| dear-imgui-glow   | 0.16.0-alpha.3  | glow = 0.17            | OpenGL 3.0+/ES 3.0+/WebGL 2 renderer; live sampler capability with restorative fallback |
-| dear-imgui-ash    | 0.16.0-alpha.3  | ash = 0.38             | Native Vulkan renderer; shared Winit/SDL3 multi-viewport runtime |
-| dear-imgui-winit  | 0.16.0-alpha.3  | winit = 0.30.13        | Winit platform backend |
-| dear-imgui-sdl3   | 0.16.0-alpha.3  | sdl3 = 0.18.4, sdl3-sys 0.6 | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
-| dear-imgui-bevy   | 0.16.0-alpha.3  | Bevy = 0.19.1          | Bevy-native backend; default renderer and Bevy UI ordering, explicit advanced routes, Rust 1.95 minimum |
+| dear-imgui-wgpu   | 0.16.0  | wgpu = 30/29/28/27     | WGPU 30 default; native Winit/SDL3 multi-viewport; browser single-window |
+| dear-imgui-glow   | 0.16.0  | glow = 0.18            | OpenGL 3.0+/ES 3.0+/WebGL 2 renderer; live sampler capability with restorative fallback |
+| dear-imgui-ash    | 0.16.0  | ash = 0.38             | Native Vulkan renderer; shared Winit/SDL3 multi-viewport runtime |
+| dear-imgui-winit  | 0.16.0  | winit = 0.30.13        | Winit platform backend |
+| dear-imgui-sdl3   | 0.16.0  | sdl3 = 0.18.4, sdl3-sys 0.6 | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
+| dear-imgui-bevy   | 0.16.0  | Bevy = 0.19.1          | Bevy-native backend; default renderer and Bevy UI ordering, explicit advanced routes, Rust 1.95 minimum |
 
 Utilities
 
 | Crate     | Version | External deps | Notes |
 |-----------|---------|---------------|-------|
-| dear-app  | 0.16.0-alpha.3  | winit, wgpu 30 | Generation-aware application runtime |
+| dear-app  | 0.16.0  | winit, wgpu 30 | Generation-aware application runtime |
 
 Tooling
 
 | Crate                    | Version | External deps | Notes |
 |--------------------------|---------|---------------|-------|
-| dear-imgui-build-support | 0.16.0-alpha.3  | ureq = 3.3    | Binding specification, build, package, and prebuilt helpers |
+| dear-imgui-build-support | 0.16.0  | ureq = 3.3    | Binding specification, build, package, and prebuilt helpers |
 
 Extensions
 
 | Crate               | Version | Requires dear-imgui-rs | Sys crate                    | Notes                                  |
 |---------------------|---------|------------------------|------------------------------|----------------------------------------|
-| dear-implot         | 0.16.0-alpha.3 | 0.16.0-alpha.3 | dear-implot-sys 0.16.0-alpha.3 | 2D plotting |
-| dear-imnodes        | 0.16.0-alpha.3 | 0.16.0-alpha.3 | dear-imnodes-sys 0.16.0-alpha.3 | WASM-capable node editor |
-| dear-node-editor    | 0.16.0-alpha.3 | 0.16.0-alpha.3 | dear-node-editor-sys 0.16.0-alpha.3 | Native-only; opt-in blueprints profile |
-| dear-imguizmo       | 0.16.0-alpha.3 | 0.16.0-alpha.3 | dear-imguizmo-sys 0.16.0-alpha.3 | 3D gizmo |
-| dear-file-browser   | 0.16.0-alpha.3 | 0.16.0-alpha.3 | — | State-owned ImGui UI + native dialogs |
-| dear-implot3d       | 0.16.0-alpha.3 | 0.16.0-alpha.3 | dear-implot3d-sys 0.16.0-alpha.3 | 3D plotting |
-| dear-imguizmo-quat  | 0.16.0-alpha.3 | 0.16.0-alpha.3 | dear-imguizmo-quat-sys 0.16.0-alpha.3 | Quaternion gizmo |
-| dear-imgui-test-engine | 0.16.0-alpha.3 | 0.16.0-alpha.3 | dear-imgui-test-engine-sys 0.16.0-alpha.3 | UI automation and test runner |
-| dear-imgui-reflect  | 0.16.0-alpha.3 | 0.16.0-alpha.3 | — | Session-owned reflection UI |
+| dear-implot         | 0.16.0 | 0.16.0 | dear-implot-sys 0.16.0 | 2D plotting |
+| dear-imnodes        | 0.16.0 | 0.16.0 | dear-imnodes-sys 0.16.0 | WASM-capable node editor |
+| dear-node-editor    | 0.16.0 | 0.16.0 | dear-node-editor-sys 0.16.0 | Native-only; opt-in blueprints profile |
+| dear-imguizmo       | 0.16.0 | 0.16.0 | dear-imguizmo-sys 0.16.0 | 3D gizmo |
+| dear-file-browser   | 0.16.0 | 0.16.0 | — | State-owned ImGui UI + native dialogs |
+| dear-implot3d       | 0.16.0 | 0.16.0 | dear-implot3d-sys 0.16.0 | 3D plotting |
+| dear-imguizmo-quat  | 0.16.0 | 0.16.0 | dear-imguizmo-quat-sys 0.16.0 | Quaternion gizmo |
+| dear-imgui-test-engine | 0.16.0 | 0.16.0 | dear-imgui-test-engine-sys 0.16.0 | UI automation and test runner |
+| dear-imgui-reflect  | 0.16.0 | 0.16.0 | — | Session-owned reflection UI |
 
 ## 0.16 Architecture Contracts
 
-The 0.16 train is not source-compatible with 0.15.x, and alpha.2 deliberately removes provisional alpha.1 APIs whose contracts were not sound enough to stabilize. The baseline is Dear ImGui v1.92.9b docking via cimgui, Rust 1.92 for the workspace, Rust 1.95 for the Bevy backend, WGPU 30 by default with explicit 29/28/27 routes, and Bevy 0.19.1. Alpha.3 migrations live in the `0.16.0-alpha.3` section of `CHANGELOG.md`; applications coming from 0.15.x must also apply the alpha.2 and alpha.1 migrations.
+The 0.16 train is not source-compatible with 0.15.x. Its baseline is Dear ImGui v1.92.9b docking via cimgui, Rust 1.92 for the workspace, Rust 1.95 for the Bevy backend, WGPU 30 by default with explicit 29/28/27 routes, Glow 0.18, and Bevy 0.19.1. The `0.16.0` section of `CHANGELOG.md` summarizes the complete stable migration; the alpha sections preserve the incremental prerelease history.
 
 The safe Rust layer intentionally breaks APIs that expose C++ lifecycle
 protocols, wrong-context state, stale GPU handles, or platform-specific ABI
@@ -98,9 +98,9 @@ target.
 | Bevy native multi-viewport | `multi-viewport` implies `render`, `bevy_winit`, and the narrow `dear-imgui-winit/native-platform-support` capability layer; it does not instantiate a second Winit platform runtime. Each Context opts in explicitly. Secondary state is keyed by stable `ImguiViewportInstanceId`; the numeric `ViewportId` is only the current routing projection and may change during docking. The host and secondary ECS entities must resolve through exact `WINIT_WINDOWS` mappings. `Show` remains hidden until the mapping and Windows policy lease are ready, and `NO_INPUTS`/`NO_FOCUS_ON_CLICK` are enforced by the native policy. Monitor facts are published transactionally from detached Winit snapshots; ECS monitor geometry is not a fallback. `ImguiNativeViewportSupport` reports coordinate capability, while the independent `NativeMonitor` diagnostic batch reports collection, primary-identity, and work-area fallback state. Wayland falls back to host-window docking because global desktop client coordinates are unavailable. |
 | Bevy WASM | `wasm` supports both default and headless builds; combining WASM with native `multi-viewport` is rejected. |
 
-Native desktop evidence is graded separately from implementation and compile coverage. The current
-worktree did not execute the complete manual desktop checklist below, so these rows must not be
-reported as newly verified native behavior without a named CI or PR test environment:
+Native desktop evidence is graded separately from implementation and compile coverage. The release
+evidence does not include the complete manual desktop checklist below, so these rows must not be
+reported as verified native behavior without a named CI or PR test environment:
 
 | Native behavior | Implemented source and repository evidence | Current claim |
 | --- | --- | --- |
@@ -316,7 +316,7 @@ import-style binding artifact. `xtask verify-bindings` regenerates and compares
 all supported profiles; arbitrary bindgen clang-argument overrides are rejected
 for canonical artifacts.
 
-The binding generator contract, formatter, allow/block lists, enum normalization, header shims, opaque types, provider name, and exact compatibility target facts all participate in the deterministic binding-spec hash. `dear-imgui-build-support` ships on the same 0.16.0-alpha.3 train as every other publishable crate.
+The binding generator contract, formatter, allow/block lists, enum normalization, header shims, opaque types, provider name, and exact compatibility target facts all participate in the deterministic binding-spec hash. `dear-imgui-build-support` ships on the same 0.16.0 train as every other publishable crate.
 
 Source identity is package data rather than repository state. The exact 40-hex
 cimgui and nested Dear ImGui revisions live in

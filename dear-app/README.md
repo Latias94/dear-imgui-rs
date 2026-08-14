@@ -7,11 +7,11 @@
 
 ## Quick Start
 
-Create a binary crate and add the exact prerelease:
+Create a binary crate and add the stable release:
 
 ```toml
 [dependencies]
-dear-app = "=0.16.0-alpha.3"
+dear-app = "0.16"
 ```
 
 Then use `dear_app::run_ui` for applications that only need persistent UI state:

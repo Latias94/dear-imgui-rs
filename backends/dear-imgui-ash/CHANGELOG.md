@@ -4,6 +4,8 @@ All notable changes to this crate will be documented in this file.
 
 ## Unreleased
 
+## 0.16.0 - 2026-08-14
+
 ### Breaking
 
 - Replace `WinitViewportRuntime` and `Sdl3ViewportRuntime` with `WinitViewportRoute` and `Sdl3ViewportRoute`. Each route captures the exact platform generation at `attach` and exposes one preparation transaction: `prepare(FrameToken)` (plus Winit's `ActiveEventLoop`) reconciles textures, dispatches secondary viewports, and returns all renderer and platform callback faults together. The old `prepare_context`, `prepare_frame`, `poll_fault`, `attach_unchecked`, renderer inspection, and manual trace/bypass entries were removed.
