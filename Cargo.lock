@@ -2611,6 +2611,8 @@ version = "0.16.0"
 dependencies = [
  "dear-imgui-cte-sys",
  "dear-imgui-rs",
+ "static_assertions",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

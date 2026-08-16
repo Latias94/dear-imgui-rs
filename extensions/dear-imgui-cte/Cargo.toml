@@ -20,9 +20,13 @@ features = []
 [dependencies]
 dear-imgui-rs.workspace = true
 dear-imgui-cte-sys.workspace = true
+thiserror.workspace = true
 
 [features]
 default = []
 prebuilt = ["dear-imgui-rs/prebuilt", "dear-imgui-cte-sys/prebuilt"]
 build-from-source = ["dear-imgui-rs/build-from-source", "dear-imgui-cte-sys/build-from-source"]
 wasm = ["dear-imgui-rs/wasm", "dear-imgui-cte-sys/wasm"]
+
+[dev-dependencies]
+static_assertions = "1.1"
