@@ -17,6 +17,7 @@ import source_metadata  # noqa: E402
 CIMGUI_REVISION = "1" * 40
 IMGUI_REVISION = "2" * 40
 EXTENSION_REVISION = "3" * 40
+NESTED_EXTENSION_REVISION = "4" * 40
 
 
 class SourceMetadataTests(unittest.TestCase):
@@ -290,7 +291,11 @@ class CrateBindingSourceMetadataTests(unittest.TestCase):
     def setUp(self):
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.repo_root = Path(self.temporary_directory.name)
-        self.spec = source_metadata.BINDING_SOURCE_SPECS[0]
+        self.spec = next(
+            spec
+            for spec in source_metadata.BINDING_SOURCE_SPECS
+            if not spec.nested_sources
+        )
         self.manifest_path = self.repo_root / self.spec.manifest_path
         self.source_path = self.repo_root / self.spec.relative_path
         self.source_path.mkdir(parents=True)
@@ -310,25 +315,24 @@ class CrateBindingSourceMetadataTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def test_registry_covers_test_engine_and_six_extension_sys_crates(self):
-        self.assertEqual(len(source_metadata.BINDING_SOURCE_SPECS), 7)
+    def test_registry_is_discovered_from_the_maintained_source_inventory(self):
         self.assertEqual(
             {spec.crate_name for spec in source_metadata.BINDING_SOURCE_SPECS},
             {
-                "dear-imgui-test-engine-sys",
-                "dear-implot-sys",
-                "dear-implot3d-sys",
-                "dear-imnodes-sys",
-                "dear-node-editor-sys",
-                "dear-imguizmo-sys",
-                "dear-imguizmo-quat-sys",
+                source.crate_name
+                for source in source_metadata.SOURCE_INVENTORY.sources
+                if source.id != "core"
             },
+        )
+        self.assertIn(
+            "dear-imgui-cte-sys",
+            {spec.crate_name for spec in source_metadata.BINDING_SOURCE_SPECS},
         )
 
     def test_binding_metadata_is_exact_and_rejects_unknown_or_malformed_values(self):
         self.assertEqual(
-            source_metadata.read_binding_source_metadata(self.manifest_path),
-            EXTENSION_REVISION,
+            source_metadata.read_binding_source_metadata(self.manifest_path, self.spec),
+            {source_metadata.BINDING_SOURCE_METADATA_KEY: EXTENSION_REVISION},
         )
         for revision, extra in [
             ("short", ""),
@@ -337,7 +341,9 @@ class CrateBindingSourceMetadataTests(unittest.TestCase):
             with self.subTest(revision=revision, extra=extra):
                 self.write_manifest(revision, extra=extra)
                 with self.assertRaises(source_metadata.SourceMetadataError):
-                    source_metadata.read_binding_source_metadata(self.manifest_path)
+                    source_metadata.read_binding_source_metadata(
+                        self.manifest_path, self.spec
+                    )
 
     def test_binding_metadata_rejects_missing_and_duplicate_revisions(self):
         fixtures = (
@@ -353,7 +359,9 @@ class CrateBindingSourceMetadataTests(unittest.TestCase):
             with self.subTest(fixture=fixture):
                 self.manifest_path.write_text(fixture, encoding="utf-8")
                 with self.assertRaises(source_metadata.SourceMetadataError):
-                    source_metadata.read_binding_source_metadata(self.manifest_path)
+                    source_metadata.read_binding_source_metadata(
+                        self.manifest_path, self.spec
+                    )
 
     def test_verification_rejects_dirty_or_mismatched_owning_source(self):
         def dirty_git_output(path: Path, arguments):
@@ -413,9 +421,153 @@ class CrateBindingSourceMetadataTests(unittest.TestCase):
         self.assertTrue(result.changed)
         self.assertTrue(result.written)
         self.assertEqual(
-            source_metadata.read_binding_source_metadata(self.manifest_path), "5" * 40
+            source_metadata.read_binding_source_metadata(self.manifest_path, self.spec),
+            {source_metadata.BINDING_SOURCE_METADATA_KEY: "5" * 40},
         )
         self.assertEqual(other_manifest.read_text(encoding="utf-8"), "untouched\n")
+
+
+class NestedCrateBindingSourceMetadataTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self.temporary_directory.name)
+        self.spec = next(
+            spec
+            for spec in source_metadata.BINDING_SOURCE_SPECS
+            if spec.crate_name == "dear-imgui-cte-sys"
+        )
+        self.nested = self.spec.nested_sources[0]
+        self.manifest_path = self.repo_root / self.spec.manifest_path
+        self.source_path = self.repo_root / self.spec.relative_path
+        self.nested_path = self.repo_root / self.nested.relative_path
+        self.nested_path.mkdir(parents=True)
+        self.manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        self.write_manifest(EXTENSION_REVISION, NESTED_EXTENSION_REVISION)
+
+    def tearDown(self):
+        self.temporary_directory.cleanup()
+
+    def write_manifest(self, source_revision: str, nested_revision: str | None) -> None:
+        nested_line = (
+            f'{self.nested.metadata_key} = "{nested_revision}"\n'
+            if nested_revision is not None
+            else ""
+        )
+        self.manifest_path.write_text(
+            "[package]\n"
+            f'name = "{self.spec.crate_name}"\n\n'
+            "[package.metadata.dear-imgui-binding]\n"
+            f'source-revision = "{source_revision}"\n'
+            f"{nested_line}",
+            encoding="utf-8",
+        )
+
+    def fake_git(
+        self,
+        *,
+        source_revision: str = EXTENSION_REVISION,
+        nested_revision: str = NESTED_EXTENSION_REVISION,
+        gitlink_revision: str = NESTED_EXTENSION_REVISION,
+    ):
+        def output(path: Path, arguments):
+            if tuple(arguments) == ("rev-parse", "--show-toplevel"):
+                return f"{path.resolve()}\n"
+            if arguments[0] == "status":
+                expected_ignore = "all" if path == self.source_path else "none"
+                self.assertEqual(arguments[-1], f"--ignore-submodules={expected_ignore}")
+                return ""
+            if tuple(arguments) == ("rev-parse", "HEAD"):
+                revision = (
+                    source_revision if path == self.source_path else nested_revision
+                )
+                return f"{revision}\n"
+            if tuple(arguments) == (
+                "ls-tree",
+                "HEAD",
+                "--",
+                self.nested.path.as_posix(),
+            ):
+                return (
+                    f"160000 commit {gitlink_revision}\t"
+                    f"{self.nested.path.as_posix()}\n"
+                )
+            self.fail(f"unexpected git command for {path}: {arguments}")
+
+        return output
+
+    def test_nested_metadata_requires_both_revisions_and_verifies_gitlink(self):
+        expected = {
+            source_metadata.BINDING_SOURCE_METADATA_KEY: EXTENSION_REVISION,
+            self.nested.metadata_key: NESTED_EXTENSION_REVISION,
+        }
+        self.assertEqual(
+            source_metadata.read_binding_source_metadata(
+                self.manifest_path, self.spec
+            ),
+            expected,
+        )
+        with patch.object(
+            source_metadata, "_git_output", side_effect=self.fake_git()
+        ):
+            self.assertEqual(
+                source_metadata.verify_binding_source_metadata(
+                    self.repo_root, self.spec
+                ),
+                expected,
+            )
+
+        self.write_manifest(EXTENSION_REVISION, None)
+        with self.assertRaisesRegex(
+            source_metadata.SourceMetadataError, self.nested.metadata_key
+        ):
+            source_metadata.read_binding_source_metadata(
+                self.manifest_path, self.spec
+            )
+
+    def test_verification_rejects_nested_checkout_that_does_not_match_gitlink(self):
+        next_nested_revision = "5" * 40
+        self.write_manifest(EXTENSION_REVISION, next_nested_revision)
+        with (
+            patch.object(
+                source_metadata,
+                "_git_output",
+                side_effect=self.fake_git(nested_revision=next_nested_revision),
+            ),
+            self.assertRaisesRegex(
+                source_metadata.SourceMetadataError, "gitlink revision mismatch"
+            ),
+        ):
+            source_metadata.verify_binding_source_metadata(
+                self.repo_root, self.spec
+            )
+
+    def test_update_rewrites_wrapper_and_nested_revisions_together(self):
+        next_source_revision = "5" * 40
+        next_nested_revision = "6" * 40
+        with patch.object(
+            source_metadata,
+            "_git_output",
+            side_effect=self.fake_git(
+                source_revision=next_source_revision,
+                nested_revision=next_nested_revision,
+                gitlink_revision=next_nested_revision,
+            ),
+        ):
+            result = source_metadata.update_binding_source_metadata(
+                self.repo_root, self.spec
+            )
+
+        self.assertTrue(result.changed)
+        self.assertTrue(result.written)
+        self.assertEqual(
+            source_metadata.read_binding_source_metadata(
+                self.manifest_path, self.spec
+            ),
+            {
+                source_metadata.BINDING_SOURCE_METADATA_KEY: next_source_revision,
+                self.nested.metadata_key: next_nested_revision,
+            },
+        )
 
 if __name__ == "__main__":
     unittest.main()

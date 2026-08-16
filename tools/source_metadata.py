@@ -26,6 +26,7 @@ SOURCE_METADATA_SECTION = "package.metadata.dear-imgui-sources"
 SOURCE_METADATA_KEYS = frozenset({"cimgui-revision", "imgui-revision"})
 BINDING_SOURCE_METADATA_SECTION = "package.metadata.dear-imgui-binding"
 BINDING_SOURCE_METADATA_KEY = "source-revision"
+BINDING_NESTED_SOURCE_METADATA_KEY = "nested-source-revision"
 GIT_REVISION_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 
 
@@ -46,6 +47,17 @@ class BindingSourceSpec:
     label: str
     manifest_path: Path
     relative_path: Path
+    nested_sources: tuple[NestedBindingSourceSpec, ...] = ()
+
+
+@dataclass(frozen=True)
+class NestedBindingSourceSpec:
+    """One gitlink-owned source nested under a binding wrapper."""
+
+    label: str
+    path: Path
+    relative_path: Path
+    metadata_key: str
 
 
 SOURCE_INVENTORY = load_inventory(Path(__file__).resolve().parents[1])
@@ -78,22 +90,11 @@ BINDING_SOURCE_LABELS = {
     "implot": "cimplot",
     "implot3d": "cimplot3d",
     "imnodes": "cimnodes",
+    "cte": "cimCTE",
     "node-editor": "cimnodes_editor",
     "imguizmo": "cimguizmo",
     "imguizmo-quat": "cimguizmo_quat",
 }
-BINDING_SOURCE_SPECS = tuple(
-    BindingSourceSpec(
-        crate_name=source.crate_name,
-        label=BINDING_SOURCE_LABELS[source.id],
-        manifest_path=Path(source.crate_root.as_posix()) / "Cargo.toml",
-        relative_path=(
-            Path(source.crate_root.as_posix()) / Path(source.source_root.as_posix())
-        ),
-    )
-    for source in SOURCE_INVENTORY.sources
-    if source.id != "core"
-)
 
 
 class SourceMetadataError(RuntimeError):
@@ -104,6 +105,48 @@ class SourceMetadataError(RuntimeError):
             errors = (errors,)
         self.errors = tuple(errors)
         super().__init__("\n".join(self.errors))
+
+
+def _binding_source_spec(source) -> BindingSourceSpec:
+    relative_path = Path(source.crate_root.as_posix()) / Path(
+        source.source_root.as_posix()
+    )
+    nested_sources: tuple[NestedBindingSourceSpec, ...] = ()
+    if source.id == "cte":
+        nested_submodules = tuple(
+            submodule
+            for submodule in SOURCE_INVENTORY.nested_submodules
+            if Path(submodule.parent.as_posix()) == relative_path
+        )
+        if len(nested_submodules) != 1:
+            raise SourceMetadataError(
+                "cimCTE must define exactly one nested source in the maintained-source "
+                f"inventory, found {len(nested_submodules)}"
+            )
+        nested = nested_submodules[0]
+        nested_path = Path(nested.path.as_posix())
+        nested_sources = (
+            NestedBindingSourceSpec(
+                label=nested_path.name,
+                path=nested_path,
+                relative_path=relative_path / nested_path,
+                metadata_key=BINDING_NESTED_SOURCE_METADATA_KEY,
+            ),
+        )
+    return BindingSourceSpec(
+        crate_name=source.crate_name,
+        label=BINDING_SOURCE_LABELS[source.id],
+        manifest_path=Path(source.crate_root.as_posix()) / "Cargo.toml",
+        relative_path=relative_path,
+        nested_sources=nested_sources,
+    )
+
+
+BINDING_SOURCE_SPECS = tuple(
+    _binding_source_spec(source)
+    for source in SOURCE_INVENTORY.sources
+    if source.id != "core"
+)
 
 
 @dataclass(frozen=True)
@@ -157,7 +200,9 @@ def read_core_source_metadata(manifest_path: Path) -> dict[str, str]:
     return _parse_core_source_metadata(manifest_text, manifest_path)
 
 
-def _parse_binding_source_metadata(manifest_text: str, manifest_path: Path) -> str:
+def _parse_binding_source_metadata(
+    manifest_text: str, manifest_path: Path, spec: BindingSourceSpec
+) -> dict[str, str]:
     try:
         data = tomllib.loads(manifest_text)
     except tomllib.TOMLDecodeError as error:
@@ -170,7 +215,10 @@ def _parse_binding_source_metadata(manifest_text: str, manifest_path: Path) -> s
             f"missing [{BINDING_SOURCE_METADATA_SECTION}] in {manifest_path}"
         ) from error
 
-    expected_keys = {BINDING_SOURCE_METADATA_KEY}
+    expected_keys = {
+        BINDING_SOURCE_METADATA_KEY,
+        *(nested.metadata_key for nested in spec.nested_sources),
+    }
     if not isinstance(metadata, dict) or set(metadata) != expected_keys:
         found = sorted(metadata) if isinstance(metadata, dict) else type(metadata).__name__
         raise SourceMetadataError(
@@ -178,21 +226,25 @@ def _parse_binding_source_metadata(manifest_text: str, manifest_path: Path) -> s
             f"{sorted(expected_keys)}, found {found}"
         )
 
-    revision = metadata[BINDING_SOURCE_METADATA_KEY]
-    if not isinstance(revision, str) or GIT_REVISION_RE.fullmatch(revision) is None:
-        raise SourceMetadataError(
-            f"{BINDING_SOURCE_METADATA_KEY} must be exactly 40 ASCII hexadecimal characters"
-        )
-    return revision
+    revisions: dict[str, str] = {}
+    for key, revision in metadata.items():
+        if not isinstance(revision, str) or GIT_REVISION_RE.fullmatch(revision) is None:
+            raise SourceMetadataError(
+                f"{key} must be exactly 40 ASCII hexadecimal characters"
+            )
+        revisions[key] = revision
+    return revisions
 
 
-def read_binding_source_metadata(manifest_path: Path) -> str:
-    """Read one crate-local binding source revision from a Cargo manifest."""
+def read_binding_source_metadata(
+    manifest_path: Path, spec: BindingSourceSpec
+) -> dict[str, str]:
+    """Read exact crate-local wrapper and tracked nested source revisions."""
     try:
         manifest_text = manifest_path.read_text(encoding="utf-8")
     except OSError as error:
         raise SourceMetadataError(f"could not read {manifest_path}: {error}") from error
-    return _parse_binding_source_metadata(manifest_text, manifest_path)
+    return _parse_binding_source_metadata(manifest_text, manifest_path, spec)
 
 
 def _git_output(path: Path, arguments: Sequence[str]) -> str:
@@ -301,9 +353,9 @@ def verify_core_source_metadata(repo_root: Path) -> dict[str, str]:
     return revisions
 
 
-def inspect_binding_source(repo_root: Path, spec: BindingSourceSpec) -> str:
-    """Return one exact revision only when its owning submodule is clean."""
-    source_path = repo_root / spec.relative_path
+def _inspect_git_source(
+    source_path: Path, label: str, *, ignore_submodules: str
+) -> str:
     if not source_path.is_dir():
         raise SourceMetadataError(f"vendored source path is missing: {source_path}")
 
@@ -320,38 +372,93 @@ def inspect_binding_source(repo_root: Path, spec: BindingSourceSpec) -> str:
             "status",
             "--porcelain=v1",
             "--untracked-files=all",
-            "--ignore-submodules=none",
+            f"--ignore-submodules={ignore_submodules}",
         ),
     )
     if status:
         raise SourceMetadataError(
-            f"{spec.label} source tree is dirty: {source_path}\n{status.rstrip()}"
+            f"{label} source tree is dirty: {source_path}\n{status.rstrip()}"
         )
 
     revision = _git_output(source_path, ("rev-parse", "HEAD")).strip()
     if GIT_REVISION_RE.fullmatch(revision) is None:
         raise SourceMetadataError(
-            f"invalid {spec.label} revision from {source_path}: {revision!r}"
+            f"invalid {label} revision from {source_path}: {revision!r}"
         )
     return revision
 
 
+def _inspect_nested_gitlink(
+    source_path: Path, nested: NestedBindingSourceSpec
+) -> str:
+    output = _git_output(
+        source_path,
+        ("ls-tree", "HEAD", "--", nested.path.as_posix()),
+    ).rstrip("\r\n")
+    match = re.fullmatch(
+        rf"160000 commit ([0-9a-fA-F]{{40}})\t{re.escape(nested.path.as_posix())}",
+        output,
+    )
+    if match is None:
+        raise SourceMetadataError(
+            f"{nested.label} is not an exact gitlink in {source_path}: {output!r}"
+        )
+    return match.group(1)
+
+
+def inspect_binding_source(
+    repo_root: Path, spec: BindingSourceSpec
+) -> dict[str, str]:
+    """Return exact wrapper and nested revisions when their worktrees agree."""
+    source_path = repo_root / spec.relative_path
+    revisions = {
+        BINDING_SOURCE_METADATA_KEY: _inspect_git_source(
+            source_path,
+            spec.label,
+            ignore_submodules="all" if spec.nested_sources else "none",
+        )
+    }
+    for nested in spec.nested_sources:
+        gitlink_revision = _inspect_nested_gitlink(source_path, nested)
+        nested_revision = _inspect_git_source(
+            repo_root / nested.relative_path,
+            nested.label,
+            ignore_submodules="none",
+        )
+        if gitlink_revision != nested_revision:
+            raise SourceMetadataError(
+                f"{nested.label} gitlink revision mismatch: wrapper "
+                f"{gitlink_revision}, HEAD {nested_revision}"
+            )
+        revisions[nested.metadata_key] = nested_revision
+    return revisions
+
+
 def verify_binding_source_metadata(
     repo_root: Path, spec: BindingSourceSpec
-) -> str:
-    """Verify one crate-local revision against its clean owning submodule."""
-    recorded = read_binding_source_metadata(repo_root / spec.manifest_path)
+) -> dict[str, str]:
+    """Verify crate-local wrapper and nested revisions against clean sources."""
+    recorded = read_binding_source_metadata(repo_root / spec.manifest_path, spec)
     actual = inspect_binding_source(repo_root, spec)
-    if recorded != actual:
-        raise SourceMetadataError(
-            f"{spec.label} revision mismatch: metadata {recorded}, HEAD {actual}"
-        )
+    labels = {
+        BINDING_SOURCE_METADATA_KEY: spec.label,
+        **{nested.metadata_key: nested.label for nested in spec.nested_sources},
+    }
+    errors = [
+        f"{labels[key]} revision mismatch: metadata {recorded[key]}, HEAD {actual[key]}"
+        for key in recorded
+        if recorded[key] != actual[key]
+    ]
+    if errors:
+        raise SourceMetadataError(errors)
     return actual
 
 
-def verify_all_binding_source_metadata(repo_root: Path) -> dict[str, str]:
+def verify_all_binding_source_metadata(
+    repo_root: Path,
+) -> dict[str, dict[str, str]]:
     """Verify every Test Engine and extension binding source independently."""
-    revisions: dict[str, str] = {}
+    revisions: dict[str, dict[str, str]] = {}
     errors: list[str] = []
     for spec in BINDING_SOURCE_SPECS:
         try:
@@ -411,8 +518,11 @@ def _replace_metadata_values(
     return updated
 
 
-def _replace_binding_metadata_value(
-    manifest_text: str, manifest_path: Path, revision: str
+def _replace_binding_metadata_values(
+    manifest_text: str,
+    manifest_path: Path,
+    spec: BindingSourceSpec,
+    revisions: dict[str, str],
 ) -> str:
     lines = manifest_text.splitlines(keepends=True)
     section_header = f"[{BINDING_SOURCE_METADATA_SECTION}]"
@@ -434,24 +544,30 @@ def _replace_binding_metadata_value(
         len(lines),
     )
     assignment = re.compile(r"^(\s*)([A-Za-z0-9_-]+)(\s*=\s*).*$")
-    found = False
+    expected_keys = {
+        BINDING_SOURCE_METADATA_KEY,
+        *(nested.metadata_key for nested in spec.nested_sources),
+    }
+    found: set[str] = set()
     for index in range(section_start + 1, section_end):
         match = assignment.match(lines[index])
-        if match is None or match.group(2) != BINDING_SOURCE_METADATA_KEY:
+        if match is None or match.group(2) not in revisions:
             continue
+        key = match.group(2)
         newline = "\n" if lines[index].endswith("\n") else ""
         lines[index] = (
-            f'{match.group(1)}{BINDING_SOURCE_METADATA_KEY}{match.group(3)}'
-            f'"{revision}"{newline}'
+            f'{match.group(1)}{key}{match.group(3)}'
+            f'"{revisions[key]}"{newline}'
         )
-        found = True
+        found.add(key)
 
-    if not found:
+    if found != expected_keys:
         raise SourceMetadataError(
-            f"could not update {BINDING_SOURCE_METADATA_KEY} in {manifest_path}"
+            f"could not update all binding source metadata keys in {manifest_path}: "
+            f"found {sorted(found)}"
         )
     updated = "".join(lines)
-    if _parse_binding_source_metadata(updated, manifest_path) != revision:
+    if _parse_binding_source_metadata(updated, manifest_path, spec) != revisions:
         raise SourceMetadataError(
             "binding source metadata update did not round-trip through TOML parsing"
         )
@@ -503,11 +619,9 @@ def update_binding_source_metadata(
 ) -> MetadataUpdate:
     """Synchronize only the manifest owned by one binding source."""
     manifest_path = repo_root / spec.manifest_path
-    previous_revision = read_binding_source_metadata(manifest_path)
-    revision = inspect_binding_source(repo_root, spec)
-    changed = previous_revision != revision
-    previous = {BINDING_SOURCE_METADATA_KEY: previous_revision}
-    revisions = {BINDING_SOURCE_METADATA_KEY: revision}
+    previous = read_binding_source_metadata(manifest_path, spec)
+    revisions = inspect_binding_source(repo_root, spec)
+    changed = previous != revisions
     if not changed or dry_run:
         return MetadataUpdate(previous, revisions, changed, False)
 
@@ -515,7 +629,9 @@ def update_binding_source_metadata(
         manifest_text = manifest_path.read_text(encoding="utf-8")
     except OSError as error:
         raise SourceMetadataError(f"could not read {manifest_path}: {error}") from error
-    updated = _replace_binding_metadata_value(manifest_text, manifest_path, revision)
+    updated = _replace_binding_metadata_values(
+        manifest_text, manifest_path, spec, revisions
+    )
     try:
         _atomic_write_text(manifest_path, updated)
     except OSError as error:
@@ -582,7 +698,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"{source.metadata_key}={revisions[source.metadata_key]}")
     else:
         for spec in BINDING_SOURCE_SPECS:
-            print(f"{spec.crate_name}={binding_revisions[spec.crate_name]}")
+            revisions = binding_revisions[spec.crate_name]
+            print(
+                f"{spec.crate_name}="
+                f"{revisions[BINDING_SOURCE_METADATA_KEY]}"
+            )
+            for nested in spec.nested_sources:
+                print(
+                    f"{spec.crate_name}.{nested.metadata_key}="
+                    f"{revisions[nested.metadata_key]}"
+                )
     return 0
 
 

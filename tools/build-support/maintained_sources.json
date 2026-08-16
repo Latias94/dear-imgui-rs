@@ -129,6 +129,29 @@
       }
     },
     {
+      "id": "cte",
+      "crate_name": "dear-imgui-cte-sys",
+      "crate_root": "extensions/dear-imgui-cte-sys",
+      "source_root": "third-party/cimCTE",
+      "files": [
+        { "id": "wrapper", "canonical": "third-party/cimCTE/cimCTE.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "text-editor", "canonical": "third-party/cimCTE/ImGuiColorTextEdit/TextEditor.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "text-diff", "canonical": "third-party/cimCTE/ImGuiColorTextEdit/TextDiff.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "dejavu", "canonical": "third-party/cimCTE/ImGuiColorTextEdit/example/dejavu.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "trie", "canonical": "third-party/cimCTE/ImGuiColorTextEdit/extras/TrieAutoComplete.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "bridge", "canonical": "shim/cte_bridge.cpp", "alternates": [], "provider_transform": null }
+      ],
+      "native_required_files": ["wrapper", "text-editor", "text-diff", "dejavu", "trie"],
+      "archive_sentinels": ["wrapper", "text-editor"],
+      "provider": {
+        "wasm_bindings": "src/wasm_bindings_pregenerated.rs",
+        "symbol_prefixes": ["TextEditor_", "TextDiff_", "DocPos_", "DocSelection_", "VisPos_", "Glyph_", "Iterator_", "Language_", "Notifications_", "Palette_", "TrieAutoComplete_", "CodePoint_"],
+        "required_exports": ["GetDejavu", "SetDejavu"],
+        "include_dirs": ["third-party/cimCTE", "third-party/cimCTE/ImGuiColorTextEdit"],
+        "source_files": ["wrapper", "text-editor", "text-diff", "dejavu", "trie"]
+      }
+    },
+    {
       "id": "node-editor",
       "crate_name": "dear-node-editor-sys",
       "crate_root": "extensions/dear-node-editor-sys",
@@ -193,6 +216,7 @@
     { "parent": "extensions/dear-imguizmo-quat-sys/third-party/cimguizmo_quat", "path": "imGuIZMO.quat", "shallow": true, "package": true, "package_order": 6 },
     { "parent": "extensions/dear-imguizmo-quat-sys/third-party/cimguizmo_quat/imGuIZMO.quat", "path": "libs/imgui", "shallow": true, "package": false, "package_order": null },
     { "parent": "extensions/dear-imnodes-sys/third-party/cimnodes", "path": "imnodes", "shallow": true, "package": true, "package_order": 2 },
-    { "parent": "extensions/dear-node-editor-sys/third-party/cimnodes_editor", "path": "imgui-node-editor", "shallow": true, "package": true, "package_order": 3 }
+    { "parent": "extensions/dear-node-editor-sys/third-party/cimnodes_editor", "path": "imgui-node-editor", "shallow": true, "package": true, "package_order": 3 },
+    { "parent": "extensions/dear-imgui-cte-sys/third-party/cimCTE", "path": "ImGuiColorTextEdit", "shallow": false, "package": true, "package_order": 7 }
   ]
 }

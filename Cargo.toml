@@ -19,6 +19,8 @@ members = [
     "extensions/dear-imguizmo",
     "extensions/dear-imguizmo-quat-sys",
     "extensions/dear-imguizmo-quat",
+    "extensions/dear-imgui-cte-sys",
+    "extensions/dear-imgui-cte",
     "extensions/dear-imgui-test-engine-sys",
     "extensions/dear-imgui-test-engine",
     "extensions/dear-imnodes-sys",
@@ -66,6 +68,8 @@ dear-app = { version = "0.16", path = "dear-app" }
 dear-file-browser = { version = "0.16", path = "extensions/dear-file-browser" }
 dear-imgui-ash = { version = "0.16", path = "backends/dear-imgui-ash" }
 dear-imgui-bevy = { version = "0.16", path = "backends/dear-imgui-bevy" }
+dear-imgui-cte = { version = "0.16", path = "extensions/dear-imgui-cte" }
+dear-imgui-cte-sys = { version = "0.16", path = "extensions/dear-imgui-cte-sys", default-features = false }
 dear-imgui-glow = { version = "0.16", path = "backends/dear-imgui-glow" }
 dear-imgui-reflect = { version = "0.16", path = "extensions/dear-imgui-reflect" }
 dear-imgui-reflect-derive = { version = "0.16", path = "extensions/dear-imgui-reflect-derive" }

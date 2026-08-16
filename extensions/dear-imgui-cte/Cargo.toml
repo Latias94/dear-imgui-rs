@@ -1,0 +1,28 @@
+[package]
+name = "dear-imgui-cte"
+version.workspace = true
+edition.workspace = true
+description = "Preview safe Rust bindings for ImGuiColorTextEdit"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+documentation = "https://docs.rs/dear-imgui-cte"
+categories.workspace = true
+keywords.workspace = true
+readme = "README.md"
+
+[package.metadata.docs.rs]
+no-default-features = true
+all-features = false
+features = []
+
+[dependencies]
+dear-imgui-rs.workspace = true
+dear-imgui-cte-sys.workspace = true
+
+[features]
+default = []
+prebuilt = ["dear-imgui-rs/prebuilt", "dear-imgui-cte-sys/prebuilt"]
+build-from-source = ["dear-imgui-rs/build-from-source", "dear-imgui-cte-sys/build-from-source"]
+wasm = ["dear-imgui-rs/wasm", "dear-imgui-cte-sys/wasm"]

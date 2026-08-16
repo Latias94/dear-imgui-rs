@@ -26,3 +26,7 @@
 	path = extensions/dear-node-editor-sys/third-party/cimnodes_editor
 	url = https://github.com/cimgui/cimnodes_editor
 	branch = main
+[submodule "extensions/dear-imgui-cte-sys/third-party/cimCTE"]
+	path = extensions/dear-imgui-cte-sys/third-party/cimCTE
+	url = https://github.com/cimgui/cimCTE
+	branch = main_goossens

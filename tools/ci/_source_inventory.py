@@ -352,6 +352,7 @@ def _validate_inventory(inventory: SourceInventory) -> None:
     _require_unique((source.crate_root for source in inventory.sources), "crate root")
     for source in inventory.sources:
         _validate_source(source)
+    _validate_core_translation_unit_ownership(inventory)
 
     locations = tuple(
         PurePosixPath(submodule.parent, submodule.path)
@@ -416,6 +417,26 @@ def _validate_source(source: MaintainedSource) -> None:
     _require_unique(provider.symbol_prefixes, "provider symbol prefix")
     _require_unique(provider.required_exports, "provider required export")
     _require_unique(provider.include_dirs, "provider include directory")
+
+
+def _validate_core_translation_unit_ownership(inventory: SourceInventory) -> None:
+    core = inventory.source_by_id("core")
+    core_file_names = {
+        candidate.name
+        for file_id in core.native_required_files
+        for candidate in core.file(file_id).candidates
+    }
+    for source in inventory.sources:
+        if source.id == core.id:
+            continue
+        for file_id in source.native_required_files:
+            for candidate in source.file(file_id).candidates:
+                if candidate.name in core_file_names:
+                    raise SourceInventoryError(
+                        f"maintained source {source.id!r} native file "
+                        f"{candidate.as_posix()!r} reuses core translation unit "
+                        f"{candidate.name!r}; only {core.id!r} may compile it"
+                    )
 
 
 def _validate_file_references(

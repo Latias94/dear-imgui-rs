@@ -2606,6 +2606,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "dear-imgui-cte"
+version = "0.16.0"
+dependencies = [
+ "dear-imgui-cte-sys",
+ "dear-imgui-rs",
+]
+
+[[package]]
+name = "dear-imgui-cte-sys"
+version = "0.16.0"
+dependencies = [
+ "bindgen",
+ "cc",
+ "dear-imgui-build-support",
+ "dear-imgui-sys",
+ "flate2",
+ "tar",
+]
+
+[[package]]
 name = "dear-imgui-examples"
 version = "0.1.0"
 dependencies = [
