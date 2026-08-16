@@ -22,6 +22,7 @@ pub enum ExtensionBinding {
     ImPlot,
     ImPlot3d,
     ImNodes,
+    Cte,
     NodeEditor,
     ImGuizmo,
     ImGuizmoQuat,
@@ -59,6 +60,13 @@ impl ExtensionBinding {
                 sys_crate_name: "dear-imnodes-sys",
                 archive_stem: "dear-imnodes",
                 library_name: "dear_imnodes",
+            },
+            Self::Cte => ExtensionArtifactSpec {
+                extension_id: "cte",
+                safe_crate_name: "dear-imgui-cte",
+                sys_crate_name: "dear-imgui-cte-sys",
+                archive_stem: "dear-imgui-cte",
+                library_name: "dear_imgui_cte",
             },
             Self::NodeEditor => ExtensionArtifactSpec {
                 extension_id: "node-editor",
@@ -120,17 +128,19 @@ impl CrateBindingTarget {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CrateBindingLanguage {
     C,
     Cxx17,
+    Cxx20,
 }
 
 impl CrateBindingLanguage {
-    const fn id(self) -> &'static str {
+    pub const fn id(self) -> &'static str {
         match self {
             Self::C => "c",
             Self::Cxx17 => "c++17",
+            Self::Cxx20 => "c++20",
         }
     }
 }
@@ -451,7 +461,25 @@ impl CrateBindingSpec {
         P: AsRef<str>,
         C: AsRef<str>,
     {
-        let actual = self.validate_embedded(source_revision, checked_in)?;
+        self.validate_checked_in_with_source_revisions(
+            &CrateBindingSourceRevisions::single(source_revision),
+            inputs,
+            checked_in,
+        )
+    }
+
+    fn validate_checked_in_with_source_revisions<I, P, C>(
+        &self,
+        source_revisions: &CrateBindingSourceRevisions,
+        inputs: I,
+        checked_in: &str,
+    ) -> Result<(), String>
+    where
+        I: IntoIterator<Item = (P, C)>,
+        P: AsRef<str>,
+        C: AsRef<str>,
+    {
+        let actual = self.validate_embedded_with_source_revisions(source_revisions, checked_in)?;
         let inputs = inputs
             .into_iter()
             .map(|(path, content)| (path.as_ref().to_owned(), content.as_ref().to_owned()))
@@ -472,7 +500,12 @@ impl CrateBindingSpec {
         }
 
         let (_, body) = split_binding_provenance(checked_in)?;
-        let expected = CrateBindingProvenance::new(self, source_revision, inputs, body);
+        let expected = CrateBindingProvenance::new_with_source_revisions(
+            self,
+            source_revisions.clone(),
+            inputs,
+            body,
+        );
         if actual != expected {
             return Err(format!(
                 "{} {} binding provenance mismatch: expected {:?}, found {:?}",
@@ -490,7 +523,18 @@ impl CrateBindingSpec {
         source_revision: &str,
         checked_in: &str,
     ) -> Result<CrateBindingProvenance, String> {
-        validate_git_revision("source-revision", source_revision)?;
+        self.validate_embedded_with_source_revisions(
+            &CrateBindingSourceRevisions::single(source_revision),
+            checked_in,
+        )
+    }
+
+    fn validate_embedded_with_source_revisions(
+        &self,
+        source_revisions: &CrateBindingSourceRevisions,
+        checked_in: &str,
+    ) -> Result<CrateBindingProvenance, String> {
+        source_revisions.validate()?;
         let (marker, body) = split_binding_provenance(checked_in)?;
         validate_required_symbols(self, body)?;
         let actual = CrateBindingProvenance::parse(marker)?;
@@ -500,7 +544,8 @@ impl CrateBindingSpec {
         let expected = CrateBindingProvenance {
             crate_name: self.crate_name.to_owned(),
             target: self.target.id().to_owned(),
-            source_revision: source_revision.to_owned(),
+            source_revision: source_revisions.source_revision.clone(),
+            nested_source_revision: source_revisions.nested_source_revision.clone(),
             spec_hash: self.deterministic_hash(),
             input_hash: actual.input_hash.clone(),
             output_hash: crate_binding_output_hash(body),
@@ -521,11 +566,11 @@ impl CrateBindingSpec {
         let manifest_path = crate_root.join("Cargo.toml");
         let manifest = std::fs::read_to_string(&manifest_path)
             .map_err(|error| format!("read {}: {error}", manifest_path.display()))?;
-        let revision = parse_crate_binding_source_revision(&manifest)?;
+        let source_revisions = parse_crate_binding_source_revisions(&manifest)?;
         let checked_in_path = crate_root.join(self.checked_in_path);
         let checked_in = std::fs::read_to_string(&checked_in_path)
             .map_err(|error| format!("read {}: {error}", checked_in_path.display()))?;
-        self.validate_embedded(&revision, &checked_in)?;
+        self.validate_embedded_with_source_revisions(&source_revisions, &checked_in)?;
         Ok(checked_in)
     }
 
@@ -536,18 +581,18 @@ impl CrateBindingSpec {
         let manifest_path = crate_root.join("Cargo.toml");
         let manifest = std::fs::read_to_string(&manifest_path)
             .map_err(|error| format!("read {}: {error}", manifest_path.display()))?;
-        let revision = parse_crate_binding_source_revision(&manifest)?;
+        let source_revisions = parse_crate_binding_source_revisions(&manifest)?;
         let checked_in_path = crate_root.join(self.checked_in_path);
         let checked_in = std::fs::read_to_string(&checked_in_path)
             .map_err(|error| format!("read {}: {error}", checked_in_path.display()))?;
-        self.validate_embedded(&revision, &checked_in)
+        self.validate_embedded_with_source_revisions(&source_revisions, &checked_in)
     }
 
     pub fn load_and_validate_full(&self, crate_root: &Path) -> Result<String, String> {
         let manifest_path = crate_root.join("Cargo.toml");
         let manifest = std::fs::read_to_string(&manifest_path)
             .map_err(|error| format!("read {}: {error}", manifest_path.display()))?;
-        let revision = parse_crate_binding_source_revision(&manifest)?;
+        let source_revisions = parse_crate_binding_source_revisions(&manifest)?;
         let mut inputs = Vec::with_capacity(self.input_paths.len());
         for relative_path in self.input_paths {
             let path = crate_root.join(relative_path);
@@ -558,8 +603,8 @@ impl CrateBindingSpec {
         let checked_in_path = crate_root.join(self.checked_in_path);
         let checked_in = std::fs::read_to_string(&checked_in_path)
             .map_err(|error| format!("read {}: {error}", checked_in_path.display()))?;
-        self.validate_checked_in(
-            &revision,
+        self.validate_checked_in_with_source_revisions(
+            &source_revisions,
             inputs
                 .iter()
                 .map(|(path, content)| (*path, content.as_str())),
@@ -583,7 +628,7 @@ impl CrateBindingSpec {
         let manifest_path = crate_root.join("Cargo.toml");
         let manifest = std::fs::read_to_string(&manifest_path)
             .map_err(|error| format!("read {}: {error}", manifest_path.display()))?;
-        let revision = parse_crate_binding_source_revision(&manifest)?;
+        let source_revisions = parse_crate_binding_source_revisions(&manifest)?;
         let mut inputs = Vec::with_capacity(self.input_paths.len());
         for relative_path in self.input_paths {
             let path = crate_root.join(relative_path);
@@ -593,9 +638,9 @@ impl CrateBindingSpec {
         }
         let (_, body) = split_optional_binding_provenance(generated)?;
         validate_required_symbols(self, body)?;
-        Ok(CrateBindingProvenance::new(
+        Ok(CrateBindingProvenance::new_with_source_revisions(
             self,
-            revision,
+            source_revisions,
             inputs
                 .iter()
                 .map(|(path, content)| (*path, content.as_str())),
@@ -606,10 +651,45 @@ impl CrateBindingSpec {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CrateBindingSourceRevisions {
+    pub source_revision: String,
+    pub nested_source_revision: Option<String>,
+}
+
+impl CrateBindingSourceRevisions {
+    pub fn new<S, N>(source_revision: S, nested_source_revision: Option<N>) -> Self
+    where
+        S: Into<String>,
+        N: Into<String>,
+    {
+        Self {
+            source_revision: source_revision.into(),
+            nested_source_revision: nested_source_revision.map(Into::into),
+        }
+    }
+
+    pub fn single(source_revision: impl Into<String>) -> Self {
+        Self {
+            source_revision: source_revision.into(),
+            nested_source_revision: None,
+        }
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        validate_git_revision("source-revision", &self.source_revision)?;
+        if let Some(revision) = &self.nested_source_revision {
+            validate_git_revision("nested-source-revision", revision)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CrateBindingProvenance {
     pub crate_name: String,
     pub target: String,
     pub source_revision: String,
+    pub nested_source_revision: Option<String>,
     pub spec_hash: String,
     pub input_hash: String,
     pub output_hash: String,
@@ -619,6 +699,25 @@ impl CrateBindingProvenance {
     pub fn new<I, P, C>(
         spec: &CrateBindingSpec,
         source_revision: impl Into<String>,
+        inputs: I,
+        binding_body: &str,
+    ) -> Self
+    where
+        I: IntoIterator<Item = (P, C)>,
+        P: AsRef<str>,
+        C: AsRef<str>,
+    {
+        Self::new_with_source_revisions(
+            spec,
+            CrateBindingSourceRevisions::single(source_revision),
+            inputs,
+            binding_body,
+        )
+    }
+
+    pub fn new_with_source_revisions<I, P, C>(
+        spec: &CrateBindingSpec,
+        source_revisions: CrateBindingSourceRevisions,
         inputs: I,
         binding_body: &str,
     ) -> Self
@@ -650,7 +749,8 @@ impl CrateBindingProvenance {
         Self {
             crate_name: spec.crate_name.to_owned(),
             target: spec.target.id().to_owned(),
-            source_revision: source_revision.into(),
+            source_revision: source_revisions.source_revision,
+            nested_source_revision: source_revisions.nested_source_revision,
             spec_hash: spec.deterministic_hash(),
             input_hash: input_hash.finish(),
             output_hash: crate_binding_output_hash(binding_body),
@@ -669,7 +769,7 @@ impl CrateBindingProvenance {
                 .ok_or_else(|| format!("malformed binding provenance field {field:?}"))?;
             if !matches!(
                 name,
-                "crate" | "target" | "source" | "spec" | "inputs" | "output"
+                "crate" | "target" | "source" | "nested" | "spec" | "inputs" | "output"
             ) {
                 return Err(format!("unknown binding provenance field {name}"));
             }
@@ -686,6 +786,9 @@ impl CrateBindingProvenance {
             }
         }
         validate_git_revision("binding provenance source", values["source"])?;
+        if let Some(revision) = values.get("nested") {
+            validate_git_revision("binding provenance nested source", revision)?;
+        }
         for hash in ["spec", "inputs", "output"] {
             validate_stable_hash(hash, values[hash])?;
         }
@@ -693,6 +796,7 @@ impl CrateBindingProvenance {
             crate_name: values["crate"].to_owned(),
             target: values["target"].to_owned(),
             source_revision: values["source"].to_owned(),
+            nested_source_revision: values.get("nested").map(|revision| (*revision).to_owned()),
             spec_hash: values["spec"].to_owned(),
             input_hash: values["inputs"].to_owned(),
             output_hash: values["output"].to_owned(),
@@ -701,10 +805,20 @@ impl CrateBindingProvenance {
 
     pub fn identity_hash(&self) -> String {
         let mut hash = StableHash::new();
-        hash.field("schema", "crate-binding-identity-v1");
+        hash.field(
+            "schema",
+            if self.nested_source_revision.is_some() {
+                "crate-binding-identity-v2"
+            } else {
+                "crate-binding-identity-v1"
+            },
+        );
         hash.field("crate_name", &self.crate_name);
         hash.field("target", &self.target);
         hash.field("source_revision", &self.source_revision);
+        if let Some(revision) = &self.nested_source_revision {
+            hash.field("nested_source_revision", revision);
+        }
         hash.field("spec_hash", &self.spec_hash);
         hash.field("input_hash", &self.input_hash);
         hash.field("output_hash", &self.output_hash);
@@ -712,11 +826,17 @@ impl CrateBindingProvenance {
     }
 
     pub fn marker(&self) -> String {
+        let nested = self
+            .nested_source_revision
+            .as_ref()
+            .map(|revision| format!(" nested={revision}"))
+            .unwrap_or_default();
         format!(
-            "{CRATE_BINDING_PROVENANCE_PREFIX} crate={} target={} source={} spec={} inputs={} output={}",
+            "{CRATE_BINDING_PROVENANCE_PREFIX} crate={} target={} source={}{} spec={} inputs={} output={}",
             self.crate_name,
             self.target,
             self.source_revision,
+            nested,
             self.spec_hash,
             self.input_hash,
             self.output_hash
@@ -777,6 +897,9 @@ impl ExtensionBindingIdentity {
             }
         }
         validate_git_revision("extension binding source", &provenance.source_revision)?;
+        if let Some(revision) = &provenance.nested_source_revision {
+            validate_git_revision("extension binding nested source", revision)?;
+        }
         validate_stable_hash("extension binding spec", &provenance.spec_hash)?;
         validate_stable_hash("extension binding inputs", &provenance.input_hash)?;
         validate_stable_hash("extension binding output", &provenance.output_hash)?;
@@ -824,8 +947,15 @@ fn crate_binding_output_hash(binding_body: &str) -> String {
 }
 
 pub fn parse_crate_binding_source_revision(content: &str) -> Result<String, String> {
+    Ok(parse_crate_binding_source_revisions(content)?.source_revision)
+}
+
+pub fn parse_crate_binding_source_revisions(
+    content: &str,
+) -> Result<CrateBindingSourceRevisions, String> {
     let mut current_section = "";
     let mut revision = None;
+    let mut nested_revision = None;
     for line in content.lines() {
         let line = line.split('#').next().unwrap_or_default().trim();
         if line.is_empty() {
@@ -845,30 +975,36 @@ pub fn parse_crate_binding_source_revision(content: &str) -> Result<String, Stri
             continue;
         };
         let key = key.trim();
-        if key != "source-revision" {
-            return Err(format!(
-                "unknown key {key} in [{CRATE_BINDING_METADATA_SECTION}]"
-            ));
-        }
         let value = value.trim();
         let value = value
             .strip_prefix('"')
             .and_then(|value| value.strip_suffix('"'))
             .ok_or_else(|| {
-                format!(
-                    "source-revision in [{CRATE_BINDING_METADATA_SECTION}] must be a quoted string"
-                )
+                format!("{key} in [{CRATE_BINDING_METADATA_SECTION}] must be a quoted string")
             })?;
-        if revision.replace(value.to_owned()).is_some() {
+        let destination = match key {
+            "source-revision" => &mut revision,
+            "nested-source-revision" => &mut nested_revision,
+            _ => {
+                return Err(format!(
+                    "unknown key {key} in [{CRATE_BINDING_METADATA_SECTION}]"
+                ));
+            }
+        };
+        if destination.replace(value.to_owned()).is_some() {
             return Err(format!(
-                "duplicate source-revision in [{CRATE_BINDING_METADATA_SECTION}]"
+                "duplicate {key} in [{CRATE_BINDING_METADATA_SECTION}]"
             ));
         }
     }
     let revision = revision
         .ok_or_else(|| format!("missing source-revision in [{CRATE_BINDING_METADATA_SECTION}]"))?;
-    validate_git_revision("source-revision", &revision)?;
-    Ok(revision)
+    let revisions = CrateBindingSourceRevisions {
+        source_revision: revision,
+        nested_source_revision: nested_revision,
+    };
+    revisions.validate()?;
+    Ok(revisions)
 }
 
 fn split_binding_provenance(content: &str) -> Result<(&str, &str), String> {
@@ -1255,6 +1391,126 @@ const IMNODES_SYMBOLS: &[&str] = &[
     "imnodes_GetNodeDimensions",
 ];
 
+const CTE_INPUTS: &[&str] = &["third-party/cimCTE/cimCTE.h", "shim/cte_bridge.h"];
+const CTE_INCLUDES: &[CrateBindingInclude] = &[
+    CrateBindingInclude {
+        root: CrateBindingIncludeRoot::CoreCimgui,
+        relative_path: "",
+    },
+    CrateBindingInclude {
+        root: CrateBindingIncludeRoot::CoreImgui,
+        relative_path: "",
+    },
+    CrateBindingInclude {
+        root: CrateBindingIncludeRoot::Source,
+        relative_path: "",
+    },
+    CrateBindingInclude {
+        root: CrateBindingIncludeRoot::Source,
+        relative_path: "ImGuiColorTextEdit",
+    },
+];
+const CTE_DEFINES: &[&str] = &["IMGUI_USE_WCHAR32", "CIMGUI_DEFINE_ENUMS_AND_STRUCTS"];
+const CTE_FUNCTIONS: &[&str] = &[
+    "TextEditor_.*",
+    "TextDiff_.*",
+    "DocPos_.*",
+    "DocSelection_.*",
+    "VisPos_.*",
+    "Glyph_.*",
+    "Iterator_.*",
+    "Language_.*",
+    "Notifications_.*",
+    "Palette_.*",
+    "TrieAutoComplete_.*",
+    "CodePoint_.*",
+    "GetDejavu",
+    "SetDejavu",
+    "dear_imgui_cte_.*",
+];
+const CTE_TYPES: &[&str] = &[
+    "(TextEditor|TextDiff|DocPos.*|DocSelection.*|VisPos.*|Glyph|Iterator|Language|Notifications|Palette|TrieAutoComplete|CodePoint|Change|Decorator|CustomCaret|PopupData|AutoComplete.*|LineBreakConfig|Color|BreakOption|Scroll|Type)",
+    "DearImGuiCte.*",
+];
+const CTE_BLOCKLIST_TYPES: &[&str] = &[
+    "ImDrawList",
+    "ImGuiContext",
+    "ImGuiChildFlags",
+    "ImGuiWindowFlags",
+    "ImGuiKeyChord",
+    "ImTextureID",
+    "ImU32",
+    "ImWchar",
+    "ImVec2",
+    "ImVec2_c",
+    "ImVec4",
+    "ImVec4_c",
+];
+const CTE_PROFILE: CrateBindgenProfile = crate_profile(
+    CrateBindingLanguage::Cxx20,
+    CTE_INCLUDES,
+    CTE_DEFINES,
+    CrateBindingSymbols {
+        functions: CTE_FUNCTIONS,
+        types: CTE_TYPES,
+        vars: &[],
+        blocked_types: CTE_BLOCKLIST_TYPES,
+    },
+    DEFAULT_CRATE_DERIVES,
+    false,
+);
+const CTE_SYMBOLS: &[&str] = &[
+    "TextEditor_TextEditor",
+    "TextEditor_destroy",
+    "TextEditor_Render",
+    "TextEditor_GetText_alloc",
+    "TextEditor_GetText_free",
+    "TextDiff_TextDiff",
+    "TextDiff_destroy",
+    "TextDiff_Render",
+    "DocPos_DocPos_Nil",
+    "DocSelection_DocSelection_Nil",
+    "VisPos_VisPos_Nil",
+    "Glyph_Glyph_Nil",
+    "Iterator_Iterator_Nil",
+    "TrieAutoComplete_TrieAutoComplete",
+    "TrieAutoComplete_destroy",
+    "Notifications_Notifications",
+    "Notifications_destroy",
+    "Palette_Palette",
+    "Palette_destroy",
+    "Language_Cpp",
+    "CodePoint_write",
+    "GetDejavu",
+    "SetDejavu",
+    "dear_imgui_cte_set_change_callback",
+    "dear_imgui_cte_set_transaction_callback",
+    "dear_imgui_cte_set_insert_callback",
+    "dear_imgui_cte_set_delete_callback",
+    "dear_imgui_cte_iterate_line_data",
+    "dear_imgui_cte_set_line_decorator",
+    "dear_imgui_cte_set_custom_caret_callback",
+    "dear_imgui_cte_set_line_number_context_callback",
+    "dear_imgui_cte_set_text_context_callback",
+    "dear_imgui_cte_set_text_hover_callback",
+    "dear_imgui_cte_set_language_change_callback",
+    "dear_imgui_cte_iterate_identifiers",
+    "dear_imgui_cte_filter_selections",
+    "dear_imgui_cte_filter_lines",
+    "dear_imgui_cte_clear_callbacks",
+    "dear_imgui_cte_autocomplete_config_create",
+    "dear_imgui_cte_autocomplete_config_destroy",
+    "dear_imgui_cte_autocomplete_config_set_callback",
+    "dear_imgui_cte_text_editor_set_autocomplete_config",
+    "dear_imgui_cte_text_editor_set_autocomplete_suggestions",
+    "dear_imgui_cte_autocomplete_state_get_search_term",
+    "dear_imgui_cte_autocomplete_state_get_range",
+    "dear_imgui_cte_autocomplete_state_get_context",
+    "dear_imgui_cte_autocomplete_state_clear_suggestions",
+    "dear_imgui_cte_autocomplete_state_add_suggestion",
+    "dear_imgui_cte_autocomplete_state_set_promise",
+];
+
 const NODE_EDITOR_INPUTS: &[&str] = &["shim/node_editor_extra.h"];
 const NODE_EDITOR_INCLUDES: &[CrateBindingInclude] = &[
     CrateBindingInclude {
@@ -1452,6 +1708,13 @@ const IMNODES_SOURCE: CrateBindingSourceSpec = source_spec(
     IMNODES_PROFILE,
     IMNODES_SYMBOLS,
 );
+const CTE_SOURCE: CrateBindingSourceSpec = source_spec(
+    BindingOwner::Extension(ExtensionBinding::Cte),
+    "dear-imgui-cte-sys",
+    CTE_INPUTS,
+    CTE_PROFILE,
+    CTE_SYMBOLS,
+);
 const NODE_EDITOR_SOURCE: CrateBindingSourceSpec = source_spec(
     BindingOwner::Extension(ExtensionBinding::NodeEditor),
     "dear-node-editor-sys",
@@ -1474,7 +1737,7 @@ const IMGUIZMO_QUAT_SOURCE: CrateBindingSourceSpec = source_spec(
     IMGUIZMO_QUAT_SYMBOLS,
 );
 
-static MAINTAINED_CRATE_BINDING_SPECS: LazyLock<[CrateBindingSpec; 12]> = LazyLock::new(|| {
+static MAINTAINED_CRATE_BINDING_SPECS: LazyLock<[CrateBindingSpec; 14]> = LazyLock::new(|| {
     let wasm_import_module = SourceInventory::embedded().wasm_import_module.as_str();
     [
         spec(
@@ -1513,6 +1776,18 @@ static MAINTAINED_CRATE_BINDING_SPECS: LazyLock<[CrateBindingSpec; 12]> = LazyLo
         ),
         spec(
             IMNODES_SOURCE,
+            "src/wasm_bindings_pregenerated.rs",
+            CrateBindingTarget::WasmImport {
+                module_name: wasm_import_module,
+            },
+        ),
+        spec(
+            CTE_SOURCE,
+            "src/bindings_pregenerated.rs",
+            CrateBindingTarget::Native,
+        ),
+        spec(
+            CTE_SOURCE,
             "src/wasm_bindings_pregenerated.rs",
             CrateBindingTarget::WasmImport {
                 module_name: wasm_import_module,

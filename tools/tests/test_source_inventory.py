@@ -70,9 +70,10 @@ class SourceInventoryTests(unittest.TestCase):
                 "shim/cte_bridge.cpp",
             },
         )
-        self.assertNotIn("bridge", source.native_required_files)
+        self.assertIn("bridge", source.native_required_files)
         self.assertIsNotNone(source.provider)
         self.assertIn("TextEditor_", source.provider.symbol_prefixes)
+        self.assertIn("dear_imgui_cte_", source.provider.symbol_prefixes)
         self.assertEqual(
             [
                 submodule.path.as_posix()

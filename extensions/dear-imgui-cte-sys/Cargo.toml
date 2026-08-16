@@ -20,6 +20,17 @@ exclude = [
     "third-party/cimCTE/test/**",
     "third-party/cimCTE/ImGuiColorTextEdit/.github/**",
     "third-party/cimCTE/ImGuiColorTextEdit/docs/**",
+    "third-party/cimCTE/ImGuiColorTextEdit/example/deps/**",
+    "third-party/cimCTE/ImGuiColorTextEdit/example/CMakeLists.txt",
+    "third-party/cimCTE/ImGuiColorTextEdit/example/README.md",
+    "third-party/cimCTE/ImGuiColorTextEdit/example/editor.cpp",
+    "third-party/cimCTE/ImGuiColorTextEdit/example/editor.h",
+    "third-party/cimCTE/ImGuiColorTextEdit/example/main.cpp",
+    "third-party/cimCTE/ImGuiColorTextEdit/example/screenshot.png",
+    "third-party/cimCTE/ImGuiColorTextEdit/example/sdl3gpu.h",
+    "third-party/cimCTE/ImGuiColorTextEdit/example/wind3d11.h",
+    "third-party/cimCTE/ImGuiColorTextEdit/extras/LspBridge.cpp",
+    "third-party/cimCTE/ImGuiColorTextEdit/extras/LspBridge.h",
 ]
 
 [package.metadata.dear-imgui-binding]
@@ -41,6 +52,11 @@ tar = { workspace = true, optional = true }
 bindgen = { workspace = true, optional = true }
 build-support = { workspace = true, features = ["binding-spec"] }
 cc.workspace = true
+
+[[bin]]
+name = "package"
+path = "bin/package/main.rs"
+required-features = ["package-bin"]
 
 [features]
 default = []

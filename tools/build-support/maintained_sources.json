@@ -139,16 +139,16 @@
         { "id": "text-diff", "canonical": "third-party/cimCTE/ImGuiColorTextEdit/TextDiff.cpp", "alternates": [], "provider_transform": "direct" },
         { "id": "dejavu", "canonical": "third-party/cimCTE/ImGuiColorTextEdit/example/dejavu.cpp", "alternates": [], "provider_transform": "direct" },
         { "id": "trie", "canonical": "third-party/cimCTE/ImGuiColorTextEdit/extras/TrieAutoComplete.cpp", "alternates": [], "provider_transform": "direct" },
-        { "id": "bridge", "canonical": "shim/cte_bridge.cpp", "alternates": [], "provider_transform": null }
+        { "id": "bridge", "canonical": "shim/cte_bridge.cpp", "alternates": [], "provider_transform": "direct" }
       ],
-      "native_required_files": ["wrapper", "text-editor", "text-diff", "dejavu", "trie"],
-      "archive_sentinels": ["wrapper", "text-editor"],
+      "native_required_files": ["wrapper", "text-editor", "text-diff", "dejavu", "trie", "bridge"],
+      "archive_sentinels": ["wrapper", "text-editor", "bridge"],
       "provider": {
         "wasm_bindings": "src/wasm_bindings_pregenerated.rs",
-        "symbol_prefixes": ["TextEditor_", "TextDiff_", "DocPos_", "DocSelection_", "VisPos_", "Glyph_", "Iterator_", "Language_", "Notifications_", "Palette_", "TrieAutoComplete_", "CodePoint_"],
+        "symbol_prefixes": ["TextEditor_", "TextDiff_", "DocPos_", "DocSelection_", "VisPos_", "Glyph_", "Iterator_", "Language_", "Notifications_", "Palette_", "TrieAutoComplete_", "CodePoint_", "GetDejavu", "SetDejavu", "dear_imgui_cte_"],
         "required_exports": ["GetDejavu", "SetDejavu"],
         "include_dirs": ["third-party/cimCTE", "third-party/cimCTE/ImGuiColorTextEdit"],
-        "source_files": ["wrapper", "text-editor", "text-diff", "dejavu", "trie"]
+        "source_files": ["wrapper", "text-editor", "text-diff", "dejavu", "trie", "bridge"]
       }
     },
     {
