@@ -59,6 +59,7 @@ SYS_CRATES = (
     "dear-imgui-sys",
     "dear-implot-sys",
     "dear-imnodes-sys",
+    "dear-imgui-cte-sys",
     "dear-node-editor-sys",
     "dear-implot3d-sys",
     "dear-imguizmo-sys",

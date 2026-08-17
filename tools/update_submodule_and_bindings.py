@@ -14,6 +14,7 @@ Supported crates (native bindings):
   - extensions/dear-node-editor-sys (cimnodes_editor / imgui-node-editor)
   - extensions/dear-imguizmo-sys (cimguizmo)
   - extensions/dear-imguizmo-quat-sys (cimguizmo_quat)
+  - extensions/dear-imgui-cte-sys (cimCTE / ImGuiColorTextEdit)
   - extensions/dear-imgui-test-engine-sys (imgui_test_engine)
 
 Native and WASM pregenerated bindings are regenerated together by the canonical
@@ -31,7 +32,8 @@ Usage examples:
         --cimplot3d-branch main \
         --cimnodes-branch master --cimguizmo-branch master \
         --cimguizmo-quat-branch master \
-        --cimnodes-editor-branch main --imgui-test-engine-branch main
+        --cimnodes-editor-branch main --cte-branch main_goossens \
+        --imgui-test-engine-branch main
 
   - Only regenerate pregenerated bindings without touching submodules:
       python3 tools/update_submodule_and_bindings.py --crates dear-implot-sys,dear-imnodes-sys \
@@ -99,6 +101,11 @@ def main() -> int:
         default="main",
         help="Branch for imgui_test_engine submodule (dear-imgui-test-engine-sys)",
     )
+    parser.add_argument(
+        "--cte-branch",
+        default="main_goossens",
+        help="Branch for cimCTE submodule (dear-imgui-cte-sys)",
+    )
     parser.add_argument("--remote", default="origin", help="Remote name for submodules")
     parser.add_argument("--wasm", action="store_true", help="Additionally generate wasm pregenerated bindings for dear-imgui-sys")
     parser.add_argument("--dry-run", action="store_true", help="Print commands without executing")
@@ -111,6 +118,7 @@ def main() -> int:
         "implot": args.cimplot_branch,
         "implot3d": args.cimplot3d_branch,
         "imnodes": args.cimnodes_branch,
+        "cte": args.cte_branch,
         "node-editor": args.cimnodes_editor_branch,
         "imguizmo": args.cimguizmo_branch,
         "imguizmo-quat": args.cimguizmo_quat_branch,
@@ -201,9 +209,13 @@ def main() -> int:
             return 2
         if metadata_update.changed:
             action = "Would update" if args.dry_run else "Updated"
+            rendered_revisions = " ".join(
+                f"{key}={value}"
+                for key, value in metadata_update.revisions.items()
+            )
             print(
                 f"{action} {crate} binding source metadata: "
-                f"{metadata_update.revisions['source-revision']}"
+                f"{rendered_revisions}"
             )
         else:
             print(f"{crate} binding source metadata already matches its submodule")

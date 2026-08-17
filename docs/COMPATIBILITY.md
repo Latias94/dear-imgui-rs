@@ -8,7 +8,8 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 ## Versioning Policy
 
 - Unified release train: all published `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
-- Stable 0.16 train: unified `v0.16.0` (use `version = "0.16"`).
+- Stable 0.17 train: unified `v0.17.0` (use `version = "0.17"`).
+- Previous stable train: unified `v0.16.0` (use `version = "0.16"`).
 - Previous prerelease: unified `v0.16.0-alpha.3` (prereleases require exact requirements).
 - Previous stable train: unified `v0.15.1` (use `version = "0.15"`).
 - Previous train: unified `v0.14.1` (use `version = "0.14"`).
@@ -18,7 +19,71 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 - Previous train: unified `v0.10.4` (use `version = "0.10"`).
 - Previous train: unified `v0.9.0` (use `version = "0.9"`).
 - Previous train: unified `v0.8.0` (use `version = "0.8"`).
-- Internal dependency constraints use the compatible current stable minor (`0.16`); prerelease trains use exact requirements. Mixing different release trains across our crates is unsupported.
+- Internal dependency constraints use the compatible current stable minor (`0.17`); prerelease trains use exact requirements. Mixing different release trains across our crates is unsupported.
+
+## 0.17 Stable Release
+
+Core
+
+| Crate           | Version | Upstream        | Notes                                     |
+|-----------------|---------|-----------------|-------------------------------------------|
+| dear-imgui-rs   | 0.17.0  | —               | Safe Rust API over dear-imgui-sys         |
+| dear-imgui-sys  | 0.17.0  | ImGui v1.92.9b  | Docking branch via cimgui; three binding profiles |
+
+Backends
+
+| Crate             | Version | External deps           | Notes |
+|-------------------|---------|-------------------------|-------|
+| dear-imgui-wgpu   | 0.17.0  | wgpu = 30/29/28/27     | WGPU 30 default; native Winit/SDL3 multi-viewport; browser single-window |
+| dear-imgui-glow   | 0.17.0  | glow = 0.18            | OpenGL 3.0+/ES 3.0+/WebGL 2 renderer; live sampler capability with restorative fallback |
+| dear-imgui-ash    | 0.17.0  | ash = 0.38             | Native Vulkan renderer; shared Winit/SDL3 multi-viewport runtime |
+| dear-imgui-winit  | 0.17.0  | winit = 0.30.13        | Winit platform backend |
+| dear-imgui-sdl3   | 0.17.0  | sdl3 = 0.18.4, sdl3-sys 0.6 | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
+| dear-imgui-bevy   | 0.17.0  | Bevy = 0.19.1          | Bevy-native backend; default renderer and Bevy UI ordering, explicit advanced routes, Rust 1.95 minimum |
+
+Utilities
+
+| Crate     | Version | External deps | Notes |
+|-----------|---------|---------------|-------|
+| dear-app  | 0.17.0  | winit, wgpu 30 | Generation-aware application runtime |
+
+Tooling
+
+| Crate                    | Version | External deps | Notes |
+|--------------------------|---------|---------------|-------|
+| dear-imgui-build-support | 0.17.0  | ureq = 3.3    | Binding specification, build, package, and prebuilt helpers |
+
+Extensions
+
+| Crate               | Version | Requires dear-imgui-rs | Sys crate                    | Notes                                  |
+|---------------------|---------|------------------------|------------------------------|----------------------------------------|
+| dear-implot         | 0.17.0 | 0.17.0 | dear-implot-sys 0.17.0 | 2D plotting |
+| dear-imnodes        | 0.17.0 | 0.17.0 | dear-imnodes-sys 0.17.0 | WASM-capable node editor |
+| dear-node-editor    | 0.17.0 | 0.17.0 | dear-node-editor-sys 0.17.0 | Native-only; opt-in blueprints profile |
+| dear-imguizmo       | 0.17.0 | 0.17.0 | dear-imguizmo-sys 0.17.0 | 3D gizmo |
+| dear-file-browser   | 0.17.0 | 0.17.0 | — | State-owned ImGui UI + native dialogs |
+| dear-implot3d       | 0.17.0 | 0.17.0 | dear-implot3d-sys 0.17.0 | 3D plotting |
+| dear-imguizmo-quat  | 0.17.0 | 0.17.0 | dear-imguizmo-quat-sys 0.17.0 | Quaternion gizmo |
+| dear-imgui-cte      | 0.17.0 | 0.17.0 | dear-imgui-cte-sys 0.17.0 | Preview ImGuiColorTextEdit editor, diff, autocomplete, and notifications |
+| dear-imgui-test-engine | 0.17.0 | 0.17.0 | dear-imgui-test-engine-sys 0.17.0 | UI automation and test runner |
+| dear-imgui-reflect  | 0.17.0 | 0.17.0 | — | Session-owned reflection UI |
+
+The CTE pair uses cimCTE `b340b99748f9b13307a8e88b938c4c9f8d77df48` with nested
+ImGuiColorTextEdit `3b46d759975dfd628ef20fd51b7e1c81ef635be5`, C++20 native
+source builds with exceptions disabled, verified prebuilt artifacts that bind
+to the exact shared-core identity, and fixed `imgui-sys-v1` WASM import
+bindings.
+
+The safe crate forwards `prebuilt`, `build-from-source`, and `wasm` through
+both the core and CTE sys crates. Source wins if Cargo unifies source and
+prebuilt routes. CTE owners are Context-bound and neither `Send` nor `Sync`;
+applications must release them before their Dear ImGui Context.
+
+CTE examples add the bundled DejaVu source to the managed font atlas before
+renderer initialization. A compatible renderer must consume the atlas texture
+create/update/destroy requests introduced by the current Dear ImGui font
+lifecycle. Raw cimCTE `SetDejavu` is not a safe substitute because it clears the
+whole atlas and changes its loader outside renderer ownership.
 
 ## 0.16 Stable Release
 
@@ -126,7 +191,7 @@ Windows source-support evidence is deliberately graded rather than inferred from
 
 The gnullvm routes require llvm-mingw and do not require Visual Studio. Their C++ standard library is linked statically as libc++; default Rust CRT mode expects `libunwind.dll` at runtime, while the validated x64 `+crt-static` mode does not. This matrix does not claim gnullvm prebuilts, FreeType, the SDL3 backend's external CMake path, or other optional native dependencies.
 
-The six native safe extension crates forward build strategy through both the
+The seven native safe extension crates forward build strategy through both the
 core and their corresponding sys crate. Select the route on the safe crate:
 
 | Safe extension | `prebuilt` | `build-from-source` | `wasm` |
@@ -136,6 +201,7 @@ core and their corresponding sys crate. Select the route on the safe crate:
 | `dear-imnodes` | yes | yes | yes |
 | `dear-imguizmo` | yes | yes | yes |
 | `dear-imguizmo-quat` | yes | yes | yes |
+| `dear-imgui-cte` | yes | yes | yes |
 | `dear-node-editor` | yes | yes | no, native-only |
 
 When Cargo unifies `prebuilt` and `build-from-source`, source wins. Test Engine

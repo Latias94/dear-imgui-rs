@@ -2,10 +2,11 @@ use super::{
     ArtifactProfile, ArtifactProfileInput, BindingOwner, BindingSpec, BuildRequest,
     BuildRequestInput, CORE_BUILD_ENV_VARS, CORE_WASM_TARGET, CoreArtifactIdentity,
     CrateBindingDefine, CrateBindingInclude, CrateBindingIncludeRoot, CrateBindingLanguage,
-    CrateBindingProvenance, CrateBindingSpec, CrateBindingTarget, ExtensionArtifactProfile,
-    ExtensionArtifactProfileInput, ExtensionBinding, ExtensionBindingIdentity, HeaderShim,
-    NativeAbiProfile, SourceRevisions, TargetFacts, bindgen_rerun_env_vars,
-    core_source_contract_hash, is_supported_wasm_target, parse_crate_binding_source_revision,
+    CrateBindingProvenance, CrateBindingSourceRevisions, CrateBindingSpec, CrateBindingTarget,
+    ExtensionArtifactProfile, ExtensionArtifactProfileInput, ExtensionBinding,
+    ExtensionBindingIdentity, HeaderShim, NativeAbiProfile, SourceRevisions, TargetFacts,
+    bindgen_rerun_env_vars, core_source_contract_hash, is_supported_wasm_target,
+    parse_crate_binding_source_revision, parse_crate_binding_source_revisions,
     validate_bindgen_environment, validate_wasm_feature_contract,
 };
 use crate::SAFE_DEMO_FONT_BOUNDARY_ARTIFACT_FEATURE;
@@ -123,6 +124,7 @@ fn extension_provenance(spec: &CrateBindingSpec) -> CrateBindingProvenance {
         crate_name: spec.crate_name.to_owned(),
         target: spec.target.id().to_owned(),
         source_revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
+        nested_source_revision: None,
         spec_hash: spec.deterministic_hash(),
         input_hash: "fnv1a64:1111111111111111".to_owned(),
         output_hash: "fnv1a64:2222222222222222".to_owned(),
@@ -785,11 +787,12 @@ fn core_release_manifest_anchors_candidate_and_fails_closed() {
 }
 
 #[test]
-fn six_extension_artifact_specs_have_unique_exact_identities() {
+fn seven_extension_artifact_specs_have_unique_exact_identities() {
     let extensions = [
         ExtensionBinding::ImPlot,
         ExtensionBinding::ImPlot3d,
         ExtensionBinding::ImNodes,
+        ExtensionBinding::Cte,
         ExtensionBinding::NodeEditor,
         ExtensionBinding::ImGuizmo,
         ExtensionBinding::ImGuizmoQuat,
@@ -1101,7 +1104,7 @@ imgui-revision = "b61e56346a92cfcaf1f43a545ca37b0b32239654"
 }
 
 #[test]
-fn maintained_binding_specs_cover_test_engine_and_six_extensions() {
+fn maintained_binding_specs_cover_test_engine_and_seven_extensions() {
     let specs = CrateBindingSpec::maintained();
     let owners = specs
         .iter()
@@ -1113,13 +1116,14 @@ fn maintained_binding_specs_cover_test_engine_and_six_extensions() {
         ExtensionBinding::ImPlot,
         ExtensionBinding::ImPlot3d,
         ExtensionBinding::ImNodes,
+        ExtensionBinding::Cte,
         ExtensionBinding::NodeEditor,
         ExtensionBinding::ImGuizmo,
         ExtensionBinding::ImGuizmoQuat,
     ] {
         assert!(owners.contains(&BindingOwner::Extension(extension)));
     }
-    assert_eq!(owners.len(), 7);
+    assert_eq!(owners.len(), 8);
     assert_eq!(
         specs
             .iter()
@@ -1128,7 +1132,51 @@ fn maintained_binding_specs_cover_test_engine_and_six_extensions() {
         1,
         "node-editor is the only native-only maintained extension"
     );
-    assert_eq!(specs.len(), 12);
+    assert_eq!(specs.len(), 14);
+}
+
+#[test]
+fn cte_binding_specs_cover_the_upstream_and_bridge_surfaces() {
+    let specs = CrateBindingSpec::for_owner(BindingOwner::Extension(ExtensionBinding::Cte))
+        .collect::<Vec<_>>();
+
+    assert_eq!(specs.len(), 2);
+    for spec in specs {
+        assert_eq!(spec.crate_name, "dear-imgui-cte-sys");
+        assert_eq!(spec.profile.language, CrateBindingLanguage::Cxx20);
+        assert!(!spec.profile.allowlist_recursively);
+        assert_eq!(
+            spec.input_paths,
+            ["third-party/cimCTE/cimCTE.h", "shim/cte_bridge.h"]
+        );
+        for symbol in [
+            "TextEditor_TextEditor",
+            "TextDiff_TextDiff",
+            "DocPos_DocPos_Nil",
+            "DocSelection_DocSelection_Nil",
+            "VisPos_VisPos_Nil",
+            "Glyph_Glyph_Nil",
+            "Iterator_Iterator_Nil",
+            "TrieAutoComplete_TrieAutoComplete",
+            "Notifications_Notifications",
+            "Palette_Palette",
+            "Language_Cpp",
+            "CodePoint_write",
+            "GetDejavu",
+            "SetDejavu",
+            "dear_imgui_cte_text_editor_create",
+            "dear_imgui_cte_text_editor_destroy",
+            "dear_imgui_cte_text_editor_set_change_callback",
+            "dear_imgui_cte_text_editor_reset_autocomplete",
+            "dear_imgui_cte_text_editor_clear_callbacks",
+            "dear_imgui_cte_clear_callbacks",
+            "dear_imgui_cte_set_transaction_callback",
+            "dear_imgui_cte_autocomplete_config_create",
+            "dear_imgui_cte_autocomplete_state_get_context",
+        ] {
+            assert!(spec.required_symbols.contains(&symbol));
+        }
+    }
 }
 
 #[test]
@@ -1444,6 +1492,82 @@ fn crate_binding_metadata_rejects_missing_and_duplicate_revisions() {
         "2".repeat(40)
     );
     assert!(parse_crate_binding_source_revision(&duplicate).is_err());
+}
+
+#[test]
+fn nested_source_revision_participates_in_binding_identity() {
+    let source_revision = "1".repeat(40);
+    let first_nested_revision = "2".repeat(40);
+    let second_nested_revision = "3".repeat(40);
+    let metadata = format!(
+        "[package.metadata.dear-imgui-binding]\nsource-revision = \"{source_revision}\"\nnested-source-revision = \"{first_nested_revision}\"\n"
+    );
+
+    let parsed = parse_crate_binding_source_revisions(&metadata).unwrap();
+    assert_eq!(parsed.source_revision, source_revision);
+    assert_eq!(
+        parsed.nested_source_revision.as_deref(),
+        Some(first_nested_revision.as_str())
+    );
+    assert_eq!(
+        parse_crate_binding_source_revision(&metadata).unwrap(),
+        source_revision
+    );
+
+    let spec = CrateBindingSpec::for_owner(BindingOwner::Extension(ExtensionBinding::Cte))
+        .find(|spec| spec.target == CrateBindingTarget::Native)
+        .unwrap();
+    let inputs = [
+        ("third-party/cimCTE/cimCTE.h", "wrapper"),
+        ("shim/cte_bridge.h", "bridge"),
+    ];
+    let body = spec
+        .required_symbols
+        .iter()
+        .map(|symbol| format!("pub fn {symbol}();\n"))
+        .collect::<String>();
+    let first = CrateBindingProvenance::new_with_source_revisions(
+        spec,
+        CrateBindingSourceRevisions::new(&source_revision, Some(&first_nested_revision)),
+        inputs,
+        &body,
+    );
+    let second = CrateBindingProvenance::new_with_source_revisions(
+        spec,
+        CrateBindingSourceRevisions::new(&source_revision, Some(&second_nested_revision)),
+        inputs,
+        &body,
+    );
+
+    assert!(
+        first
+            .marker()
+            .contains(&format!(" nested={first_nested_revision}"))
+    );
+    assert_ne!(first.identity_hash(), second.identity_hash());
+
+    let first_artifact = ExtensionArtifactProfile::new(
+        &extension_core_profile(),
+        "c".repeat(40),
+        ["wchar32"],
+        ExtensionBindingIdentity::new(ExtensionBinding::Cte, spec, first).unwrap(),
+    )
+    .unwrap();
+    let second_artifact = ExtensionArtifactProfile::new(
+        &extension_core_profile(),
+        "c".repeat(40),
+        ["wchar32"],
+        ExtensionBindingIdentity::new(ExtensionBinding::Cte, spec, second).unwrap(),
+    )
+    .unwrap();
+    assert_ne!(
+        first_artifact.deterministic_hash(),
+        second_artifact.deterministic_hash()
+    );
+    assert_ne!(
+        first_artifact.manifest_bytes(),
+        second_artifact.manifest_bytes()
+    );
 }
 
 #[test]

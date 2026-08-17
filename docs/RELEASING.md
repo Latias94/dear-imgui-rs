@@ -14,6 +14,7 @@ Supported crates:
 - `extensions/dear-imguizmo-sys` (third-party: cimguizmo)
 - `extensions/dear-implot3d-sys` (third-party: cimplot3d)
 - `extensions/dear-imguizmo-quat-sys` (third-party: cimguizmo_quat)
+- `extensions/dear-imgui-cte-sys` (third-party: cimCTE / ImGuiColorTextEdit)
 - `extensions/dear-imgui-test-engine-sys` (third-party: imgui_test_engine; native only)
 
 ## Prerequisites
@@ -38,6 +39,8 @@ Key flags:
   - `--cimnodes-branch` (default `master`)
   - `--cimnodes-editor-branch` (default `main`)
   - `--cimguizmo-branch` (default `master`)
+  - `--cimguizmo-quat-branch` (default `master`)
+  - `--cte-branch` (default `main_goossens`)
   - `--imgui-test-engine-branch` (default `main`)
 
 Examples
@@ -59,6 +62,8 @@ python3 tools/update_submodule_and_bindings.py \
   --cimnodes-branch master \
   --cimnodes-editor-branch main \
   --cimguizmo-branch master \
+  --cimguizmo-quat-branch master \
+  --cte-branch main_goossens \
   --imgui-test-engine-branch main
 ```
 
@@ -102,8 +107,8 @@ The exact 40-hex cimgui and nested Dear ImGui revisions are package metadata, no
 
 A `dear-imgui-sys` core native prebuilt is accepted only when its manifest exactly matches crate/version, target triple, static link type, MSVC CRT, normalized features, both source revisions, and binding-spec hash. The normal, freetype, stack-layout, and stack-layout + freetype combinations have different names and manifests. Missing, duplicate, unknown, or mismatched fields reject the core artifact.
 
-The six safe extension crates (`dear-implot`, `dear-implot3d`, `dear-imnodes`,
-`dear-imguizmo`, `dear-imguizmo-quat`, and `dear-node-editor`) forward
+The seven safe extension crates (`dear-implot`, `dear-implot3d`, `dear-imnodes`,
+`dear-imguizmo`, `dear-imguizmo-quat`, `dear-imgui-cte`, and `dear-node-editor`) forward
 `prebuilt` and `build-from-source` through both core and extension sys crates.
 Source wins when Cargo unifies both routes. Each extension prebuilt manifest
 binds its source and binding identity to the exact core artifact and candidate
@@ -137,6 +142,7 @@ $env:DOCS_RS = '1'; cargo check -p dear-node-editor-sys
 $env:DOCS_RS = '1'; cargo check -p dear-imguizmo-sys
 $env:DOCS_RS = '1'; cargo check -p dear-implot3d-sys
 $env:DOCS_RS = '1'; cargo check -p dear-imguizmo-quat-sys
+$env:DOCS_RS = '1'; cargo check -p dear-imgui-cte-sys
 $env:DOCS_RS = '1'; cargo check -p dear-imgui-test-engine-sys
 ```
 
@@ -149,6 +155,7 @@ DOCS_RS=1 cargo check -p dear-node-editor-sys
 DOCS_RS=1 cargo check -p dear-imguizmo-sys
 DOCS_RS=1 cargo check -p dear-implot3d-sys
 DOCS_RS=1 cargo check -p dear-imguizmo-quat-sys
+DOCS_RS=1 cargo check -p dear-imgui-cte-sys
 DOCS_RS=1 cargo check -p dear-imgui-test-engine-sys
 ```
 
@@ -159,24 +166,24 @@ These checks generate/use bindings only and won’t build/link native code.
 Preparation and validation remain separate because preparation intentionally changes the worktree:
 
 ```bash
-python3 tools/tasks.py release-prepare 0.16.0
+python3 tools/tasks.py release-prepare 0.17.0
 git diff
 git add -A
-git commit -m "chore: prepare release v0.16.0"
+git commit -m "chore: prepare release v0.17.0"
 python3 tools/tasks.py release-check
 ```
 
 After the candidate is merged to `main` and normal CI is green, run the single release entry point:
 
 ```bash
-gh workflow run release.yml --ref main -f tag=v0.16.0
+gh workflow run release.yml --ref main -f tag=v0.17.0
 ```
 
 `release.yml` binds the tag, workspace version, `main` ref, and exact candidate;
 requires a successful `main` push CI run for that SHA; builds and consumes all
 five prebuilt targets; atomically creates or verifies the candidate tag inside
 the protected environment before the first upload; publishes the complete
-27-package train with crates.io Trusted Publishing; verifies every exact
+29-package train with crates.io Trusted Publishing; verifies every exact
 version; then validates asset names and SHA-256 digests before completing the
 checksummed GitHub Release. A rerun accepts only an identical existing asset
 subset and never overwrites a differing same-name asset. See
@@ -186,11 +193,11 @@ subset and never overwrites a differing same-name asset. See
 
 Before dispatching, verify:
 
-- Root `workspace.package.version` is correct, all 27 publishable manifests inherit it, internal dependencies inherit root workspace declarations, and `CHANGELOG.md` has matching release notes.
+- Root `workspace.package.version` is correct, all 29 publishable manifests inherit it, internal dependencies inherit root workspace declarations, and `CHANGELOG.md` has matching release notes.
 - Binding profiles reproduce, packaged sys crates work without Git metadata, and `docs.rs` offline routes remain valid.
 - Compatibility documentation and examples reflect public API or dependency changes.
 - The candidate is merged to `main`, the worktree is clean, local `release-check` passed, and normal CI is green.
-- The protected `release` environment and all 27 crates.io Trusted Publishers target `.github/workflows/release.yml`.
+- The protected `release` environment and all 29 crates.io Trusted Publishers target `.github/workflows/release.yml`.
 - No release tag was manually created for a different commit.
 
 ## Notes

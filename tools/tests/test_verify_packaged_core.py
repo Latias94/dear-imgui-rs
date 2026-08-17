@@ -331,7 +331,7 @@ class PrebuiltArchiveSelectionTests(unittest.TestCase):
 
 
 class ExtensionArchiveSelectionTests(unittest.TestCase):
-    def test_selects_all_six_safe_extensions_and_exact_sys_artifacts(self):
+    def test_selects_all_maintained_safe_extensions_and_exact_sys_artifacts(self):
         with TemporaryDirectory() as temporary:
             package_dir = Path(temporary)
             core = write_base_extension_matrix(package_dir)

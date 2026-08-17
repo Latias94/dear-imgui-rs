@@ -94,6 +94,15 @@ EXPECTED_COMMANDS = (
         "--depth=1",
         "imgui-node-editor",
     ),
+    (
+        "git",
+        "-C",
+        "extensions/dear-imgui-cte-sys/third-party/cimCTE",
+        "submodule",
+        "update",
+        "--init",
+        "ImGuiColorTextEdit",
+    ),
 )
 
 
@@ -241,6 +250,34 @@ class RepositoryScriptContractTests(unittest.TestCase):
         self.assertIn("WASM pregenerated bindings would be generated at", result.stdout)
         self.assertIn(
             "cargo check -p dear-imgui-rs -F wasm --target wasm32-unknown-unknown",
+            result.stdout,
+        )
+
+    def test_binding_updater_selects_cte_branch_and_nested_source(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "tools/update_submodule_and_bindings.py",
+                "--crates",
+                "dear-imgui-cte-sys",
+                "--submodules",
+                "auto",
+                "--dry-run",
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("checkout main_goossens", result.stdout)
+        self.assertIn(
+            "submodule update --init --recursive",
+            result.stdout,
+        )
+        self.assertIn(
+            "dear-imgui-cte-sys binding source metadata",
             result.stdout,
         )
 

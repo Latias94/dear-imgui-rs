@@ -37,6 +37,33 @@ Do not duplicate it in generated coverage reports or infer a `keep` decision mer
 method and native symbol share a name. Every removal must identify one replacement or explicitly
 state that the sys API is the intended unsafe route.
 
+## ImGuiColorTextEdit API family ledger
+
+This is a family-level semantic ledger over the checked-in native and WASM cimCTE binding
+snapshots at wrapper revision `b340b99748f9b13307a8e88b938c4c9f8d77df48` and nested
+ImGuiColorTextEdit revision `3b46d759975dfd628ef20fd51b7e1c81ef635be5`. It is not a second
+declaration inventory, does not infer safety from symbol names, and does not parse Rust source.
+
+The canonical binding specification owns the generated family allowlist. Its static required-symbol
+sentinels are checked against both native and WASM snapshots, so a regenerated artifact cannot
+silently lose one of these families. New or changed declarations still require a generated diff and
+human ownership review; a symbol-presence check is not proof of safe coverage.
+
+| Generated family | High-level disposition |
+| --- | --- |
+| `TextEditor_*` document, configuration, render, navigation, search, and diagnostics | Safe ergonomic subset on context-bound `TextEditor` and `TextEditorRenderer`; strings are owned copies and indices are validated. Process-current Context mutation and raw line-break configuration remain sys-only. |
+| `DocPos_*`, `DocSelection_*`, `VisPos_*` | Copied Rust `Position`, `Selection`, and `VisualPosition` values; native heap constructors are unnecessary in safe code. |
+| `Language_*`, `Palette_*` | Closed `Language` values plus copied, bounds-checked `Palette`; raw language pointers remain borrowed static values. |
+| `dear_imgui_cte_*` callback, transaction, iteration, and filter bridge | Editor-owned typed closures with length-aware UTF-8, callback-scoped views, complete-batch validation, explicit clear/replace ordering, reentry policy, and abort-on-panic no-unwind behavior. |
+| `TrieAutoComplete_*` and `dear_imgui_cte_*autocomplete*` | Editor-owned Trie attachment or custom autocomplete with callback-scoped `AutocompleteRequest`; exclusive upstream callback slots are represented as conflicts. |
+| `TextDiff_*` | Context-bound `TextDiff` with copied configuration and a `Ui`-checked render builder. |
+| `Notifications_*` | Context-bound `Notifications` queue with validated messages, durations, positions, and a `Ui`-checked renderer. |
+| `Glyph_*`, `Iterator_*`, `CodePoint_*` | Sys-only. Their native pointer/iterator graph has no stable ownership benefit over the copied editor values exposed by the safe layer. |
+| `GetDejavu`, `SetDejavu` | `GetDejavu` is wrapped by `dejavu_font_source`, which returns a static compressed source for the managed atlas. `SetDejavu` remains sys-only because it clears the full atlas and changes the global loader outside renderer texture management. |
+
+Unsafe `as_raw` escape hatches on safe owners require the caller to preserve every native
+ownership, pointer-lifetime, Context, and wrapper invariant before returning to safe methods.
+
 ## Reviewing an upstream update
 
 The vendored source and regenerated bindings are the canonical diff. Do not infer Rust safety from

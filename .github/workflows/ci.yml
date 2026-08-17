@@ -1848,6 +1848,9 @@ jobs:
       - name: Check ImNodes WASM safe API tests
         run: cargo check -p dear-imnodes --tests --target wasm32-unknown-unknown --no-default-features --features wasm
 
+      - name: Check CTE preview WASM safe API
+        run: cargo check -p dear-imgui-cte --target wasm32-unknown-unknown --no-default-features --features wasm
+
       - name: Check file browser WASM scan policy branches
         run: cargo check -p dear-file-browser --target wasm32-unknown-unknown --tests --no-default-features --features "imgui,dear-imgui-rs/wasm"
 
@@ -1899,13 +1902,14 @@ jobs:
           -p dear-implot-sys
           -p dear-implot3d-sys
           -p dear-imnodes-sys
+          -p dear-imgui-cte-sys
           --test binding_symbols
           --target wasm32-unknown-unknown
           --no-default-features
-          --features dear-implot-sys/wasm,dear-implot3d-sys/wasm,dear-imnodes-sys/wasm
+          --features dear-implot-sys/wasm,dear-implot3d-sys/wasm,dear-imnodes-sys/wasm,dear-imgui-cte-sys/wasm
 
       - name: Build web demo crate for wasm32-unknown-unknown (core + extensions)
-        run: cargo build -p dear-imgui-web-demo --target wasm32-unknown-unknown --no-default-features --features "web-backends,implot,implot3d,imnodes,imguizmo,imguizmo-quat"
+        run: cargo build -p dear-imgui-web-demo --target wasm32-unknown-unknown --no-default-features --features "web-backends,implot,implot3d,imnodes,imguizmo,imguizmo-quat,cte"
 
       - name: Build and structurally verify the Emscripten provider
         run: python3 -B tools/ci/verify_wasm_provider.py

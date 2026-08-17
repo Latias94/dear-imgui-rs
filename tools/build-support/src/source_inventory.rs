@@ -181,6 +181,7 @@ impl SourceInventory {
             insert_unique(&mut crate_roots, &source.crate_root, "source crate root")?;
             source.validate()?;
         }
+        self.validate_core_translation_unit_ownership()?;
 
         let mut submodule_locations = BTreeSet::new();
         let mut package_orders = BTreeSet::new();
@@ -218,6 +219,44 @@ impl SourceInventory {
             return Err(SourceInventoryError::new(
                 "nested submodule package_order values must be contiguous from zero",
             ));
+        }
+        Ok(())
+    }
+
+    fn validate_core_translation_unit_ownership(&self) -> Result<(), SourceInventoryError> {
+        let core = self.source_by_id("core").ok_or_else(|| {
+            SourceInventoryError::new("maintained-source inventory is missing the core source")
+        })?;
+        let core_file_names = core
+            .native_required_files
+            .iter()
+            .flat_map(|file_id| {
+                let file = core
+                    .file(file_id)
+                    .expect("validated core native source reference");
+                std::iter::once(&file.canonical).chain(file.alternates.iter())
+            })
+            .filter_map(|path| Path::new(path).file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .collect::<BTreeSet<_>>();
+
+        for source in self.sources.iter().filter(|source| source.id != core.id) {
+            for file_id in &source.native_required_files {
+                let file = source
+                    .file(file_id)
+                    .expect("validated extension native source reference");
+                for candidate in std::iter::once(&file.canonical).chain(file.alternates.iter()) {
+                    let Some(file_name) = Path::new(candidate).file_name() else {
+                        continue;
+                    };
+                    if core_file_names.contains(file_name.to_string_lossy().as_ref()) {
+                        return Err(SourceInventoryError::new(format!(
+                            "maintained source {:?} native file {:?} reuses core translation unit {:?}; only {:?} may compile it",
+                            source.id, candidate, file_name, core.id
+                        )));
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -885,6 +924,29 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("package_order values must be contiguous from zero")
+        );
+    }
+
+    #[test]
+    fn extension_sources_cannot_recompile_a_core_translation_unit() {
+        let mut inventory = SourceInventory::embedded().clone();
+        let cte = inventory
+            .sources
+            .iter_mut()
+            .find(|source| source.id == "cte")
+            .expect("embedded inventory should contain CTE");
+        cte.files
+            .iter_mut()
+            .find(|file| file.id == "wrapper")
+            .expect("CTE should define its wrapper")
+            .canonical = "third-party/cimCTE/cimgui/cimgui.cpp".into();
+
+        assert!(
+            inventory
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("core translation unit")
         );
     }
 

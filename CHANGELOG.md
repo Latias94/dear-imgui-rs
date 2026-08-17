@@ -8,6 +8,17 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-08-17
+
+### Added
+
+- Added Preview `dear-imgui-cte` and `dear-imgui-cte-sys` crates for ImGuiColorTextEdit through cimCTE, with Context-bound editors, text diffs, notifications, callbacks, autocomplete, native/prebuilt routes, and fixed-provider WASM support.
+- Added CTE desktop examples and WebAssembly demo integration, including managed DejaVu font installation through the Dear ImGui font atlas.
+
+### Changed
+
+- Expanded the synchronized release train to 29 publishable crates and added CTE to release ordering, docs.rs sys checks, and explicit WASM pre-publish coverage.
+
 ## [0.16.0] - 2026-08-14
 
 0.16 is an intentionally source-breaking release that finalizes the ownership-first API introduced through the alpha train. Context, frame, texture, font, native callback, renderer, platform-window, and GPU-completion state now move through explicit capabilities instead of remaining reachable through stale pointers or manual phase controls. See the [compatibility guide](https://github.com/Latias94/dear-imgui-rs/blob/v0.16.0/docs/COMPATIBILITY.md), [custom backend guide](https://github.com/Latias94/dear-imgui-rs/blob/v0.16.0/docs/CUSTOM_BACKENDS.md), and [task-oriented examples](https://github.com/Latias94/dear-imgui-rs/blob/v0.16.0/examples/README.md) for complete integration patterns; the tagged [changelog](https://github.com/Latias94/dear-imgui-rs/blob/v0.16.0/CHANGELOG.md) preserves the detailed prerelease migration history.

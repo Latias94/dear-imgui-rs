@@ -112,6 +112,21 @@ pub fn configure_cpp_runtime_linkage(
     }
 }
 
+pub fn cpp_no_exceptions_flag(target_env: &str) -> &'static str {
+    if target_env == "msvc" {
+        "/EHs-c-"
+    } else {
+        "-fno-exceptions"
+    }
+}
+
+pub fn configure_cpp_no_exceptions(build: &mut cc::Build, target_env: &str) {
+    build.flag(cpp_no_exceptions_flag(target_env));
+    if target_env == "msvc" {
+        build.define("_HAS_EXCEPTIONS", Some("0"));
+    }
+}
+
 pub fn compile_cpp_archive(
     build: &mut cc::Build,
     library: &str,
@@ -653,8 +668,8 @@ mod tests {
     #[cfg(windows)]
     use super::file_url_path;
     use super::{
-        CppRuntimeLinkage, local_path_from_urlish, prebuilt_cpp_runtime_linkage,
-        prebuilt_manifest_has_feature, should_static_link_cpp_stdlib,
+        CppRuntimeLinkage, cpp_no_exceptions_flag, local_path_from_urlish,
+        prebuilt_cpp_runtime_linkage, prebuilt_manifest_has_feature, should_static_link_cpp_stdlib,
     };
     #[cfg(feature = "archive")]
     use super::{extract_archive_to_cache, extract_archive_to_dir, extraction_lock_path};
@@ -695,6 +710,13 @@ mod tests {
             prebuilt_cpp_runtime_linkage("android", "", ""),
             CppRuntimeLinkage::Dynamic("c++_shared")
         );
+    }
+
+    #[test]
+    fn no_exception_flags_match_msvc_and_gnu_style_compilers() {
+        assert_eq!(cpp_no_exceptions_flag("msvc"), "/EHs-c-");
+        assert_eq!(cpp_no_exceptions_flag("gnu"), "-fno-exceptions");
+        assert_eq!(cpp_no_exceptions_flag(""), "-fno-exceptions");
     }
 
     fn unique_tmp_dir(suffix: &str) -> PathBuf {

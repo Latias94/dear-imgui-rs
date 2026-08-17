@@ -525,7 +525,8 @@ fn validate_checked_in_extension_bindings(root: &Path) -> Result<()> {
 }
 
 fn verify_crate_binding_sources(root: &Path) -> Result<()> {
-    use build_support::binding::parse_crate_binding_source_revision;
+    use build_support::binding::parse_crate_binding_source_revisions;
+    use build_support::source_inventory::SourceInventory;
     use std::collections::BTreeSet;
     use std::process::Command;
 
@@ -540,7 +541,7 @@ fn verify_crate_binding_sources(root: &Path) -> Result<()> {
         let manifest = fs::read_to_string(&manifest_path)
             .with_context(|| format!("read {}", manifest_path.display()))?;
         let expected =
-            parse_crate_binding_source_revision(&manifest).map_err(anyhow::Error::msg)?;
+            parse_crate_binding_source_revisions(&manifest).map_err(anyhow::Error::msg)?;
 
         let top_level = git_output(&source_root, &["rev-parse", "--show-toplevel"])?;
         let actual_top_level = fs::canonicalize(top_level.trim())
@@ -574,13 +575,43 @@ fn verify_crate_binding_sources(root: &Path) -> Result<()> {
             );
         }
         let actual = git_output(&source_root, &["rev-parse", "HEAD"])?;
-        if actual.trim() != expected {
+        if actual.trim() != expected.source_revision {
             anyhow::bail!(
                 "{} binding source revision mismatch: metadata {}, HEAD {}",
                 spec.crate_name,
-                expected,
+                expected.source_revision,
                 actual.trim()
             );
+        }
+
+        if let Some(nested_revision) = &expected.nested_source_revision {
+            let inventory = SourceInventory::embedded();
+            let source = inventory
+                .require_source_by_crate(spec.crate_name)
+                .map_err(anyhow::Error::msg)?;
+            let parent = Path::new(&source.crate_root).join(&source.source_root);
+            let nested = inventory
+                .nested_submodules
+                .iter()
+                .filter(|submodule| Path::new(&submodule.parent) == parent)
+                .collect::<Vec<_>>();
+            if nested.len() != 1 {
+                anyhow::bail!(
+                    "{} declares nested-source-revision but its source inventory resolves {} nested submodules",
+                    spec.crate_name,
+                    nested.len()
+                );
+            }
+            let nested_root = source_root.join(&nested[0].path);
+            let actual_nested = git_output(&nested_root, &["rev-parse", "HEAD"])?;
+            if actual_nested.trim() != nested_revision {
+                anyhow::bail!(
+                    "{} nested binding source revision mismatch: metadata {}, HEAD {}",
+                    spec.crate_name,
+                    nested_revision,
+                    actual_nested.trim()
+                );
+            }
         }
     }
 
@@ -709,11 +740,11 @@ fn extension_bindgen_builder(root: &Path, spec: &CrateBindingSpec) -> Result<bin
     for pattern in profile.blocklisted_types {
         builder = builder.blocklist_type(pattern);
     }
-    if profile.language == CrateBindingLanguage::Cxx17 {
+    if profile.language != CrateBindingLanguage::C {
         builder = builder
             .clang_arg("-x")
             .clang_arg("c++")
-            .clang_arg("-std=c++17");
+            .clang_arg(format!("-std={}", profile.language.id()));
     }
     if let CrateBindingTarget::WasmImport { module_name } = spec.target {
         builder = builder.wasm_import_module_name(module_name);
@@ -1121,6 +1152,7 @@ fn find_emsdk_tools() -> Result<(std::path::PathBuf, std::path::PathBuf, std::pa
 struct WasmProviderInputs {
     module_name: String,
     exports: BTreeSet<String>,
+    cpp_standard: CrateBindingLanguage,
     compile_defines: Vec<String>,
     include_dirs: Vec<PathBuf>,
     source_files: Vec<PathBuf>,
@@ -1195,6 +1227,7 @@ fn prepare_wasm_provider_inputs(
     use build_support::source_inventory::{ProviderTransform, parse_wasm_imports};
 
     let mut exports = BTreeSet::new();
+    let mut cpp_standard = CrateBindingLanguage::Cxx17;
     let mut compile_defines = BTreeMap::new();
     let mut include_dirs = Vec::new();
     let mut source_files = Vec::new();
@@ -1238,6 +1271,7 @@ fn prepare_wasm_provider_inputs(
                         source.crate_name
                     )
                 })?;
+            cpp_standard = cpp_standard.max(spec.profile.language);
             for define in spec.native_binding_defines() {
                 insert_provider_compile_define(&mut compile_defines, define, &source.crate_name)?;
             }
@@ -1331,6 +1365,7 @@ fn prepare_wasm_provider_inputs(
     Ok(WasmProviderInputs {
         module_name: inventory.wasm_import_module.clone(),
         exports,
+        cpp_standard,
         compile_defines: compile_defines
             .into_iter()
             .map(|(name, value)| match value {
@@ -1397,6 +1432,7 @@ fn build_cimgui_provider(options: BuildProviderOptions) -> Result<()> {
     let WasmProviderInputs {
         module_name,
         exports: names,
+        cpp_standard,
         compile_defines,
         include_dirs,
         source_files,
@@ -1422,7 +1458,7 @@ fn build_cimgui_provider(options: BuildProviderOptions) -> Result<()> {
     // 2b) Compose em++ command to build imgui-sys-v1.wasm (shared imported memory) with explicit exports
 
     let mut cmd = Command::new(&empp);
-    cmd.arg("-std=c++17")
+    cmd.arg(format!("-std={}", cpp_standard.id()))
         .arg("-O2")
         .arg("-s")
         .arg("MODULARIZE=1")  // Generate a module function
@@ -1624,7 +1660,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        BuildProviderOptions, VerifyBindingOptions, binding_contents_equal,
+        BuildProviderOptions, CrateBindingLanguage, VerifyBindingOptions, binding_contents_equal,
         prepare_wasm_provider_inputs, project_root, require_byte_identical,
     };
     use build_support::source_inventory::SourceInventory;
@@ -1644,6 +1680,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(inputs.module_name, "imgui-sys-v1");
+        assert_eq!(inputs.cpp_standard, CrateBindingLanguage::Cxx20);
+        assert!(inputs.exports.contains("dear_imgui_cte_clear_callbacks"));
         assert!(inputs.exports.contains("ImGuizmo_ComputeMouseRay"));
         assert!(
             inputs

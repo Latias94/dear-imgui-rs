@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-`dear-imgui-rs` is a Rust bindings ecosystem for Dear ImGui, featuring docking support, WGPU/GL/Vulkan backends, and a rich set of extensions (ImPlot/ImPlot3D, ImGuizmo/ImGuIZMO.quat, ImNodes, imgui-node-editor, ImGui Test Engine, file browser, reflection-based UI).
+`dear-imgui-rs` is a Rust bindings ecosystem for Dear ImGui, featuring docking support, WGPU/GL/Vulkan backends, and a rich set of extensions (ImPlot/ImPlot3D, ImGuizmo/ImGuIZMO.quat, ImNodes, imgui-node-editor, ImGuiColorTextEdit, ImGui Test Engine, file browser, reflection-based UI).
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/game-engine-docking.png" alt="Docking" width="49%"/>
@@ -44,6 +44,7 @@
   - `dear-implot` — plotting (cimplot C API)
   - `dear-implot3d` — 3D plotting (cimplot3d C API)
   - `dear-imguizmo-quat` — quaternion + 3D gizmo (cimguizmo_quat C API)
+  - `dear-imgui-cte` — Preview context-bound code editor, text diff, autocomplete, and notifications (cimCTE / ImGuiColorTextEdit)
   - `dear-imgui-test-engine` — Dear ImGui UI automation/test runner integration
   - `dear-file-browser` — native dialogs (rfd) + pure ImGui in-UI file browser
   - `dear-imgui-reflect` — reflection-based UI helpers (auto-generate ImGui widgets from Rust types)
@@ -147,6 +148,8 @@ separate:
 cargo run -p dear-imgui-examples --bin implot_minimal --features implot
 cargo run -p dear-imgui-examples --bin implot3d_minimal --features implot3d
 cargo run -p dear-imgui-examples --bin imnodes_minimal --features imnodes
+cargo run -p dear-imgui-examples --bin cte_minimal --features cte
+cargo run -p dear-imgui-examples --bin cte_showcase --features cte
 cargo run -p dear-imgui-examples --bin imguizmo_minimal --features imguizmo
 cargo run -p dear-imgui-examples --bin imguizmo_quat_minimal --features imguizmo-quat
 cargo run -p dear-imgui-examples --bin node_editor_minimal --features node-editor
@@ -168,25 +171,25 @@ under `examples/ci/` are release evidence and are intentionally excluded from th
 
 ## Installation
 
-The `0.16.0` stable release train uses the compatible `"0.16"` requirement across the workspace crates. Applications staying on `0.15.1` can use the [v0.15.1 README](https://github.com/Latias94/dear-imgui-rs/blob/v0.15.1/README.md) for its API and installation snippets.
+The `0.17.0` stable release train uses the compatible `"0.17"` requirement across the workspace crates. Applications staying on `0.16.0` can use the [v0.16.0 README](https://github.com/Latias94/dear-imgui-rs/blob/v0.16.0/README.md) for its API and installation snippets.
 
 ### Core + Backends
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.16"
+dear-imgui-rs = "0.17"
 # Choose a backend + platform integration
-dear-imgui-wgpu = "0.16"  # or dear-imgui-glow / dear-imgui-ash
-dear-imgui-winit = "0.16" # or dear-imgui-sdl3
+dear-imgui-wgpu = "0.17"  # or dear-imgui-glow / dear-imgui-ash
+dear-imgui-winit = "0.17" # or dear-imgui-sdl3
 ```
 
-`dear-imgui-wgpu` 0.16 defaults to WGPU 30. WGPU 29, 28, and 27 remain available as separate, mutually exclusive compatibility features:
+`dear-imgui-wgpu` 0.17 defaults to WGPU 30. WGPU 29, 28, and 27 remain available as separate, mutually exclusive compatibility features:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.16"
-dear-imgui-wgpu = { version = "0.16", default-features = false, features = ["wgpu-29"] }
-dear-imgui-winit = "0.16"
+dear-imgui-rs = "0.17"
+dear-imgui-wgpu = { version = "0.17", default-features = false, features = ["wgpu-29"] }
+dear-imgui-winit = "0.17"
 ```
 
 Replace `wgpu-29` with `wgpu-28` or `wgpu-27` when integrating an older WGPU application.
@@ -195,7 +198,7 @@ Replace `wgpu-29` with `wgpu-28` or `wgpu-27` when integrating an older WGPU app
 
 ```toml
 [dependencies]
-dear-app = "0.16" # State-owning Winit + WGPU runtime with docking support
+dear-app = "0.17" # State-owning Winit + WGPU runtime with docking support
 ```
 
 ### Apple Platform Examples
@@ -237,8 +240,8 @@ Example: low-level Android route without a dedicated Android convenience crate:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.16"
-dear-imgui-sys = { version = "0.16", features = ["backend-shim-android", "backend-shim-opengl3"] }
+dear-imgui-rs = "0.17"
+dear-imgui-sys = { version = "0.17", features = ["backend-shim-android", "backend-shim-opengl3"] }
 ```
 
 Recommended ownership split:
@@ -268,26 +271,33 @@ assembly.
 ```toml
 [dependencies]
 # Plotting
-dear-implot = "0.16"   # 2D plotting
-dear-implot3d = "0.16" # 3D plotting
+dear-implot = "0.17"   # 2D plotting
+dear-implot3d = "0.17" # 3D plotting
 
 # 3D Gizmos
-dear-imguizmo = "0.16"      # Standard 3D gizmo + GraphEditor
-dear-imguizmo-quat = "0.16" # Quaternion-based gizmo
+dear-imguizmo = "0.17"      # Standard 3D gizmo + GraphEditor
+dear-imguizmo-quat = "0.17" # Quaternion-based gizmo
 
 # Node Editor
-dear-imnodes = "0.16"
-dear-node-editor = "0.16" # native-only; add feature "blueprints" for stack layout
+dear-imnodes = "0.17"
+dear-node-editor = "0.17" # native-only; add feature "blueprints" for stack layout
+
+# Code editor, text diff, autocomplete, and notifications
+dear-imgui-cte = "0.17"
 
 # Test automation
-dear-imgui-test-engine = "0.16"
+dear-imgui-test-engine = "0.17"
 
 # File Browser
-dear-file-browser = "0.16" # Native dialogs + ImGui file browser
+dear-file-browser = "0.17" # Native dialogs + ImGui file browser
 
 # Reflection-based UI helpers
-dear-imgui-reflect = "0.16"
+dear-imgui-reflect = "0.17"
 ```
+
+`dear-imgui-cte` is a Preview crate in the published `0.17.0` train. Use it from
+the same release train as `dear-imgui-rs` and `dear-imgui-cte-sys`; mixing
+different train versions across the safe and sys crates is unsupported.
 
 ### Reflection-based UI (dear-imgui-reflect)
 
@@ -326,9 +336,9 @@ fn ui_frame(
 - Opt-in core prebuilt download from Release: enable `dear-imgui-rs/prebuilt`, or `dear-imgui-sys/prebuilt` when depending on the low-level crate directly (the env toggle `IMGUI_SYS_USE_PREBUILT=1` is still accepted but requires that feature). `IMGUI_SYS_LIB_DIR` points to the static-library directory and requires its matching `manifest.txt` there or in the parent artifact root, while `IMGUI_SYS_PREBUILT_URL` should point to a package-tool-generated archive. Bare core `.a`/`.lib` files without adjacent provenance are rejected.
 - Every accepted core prebuilt manifest records crate/version, target, link type, MSVC CRT, normalized features, cimgui and Dear ImGui revisions, and the binding-spec hash. Missing, unknown, duplicate, or mismatched fields reject the core artifact instead of falling back to an ABI guess. Extension `*-sys` crates retain their crate-specific prebuilt contracts.
 - `dear-implot`, `dear-implot3d`, `dear-imnodes`, `dear-imguizmo`,
-  `dear-imguizmo-quat`, and `dear-node-editor` forward both `prebuilt` and
+  `dear-imguizmo-quat`, `dear-imgui-cte`, and `dear-node-editor` forward both `prebuilt` and
   `build-from-source` through the core and their matching sys crate. Source wins
-  if Cargo unifies both features. The first five also forward `wasm`;
+  if Cargo unifies both features. The first six also forward `wasm`;
   `dear-node-editor` remains native-only.
 
 Test engine hooks (important):
@@ -359,47 +369,48 @@ Quick examples (enable auto prebuilt download):
 - Env (Unix): `IMGUI_SYS_USE_PREBUILT=1 cargo build -p dear-imgui-rs --features prebuilt`
 - Env (Windows PowerShell): `$env:IMGUI_SYS_USE_PREBUILT='1'; cargo build -p dear-imgui-rs --features prebuilt`
 
-## Compatibility (0.16.0)
+## Compatibility (0.17.0)
 
-The workspace follows a release-train model. The table below lists the combinations validated for the 0.16.0 release. See [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for version history and compatibility policy.
+The workspace follows a release-train model. The table below lists the combinations validated for the 0.17.0 release. See [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for version history and compatibility policy.
 
 Core
 
 | Crate           | Version | Notes                                     |
 |-----------------|---------|-------------------------------------------|
-| dear-imgui-rs   | 0.16.0 | Safe Rust API over dear-imgui-sys     |
-| dear-imgui-sys  | 0.16.0 | Dear ImGui v1.92.9b docking via cimgui |
+| dear-imgui-rs   | 0.17.0 | Safe Rust API over dear-imgui-sys     |
+| dear-imgui-sys  | 0.17.0 | Dear ImGui v1.92.9b docking via cimgui |
 
 Backends
 
 | Crate            | Version | External deps     | Notes                          |
 |------------------|---------|-------------------|--------------------------------|
-| dear-imgui-wgpu  | 0.16.0 | wgpu = 30/29/28/27 | WebGPU renderer; WGPU 30 default, native Winit/SDL3 multi-viewport, browser single-window |
-| dear-imgui-glow  | 0.16.0 | glow = 0.18       | OpenGL renderer (winit/glutin) |
-| dear-imgui-ash   | 0.16.0 | ash = 0.38        | Native Vulkan renderer with Winit/SDL3 multi-viewport adapters |
-| dear-imgui-winit | 0.16.0 | winit = 0.30.13   | Winit platform backend         |
-| dear-imgui-sdl3  | 0.16.0 | sdl3 = 0.18.4     | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
-| dear-imgui-bevy  | 0.16.0 | Bevy = 0.19.1     | Experimental Bevy-native backend with docking, texture interop, and native multi-viewport |
+| dear-imgui-wgpu  | 0.17.0 | wgpu = 30/29/28/27 | WebGPU renderer; WGPU 30 default, native Winit/SDL3 multi-viewport, browser single-window |
+| dear-imgui-glow  | 0.17.0 | glow = 0.18       | OpenGL renderer (winit/glutin) |
+| dear-imgui-ash   | 0.17.0 | ash = 0.38        | Native Vulkan renderer with Winit/SDL3 multi-viewport adapters |
+| dear-imgui-winit | 0.17.0 | winit = 0.30.13   | Winit platform backend         |
+| dear-imgui-sdl3  | 0.17.0 | sdl3 = 0.18.4     | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
+| dear-imgui-bevy  | 0.17.0 | Bevy = 0.19.1     | Experimental Bevy-native backend with docking, texture interop, and native multi-viewport |
 
 Application Runtime
 
 | Crate     | Version | Requires dear-imgui-rs | Notes                                            |
 |-----------|---------|------------------------|--------------------------------------------------|
-| dear-app  | 0.16.0 | 0.16.0       | Generation-aware Winit + WGPU application runtime |
+| dear-app  | 0.17.0 | 0.17.0       | Generation-aware Winit + WGPU application runtime |
 
 Extensions
 
 | Crate               | Version | Requires dear-imgui-rs | Sys crate                   | Notes                                  |
 |---------------------|---------|------------------------|-----------------------------|----------------------------------------|
-| dear-implot         | 0.16.0 | 0.16.0 | dear-implot-sys 0.16.0 | 2D plotting                         |
-| dear-imnodes        | 0.16.0 | 0.16.0 | dear-imnodes-sys 0.16.0 | WASM-capable node editor            |
-| dear-node-editor    | 0.16.0 | 0.16.0 | dear-node-editor-sys 0.16.0 | Native imgui-node-editor; optional blueprints profile |
-| dear-imguizmo       | 0.16.0 | 0.16.0 | dear-imguizmo-sys 0.16.0 | 3D gizmo + GraphEditor              |
-| dear-file-browser   | 0.16.0 | 0.16.0 | —                              | State-owned ImGui UI + native dialog backends |
-| dear-implot3d       | 0.16.0 | 0.16.0 | dear-implot3d-sys 0.16.0 | 3D plotting                       |
-| dear-imguizmo-quat  | 0.16.0 | 0.16.0 | dear-imguizmo-quat-sys 0.16.0 | Quaternion gizmo              |
-| dear-imgui-test-engine | 0.16.0 | 0.16.0 | dear-imgui-test-engine-sys 0.16.0 | UI automation and test runner |
-| dear-imgui-reflect  | 0.16.0 | 0.16.0 | —                              | Session-owned reflection UI              |
+| dear-implot         | 0.17.0 | 0.17.0 | dear-implot-sys 0.17.0 | 2D plotting                         |
+| dear-imnodes        | 0.17.0 | 0.17.0 | dear-imnodes-sys 0.17.0 | WASM-capable node editor            |
+| dear-node-editor    | 0.17.0 | 0.17.0 | dear-node-editor-sys 0.17.0 | Native imgui-node-editor; optional blueprints profile |
+| dear-imguizmo       | 0.17.0 | 0.17.0 | dear-imguizmo-sys 0.17.0 | 3D gizmo + GraphEditor              |
+| dear-file-browser   | 0.17.0 | 0.17.0 | —                              | State-owned ImGui UI + native dialog backends |
+| dear-implot3d       | 0.17.0 | 0.17.0 | dear-implot3d-sys 0.17.0 | 3D plotting                       |
+| dear-imguizmo-quat  | 0.17.0 | 0.17.0 | dear-imguizmo-quat-sys 0.17.0 | Quaternion gizmo              |
+| dear-imgui-cte      | 0.17.0 | 0.17.0 | dear-imgui-cte-sys 0.17.0 | Preview ImGuiColorTextEdit editor, diff, autocomplete, and notifications |
+| dear-imgui-test-engine | 0.17.0 | 0.17.0 | dear-imgui-test-engine-sys 0.17.0 | UI automation and test runner |
+| dear-imgui-reflect  | 0.17.0 | 0.17.0 | —                              | Session-owned reflection UI              |
 
 The workspace MSRV is Rust 1.92. The experimental Bevy backend requires Rust 1.95 because Bevy 0.19 does. Select exactly one WGPU major; `dear-app` follows the WGPU 30 default.
 
@@ -416,7 +427,7 @@ Maintenance rules
   builds and consumes every prebuilt profile, publishes the crate train, and
   creates the tag and GitHub Release.
 - Its reusable `.github/workflows/prebuilt-binaries.yml` job builds and then
-  consumes the complete core plus six-safe-extension package set for Linux
+  consumes the complete core plus maintained extension package set for Linux
   x86_64, macOS x86_64/aarch64, and Windows MSVC `/MD`/`/MT`. There is no
   selective `crates` input in the release contract.
 - Packages use names such as
@@ -460,6 +471,7 @@ extensions/
   dear-implot/         # ImPlot (2D plotting)
   dear-implot3d/       # ImPlot3D (3D plotting)
   dear-imguizmo-quat/  # ImGuIZMO.quat (quaternion gizmo)
+  dear-imgui-cte/      # Preview ImGuiColorTextEdit editor, diff, autocomplete, and notifications
   dear-imgui-test-engine/ # ImGui Test Engine integration
   dear-file-browser/   # File dialogs (rfd) + pure ImGui browser
   dear-imgui-reflect/  # Reflection-based UI helpers for dear-imgui-rs
@@ -494,7 +506,7 @@ python3 -m http.server -d target/web-demo 8080
 # Open http://127.0.0.1:8080
 ```
 
-Pass a comma-separated extension list to the demo command, for example `cargo run -p xtask -- web-demo implot,imnodes`. Native multi-viewport, `dear-node-editor`, and the blueprints stack-layout profile are unavailable in the browser; use `dear-imnodes` for the current WASM node-editor route.
+Pass a comma-separated extension list to the demo command, for example `cargo run -p xtask -- web-demo implot,imnodes` or `cargo run -p xtask -- web-demo cte`. Native multi-viewport, `dear-node-editor`, and the blueprints stack-layout profile are unavailable in the browser; use `dear-imnodes` for the current WASM node-editor route.
 
 For binding verification, provider construction, feature-forwarding checks, and troubleshooting, see [`docs/WASM.md`](docs/WASM.md).
 

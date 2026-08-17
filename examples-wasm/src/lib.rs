@@ -1,5 +1,10 @@
 #![cfg(target_arch = "wasm32")]
 
+#[cfg(feature = "cte")]
+use dear_imgui_cte::{
+    CteResult, CteUiExt, Language, NotificationType, Notifications, TextDiff, TextEditor,
+    dejavu_font_source,
+};
 use dear_imgui_rs::*;
 use dear_imgui_wgpu::{FramebufferExtent, WgpuRenderer};
 use dear_imgui_winit::WinitPlatform;
@@ -14,6 +19,8 @@ use dear_implot::PlotContext;
 #[cfg(feature = "implot3d")]
 use dear_implot3d::{Axis3DFlags, Plot3DContext, Plot3DFlags, Scatter3DFlags};
 use log::info;
+#[cfg(feature = "cte")]
+use std::{cell::Cell, rc::Rc, time::Duration};
 use std::{cell::RefCell, sync::Arc};
 use wasm_bindgen::prelude::*;
 use web_time::Instant;
@@ -24,6 +31,50 @@ use winit::{
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::{Window, WindowId},
 };
+
+#[cfg(feature = "cte")]
+struct CteWebState {
+    editor: TextEditor,
+    diff: TextDiff,
+    notifications: Notifications,
+    transaction_count: Rc<Cell<usize>>,
+}
+
+#[cfg(feature = "cte")]
+impl CteWebState {
+    fn create(context: &Context) -> CteResult<Self> {
+        let mut editor = TextEditor::try_create(context)?;
+        editor.set_text(
+            "#include <string>\n\nstd::string greeting = \"Hello from WebAssembly\";\n",
+        )?;
+        editor.set_language(Some(Language::Cpp));
+        let transaction_count: Rc<Cell<usize>> = Rc::new(Cell::new(0));
+        let callback_count = Rc::clone(&transaction_count);
+        editor.set_transaction_callback(move |_| {
+            callback_count.set(callback_count.get().saturating_add(1));
+        })?;
+        editor.enable_trie_autocomplete()?;
+
+        let mut diff = TextDiff::try_create(context)?;
+        diff.set_text("const int answer = 41;\n", "const int answer = 42;\n")?;
+        diff.set_language(Some(Language::Cpp));
+        diff.set_side_by_side(true);
+
+        let mut notifications = Notifications::try_create(context)?;
+        notifications.add(
+            NotificationType::Info,
+            "CTE is using the shared WASM provider",
+            Duration::from_secs(4),
+        )?;
+
+        Ok(Self {
+            editor,
+            diff,
+            notifications,
+            transaction_count,
+        })
+    }
+}
 
 struct ImguiState {
     platform: WinitPlatform,
@@ -44,7 +95,16 @@ struct ImguiState {
     guizmo_model: [f32; 16],
     #[cfg(feature = "imguizmo-quat")]
     quat_rot: [f32; 4],
+    #[cfg(feature = "cte")]
+    cte: Option<CteWebState>,
     context: Context,
+}
+
+impl Drop for ImguiState {
+    fn drop(&mut self) {
+        #[cfg(feature = "cte")]
+        drop(self.cte.take());
+    }
 }
 
 struct AppWindow {
@@ -143,6 +203,13 @@ impl AppWindow {
             fonts.add_font(&[FontSource::default_font().with_config(cfg)]);
         }
 
+        #[cfg(feature = "cte")]
+        {
+            let source = dejavu_font_source(16.0)
+                .map_err(|error| JsValue::from_str(&format!("init CTE font: {error}")))?;
+            context.font_atlas().add_font(&[source]);
+        }
+
         let init_info =
             dear_imgui_wgpu::WgpuInitInfo::new(device.clone(), queue.clone(), surface_desc.format);
         let renderer = WgpuRenderer::new(init_info, &mut context)
@@ -165,6 +232,11 @@ impl AppWindow {
         ];
         #[cfg(feature = "imguizmo-quat")]
         let quat_rot = [0.0_f32, 0.0, 0.0, 1.0];
+        #[cfg(feature = "cte")]
+        let cte = Some(
+            CteWebState::create(&context)
+                .map_err(|error| JsValue::from_str(&format!("init CTE state: {error}")))?,
+        );
 
         let imgui = ImguiState {
             platform,
@@ -190,6 +262,8 @@ impl AppWindow {
             guizmo_model,
             #[cfg(feature = "imguizmo-quat")]
             quat_rot,
+            #[cfg(feature = "cte")]
+            cte,
             context,
         };
 
@@ -295,6 +369,55 @@ impl AppWindow {
 
         if self.imgui.demo_open {
             ui.show_demo_window(&mut self.imgui.demo_open);
+        }
+
+        #[cfg(feature = "cte")]
+        {
+            let cte = self
+                .imgui
+                .cte
+                .as_mut()
+                .expect("CTE state is initialized with the feature");
+            let submitted = ui
+                .window("ImGuiColorTextEdit (Web)")
+                .size([700.0, 620.0], Condition::FirstUseEver)
+                .build(|| -> CteResult<()> {
+                    let connected = cte
+                        .editor
+                        .trie_autocomplete()
+                        .map(|trie| trie.is_connected())
+                        .transpose()?
+                        .unwrap_or(false);
+                    ui.text(format!(
+                        "Trie connected: {connected} | transaction events: {}",
+                        cte.transaction_count.get()
+                    ));
+                    if ui.button("Notify") {
+                        cte.notifications.add(
+                            NotificationType::Success,
+                            "CTE notification from WebAssembly",
+                            Duration::from_secs(3),
+                        )?;
+                    }
+                    ui.separator();
+                    ui.text_editor(&mut cte.editor, "Source##cte_web")
+                        .size([0.0, 280.0])
+                        .build()?;
+                    ui.separator();
+                    ui.text_diff(&mut cte.diff, "Diff##cte_web")
+                        .size([0.0, 210.0])
+                        .build()?;
+                    Ok(())
+                });
+            if let Some(result) = submitted {
+                result
+                    .map_err(|error| JsValue::from_str(&format!("render CTE widgets: {error}")))?;
+            }
+            ui.notifications(&mut cte.notifications)
+                .build()
+                .map_err(|error| {
+                    JsValue::from_str(&format!("render CTE notifications: {error}"))
+                })?;
         }
 
         #[cfg(feature = "implot")]
@@ -441,7 +564,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_render(&ui, &self.window)
+            .prepare_render(ui, &self.window)
             .map_err(|e| JsValue::from_str(&format!("prepare platform render: {e}")))?;
         let pending_frame = self.imgui.context.render(
             self.imgui

@@ -796,6 +796,7 @@ fn validate_extension_artifact_features(
         ExtensionBinding::NodeEditor => &["freetype", "stack-layout", "wchar32"][..],
         ExtensionBinding::ImPlot
         | ExtensionBinding::ImNodes
+        | ExtensionBinding::Cte
         | ExtensionBinding::ImGuizmo
         | ExtensionBinding::ImGuizmoQuat => &["freetype", "wchar32"][..],
     };

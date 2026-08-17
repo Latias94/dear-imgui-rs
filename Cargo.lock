@@ -2503,7 +2503,7 @@ checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
 
 [[package]]
 name = "dear-app"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "dear-imgui-rs",
  "dear-imgui-test-engine",
@@ -2521,7 +2521,7 @@ dependencies = [
 
 [[package]]
 name = "dear-file-browser"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "chrono",
  "dear-imgui-rs",
@@ -2536,7 +2536,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-ash"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "ash",
  "ash-window",
@@ -2552,7 +2552,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-bevy"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bevy",
  "bevy_app",
@@ -2592,7 +2592,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-build-support"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "cc",
  "flate2",
@@ -2606,6 +2606,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "dear-imgui-cte"
+version = "0.17.0"
+dependencies = [
+ "dear-imgui-cte-sys",
+ "dear-imgui-rs",
+ "dear-imnodes",
+ "dear-implot",
+ "static_assertions",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "dear-imgui-cte-sys"
+version = "0.17.0"
+dependencies = [
+ "bindgen",
+ "cc",
+ "dear-imgui-build-support",
+ "dear-imgui-sys",
+ "flate2",
+ "tar",
+]
+
+[[package]]
 name = "dear-imgui-examples"
 version = "0.1.0"
 dependencies = [
@@ -2616,6 +2640,7 @@ dependencies = [
  "dear-app",
  "dear-file-browser",
  "dear-imgui-ash",
+ "dear-imgui-cte",
  "dear-imgui-glow",
  "dear-imgui-reflect",
  "dear-imgui-rs",
@@ -2648,7 +2673,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-glow"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "dear-imgui-rs",
  "dear-imgui-winit",
@@ -2665,7 +2690,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-reflect"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "dear-imgui-reflect-derive",
  "dear-imgui-rs",
@@ -2676,7 +2701,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-reflect-derive"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2685,7 +2710,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-rs"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "approx",
  "bitflags 2.13.1",
@@ -2704,7 +2729,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-sdl3"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "cc",
  "dear-imgui-build-support",
@@ -2717,7 +2742,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-sys"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -2730,7 +2755,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-test-engine"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bitflags 2.13.1",
  "dear-imgui-rs",
@@ -2739,7 +2764,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-test-engine-sys"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -2753,6 +2778,7 @@ version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",
  "console_log",
+ "dear-imgui-cte",
  "dear-imgui-rs",
  "dear-imgui-wgpu",
  "dear-imgui-winit",
@@ -2773,7 +2799,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-wgpu"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bytemuck",
  "dear-imgui-rs",
@@ -2795,7 +2821,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-winit"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "dear-imgui-rs",
  "objc2 0.6.4",
@@ -2809,7 +2835,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imguizmo"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bitflags 2.13.1",
  "dear-imgui-rs",
@@ -2825,7 +2851,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imguizmo-quat"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bitflags 2.13.1",
  "dear-imgui-rs",
@@ -2838,7 +2864,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imguizmo-quat-sys"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -2850,7 +2876,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imguizmo-sys"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -2863,7 +2889,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imnodes"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bitflags 2.13.1",
  "dear-imgui-rs",
@@ -2874,7 +2900,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imnodes-sys"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -2886,7 +2912,7 @@ dependencies = [
 
 [[package]]
 name = "dear-implot"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "approx",
  "bitflags 2.13.1",
@@ -2899,7 +2925,7 @@ dependencies = [
 
 [[package]]
 name = "dear-implot-sys"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -2912,7 +2938,7 @@ dependencies = [
 
 [[package]]
 name = "dear-implot3d"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bitflags 2.13.1",
  "dear-imgui-rs",
@@ -2924,7 +2950,7 @@ dependencies = [
 
 [[package]]
 name = "dear-implot3d-sys"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -2936,7 +2962,7 @@ dependencies = [
 
 [[package]]
 name = "dear-node-editor"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bitflags 2.13.1",
  "dear-imgui-rs",
@@ -2947,7 +2973,7 @@ dependencies = [
 
 [[package]]
 name = "dear-node-editor-sys"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bindgen",
  "cc",

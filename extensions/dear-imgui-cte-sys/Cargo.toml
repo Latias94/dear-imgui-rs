@@ -1,0 +1,67 @@
+[package]
+name = "dear-imgui-cte-sys"
+version.workspace = true
+edition.workspace = true
+description = "Preview low-level FFI bindings for ImGuiColorTextEdit via cimCTE"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+documentation = "https://docs.rs/dear-imgui-cte-sys"
+categories.workspace = true
+keywords.workspace = true
+readme = "README.md"
+build = "build.rs"
+links = "dear_imgui_cte"
+
+exclude = [
+    "third-party/cimCTE/.github/**",
+    "third-party/cimCTE/generator/**",
+    "third-party/cimCTE/test/**",
+    "third-party/cimCTE/ImGuiColorTextEdit/.github/**",
+    "third-party/cimCTE/ImGuiColorTextEdit/docs/**",
+    "third-party/cimCTE/ImGuiColorTextEdit/example/deps/**",
+    "third-party/cimCTE/ImGuiColorTextEdit/example/CMakeLists.txt",
+    "third-party/cimCTE/ImGuiColorTextEdit/example/README.md",
+    "third-party/cimCTE/ImGuiColorTextEdit/example/editor.cpp",
+    "third-party/cimCTE/ImGuiColorTextEdit/example/editor.h",
+    "third-party/cimCTE/ImGuiColorTextEdit/example/main.cpp",
+    "third-party/cimCTE/ImGuiColorTextEdit/example/screenshot.png",
+    "third-party/cimCTE/ImGuiColorTextEdit/example/sdl3gpu.h",
+    "third-party/cimCTE/ImGuiColorTextEdit/example/wind3d11.h",
+    "third-party/cimCTE/ImGuiColorTextEdit/extras/LspBridge.cpp",
+    "third-party/cimCTE/ImGuiColorTextEdit/extras/LspBridge.h",
+]
+
+[package.metadata.dear-imgui-binding]
+source-revision = "b340b99748f9b13307a8e88b938c4c9f8d77df48"
+nested-source-revision = "3b46d759975dfd628ef20fd51b7e1c81ef635be5"
+
+[package.metadata.docs.rs]
+no-default-features = true
+all-features = false
+features = []
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+dear-imgui-sys.workspace = true
+flate2 = { workspace = true, optional = true }
+tar = { workspace = true, optional = true }
+
+[build-dependencies]
+bindgen = { workspace = true, optional = true }
+build-support = { workspace = true, features = ["binding-spec"] }
+cc.workspace = true
+
+[[bin]]
+name = "package"
+path = "bin/package/main.rs"
+required-features = ["package-bin"]
+
+[features]
+default = []
+bindgen = ["dep:bindgen", "dear-imgui-sys/bindgen"]
+package-bin = ["dep:flate2", "dep:tar"]
+prebuilt = ["build-support/download"]
+build-from-source = []
+wasm = ["dear-imgui-sys/wasm"]
