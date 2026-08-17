@@ -1486,6 +1486,7 @@ jobs:
           IMPLOT3D_SYS_SKIP_CC: "1"
           IMGUIZMO_SYS_SKIP_CC: "1"
           IMGUIZMO_QUAT_SYS_SKIP_CC: "1"
+          CTE_SYS_SKIP_CC: "1"
           IMGUI_TEST_ENGINE_SYS_SKIP_CC: "1"
         run: >-
           cargo check
@@ -1496,6 +1497,7 @@ jobs:
           -p dear-implot3d-sys
           -p dear-imguizmo-sys
           -p dear-imguizmo-quat-sys
+          -p dear-imgui-cte-sys
           -p dear-imgui-test-engine-sys
 
       - name: Check generated compatibility symbols on native without vendored sources

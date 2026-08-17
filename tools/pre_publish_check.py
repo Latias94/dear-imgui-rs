@@ -135,7 +135,9 @@ def run_command(cmd: List[str], cwd: Optional[Path] = None, capture: bool = True
                 cwd=cwd,
                 capture_output=True,
                 text=True,
-                check=False
+                encoding="utf-8",
+                errors="replace",
+                check=False,
             )
             if show_output:
                 if result.stdout:

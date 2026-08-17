@@ -62,6 +62,8 @@ def run_command(
             check=False,
             capture_output=capture,
             text=capture,
+            encoding=("utf-8" if capture else None),
+            errors=("replace" if capture else None),
         )
         if capture and result.returncode != 0:
             if result.stdout:
@@ -270,6 +272,8 @@ def require_clean_worktree(repo_root: Path) -> int:
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
     except Exception as error:
         print(f"Error: could not inspect worktree: {error}", file=sys.stderr)
