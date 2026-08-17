@@ -1,6 +1,6 @@
 use dear_imgui_cte::{
     CteUiExt, Language, Palette, PaletteColor, Position, SearchOptions, Selection, SquiggleKind,
-    TextEditor,
+    TextEditor, VisualPosition,
 };
 use dear_imgui_rs::{ChildFlags, Condition, Context, MouseButton, WindowFlags};
 
@@ -230,6 +230,10 @@ fn layout_dependent_mouse_queries_are_invalidated_after_document_changes() {
 
     assert_eq!(editor.line_height(), None);
     assert_eq!(editor.glyph_width(), None);
+    assert_eq!(editor.first_visible_row(), 0);
+    assert_eq!(editor.last_visible_row(), 0);
+    assert_eq!(editor.first_visible_column(), 0);
+    assert_eq!(editor.last_visible_column(), 0);
     assert!(!editor.is_mouse_over_glyph(mouse_position).unwrap());
     assert!(!editor.is_mouse_over_text_area(mouse_position).unwrap());
     assert_eq!(
@@ -237,6 +241,16 @@ fn layout_dependent_mouse_queries_are_invalidated_after_document_changes() {
         Position::default()
     );
     assert_eq!(editor.word_at_mouse(mouse_position).unwrap(), "");
+    assert_eq!(
+        editor.document_to_visual(Position::default()).unwrap(),
+        VisualPosition::default()
+    );
+    assert_eq!(
+        editor.visual_to_document(VisualPosition::new(99, 0)),
+        Position::default()
+    );
+    assert!(!editor.is_position_visible(Position::default()).unwrap());
+    assert!(!editor.is_visual_position_over_glyph(VisualPosition::new(99, 0)));
 
     render_editor_host(&mut context, &mut editor, None);
     assert!(editor.line_height().is_some_and(|value| value > 0.0));

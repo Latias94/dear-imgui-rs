@@ -54,7 +54,7 @@ impl TextEditor {
         })
     }
 
-    editor_command!(select_all, sys::TextEditor_SelectAll);
+    editor_command_invalidate!(select_all, sys::TextEditor_SelectAll);
 
     pub fn select_line(&mut self, line: usize) -> CteResult<()> {
         self.with_context("TextEditor::select_line", |raw| unsafe {
@@ -62,6 +62,7 @@ impl TextEditor {
             sys::TextEditor_SelectLine(raw, line);
             Ok(())
         })
+        .map(|_| self.invalidate_layout())
     }
 
     /// Selects an inclusive range of document lines.
@@ -79,6 +80,7 @@ impl TextEditor {
             sys::TextEditor_SelectLines(raw, start, end);
             Ok(())
         })
+        .map(|_| self.invalidate_layout())
     }
 
     pub fn select_region(&mut self, selection: Selection) -> CteResult<()> {
@@ -87,18 +89,20 @@ impl TextEditor {
             sys::TextEditor_SelectRegion(raw, selection.start.into_raw(), selection.end.into_raw());
             Ok(())
         })
+        .map(|_| self.invalidate_layout())
     }
 
     pub fn select_to_brackets(&mut self, include_brackets: bool) {
         self.with_context("TextEditor::select_to_brackets", |raw| unsafe {
             sys::TextEditor_SelectToBrackets(raw, include_brackets)
         });
+        self.invalidate_layout();
     }
 
-    editor_command!(grow_selections, sys::TextEditor_GrowSelections);
-    editor_command!(shrink_selections, sys::TextEditor_ShrinkSelections);
-    editor_command!(add_next_occurrence, sys::TextEditor_AddNextOccurrence);
-    editor_command!(select_all_occurrences, sys::TextEditor_SelectAllOccurrences);
+    editor_command_invalidate!(grow_selections, sys::TextEditor_GrowSelections);
+    editor_command_invalidate!(shrink_selections, sys::TextEditor_ShrinkSelections);
+    editor_command_invalidate!(add_next_occurrence, sys::TextEditor_AddNextOccurrence);
+    editor_command_invalidate!(select_all_occurrences, sys::TextEditor_SelectAllOccurrences);
     editor_bool_query!(
         any_cursor_has_selection,
         sys::TextEditor_AnyCursorHasSelection
@@ -115,7 +119,7 @@ impl TextEditor {
         current_cursor_has_selection,
         sys::TextEditor_CurrentCursorHasSelection
     );
-    editor_command!(clear_cursors, sys::TextEditor_ClearCursors);
+    editor_command_invalidate!(clear_cursors, sys::TextEditor_ClearCursors);
 
     pub fn cursor_count(&self) -> usize {
         self.with_context("TextEditor::cursor_count", |raw| unsafe {
@@ -178,6 +182,7 @@ impl TextEditor {
             sys::TextEditor_SetCursor(raw, position.into_raw());
             Ok(())
         })
+        .map(|_| self.invalidate_layout())
     }
 
     pub fn is_mouse_over_glyph(&self, mouse_position: [f32; 2]) -> CteResult<bool> {
@@ -258,24 +263,36 @@ impl TextEditor {
     }
 
     pub fn first_visible_row(&self) -> usize {
+        if !self.layout_ready {
+            return 0;
+        }
         self.with_context("TextEditor::first_visible_row", |raw| unsafe {
             sys::TextEditor_GetFirstVisibleRow(raw)
         })
     }
 
     pub fn last_visible_row(&self) -> usize {
+        if !self.layout_ready {
+            return 0;
+        }
         self.with_context("TextEditor::last_visible_row", |raw| unsafe {
             sys::TextEditor_GetLastVisibleRow(raw)
         })
     }
 
     pub fn first_visible_column(&self) -> usize {
+        if !self.layout_ready {
+            return 0;
+        }
         self.with_context("TextEditor::first_visible_column", |raw| unsafe {
             sys::TextEditor_GetFirstVisibleColumn(raw)
         })
     }
 
     pub fn last_visible_column(&self) -> usize {
+        if !self.layout_ready {
+            return 0;
+        }
         self.with_context("TextEditor::last_visible_column", |raw| unsafe {
             sys::TextEditor_GetLastVisibleColumn(raw)
         })
@@ -300,6 +317,9 @@ impl TextEditor {
     }
 
     pub fn document_to_visual(&self, position: Position) -> CteResult<VisualPosition> {
+        if !self.layout_ready {
+            return Ok(VisualPosition::default());
+        }
         self.with_context("TextEditor::document_to_visual", |raw| unsafe {
             validate_position(raw, "TextEditor::document_to_visual", position)?;
             Ok(VisualPosition::from_raw(sys::TextEditor_DocPos2VisPos(
@@ -310,12 +330,18 @@ impl TextEditor {
     }
 
     pub fn visual_to_document(&self, position: VisualPosition) -> Position {
+        if !self.layout_ready {
+            return Position::default();
+        }
         self.with_context("TextEditor::visual_to_document", |raw| unsafe {
             Position::from_raw(sys::TextEditor_VisPos2DocPos(raw, position.into_raw()))
         })
     }
 
     pub fn is_position_visible(&self, position: Position) -> CteResult<bool> {
+        if !self.layout_ready {
+            return Ok(false);
+        }
         self.with_context("TextEditor::is_position_visible", |raw| unsafe {
             validate_position(raw, "TextEditor::is_position_visible", position)?;
             Ok(sys::TextEditor_IsDocPosVisible(raw, position.into_raw()))
@@ -323,6 +349,9 @@ impl TextEditor {
     }
 
     pub fn is_visual_position_over_glyph(&self, position: VisualPosition) -> bool {
+        if !self.layout_ready {
+            return false;
+        }
         self.with_context("TextEditor::is_visual_position_over_glyph", |raw| unsafe {
             sys::TextEditor_IsVisPosOverGlyph(raw, position.into_raw())
         })
@@ -358,6 +387,7 @@ impl TextEditor {
                 options.whole_word,
             )
         });
+        self.invalidate_layout();
         Ok(())
     }
 
@@ -371,6 +401,7 @@ impl TextEditor {
                 options.whole_word,
             )
         });
+        self.invalidate_layout();
         Ok(())
     }
 
@@ -384,6 +415,7 @@ impl TextEditor {
                 options.whole_word,
             )
         });
+        self.invalidate_layout();
         Ok(())
     }
 
