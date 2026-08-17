@@ -90,6 +90,20 @@ pub enum CteError {
         operation: &'static str,
         parameter: &'static str,
     },
+
+    /// The compatibility bridge rejected an operation.
+    #[error("{operation} failed with native status {status}")]
+    NativeStatus {
+        operation: &'static str,
+        status: u32,
+    },
+
+    /// Two upstream features would overwrite the same native callback slots.
+    #[error("{operation} conflicts with active {active}")]
+    CallbackConflict {
+        operation: &'static str,
+        active: &'static str,
+    },
 }
 
 /// Result alias used by the safe cimCTE layer.

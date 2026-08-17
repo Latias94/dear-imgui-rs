@@ -30,7 +30,7 @@ pub enum PaletteColor {
 }
 
 impl PaletteColor {
-    pub const COUNT: usize = 22;
+    pub const COUNT: usize = sys::count as usize;
     pub const ALL: [Self; Self::COUNT] = [
         Self::Text,
         Self::Keyword,

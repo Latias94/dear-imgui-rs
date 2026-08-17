@@ -1,5 +1,12 @@
 //! Safe, context-bound ImGuiColorTextEdit bindings.
+//!
+//! Stateful callbacks are owned by their [`TextEditor`]. Reentering the same mutable
+//! callback skips the nested invocation; text filters preserve the original input and
+//! return an error. A callback panic is diagnosed and aborts rather than unwinding through
+//! native C++ frames.
 
+mod autocomplete;
+mod callbacks;
 mod context;
 mod error;
 mod language;
@@ -7,6 +14,10 @@ mod palette;
 mod text_editor;
 mod types;
 
+pub use autocomplete::{
+    AutocompleteConfig, AutocompleteContext, AutocompleteRequest, TrieAutocomplete,
+};
+pub use callbacks::{CaretEvent, DecoratorEvent, PopupEvent, TextChange, TextChangeKind};
 pub use error::{CteError, CteResult};
 pub use language::Language;
 pub use palette::{Palette, PaletteColor};
@@ -17,11 +28,3 @@ pub use types::{
 };
 
 pub(crate) use dear_imgui_cte_sys as sys;
-
-#[inline]
-pub(crate) fn vec2(value: [f32; 2]) -> sys::ImVec2_c {
-    sys::ImVec2_c {
-        x: value[0],
-        y: value[1],
-    }
-}

@@ -30,15 +30,6 @@ impl CteContextBinding {
         Ok(())
     }
 
-    pub(crate) fn with_bound_context<R>(
-        &self,
-        operation: &'static str,
-        f: impl FnOnce() -> R,
-    ) -> R {
-        self.try_with_bound_context(operation, f)
-            .unwrap_or_else(|error| panic!("{error}"))
-    }
-
     pub(crate) fn try_with_bound_context<R>(
         &self,
         operation: &'static str,

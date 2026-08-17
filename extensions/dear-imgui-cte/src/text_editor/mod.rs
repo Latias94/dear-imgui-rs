@@ -5,13 +5,14 @@ mod render;
 pub use render::{CteUiExt, TextEditorRenderer};
 
 use crate::{
-    CteError, CteResult, Language, Palette, Position, Selection, context::CteContextBinding,
-    error::c_string, sys,
+    CteError, CteResult, Language, Palette, Position, Selection, callbacks::CallbackRegistry,
+    context::CteContextBinding, error::c_string, sys,
 };
 use dear_imgui_rs::{Context, ContextId};
 use std::{
     ffi::{CStr, c_char},
     marker::PhantomData,
+    panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
     ptr::NonNull,
     rc::Rc,
 };
@@ -21,8 +22,10 @@ use std::{
 /// The editor is intentionally neither [`Send`] nor [`Sync`]. Every native call is
 /// made while its originating Dear ImGui context is current.
 pub struct TextEditor {
-    raw: Option<NonNull<sys::TextEditor>>,
+    raw: NonNull<sys::TextEditor>,
     binding: CteContextBinding,
+    pub(crate) callbacks: CallbackRegistry,
+    pub(crate) trie: Option<NonNull<sys::TrieAutoComplete>>,
     _not_send_sync: PhantomData<Rc<()>>,
 }
 
@@ -37,8 +40,10 @@ impl TextEditor {
             object: "TextEditor",
         })?;
         Ok(Self {
-            raw: Some(raw),
+            raw,
             binding,
+            callbacks: CallbackRegistry::new(),
+            trie: None,
             _not_send_sync: PhantomData,
         })
     }
@@ -198,8 +203,8 @@ impl TextEditor {
         operation: &'static str,
         f: impl FnOnce(*mut sys::TextEditor) -> R,
     ) -> R {
-        let raw = self.raw_ptr();
-        self.binding.with_bound_context(operation, || f(raw))
+        self.try_with_context(operation, f)
+            .unwrap_or_else(|error| panic!("{error}"))
     }
 
     pub(crate) fn try_with_context<R>(
@@ -212,25 +217,50 @@ impl TextEditor {
     }
 
     fn raw_ptr(&self) -> *mut sys::TextEditor {
-        self.raw
-            .expect("TextEditor native handle is unavailable")
-            .as_ptr()
+        self.raw.as_ptr()
     }
 }
 
 impl Drop for TextEditor {
     fn drop(&mut self) {
-        let Some(raw) = self.raw.take() else {
-            return;
-        };
-        let _ = self
+        let raw = self.raw;
+        let trie = self.trie.take();
+        let callbacks = &mut self.callbacks;
+        let mut callback_panic = None;
+        let native_result = self
             .binding
             .try_with_bound_context("TextEditor::drop", || unsafe {
-                sys::TextEditor_destroy(raw.as_ptr())
+                if let Some(trie) = trie {
+                    sys::TrieAutoComplete_Disconnect(trie.as_ptr());
+                    sys::TrieAutoComplete_destroy(trie.as_ptr());
+                }
+                let _ = sys::dear_imgui_cte_clear_callbacks(raw.as_ptr());
+                let owned = callbacks.take_owned();
+                callback_panic = catch_unwind(AssertUnwindSafe(|| drop(owned))).err();
+                sys::TextEditor_destroy(raw.as_ptr());
             });
+        if native_result.is_err() {
+            callbacks.clear_owned();
+        } else if let Some(payload) = callback_panic {
+            resume_unwind(payload);
+        }
         // If context teardown already started, touching CTE state is no longer proven safe.
-        // The native handle is intentionally leaked rather than calling into a dead context.
+        // Native handles are intentionally leaked rather than calling into a dead context.
     }
+}
+
+fn validate_finite_vec2(
+    operation: &'static str,
+    parameter: &'static str,
+    value: [f32; 2],
+) -> CteResult<()> {
+    if !value.into_iter().all(f32::is_finite) {
+        return Err(CteError::NonFinite {
+            operation,
+            parameter,
+        });
+    }
+    Ok(())
 }
 
 struct AllocatedText(NonNull<c_char>);

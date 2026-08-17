@@ -91,6 +91,14 @@ fn bridge_owns_cpp_callbacks_and_preserves_length_aware_text() {
             sys::DearImGuiCteStatus_InvalidValue
         );
         assert_eq!(
+            sys::dear_imgui_cte_autocomplete_config_set_trigger_delay(config, 86_400_000),
+            sys::DearImGuiCteStatus_Ok
+        );
+        assert_eq!(
+            sys::dear_imgui_cte_autocomplete_config_set_trigger_delay(config, 86_400_001),
+            sys::DearImGuiCteStatus_InvalidValue
+        );
+        assert_eq!(
             sys::dear_imgui_cte_autocomplete_config_set_no_suggestions_label(
                 config,
                 std::ptr::null(),

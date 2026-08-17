@@ -1,5 +1,5 @@
-use super::TextEditor;
-use crate::{CteError, CteResult, error::c_string, sys, vec2};
+use super::{TextEditor, validate_finite_vec2};
+use crate::{CteError, CteResult, error::c_string, sys};
 use dear_imgui_rs::{ChildFlags, Ui, WindowFlags};
 
 /// Extension methods for rendering a [`TextEditor`] from a Dear ImGui frame.
@@ -59,20 +59,15 @@ impl TextEditorRenderer<'_, '_> {
     pub fn build(self) -> CteResult<bool> {
         const OPERATION: &str = "TextEditorRenderer::build";
         self.editor.binding.require_ui(OPERATION, self.ui)?;
-        if !self.size.into_iter().all(f32::is_finite) {
-            return Err(CteError::NonFinite {
-                operation: OPERATION,
-                parameter: "size",
-            });
-        }
-        if self.child_flags.bits() & !ChildFlags::all().bits() != 0 {
+        validate_finite_vec2(OPERATION, "size", self.size)?;
+        if !ChildFlags::all().contains(self.child_flags) {
             return Err(CteError::InvalidValue {
                 operation: OPERATION,
                 parameter: "child_flags",
                 requirement: "a supported ChildFlags combination",
             });
         }
-        if self.window_flags.bits() & !WindowFlags::all().bits() != 0 {
+        if !WindowFlags::all().contains(self.window_flags) {
             return Err(CteError::InvalidValue {
                 operation: OPERATION,
                 parameter: "window_flags",
@@ -80,17 +75,13 @@ impl TextEditorRenderer<'_, '_> {
             });
         }
         let title = c_string(OPERATION, &self.title)?;
-        let child_flags =
-            i32::try_from(self.child_flags.bits()).map_err(|_| CteError::InvalidValue {
-                operation: OPERATION,
-                parameter: "child_flags",
-                requirement: "representable by ImGuiChildFlags",
-            })?;
+        let child_flags = self.child_flags.bits() as i32;
+        let _active_ui = self.editor.callbacks.enter_ui(self.ui);
         self.editor.try_with_context(OPERATION, |raw| unsafe {
             sys::TextEditor_Render(
                 raw,
                 title.as_ptr(),
-                vec2(self.size),
+                self.size.into(),
                 child_flags,
                 self.window_flags.bits(),
             )

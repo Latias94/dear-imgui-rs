@@ -374,7 +374,9 @@ DearImGuiCteStatus dear_imgui_cte_autocomplete_config_set_trigger_delay(
         return DearImGuiCteStatus_NullArgument;
     }
     using Milliseconds = std::chrono::milliseconds;
-    if (delay_ms > static_cast<uint64_t>(std::numeric_limits<Milliseconds::rep>::max())) {
+    constexpr uint64_t max_delay_ms = 24ULL * 60ULL * 60ULL * 1000ULL;
+    if (delay_ms > max_delay_ms ||
+        delay_ms > static_cast<uint64_t>(std::numeric_limits<Milliseconds::rep>::max())) {
         return DearImGuiCteStatus_InvalidValue;
     }
     config->value.triggerDelay = Milliseconds(static_cast<Milliseconds::rep>(delay_ms));

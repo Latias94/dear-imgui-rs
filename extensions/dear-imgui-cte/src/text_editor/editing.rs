@@ -1,10 +1,10 @@
 use super::{
-    TextEditor, copy_c_string, validate_cursor, validate_line, validate_position,
-    validate_selection,
+    TextEditor, copy_c_string, validate_cursor, validate_finite_vec2, validate_line,
+    validate_position, validate_selection,
 };
 use crate::{
     CteError, CteResult, Position, ScrollAlignment, SearchOptions, Selection, SquiggleKind,
-    VisualPosition, error::c_string, sys, vec2,
+    VisualPosition, error::c_string, sys,
 };
 
 macro_rules! editor_command {
@@ -177,7 +177,7 @@ impl TextEditor {
         )?;
         Ok(
             self.with_context("TextEditor::is_mouse_over_glyph", |raw| unsafe {
-                sys::TextEditor_IsMousePosOverGlyph(raw, vec2(mouse_position))
+                sys::TextEditor_IsMousePosOverGlyph(raw, mouse_position.into())
             }),
         )
     }
@@ -190,7 +190,7 @@ impl TextEditor {
         )?;
         Ok(
             self.with_context("TextEditor::is_mouse_over_text_area", |raw| unsafe {
-                sys::TextEditor_IsMousePosOverTextArea(raw, vec2(mouse_position))
+                sys::TextEditor_IsMousePosOverTextArea(raw, mouse_position.into())
             }),
         )
     }
@@ -205,7 +205,7 @@ impl TextEditor {
             self.with_context("TextEditor::position_at_mouse", |raw| unsafe {
                 Position::from_raw(sys::TextEditor_GetDocPosAtMousePos(
                     raw,
-                    vec2(mouse_position),
+                    mouse_position.into(),
                 ))
             }),
         )
@@ -220,7 +220,7 @@ impl TextEditor {
         self.with_context("TextEditor::word_at_mouse", |raw| unsafe {
             copy_c_string(
                 "TextEditor::word_at_mouse",
-                sys::TextEditor_GetWordAtMousePos(raw, vec2(mouse_position)),
+                sys::TextEditor_GetWordAtMousePos(raw, mouse_position.into()),
             )
         })
     }
@@ -588,18 +588,4 @@ impl TextEditor {
             Ok(query(raw, line))
         })
     }
-}
-
-fn validate_finite_vec2(
-    operation: &'static str,
-    parameter: &'static str,
-    value: [f32; 2],
-) -> CteResult<()> {
-    if !value.into_iter().all(f32::is_finite) {
-        return Err(CteError::NonFinite {
-            operation,
-            parameter,
-        });
-    }
-    Ok(())
 }
