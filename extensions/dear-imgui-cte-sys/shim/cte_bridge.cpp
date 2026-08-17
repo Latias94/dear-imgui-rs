@@ -12,6 +12,7 @@
 #include <new>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 struct DearImGuiCteAutocompleteConfig {
@@ -34,7 +35,85 @@ const TextEditor::AutoCompleteState* autocomplete_state(
     return reinterpret_cast<const TextEditor::AutoCompleteState*>(state);
 }
 
+class DearImGuiCteBridgeTextEditor final : public TextEditor {
+public:
+    void reset_autocomplete() {
+        autocomplete = AutoComplete{};
+    }
+
+    void set_change_callback(std::function<void()> callback, int delay_ms) {
+        delayedChangeDetected = false;
+        delayedChangeReportTime = std::chrono::system_clock::time_point{};
+        SetChangeCallback(std::move(callback), delay_ms);
+    }
+
+    void clear_callbacks() {
+        set_change_callback(nullptr, 0);
+        SetTransactionCallback(nullptr);
+        SetInsertor(nullptr);
+        SetDeletor(nullptr);
+        ClearLineDecorator();
+        ClearCustomCaretRenderer();
+        ClearLineNumberContextMenuCallback();
+        ClearTextContextMenuCallback();
+        ClearTextHoverCallback();
+        SetLanguageChangeCallback(nullptr);
+        reset_autocomplete();
+    }
+};
+
+DearImGuiCteBridgeTextEditor* bridge_editor(TextEditor* editor) noexcept {
+    return static_cast<DearImGuiCteBridgeTextEditor*>(editor);
+}
+
 } // namespace
+
+TextEditor* dear_imgui_cte_text_editor_create(void) noexcept {
+    return IM_NEW(DearImGuiCteBridgeTextEditor)();
+}
+
+void dear_imgui_cte_text_editor_destroy(TextEditor* editor) noexcept {
+    IM_DELETE(bridge_editor(editor));
+}
+
+DearImGuiCteStatus dear_imgui_cte_text_editor_set_change_callback(
+    TextEditor* editor,
+    DearImGuiCteChangeCallback callback,
+    void* userdata,
+    int delay_ms) noexcept {
+    if (editor == nullptr) {
+        return DearImGuiCteStatus_NullArgument;
+    }
+    if (delay_ms < 0) {
+        return DearImGuiCteStatus_InvalidValue;
+    }
+    if (callback == nullptr) {
+        bridge_editor(editor)->set_change_callback(nullptr, delay_ms);
+    } else {
+        bridge_editor(editor)->set_change_callback(
+            [callback, userdata]() { callback(userdata); },
+            delay_ms);
+    }
+    return DearImGuiCteStatus_Ok;
+}
+
+DearImGuiCteStatus dear_imgui_cte_text_editor_reset_autocomplete(
+    TextEditor* editor) noexcept {
+    if (editor == nullptr) {
+        return DearImGuiCteStatus_NullArgument;
+    }
+    bridge_editor(editor)->reset_autocomplete();
+    return DearImGuiCteStatus_Ok;
+}
+
+DearImGuiCteStatus dear_imgui_cte_text_editor_clear_callbacks(
+    TextEditor* editor) noexcept {
+    if (editor == nullptr) {
+        return DearImGuiCteStatus_NullArgument;
+    }
+    bridge_editor(editor)->clear_callbacks();
+    return DearImGuiCteStatus_Ok;
+}
 
 DearImGuiCteStatus dear_imgui_cte_set_change_callback(
     TextEditor* editor,
@@ -374,9 +453,7 @@ DearImGuiCteStatus dear_imgui_cte_autocomplete_config_set_trigger_delay(
         return DearImGuiCteStatus_NullArgument;
     }
     using Milliseconds = std::chrono::milliseconds;
-    constexpr uint64_t max_delay_ms = 24ULL * 60ULL * 60ULL * 1000ULL;
-    if (delay_ms > max_delay_ms ||
-        delay_ms > static_cast<uint64_t>(std::numeric_limits<Milliseconds::rep>::max())) {
+    if (delay_ms > static_cast<uint64_t>(std::numeric_limits<Milliseconds::rep>::max())) {
         return DearImGuiCteStatus_InvalidValue;
     }
     config->value.triggerDelay = Milliseconds(static_cast<Milliseconds::rep>(delay_ms));
@@ -399,9 +476,6 @@ DearImGuiCteStatus dear_imgui_cte_autocomplete_config_set_suggestion_width(
     size_t width) noexcept {
     if (config == nullptr) {
         return DearImGuiCteStatus_NullArgument;
-    }
-    if (width == 0) {
-        return DearImGuiCteStatus_InvalidValue;
     }
     config->value.suggestionWidth = width;
     return DearImGuiCteStatus_Ok;

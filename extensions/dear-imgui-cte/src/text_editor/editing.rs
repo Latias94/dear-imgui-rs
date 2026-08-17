@@ -175,6 +175,9 @@ impl TextEditor {
             "mouse_position",
             mouse_position,
         )?;
+        if !self.layout_ready {
+            return Ok(false);
+        }
         Ok(
             self.with_context("TextEditor::is_mouse_over_glyph", |raw| unsafe {
                 sys::TextEditor_IsMousePosOverGlyph(raw, mouse_position.into())
@@ -188,6 +191,9 @@ impl TextEditor {
             "mouse_position",
             mouse_position,
         )?;
+        if !self.layout_ready {
+            return Ok(false);
+        }
         Ok(
             self.with_context("TextEditor::is_mouse_over_text_area", |raw| unsafe {
                 sys::TextEditor_IsMousePosOverTextArea(raw, mouse_position.into())
@@ -201,6 +207,9 @@ impl TextEditor {
             "mouse_position",
             mouse_position,
         )?;
+        if !self.layout_ready {
+            return Ok(Position::default());
+        }
         Ok(
             self.with_context("TextEditor::position_at_mouse", |raw| unsafe {
                 Position::from_raw(sys::TextEditor_GetDocPosAtMousePos(
@@ -217,6 +226,9 @@ impl TextEditor {
             "mouse_position",
             mouse_position,
         )?;
+        if !self.layout_ready {
+            return Ok(String::new());
+        }
         self.with_context("TextEditor::word_at_mouse", |raw| unsafe {
             copy_c_string(
                 "TextEditor::word_at_mouse",
@@ -257,15 +269,21 @@ impl TextEditor {
         })
     }
 
-    pub fn line_height(&self) -> f32 {
-        self.with_context("TextEditor::line_height", |raw| unsafe {
-            sys::TextEditor_GetLineHeight(raw)
+    /// Returns the line height after the editor has produced a visible layout.
+    pub fn line_height(&self) -> Option<f32> {
+        self.layout_ready.then(|| {
+            self.with_context("TextEditor::line_height", |raw| unsafe {
+                sys::TextEditor_GetLineHeight(raw)
+            })
         })
     }
 
-    pub fn glyph_width(&self) -> f32 {
-        self.with_context("TextEditor::glyph_width", |raw| unsafe {
-            sys::TextEditor_GetGlyphWidth(raw)
+    /// Returns the glyph width after the editor has produced a visible layout.
+    pub fn glyph_width(&self) -> Option<f32> {
+        self.layout_ready.then(|| {
+            self.with_context("TextEditor::glyph_width", |raw| unsafe {
+                sys::TextEditor_GetGlyphWidth(raw)
+            })
         })
     }
 

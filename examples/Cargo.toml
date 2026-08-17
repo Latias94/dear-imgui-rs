@@ -21,6 +21,7 @@ implot3d = ["dep:dear-implot3d", "dear-app/implot3d"]
 file-browser = ["dep:dear-file-browser", "dear-file-browser/thumbnails-image"]
 reflect = ["dep:dear-imgui-reflect", "dear-imgui-reflect/glam"]
 test-engine = ["dep:dear-imgui-test-engine", "dear-app/test-engine"]
+cte = ["dep:dear-imgui-cte"]
 multi-viewport = [
     "glow-multi-viewport",
     "dear-imgui-wgpu/multi-viewport-winit",
@@ -290,6 +291,16 @@ path = "03-features/imnodes_showcase.rs"
 required-features = ["imnodes"]
 
 [[bin]]
+name = "cte_minimal"
+path = "03-features/cte_minimal.rs"
+required-features = ["cte"]
+
+[[bin]]
+name = "cte_showcase"
+path = "03-features/cte_showcase.rs"
+required-features = ["cte"]
+
+[[bin]]
 name = "node_editor_minimal"
 path = "03-features/node_editor_minimal.rs"
 required-features = ["node-editor"]
@@ -385,6 +396,7 @@ dear-implot3d = { workspace = true, optional = true }
 dear-file-browser = { workspace = true, optional = true }
 dear-imgui-reflect = { workspace = true, optional = true, features = ["glam"] }
 dear-imgui-test-engine = { workspace = true, optional = true }
+dear-imgui-cte = { workspace = true, optional = true }
 sdl3-main = { version = "0.6", optional = true }
 wgpu = { workspace = true }
 winit = { workspace = true }

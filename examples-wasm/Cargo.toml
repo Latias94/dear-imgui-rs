@@ -21,6 +21,7 @@ implot3d = ["dep:dear-implot3d"]
 imnodes = ["dep:dear-imnodes"]
 imguizmo = ["dep:dear-imguizmo"]
 imguizmo-quat = ["dep:dear-imguizmo-quat"]
+cte = ["dep:dear-imgui-cte", "experimental-fonts"]
 
 [dependencies]
 dear-imgui-rs = { workspace = true, features = ["wasm"] }
@@ -31,6 +32,7 @@ dear-implot3d = { workspace = true, optional = true, features = ["wasm"] }
 dear-imnodes = { workspace = true, optional = true, features = ["wasm"] }
 dear-imguizmo = { workspace = true, optional = true, features = ["wasm"] }
 dear-imguizmo-quat = { workspace = true, optional = true, features = ["wasm"] }
+dear-imgui-cte = { workspace = true, optional = true, features = ["wasm"] }
 wgpu = { workspace = true }
 winit = { workspace = true }
 web-time = { workspace = true }

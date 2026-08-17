@@ -14,7 +14,7 @@ use std::{
     time::Duration,
 };
 
-const MAX_AUTOCOMPLETE_DELAY_MS: u128 = 24 * 60 * 60 * 1_000;
+const MAX_AUTOCOMPLETE_DELAY_MS: u128 = i64::MAX as u128;
 
 /// Configuration copied into an editor when autocomplete is installed.
 #[must_use]
@@ -33,7 +33,7 @@ pub struct AutocompleteConfig {
 
 impl Default for AutocompleteConfig {
     fn default() -> Self {
-        let modifier = if cfg!(target_os = "macos") {
+        let modifier = if cfg!(target_vendor = "apple") {
             KeyMods::SUPER
         } else {
             KeyMods::CTRL
@@ -89,7 +89,7 @@ impl AutocompleteConfig {
 
     /// Sets the activation delay.
     ///
-    /// Delays longer than 24 hours are rejected when the configuration is installed.
+    /// Delays longer than `i64::MAX` milliseconds are rejected when the configuration is installed.
     pub fn trigger_delay(mut self, delay: Duration) -> Self {
         self.trigger_delay = delay;
         self
@@ -100,6 +100,7 @@ impl AutocompleteConfig {
         self
     }
 
+    /// Sets the popup width in glyph columns, or `0` to let Dear ImGui auto-fit it.
     pub fn suggestion_width(mut self, width: usize) -> Self {
         self.suggestion_width = width;
         self
@@ -280,19 +281,12 @@ impl TextEditor {
     {
         const OPERATION: &str = "TextEditor::set_autocomplete";
         self.reject_trie_conflict(OPERATION)?;
-        if config.suggestion_width == 0 {
-            return Err(CteError::InvalidValue {
-                operation: OPERATION,
-                parameter: "suggestion_width",
-                requirement: "greater than zero",
-            });
-        }
         let delay_ms = config.trigger_delay.as_millis();
         if delay_ms > MAX_AUTOCOMPLETE_DELAY_MS {
             return Err(CteError::InvalidValue {
                 operation: OPERATION,
                 parameter: "trigger_delay",
-                requirement: "at most 24 hours",
+                requirement: "at most i64::MAX milliseconds",
             });
         }
         let delay_ms = delay_ms as u64;
@@ -359,7 +353,7 @@ impl TextEditor {
         }
         const OPERATION: &str = "TextEditor::clear_autocomplete";
         let status = self.try_with_context(OPERATION, |raw| unsafe {
-            sys::dear_imgui_cte_text_editor_set_autocomplete_config(raw, ptr::null())
+            sys::dear_imgui_cte_text_editor_reset_autocomplete(raw)
         })?;
         check_status(OPERATION, status)?;
         self.callbacks.autocomplete = None;
@@ -406,30 +400,65 @@ impl TextEditor {
                 active,
             });
         }
-        let mut new = PendingTrie::create()?;
+
+        enum EnableTrieResult {
+            Connected(NonNull<sys::TrieAutoComplete>),
+            CreationFailed,
+            ResetFailed(sys::DearImGuiCteStatus),
+            NotConnected,
+        }
+
         let old = self.trie.take();
-        let connected = match self.try_with_context(OPERATION, |raw| unsafe {
+        let result = match self.try_with_context(OPERATION, |raw| unsafe {
+            let Some(new) = NonNull::new(sys::TrieAutoComplete_TrieAutoComplete()) else {
+                return EnableTrieResult::CreationFailed;
+            };
             if let Some(old) = old {
+                let status = sys::dear_imgui_cte_text_editor_reset_autocomplete(raw);
+                if status != sys::DearImGuiCteStatus_Ok {
+                    sys::TrieAutoComplete_destroy(new.as_ptr());
+                    return EnableTrieResult::ResetFailed(status);
+                }
                 sys::TrieAutoComplete_Disconnect(old.as_ptr());
                 sys::TrieAutoComplete_destroy(old.as_ptr());
             }
-            sys::TrieAutoComplete_Connect(new.raw(), raw);
-            sys::TrieAutoComplete_IsConnected(new.raw())
+            sys::TrieAutoComplete_Connect(new.as_ptr(), raw);
+            if sys::TrieAutoComplete_IsConnected(new.as_ptr()) {
+                EnableTrieResult::Connected(new)
+            } else {
+                sys::TrieAutoComplete_destroy(new.as_ptr());
+                EnableTrieResult::NotConnected
+            }
         }) {
-            Ok(connected) => connected,
+            Ok(result) => result,
             Err(error) => {
                 self.trie = old;
                 return Err(error);
             }
         };
-        if !connected {
-            return Err(CteError::NativeStatus {
+        match result {
+            EnableTrieResult::Connected(new) => {
+                self.trie = Some(new);
+                Ok(())
+            }
+            EnableTrieResult::CreationFailed => {
+                self.trie = old;
+                Err(CteError::CreationFailed {
+                    object: "TrieAutoComplete",
+                })
+            }
+            EnableTrieResult::ResetFailed(status) => {
+                self.trie = old;
+                Err(CteError::NativeStatus {
+                    operation: OPERATION,
+                    status: status as u32,
+                })
+            }
+            EnableTrieResult::NotConnected => Err(CteError::NativeStatus {
                 operation: OPERATION,
                 status: sys::DearImGuiCteStatus_CallbackFailed as u32,
-            });
+            }),
         }
-        self.trie = Some(new.release());
-        Ok(())
     }
 
     pub fn disable_trie_autocomplete(&mut self) -> CteResult<()> {
@@ -437,14 +466,21 @@ impl TextEditor {
         let Some(trie) = self.trie.take() else {
             return Ok(());
         };
-        if let Err(error) = self.try_with_context(OPERATION, |_raw| unsafe {
+        match self.try_with_context(OPERATION, |raw| unsafe {
+            check_status(
+                OPERATION,
+                sys::dear_imgui_cte_text_editor_reset_autocomplete(raw),
+            )?;
             sys::TrieAutoComplete_Disconnect(trie.as_ptr());
             sys::TrieAutoComplete_destroy(trie.as_ptr());
+            Ok(())
         }) {
-            self.trie = Some(trie);
-            return Err(error);
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) | Err(error) => {
+                self.trie = Some(trie);
+                Err(error)
+            }
         }
-        Ok(())
     }
 
     pub fn trie_autocomplete(&self) -> Option<TrieAutocomplete<'_>> {
@@ -473,34 +509,6 @@ impl NativeAutocompleteConfig {
 impl Drop for NativeAutocompleteConfig {
     fn drop(&mut self) {
         unsafe { sys::dear_imgui_cte_autocomplete_config_destroy(self.0.as_ptr()) };
-    }
-}
-
-struct PendingTrie(Option<NonNull<sys::TrieAutoComplete>>);
-
-impl PendingTrie {
-    fn create() -> CteResult<Self> {
-        NonNull::new(unsafe { sys::TrieAutoComplete_TrieAutoComplete() })
-            .map(|raw| Self(Some(raw)))
-            .ok_or(CteError::CreationFailed {
-                object: "TrieAutoComplete",
-            })
-    }
-
-    fn raw(&self) -> *mut sys::TrieAutoComplete {
-        self.0.expect("pending Trie was already released").as_ptr()
-    }
-
-    fn release(&mut self) -> NonNull<sys::TrieAutoComplete> {
-        self.0.take().expect("pending Trie was already released")
-    }
-}
-
-impl Drop for PendingTrie {
-    fn drop(&mut self) {
-        if let Some(raw) = self.0 {
-            unsafe { sys::TrieAutoComplete_destroy(raw.as_ptr()) };
-        }
     }
 }
 
@@ -538,5 +546,24 @@ unsafe fn bytes_from_raw<'a>(
         Err(CteError::NullResult { operation })
     } else {
         Ok(unsafe { slice::from_raw_parts(raw.cast(), len) })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_shortcut_matches_the_upstream_apple_contract() {
+        let expected_modifier = if cfg!(target_vendor = "apple") {
+            KeyMods::SUPER
+        } else {
+            KeyMods::CTRL
+        };
+
+        assert_eq!(
+            AutocompleteConfig::default().shortcut,
+            KeyChord::new(Key::Space).with_mods(expected_modifier)
+        );
     }
 }

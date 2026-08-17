@@ -20,6 +20,27 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 - Previous train: unified `v0.8.0` (use `version = "0.8"`).
 - Internal dependency constraints use the compatible current stable minor (`0.16`); prerelease trains use exact requirements. Mixing different release trains across our crates is unsupported.
 
+## Unreleased
+
+The workspace adds the following Preview pair after the `0.16.0` release. It
+will join the next synchronized release train; it is not part of the published
+`0.16.0` crate set.
+
+| Safe crate | Sys crate | Core baseline | Source identity | Native source | Verified prebuilt route | WASM import route |
+| --- | --- | --- | --- | --- | --- | --- |
+| `dear-imgui-cte` | `dear-imgui-cte-sys` | Dear ImGui v1.92.9b docking | cimCTE `b340b99748f9b13307a8e88b938c4c9f8d77df48`; ImGuiColorTextEdit `3b46d759975dfd628ef20fd51b7e1c81ef635be5` | C++20, exceptions disabled | yes, exact artifact and shared-core identity required | yes, fixed `imgui-sys-v1` provider |
+
+The safe crate forwards `prebuilt`, `build-from-source`, and `wasm` through
+both the core and CTE sys crates. Source wins if Cargo unifies source and
+prebuilt routes. CTE owners are Context-bound and neither `Send` nor `Sync`;
+applications must release them before their Dear ImGui Context.
+
+CTE examples add the bundled DejaVu source to the managed font atlas before
+renderer initialization. A compatible renderer must consume the atlas texture
+create/update/destroy requests introduced by the current Dear ImGui font
+lifecycle. Raw cimCTE `SetDejavu` is not a safe substitute because it clears the
+whole atlas and changes its loader outside renderer ownership.
+
 ## 0.16 Stable Release
 
 Core

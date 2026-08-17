@@ -1,9 +1,40 @@
-//! Safe, context-bound ImGuiColorTextEdit bindings.
+//! Preview, context-bound ImGuiColorTextEdit bindings through cimCTE.
 //!
-//! Stateful callbacks are owned by their [`TextEditor`]. Reentering the same mutable
-//! callback skips the nested invocation; text filters preserve the original input and
-//! return an error. A callback panic is diagnosed and aborts rather than unwinding through
-//! native C++ frames.
+//! Persistent [`TextEditor`], [`TextDiff`], and [`Notifications`] values are created from a
+//! [`dear_imgui_rs::Context`] and rendered through [`CteUiExt`] on that same Context:
+//!
+//! ```no_run
+//! use dear_imgui_cte::{CteUiExt, Language, TextEditor};
+//! use dear_imgui_rs::Context;
+//!
+//! # fn main() -> Result<(), dear_imgui_cte::CteError> {
+//! let mut imgui = Context::create();
+//! let mut editor = TextEditor::try_create(&imgui)?;
+//! editor.set_text("int main() { return 0; }\n")?;
+//! editor.set_language(Some(Language::Cpp));
+//!
+//! let ui = imgui.frame();
+//! ui.text_editor(&mut editor, "Source")
+//!     .size([640.0, 480.0])
+//!     .build()?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! Native owners are neither [`Send`] nor [`Sync`]. A renderer built from another Context is
+//! rejected before FFI, and applications should drop every CTE owner before its Context. If the
+//! Context has already died, Drop deliberately leaks the native handle rather than dereferencing
+//! invalid native state.
+//!
+//! Stateful callbacks are owned by their editor. Reentering the same mutable callback skips the
+//! nested invocation; text filters validate a complete batch before mutation. A callback panic is
+//! diagnosed and aborts rather than unwinding through native C++ frames. Trie autocomplete uses
+//! upstream-exclusive callback slots, so conflicts are reported instead of silently replacing
+//! user callbacks.
+//!
+//! Add [`dejavu_font_source`] to the managed font atlas before renderer initialization. Do not use
+//! the raw cimCTE `SetDejavu` helper from safe integrations: it clears the complete atlas and
+//! changes its loader outside renderer texture management.
 
 mod autocomplete;
 mod callbacks;

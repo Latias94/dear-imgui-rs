@@ -2640,6 +2640,7 @@ dependencies = [
  "dear-app",
  "dear-file-browser",
  "dear-imgui-ash",
+ "dear-imgui-cte",
  "dear-imgui-glow",
  "dear-imgui-reflect",
  "dear-imgui-rs",
@@ -2777,6 +2778,7 @@ version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",
  "console_log",
+ "dear-imgui-cte",
  "dear-imgui-rs",
  "dear-imgui-wgpu",
  "dear-imgui-winit",

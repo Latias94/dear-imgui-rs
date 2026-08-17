@@ -1433,6 +1433,9 @@ const CTE_TYPES: &[&str] = &[
     "DearImGuiCte.*",
 ];
 const CTE_BLOCKLIST_TYPES: &[&str] = &[
+    "BreakOption",
+    "Color",
+    "Glyph",
     "ImDrawList",
     "ImGuiContext",
     "ImGuiChildFlags",
@@ -1483,6 +1486,11 @@ const CTE_SYMBOLS: &[&str] = &[
     "CodePoint_write",
     "GetDejavu",
     "SetDejavu",
+    "dear_imgui_cte_text_editor_create",
+    "dear_imgui_cte_text_editor_destroy",
+    "dear_imgui_cte_text_editor_set_change_callback",
+    "dear_imgui_cte_text_editor_reset_autocomplete",
+    "dear_imgui_cte_text_editor_clear_callbacks",
     "dear_imgui_cte_set_change_callback",
     "dear_imgui_cte_set_transaction_callback",
     "dear_imgui_cte_set_insert_callback",

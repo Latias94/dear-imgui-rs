@@ -40,6 +40,14 @@ fn bridge_owns_cpp_callbacks_and_preserves_length_aware_text() {
             sys::dear_imgui_cte_clear_callbacks(std::ptr::null_mut()),
             sys::DearImGuiCteStatus_NullArgument
         );
+        assert_eq!(
+            sys::dear_imgui_cte_text_editor_reset_autocomplete(std::ptr::null_mut()),
+            sys::DearImGuiCteStatus_NullArgument
+        );
+        assert_eq!(
+            sys::dear_imgui_cte_text_editor_clear_callbacks(std::ptr::null_mut()),
+            sys::DearImGuiCteStatus_NullArgument
+        );
         let mut context = std::mem::MaybeUninit::uninit();
         assert_eq!(
             sys::dear_imgui_cte_autocomplete_state_get_context(
@@ -49,7 +57,7 @@ fn bridge_owns_cpp_callbacks_and_preserves_length_aware_text() {
             sys::DearImGuiCteStatus_NullArgument
         );
 
-        let editor = sys::TextEditor_TextEditor();
+        let editor = sys::dear_imgui_cte_text_editor_create();
         assert!(!editor.is_null());
         let source = CString::new("alpha\nbeta").unwrap();
         sys::TextEditor_SetText(editor, source.as_ptr());
@@ -88,7 +96,7 @@ fn bridge_owns_cpp_callbacks_and_preserves_length_aware_text() {
         assert!(!config.is_null());
         assert_eq!(
             sys::dear_imgui_cte_autocomplete_config_set_suggestion_width(config, 0),
-            sys::DearImGuiCteStatus_InvalidValue
+            sys::DearImGuiCteStatus_Ok
         );
         assert_eq!(
             sys::dear_imgui_cte_autocomplete_config_set_trigger_delay(config, 86_400_000),
@@ -96,6 +104,14 @@ fn bridge_owns_cpp_callbacks_and_preserves_length_aware_text() {
         );
         assert_eq!(
             sys::dear_imgui_cte_autocomplete_config_set_trigger_delay(config, 86_400_001),
+            sys::DearImGuiCteStatus_Ok
+        );
+        assert_eq!(
+            sys::dear_imgui_cte_autocomplete_config_set_trigger_delay(config, i64::MAX as u64),
+            sys::DearImGuiCteStatus_Ok
+        );
+        assert_eq!(
+            sys::dear_imgui_cte_autocomplete_config_set_trigger_delay(config, i64::MAX as u64 + 1),
             sys::DearImGuiCteStatus_InvalidValue
         );
         assert_eq!(
@@ -110,12 +126,16 @@ fn bridge_owns_cpp_callbacks_and_preserves_length_aware_text() {
             sys::dear_imgui_cte_text_editor_set_autocomplete_config(editor, config),
             sys::DearImGuiCteStatus_Ok
         );
+        assert_eq!(
+            sys::dear_imgui_cte_text_editor_reset_autocomplete(editor),
+            sys::DearImGuiCteStatus_Ok
+        );
         sys::dear_imgui_cte_autocomplete_config_destroy(config);
 
         assert_eq!(
-            sys::dear_imgui_cte_clear_callbacks(editor),
+            sys::dear_imgui_cte_text_editor_clear_callbacks(editor),
             sys::DearImGuiCteStatus_Ok
         );
-        sys::TextEditor_destroy(editor);
+        sys::dear_imgui_cte_text_editor_destroy(editor);
     }
 }

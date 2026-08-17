@@ -222,7 +222,7 @@ impl TextEditor {
         let slot = CallbackSlot::new(Box::new(callback) as Box<EmptyCallback>);
         let userdata = slot.userdata();
         let status = self.try_with_context(OPERATION, |raw| unsafe {
-            sys::dear_imgui_cte_set_change_callback(
+            sys::dear_imgui_cte_text_editor_set_change_callback(
                 raw,
                 Some(change_trampoline),
                 userdata,
@@ -240,7 +240,7 @@ impl TextEditor {
         }
         const OPERATION: &str = "TextEditor::clear_change_callback";
         let status = self.try_with_context(OPERATION, |raw| unsafe {
-            sys::dear_imgui_cte_set_change_callback(raw, None, ptr::null_mut(), 0)
+            sys::dear_imgui_cte_text_editor_set_change_callback(raw, None, ptr::null_mut(), 0)
         })?;
         check_status(OPERATION, status)?;
         self.callbacks.change = None;
@@ -345,6 +345,10 @@ impl TextEditor {
         Ok(())
     }
 
+    /// Installs content for the popup opened by right-clicking a line number.
+    ///
+    /// The callback runs inside the open popup during editor rendering. Submit popup widgets
+    /// through the provided [`Ui`]; [`PopupEvent::position`] identifies the clicked document line.
     pub fn set_line_number_context_callback<F>(&mut self, callback: F) -> CteResult<()>
     where
         F: FnMut(&Ui, PopupEvent) + 'static,
@@ -359,6 +363,10 @@ impl TextEditor {
         self.clear_popup_callback(PopupKind::LineNumberContext)
     }
 
+    /// Installs content for the popup opened by right-clicking the text area.
+    ///
+    /// The callback runs inside the open popup during editor rendering. Submit popup widgets
+    /// through the provided [`Ui`]; [`PopupEvent::position`] identifies the clicked position.
     pub fn set_text_context_callback<F>(&mut self, callback: F) -> CteResult<()>
     where
         F: FnMut(&Ui, PopupEvent) + 'static,
@@ -373,6 +381,10 @@ impl TextEditor {
         self.clear_popup_callback(PopupKind::TextContext)
     }
 
+    /// Installs content for the popup opened while a text glyph is hovered.
+    ///
+    /// The callback runs inside the open popup during editor rendering. Submit popup widgets
+    /// through the provided [`Ui`]; [`PopupEvent::position`] identifies the hovered word start.
     pub fn set_text_hover_callback<F>(&mut self, callback: F) -> CteResult<()>
     where
         F: FnMut(&Ui, PopupEvent) + 'static,
@@ -470,11 +482,7 @@ impl TextEditor {
             let line = self.line_text(selection.end.line)?;
             if selection.end.column != 0 && !line.is_empty() {
                 let input = self.cursor_text(cursor)?;
-                let output = if selection.is_empty() {
-                    input
-                } else {
-                    callback(&input)
-                };
+                let output = callback(&input);
                 outputs.push(c_string(OPERATION, &output)?);
             }
         }
@@ -517,7 +525,7 @@ impl TextEditor {
         const OPERATION: &str = "TextEditor::clear_callbacks";
         self.disable_trie_autocomplete()?;
         let status = self.try_with_context(OPERATION, |raw| unsafe {
-            sys::dear_imgui_cte_clear_callbacks(raw)
+            sys::dear_imgui_cte_text_editor_clear_callbacks(raw)
         })?;
         check_status(OPERATION, status)?;
         self.callbacks.clear_owned();

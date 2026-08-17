@@ -67,16 +67,16 @@ fn integrated_and_side_by_side_views_render_across_frames() {
     side_by_side.set_side_by_side(true);
     side_by_side.focus();
 
-    for frame in 0..3 {
+    for _ in 0..3 {
         let ui = context.frame();
         ui.window("Text diff host")
             .size([620.0, 420.0], Condition::Always)
             .build(|| {
-                ui.text_diff(&mut integrated, format!("Integrated##{frame}"))
+                ui.text_diff(&mut integrated, "Integrated")
                     .size([300.0, 180.0])
                     .build()
                     .unwrap();
-                ui.text_diff(&mut side_by_side, format!("SideBySide##{frame}"))
+                ui.text_diff(&mut side_by_side, "SideBySide")
                     .size([300.0, 180.0])
                     .window_flags(WindowFlags::NO_SAVED_SETTINGS)
                     .build()

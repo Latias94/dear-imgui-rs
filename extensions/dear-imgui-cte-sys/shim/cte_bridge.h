@@ -62,6 +62,21 @@ typedef void (*DearImGuiCteAutocompleteCallback)(
     void* userdata,
     DearImGuiCteAutocompleteState* state);
 
+/* Bridge-owned editor functions require pointers returned by dear_imgui_cte_text_editor_create. */
+CIMGUI_API TextEditor*
+dear_imgui_cte_text_editor_create(void) DEAR_IMGUI_CTE_NOEXCEPT;
+CIMGUI_API void dear_imgui_cte_text_editor_destroy(
+    TextEditor* editor) DEAR_IMGUI_CTE_NOEXCEPT;
+CIMGUI_API DearImGuiCteStatus dear_imgui_cte_text_editor_set_change_callback(
+    TextEditor* editor,
+    DearImGuiCteChangeCallback callback,
+    void* userdata,
+    int delay_ms) DEAR_IMGUI_CTE_NOEXCEPT;
+CIMGUI_API DearImGuiCteStatus dear_imgui_cte_text_editor_reset_autocomplete(
+    TextEditor* editor) DEAR_IMGUI_CTE_NOEXCEPT;
+CIMGUI_API DearImGuiCteStatus dear_imgui_cte_text_editor_clear_callbacks(
+    TextEditor* editor) DEAR_IMGUI_CTE_NOEXCEPT;
+
 CIMGUI_API DearImGuiCteStatus dear_imgui_cte_set_change_callback(
     TextEditor* editor,
     DearImGuiCteChangeCallback callback,

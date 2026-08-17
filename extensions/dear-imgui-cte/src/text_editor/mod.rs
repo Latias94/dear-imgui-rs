@@ -26,6 +26,7 @@ pub struct TextEditor {
     binding: CteContextBinding,
     pub(crate) callbacks: CallbackRegistry,
     pub(crate) trie: Option<NonNull<sys::TrieAutoComplete>>,
+    pub(crate) layout_ready: bool,
     _not_send_sync: PhantomData<Rc<()>>,
 }
 
@@ -34,7 +35,7 @@ impl TextEditor {
     pub fn try_create(context: &Context) -> CteResult<Self> {
         let binding = CteContextBinding::new(context);
         let raw = binding.try_with_bound_context("TextEditor::try_create", || unsafe {
-            sys::TextEditor_TextEditor()
+            sys::dear_imgui_cte_text_editor_create()
         })?;
         let raw = NonNull::new(raw).ok_or(CteError::CreationFailed {
             object: "TextEditor",
@@ -44,6 +45,7 @@ impl TextEditor {
             binding,
             callbacks: CallbackRegistry::new(),
             trie: None,
+            layout_ready: false,
             _not_send_sync: PhantomData,
         })
     }
@@ -233,13 +235,14 @@ impl Drop for TextEditor {
             .binding
             .try_with_bound_context("TextEditor::drop", || unsafe {
                 if let Some(trie) = trie {
+                    let _ = sys::dear_imgui_cte_text_editor_reset_autocomplete(raw.as_ptr());
                     sys::TrieAutoComplete_Disconnect(trie.as_ptr());
                     sys::TrieAutoComplete_destroy(trie.as_ptr());
                 }
-                let _ = sys::dear_imgui_cte_clear_callbacks(raw.as_ptr());
+                let _ = sys::dear_imgui_cte_text_editor_clear_callbacks(raw.as_ptr());
                 let owned = callbacks.take_owned();
                 callback_panic = catch_unwind(AssertUnwindSafe(|| drop(owned))).err();
-                sys::TextEditor_destroy(raw.as_ptr());
+                sys::dear_imgui_cte_text_editor_destroy(raw.as_ptr());
             });
         if native_result.is_err() {
             callbacks.clear_owned();

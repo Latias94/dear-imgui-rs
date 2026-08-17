@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-`dear-imgui-rs` is a Rust bindings ecosystem for Dear ImGui, featuring docking support, WGPU/GL/Vulkan backends, and a rich set of extensions (ImPlot/ImPlot3D, ImGuizmo/ImGuIZMO.quat, ImNodes, imgui-node-editor, ImGui Test Engine, file browser, reflection-based UI).
+`dear-imgui-rs` is a Rust bindings ecosystem for Dear ImGui, featuring docking support, WGPU/GL/Vulkan backends, and a rich set of extensions (ImPlot/ImPlot3D, ImGuizmo/ImGuIZMO.quat, ImNodes, imgui-node-editor, ImGuiColorTextEdit, ImGui Test Engine, file browser, reflection-based UI).
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/game-engine-docking.png" alt="Docking" width="49%"/>
@@ -44,6 +44,7 @@
   - `dear-implot` — plotting (cimplot C API)
   - `dear-implot3d` — 3D plotting (cimplot3d C API)
   - `dear-imguizmo-quat` — quaternion + 3D gizmo (cimguizmo_quat C API)
+  - `dear-imgui-cte` — Preview context-bound code editor, text diff, autocomplete, and notifications (cimCTE / ImGuiColorTextEdit)
   - `dear-imgui-test-engine` — Dear ImGui UI automation/test runner integration
   - `dear-file-browser` — native dialogs (rfd) + pure ImGui in-UI file browser
   - `dear-imgui-reflect` — reflection-based UI helpers (auto-generate ImGui widgets from Rust types)
@@ -147,6 +148,8 @@ separate:
 cargo run -p dear-imgui-examples --bin implot_minimal --features implot
 cargo run -p dear-imgui-examples --bin implot3d_minimal --features implot3d
 cargo run -p dear-imgui-examples --bin imnodes_minimal --features imnodes
+cargo run -p dear-imgui-examples --bin cte_minimal --features cte
+cargo run -p dear-imgui-examples --bin cte_showcase --features cte
 cargo run -p dear-imgui-examples --bin imguizmo_minimal --features imguizmo
 cargo run -p dear-imgui-examples --bin imguizmo_quat_minimal --features imguizmo-quat
 cargo run -p dear-imgui-examples --bin node_editor_minimal --features node-editor
@@ -289,6 +292,11 @@ dear-file-browser = "0.16" # Native dialogs + ImGui file browser
 dear-imgui-reflect = "0.16"
 ```
 
+`dear-imgui-cte` is currently an Unreleased Preview on the main branch and is
+not part of the published `0.16.0` crate set. Until it joins the next synchronized
+release train, take the safe and sys crates from the same workspace checkout or
+the same Git revision as the core crates.
+
 ### Reflection-based UI (dear-imgui-reflect)
 
 `dear-imgui-reflect` lets you derive `ImGuiReflect` on your structs/enums and automatically get Dear ImGui editors for them. It is inspired by the C++ ImReflect library but implemented in pure Rust on top of `dear-imgui-rs`.
@@ -326,9 +334,9 @@ fn ui_frame(
 - Opt-in core prebuilt download from Release: enable `dear-imgui-rs/prebuilt`, or `dear-imgui-sys/prebuilt` when depending on the low-level crate directly (the env toggle `IMGUI_SYS_USE_PREBUILT=1` is still accepted but requires that feature). `IMGUI_SYS_LIB_DIR` points to the static-library directory and requires its matching `manifest.txt` there or in the parent artifact root, while `IMGUI_SYS_PREBUILT_URL` should point to a package-tool-generated archive. Bare core `.a`/`.lib` files without adjacent provenance are rejected.
 - Every accepted core prebuilt manifest records crate/version, target, link type, MSVC CRT, normalized features, cimgui and Dear ImGui revisions, and the binding-spec hash. Missing, unknown, duplicate, or mismatched fields reject the core artifact instead of falling back to an ABI guess. Extension `*-sys` crates retain their crate-specific prebuilt contracts.
 - `dear-implot`, `dear-implot3d`, `dear-imnodes`, `dear-imguizmo`,
-  `dear-imguizmo-quat`, and `dear-node-editor` forward both `prebuilt` and
+  `dear-imguizmo-quat`, `dear-imgui-cte`, and `dear-node-editor` forward both `prebuilt` and
   `build-from-source` through the core and their matching sys crate. Source wins
-  if Cargo unifies both features. The first five also forward `wasm`;
+  if Cargo unifies both features. The first six also forward `wasm`;
   `dear-node-editor` remains native-only.
 
 Test engine hooks (important):
@@ -460,6 +468,7 @@ extensions/
   dear-implot/         # ImPlot (2D plotting)
   dear-implot3d/       # ImPlot3D (3D plotting)
   dear-imguizmo-quat/  # ImGuIZMO.quat (quaternion gizmo)
+  dear-imgui-cte/      # Preview ImGuiColorTextEdit editor, diff, autocomplete, and notifications
   dear-imgui-test-engine/ # ImGui Test Engine integration
   dear-file-browser/   # File dialogs (rfd) + pure ImGui browser
   dear-imgui-reflect/  # Reflection-based UI helpers for dear-imgui-rs
@@ -494,7 +503,7 @@ python3 -m http.server -d target/web-demo 8080
 # Open http://127.0.0.1:8080
 ```
 
-Pass a comma-separated extension list to the demo command, for example `cargo run -p xtask -- web-demo implot,imnodes`. Native multi-viewport, `dear-node-editor`, and the blueprints stack-layout profile are unavailable in the browser; use `dear-imnodes` for the current WASM node-editor route.
+Pass a comma-separated extension list to the demo command, for example `cargo run -p xtask -- web-demo implot,imnodes` or `cargo run -p xtask -- web-demo cte`. Native multi-viewport, `dear-node-editor`, and the blueprints stack-layout profile are unavailable in the browser; use `dear-imnodes` for the current WASM node-editor route.
 
 For binding verification, provider construction, feature-forwarding checks, and troubleshooting, see [`docs/WASM.md`](docs/WASM.md).
 

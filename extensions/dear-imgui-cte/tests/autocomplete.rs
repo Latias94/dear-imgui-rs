@@ -1,5 +1,5 @@
 use dear_imgui_cte::{AutocompleteConfig, CteError, CteUiExt, Language, Position, TextEditor};
-use dear_imgui_rs::{Context, FramePrepareOptions, Key};
+use dear_imgui_rs::{Context, FramePrepareOptions, Key, KeyChord, KeyMods};
 use std::{cell::Cell, rc::Rc, time::Duration};
 
 fn context() -> Context {
@@ -21,6 +21,15 @@ fn render(context: &mut Context, editor: &mut TextEditor, _frame: usize) {
         .build()
         .unwrap();
     drop(context.render_legacy());
+}
+
+fn request_ctrl_space(context: &mut Context, editor: &mut TextEditor, frame: usize) {
+    context.io_mut().add_focus_event(true);
+    context.io_mut().add_key_event(Key::ModCtrl, true);
+    context.io_mut().add_key_event(Key::Space, true);
+    render(context, editor, frame);
+    context.io_mut().add_key_event(Key::Space, false);
+    context.io_mut().add_key_event(Key::ModCtrl, false);
 }
 
 struct DropToken(Rc<Cell<usize>>);
@@ -65,10 +74,10 @@ fn autocomplete_configuration_owns_replaces_and_clears_callbacks() {
     editor.clear_autocomplete().unwrap();
     assert_eq!(drops.get(), 2);
 
-    assert!(matches!(
-        editor.set_autocomplete(&AutocompleteConfig::new().suggestion_width(0), |_| {}),
-        Err(CteError::InvalidValue { .. })
-    ));
+    editor
+        .set_autocomplete(&AutocompleteConfig::new().suggestion_width(0), |_| {})
+        .unwrap();
+    editor.clear_autocomplete().unwrap();
     assert!(matches!(
         editor.set_autocomplete(
             &AutocompleteConfig::new().no_suggestions_label("bad\0label"),
@@ -82,8 +91,7 @@ fn autocomplete_configuration_owns_replaces_and_clears_callbacks() {
     ));
     assert!(matches!(
         editor.set_autocomplete(
-            &AutocompleteConfig::new()
-                .trigger_delay(Duration::from_secs(24 * 60 * 60) + Duration::from_millis(1)),
+            &AutocompleteConfig::new().trigger_delay(Duration::from_millis(i64::MAX as u64 + 1)),
             |_| {}
         ),
         Err(CteError::InvalidValue { .. })
@@ -181,6 +189,49 @@ fn configured_autocomplete_callback_runs_from_the_render_loop() {
 }
 
 #[test]
+fn replacing_autocomplete_cancels_queued_activation() {
+    let mut context = context();
+    let mut editor = TextEditor::create(&context);
+    editor.set_text("al").unwrap();
+    editor.set_cursor(Position::new(0, 2)).unwrap();
+    editor.set_language(Some(Language::Cpp));
+
+    let config = AutocompleteConfig::new()
+        .trigger_on_typing(false)
+        .shortcut(KeyChord::new(Key::Space).with_mods(KeyMods::CTRL))
+        .trigger_delay(Duration::from_millis(30));
+
+    let old_calls = Rc::new(Cell::new(0));
+    let calls = Rc::clone(&old_calls);
+    editor
+        .set_autocomplete(&config, move |request| {
+            calls.set(calls.get() + 1);
+            request.set_suggestions(["alpha"]).unwrap();
+        })
+        .unwrap();
+
+    render(&mut context, &mut editor, 0);
+    editor.focus();
+    render(&mut context, &mut editor, 1);
+    request_ctrl_space(&mut context, &mut editor, 2);
+
+    let new_calls = Rc::new(Cell::new(0));
+    let calls = Rc::clone(&new_calls);
+    editor
+        .set_autocomplete(&config, move |request| {
+            calls.set(calls.get() + 1);
+            request.set_suggestions(["alpine"]).unwrap();
+        })
+        .unwrap();
+
+    std::thread::sleep(Duration::from_millis(40));
+    render(&mut context, &mut editor, 3);
+
+    assert_eq!(old_calls.get(), 0);
+    assert_eq!(new_calls.get(), 0);
+}
+
+#[test]
 fn trie_suggestions_can_be_accepted_and_disconnect_cleanly() {
     let mut context = context();
     let mut editor = TextEditor::create(&context);
@@ -227,5 +278,31 @@ fn trie_suggestions_can_be_accepted_and_disconnect_cleanly() {
     render(&mut context, &mut editor, 9);
     context.io_mut().add_key_event(Key::Enter, false);
     render(&mut context, &mut editor, 10);
+    assert_ne!(editor.text().unwrap(), "alpha");
+}
+
+#[test]
+fn disabling_trie_autocomplete_cancels_queued_activation() {
+    let mut context = context();
+    let mut editor = TextEditor::create(&context);
+    editor.set_text("alpha beta").unwrap();
+    editor.set_language(Some(Language::Cpp));
+    render(&mut context, &mut editor, 0);
+
+    editor.enable_trie_autocomplete().unwrap();
+    editor.set_text("al").unwrap();
+    editor.set_cursor(Position::new(0, 2)).unwrap();
+    editor.focus();
+    render(&mut context, &mut editor, 1);
+    request_ctrl_space(&mut context, &mut editor, 2);
+
+    editor.disable_trie_autocomplete().unwrap();
+    std::thread::sleep(Duration::from_millis(225));
+    render(&mut context, &mut editor, 3);
+    context.io_mut().add_key_event(Key::Enter, true);
+    render(&mut context, &mut editor, 4);
+    context.io_mut().add_key_event(Key::Enter, false);
+    render(&mut context, &mut editor, 5);
+
     assert_ne!(editor.text().unwrap(), "alpha");
 }

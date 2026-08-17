@@ -287,3 +287,33 @@ impl TextDiffRenderer<'_, '_> {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dear_imgui_rs::{Context, FramePrepareOptions};
+
+    #[test]
+    fn renderer_preserves_the_upstream_no_move_flag() {
+        let mut context = Context::create();
+        context.prepare_frame(FramePrepareOptions::new([640.0, 480.0], 1.0 / 60.0));
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("headless CTE tests require the legacy font-atlas capability")
+            .build();
+        let mut diff = TextDiff::create(&context);
+        let ui = context.frame();
+
+        let renderer = TextDiffRenderer::new(ui, &mut diff, "Diff".to_owned());
+        assert_eq!(renderer.window_flags, WindowFlags::NO_MOVE);
+
+        let renderer = renderer.window_flags(WindowFlags::NO_SAVED_SETTINGS);
+        assert!(renderer.window_flags.contains(WindowFlags::NO_MOVE));
+        assert!(
+            renderer
+                .window_flags
+                .contains(WindowFlags::NO_SAVED_SETTINGS)
+        );
+    }
+}

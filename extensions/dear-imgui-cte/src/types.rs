@@ -112,10 +112,19 @@ pub enum MiddleMouseMode {
 }
 
 /// Matching options used by occurrence search operations.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct SearchOptions {
     pub case_sensitive: bool,
     pub whole_word: bool,
+}
+
+impl Default for SearchOptions {
+    fn default() -> Self {
+        Self {
+            case_sensitive: true,
+            whole_word: false,
+        }
+    }
 }
 
 /// Application-defined diagnostic category for a squiggle.

@@ -3,7 +3,7 @@ use dear_imgui_cte::{
     TextEditor,
 };
 use dear_imgui_cte_sys as sys;
-use dear_imgui_rs::{Context, FramePrepareOptions};
+use dear_imgui_rs::{Context, FramePrepareOptions, MouseButton};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -29,6 +29,38 @@ fn render_editor(context: &mut Context, editor: &mut TextEditor, title: &str) {
         .build()
         .unwrap();
     drop(context.render_legacy());
+}
+
+fn find_first_line_glyph(editor: &TextEditor) -> [f32; 2] {
+    for y in (2..260).step_by(2) {
+        for x in (2..500).step_by(2) {
+            let mouse_position = [x as f32, y as f32];
+            if !editor.is_mouse_over_glyph(mouse_position).unwrap() {
+                continue;
+            }
+            if editor.position_at_mouse(mouse_position).unwrap().line == 0 {
+                return mouse_position;
+            }
+        }
+    }
+    panic!("the rendered editor should expose a first-line glyph");
+}
+
+fn find_first_line_text_area_glyph(editor: &TextEditor) -> [f32; 2] {
+    for y in (2..260).step_by(2) {
+        for x in (2..500).step_by(2) {
+            let mouse_position = [x as f32, y as f32];
+            if !editor.is_mouse_over_glyph(mouse_position).unwrap()
+                || !editor.is_mouse_over_text_area(mouse_position).unwrap()
+            {
+                continue;
+            }
+            if editor.position_at_mouse(mouse_position).unwrap().line == 0 {
+                return mouse_position;
+            }
+        }
+    }
+    panic!("the rendered editor should expose a first-line text-area glyph");
 }
 
 struct DropToken(Rc<Cell<usize>>);
@@ -166,14 +198,70 @@ fn transaction_change_and_render_callbacks_route_typed_events() {
         .unwrap();
 
     editor.focus();
-    for frame in 0..4 {
-        render_editor(&mut context, &mut editor, &format!("callbacks##{frame}"));
+    for _ in 0..4 {
+        render_editor(&mut context, &mut editor, "callbacks");
         std::thread::sleep(Duration::from_millis(1));
     }
 
     assert!(change_calls.get() >= 1);
     assert!(decorator_calls.get() >= 1);
     assert!(caret_calls.get() >= 1);
+}
+
+#[test]
+fn popup_callbacks_are_driven_by_real_mouse_events() {
+    let mut context = render_context();
+    let mut editor = TextEditor::create(&context);
+    editor.set_text("alpha beta").unwrap();
+
+    let context_calls = Rc::new(Cell::new(0));
+    let calls = Rc::clone(&context_calls);
+    editor
+        .set_text_context_callback(move |ui, event| {
+            let _ = ui.context_id();
+            assert_eq!(event.position.line, 0);
+            calls.set(calls.get() + 1);
+        })
+        .unwrap();
+
+    editor.focus();
+    render_editor(&mut context, &mut editor, "popup-callbacks");
+    let context_position = find_first_line_text_area_glyph(&editor);
+
+    context.io_mut().add_mouse_pos_event(context_position);
+    render_editor(&mut context, &mut editor, "popup-callbacks");
+    context
+        .io_mut()
+        .add_mouse_button_event(MouseButton::Right, true);
+    render_editor(&mut context, &mut editor, "popup-callbacks");
+    context
+        .io_mut()
+        .add_mouse_button_event(MouseButton::Right, false);
+    render_editor(&mut context, &mut editor, "popup-callbacks");
+    assert!(context_calls.get() >= 1);
+
+    editor.clear_text_context_callback().unwrap();
+    render_editor(&mut context, &mut editor, "popup-callbacks");
+
+    let hover_calls = Rc::new(Cell::new(0));
+    let calls = Rc::clone(&hover_calls);
+    editor
+        .set_text_hover_callback(move |ui, event| {
+            let _ = ui.context_id();
+            assert_eq!(event.position.line, 0);
+            calls.set(calls.get() + 1);
+        })
+        .unwrap();
+
+    let hover_position = find_first_line_glyph(&editor);
+    for _ in 0..3 {
+        context.io_mut().add_mouse_pos_event(hover_position);
+        render_editor(&mut context, &mut editor, "popup-callbacks");
+        if hover_calls.get() > 0 {
+            break;
+        }
+    }
+    assert!(hover_calls.get() >= 1);
 }
 
 #[test]
@@ -200,6 +288,12 @@ fn length_aware_identifier_and_filter_callbacks_preserve_utf8() {
         .filter_selections(|selection| selection.to_uppercase())
         .unwrap();
     assert!(editor.text().unwrap().starts_with("INT variable_name"));
+
+    editor.set_cursor(Position::new(0, 3)).unwrap();
+    editor
+        .filter_selections(|selection| format!("<{selection}>"))
+        .unwrap();
+    assert!(editor.text().unwrap().starts_with("INT<> variable_name"));
 
     let before = editor.text().unwrap();
     assert!(matches!(
@@ -265,6 +359,37 @@ fn invalid_callback_setup_drops_only_the_rejected_closure() {
     assert!(old_calls.get() >= 1);
 
     editor.clear_change_callback().unwrap();
+}
+
+#[test]
+fn replacing_change_callback_cancels_the_previous_delayed_report() {
+    let mut context = render_context();
+    let mut editor = TextEditor::create(&context);
+    let old_calls = Rc::new(Cell::new(0));
+    let calls = Rc::clone(&old_calls);
+    editor
+        .set_change_callback(Duration::from_millis(30), move || {
+            calls.set(calls.get() + 1)
+        })
+        .unwrap();
+
+    editor.set_text("queued").unwrap();
+    render_editor(&mut context, &mut editor, "delayed-change");
+
+    let new_calls = Rc::new(Cell::new(0));
+    let calls = Rc::clone(&new_calls);
+    editor
+        .set_change_callback(Duration::ZERO, move || calls.set(calls.get() + 1))
+        .unwrap();
+
+    std::thread::sleep(Duration::from_millis(40));
+    render_editor(&mut context, &mut editor, "delayed-change");
+    assert_eq!(old_calls.get(), 0);
+    assert_eq!(new_calls.get(), 0);
+
+    editor.set_text("fresh").unwrap();
+    render_editor(&mut context, &mut editor, "delayed-change");
+    assert_eq!(new_calls.get(), 1);
 }
 
 #[test]

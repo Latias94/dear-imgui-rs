@@ -49,6 +49,8 @@ token lifetime is clear.
 | `imguizmo_quat_showcase` | Quaternion gizmo catalog | `imguizmo-quat` | `cargo run -p dear-imgui-examples --bin imguizmo_quat_showcase --features imguizmo-quat` | Desktop GPU | ImGuIZMO.quat crate README |
 | `imnodes_minimal` | Node editor | `imnodes` | `cargo run -p dear-imgui-examples --bin imnodes_minimal --features imnodes` | Desktop GPU | `imnodes_showcase` |
 | `imnodes_showcase` | Node editor catalog | `imnodes` | `cargo run -p dear-imgui-examples --bin imnodes_showcase --features imnodes` | Desktop GPU | ImNodes crate README |
+| `cte_minimal` | Syntax-aware text editor | `cte` | `cargo run -p dear-imgui-examples --bin cte_minimal --features cte` | Desktop GPU; managed font-texture renderer | `cte_showcase` |
+| `cte_showcase` | Editor, diff, autocomplete, and notifications | `cte` | `cargo run -p dear-imgui-examples --bin cte_showcase --features cte` | Desktop GPU; managed font-texture renderer | CTE crate README |
 | `node_editor_minimal` | Blueprint editor | `node-editor` | `cargo run -p dear-imgui-examples --bin node_editor_minimal --features node-editor` | Desktop GPU | `node_editor_showcase` |
 | `node_editor_showcase` | Blueprint workflow | `node-editor-blueprints` | `cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-editor-blueprints` | Desktop GPU | Node Editor crate README |
 | `reflect_demo` | Reflected inspectors | `reflect` | `cargo run -p dear-imgui-examples --bin reflect_demo --features reflect` | Desktop GPU | Reflect crate README |

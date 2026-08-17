@@ -49,12 +49,11 @@ impl TextEditor {
         })
     }
 
-    pub fn set_minimap_columns(&mut self, value: usize) -> CteResult<()> {
-        validate_nonzero_usize("TextEditor::set_minimap_columns", "value", value)?;
+    /// Sets the fixed minimap width in columns, or `0` to size it automatically.
+    pub fn set_minimap_columns(&mut self, value: usize) {
         self.with_context("TextEditor::set_minimap_columns", |raw| unsafe {
             sys::TextEditor_SetMiniMapColumns(raw, value)
         });
-        Ok(())
     }
 
     pub fn minimap_columns(&self) -> usize {

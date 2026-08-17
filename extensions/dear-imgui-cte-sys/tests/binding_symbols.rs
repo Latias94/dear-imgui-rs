@@ -30,6 +30,11 @@ fn representative_upstream_and_bridge_symbols_are_generated() {
     let _ = sys::Notifications_destroy;
     let _ = sys::GetDejavu;
     let _ = sys::SetDejavu;
+    let _: unsafe extern "C" fn() -> *mut sys::TextEditor = sys::dear_imgui_cte_text_editor_create;
+    let _: unsafe extern "C" fn(*mut sys::TextEditor) = sys::dear_imgui_cte_text_editor_destroy;
+    let _ = sys::dear_imgui_cte_text_editor_set_change_callback;
+    let _ = sys::dear_imgui_cte_text_editor_reset_autocomplete;
+    let _ = sys::dear_imgui_cte_text_editor_clear_callbacks;
     let _ = sys::dear_imgui_cte_set_change_callback;
     let _ = sys::dear_imgui_cte_set_transaction_callback;
     let _ = sys::dear_imgui_cte_set_insert_callback;
