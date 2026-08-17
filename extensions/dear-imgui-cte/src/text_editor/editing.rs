@@ -17,6 +17,17 @@ macro_rules! editor_command {
     };
 }
 
+macro_rules! editor_command_invalidate {
+    ($name:ident, $raw:path) => {
+        pub fn $name(&mut self) {
+            self.with_context(concat!("TextEditor::", stringify!($name)), |raw| unsafe {
+                $raw(raw)
+            });
+            self.invalidate_layout();
+        }
+    };
+}
+
 macro_rules! editor_bool_query {
     ($name:ident, $raw:path) => {
         pub fn $name(&self) -> bool {
@@ -29,11 +40,11 @@ macro_rules! editor_bool_query {
 
 impl TextEditor {
     editor_command!(focus, sys::TextEditor_SetFocus);
-    editor_command!(cut, sys::TextEditor_Cut);
+    editor_command_invalidate!(cut, sys::TextEditor_Cut);
     editor_command!(copy, sys::TextEditor_Copy);
-    editor_command!(paste, sys::TextEditor_Paste);
-    editor_command!(undo, sys::TextEditor_Undo);
-    editor_command!(redo, sys::TextEditor_Redo);
+    editor_command_invalidate!(paste, sys::TextEditor_Paste);
+    editor_command_invalidate!(undo, sys::TextEditor_Undo);
+    editor_command_invalidate!(redo, sys::TextEditor_Redo);
     editor_bool_query!(can_undo, sys::TextEditor_CanUndo);
     editor_bool_query!(can_redo, sys::TextEditor_CanRedo);
 
@@ -243,6 +254,7 @@ impl TextEditor {
             sys::TextEditor_ScrollToLine(raw, line, alignment.into_raw());
             Ok(())
         })
+        .map(|_| self.invalidate_layout())
     }
 
     pub fn first_visible_row(&self) -> usize {
@@ -380,6 +392,7 @@ impl TextEditor {
         self.with_context("TextEditor::replace_current_selection", |raw| unsafe {
             sys::TextEditor_ReplaceTextInCurrentCursor(raw, text.as_ptr())
         });
+        self.invalidate_layout();
         Ok(())
     }
 
@@ -388,6 +401,7 @@ impl TextEditor {
         self.with_context("TextEditor::replace_all_selections", |raw| unsafe {
             sys::TextEditor_ReplaceTextInAllCursors(raw, text.as_ptr())
         });
+        self.invalidate_layout();
         Ok(())
     }
 
@@ -523,7 +537,7 @@ impl TextEditor {
         )
     }
 
-    editor_command!(unfold_all, sys::TextEditor_UnfoldAll);
+    editor_command_invalidate!(unfold_all, sys::TextEditor_UnfoldAll);
 
     pub fn is_line_foldable(&self, line: usize) -> CteResult<bool> {
         self.line_query(
@@ -557,19 +571,19 @@ impl TextEditor {
         )
     }
 
-    editor_command!(indent_lines, sys::TextEditor_IndentLines);
-    editor_command!(deindent_lines, sys::TextEditor_DeindentLines);
-    editor_command!(move_lines_up, sys::TextEditor_MoveUpLines);
-    editor_command!(move_lines_down, sys::TextEditor_MoveDownLines);
-    editor_command!(toggle_comments, sys::TextEditor_ToggleComments);
-    editor_command!(selection_to_lowercase, sys::TextEditor_SelectionToLowerCase);
-    editor_command!(selection_to_uppercase, sys::TextEditor_SelectionToUpperCase);
-    editor_command!(
+    editor_command_invalidate!(indent_lines, sys::TextEditor_IndentLines);
+    editor_command_invalidate!(deindent_lines, sys::TextEditor_DeindentLines);
+    editor_command_invalidate!(move_lines_up, sys::TextEditor_MoveUpLines);
+    editor_command_invalidate!(move_lines_down, sys::TextEditor_MoveDownLines);
+    editor_command_invalidate!(toggle_comments, sys::TextEditor_ToggleComments);
+    editor_command_invalidate!(selection_to_lowercase, sys::TextEditor_SelectionToLowerCase);
+    editor_command_invalidate!(selection_to_uppercase, sys::TextEditor_SelectionToUpperCase);
+    editor_command_invalidate!(
         strip_trailing_whitespaces,
         sys::TextEditor_StripTrailingWhitespaces
     );
-    editor_command!(tabs_to_spaces, sys::TextEditor_TabsToSpaces);
-    editor_command!(spaces_to_tabs, sys::TextEditor_SpacesToTabs);
+    editor_command_invalidate!(tabs_to_spaces, sys::TextEditor_TabsToSpaces);
+    editor_command_invalidate!(spaces_to_tabs, sys::TextEditor_SpacesToTabs);
 
     fn set_find_label(
         &mut self,
@@ -593,6 +607,7 @@ impl TextEditor {
             command(raw, line);
             Ok(())
         })
+        .map(|_| self.invalidate_layout())
     }
 
     fn line_query(

@@ -79,6 +79,7 @@ impl TextEditor {
         self.with_context("TextEditor::set_text", |raw| unsafe {
             sys::TextEditor_SetText(raw, text.as_ptr())
         });
+        self.invalidate_layout();
         Ok(())
     }
 
@@ -136,6 +137,7 @@ impl TextEditor {
             );
             Ok(())
         })
+        .map(|_| self.invalidate_layout())
     }
 
     /// Removes all document text.
@@ -143,6 +145,7 @@ impl TextEditor {
         self.with_context("TextEditor::clear_text", |raw| unsafe {
             sys::TextEditor_ClearText(raw)
         });
+        self.invalidate_layout();
     }
 
     pub fn is_empty(&self) -> bool {
@@ -163,6 +166,7 @@ impl TextEditor {
         self.with_context("TextEditor::set_language", |raw| unsafe {
             sys::TextEditor_SetLanguage(raw, language)
         });
+        self.invalidate_layout();
     }
 
     /// Returns the selected built-in language.
@@ -192,7 +196,9 @@ impl TextEditor {
     pub fn set_palette(&mut self, palette: &Palette) -> CteResult<()> {
         self.with_context("TextEditor::set_palette", |raw| {
             palette.with_native(|native| unsafe { sys::TextEditor_SetPalette(raw, native) })
-        })
+        })?;
+        self.invalidate_layout();
+        Ok(())
     }
 
     /// Returns an owned copy of the editor palette.
@@ -222,6 +228,10 @@ impl TextEditor {
 
     fn raw_ptr(&self) -> *mut sys::TextEditor {
         self.raw.as_ptr()
+    }
+
+    pub(crate) fn invalidate_layout(&mut self) {
+        self.layout_ready = false;
     }
 }
 

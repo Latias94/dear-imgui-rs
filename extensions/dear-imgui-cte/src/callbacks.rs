@@ -612,6 +612,7 @@ impl TextEditor {
                 status: sys::DearImGuiCteStatus_CallbackFailed as u32,
             });
         }
+        self.invalidate_layout();
         Ok(())
     }
 

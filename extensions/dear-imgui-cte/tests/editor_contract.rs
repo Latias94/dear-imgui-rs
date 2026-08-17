@@ -212,6 +212,38 @@ fn layout_dependent_mouse_queries_are_safe_before_visible_layout() {
 }
 
 #[test]
+fn layout_dependent_mouse_queries_are_invalidated_after_document_changes() {
+    let mut context = render_context();
+    let mut editor = TextEditor::create(&context);
+    let text = (0..100)
+        .map(|line| format!("line {line} with enough text"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    editor.set_text(&text).unwrap();
+
+    let (_, editor_origin) = render_editor_host(&mut context, &mut editor, Some([80.0, 80.0]));
+    let mouse_position = [editor_origin[0] + 12.0, editor_origin[1] + 12.0];
+    assert!(editor.line_height().is_some_and(|value| value > 0.0));
+    assert!(editor.glyph_width().is_some_and(|value| value > 0.0));
+
+    editor.set_text("short").unwrap();
+
+    assert_eq!(editor.line_height(), None);
+    assert_eq!(editor.glyph_width(), None);
+    assert!(!editor.is_mouse_over_glyph(mouse_position).unwrap());
+    assert!(!editor.is_mouse_over_text_area(mouse_position).unwrap());
+    assert_eq!(
+        editor.position_at_mouse(mouse_position).unwrap(),
+        Position::default()
+    );
+    assert_eq!(editor.word_at_mouse(mouse_position).unwrap(), "");
+
+    render_editor_host(&mut context, &mut editor, None);
+    assert!(editor.line_height().is_some_and(|value| value > 0.0));
+    assert!(editor.glyph_width().is_some_and(|value| value > 0.0));
+}
+
+#[test]
 fn drag_selection_stays_in_the_editor_instead_of_moving_its_host_window() {
     let mut context = render_context();
     let mut editor = TextEditor::create(&context);

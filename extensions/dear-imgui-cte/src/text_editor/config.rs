@@ -20,12 +20,30 @@ macro_rules! bool_property {
     };
 }
 
+macro_rules! layout_bool_property {
+    ($setter:ident, $getter:ident, $raw_setter:path, $raw_getter:path) => {
+        pub fn $setter(&mut self, value: bool) {
+            self.with_context(concat!("TextEditor::", stringify!($setter)), |raw| unsafe {
+                $raw_setter(raw, value)
+            });
+            self.invalidate_layout();
+        }
+
+        pub fn $getter(&self) -> bool {
+            self.with_context(concat!("TextEditor::", stringify!($getter)), |raw| unsafe {
+                $raw_getter(raw)
+            })
+        }
+    };
+}
+
 impl TextEditor {
     pub fn set_tab_size(&mut self, value: usize) -> CteResult<()> {
         validate_nonzero_usize("TextEditor::set_tab_size", "value", value)?;
         self.with_context("TextEditor::set_tab_size", |raw| unsafe {
             sys::TextEditor_SetTabSize(raw, value)
         });
+        self.invalidate_layout();
         Ok(())
     }
 
@@ -40,6 +58,7 @@ impl TextEditor {
         self.with_context("TextEditor::set_line_spacing", |raw| unsafe {
             sys::TextEditor_SetLineSpacing(raw, value)
         });
+        self.invalidate_layout();
         Ok(())
     }
 
@@ -54,6 +73,7 @@ impl TextEditor {
         self.with_context("TextEditor::set_minimap_columns", |raw| unsafe {
             sys::TextEditor_SetMiniMapColumns(raw, value)
         });
+        self.invalidate_layout();
     }
 
     pub fn minimap_columns(&self) -> usize {
@@ -85,6 +105,7 @@ impl TextEditor {
         self.with_context("TextEditor::set_line_number_left_margin", |raw| unsafe {
             sys::TextEditor_SetLineNumberLeftMargin(raw, value)
         });
+        self.invalidate_layout();
     }
 
     pub fn line_number_left_margin(&self) -> usize {
@@ -97,6 +118,7 @@ impl TextEditor {
         self.with_context("TextEditor::set_decoration_left_margin", |raw| unsafe {
             sys::TextEditor_SetDecorationLeftMargin(raw, value)
         });
+        self.invalidate_layout();
     }
 
     pub fn decoration_left_margin(&self) -> usize {
@@ -109,6 +131,7 @@ impl TextEditor {
         self.with_context("TextEditor::set_text_left_margin", |raw| unsafe {
             sys::TextEditor_SetTextLeftMargin(raw, value)
         });
+        self.invalidate_layout();
     }
 
     pub fn text_left_margin(&self) -> usize {
@@ -123,7 +146,7 @@ impl TextEditor {
         sys::TextEditor_SetInsertSpacesOnTabs,
         sys::TextEditor_IsInsertSpacesOnTabs
     );
-    bool_property!(
+    layout_bool_property!(
         set_word_wrap_enabled,
         is_word_wrap_enabled,
         sys::TextEditor_SetWordWrapEnabled,
@@ -147,49 +170,49 @@ impl TextEditor {
         sys::TextEditor_SetAutoIndentEnabled,
         sys::TextEditor_IsAutoIndentEnabled
     );
-    bool_property!(
+    layout_bool_property!(
         set_show_whitespaces,
         shows_whitespaces,
         sys::TextEditor_SetShowWhitespacesEnabled,
         sys::TextEditor_IsShowWhitespacesEnabled
     );
-    bool_property!(
+    layout_bool_property!(
         set_show_spaces,
         shows_spaces,
         sys::TextEditor_SetShowSpacesEnabled,
         sys::TextEditor_IsShowSpacesEnabled
     );
-    bool_property!(
+    layout_bool_property!(
         set_show_tabs,
         shows_tabs,
         sys::TextEditor_SetShowTabsEnabled,
         sys::TextEditor_IsShowTabsEnabled
     );
-    bool_property!(
+    layout_bool_property!(
         set_show_line_numbers,
         shows_line_numbers,
         sys::TextEditor_SetShowLineNumbersEnabled,
         sys::TextEditor_IsShowLineNumbersEnabled
     );
-    bool_property!(
+    layout_bool_property!(
         set_show_minimap,
         shows_minimap,
         sys::TextEditor_SetShowMiniMapEnabled,
         sys::TextEditor_IsShowMiniMapEnabled
     );
-    bool_property!(
+    layout_bool_property!(
         set_show_scrollbar_minimap,
         shows_scrollbar_minimap,
         sys::TextEditor_SetShowScrollbarMiniMapEnabled,
         sys::TextEditor_IsShowScrollbarMiniMapEnabled
     );
-    bool_property!(
+    layout_bool_property!(
         set_show_pan_scroll_indicator,
         shows_pan_scroll_indicator,
         sys::TextEditor_SetShowPanScrollIndicatorEnabled,
         sys::TextEditor_IsShowPanScrollIndicatorEnabled
     );
-    bool_property!(
+    layout_bool_property!(
         set_show_matching_brackets,
         shows_matching_brackets,
         sys::TextEditor_SetShowMatchingBrackets,
@@ -201,7 +224,7 @@ impl TextEditor {
         sys::TextEditor_SetCompletePairedGlyphs,
         sys::TextEditor_IsCompletingPairedGlyphs
     );
-    bool_property!(
+    layout_bool_property!(
         set_line_folding_enabled,
         is_line_folding_enabled,
         sys::TextEditor_SetLineFoldingEnabled,
