@@ -18,6 +18,7 @@
   - [ ] extensions/dear-node-editor(-sys)
   - [ ] extensions/dear-imguizmo(-sys)
   - [ ] extensions/dear-imguizmo-quat(-sys)
+  - [ ] extensions/dear-imgui-cte(-sys)
   - [ ] extensions/dear-file-browser
   - [ ] extensions/dear-imgui-reflect
   - [ ] CI / tooling / docs
