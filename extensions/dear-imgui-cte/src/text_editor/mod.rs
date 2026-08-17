@@ -2,7 +2,7 @@ mod config;
 mod editing;
 mod render;
 
-pub use render::{CteUiExt, TextEditorRenderer};
+pub use render::TextEditorRenderer;
 
 use crate::{
     CteError, CteResult, Language, Palette, Position, Selection, callbacks::CallbackRegistry,
@@ -63,8 +63,10 @@ impl TextEditor {
     /// # Safety
     ///
     /// The pointer may only be used while the owning Dear ImGui context is current. The
-    /// caller must not destroy it, retain borrowed native pointers, install callbacks, or
-    /// call `TextEditor_SetImGuiContext` through this pointer.
+    /// caller must preserve every cimCTE precondition, ownership and pointer-lifetime rule,
+    /// and invariant relied on by this safe wrapper. In particular, the caller must not
+    /// destroy the editor, retain borrowed native pointers, install callbacks, set invalid
+    /// configuration values, or call `TextEditor_SetImGuiContext` through this pointer.
     pub unsafe fn as_raw(&self) -> *mut sys::TextEditor {
         self.raw_ptr()
     }
@@ -247,20 +249,6 @@ impl Drop for TextEditor {
         // If context teardown already started, touching CTE state is no longer proven safe.
         // Native handles are intentionally leaked rather than calling into a dead context.
     }
-}
-
-fn validate_finite_vec2(
-    operation: &'static str,
-    parameter: &'static str,
-    value: [f32; 2],
-) -> CteResult<()> {
-    if !value.into_iter().all(f32::is_finite) {
-        return Err(CteError::NonFinite {
-            operation,
-            parameter,
-        });
-    }
-    Ok(())
 }
 
 struct AllocatedText(NonNull<c_char>);

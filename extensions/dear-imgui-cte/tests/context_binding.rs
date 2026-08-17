@@ -1,4 +1,4 @@
-use dear_imgui_cte::{CteError, CteUiExt, TextEditor};
+use dear_imgui_cte::{CteError, CteUiExt, Notifications, TextDiff, TextEditor};
 use dear_imgui_rs::{Context, sys};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -31,6 +31,33 @@ fn render_rejects_a_ui_from_another_context_before_ffi() {
     drop(context_b);
     let context_a = suspended_a.activate_or_panic();
     drop(editor);
+    drop(context_a);
+}
+
+#[test]
+fn auxiliary_renderers_reject_a_ui_from_another_context_before_ffi() {
+    let context_a = Context::create();
+    let mut diff = TextDiff::create(&context_a);
+    let mut notifications = Notifications::create(&context_a);
+    let suspended_a = context_a.suspend_or_panic();
+
+    let mut context_b = Context::create();
+    prepare_frame(&mut context_b);
+    let ui = context_b.frame();
+    assert!(matches!(
+        ui.text_diff(&mut diff, "wrong context").build(),
+        Err(CteError::WrongContext { .. })
+    ));
+    assert!(matches!(
+        ui.notifications(&mut notifications).build(),
+        Err(CteError::WrongContext { .. })
+    ));
+    drop(context_b.render_legacy());
+
+    drop(context_b);
+    let context_a = suspended_a.activate_or_panic();
+    drop(diff);
+    drop(notifications);
     drop(context_a);
 }
 

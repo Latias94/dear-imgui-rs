@@ -29,4 +29,6 @@ build-from-source = ["dear-imgui-rs/build-from-source", "dear-imgui-cte-sys/buil
 wasm = ["dear-imgui-rs/wasm", "dear-imgui-cte-sys/wasm"]
 
 [dev-dependencies]
+dear-imnodes.workspace = true
+dear-implot.workspace = true
 static_assertions = "1.1"

@@ -1,10 +1,10 @@
 use super::{
-    TextEditor, copy_c_string, validate_cursor, validate_finite_vec2, validate_line,
-    validate_position, validate_selection,
+    TextEditor, copy_c_string, validate_cursor, validate_line, validate_position,
+    validate_selection,
 };
 use crate::{
     CteError, CteResult, Position, ScrollAlignment, SearchOptions, Selection, SquiggleKind,
-    VisualPosition, error::c_string, sys,
+    VisualPosition, error::c_string, sys, validation::validate_finite_vec2,
 };
 
 macro_rules! editor_command {

@@ -1,5 +1,8 @@
 use super::TextEditor;
-use crate::{CteError, CteResult, MiddleMouseMode, sys};
+use crate::{
+    CteResult, MiddleMouseMode, sys,
+    validation::{validate_finite_f32, validate_nonzero_usize},
+};
 
 macro_rules! bool_property {
     ($setter:ident, $getter:ident, $raw_setter:path, $raw_getter:path) => {
@@ -19,13 +22,7 @@ macro_rules! bool_property {
 
 impl TextEditor {
     pub fn set_tab_size(&mut self, value: usize) -> CteResult<()> {
-        if value == 0 {
-            return Err(CteError::InvalidValue {
-                operation: "TextEditor::set_tab_size",
-                parameter: "value",
-                requirement: "greater than zero",
-            });
-        }
+        validate_nonzero_usize("TextEditor::set_tab_size", "value", value)?;
         self.with_context("TextEditor::set_tab_size", |raw| unsafe {
             sys::TextEditor_SetTabSize(raw, value)
         });
@@ -39,12 +36,7 @@ impl TextEditor {
     }
 
     pub fn set_line_spacing(&mut self, value: f32) -> CteResult<()> {
-        if !value.is_finite() {
-            return Err(CteError::NonFinite {
-                operation: "TextEditor::set_line_spacing",
-                parameter: "value",
-            });
-        }
+        validate_finite_f32("TextEditor::set_line_spacing", "value", value)?;
         self.with_context("TextEditor::set_line_spacing", |raw| unsafe {
             sys::TextEditor_SetLineSpacing(raw, value)
         });
@@ -58,13 +50,7 @@ impl TextEditor {
     }
 
     pub fn set_minimap_columns(&mut self, value: usize) -> CteResult<()> {
-        if value == 0 {
-            return Err(CteError::InvalidValue {
-                operation: "TextEditor::set_minimap_columns",
-                parameter: "value",
-                requirement: "greater than zero",
-            });
-        }
+        validate_nonzero_usize("TextEditor::set_minimap_columns", "value", value)?;
         self.with_context("TextEditor::set_minimap_columns", |raw| unsafe {
             sys::TextEditor_SetMiniMapColumns(raw, value)
         });

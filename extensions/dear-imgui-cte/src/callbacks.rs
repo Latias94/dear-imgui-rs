@@ -1,4 +1,6 @@
-use crate::{CteError, CteResult, Position, Selection, error::c_string, sys};
+use crate::{
+    CteError, CteResult, Position, Selection, error::c_string, sys, validation::duration_millis_i32,
+};
 use dear_imgui_rs::Ui;
 use std::{
     cell::{Cell, UnsafeCell},
@@ -215,11 +217,7 @@ impl TextEditor {
     {
         const OPERATION: &str = "TextEditor::set_change_callback";
         self.reject_trie_conflict(OPERATION)?;
-        let delay_ms = i32::try_from(delay.as_millis()).map_err(|_| CteError::InvalidValue {
-            operation: OPERATION,
-            parameter: "delay",
-            requirement: "at most i32::MAX milliseconds",
-        })?;
+        let delay_ms = duration_millis_i32(OPERATION, "delay", delay)?;
         self.clear_change_callback()?;
         let slot = CallbackSlot::new(Box::new(callback) as Box<EmptyCallback>);
         let userdata = slot.userdata();
