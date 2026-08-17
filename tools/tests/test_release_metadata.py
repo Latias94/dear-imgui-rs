@@ -198,7 +198,7 @@ class MetadataTests(unittest.TestCase):
     def test_current_workspace_versions_and_internal_requirements_are_valid(self):
         metadata = release_metadata.load_workspace_metadata(REPO_ROOT)
 
-        self.assertEqual(len(metadata.publishable_packages), 27)
+        self.assertEqual(len(metadata.publishable_packages), 29)
         self.assertEqual(len(metadata.private_packages), 3)
         self.assertEqual(release_metadata.validate_release_workspace(metadata), [])
 

@@ -1,6 +1,6 @@
 # Publishing Guide
 
-The workspace uses one release train: all 27 publishable crates inherit `workspace.package.version` and must be published together. Examples, the web demo, and `xtask` are not published.
+The workspace uses one release train: all 29 publishable crates inherit `workspace.package.version` and must be published together. Examples, the web demo, and `xtask` are not published.
 
 ## One-time setup
 
@@ -8,7 +8,7 @@ The release workflow uses crates.io Trusted Publishing. It does not store a crat
 
 1. Create a protected GitHub Environment named `release`.
 2. Require maintainer approval for that environment and restrict deployments to `main`.
-3. For each of the 27 crates on crates.io, add the same GitHub Trusted Publisher configuration: repository owner `Latias94`, repository `dear-imgui-rs`, workflow `release.yml`, environment `release`.
+3. For each of the 29 crates on crates.io, add the same GitHub Trusted Publisher configuration: repository owner `Latias94`, repository `dear-imgui-rs`, workflow `release.yml`, environment `release`.
 
 The repository workflow token defaults to read-only. The protected crates.io job receives `id-token: write` and `contents: write` so it can reserve the exact tag before the first upload. The final GitHub Release job receives `contents: write` to publish the verified assets.
 
@@ -17,12 +17,12 @@ The repository workflow token defaults to read-only. The protected crates.io job
 Preparation intentionally changes the worktree; validation requires the resulting commit to be clean.
 
 ```bash
-python3 tools/tasks.py release-prepare 0.16.0
+python3 tools/tasks.py release-prepare 0.17.0
 
 # Review generated bindings, source metadata, Cargo.lock, CHANGELOG.md, and docs.
 git diff
 git add -A
-git commit -m "chore: prepare release v0.16.0"
+git commit -m "chore: prepare release v0.17.0"
 
 python3 tools/tasks.py release-check
 ```
@@ -34,7 +34,7 @@ Before merging, require normal CI to pass on Linux, Windows, and macOS. The root
 Merge the candidate to `main`, then dispatch the release workflow with the matching tag:
 
 ```bash
-gh workflow run release.yml --ref main -f tag=v0.16.0
+gh workflow run release.yml --ref main -f tag=v0.17.0
 ```
 
 The workflow binds the tag to the workspace version and the exact `main` commit before doing any irreversible work. It then:
@@ -46,10 +46,10 @@ The workflow binds the tag to the workspace version and the exact `main` commit 
 3. Enters the protected `release` environment and atomically creates or
    verifies the exact candidate tag before publishing any crate.
 4. Obtains a short-lived crates.io OIDC token and publishes the complete
-   27-crate dependency train, automatically skipping an
+   29-crate dependency train, automatically skipping an
    exact version only when its published Cargo archive records the same clean
    candidate commit.
-5. Confirms that all 27 exact versions are available through crates.io and
+5. Confirms that all 29 exact versions are available through crates.io and
    Cargo.
 6. Generates deterministic `SHA256SUMS`, validates every existing Release
    asset by name and GitHub-computed digest, and lets the release action upload

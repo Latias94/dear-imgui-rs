@@ -12,10 +12,16 @@ notifications on native and WebAssembly targets.
 
 ## Compatibility
 
-This crate is currently an Unreleased Preview in the workspace. Use it from the
-same workspace checkout or Git revision as `dear-imgui-rs` and
-`dear-imgui-cte-sys`; mixing revisions is unsupported. The checked-in source
-identity is recorded in the sys crate README and Cargo metadata.
+This crate is a Preview crate in the `0.17` release train. Use it from the same
+release train as `dear-imgui-rs` and `dear-imgui-cte-sys`; mixing release trains
+is unsupported. The checked-in source identity is recorded in the sys crate
+README and Cargo metadata.
+
+```toml
+[dependencies]
+dear-imgui-rs = "0.17"
+dear-imgui-cte = "0.17"
+```
 
 ## Quick Start
 

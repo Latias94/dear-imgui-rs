@@ -50,6 +50,7 @@ SYS_CRATES = [
     ("dear-imguizmo-sys", "extensions/dear-imguizmo-sys"),
     ("dear-implot3d-sys", "extensions/dear-implot3d-sys"),
     ("dear-imguizmo-quat-sys", "extensions/dear-imguizmo-quat-sys"),
+    ("dear-imgui-cte-sys", "extensions/dear-imgui-cte-sys"),
     ("dear-imgui-test-engine-sys", "extensions/dear-imgui-test-engine-sys"),
 ]
 
@@ -80,6 +81,7 @@ WASM_RELEASE_PACKAGES = (
     "dear-imnodes",
     "dear-imguizmo",
     "dear-imguizmo-quat",
+    "dear-imgui-cte",
 )
 
 

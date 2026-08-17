@@ -21,7 +21,7 @@ enable the `wasm` feature. Use the compatible stable requirement:
 
 ```toml
 [dependencies]
-dear-imgui-rs = { version = "0.16", features = ["wasm"] }
+dear-imgui-rs = { version = "0.17", features = ["wasm"] }
 ```
 
 For Bevy, enable `wasm` alongside the features needed by the application and
@@ -29,11 +29,11 @@ take both packages from the same release train:
 
 ```toml
 [dependencies]
-dear-imgui-bevy = { version = "0.16", features = ["render", "wasm"] }
-dear-imgui-rs = { version = "0.16", features = ["wasm"] }
+dear-imgui-bevy = { version = "0.17", features = ["render", "wasm"] }
+dear-imgui-rs = { version = "0.17", features = ["wasm"] }
 ```
 
-Five published safe native extensions expose the same `wasm` feature and forward it to
+Six published safe native extensions expose the same `wasm` feature and forward it to
 both `dear-imgui-rs` and their matching sys crate:
 
 | Safe crate | Sys crate | WASM import bindings |
@@ -43,17 +43,16 @@ both `dear-imgui-rs` and their matching sys crate:
 | `dear-imnodes` | `dear-imnodes-sys` | yes |
 | `dear-imguizmo` | `dear-imguizmo-sys` | yes |
 | `dear-imguizmo-quat` | `dear-imguizmo-quat-sys` | yes |
+| `dear-imgui-cte` | `dear-imgui-cte-sys` | yes |
 
 Enable the feature on the highest safe crate you depend on; direct sys users
 enable it on the extension sys crate, which forwards the same core dependency
-path. The sixth published native safe extension, `dear-node-editor`, intentionally has no
+path. The published native safe extension `dear-node-editor` intentionally has no
 WASM route. Dear ImGui Test Engine is also native-only and source-only.
 
-The Unreleased Preview pair `dear-imgui-cte` / `dear-imgui-cte-sys` also has a
-`wasm` route. Take it from the same workspace checkout or Git revision as the
-core crates; it is not part of the published `0.16.0` crate set. The workspace
-web demo's `cte` feature also enables the experimental managed font-atlas path
-needed to install CTE's bundled DejaVu font before renderer initialization.
+The workspace web demo's `cte` feature also enables the experimental managed
+font-atlas path needed to install CTE's bundled DejaVu font before renderer
+initialization.
 
 A `wasm32-unknown-unknown` build without this feature fails at compile time
 instead of selecting a native binding artifact. Other wasm32 families, including
@@ -85,8 +84,6 @@ cargo check -p dear-imguizmo --target wasm32-unknown-unknown \
   --no-default-features --features wasm
 cargo check -p dear-imguizmo-quat --target wasm32-unknown-unknown \
   --no-default-features --features wasm
-
-# Unreleased Preview; run from the same workspace checkout or Git revision.
 cargo check -p dear-imgui-cte --target wasm32-unknown-unknown \
   --no-default-features --features wasm
 
@@ -174,7 +171,7 @@ Build the Rust application, then the provider:
 cargo run -p xtask -- web-demo
 cargo run -p xtask -- web-demo implot,imnodes
 
-# Unreleased Preview; this enables the experimental managed font-atlas path.
+# This enables the experimental managed font-atlas path required by CTE fonts.
 cargo run -p xtask -- web-demo cte
 
 # Requires emcc/em++ on PATH, or EMSDK set to the SDK root.

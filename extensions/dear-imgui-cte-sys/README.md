@@ -13,10 +13,11 @@ length-aware filters, transactions, and autocomplete configuration.
 
 ## Compatibility and Provenance
 
-This crate is an Unreleased Preview and must use the same workspace checkout or
-Git revision as `dear-imgui-sys` and `dear-imgui-cte`. It shares the Dear ImGui
-and cimgui core supplied by `dear-imgui-sys`; upstream CMake files are not used
-because they compile a second core.
+This crate is a Preview `-sys` crate in the `0.17` release train and must use
+the same release train, workspace checkout, or Git revision as `dear-imgui-sys`
+and `dear-imgui-cte`. It shares the Dear ImGui and cimgui core supplied by
+`dear-imgui-sys`; upstream CMake files are not used because they compile a
+second core.
 
 The checked-in binding and source identity is:
 

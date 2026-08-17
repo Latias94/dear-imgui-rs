@@ -327,7 +327,7 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
 name = "dear-imgui-build-support"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "cc",
  "serde",
@@ -347,7 +347,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-rs"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bitflags 2.11.1",
  "dear-imgui-sys",
@@ -357,7 +357,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-sys"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "cc",
  "dear-imgui-build-support",
@@ -366,7 +366,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-wgpu"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "bytemuck",
  "dear-imgui-rs",
@@ -376,7 +376,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-winit"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "dear-imgui-rs",
  "thiserror 2.0.18",

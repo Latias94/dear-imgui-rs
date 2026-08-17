@@ -4,7 +4,7 @@ This directory contains automation scripts for managing the dear-imgui-rs worksp
 
 ## Overview
 
-The workspace uses a **unified release train** model. All 27 publishable packages inherit `workspace.package.version`; examples and workspace-only tools keep independent package versions. Release tooling prepares, validates, and publishes that single version source.
+The workspace uses a **unified release train** model. All 29 publishable packages inherit `workspace.package.version`; examples and workspace-only tools keep independent package versions. Release tooling prepares, validates, and publishes that single version source.
 
 ## Quick Start
 
@@ -12,18 +12,18 @@ The workspace uses a **unified release train** model. All 27 publishable package
 
 ```bash
 # Generate the complete release diff.
-python3 tools/tasks.py release-prepare 0.16.0
+python3 tools/tasks.py release-prepare 0.17.0
 
 # Review and commit versions, bindings, lockfile, changelog, and docs.
 git diff
 git add -A
-git commit -m "chore: prepare release v0.16.0"
+git commit -m "chore: prepare release v0.17.0"
 
 # Validate the committed clean release candidate.
 python3 tools/tasks.py release-check
 
 # After merging to main and normal CI passes, run the complete release.
-gh workflow run release.yml --ref main -f tag=v0.16.0
+gh workflow run release.yml --ref main -f tag=v0.17.0
 ```
 
 `release-prepare` intentionally leaves changes in the working tree. `release-check` runs the strict clean-tree, changelog, locked dependency graph, reproducible binding, package/offline, documentation, and test gates. Keeping these phases separate prevents release preparation from failing its own clean-tree check.
@@ -31,7 +31,7 @@ gh workflow run release.yml --ref main -f tag=v0.16.0
 Local success is necessary but not sufficient. `release.yml` binds the candidate
 to the exact `main` commit, requires successful normal CI, builds and consumes all
 five prebuilt targets, reserves or verifies the tag in the protected environment,
-publishes the complete 27-crate train through Trusted Publishing, and then creates
+publishes the complete 29-crate train through Trusted Publishing, and then creates
 the GitHub Release.
 
 ## Available Scripts
@@ -60,7 +60,7 @@ python3 tools/tasks.py doc
 python3 tools/tasks.py clean
 
 # Create a release diff, then validate it after commit
-python3 tools/tasks.py release-prepare 0.16.0
+python3 tools/tasks.py release-prepare 0.17.0
 python3 tools/tasks.py release-check
 ```
 
@@ -69,7 +69,7 @@ python3 tools/tasks.py release-check
 The workspace root is the single version source. Publishable manifests use `version.workspace = true`, and internal dependencies inherit their root workspace declarations. `[workspace.metadata.dear-imgui-release]` is the shared policy for the core package and private package paths/versions; Rust and Python release validators derive package counts from the actual workspace members. Update the release train with:
 
 ```bash
-cargo run -p xtask -- release-version 0.16.0
+cargo run -p xtask -- release-version 0.17.0
 ```
 
 The command updates the root release version and inherited internal dependency requirements as one validated workspace operation. It never offers partial crate selection. Documentation remains an explicit review step.
@@ -106,7 +106,7 @@ machine-readable state.
 1. Build tooling: `dear-imgui-build-support`
 2. Core: `dear-imgui-sys` → `dear-imgui-rs`
 3. Platform/renderer backends except Bevy
-4. All extension sys crates, including `dear-imgui-test-engine-sys`
+4. All extension sys crates, including `dear-imgui-cte-sys` and `dear-imgui-test-engine-sys`
 5. All extension high-level crates, file browser, and reflection derive/runtime
 6. `dear-imgui-bevy` after its optional ecosystem dependencies
 7. `dear-app`
@@ -220,24 +220,24 @@ job, prebuilt build, or consumer directly fails the release.
 
 ```bash
 # 1. Generate versions, bindings, provenance, and lockfile changes.
-python3 tools/tasks.py release-prepare 0.16.0
+python3 tools/tasks.py release-prepare 0.17.0
 
 # 2. Review CHANGELOG.md, compatibility docs, generated files, and Cargo.lock.
 git diff
 
 # 3. Commit and validate the exact candidate.
 git add -A
-git commit -m "chore: prepare release v0.16.0"
+git commit -m "chore: prepare release v0.17.0"
 python3 tools/tasks.py release-check
 
 # 4. Merge to main, require normal CI to pass, then run the complete release.
-gh workflow run release.yml --ref main -f tag=v0.16.0
+gh workflow run release.yml --ref main -f tag=v0.17.0
 ```
 
 The release workflow acquires a short-lived crates.io token only after all
 prebuilt targets pass, reserves or verifies the candidate tag before the first
 upload, resumes exact already-published versions automatically, and creates the
-GitHub Release only after all 27 crates are available.
+GitHub Release only after all 29 crates are available.
 
 ## Common Tasks
 
@@ -254,6 +254,7 @@ python3 tools/update_submodule_and_bindings.py \
   --cimnodes-editor-branch main \
   --cimguizmo-branch master \
   --cimguizmo-quat-branch master \
+  --cte-branch main_goossens \
   --imgui-test-engine-branch main
 ```
 
@@ -269,6 +270,7 @@ cargo check -p dear-node-editor-sys
 cargo check -p dear-imguizmo-sys
 cargo check -p dear-implot3d-sys
 cargo check -p dear-imguizmo-quat-sys
+cargo check -p dear-imgui-cte-sys
 cargo check -p dear-imgui-test-engine-sys
 
 # Linux/macOS
@@ -279,6 +281,7 @@ DOCS_RS=1 cargo check -p dear-node-editor-sys
 DOCS_RS=1 cargo check -p dear-imguizmo-sys
 DOCS_RS=1 cargo check -p dear-implot3d-sys
 DOCS_RS=1 cargo check -p dear-imguizmo-quat-sys
+DOCS_RS=1 cargo check -p dear-imgui-cte-sys
 DOCS_RS=1 cargo check -p dear-imgui-test-engine-sys
 ```
 
