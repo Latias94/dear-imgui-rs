@@ -1761,3 +1761,28 @@ fn provenance_changes_are_isolated_to_the_owning_crate_profiles() {
         BTreeSet::from([("dear-implot-sys", "native"), ("dear-implot-sys", "wasm")])
     );
 }
+
+#[test]
+fn cte_prebuilt_rejects_the_identity_without_the_wide_glyph_overlay() {
+    let binding = extension_identity(ExtensionBinding::Cte);
+    let mut old = super::StableHash::new();
+    old.field("schema", "extension-binding-identity-v1");
+    old.field("extension", "cte");
+    old.field("provenance", &binding.provenance().identity_hash());
+    let old_hash = old.finish();
+    let profile = ExtensionArtifactProfile::new(
+        &extension_core_profile(),
+        "cccccccccccccccccccccccccccccccccccccccc",
+        ["wchar32"],
+        binding,
+    )
+    .unwrap();
+    let manifest = String::from_utf8(profile.manifest_bytes()).unwrap();
+    let old_manifest = manifest.replace(&profile.extension_binding_identity_hash, &old_hash);
+    assert!(
+        profile
+            .validate_manifest_bytes(old_manifest.as_bytes())
+            .unwrap_err()
+            .contains("extension_binding_identity")
+    );
+}

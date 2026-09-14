@@ -59,10 +59,16 @@ fn integrated_and_side_by_side_views_render_across_frames() {
     let mut integrated = TextDiff::create(&context);
     let mut side_by_side = TextDiff::create(&context);
     integrated
-        .set_text("same\nremoved\ntail", "same\nadded\ntail")
+        .set_text(
+            "same\n\u{4e2d}\u{6587}\tremoved\ntail",
+            "same\n\u{65e5}\u{672c}\u{8a9e}\tadded\ntail",
+        )
         .unwrap();
     side_by_side
-        .set_text("fn old() {}", "fn new() {\n    true\n}")
+        .set_text(
+            "\u{d55c}\u{ae00}\u{ff21} old() {}",
+            "\u{4e2d}\u{6587} new() {\n    true\n}",
+        )
         .unwrap();
     side_by_side.set_side_by_side(true);
     side_by_side.focus();

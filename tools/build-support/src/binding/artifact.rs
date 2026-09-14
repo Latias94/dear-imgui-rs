@@ -191,6 +191,14 @@ pub fn core_source_contract_hash() -> String {
 
     fn transform_contract(transform: ProviderTransform) -> (&'static str, &'static str) {
         match transform {
+            ProviderTransform::PatchCteTextEditorWideGlyphs => (
+                "patch-cte-text-editor-wide-glyphs",
+                crate::CTE_WIDE_GLYPH_PATCH_VERSION,
+            ),
+            ProviderTransform::PatchCteTextDiffWideGlyphs => (
+                "patch-cte-text-diff-wide-glyphs",
+                crate::CTE_WIDE_GLYPH_PATCH_VERSION,
+            ),
             ProviderTransform::Direct => ("direct", "v1"),
             ProviderTransform::PatchImguiCore => ("patch-imgui-core", "safe-demo-boundary-v1"),
             ProviderTransform::PatchImguiDemo => ("patch-imgui-demo", "safe-demo-boundary-v1"),

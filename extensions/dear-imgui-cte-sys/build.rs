@@ -406,7 +406,29 @@ fn build_with_cc(
         .include(source_root)
         .include(source_root.join("ImGuiColorTextEdit"));
     for source in native_sources {
-        build.file(source);
+        let transform = match source.file_name().and_then(|name| name.to_str()) {
+            Some("TextEditor.cpp") => Some(
+                build_support::patch_cte_text_editor_for_wide_glyphs
+                    as fn(&str) -> Result<String, String>,
+            ),
+            Some("TextDiff.cpp") => Some(
+                build_support::patch_cte_text_diff_for_wide_glyphs
+                    as fn(&str) -> Result<String, String>,
+            ),
+            _ => None,
+        };
+        if let Some(transform) = transform {
+            let contents = std::fs::read_to_string(source)
+                .unwrap_or_else(|error| panic!("read {}: {error}", source.display()));
+            let patched =
+                transform(&contents).unwrap_or_else(|error| panic!("{CRATE_LABEL}: {error}"));
+            let output = config.out_dir.join(source.file_name().unwrap());
+            std::fs::write(&output, patched)
+                .unwrap_or_else(|error| panic!("write {}: {error}", output.display()));
+            build.file(output);
+        } else {
+            build.file(source);
+        }
     }
     build_support::compile_cpp_archive(
         &mut build,

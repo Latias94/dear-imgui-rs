@@ -426,7 +426,8 @@ def expected_extension_binding_identity(source_root: Path, spec: ExtensionSpec) 
                 f"native binding for {spec.sys_crate} repeats provenance field {key}"
             )
         values[key] = value
-    expected_fields = ("crate", "target", "source", "spec", "inputs", "output")
+    nested = ("nested",) if "nested" in values else ()
+    expected_fields = ("crate", "target", "source", *nested, "spec", "inputs", "output")
     if tuple(values) != expected_fields:
         raise VerificationError(
             f"native binding for {spec.sys_crate} has non-canonical provenance fields"
@@ -439,6 +440,10 @@ def expected_extension_binding_identity(source_root: Path, spec: ExtensionSpec) 
         raise VerificationError(
             f"native binding for {spec.sys_crate} has invalid source revision"
         )
+    if nested and not GIT_SHA_PATTERN.fullmatch(values["nested"]):
+        raise VerificationError(
+            f"native binding for {spec.sys_crate} has invalid nested source revision"
+        )
     for field in ("spec", "inputs", "output"):
         if not STABLE_HASH_PATTERN.fullmatch(values[field]):
             raise VerificationError(
@@ -446,11 +451,14 @@ def expected_extension_binding_identity(source_root: Path, spec: ExtensionSpec) 
             )
 
     provenance = _StableHash()
-    provenance.field("schema", "crate-binding-identity-v1")
+    provenance.field(
+        "schema", "crate-binding-identity-v2" if nested else "crate-binding-identity-v1"
+    )
     for label, field in (
         ("crate_name", "crate"),
         ("target", "target"),
         ("source_revision", "source"),
+        *((("nested_source_revision", "nested"),) if nested else ()),
         ("spec_hash", "spec"),
         ("input_hash", "inputs"),
         ("output_hash", "output"),
@@ -460,6 +468,9 @@ def expected_extension_binding_identity(source_root: Path, spec: ExtensionSpec) 
     identity.field("schema", "extension-binding-identity-v1")
     identity.field("extension", spec.extension_id)
     identity.field("provenance", provenance.finish())
+    if spec.extension_id == "cte":
+        # Keep in sync with CTE_WIDE_GLYPH_PATCH_VERSION in build-support.
+        identity.field("source_overlay", "cte-wide-glyphs-v1")
     return identity.finish()
 
 

@@ -41,6 +41,14 @@ Maintained source builds compile exactly these translation units:
 - `third-party/cimCTE/ImGuiColorTextEdit/extras/TrieAutoComplete.cpp`
 - `shim/cte_bridge.cpp`
 
+## Temporary Wide-glyph Overlay
+
+Source builds apply the ImGuiColorTextEdit #88 fix from commit `26da49ecbbde309595c01bef1aa0b0ecd293a464` to copies of `TextEditor.cpp` in the build output directory. Both `TextDiff.cpp` renderers use the same column rule to stay consistent with the shared typesetter. Native builds, packaged native libraries, and the WASM provider all apply these overlays; the pinned submodules and public headers remain unchanged.
+
+The overlay reserves two grid cells for the ranges handled by the original upstream fix. It does not provide complete Unicode grapheme shaping. Applications still need a font containing the requested glyphs. This backport does not include the later upstream `Glyph` layout changes.
+
+Each replacement checks its expected occurrence count and fails if the upstream source drifts. The CTE artifact identity includes `cte-wide-glyphs-v1`, rejecting earlier unpatched archives. Once cimCTE incorporates the upstream fix, remove the overlays and their native/WASM wiring together, then regenerate and verify bindings before producing new archives.
+
 ## Build Modes
 
 | Route | Contract |

@@ -344,3 +344,53 @@ fn render_builder_rejects_invalid_values_before_native_rendering() {
 
     drop(context.render_legacy());
 }
+
+#[test]
+fn wide_glyph_columns_keep_cursor_mapping_and_tabs_consistent() {
+    let mut context = render_context();
+    let mut editor = TextEditor::create(&context);
+    let source = "a\u{4e2d}b\t\u{65e5}\u{672c}\u{8a9e}\n\u{d55c}\u{ae00}\u{ff21}\nASCII";
+    editor.set_text(source).unwrap();
+    editor.set_tab_size(4).unwrap();
+    for wrap in [false, true] {
+        editor.set_word_wrap_enabled(wrap);
+        for _ in 0..2 {
+            render_editor_host(&mut context, &mut editor, Some([0.0, 0.0]));
+        }
+        for (line, columns) in [
+            (0, &[0, 1, 3, 4, 8, 10, 12, 14][..]),
+            (1, &[0, 2, 4, 6][..]),
+            (2, &[0, 1, 2, 3, 4, 5][..]),
+        ] {
+            for (index, &column) in columns.iter().enumerate() {
+                let document = Position::new(line, index);
+                let visual = VisualPosition::new(line, column);
+                assert_eq!(editor.document_to_visual(document).unwrap(), visual);
+                assert_eq!(editor.visual_to_document(visual), document);
+            }
+        }
+        assert_eq!(
+            editor.visual_to_document(VisualPosition::new(0, 2)),
+            Position::new(0, 1)
+        );
+        assert_eq!(editor.text().unwrap(), source);
+    }
+
+    editor.set_text(&"\u{4e2d}".repeat(120)).unwrap();
+    for _ in 0..2 {
+        render_editor_host(&mut context, &mut editor, Some([0.0, 0.0]));
+    }
+    assert!(
+        editor
+            .document_to_visual(Position::new(0, 120))
+            .unwrap()
+            .row
+            > 0
+    );
+    for index in 0..=120 {
+        let document = Position::new(0, index);
+        let visual = editor.document_to_visual(document).unwrap();
+        assert_eq!(visual.column % 2, 0);
+        assert_eq!(editor.visual_to_document(visual), document);
+    }
+}

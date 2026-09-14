@@ -922,6 +922,9 @@ impl ExtensionBindingIdentity {
         hash.field("schema", "extension-binding-identity-v1");
         hash.field("extension", self.extension.artifact_spec().extension_id);
         hash.field("provenance", &self.provenance.identity_hash());
+        if self.extension == ExtensionBinding::Cte {
+            hash.field("source_overlay", crate::CTE_WIDE_GLYPH_PATCH_VERSION);
+        }
         hash.finish()
     }
 }

@@ -169,6 +169,30 @@ def write_base_extension_matrix(
     return core
 
 
+class CteBindingIdentityTests(unittest.TestCase):
+    def test_nested_revision_participates_in_cte_identity(self):
+        spec = PREBUILT.ExtensionSpec(
+            "cte", "dear-imgui-cte", "dear-imgui-cte-sys", "dear-imgui-cte",
+            "dear_imgui_cte", "CTE_SYS", ("normal",), "TextEditor_TextEditor",
+        )
+        relative = Path("extensions") / spec.sys_crate / "src/bindings_pregenerated.rs"
+        marker = (REPO_ROOT / relative).read_text(encoding="utf-8").splitlines()[0]
+        nested = next(item for item in marker.split() if item.startswith("nested="))
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            binding = root / relative
+            binding.parent.mkdir(parents=True)
+            binding.write_text(marker, encoding="utf-8")
+            baseline = PREBUILT.expected_extension_binding_identity(root, spec)
+            binding.write_text(marker.replace(nested, "nested=" + "1" * 40), encoding="utf-8")
+            self.assertNotEqual(
+                baseline, PREBUILT.expected_extension_binding_identity(root, spec)
+            )
+            binding.write_text(marker.replace(nested, "nested=invalid"), encoding="utf-8")
+            with self.assertRaisesRegex(PREBUILT.VerificationError, "invalid nested"):
+                PREBUILT.expected_extension_binding_identity(root, spec)
+
+
 class PrebuiltArchiveSelectionTests(unittest.TestCase):
     def test_selects_each_required_profile_exactly_once(self):
         with TemporaryDirectory() as temporary:

@@ -1073,6 +1073,152 @@ bool ImGui::DataTypeApplyFromText(const char* buf, ImGuiDataType data_type, void
     Ok(restore_cpp_newlines(patched, newline))
 }
 
+/// Version of the temporary CTE wide-glyph source overlay.
+///
+/// This is part of the CTE prebuilt identity. Bump it whenever the overlay
+/// changes so artifacts built from an older implementation cannot be reused.
+pub const CTE_WIDE_GLYPH_PATCH_VERSION: &str = "cte-wide-glyphs-v1";
+
+const CTE_GLYPH_COLUMNS: &str = concat!(
+    "// Glyph columns reserved on the monospace grid.\n",
+    "// East Asian wide/fullwidth codepoints occupy two cells.\n",
+    "static size_t glyphColumns(uint32_t codepoint) {\n",
+    "    if ((codepoint >= 0x1100 && codepoint <= 0x115F)\n",
+    "        || (codepoint >= 0x2E80 && codepoint <= 0xA4CF)\n",
+    "        || (codepoint >= 0xAC00 && codepoint <= 0xD7A3)\n",
+    "        || (codepoint >= 0xF900 && codepoint <= 0xFAFF)\n",
+    "        || (codepoint >= 0xFE30 && codepoint <= 0xFE4F)\n",
+    "        || (codepoint >= 0xFF00 && codepoint <= 0xFF60)\n",
+    "        || (codepoint >= 0xFFE0 && codepoint <= 0xFFE6)\n",
+    "        || (codepoint >= 0x1F300 && codepoint <= 0x1FAFF)\n",
+    "        || (codepoint >= 0x20000 && codepoint <= 0x3FFFD)) {\n",
+    "        return 2;\n",
+    "    }\n",
+    "    return 1;\n",
+    "}\n\n"
+);
+
+/// Apply the upstream ImGuiColorTextEdit #88 wide-glyph layout fix.
+///
+/// Backport of goossens/ImGuiColorTextEdit commit
+/// 26da49ecbbde309595c01bef1aa0b0ecd293a464 by chemPolonium (MIT).
+/// Remove both CTE overlays once the cimCTE pin incorporates the upstream fix.
+///
+/// cimCTE currently pins a revision before the fix. The overlay is deliberately
+/// source based and fail-closed: any upstream drift must be reviewed before a
+/// build can continue.
+pub fn patch_cte_text_editor_for_wide_glyphs(source: &str) -> Result<String, String> {
+    let (mut patched, newline) = normalize_cpp_source(source);
+
+    patched = replace_cpp_source_once(
+        &patched,
+        "#include \"TextEditor.h\"\n\n",
+        &format!("#include \"TextEditor.h\"\n\n{CTE_GLYPH_COLUMNS}"),
+        "CTE wide-glyph helper insertion",
+    )?;
+
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "\t\t\t\t// handle tabs\n",
+            "\t\t\t\tif (codepoint == '\\t') {\n",
+            "\t\t\t\t\tcolumn += config.tabSize - (column % config.tabSize);\n",
+            "\n",
+            "\t\t\t\t// handle regular glyphs\n",
+            "\t\t\t\t} else {\n",
+            "\t\t\t\t\tcolumn++;\n",
+            "\t\t\t\t}"
+        ),
+        concat!(
+            "\t\t\t\t// handle tabs\n",
+            "\t\t\t\tif (codepoint == '\\t') {\n",
+            "\t\t\t\t\tcolumn += config.tabSize - (column % config.tabSize);\n",
+            "\n",
+            "\t\t\t\t// handle regular glyphs\n",
+            "\t\t\t\t} else {\n",
+            "\t\t\t\t\tcolumn += glyphColumns(codepoint);\n",
+            "\t\t\t\t}"
+        ),
+        "CTE squiggle column advance",
+    )?;
+
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "\t\t\t// handle regular glyphs\n",
+            "\t\t\t} else {\n",
+            "\t\t\t\tif (column >= firstRenderableColumn) {\n",
+            "\t\t\t\t\tfont->RenderChar(drawList, fontSize, glyphPos, palette.get(glyph.color), codepoint);\n",
+            "\t\t\t\t}\n",
+            "\n",
+            "\t\t\t\tcolumn++;\n",
+            "\t\t\t}"
+        ),
+        concat!(
+            "\t\t\t// handle regular glyphs\n",
+            "\t\t\t} else {\n",
+            "\t\t\t\tif (column >= firstRenderableColumn) {\n",
+            "\t\t\t\t\tfont->RenderChar(drawList, fontSize, glyphPos, palette.get(glyph.color), codepoint);\n",
+            "\t\t\t\t}\n",
+            "\n",
+            "\t\t\t\tcolumn += glyphColumns(codepoint);\n",
+            "\t\t\t}"
+        ),
+        "CTE text column advance",
+    )?;
+
+    for (before, after, description) in [
+        (
+            "columns = (codepoint == '\\t') ? ((columns / tabSize) + 1) * tabSize : columns + 1;",
+            "columns = (codepoint == '\\t') ? ((columns / tabSize) + 1) * tabSize : columns + glyphColumns(codepoint);",
+            "CTE wrapped-line column advance",
+        ),
+        (
+            "line.columns = (glyph.codepoint == '\\t') ? ((line.columns / tabSize) + 1) * tabSize : line.columns + 1;",
+            "line.columns = (glyph.codepoint == '\\t') ? ((line.columns / tabSize) + 1) * tabSize : line.columns + glyphColumns(glyph.codepoint);",
+            "CTE line column calculation",
+        ),
+    ] {
+        patched = replace_cpp_source_once(&patched, before, after, description)?;
+    }
+
+    patched = replace_cpp_source_exact(
+        &patched,
+        "visPos.column = (glyph->codepoint == '\\t') ? ((visPos.column / tabSize) + 1) * tabSize : visPos.column + 1;",
+        "visPos.column = (glyph->codepoint == '\\t') ? ((visPos.column / tabSize) + 1) * tabSize : visPos.column + glyphColumns(glyph->codepoint);",
+        2,
+        "CTE document/visual column calculations",
+    )?;
+    patched = replace_cpp_source_exact(
+        &patched,
+        "rightColumn = (glyph->codepoint == '\\t') ? ((rightColumn / tabSize) + 1) * tabSize : rightColumn + 1;",
+        "rightColumn = (glyph->codepoint == '\\t') ? ((rightColumn / tabSize) + 1) * tabSize : rightColumn + glyphColumns(glyph->codepoint);",
+        2,
+        "CTE visual/screen column calculations",
+    )?;
+
+    Ok(restore_cpp_newlines(patched, newline))
+}
+
+/// Keep both TextDiff renderers consistent with the patched typesetter.
+/// Without this overlay, their one-cell advance can run past the glyph array.
+pub fn patch_cte_text_diff_for_wide_glyphs(source: &str) -> Result<String, String> {
+    let (mut patched, newline) = normalize_cpp_source(source);
+    patched = replace_cpp_source_once(
+        &patched,
+        "#include \"TextDiff.h\"",
+        &format!("#include \"TextDiff.h\"\n\n{CTE_GLYPH_COLUMNS}"),
+        "CTE diff wide-glyph helper insertion",
+    )?;
+    let before = concat!(
+        "\t\t\t\tfont->RenderChar(drawList, fontSize, glyphPos, diff.palette.get(glyph.color), codepoint);\n",
+        "\t\t\t}\n\n\t\t\tcolumn++;"
+    );
+    let after = before.replace("column++;", "column += glyphColumns(codepoint);");
+    patched = replace_cpp_source_exact(&patched, before, &after, 2, "CTE diff glyph advances")?;
+    Ok(restore_cpp_newlines(patched, newline))
+}
+
 /// Patch ImNodes persistence to use Dear ImGui's file-handle abstraction.
 ///
 /// Upstream ImNodes currently assigns `ImFileOpen()` to `FILE*` and calls the
@@ -1129,6 +1275,22 @@ fn restore_cpp_newlines(source: String, newline: &str) -> String {
     }
 }
 
+fn replace_cpp_source_exact(
+    source: &str,
+    marker: &str,
+    replacement: &str,
+    expected: usize,
+    description: &str,
+) -> Result<String, String> {
+    let count = source.matches(marker).count();
+    if count != expected {
+        return Err(format!(
+            "{description}: expected {expected} source markers, found {count}"
+        ));
+    }
+    Ok(source.replace(marker, replacement))
+}
+
 fn replace_cpp_source_once(
     source: &str,
     marker: &str,
@@ -1152,6 +1314,41 @@ mod tests {
         patch_test_engine_capture_cpp_for_defined_geometry,
         patch_test_engine_cpp_for_presentation_abort,
     };
+
+    #[test]
+    fn cte_wide_glyph_overlays_preserve_newlines_and_reject_drift() {
+        let editor = include_str!(concat!(
+            "../../../extensions/dear-imgui-cte-sys/third-party/",
+            "cimCTE/ImGuiColorTextEdit/TextEditor.cpp"
+        ));
+        let diff = include_str!(concat!(
+            "../../../extensions/dear-imgui-cte-sys/third-party/",
+            "cimCTE/ImGuiColorTextEdit/TextDiff.cpp"
+        ));
+        for (source, transform) in [
+            (
+                editor,
+                super::patch_cte_text_editor_for_wide_glyphs as fn(&str) -> Result<String, String>,
+            ),
+            (
+                diff,
+                super::patch_cte_text_diff_for_wide_glyphs as fn(&str) -> Result<String, String>,
+            ),
+        ] {
+            let lf = source.replace("\r\n", "\n");
+            let patched = transform(&lf).unwrap();
+            assert_eq!(
+                transform(&lf.replace('\n', "\r\n")).unwrap(),
+                patched.replace('\n', "\r\n")
+            );
+            assert!(
+                transform(&patched).is_err(),
+                "already patched source must require review"
+            );
+            assert!(transform(&lf.replace("column++;", "++column;")).is_err());
+            assert!(transform(&(lf.clone() + &lf)).is_err());
+        }
+    }
 
     #[test]
     fn metrics_patch_guards_only_the_font_atlas_section() {

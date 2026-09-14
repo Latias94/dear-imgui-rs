@@ -69,6 +69,8 @@ pub enum ProviderTransform {
     PatchImguiDemo,
     PatchImguiWidgetsNumericConversions,
     PatchImnodesFileIo,
+    PatchCteTextEditorWideGlyphs,
+    PatchCteTextDiffWideGlyphs,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
