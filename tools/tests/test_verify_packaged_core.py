@@ -72,7 +72,7 @@ def write_prebuilt_archive(
     version: str = "0.16.0",
     artifact_features: str | None = None,
 ) -> Path:
-    path = directory / f"dear-imgui-{profile}{suffix}.tar.gz"
+    path = directory / f"dear-imgui-prebuilt-{profile}{suffix}.tar.gz"
     selected_features = (
         artifact_features
         if artifact_features is not None
@@ -171,10 +171,7 @@ def write_base_extension_matrix(
 
 class CteBindingIdentityTests(unittest.TestCase):
     def test_nested_revision_participates_in_cte_identity(self):
-        spec = PREBUILT.ExtensionSpec(
-            "cte", "dear-imgui-cte", "dear-imgui-cte-sys", "dear-imgui-cte",
-            "dear_imgui_cte", "CTE_SYS", ("normal",), "TextEditor_TextEditor",
-        )
+        spec = PREBUILT.EXTENSION_BY_ID["cte"]
         relative = Path("extensions") / spec.sys_crate / "src/bindings_pregenerated.rs"
         marker = (REPO_ROOT / relative).read_text(encoding="utf-8").splitlines()[0]
         nested = next(item for item in marker.split() if item.startswith("nested="))
@@ -248,7 +245,7 @@ class PrebuiltArchiveSelectionTests(unittest.TestCase):
             for profile in ("normal", "stack-layout"):
                 write_prebuilt_archive(package_dir, profile)
             write_archive(
-                package_dir / "dear-imgui-unknown.tar.gz",
+                package_dir / "dear-imgui-prebuilt-unknown.tar.gz",
                 {
                     "manifest.txt": (
                         b"dear-imgui prebuilt\n"
@@ -376,7 +373,18 @@ class ExtensionArchiveSelectionTests(unittest.TestCase):
             if profile in spec.profiles
         }
         self.assertEqual(set(selected), expected)
-        self.assertEqual(len(selected), 7)
+        self.assertEqual(len(selected), 8)
+
+    def test_cte_archives_do_not_enter_core_selection(self):
+        with TemporaryDirectory() as temporary:
+            package_dir = Path(temporary)
+            core = write_base_extension_matrix(package_dir)
+            selected = PREBUILT.select_core_prebuilt_archives(
+                package_dir, "x86_64-unknown-linux-gnu", "",
+                profile_scope="base", candidate_sha=CANDIDATE_SHA,
+            )
+            self.assertEqual(selected, core)
+            self.assertEqual(PREBUILT._built_core_archive(package_dir, "normal"), core["normal"])
 
     def test_prerelease_version_is_preserved_in_extension_archive_identity(self):
         version = "0.16.0-alpha.1"
@@ -448,7 +456,7 @@ class ExtensionArchiveSelectionTests(unittest.TestCase):
             )
 
         self.assertEqual(selected_core, core)
-        self.assertEqual(len(selected_extensions), 7)
+        self.assertEqual(len(selected_extensions), 8)
 
     def test_rejects_missing_and_alternate_duplicate_extension_archives(self):
         with TemporaryDirectory() as temporary:
@@ -682,7 +690,7 @@ future-default = []
         with TemporaryDirectory() as temporary:
             package_dir = Path(temporary)
             write_archive(
-                package_dir / "dear-imgui-missing-manifest.tar.gz",
+                package_dir / "dear-imgui-prebuilt-missing-manifest.tar.gz",
                 {"nested/manifest.txt": b"not at root"},
             )
 
@@ -1011,6 +1019,20 @@ class ConsumerContractTests(unittest.TestCase):
             self.assertIn("use dear_node_editor as _;", source)
             self.assertIn("dear_node_editor_sys::dne_create_editor", source)
 
+    def test_cte_consumer_runs_wide_glyph_layout_and_both_diff_views(self):
+        with TemporaryDirectory() as temporary:
+            destination = Path(temporary)
+            PREBUILT.write_extension_prebuilt_consumer(
+                destination, REPO_ROOT, PREBUILT.EXTENSION_BY_ID["cte"], "normal"
+            )
+            manifest = tomllib.loads((destination / "Cargo.toml").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["dependencies"]["dear-imgui-rs"]["features"], ["prebuilt"])
+            source = (destination / "src/main.rs").read_text(encoding="utf-8")
+            self.assertIn("editor.document_to_visual(document)", source)
+            self.assertIn("editor.visual_to_document(visual)", source)
+            self.assertIn("ui.text_diff(&mut integrated", source)
+            self.assertIn("ui.text_diff(&mut side_by_side", source)
+
     def test_all_extension_route_consumers_use_safe_and_exact_sys_crates(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1193,9 +1215,9 @@ class ConsumerContractTests(unittest.TestCase):
 
         self.assertEqual(built_crt, "md")
         normal_env = run_command.call_args_list[0].kwargs["env"]
-        stack_env = run_command.call_args_list[7].kwargs["env"]
+        stack_env = run_command.call_args_list[8].kwargs["env"]
         normal_command = run_command.call_args_list[0].args[0]
-        stack_command = run_command.call_args_list[7].args[0]
+        stack_command = run_command.call_args_list[8].args[0]
         for name in (
             "IMGUI_SYS_LIB_DIR",
             "IMGUI_SYS_PREBUILT_URL",
@@ -1213,7 +1235,7 @@ class ConsumerContractTests(unittest.TestCase):
         self.assertIn("package-bin", normal_command)
         self.assertIn("--no-default-features", stack_command)
         self.assertIn("package-bin,stack-layout", stack_command)
-        extension_calls = run_command.call_args_list[1:7]
+        extension_calls = run_command.call_args_list[1:8]
         self.assertEqual(len(extension_calls), len(PREBUILT.EXTENSION_SPECS))
         for call in extension_calls:
             self.assertEqual(
@@ -1248,8 +1270,11 @@ class ConsumerContractTests(unittest.TestCase):
                 crt="md",
             )
 
-        self.assertEqual(len(run_command.call_args_list), 17)
-        core_calls = [run_command.call_args_list[index] for index in (0, 7, 9, 15)]
+        self.assertEqual(len(run_command.call_args_list), 18)
+        core_calls = [
+            call for call in run_command.call_args_list
+            if call.args[0][call.args[0].index("-p") + 1] == "dear-imgui-sys"
+        ]
         self.assertEqual(
             {
                 next(

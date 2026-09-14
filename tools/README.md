@@ -12,18 +12,18 @@ The workspace uses a **unified release train** model. All 29 publishable package
 
 ```bash
 # Generate the complete release diff.
-python3 tools/tasks.py release-prepare 0.17.0
+python3 tools/tasks.py release-prepare 0.18.0
 
 # Review and commit versions, bindings, lockfile, changelog, and docs.
 git diff
 git add -A
-git commit -m "chore: prepare release v0.17.0"
+git commit -m "chore: prepare release v0.18.0"
 
 # Validate the committed clean release candidate.
 python3 tools/tasks.py release-check
 
 # After merging to main and normal CI passes, run the complete release.
-gh workflow run release.yml --ref main -f tag=v0.17.0
+gh workflow run release.yml --ref main -f tag=v0.18.0
 ```
 
 `release-prepare` intentionally leaves changes in the working tree. `release-check` runs the strict clean-tree, changelog, locked dependency graph, reproducible binding, package/offline, documentation, and test gates. Keeping these phases separate prevents release preparation from failing its own clean-tree check.
@@ -60,7 +60,7 @@ python3 tools/tasks.py doc
 python3 tools/tasks.py clean
 
 # Create a release diff, then validate it after commit
-python3 tools/tasks.py release-prepare 0.17.0
+python3 tools/tasks.py release-prepare 0.18.0
 python3 tools/tasks.py release-check
 ```
 
@@ -69,7 +69,7 @@ python3 tools/tasks.py release-check
 The workspace root is the single version source. Publishable manifests use `version.workspace = true`, and internal dependencies inherit their root workspace declarations. `[workspace.metadata.dear-imgui-release]` is the shared policy for the core package and private package paths/versions; Rust and Python release validators derive package counts from the actual workspace members. Update the release train with:
 
 ```bash
-cargo run -p xtask -- release-version 0.17.0
+cargo run -p xtask -- release-version 0.18.0
 ```
 
 The command updates the root release version and inherited internal dependency requirements as one validated workspace operation. It never offers partial crate selection. Documentation remains an explicit review step.
@@ -220,18 +220,18 @@ job, prebuilt build, or consumer directly fails the release.
 
 ```bash
 # 1. Generate versions, bindings, provenance, and lockfile changes.
-python3 tools/tasks.py release-prepare 0.17.0
+python3 tools/tasks.py release-prepare 0.18.0
 
 # 2. Review CHANGELOG.md, compatibility docs, generated files, and Cargo.lock.
 git diff
 
 # 3. Commit and validate the exact candidate.
 git add -A
-git commit -m "chore: prepare release v0.17.0"
+git commit -m "chore: prepare release v0.18.0"
 python3 tools/tasks.py release-check
 
 # 4. Merge to main, require normal CI to pass, then run the complete release.
-gh workflow run release.yml --ref main -f tag=v0.17.0
+gh workflow run release.yml --ref main -f tag=v0.18.0
 ```
 
 The release workflow acquires a short-lived crates.io token only after all

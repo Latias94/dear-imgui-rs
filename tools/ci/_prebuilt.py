@@ -169,6 +169,16 @@ EXTENSION_SPECS = (
         ("normal", "freetype"),
         "imguiGizmo_buildPlane",
     ),
+    ExtensionSpec(
+        "cte",
+        "dear-imgui-cte",
+        "dear-imgui-cte-sys",
+        "dear-imgui-cte",
+        "dear_imgui_cte",
+        "CTE_SYS",
+        ("normal",),
+        "TextEditor_TextEditor",
+    ),
 )
 EXTENSION_BY_ID = {spec.extension_id: spec for spec in EXTENSION_SPECS}
 SUPPORTED_WASM_EXTENSION_SPECS = tuple(
@@ -496,7 +506,7 @@ def select_core_prebuilt_archives(
     if candidate_sha is not None:
         candidate_sha = _validate_candidate_sha(candidate_sha)
     matches = {profile: [] for profile in required_profiles}
-    for archive in sorted(package_dir.resolve().glob("dear-imgui-*.tar.gz")):
+    for archive in sorted(package_dir.resolve().glob("dear-imgui-prebuilt-*.tar.gz")):
         fields = _read_prebuilt_manifest(archive)
         core_artifact_identity(fields, archive)
         if fields.get("target") != target:
@@ -839,6 +849,44 @@ fn main() {{
     _copy_consumer_lockfile(destination, source_root)
 
 
+CTE_PREBUILT_CONSUMER = r"""use dear_imgui_cte::{CteUiExt, Position, TextDiff, TextEditor, VisualPosition};
+use dear_imgui_rs::{Condition, Context};
+
+fn main() {
+    std::hint::black_box(dear_imgui_cte_sys::TextEditor_TextEditor as *const ());
+    let mut context = Context::create();
+    context.io_mut().set_display_size([640.0, 480.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
+    context.font_atlas().try_claim_legacy_renderer().unwrap().build();
+    let mut editor = TextEditor::create(&context);
+    editor.set_text("a\u{4e2d}b\t\u{ff21}").unwrap();
+    editor.set_tab_size(4).unwrap();
+    let mut integrated = TextDiff::create(&context);
+    let mut side_by_side = TextDiff::create(&context);
+    integrated.set_text("\u{4e2d} old", "\u{65e5} new").unwrap();
+    side_by_side.set_text("\u{d55c} old", "\u{ff21} new").unwrap();
+    side_by_side.set_side_by_side(true);
+    for _ in 0..2 {
+        let ui = context.frame();
+        ui.window("CTE prebuilt")
+            .size([600.0, 420.0], Condition::Always)
+            .build(|| {
+                ui.text_editor(&mut editor, "Editor").size([560.0, 100.0]).build().unwrap();
+                ui.text_diff(&mut integrated, "Integrated").size([560.0, 100.0]).build().unwrap();
+                ui.text_diff(&mut side_by_side, "Side by side").size([560.0, 100.0]).build().unwrap();
+            }).unwrap();
+        assert!(context.render_legacy().valid());
+    }
+    for (index, column) in [0, 1, 3, 4, 8, 10].into_iter().enumerate() {
+        let document = Position::new(0, index);
+        let visual = VisualPosition::new(0, column);
+        assert_eq!(editor.document_to_visual(document).unwrap(), visual);
+        assert_eq!(editor.visual_to_document(visual), document);
+    }
+}
+"""
+
+
 def write_extension_prebuilt_consumer(
     destination: Path,
     source_root: Path,
@@ -852,6 +900,13 @@ def write_extension_prebuilt_consumer(
     safe_path = (source_root / "extensions" / spec.safe_crate).resolve()
     sys_path = (source_root / "extensions" / spec.sys_crate).resolve()
     safe_selected_features = ["prebuilt", *safe_features]
+    core_dependency = ()
+    if spec.extension_id == "cte":
+        core_path = (source_root / "dear-imgui").resolve()
+        core_dependency = (
+            f"dear-imgui-rs = {{ path = {json.dumps(os.fspath(core_path))}, "
+            'default-features = false, features = ["prebuilt"] }',
+        )
     destination.joinpath("Cargo.toml").write_text(
         "\n".join(
             (
@@ -871,6 +926,7 @@ def write_extension_prebuilt_consumer(
                     f"{spec.sys_crate} = {{ path = {json.dumps(os.fspath(sys_path))}, "
                     "default-features = false }"
                 ),
+                *core_dependency,
                 "",
                 "[workspace]",
                 "",
@@ -881,7 +937,7 @@ def write_extension_prebuilt_consumer(
     safe_module = spec.safe_crate.replace("-", "_")
     sys_module = spec.sys_crate.replace("-", "_")
     source_dir.joinpath("main.rs").write_text(
-        f"""use {safe_module} as _;
+        CTE_PREBUILT_CONSUMER if spec.extension_id == "cte" else f"""use {safe_module} as _;
 
 fn main() {{
     let _extension_symbol = {sys_module}::{spec.symbol};
@@ -1502,7 +1558,7 @@ def verify_prebuilt_packages(
     source_root: Path = WORKSPACE_ROOT,
     profile_scope: str = "base",
 ) -> None:
-    """Consume exact core and all six safe extension artifact routes."""
+    """Consume exact core and all maintained safe extension artifact routes."""
     verify_core_prebuilt_packages(
         package_dir,
         target,
@@ -1516,7 +1572,7 @@ def verify_prebuilt_packages(
 def _built_core_archive(package_dir: Path, profile_name: str) -> Path:
     expected = PREBUILT_PROFILE_BY_NAME[profile_name].artifact_features
     matches = []
-    for archive in sorted(package_dir.glob("dear-imgui-*.tar.gz")):
+    for archive in sorted(package_dir.glob("dear-imgui-prebuilt-*.tar.gz")):
         fields = _read_prebuilt_manifest(archive)
         core_artifact_identity(fields, archive)
         if frozenset(_canonical_features(fields, archive)) == expected:

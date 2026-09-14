@@ -8,7 +8,8 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 ## Versioning Policy
 
 - Unified release train: all published `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
-- Stable 0.17 train: unified `v0.17.0` (use `version = "0.17"`).
+- Stable 0.18 train: unified `v0.18.0` (use `version = "0.18"`).
+- Previous stable train: unified `v0.17.0` (use `version = "0.17"`).
 - Previous stable train: unified `v0.16.0` (use `version = "0.16"`).
 - Previous prerelease: unified `v0.16.0-alpha.3` (prereleases require exact requirements).
 - Previous stable train: unified `v0.15.1` (use `version = "0.15"`).
@@ -19,7 +20,15 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 - Previous train: unified `v0.10.4` (use `version = "0.10"`).
 - Previous train: unified `v0.9.0` (use `version = "0.9"`).
 - Previous train: unified `v0.8.0` (use `version = "0.8"`).
-- Internal dependency constraints use the compatible current stable minor (`0.17`); prerelease trains use exact requirements. Mixing different release trains across our crates is unsupported.
+- Internal dependency constraints use the compatible current stable minor (`0.18`); prerelease trains use exact requirements. Mixing different release trains across our crates is unsupported.
+
+## 0.18 Stable Release
+
+All 29 published crates move together to `0.18.0`. Use `version = "0.18"` for every workspace crate in an application. The upstream Dear ImGui baseline, external dependency versions, and safe editor API remain as listed for [0.17](#017-stable-release).
+
+- `dear-imgui-build-support` exposes two new `ProviderTransform` variants: `PatchCteTextEditorWideGlyphs` and `PatchCteTextDiffWideGlyphs`. Downstream build tools using exhaustive matches must handle them and apply the corresponding `patch_cte_text_editor_for_wide_glyphs` or `patch_cte_text_diff_for_wide_glyphs` transformation.
+- CTE editors and both diff views reserve two columns for the wide/fullwidth codepoint ranges handled by the upstream fix. Native and WASM builds apply the same temporary source overlay without changing cimCTE headers or the pinned source revisions.
+- CTE standard native prebuilts join the five-target release matrix. Older CTE artifacts are rejected; rebuild custom archives for 0.18.0. CTE does not expose a separate FreeType or stack-layout feature profile.
 
 ## 0.17 Stable Release
 

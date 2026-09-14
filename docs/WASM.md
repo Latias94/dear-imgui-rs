@@ -21,7 +21,7 @@ enable the `wasm` feature. Use the compatible stable requirement:
 
 ```toml
 [dependencies]
-dear-imgui-rs = { version = "0.17", features = ["wasm"] }
+dear-imgui-rs = { version = "0.18", features = ["wasm"] }
 ```
 
 For Bevy, enable `wasm` alongside the features needed by the application and
@@ -29,8 +29,8 @@ take both packages from the same release train:
 
 ```toml
 [dependencies]
-dear-imgui-bevy = { version = "0.17", features = ["render", "wasm"] }
-dear-imgui-rs = { version = "0.17", features = ["wasm"] }
+dear-imgui-bevy = { version = "0.18", features = ["render", "wasm"] }
+dear-imgui-rs = { version = "0.18", features = ["wasm"] }
 ```
 
 Six published safe native extensions expose the same `wasm` feature and forward it to

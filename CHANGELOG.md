@@ -8,6 +8,16 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-14
+
+### Breaking Changes and Migration
+
+- `dear-imgui-build-support::source_inventory::ProviderTransform` adds `PatchCteTextEditorWideGlyphs` and `PatchCteTextDiffWideGlyphs`. Downstream build tools using exhaustive matches must handle both variants and apply the corresponding CTE source transformations. Update all workspace crate dependencies together to `"0.18"`; CTE's safe API and native headers remain unchanged.
+
+### Added
+
+- Added standard CTE native prebuilts to the Linux x86_64, macOS x86_64/aarch64, and Windows MSVC `/MD` and `/MT` release matrix, with isolated consumers that verify wide-glyph layout and both diff views. Custom CTE prebuilts must be rebuilt for 0.18.0.
+
 ### Fixed
 
 - Fixed overlapping CJK and fullwidth characters in `dear-imgui-cte` editors and both text-diff views, including cursor column mapping, tabs, and wrapped-line layout. Native and WASM builds carry a temporary upstream backport while retaining the pinned cimCTE sources and existing ABI. Thanks to [@chemPolonium](https://github.com/chemPolonium) for the report and upstream fix. [#82](https://github.com/Latias94/dear-imgui-rs/issues/82), [upstream #88](https://github.com/goossens/ImGuiColorTextEdit/pull/88)
