@@ -22,6 +22,7 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 - Fixed overlapping CJK and fullwidth characters in `dear-imgui-cte` editors and both text-diff views, including cursor column mapping, tabs, and wrapped-line layout. Native and WASM builds carry a temporary upstream backport while retaining the pinned cimCTE sources and existing ABI. Thanks to [@chemPolonium](https://github.com/chemPolonium) for the report and upstream fix. [#82](https://github.com/Latias94/dear-imgui-rs/issues/82), [upstream #88](https://github.com/goossens/ImGuiColorTextEdit/pull/88)
 - Fixed false native table scope order violations when creating nested tables grows Dear ImGui's table pool. Table scope identity now uses the stable table ID instead of a relocatable memory address.
+  Thanks to [@pnxs](https://github.com/pnxs) for the fix and regression test. [PR #81](https://github.com/Latias94/dear-imgui-rs/pull/81)
 
 ## [0.17.0] - 2026-08-17
 
