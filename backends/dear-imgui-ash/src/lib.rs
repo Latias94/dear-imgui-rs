@@ -12,6 +12,11 @@
 //! Native targets only. On `wasm32`, this crate provides a stub implementation
 //! that always returns `RendererError::UnsupportedTarget`.
 
+#[cfg(not(any(feature = "render-pass", feature = "dynamic-rendering")))]
+compile_error!(
+    "dear-imgui-ash requires at least one of the `render-pass` or `dynamic-rendering` features to be enabled"
+);
+
 mod error;
 pub use error::*;
 
