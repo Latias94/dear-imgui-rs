@@ -56,16 +56,21 @@ pub struct AshRendererConfig {
     pub(super) device: Device,
     pub(super) queue: vk::Queue,
     pub(super) command_pool: vk::CommandPool,
-    #[cfg(not(feature = "dynamic-rendering"))]
-    pub(super) render_pass: vk::RenderPass,
-    #[cfg(feature = "dynamic-rendering")]
-    pub(super) dynamic_rendering: DynamicRendering,
+    pub(super) render_target: RenderTarget,
     pub(super) options: Options,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum RenderTarget {
+    #[cfg(feature = "render-pass")]
+    RenderPass(vk::RenderPass),
+    #[cfg(feature = "dynamic-rendering")]
+    DynamicRendering(DynamicRendering),
 }
 
 impl AshRendererConfig {
     /// Configure a renderer for one compatible render pass.
-    #[cfg(not(feature = "dynamic-rendering"))]
+    #[cfg(feature = "render-pass")]
     pub fn with_render_pass(
         device: Device,
         queue: vk::Queue,
@@ -76,7 +81,7 @@ impl AshRendererConfig {
             device,
             queue,
             command_pool,
-            render_pass,
+            render_target: RenderTarget::RenderPass(render_pass),
             options: Options::default(),
         }
     }
@@ -93,7 +98,7 @@ impl AshRendererConfig {
             device,
             queue,
             command_pool,
-            dynamic_rendering,
+            render_target: RenderTarget::DynamicRendering(dynamic_rendering),
             options: Options::default(),
         }
     }

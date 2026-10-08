@@ -140,7 +140,7 @@ pub use self::core::AshRenderer;
 use self::draw::Frames;
 #[cfg(feature = "dynamic-rendering")]
 pub use self::options::DynamicRendering;
-pub use self::options::{AshRendererConfig, Options};
+pub use self::options::{AshRendererConfig, Options, RenderTarget};
 #[cfg(all(
     any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"),
     not(feature = "dynamic-rendering")

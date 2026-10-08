@@ -122,10 +122,7 @@ impl AshRenderer {
             device,
             queue,
             command_pool,
-            #[cfg(not(feature = "dynamic-rendering"))]
-            render_pass,
-            #[cfg(feature = "dynamic-rendering")]
-            dynamic_rendering,
+            render_target,
             options,
         } = config;
         if options.in_flight_frames == 0 {
@@ -135,14 +132,7 @@ impl AshRenderer {
         }
         let context_state = RendererContextState::prepare(imgui)?;
 
-        let resources = VulkanRendererResources::create(
-            &device,
-            #[cfg(not(feature = "dynamic-rendering"))]
-            render_pass,
-            #[cfg(feature = "dynamic-rendering")]
-            dynamic_rendering,
-            options,
-        )?;
+        let resources = VulkanRendererResources::create(&device, render_target, options)?;
 
         let mut renderer = Self {
             device,
