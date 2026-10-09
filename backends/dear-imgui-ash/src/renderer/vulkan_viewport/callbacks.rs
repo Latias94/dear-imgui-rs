@@ -747,13 +747,8 @@ unsafe fn renderer_render_window(
         };
         let swapchain = resources.swapchain;
         let format = resources.format;
-        #[cfg(not(feature = "dynamic-rendering"))]
-        let (pipeline, render_pass) = {
-            let pipeline = renderer.viewport_pipeline(format)?;
-            (pipeline.pipeline, pipeline.render_pass(attachment_load_op))
-        };
-        #[cfg(feature = "dynamic-rendering")]
-        let pipeline = renderer.viewport_pipeline(format)?.pipeline;
+        let viewport_pipeline = renderer.viewport_pipeline(format)?;
+        let pipeline = viewport_pipeline.pipeline;
         let gamma = renderer.gamma_for_format(format);
 
         let (image_index, suboptimal) = match unsafe {
@@ -814,42 +809,12 @@ unsafe fn renderer_render_window(
                 desired_extent,
             );
         };
-        #[cfg(feature = "dynamic-rendering")]
-        let Some(image) = resources.images.get(image_index_usize).copied() else {
-            return recover_aborted_acquire(
-                control,
-                renderer,
-                globals,
-                data,
-                frame_index,
-                desired_extent,
-            );
-        };
-        #[cfg(feature = "dynamic-rendering")]
-        let Some(image_view) = resources.image_views.get(image_index_usize).copied() else {
-            return recover_aborted_acquire(
-                control,
-                renderer,
-                globals,
-                data,
-                frame_index,
-                desired_extent,
-            );
-        };
         let extent = resources.extent;
-        #[cfg(not(feature = "dynamic-rendering"))]
-        let Some(framebuffer) = resources.framebuffers.get(image_index_usize).copied() else {
-            return recover_aborted_acquire(
-                control,
-                renderer,
-                globals,
-                data,
-                frame_index,
-                desired_extent,
-            );
-        };
-        #[cfg(feature = "dynamic-rendering")]
-        let Some(old_layout) = resources.image_layouts.get(image_index_usize).copied() else {
+        let Some(frame_target) = resources.frame_target(
+            viewport_pipeline.target,
+            image_index_usize,
+            attachment_load_op,
+        ) else {
             return recover_aborted_acquire(
                 control,
                 renderer,
@@ -929,100 +894,109 @@ unsafe fn renderer_render_window(
             );
         };
 
-        #[cfg(not(feature = "dynamic-rendering"))]
-        unsafe {
-            let clear_values = [vk::ClearValue {
-                color: vk::ClearColorValue {
-                    float32: renderer.viewport_clear_color(),
-                },
-            }];
-            let clear_values: &[vk::ClearValue] =
-                if attachment_load_op == vk::AttachmentLoadOp::CLEAR {
-                    &clear_values
-                } else {
-                    &[]
-                };
-            renderer.device.cmd_begin_render_pass(
-                command_buffer,
-                &vk::RenderPassBeginInfo::default()
-                    .render_pass(render_pass)
-                    .framebuffer(framebuffer)
-                    .render_area(vk::Rect2D {
-                        offset: vk::Offset2D { x: 0, y: 0 },
-                        extent,
-                    })
-                    .clear_values(clear_values),
-                vk::SubpassContents::INLINE,
-            );
-            if let Err(error) =
-                renderer.cmd_draw_with_mesh(command_buffer, draw_data, pipeline, gamma, mesh)
-            {
+        match frame_target {
+            #[cfg(feature = "render-pass")]
+            ViewportFrameTarget::RenderPass {
+                render_pass,
+                framebuffer,
+            } => unsafe {
+                let clear_values = [vk::ClearValue {
+                    color: vk::ClearColorValue {
+                        float32: renderer.viewport_clear_color(),
+                    },
+                }];
+                let clear_values: &[vk::ClearValue] =
+                    if attachment_load_op == vk::AttachmentLoadOp::CLEAR {
+                        &clear_values
+                    } else {
+                        &[]
+                    };
+                renderer.device.cmd_begin_render_pass(
+                    command_buffer,
+                    &vk::RenderPassBeginInfo::default()
+                        .render_pass(render_pass)
+                        .framebuffer(framebuffer)
+                        .render_area(vk::Rect2D {
+                            offset: vk::Offset2D { x: 0, y: 0 },
+                            extent,
+                        })
+                        .clear_values(clear_values),
+                    vk::SubpassContents::INLINE,
+                );
+                if let Err(error) =
+                    renderer.cmd_draw_with_mesh(command_buffer, draw_data, pipeline, gamma, mesh)
+                {
+                    renderer.device.cmd_end_render_pass(command_buffer);
+                    recover_aborted_acquire(
+                        control,
+                        renderer,
+                        globals,
+                        data,
+                        frame_index,
+                        desired_extent,
+                    )?;
+                    return Err(error.into());
+                }
                 renderer.device.cmd_end_render_pass(command_buffer);
-                recover_aborted_acquire(
-                    control,
-                    renderer,
-                    globals,
-                    data,
-                    frame_index,
-                    desired_extent,
-                )?;
-                return Err(error.into());
-            }
-            renderer.device.cmd_end_render_pass(command_buffer);
-        }
+            },
 
-        #[cfg(feature = "dynamic-rendering")]
-        unsafe {
-            transition_swapchain_image(
-                &renderer.device,
-                command_buffer,
+            #[cfg(feature = "dynamic-rendering")]
+            ViewportFrameTarget::DynamicRendering {
                 image,
+                image_view,
                 old_layout,
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-            );
-            let clear_value = vk::ClearValue {
-                color: vk::ClearColorValue {
-                    float32: renderer.viewport_clear_color(),
-                },
-            };
-            let color_attachment = vk::RenderingAttachmentInfo::default()
-                .image_view(image_view)
-                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                .load_op(attachment_load_op)
-                .store_op(vk::AttachmentStoreOp::STORE)
-                .clear_value(clear_value);
-            renderer.device.cmd_begin_rendering(
-                command_buffer,
-                &vk::RenderingInfo::default()
-                    .render_area(vk::Rect2D {
-                        offset: vk::Offset2D { x: 0, y: 0 },
-                        extent,
-                    })
-                    .layer_count(1)
-                    .color_attachments(std::slice::from_ref(&color_attachment)),
-            );
-            if let Err(error) =
-                renderer.cmd_draw_with_mesh(command_buffer, draw_data, pipeline, gamma, mesh)
-            {
+            } => unsafe {
+                transition_swapchain_image(
+                    &renderer.device,
+                    command_buffer,
+                    image,
+                    old_layout,
+                    vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                );
+                let clear_value = vk::ClearValue {
+                    color: vk::ClearColorValue {
+                        float32: renderer.viewport_clear_color(),
+                    },
+                };
+                let color_attachment = vk::RenderingAttachmentInfo::default()
+                    .image_view(image_view)
+                    .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                    .load_op(attachment_load_op)
+                    .store_op(vk::AttachmentStoreOp::STORE)
+                    .clear_value(clear_value);
+                renderer.device.cmd_begin_rendering(
+                    command_buffer,
+                    &vk::RenderingInfo::default()
+                        .render_area(vk::Rect2D {
+                            offset: vk::Offset2D { x: 0, y: 0 },
+                            extent,
+                        })
+                        .layer_count(1)
+                        .color_attachments(std::slice::from_ref(&color_attachment)),
+                );
+                if let Err(error) =
+                    renderer.cmd_draw_with_mesh(command_buffer, draw_data, pipeline, gamma, mesh)
+                {
+                    renderer.device.cmd_end_rendering(command_buffer);
+                    recover_aborted_acquire(
+                        control,
+                        renderer,
+                        globals,
+                        data,
+                        frame_index,
+                        desired_extent,
+                    )?;
+                    return Err(error.into());
+                }
                 renderer.device.cmd_end_rendering(command_buffer);
-                recover_aborted_acquire(
-                    control,
-                    renderer,
-                    globals,
-                    data,
-                    frame_index,
-                    desired_extent,
-                )?;
-                return Err(error.into());
-            }
-            renderer.device.cmd_end_rendering(command_buffer);
-            transition_swapchain_image(
-                &renderer.device,
-                command_buffer,
-                image,
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                vk::ImageLayout::PRESENT_SRC_KHR,
-            );
+                transition_swapchain_image(
+                    &renderer.device,
+                    command_buffer,
+                    image,
+                    vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                    vk::ImageLayout::PRESENT_SRC_KHR,
+                );
+            },
         }
 
         recover_acquired_step(
@@ -1087,8 +1061,12 @@ unsafe fn renderer_render_window(
         };
         resources.images_in_flight[image_index_usize] = frame_fence;
         #[cfg(feature = "dynamic-rendering")]
-        {
-            resources.image_layouts[image_index_usize] = vk::ImageLayout::PRESENT_SRC_KHR;
+        match &mut resources.target {
+            SwapchainRenderTarget::DynamicRendering { image_layouts, .. } => {
+                image_layouts[image_index_usize] = vk::ImageLayout::PRESENT_SRC_KHR;
+            }
+            #[cfg(feature = "render-pass")]
+            SwapchainRenderTarget::RenderPass { .. } => {}
         }
         data.frame_index = (data.frame_index + 1) % data.frames.len();
         data.pending_present = Some(image_index);

@@ -56,16 +56,48 @@ pub struct AshRendererConfig {
     pub(super) device: Device,
     pub(super) queue: vk::Queue,
     pub(super) command_pool: vk::CommandPool,
-    #[cfg(not(feature = "dynamic-rendering"))]
-    pub(super) render_pass: vk::RenderPass,
-    #[cfg(feature = "dynamic-rendering")]
-    pub(super) dynamic_rendering: DynamicRendering,
+    pub(super) render_target: RenderTarget,
     pub(super) options: Options,
+}
+
+/// Pipeline target selected when constructing a renderer.
+///
+/// When both rendering features are enabled, this value chooses the mode at runtime.
+/// Secondary viewports use the same mode with their own surface formats and resources.
+#[derive(Debug, Clone, Copy)]
+pub enum RenderTarget {
+    /// Use a caller-owned render pass compatible with the application's draw targets.
+    #[cfg(feature = "render-pass")]
+    RenderPass(vk::RenderPass),
+    /// Use dynamic rendering with the specified attachment formats.
+    #[cfg(feature = "dynamic-rendering")]
+    DynamicRendering(DynamicRendering),
+}
+
+#[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum RenderMode {
+    #[cfg(feature = "render-pass")]
+    RenderPass,
+    #[cfg(feature = "dynamic-rendering")]
+    DynamicRendering,
+}
+
+#[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+impl RenderTarget {
+    pub(super) fn mode(self) -> RenderMode {
+        match self {
+            #[cfg(feature = "render-pass")]
+            Self::RenderPass(_) => RenderMode::RenderPass,
+            #[cfg(feature = "dynamic-rendering")]
+            Self::DynamicRendering(_) => RenderMode::DynamicRendering,
+        }
+    }
 }
 
 impl AshRendererConfig {
     /// Configure a renderer for one compatible render pass.
-    #[cfg(not(feature = "dynamic-rendering"))]
+    #[cfg(feature = "render-pass")]
     pub fn with_render_pass(
         device: Device,
         queue: vk::Queue,
@@ -76,7 +108,7 @@ impl AshRendererConfig {
             device,
             queue,
             command_pool,
-            render_pass,
+            render_target: RenderTarget::RenderPass(render_pass),
             options: Options::default(),
         }
     }
@@ -93,7 +125,7 @@ impl AshRendererConfig {
             device,
             queue,
             command_pool,
-            dynamic_rendering,
+            render_target: RenderTarget::DynamicRendering(dynamic_rendering),
             options: Options::default(),
         }
     }

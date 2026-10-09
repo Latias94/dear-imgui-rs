@@ -38,27 +38,96 @@ impl ViewportRuntimeState {
     }
 }
 
+pub(super) enum SwapchainRenderTarget {
+    #[cfg(feature = "render-pass")]
+    RenderPass { framebuffers: Vec<vk::Framebuffer> },
+    #[cfg(feature = "dynamic-rendering")]
+    DynamicRendering {
+        images: Vec<vk::Image>,
+        image_layouts: Vec<vk::ImageLayout>,
+    },
+}
+
+pub(super) enum ViewportFrameTarget {
+    #[cfg(feature = "render-pass")]
+    RenderPass {
+        render_pass: vk::RenderPass,
+        framebuffer: vk::Framebuffer,
+    },
+    #[cfg(feature = "dynamic-rendering")]
+    DynamicRendering {
+        image: vk::Image,
+        image_view: vk::ImageView,
+        old_layout: vk::ImageLayout,
+    },
+}
+
 pub(super) struct SwapchainResources {
     pub(super) swapchain: vk::SwapchainKHR,
     pub(super) format: vk::Format,
     pub(super) extent: vk::Extent2D,
-    #[cfg(feature = "dynamic-rendering")]
-    pub(super) images: Vec<vk::Image>,
     pub(super) image_views: Vec<vk::ImageView>,
-    #[cfg(feature = "dynamic-rendering")]
-    pub(super) image_layouts: Vec<vk::ImageLayout>,
-    #[cfg(not(feature = "dynamic-rendering"))]
-    pub(super) framebuffers: Vec<vk::Framebuffer>,
+    pub(super) target: SwapchainRenderTarget,
     pub(super) present_semaphores: Vec<vk::Semaphore>,
     pub(super) images_in_flight: Vec<vk::Fence>,
 }
 
 impl SwapchainResources {
+    pub(super) fn frame_target(
+        &self,
+        pipeline_target: ViewportRenderTarget,
+        image_index: usize,
+        load_op: vk::AttachmentLoadOp,
+    ) -> Option<ViewportFrameTarget> {
+        match (&self.target, pipeline_target) {
+            #[cfg(feature = "render-pass")]
+            (
+                SwapchainRenderTarget::RenderPass { framebuffers },
+                ViewportRenderTarget::RenderPass { clear, discard },
+            ) => {
+                // Load ops do not affect render-pass compatibility; both passes share framebuffers.
+                let render_pass = if load_op == vk::AttachmentLoadOp::DONT_CARE {
+                    discard
+                } else {
+                    debug_assert_eq!(load_op, vk::AttachmentLoadOp::CLEAR);
+                    clear
+                };
+                Some(ViewportFrameTarget::RenderPass {
+                    render_pass,
+                    framebuffer: *framebuffers.get(image_index)?,
+                })
+            }
+            #[cfg(feature = "dynamic-rendering")]
+            (
+                SwapchainRenderTarget::DynamicRendering {
+                    images,
+                    image_layouts,
+                },
+                ViewportRenderTarget::DynamicRendering(_),
+            ) => {
+                let _ = load_op;
+                Some(ViewportFrameTarget::DynamicRendering {
+                    image: *images.get(image_index)?,
+                    image_view: *self.image_views.get(image_index)?,
+                    old_layout: *image_layouts.get(image_index)?,
+                })
+            }
+            #[cfg(all(feature = "render-pass", feature = "dynamic-rendering"))]
+            _ => None,
+        }
+    }
+
     pub(super) fn destroy(mut self, device: &Device, swapchain_loader: &khr_swapchain::Device) {
         unsafe {
-            #[cfg(not(feature = "dynamic-rendering"))]
-            for framebuffer in self.framebuffers.drain(..) {
-                device.destroy_framebuffer(framebuffer, None);
+            match self.target {
+                #[cfg(feature = "render-pass")]
+                SwapchainRenderTarget::RenderPass { framebuffers } => {
+                    for framebuffer in framebuffers {
+                        device.destroy_framebuffer(framebuffer, None);
+                    }
+                }
+                #[cfg(feature = "dynamic-rendering")]
+                SwapchainRenderTarget::DynamicRendering { .. } => {}
             }
             for view in self.image_views.drain(..) {
                 device.destroy_image_view(view, None);
@@ -81,6 +150,112 @@ pub(super) struct ViewportAshData {
     pub(super) rebuild_after_present: bool,
     pub(super) state: ViewportRuntimeState,
     pub(super) mesh_frames: Frames,
+}
+
+#[cfg(test)]
+mod render_target_tests {
+    use super::*;
+    use ash::vk::Handle;
+
+    fn swapchain(target: SwapchainRenderTarget) -> SwapchainResources {
+        SwapchainResources {
+            swapchain: vk::SwapchainKHR::null(),
+            format: vk::Format::B8G8R8A8_SRGB,
+            extent: vk::Extent2D {
+                width: 640,
+                height: 480,
+            },
+            image_views: vec![vk::ImageView::from_raw(3)],
+            target,
+            present_semaphores: Vec::new(),
+            images_in_flight: Vec::new(),
+        }
+    }
+
+    #[cfg(feature = "render-pass")]
+    #[test]
+    fn render_pass_frames_select_clear_or_discard_without_dynamic_resources() {
+        let resources = swapchain(SwapchainRenderTarget::RenderPass {
+            framebuffers: vec![vk::Framebuffer::from_raw(4)],
+        });
+        let target = ViewportRenderTarget::RenderPass {
+            clear: vk::RenderPass::from_raw(1),
+            discard: vk::RenderPass::from_raw(2),
+        };
+        assert!(
+            matches!(target.pipeline_target(), RenderTarget::RenderPass(pass) if pass.as_raw() == 1)
+        );
+        for (load_op, expected_pass) in [
+            (vk::AttachmentLoadOp::CLEAR, 1),
+            (vk::AttachmentLoadOp::DONT_CARE, 2),
+        ] {
+            assert!(matches!(resources.frame_target(target, 0, load_op),
+                Some(ViewportFrameTarget::RenderPass { render_pass, framebuffer })
+                    if render_pass.as_raw() == expected_pass && framebuffer.as_raw() == 4));
+        }
+        assert!(
+            resources
+                .frame_target(target, 1, vk::AttachmentLoadOp::CLEAR)
+                .is_none()
+        );
+    }
+
+    #[cfg(feature = "dynamic-rendering")]
+    #[test]
+    fn dynamic_frames_use_the_acquired_image_and_tracked_layout_without_framebuffers() {
+        let resources = swapchain(SwapchainRenderTarget::DynamicRendering {
+            images: vec![vk::Image::from_raw(5)],
+            image_layouts: vec![vk::ImageLayout::PRESENT_SRC_KHR],
+        });
+        let target = ViewportRenderTarget::DynamicRendering(DynamicRendering {
+            color_attachment_format: resources.format,
+            depth_attachment_format: None,
+        });
+        assert!(
+            matches!(target.pipeline_target(), RenderTarget::DynamicRendering(params)
+            if params.color_attachment_format == resources.format && params.depth_attachment_format.is_none())
+        );
+        assert!(
+            matches!(resources.frame_target(target, 0, vk::AttachmentLoadOp::CLEAR),
+            Some(ViewportFrameTarget::DynamicRendering { image, image_view, old_layout })
+                if image.as_raw() == 5 && image_view.as_raw() == 3 && old_layout == vk::ImageLayout::PRESENT_SRC_KHR)
+        );
+        assert!(
+            resources
+                .frame_target(target, 1, vk::AttachmentLoadOp::CLEAR)
+                .is_none()
+        );
+    }
+
+    #[cfg(all(feature = "render-pass", feature = "dynamic-rendering"))]
+    #[test]
+    fn mismatched_pipeline_and_swapchain_modes_are_rejected_before_recording() {
+        let render_pass = ViewportRenderTarget::RenderPass {
+            clear: vk::RenderPass::null(),
+            discard: vk::RenderPass::null(),
+        };
+        let dynamic = ViewportRenderTarget::DynamicRendering(DynamicRendering {
+            color_attachment_format: vk::Format::B8G8R8A8_SRGB,
+            depth_attachment_format: None,
+        });
+        let render_pass_resources = swapchain(SwapchainRenderTarget::RenderPass {
+            framebuffers: vec![vk::Framebuffer::null()],
+        });
+        let dynamic_resources = swapchain(SwapchainRenderTarget::DynamicRendering {
+            images: vec![vk::Image::null()],
+            image_layouts: vec![vk::ImageLayout::UNDEFINED],
+        });
+        assert!(
+            render_pass_resources
+                .frame_target(dynamic, 0, vk::AttachmentLoadOp::CLEAR)
+                .is_none()
+        );
+        assert!(
+            dynamic_resources
+                .frame_target(render_pass, 0, vk::AttachmentLoadOp::CLEAR)
+                .is_none()
+        );
+    }
 }
 
 impl ViewportAshData {

@@ -19,6 +19,8 @@ pub struct AshRenderer {
     pub(super) in_flight_uploads: VecDeque<InFlightUpload>,
     pub(super) managed_uploads: ManagedUploadTracker,
     #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+    pub(super) render_mode: RenderMode,
+    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     pub(super) viewport_pipelines: HashMap<vk::Format, ViewportPipeline>,
     #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     pub(super) viewport_clear_color: [f32; 4],

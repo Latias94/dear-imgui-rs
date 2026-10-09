@@ -1419,6 +1419,8 @@ mod operational_gate_tests {
             in_flight_uploads: VecDeque::new(),
             managed_uploads: ManagedUploadTracker::default(),
             #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+            render_mode: super::lifecycle::test_render_mode(),
+            #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
             viewport_pipelines: HashMap::new(),
             #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
             viewport_clear_color: [0.0, 0.0, 0.0, 1.0],

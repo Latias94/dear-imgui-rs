@@ -4,24 +4,43 @@ use super::*;
 #[derive(Clone, Copy)]
 pub(super) struct ViewportPipeline {
     pub(super) pipeline: vk::Pipeline,
-    #[cfg(not(feature = "dynamic-rendering"))]
-    pub(super) clear_render_pass: vk::RenderPass,
-    #[cfg(not(feature = "dynamic-rendering"))]
-    pub(super) discard_render_pass: vk::RenderPass,
+    pub(super) target: ViewportRenderTarget,
 }
 
-#[cfg(all(
-    any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"),
-    not(feature = "dynamic-rendering")
-))]
-impl ViewportPipeline {
-    pub(super) fn render_pass(&self, load_op: vk::AttachmentLoadOp) -> vk::RenderPass {
-        // Load ops do not affect render-pass compatibility, so both passes share one pipeline.
-        if load_op == vk::AttachmentLoadOp::DONT_CARE {
-            self.discard_render_pass
-        } else {
-            debug_assert_eq!(load_op, vk::AttachmentLoadOp::CLEAR);
-            self.clear_render_pass
+#[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+#[derive(Clone, Copy)]
+pub(super) enum ViewportRenderTarget {
+    #[cfg(feature = "render-pass")]
+    RenderPass {
+        clear: vk::RenderPass,
+        discard: vk::RenderPass,
+    },
+    #[cfg(feature = "dynamic-rendering")]
+    DynamicRendering(DynamicRendering),
+}
+
+#[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+impl ViewportRenderTarget {
+    pub(super) fn pipeline_target(self) -> RenderTarget {
+        match self {
+            #[cfg(feature = "render-pass")]
+            Self::RenderPass { clear, .. } => RenderTarget::RenderPass(clear),
+            #[cfg(feature = "dynamic-rendering")]
+            Self::DynamicRendering(params) => RenderTarget::DynamicRendering(params),
+        }
+    }
+
+    pub(super) fn destroy(self, device: &Device) {
+        match self {
+            #[cfg(feature = "render-pass")]
+            Self::RenderPass { clear, discard } => unsafe {
+                device.destroy_render_pass(discard, None);
+                device.destroy_render_pass(clear, None);
+            },
+            #[cfg(feature = "dynamic-rendering")]
+            Self::DynamicRendering(_) => {
+                let _ = device;
+            }
         }
     }
 }
@@ -36,7 +55,7 @@ pub(super) fn is_srgb_format(format: vk::Format) -> bool {
 
 #[cfg(all(
     any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"),
-    not(feature = "dynamic-rendering")
+    feature = "render-pass"
 ))]
 pub(super) fn create_viewport_render_pass(
     device: &Device,
@@ -90,6 +109,23 @@ pub(super) fn viewport_attachment_load_op(flags: ViewportFlags) -> vk::Attachmen
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(all(feature = "render-pass", feature = "dynamic-rendering"))]
+    #[test]
+    fn viewport_mode_follows_the_main_target_when_both_features_are_enabled() {
+        assert_eq!(
+            RenderTarget::RenderPass(vk::RenderPass::null()).mode(),
+            RenderMode::RenderPass
+        );
+        assert_eq!(
+            RenderTarget::DynamicRendering(DynamicRendering {
+                color_attachment_format: vk::Format::B8G8R8A8_UNORM,
+                depth_attachment_format: None,
+            })
+            .mode(),
+            RenderMode::DynamicRendering
+        );
+    }
 
     #[test]
     fn no_renderer_clear_selects_discard_policy() {

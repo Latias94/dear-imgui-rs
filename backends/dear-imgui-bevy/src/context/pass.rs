@@ -651,7 +651,7 @@ pub(crate) struct ImguiPassRegistry {
 impl ImguiPassRegistry {
     fn new(lifecycle: ImguiAppLifecycle) -> Result<Self, ImguiPassError> {
         let registry_id = NEXT_REGISTRY_ID
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 current.checked_add(1)
             })
             .map_err(|_| ImguiPassError::RegistryIdExhausted)?;

@@ -2,7 +2,7 @@
 //!
 //! This module is inspired by `imgui-rs-vulkan-renderer`, adapted to `dear-imgui-rs`.
 
-use crate::{Options, RendererError, RendererResult};
+use crate::{Options, RenderTarget, RendererError, RendererResult};
 use ash::{Device, vk};
 use std::ffi::CString;
 
@@ -151,8 +151,7 @@ pub fn create_vulkan_pipeline_layout(
 pub fn create_vulkan_pipeline(
     device: &Device,
     pipeline_layout: vk::PipelineLayout,
-    #[cfg(not(feature = "dynamic-rendering"))] render_pass: vk::RenderPass,
-    #[cfg(feature = "dynamic-rendering")] dynamic_rendering: super::DynamicRendering,
+    render_target: RenderTarget,
     options: Options,
 ) -> RendererResult<vk::Pipeline> {
     let entry_point_name = CString::new("main").unwrap();
@@ -268,30 +267,38 @@ pub fn create_vulkan_pipeline(
         .layout(pipeline_layout)
         .subpass(options.subpass);
 
-    #[cfg(not(feature = "dynamic-rendering"))]
-    let pipeline_info = pipeline_info.render_pass(render_pass);
-
-    #[cfg(feature = "dynamic-rendering")]
-    let color_attachment_formats = [dynamic_rendering.color_attachment_format];
-    #[cfg(feature = "dynamic-rendering")]
-    let mut rendering_info = {
-        let mut rendering_info = vk::PipelineRenderingCreateInfo::default()
-            .color_attachment_formats(&color_attachment_formats);
-        if let Some(depth_attachment_format) = dynamic_rendering.depth_attachment_format {
-            rendering_info = rendering_info.depth_attachment_format(depth_attachment_format);
+    let create_result = match render_target {
+        #[cfg(feature = "render-pass")]
+        RenderTarget::RenderPass(render_pass) => {
+            let pipeline_info = pipeline_info.render_pass(render_pass);
+            unsafe {
+                device.create_graphics_pipelines(
+                    vk::PipelineCache::null(),
+                    std::slice::from_ref(&pipeline_info),
+                    None,
+                )
+            }
         }
-        rendering_info
+        #[cfg(feature = "dynamic-rendering")]
+        RenderTarget::DynamicRendering(dynamic_rendering) => {
+            let color_attachment_formats = [dynamic_rendering.color_attachment_format];
+            let mut rendering_info = vk::PipelineRenderingCreateInfo::default()
+                .color_attachment_formats(&color_attachment_formats);
+            if let Some(depth_attachment_format) = dynamic_rendering.depth_attachment_format {
+                rendering_info = rendering_info.depth_attachment_format(depth_attachment_format);
+            }
+            let pipeline_info = pipeline_info.push_next(&mut rendering_info);
+            unsafe {
+                device.create_graphics_pipelines(
+                    vk::PipelineCache::null(),
+                    std::slice::from_ref(&pipeline_info),
+                    None,
+                )
+            }
+        }
     };
-    #[cfg(feature = "dynamic-rendering")]
-    let pipeline_info = pipeline_info.push_next(&mut rendering_info);
 
-    let pipeline = match unsafe {
-        device.create_graphics_pipelines(
-            vk::PipelineCache::null(),
-            std::slice::from_ref(&pipeline_info),
-            None,
-        )
-    } {
+    let pipeline = match create_result {
         Ok(mut pipelines) => match pipelines.pop() {
             Some(pipeline) => pipeline,
             None => {
@@ -467,8 +474,7 @@ pub(super) struct VulkanRendererResources {
 impl VulkanRendererResources {
     pub(super) fn create(
         device: &Device,
-        #[cfg(not(feature = "dynamic-rendering"))] render_pass: vk::RenderPass,
-        #[cfg(feature = "dynamic-rendering")] dynamic_rendering: super::DynamicRendering,
+        render_target: RenderTarget,
         options: Options,
     ) -> RendererResult<Self> {
         let mut resources = Self::empty();
@@ -482,15 +488,8 @@ impl VulkanRendererResources {
                 resources.sampled_image_set_layout,
                 resources.sampler_set_layout,
             )?;
-            resources.pipeline = create_vulkan_pipeline(
-                device,
-                resources.pipeline_layout,
-                #[cfg(not(feature = "dynamic-rendering"))]
-                render_pass,
-                #[cfg(feature = "dynamic-rendering")]
-                dynamic_rendering,
-                options,
-            )?;
+            resources.pipeline =
+                create_vulkan_pipeline(device, resources.pipeline_layout, render_target, options)?;
             resources.descriptor_pool =
                 create_vulkan_descriptor_pool(device, options.max_textures)?;
             resources.linear_sampler = create_standard_sampler(device, vk::Filter::LINEAR)?;

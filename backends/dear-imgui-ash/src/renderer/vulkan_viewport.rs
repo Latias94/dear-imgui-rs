@@ -35,7 +35,10 @@ pub use self::runtime::{
     AshPreparedViewportFrame, AshViewportAttachError, AshViewportError, AshViewportFrameCompletion,
     AshViewportRouteError, AshViewportRouteFault,
 };
-use self::surface::{SwapchainResources, ViewportAshData, ViewportRuntimeState};
+use self::surface::{
+    SwapchainRenderTarget, SwapchainResources, ViewportAshData, ViewportFrameTarget,
+    ViewportRuntimeState,
+};
 pub use self::trace::AshViewportFrameReport;
 
 pub(super) fn first_renderer_callback_drift(

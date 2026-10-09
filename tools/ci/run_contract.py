@@ -110,7 +110,7 @@ RENDERER_FEATURE_CONFLICTS = (
             "--lib",
             "--no-default-features",
             "--features",
-            "multi-viewport-winit,multi-viewport-sdl3",
+            "multi-viewport-winit,multi-viewport-sdl3,render-pass",
         ),
     ),
 )

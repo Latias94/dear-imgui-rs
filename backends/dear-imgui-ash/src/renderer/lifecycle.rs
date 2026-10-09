@@ -17,6 +17,19 @@ pub(super) fn classify_device_idle(
 }
 
 #[cfg(all(test, not(any(feature = "gpu-allocator", feature = "vk-mem"))))]
+#[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+pub(super) fn test_render_mode() -> RenderMode {
+    #[cfg(feature = "render-pass")]
+    {
+        RenderMode::RenderPass
+    }
+    #[cfg(not(feature = "render-pass"))]
+    {
+        RenderMode::DynamicRendering
+    }
+}
+
+#[cfg(all(test, not(any(feature = "gpu-allocator", feature = "vk-mem"))))]
 pub(super) fn renderer_for_test(context: &mut Context) -> AshRenderer {
     let device = unsafe { Device::load_with(|_| std::ptr::null(), vk::Device::null()) };
     let context_state = RendererContextState::prepare(context).unwrap();
@@ -40,6 +53,8 @@ pub(super) fn renderer_for_test(context: &mut Context) -> AshRenderer {
         destroyed: false,
         in_flight_uploads: VecDeque::new(),
         managed_uploads: ManagedUploadTracker::default(),
+        #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+        render_mode: test_render_mode(),
         #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
         viewport_pipelines: HashMap::new(),
         #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
@@ -122,10 +137,7 @@ impl AshRenderer {
             device,
             queue,
             command_pool,
-            #[cfg(not(feature = "dynamic-rendering"))]
-            render_pass,
-            #[cfg(feature = "dynamic-rendering")]
-            dynamic_rendering,
+            render_target,
             options,
         } = config;
         if options.in_flight_frames == 0 {
@@ -135,14 +147,7 @@ impl AshRenderer {
         }
         let context_state = RendererContextState::prepare(imgui)?;
 
-        let resources = VulkanRendererResources::create(
-            &device,
-            #[cfg(not(feature = "dynamic-rendering"))]
-            render_pass,
-            #[cfg(feature = "dynamic-rendering")]
-            dynamic_rendering,
-            options,
-        )?;
+        let resources = VulkanRendererResources::create(&device, render_target, options)?;
 
         let mut renderer = Self {
             device,
@@ -159,6 +164,8 @@ impl AshRenderer {
             destroyed: false,
             in_flight_uploads: VecDeque::new(),
             managed_uploads: ManagedUploadTracker::default(),
+            #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+            render_mode: render_target.mode(),
             #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
             viewport_pipelines: HashMap::new(),
             #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
@@ -337,54 +344,49 @@ impl AshRenderer {
             color_gamma_override: self.options.color_gamma_override,
         };
 
-        #[cfg(not(feature = "dynamic-rendering"))]
-        let clear_render_pass =
-            create_viewport_render_pass(&self.device, format, vk::AttachmentLoadOp::CLEAR)?;
-        #[cfg(not(feature = "dynamic-rendering"))]
-        let discard_render_pass = match create_viewport_render_pass(
-            &self.device,
-            format,
-            vk::AttachmentLoadOp::DONT_CARE,
-        ) {
-            Ok(render_pass) => render_pass,
-            Err(err) => {
-                unsafe {
-                    self.device.destroy_render_pass(clear_render_pass, None);
-                }
-                return Err(err);
+        let target = match self.render_mode {
+            #[cfg(feature = "render-pass")]
+            RenderMode::RenderPass => {
+                let clear =
+                    create_viewport_render_pass(&self.device, format, vk::AttachmentLoadOp::CLEAR)?;
+                let discard = match create_viewport_render_pass(
+                    &self.device,
+                    format,
+                    vk::AttachmentLoadOp::DONT_CARE,
+                ) {
+                    Ok(pass) => pass,
+                    Err(error) => {
+                        unsafe {
+                            self.device.destroy_render_pass(clear, None);
+                        }
+                        return Err(error);
+                    }
+                };
+                ViewportRenderTarget::RenderPass { clear, discard }
+            }
+            #[cfg(feature = "dynamic-rendering")]
+            RenderMode::DynamicRendering => {
+                ViewportRenderTarget::DynamicRendering(DynamicRendering {
+                    color_attachment_format: format,
+                    depth_attachment_format: None,
+                })
             }
         };
 
         let pipeline = match create_vulkan_pipeline(
             &self.device,
             self.resources.pipeline_layout,
-            #[cfg(not(feature = "dynamic-rendering"))]
-            clear_render_pass,
-            #[cfg(feature = "dynamic-rendering")]
-            DynamicRendering {
-                color_attachment_format: format,
-                depth_attachment_format: None,
-            },
+            target.pipeline_target(),
             options,
         ) {
             Ok(pipeline) => pipeline,
             Err(err) => {
-                #[cfg(not(feature = "dynamic-rendering"))]
-                unsafe {
-                    self.device.destroy_render_pass(discard_render_pass, None);
-                    self.device.destroy_render_pass(clear_render_pass, None);
-                }
+                target.destroy(&self.device);
                 return Err(err);
             }
         };
 
-        let vp = ViewportPipeline {
-            pipeline,
-            #[cfg(not(feature = "dynamic-rendering"))]
-            clear_render_pass,
-            #[cfg(not(feature = "dynamic-rendering"))]
-            discard_render_pass,
-        };
+        let vp = ViewportPipeline { pipeline, target };
 
         self.viewport_pipelines.insert(format, vp);
         Ok(vp)
@@ -568,12 +570,7 @@ impl AshRenderer {
                 let viewport_pipelines = std::mem::take(&mut self.viewport_pipelines);
                 for (_, vp) in viewport_pipelines {
                     self.device.destroy_pipeline(vp.pipeline, None);
-                    #[cfg(not(feature = "dynamic-rendering"))]
-                    {
-                        self.device
-                            .destroy_render_pass(vp.discard_render_pass, None);
-                        self.device.destroy_render_pass(vp.clear_render_pass, None);
-                    }
+                    vp.target.destroy(&self.device);
                 }
             }
         }
