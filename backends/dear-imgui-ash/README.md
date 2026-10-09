@@ -22,6 +22,18 @@ This backend is compatible with both `ash` loader modes:
 - Upload path uses in-flight fences to avoid `vkQueueWaitIdle` stalls.
 - Sub-rect texture updates (uses `UpdateRect` bounding box).
 
+### Render targets
+
+The default `render-pass` feature enables `AshRendererConfig::with_render_pass`.
+The `dynamic-rendering` feature enables `AshRendererConfig::with_dynamic_rendering`.
+Enable both to choose a render target after querying device capabilities at startup.
+Secondary viewports use the same rendering mode as the main renderer.
+
+When disabling default features, enable at least one of `render-pass` or
+`dynamic-rendering`. Dynamic rendering requires a device with the `dynamicRendering`
+feature enabled; secondary viewports also require the Vulkan 1.3 core rendering
+commands used by this backend.
+
 ### Shader artifacts
 
 Managed textures are tightly packed RGBA bytes and are always stored as

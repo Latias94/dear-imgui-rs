@@ -676,16 +676,22 @@ jobs:
         include:
           - platform: Winit
             rendering: classic
-            features: multi-viewport-winit
+            features: multi-viewport-winit,render-pass
           - platform: Winit
             rendering: dynamic
             features: multi-viewport-winit,dynamic-rendering
+          - platform: Winit
+            rendering: runtime
+            features: multi-viewport-winit,render-pass,dynamic-rendering
           - platform: SDL3
             rendering: classic
-            features: multi-viewport-sdl3
+            features: multi-viewport-sdl3,render-pass
           - platform: SDL3
             rendering: dynamic
             features: multi-viewport-sdl3,dynamic-rendering
+          - platform: SDL3
+            rendering: runtime
+            features: multi-viewport-sdl3,render-pass,dynamic-rendering
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -750,7 +756,7 @@ jobs:
         if: matrix.platform == 'Winit' && matrix.rendering == 'classic'
         run: >-
           cargo check -p dear-imgui-ash --lib --no-default-features
-          --features "vk-mem"
+          --features "vk-mem,render-pass"
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
 
@@ -759,8 +765,7 @@ jobs:
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
 
-      - name: Lint exact classic Ash release route
-        if: matrix.rendering == 'classic'
+      - name: Lint exact Ash release route
         run: >-
           python3 tools/ci/run_contract.py clippy --
           -p dear-imgui-ash --all-targets --no-default-features

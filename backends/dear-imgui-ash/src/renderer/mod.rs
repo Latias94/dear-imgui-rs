@@ -140,10 +140,12 @@ pub use self::core::AshRenderer;
 use self::draw::Frames;
 #[cfg(feature = "dynamic-rendering")]
 pub use self::options::DynamicRendering;
+#[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+use self::options::RenderMode;
 pub use self::options::{AshRendererConfig, Options, RenderTarget};
 #[cfg(all(
     any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"),
-    not(feature = "dynamic-rendering")
+    feature = "render-pass"
 ))]
 use self::pipeline::create_viewport_render_pass;
 #[cfg(all(
@@ -152,7 +154,7 @@ use self::pipeline::create_viewport_render_pass;
 ))]
 use self::pipeline::viewport_attachment_load_op;
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
-use self::pipeline::{ViewportPipeline, is_srgb_format};
+use self::pipeline::{ViewportPipeline, ViewportRenderTarget, is_srgb_format};
 pub use self::retirement::TextureRetirementBatch;
 use self::retirement::{RetirementQueue, RetirementRequest, RetirementReservation};
 use self::texture::TextureManager;

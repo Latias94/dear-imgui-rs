@@ -212,7 +212,7 @@ fn create_image_views(
     Ok(image_views)
 }
 
-#[cfg(not(feature = "dynamic-rendering"))]
+#[cfg(feature = "render-pass")]
 fn create_framebuffers(
     device: &Device,
     render_pass: vk::RenderPass,
@@ -305,12 +305,7 @@ pub(super) fn recreate_swapchain_after_device_idle(
         &support.present_modes,
     )?;
 
-    #[cfg(not(feature = "dynamic-rendering"))]
-    let clear_render_pass = renderer
-        .viewport_pipeline(surface_format.format)?
-        .clear_render_pass;
-    #[cfg(feature = "dynamic-rendering")]
-    renderer.viewport_pipeline(surface_format.format)?;
+    let pipeline_target = renderer.viewport_pipeline(surface_format.format)?.target;
 
     let capabilities = support.capabilities;
     let min_image_count = {
@@ -395,30 +390,35 @@ pub(super) fn recreate_swapchain_after_device_idle(
             return Err(error.into());
         }
     };
-    #[cfg(not(feature = "dynamic-rendering"))]
-    let framebuffers =
-        match create_framebuffers(&renderer.device, clear_render_pass, &image_views, extent) {
-            Ok(framebuffers) => framebuffers,
-            Err(error) => {
-                destroy_present_semaphores(&renderer.device, present_semaphores);
-                destroy_image_views(&renderer.device, image_views);
-                unsafe { data.swapchain_loader.destroy_swapchain(swapchain, None) };
-                return Err(error.into());
-            }
-        };
-
     let image_count = images.len();
+    let target = match pipeline_target {
+        #[cfg(feature = "render-pass")]
+        ViewportRenderTarget::RenderPass { clear, .. } => {
+            let framebuffers =
+                match create_framebuffers(&renderer.device, clear, &image_views, extent) {
+                    Ok(framebuffers) => framebuffers,
+                    Err(error) => {
+                        destroy_present_semaphores(&renderer.device, present_semaphores);
+                        destroy_image_views(&renderer.device, image_views);
+                        unsafe { data.swapchain_loader.destroy_swapchain(swapchain, None) };
+                        return Err(error.into());
+                    }
+                };
+            SwapchainRenderTarget::RenderPass { framebuffers }
+        }
+        #[cfg(feature = "dynamic-rendering")]
+        ViewportRenderTarget::DynamicRendering(_) => SwapchainRenderTarget::DynamicRendering {
+            images,
+            image_layouts: vec![vk::ImageLayout::UNDEFINED; image_count],
+        },
+    };
+
     data.swapchain = Some(SwapchainResources {
         swapchain,
         format: surface_format.format,
         extent,
-        #[cfg(feature = "dynamic-rendering")]
-        images,
         image_views,
-        #[cfg(feature = "dynamic-rendering")]
-        image_layouts: vec![vk::ImageLayout::UNDEFINED; image_count],
-        #[cfg(not(feature = "dynamic-rendering"))]
-        framebuffers,
+        target,
         present_semaphores,
         images_in_flight: vec![vk::Fence::null(); image_count],
     });

@@ -488,12 +488,8 @@ impl VulkanRendererResources {
                 resources.sampled_image_set_layout,
                 resources.sampler_set_layout,
             )?;
-            resources.pipeline = create_vulkan_pipeline(
-                device,
-                resources.pipeline_layout,
-                render_target,
-                options,
-            )?;
+            resources.pipeline =
+                create_vulkan_pipeline(device, resources.pipeline_layout, render_target, options)?;
             resources.descriptor_pool =
                 create_vulkan_descriptor_pool(device, options.max_textures)?;
             resources.linear_sampler = create_standard_sampler(device, vk::Filter::LINEAR)?;

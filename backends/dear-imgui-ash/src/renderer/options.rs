@@ -60,12 +60,39 @@ pub struct AshRendererConfig {
     pub(super) options: Options,
 }
 
+/// Pipeline target selected when constructing a renderer.
+///
+/// When both rendering features are enabled, this value chooses the mode at runtime.
+/// Secondary viewports use the same mode with their own surface formats and resources.
 #[derive(Debug, Clone, Copy)]
 pub enum RenderTarget {
+    /// Use a caller-owned render pass compatible with the application's draw targets.
     #[cfg(feature = "render-pass")]
     RenderPass(vk::RenderPass),
+    /// Use dynamic rendering with the specified attachment formats.
     #[cfg(feature = "dynamic-rendering")]
     DynamicRendering(DynamicRendering),
+}
+
+#[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum RenderMode {
+    #[cfg(feature = "render-pass")]
+    RenderPass,
+    #[cfg(feature = "dynamic-rendering")]
+    DynamicRendering,
+}
+
+#[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+impl RenderTarget {
+    pub(super) fn mode(self) -> RenderMode {
+        match self {
+            #[cfg(feature = "render-pass")]
+            Self::RenderPass(_) => RenderMode::RenderPass,
+            #[cfg(feature = "dynamic-rendering")]
+            Self::DynamicRendering(_) => RenderMode::DynamicRendering,
+        }
+    }
 }
 
 impl AshRendererConfig {
