@@ -292,13 +292,17 @@ fn out_of_order_completion_applies_only_after_the_contiguous_gap_closes() {
     let first = ctx.begin_frame().render_snapshot(&consumer).unwrap();
     let first_feedback = upload_user(&first, texture_id, imgui::TextureId::new(41));
     let second = ctx.begin_frame().render_snapshot(&consumer).unwrap();
+    assert_eq!(
+        request_for(&first, texture_id).upload_identity(),
+        request_for(&second, texture_id).upload_identity()
+    );
     let second_feedback = upload_user(&second, texture_id, imgui::TextureId::new(42));
 
     second.commit(second_feedback).unwrap();
     let progress = ctx.poll_snapshot_completions().unwrap();
     assert_eq!(progress.watermark(), 0);
     ctx.with_texture(texture_id, |texture| {
-        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+        assert_eq!(texture.status(), imgui::TextureStatus::OK);
         assert!(texture.texture_id().is_null());
     })
     .unwrap();
@@ -395,7 +399,7 @@ fn stale_upload_feedback_cannot_write_a_newer_texture_revision() {
     assert_eq!(stale_progress.watermark(), 1);
     assert_eq!(stale_progress.feedback_applied(), 0);
     ctx.with_texture(texture_id, |texture| {
-        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+        assert_eq!(texture.status(), imgui::TextureStatus::OK);
         assert!(texture.texture_id().is_null());
     })
     .unwrap();
@@ -436,7 +440,7 @@ fn successful_pixel_mutation_immediately_invalidates_in_flight_upload_feedback()
     assert_eq!(stale_progress.watermark(), 1);
     assert_eq!(stale_progress.feedback_applied(), 0);
     ctx.with_texture(texture_id, |texture| {
-        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+        assert_eq!(texture.status(), imgui::TextureStatus::WantUpdates);
         assert!(texture.texture_id().is_null());
     })
     .unwrap();
@@ -482,7 +486,7 @@ fn ignored_successful_mutation_result_still_invalidates_in_flight_feedback() {
     assert_eq!(progress.feedback_applied(), 0);
     ctx.with_texture(texture_id, |texture| {
         assert_eq!(texture.pixels(), Some(replacement.as_slice()));
-        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+        assert_eq!(texture.status(), imgui::TextureStatus::WantUpdates);
         assert!(texture.texture_id().is_null());
     })
     .unwrap();
@@ -579,7 +583,7 @@ fn managed_mutation_closure_preserves_earlier_success_when_a_later_call_fails() 
     );
     ctx.with_texture(texture_id, |texture| {
         assert_eq!(texture.pixels(), Some(replacement.as_slice()));
-        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+        assert_eq!(texture.status(), imgui::TextureStatus::WantUpdates);
     })
     .unwrap();
 
@@ -587,7 +591,7 @@ fn managed_mutation_closure_preserves_earlier_success_when_a_later_call_fails() 
     let progress = ctx.poll_snapshot_completions().unwrap();
     assert_eq!(progress.feedback_applied(), 0);
     ctx.with_texture(texture_id, |texture| {
-        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+        assert_eq!(texture.status(), imgui::TextureStatus::WantUpdates);
         assert!(texture.texture_id().is_null());
     })
     .unwrap();
@@ -615,7 +619,7 @@ fn managed_pixel_mutation_invalidates_in_flight_feedback_during_unwind() {
     assert!(panic.is_err());
     ctx.with_texture(texture_id, |texture| {
         assert_eq!(texture.pixels(), Some(replacement.as_slice()));
-        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+        assert_eq!(texture.status(), imgui::TextureStatus::WantUpdates);
     })
     .unwrap();
 
@@ -623,7 +627,7 @@ fn managed_pixel_mutation_invalidates_in_flight_feedback_during_unwind() {
     let progress = ctx.poll_snapshot_completions().unwrap();
     assert_eq!(progress.feedback_applied(), 0);
     ctx.with_texture(texture_id, |texture| {
-        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+        assert_eq!(texture.status(), imgui::TextureStatus::WantUpdates);
         assert!(texture.texture_id().is_null());
     })
     .unwrap();
@@ -895,7 +899,7 @@ fn duplicate_feedback_abandons_the_epoch_without_partial_registry_mutation() {
     assert_eq!(progress.watermark(), 1);
     assert_eq!(progress.abandoned(), 1);
     ctx.with_texture(texture_id, |texture| {
-        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+        assert_eq!(texture.status(), imgui::TextureStatus::OK);
         assert!(texture.texture_id().is_null());
     })
     .unwrap();
@@ -937,7 +941,7 @@ fn feedback_from_an_old_consumer_generation_cannot_mutate_a_new_generation() {
     assert_eq!(progress.watermark(), 2);
     assert_eq!(progress.abandoned(), 1);
     ctx.with_texture(texture_id, |texture| {
-        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+        assert_eq!(texture.status(), imgui::TextureStatus::OK);
         assert!(texture.texture_id().is_null());
     })
     .unwrap();
@@ -983,7 +987,7 @@ fn feedback_from_a_foreign_context_is_rejected_before_registry_mutation() {
     assert_eq!(progress.abandoned(), 1);
     context_b
         .with_texture(texture_b, |texture| {
-            assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+            assert_eq!(texture.status(), imgui::TextureStatus::OK);
             assert!(texture.texture_id().is_null());
         })
         .unwrap();
@@ -1032,7 +1036,7 @@ fn stale_feedback_cannot_mutate_a_texture_in_a_reused_slot() {
     let progress = ctx.poll_snapshot_completions().unwrap();
     assert_eq!(progress.abandoned(), 1);
     ctx.with_texture(replacement_id, |texture| {
-        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+        assert_eq!(texture.status(), imgui::TextureStatus::OK);
         assert!(texture.texture_id().is_null());
     })
     .unwrap();
@@ -1077,13 +1081,26 @@ fn foreign_consumer_is_rejected_before_capture() {
     let mut context_b = imgui::Context::create();
     prepare_context(&mut context_b);
     let _consumer_b = context_b.create_detached_renderer_consumer().unwrap();
+    let texture_id = context_b.register_texture(owned_texture());
     let frame = context_b.begin_frame();
+    frame.ui().image(texture_id, [16.0, 16.0]);
     assert!(matches!(
         frame.render_snapshot(&consumer_a),
         Err(imgui::render::SnapshotError::Consumer(
             imgui::render::RendererConsumerError::ForeignContext { .. }
         ))
     ));
+    context_b
+        .with_texture(texture_id, |texture| {
+            assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+            assert!(texture.texture_id().is_null());
+        })
+        .unwrap();
+    context_b.remove_texture(texture_id).unwrap();
+    assert_eq!(
+        context_b.with_texture(texture_id, |_| ()),
+        Err(imgui::ManagedTextureError::AlreadyRemoved(texture_id))
+    );
     drop(context_b);
     drop(suspended_a.activate().unwrap());
 }
@@ -1121,4 +1138,367 @@ fn renderer_reset_rejects_an_outstanding_detached_epoch() {
     let reset = ctx.prepare_renderer_texture_reset(&consumer).unwrap();
     let committed: () = reset.commit();
     assert_eq!(committed, ());
+}
+
+#[test]
+fn late_feedback_must_not_hide_a_new_digit_upload() {
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let consumer = ctx.create_detached_renderer_consumer().unwrap();
+    let first = ctx.begin_frame();
+    first.ui().text("A");
+    let first = first.render_snapshot(&consumer).unwrap();
+    let feedback = acknowledge_all(&first, 9000);
+    first.commit(feedback).unwrap();
+    ctx.poll_snapshot_completions().unwrap();
+
+    let older = ctx.begin_frame();
+    older.ui().text("1");
+    let older = older.render_snapshot(&consumer).unwrap();
+    assert!(
+        older.texture_requests().iter().any(|request| {
+            matches!(request.operation(), imgui::render::TextureOp::Update { .. })
+        })
+    );
+    let feedback = acknowledge_all(&older, 9000);
+
+    let current = ctx.begin_frame();
+    current.ui().text("2");
+    older.commit(feedback).unwrap();
+    let current = current.render_snapshot(&consumer).unwrap();
+    assert!(
+        current.texture_requests().iter().any(|request| {
+            matches!(request.operation(), imgui::render::TextureOp::Update { .. })
+        }),
+        "the newer glyph upload must survive older feedback: {:?}",
+        current.texture_requests()
+    );
+}
+
+#[test]
+fn dropped_create_and_late_feedback_preserve_a_complete_latest_create() {
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let id = ctx.register_texture(owned_texture());
+    let consumer = ctx.create_detached_renderer_consumer().unwrap();
+
+    let dropped = ctx.begin_frame().render_snapshot(&consumer).unwrap();
+    let first_identity = request_for(&dropped, id).upload_identity().unwrap();
+    drop(dropped);
+    ctx.poll_snapshot_completions().unwrap();
+    let older = ctx.begin_frame().render_snapshot(&consumer).unwrap();
+    assert_eq!(
+        request_for(&older, id).upload_identity(),
+        Some(first_identity)
+    );
+    let feedback = upload_user(&older, id, imgui::TextureId::new(901));
+    let replacement = [7; 16];
+    ctx.try_with_texture_mut(id, |mut texture| texture.replace_pixels(&replacement))
+        .unwrap();
+    older.commit(feedback).unwrap();
+    ctx.poll_snapshot_completions().unwrap();
+
+    let latest = ctx.begin_frame().render_snapshot(&consumer).unwrap();
+    let request = request_for(&latest, id);
+    assert_ne!(request.upload_identity(), Some(first_identity));
+    assert!(matches!(
+        request.operation(),
+        imgui::render::TextureOp::Create { pixels, .. } if pixels == &replacement
+    ));
+    ctx.with_texture(id, |texture| {
+        assert_eq!(texture.status(), imgui::TextureStatus::OK);
+        assert!(texture.texture_id().is_null());
+    })
+    .unwrap();
+}
+
+#[test]
+fn dropping_the_initial_atlas_snapshot_keeps_later_glyphs_in_a_complete_create() {
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let consumer = ctx.create_detached_renderer_consumer().unwrap();
+    let first = ctx.begin_frame();
+    first.ui().text("A");
+    let first = first.render_snapshot(&consumer).unwrap();
+    let initial = first
+        .texture_requests()
+        .iter()
+        .find(|request| {
+            matches!(
+                request.texture(),
+                imgui::render::SnapshotTextureId::FontAtlas { .. }
+            )
+        })
+        .expect("the first glyph needs an atlas create");
+    let identity = initial.upload_identity().unwrap();
+    assert!(matches!(
+        initial.operation(),
+        imgui::render::TextureOp::Create { .. }
+    ));
+    drop(first);
+    ctx.poll_snapshot_completions().unwrap();
+
+    let next = ctx.begin_frame();
+    next.ui().text("1234567890");
+    let next = next.render_snapshot(&consumer).unwrap();
+    let latest = next
+        .texture_requests()
+        .iter()
+        .find(|request| {
+            matches!(
+                request.texture(),
+                imgui::render::SnapshotTextureId::FontAtlas { .. }
+            )
+        })
+        .expect("an abandoned create must be reissued");
+    assert_ne!(latest.upload_identity(), Some(identity));
+    let imgui::render::TextureOp::Create { pixels, .. } = latest.operation() else {
+        panic!("unconfirmed atlas creation must remain a complete create");
+    };
+    unsafe {
+        let atlas = (*imgui::sys::igGetIO_ContextPtr(ctx.as_raw())).Fonts;
+        let texture = (*atlas).TexData;
+        let length = usize::try_from((*texture).Width).unwrap()
+            * usize::try_from((*texture).Height).unwrap()
+            * usize::try_from((*texture).BytesPerPixel).unwrap();
+        assert_eq!(
+            pixels.as_slice(),
+            std::slice::from_raw_parts((*texture).Pixels.cast::<u8>(), length)
+        );
+    }
+}
+
+#[test]
+fn cumulative_updates_survive_dropped_frames_and_retry_with_stable_identity() {
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let id = ctx.register_texture(
+        imgui::texture::OwnedTextureData::from_pixels(
+            imgui::texture::TextureFormat::RGBA32,
+            3,
+            1,
+            &[0; 12],
+        )
+        .unwrap(),
+    );
+    let consumer = ctx.create_detached_renderer_consumer().unwrap();
+    let binding = imgui::TextureId::new(902);
+    let created = ctx.begin_frame().render_snapshot(&consumer).unwrap();
+    let feedback = upload_user(&created, id, binding);
+    created.commit(feedback).unwrap();
+    ctx.poll_snapshot_completions().unwrap();
+
+    for (x, pixel) in [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]]
+        .iter()
+        .enumerate()
+    {
+        ctx.try_with_texture_mut(id, |mut texture| {
+            texture.update_subresource(imgui::texture::TextureSubresource::new(
+                imgui::texture::TextureRegion::new(x as u32, 0, 1, 1).unwrap(),
+                4,
+                pixel,
+            ))
+        })
+        .unwrap();
+        let snapshot = ctx.begin_frame().render_snapshot(&consumer).unwrap();
+        if x < 2 {
+            drop(snapshot);
+            ctx.poll_snapshot_completions().unwrap();
+            continue;
+        }
+        let request = request_for(&snapshot, id);
+        let imgui::render::TextureOp::Update { rects, .. } = request.operation() else {
+            panic!("confirmed creation must be followed by an update");
+        };
+        let mut uploaded = [0; 12];
+        let mut covered = [false; 3];
+        for upload in rects {
+            assert_eq!(upload.rect.y, 0);
+            assert_eq!(upload.rect.h, 1);
+            let start = usize::from(upload.rect.x);
+            let width = usize::from(upload.rect.w);
+            uploaded[start * 4..(start + width) * 4].copy_from_slice(&upload.data[..width * 4]);
+            covered[start..start + width].fill(true);
+        }
+        assert_eq!(covered, [true; 3]);
+        assert_eq!(uploaded, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+        let identity = request.upload_identity().unwrap();
+        let operation = request.operation().clone();
+        let feedback = retry_all(&snapshot);
+        snapshot.commit(feedback).unwrap();
+        ctx.poll_snapshot_completions().unwrap();
+
+        let retry = ctx.begin_frame().render_snapshot(&consumer).unwrap();
+        assert_eq!(request_for(&retry, id).upload_identity(), Some(identity));
+        assert_eq!(request_for(&retry, id).operation(), &operation);
+        let feedback = upload_user(&retry, id, binding);
+        retry.commit(feedback).unwrap();
+        ctx.poll_snapshot_completions().unwrap();
+        let settled = ctx.begin_frame().render_snapshot(&consumer).unwrap();
+        assert!(
+            settled
+                .texture_requests()
+                .iter()
+                .all(|request| { request.texture() != imgui::render::SnapshotTextureId::User(id) })
+        );
+    }
+}
+
+#[test]
+fn removing_an_unconfirmed_staged_create_keeps_destroy_pending_until_acknowledged() {
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let id = ctx.register_texture(owned_texture());
+    let consumer = ctx.create_detached_renderer_consumer().unwrap();
+    let create = ctx.begin_frame().render_snapshot(&consumer).unwrap();
+    assert!(matches!(
+        request_for(&create, id).operation(),
+        imgui::render::TextureOp::Create { .. }
+    ));
+    drop(create);
+    ctx.poll_snapshot_completions().unwrap();
+    ctx.with_texture(id, |texture| assert!(texture.texture_id().is_null()))
+        .unwrap();
+
+    ctx.remove_texture(id).unwrap();
+    assert_eq!(
+        ctx.with_texture(id, |_| ()),
+        Err(imgui::ManagedTextureError::Retiring(id))
+    );
+    let destroy = ctx.begin_frame().render_snapshot(&consumer).unwrap();
+    assert_eq!(
+        request_for(&destroy, id).operation(),
+        &imgui::render::TextureOp::Destroy
+    );
+    drop(destroy);
+    ctx.poll_snapshot_completions().unwrap();
+    assert_eq!(
+        ctx.with_texture(id, |_| ()),
+        Err(imgui::ManagedTextureError::Retiring(id))
+    );
+
+    let retry = ctx.begin_frame().render_snapshot(&consumer).unwrap();
+    assert_eq!(
+        request_for(&retry, id).operation(),
+        &imgui::render::TextureOp::Destroy
+    );
+    let feedback = retry_all(&retry);
+    retry.commit(feedback).unwrap();
+    ctx.poll_snapshot_completions().unwrap();
+    assert_eq!(
+        ctx.with_texture(id, |_| ()),
+        Err(imgui::ManagedTextureError::Retiring(id))
+    );
+
+    let latest = ctx.begin_frame().render_snapshot(&consumer).unwrap();
+    assert_eq!(
+        request_for(&latest, id).operation(),
+        &imgui::render::TextureOp::Destroy
+    );
+    let feedback = destroy_user(&latest, id);
+    latest.commit(feedback).unwrap();
+    ctx.poll_snapshot_completions().unwrap();
+    assert_eq!(
+        ctx.with_texture(id, |_| ()),
+        Err(imgui::ManagedTextureError::AlreadyRemoved(id))
+    );
+}
+
+#[test]
+fn renderer_reset_replaces_a_pending_update_with_a_fresh_complete_create() {
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let id = ctx.register_texture(owned_texture());
+    let consumer = ctx.create_detached_renderer_consumer().unwrap();
+    let binding = imgui::TextureId::new(903);
+    let create = ctx.begin_frame().render_snapshot(&consumer).unwrap();
+    let created = upload_user(&create, id, binding);
+    create.commit(created).unwrap();
+    ctx.poll_snapshot_completions().unwrap();
+
+    let replacement = [13; 16];
+    ctx.try_with_texture_mut(id, |mut texture| texture.replace_pixels(&replacement))
+        .unwrap();
+    let update = ctx.begin_frame().render_snapshot(&consumer).unwrap();
+    let request = request_for(&update, id);
+    assert!(matches!(
+        request.operation(),
+        imgui::render::TextureOp::Update { .. }
+    ));
+    let update_identity = request.upload_identity().unwrap();
+    let feedback = retry_all(&update);
+    update.commit(feedback).unwrap();
+    ctx.poll_snapshot_completions().unwrap();
+
+    let reset = ctx.prepare_renderer_texture_reset(&consumer).unwrap();
+    reset.commit();
+    ctx.with_texture(id, |texture| {
+        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+        assert!(texture.texture_id().is_null());
+    })
+    .unwrap();
+
+    let next = ctx.begin_frame().render_snapshot(&consumer).unwrap();
+    let request = request_for(&next, id);
+    assert_ne!(request.upload_identity(), Some(update_identity));
+    assert!(matches!(
+        request.operation(),
+        imgui::render::TextureOp::Create { pixels, .. } if pixels == &replacement
+    ));
+    let feedback = upload_user(&next, id, imgui::TextureId::new(904));
+    next.commit(feedback).unwrap();
+    ctx.poll_snapshot_completions().unwrap();
+    let settled = ctx.begin_frame().render_snapshot(&consumer).unwrap();
+    assert!(
+        settled
+            .texture_requests()
+            .iter()
+            .all(|request| { request.texture() != imgui::render::SnapshotTextureId::User(id) })
+    );
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn main_and_platform_snapshots_share_pending_glyph_identity_after_late_feedback() {
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let consumer = ctx.create_detached_renderer_consumer().unwrap();
+    let first = ctx.begin_frame();
+    first.ui().text("A");
+    let first = first.render_snapshot(&consumer).unwrap();
+    let feedback = acknowledge_all(&first, 905);
+    first.commit(feedback).unwrap();
+    ctx.poll_snapshot_completions().unwrap();
+
+    let older = ctx.begin_frame();
+    older.ui().text("1");
+    let older = older.render_snapshot(&consumer).unwrap();
+    let feedback = acknowledge_all(&older, 905);
+    let current = ctx.begin_frame();
+    current.ui().text("2");
+    let main = current.render_snapshot(&consumer).unwrap();
+    let current_request = main
+        .texture_requests()
+        .iter()
+        .find(|request| matches!(request.operation(), imgui::render::TextureOp::Update { .. }))
+        .expect("the newer glyph must produce an update");
+    older.commit(feedback).unwrap();
+    let platform = ctx.platform_viewport_snapshot(&consumer).unwrap();
+    let platform_request = platform
+        .texture_requests()
+        .iter()
+        .find(|request| request.texture() == current_request.texture())
+        .expect("the platform capture must retain the current glyph update");
+    assert_eq!(
+        platform_request.upload_identity(),
+        current_request.upload_identity()
+    );
+    assert_eq!(platform_request.operation(), current_request.operation());
 }

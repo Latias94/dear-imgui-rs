@@ -239,7 +239,11 @@ fn managed_texture_create_request_repeats_after_gpu_retry() {
         .configure(primary_id, |context| {
             context
                 .with_texture(texture, |texture| {
-                    assert_eq!(texture.status(), imgui::texture::TextureStatus::WantCreate);
+                    assert_eq!(
+                        texture.status(),
+                        imgui::texture::TextureStatus::OK,
+                        "native staging is acknowledged independently of the GPU retry"
+                    );
                     assert!(texture.texture_id().is_null());
                 })
                 .expect("managed texture should remain active");
@@ -475,7 +479,11 @@ fn managed_texture_requests_and_lifecycles_are_isolated_by_context() {
         .configure(secondary_id, |context| {
             context
                 .with_texture(secondary_texture, |texture| {
-                    assert_eq!(texture.status(), imgui::texture::TextureStatus::WantCreate);
+                    assert_eq!(
+                        texture.status(),
+                        imgui::texture::TextureStatus::OK,
+                        "another Context's retirement must not invalidate staged content"
+                    );
                     assert!(texture.texture_id().is_null());
                 })
                 .expect("secondary texture should remain active");

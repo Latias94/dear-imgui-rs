@@ -23,7 +23,8 @@ use std::ffi::c_void;
 /// - A renderer owns one synchronous or detached consumer and processes the pointer-free requests
 ///   exposed by `PendingFrame::texture_requests` or `FrameSnapshot::texture_requests`.
 /// - The renderer returns request-bound `TextureFeedback`; the owning Context validates and
-///   reconciles it before mutating native texture status or identifiers.
+///   reconciles it before installing GPU identifiers or completing destruction. Managed
+///   staging acknowledges native uploads once their bytes are durably owned by the Context.
 ///
 /// Context owns every registered user allocation through retirement. Application pixel mutation
 /// normally uses `Context::try_with_texture_mut`, so safe code cannot drop the allocation while
@@ -117,7 +118,10 @@ impl TextureData {
         self.inner().UniqueID
     }
 
-    /// Get the current status of this texture
+    /// Get the current native status of this texture.
+    ///
+    /// In managed rendering, `OK` means the Context has staged the upload. It does not
+    /// prove that the renderer has uploaded it; renderer completion is request-bound.
     pub fn status(&self) -> TextureStatus {
         TextureStatus::from(self.inner().Status)
     }

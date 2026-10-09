@@ -17,7 +17,10 @@ impl<'texture> ManagedTextureRef<'texture> {
         Self { texture }
     }
 
-    /// Current renderer lifecycle status.
+    /// Current native lifecycle status.
+    ///
+    /// `OK` means the Context has accepted the upload into its persistent staging queue,
+    /// not necessarily that a GPU upload has completed.
     #[must_use]
     pub fn status(self) -> TextureStatus {
         self.texture.status()
@@ -126,12 +129,11 @@ impl<'texture> ManagedTextureRef<'texture> {
 /// ```
 pub struct ManagedTextureMut<'texture> {
     texture: &'texture mut TextureData,
-    mutated: &'texture mut bool,
 }
 
 impl<'texture> ManagedTextureMut<'texture> {
-    pub(crate) fn new(texture: &'texture mut TextureData, mutated: &'texture mut bool) -> Self {
-        Self { texture, mutated }
+    pub(crate) fn new(texture: &'texture mut TextureData) -> Self {
+        Self { texture }
     }
 
     /// Replace every pixel using the destination's exact tightly packed byte length.
@@ -144,11 +146,7 @@ impl<'texture> ManagedTextureMut<'texture> {
     /// Returns [`TextureDataError`] when the texture is not mutable, its layout is invalid, the
     /// payload length is not exact, or a live full update is not natively representable.
     pub fn replace_pixels(&mut self, pixels: &[u8]) -> Result<(), TextureDataError> {
-        let result = self.texture.replace_pixels(pixels);
-        if result.is_ok() {
-            *self.mutated = true;
-        }
-        result
+        self.texture.replace_pixels(pixels)
     }
 
     /// Copy one strided source payload into the requested texture region.
@@ -166,11 +164,7 @@ impl<'texture> ManagedTextureMut<'texture> {
         &mut self,
         update: TextureSubresource<'_>,
     ) -> Result<(), TextureDataError> {
-        let result = self.texture.update_subresource(update);
-        if result.is_ok() {
-            *self.mutated = true;
-        }
-        result
+        self.texture.update_subresource(update)
     }
 
     /// Inspect the texture without exposing renderer-owned fields or native pointers.

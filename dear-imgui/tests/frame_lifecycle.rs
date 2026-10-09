@@ -546,7 +546,7 @@ fn synchronous_retry_keeps_the_frame_drawable_and_reissues_the_same_upload() {
     drop(frame);
 
     ctx.with_texture(texture_id, |texture| {
-        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+        assert_eq!(texture.status(), imgui::TextureStatus::OK);
         assert!(texture.texture_id().is_null());
     })
     .unwrap();
@@ -602,7 +602,7 @@ fn invalid_synchronous_feedback_abandons_without_wedging_the_consumer() {
         Err(imgui::render::RendererConsumerError::DuplicateFeedback { .. })
     ));
     ctx.with_texture(texture_id, |texture| {
-        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+        assert_eq!(texture.status(), imgui::TextureStatus::OK);
         assert!(texture.texture_id().is_null());
     })
     .unwrap();
