@@ -4,6 +4,10 @@
 //! [`DetachedRendererConsumer`]. It can cross threads, but it cannot be cloned or constructed
 //! from arbitrary native draw data. Dropping it reports an abandoned epoch;
 //! [`FrameSnapshot::commit`] reports renderer feedback for ordered reconciliation by the Context.
+//! Texture operations and drawing must execute in epoch order, although epochs may be skipped.
+//! Completion messages may arrive out of order; that does not permit out-of-order GPU execution.
+//! Pending texture work belongs to the Context, so dropping a snapshot or retrying an upload
+//! preserves its operation for a later snapshot.
 
 use std::collections::HashSet;
 use std::marker::PhantomData;
@@ -504,6 +508,10 @@ pub(crate) struct TextureRequestKey {
 }
 
 /// One texture request tied to this snapshot's exact epoch and revision.
+///
+/// Pending requests are shared across later snapshots until acknowledged. A retry or a
+/// dropped snapshot does not discard the payload. New content replaces the pending revision
+/// with a cumulative operation, so an older acknowledgement cannot clear the newer work.
 #[derive(Debug)]
 pub struct TextureRequest {
     key: TextureRequestKey,
@@ -886,7 +894,12 @@ pub(crate) enum SnapshotCompletionOutcome {
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct ResolvedSnapshotTexture {
     pub(crate) id: SnapshotTextureId,
-    pub(crate) revision: u64,
+}
+
+#[derive(Debug)]
+pub(crate) struct CapturedTextureOperation {
+    pub(crate) texture: SnapshotTextureId,
+    pub(crate) op: Arc<TextureOp>,
 }
 
 #[derive(Debug)]
@@ -900,7 +913,7 @@ pub(crate) struct PendingTextureRequest {
 pub(crate) struct PendingSnapshot {
     main_draw: MainDrawSnapshot,
     pub(crate) viewports: Vec<ViewportDrawDataSnapshot>,
-    pub(crate) texture_requests: Vec<PendingTextureRequest>,
+    pub(crate) texture_operations: Vec<CapturedTextureOperation>,
 }
 
 impl PendingSnapshot {
@@ -908,7 +921,10 @@ impl PendingSnapshot {
         self.main_draw.draw_data(&self.viewports)
     }
 
-    pub(crate) fn referenced_user_textures(&self) -> HashSet<ManagedTextureId> {
+    pub(crate) fn referenced_user_textures(
+        &self,
+        requests: &[PendingTextureRequest],
+    ) -> HashSet<ManagedTextureId> {
         let mut referenced = HashSet::new();
         if matches!(&self.main_draw, MainDrawSnapshot::Standalone(_)) {
             collect_referenced_user_textures(self.draw_data(), &mut referenced);
@@ -916,7 +932,7 @@ impl PendingSnapshot {
         for viewport in &self.viewports {
             collect_referenced_user_textures(&viewport.draw, &mut referenced);
         }
-        for request in &self.texture_requests {
+        for request in requests {
             if let SnapshotTextureId::User(id) = request.texture {
                 referenced.insert(id);
             }
@@ -926,10 +942,11 @@ impl PendingSnapshot {
 
     pub(crate) fn into_frame(
         self,
+        requests: Vec<PendingTextureRequest>,
         epoch: SnapshotEpoch,
         sender: Sender<SnapshotMessage>,
     ) -> (FrameSnapshot, HashSet<TextureRequestKey>) {
-        let (texture_requests, expected) = finalize_texture_requests(self.texture_requests, epoch);
+        let (texture_requests, expected) = finalize_texture_requests(requests, epoch);
         (
             FrameSnapshot {
                 main_draw: self.main_draw,
@@ -993,7 +1010,7 @@ pub(crate) fn capture_texture_requests_only(
     resolve: &mut impl FnMut(
         *const sys::ImTextureData,
     ) -> Result<ResolvedSnapshotTexture, SnapshotError>,
-) -> Result<Vec<PendingTextureRequest>, SnapshotError> {
+) -> Result<Vec<CapturedTextureOperation>, SnapshotError> {
     snapshot_texture_requests(draw_data, resolve)
 }
 
@@ -1005,7 +1022,7 @@ pub(crate) fn capture_draw_data(
 ) -> Result<PendingSnapshot, SnapshotError> {
     preflight_detached_callbacks(draw_data)?;
     let draw = snapshot_draw_data(draw_data, resolve)?;
-    let texture_requests = snapshot_texture_requests(draw_data, resolve)?;
+    let texture_operations = snapshot_texture_requests(draw_data, resolve)?;
     let (main_draw, viewports) = match owner_viewport_identity(draw_data) {
         Some((viewport_id, is_main)) => (
             MainDrawSnapshot::Viewport(0),
@@ -1016,7 +1033,7 @@ pub(crate) fn capture_draw_data(
     Ok(PendingSnapshot {
         main_draw,
         viewports,
-        texture_requests,
+        texture_operations,
     })
 }
 
@@ -1075,17 +1092,17 @@ pub(crate) unsafe fn capture_platform_io(
         return Ok(PendingSnapshot {
             main_draw: MainDrawSnapshot::Standalone(empty_draw_data_snapshot()),
             viewports: Vec::new(),
-            texture_requests: Vec::new(),
+            texture_operations: Vec::new(),
         });
     };
-    let texture_requests = snapshot_texture_requests(
+    let texture_operations = snapshot_texture_requests(
         main_draw_data.expect("main viewport draw data was recorded"),
         resolve,
     )?;
     Ok(PendingSnapshot {
         main_draw: MainDrawSnapshot::Viewport(main_draw_index),
         viewports,
-        texture_requests,
+        texture_operations,
     })
 }
 
@@ -1221,7 +1238,7 @@ fn snapshot_texture_requests(
     resolve: &mut impl FnMut(
         *const sys::ImTextureData,
     ) -> Result<ResolvedSnapshotTexture, SnapshotError>,
-) -> Result<Vec<PendingTextureRequest>, SnapshotError> {
+) -> Result<Vec<CapturedTextureOperation>, SnapshotError> {
     let mut out = Vec::new();
     for texture in draw_data.textures() {
         let status = texture.status();
@@ -1231,9 +1248,8 @@ fn snapshot_texture_requests(
         let resolved = resolve(texture.as_raw())?;
         let id = resolved.id;
         if status == TextureStatus::WantDestroy {
-            out.push(PendingTextureRequest {
+            out.push(CapturedTextureOperation {
                 texture: id,
-                revision: resolved.revision,
                 op: Arc::new(TextureOp::Destroy),
             });
             continue;
@@ -1298,17 +1314,25 @@ fn snapshot_texture_requests(
                     height,
                     rects: rects
                         .into_iter()
-                        .filter_map(|rect| copy_upload_rect(pixels, width, height, bpp, rect))
-                        .collect(),
+                        .map(|rect| {
+                            copy_upload_rect(pixels, width, height, bpp, rect).ok_or(
+                                SnapshotError::TextureInvalidLayout {
+                                    id,
+                                    width: raw_width,
+                                    height: raw_height,
+                                    bpp: raw_bpp,
+                                },
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
                 }
             }
             TextureStatus::OK | TextureStatus::WantDestroy | TextureStatus::Destroyed => {
                 unreachable!("non-upload statuses were handled before layout validation")
             }
         };
-        out.push(PendingTextureRequest {
+        out.push(CapturedTextureOperation {
             texture: id,
-            revision: resolved.revision,
             op: Arc::new(op),
         });
     }
@@ -1493,7 +1517,7 @@ mod layout_tests {
     }
 }
 
-fn copy_upload_rect(
+pub(crate) fn copy_upload_rect(
     pixels: &[u8],
     width: u32,
     height: u32,

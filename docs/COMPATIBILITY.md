@@ -228,6 +228,21 @@ records an abandoned epoch rather than acknowledging destroy requests. Managed
 texture retirement completes only after matching-generation destroy feedback
 and the ordered completion watermark both permit reclamation.
 
+Managed texture synchronization is persistent Context-owned work, not snapshot-owned
+work. Staging copies the native upload into immutable Rust-owned data and acknowledges
+the native request immediately. Native `OK` therefore means accepted by the staging
+queue, not necessarily uploaded to the GPU. Dropping a snapshot, returning `retry`, or
+waiting for a renderer does not discard pending uploads. Snapshots share unchanged
+pending payloads and upload identities. Before the latest Create is acknowledged,
+later snapshots retain a complete Create; afterwards, updates cover all unacknowledged
+changes. Only feedback for the current content revision installs its GPU binding or
+completes its pending work. Older feedback never clears newer native changes.
+
+For each consumer, texture operations and drawing must execute in epoch order.
+Snapshots may be skipped, and completion messages may arrive out of order, but GPU
+writes must not apply an older snapshot after a newer one. Uploads must precede drawing
+that uses them; Destroy must respect the backend's outstanding GPU-use lifetime.
+
 Renderer resource maps keep a tombstone for every accepted Destroy identity
 until a complete idle-consumer reset succeeds. A late Create or Update for a
 tombstoned identity is ignored without GPU work or feedback, so out-of-order

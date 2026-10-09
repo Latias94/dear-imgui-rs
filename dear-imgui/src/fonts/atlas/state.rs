@@ -1,10 +1,9 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use crate::context::ContextId;
 use crate::error::ImGuiError;
-use crate::render::snapshot::{RendererConsumerError, SnapshotTextureId, TextureOp};
+use crate::render::snapshot::{RendererConsumerError, SnapshotTextureId};
 use crate::sys;
 
 use super::error::FontAtlasModeError;
@@ -21,14 +20,11 @@ pub(super) struct FontAtlasState {
 pub(crate) struct FontAtlasSnapshotIdentity {
     pub(crate) stamp: u64,
     pub(crate) texture_generation: u64,
-    pub(crate) revision: u64,
     pub(crate) texture: *mut sys::ImTextureData,
 }
 
 #[derive(Clone, Debug)]
 struct FontAtlasTextureLedgerEntry {
-    revision: u64,
-    operation: Option<Arc<TextureOp>>,
     live: bool,
     last_reference_epoch: HashMap<ContextId, u64>,
 }
@@ -323,8 +319,6 @@ pub(crate) fn font_atlas_snapshot_identities(
             .map(|(texture_generation, texture)| {
                 let entry = ledger.entries.entry(texture_generation).or_insert_with(|| {
                     FontAtlasTextureLedgerEntry {
-                        revision: 0,
-                        operation: None,
                         live: true,
                         last_reference_epoch: HashMap::new(),
                     }
@@ -333,7 +327,6 @@ pub(crate) fn font_atlas_snapshot_identities(
                 FontAtlasSnapshotIdentity {
                     stamp,
                     texture_generation,
-                    revision: entry.revision,
                     texture,
                 }
             })
@@ -341,64 +334,17 @@ pub(crate) fn font_atlas_snapshot_identities(
     })
 }
 
-pub(crate) fn track_font_atlas_texture_operation(
-    raw: *mut sys::ImFontAtlas,
-    id: SnapshotTextureId,
-    operation: &mut Arc<TextureOp>,
-) -> u64 {
-    let SnapshotTextureId::FontAtlas {
-        stamp, generation, ..
-    } = id
-    else {
-        panic!("font atlas operation received a user texture identity");
-    };
+pub(crate) fn mark_font_atlas_texture_staged(raw: *mut sys::ImFontAtlas) {
     FONT_ATLAS_STATES.with(|states| {
         let mut states = states.borrow_mut();
-        states.get_or_insert(raw);
-        let namespace = states
-            .renderer_modes
-            .get_mut(&(raw as usize))
-            .and_then(|mode| match mode {
-                FontAtlasRendererMode::Managed {
-                    namespace,
-                    renderer_reset_committed,
-                    ..
-                } => {
-                    *renderer_reset_committed = false;
-                    Some(*namespace)
-                }
-                FontAtlasRendererMode::Legacy { .. }
-                | FontAtlasRendererMode::RendererReleasePending { .. } => None,
-            })
-            .expect("font atlas managed renderer namespace was not claimed");
-        assert_eq!(
-            stamp, namespace,
-            "font atlas operation belongs to a retired renderer namespace"
-        );
-        let entry = states
-            .texture_ledgers
-            .get_mut(&(raw as usize))
-            .and_then(|ledger| ledger.entries.get_mut(&generation))
-            .expect("font atlas operation must target the current observed texture list");
-        assert!(
-            entry.live,
-            "font atlas operation must target a live texture allocation"
-        );
-        if entry
-            .operation
-            .as_deref()
-            .is_none_or(|current| current != operation.as_ref())
+        if let Some(FontAtlasRendererMode::Managed {
+            renderer_reset_committed,
+            ..
+        }) = states.renderer_modes.get_mut(&(raw as usize))
         {
-            entry.revision = entry
-                .revision
-                .checked_add(1)
-                .expect("font atlas texture revision space exhausted");
-            entry.operation = Some(Arc::clone(operation));
-        } else if let Some(current) = &entry.operation {
-            *operation = Arc::clone(current);
+            *renderer_reset_committed = false;
         }
-        entry.revision
-    })
+    });
 }
 
 pub(crate) fn record_font_atlas_texture_reference(
@@ -471,39 +417,6 @@ pub(crate) fn font_atlas_texture_identity_is_known(
                     })
                     && ledger.entries.contains_key(&generation)
             })
-    })
-}
-
-pub(crate) fn font_atlas_texture_revision_is_current(
-    raw: *mut sys::ImFontAtlas,
-    id: SnapshotTextureId,
-    revision: u64,
-) -> bool {
-    let SnapshotTextureId::FontAtlas {
-        stamp, generation, ..
-    } = id
-    else {
-        return false;
-    };
-    FONT_ATLAS_STATES.with(|states| {
-        let states = states.borrow();
-        states
-            .texture_ledgers
-            .get(&(raw as usize))
-            .filter(|_| {
-                states
-                    .renderer_modes
-                    .get(&(raw as usize))
-                    .is_some_and(|mode| {
-                        matches!(
-                            mode,
-                            FontAtlasRendererMode::Managed { namespace, .. }
-                                if *namespace == stamp
-                        )
-                    })
-            })
-            .and_then(|ledger| ledger.entries.get(&generation))
-            .is_some_and(|entry| entry.live && entry.revision == revision)
     })
 }
 

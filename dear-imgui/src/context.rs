@@ -19,6 +19,7 @@ mod suspended;
 #[cfg(test)]
 mod tests;
 mod texture_registry;
+mod texture_sync;
 
 pub use self::attachment::{
     ContextAttachment, ContextAttachmentDetachError, ContextAttachmentError,

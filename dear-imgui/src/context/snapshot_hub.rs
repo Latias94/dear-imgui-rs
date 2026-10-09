@@ -166,20 +166,21 @@ impl SnapshotHub {
         &mut self,
         consumer: &DetachedRendererConsumer,
         pending: PendingSnapshot,
+        requests: Vec<PendingTextureRequest>,
         registry: &mut ManagedTextureRegistry,
         atlas: &FontAtlasSnapshotTarget,
     ) -> Result<FrameSnapshot, SnapshotError> {
         let generation = self.validate_consumer(consumer, ConsumerMode::Detached)?;
         let sequence = self.allocate_epoch()?;
         let epoch = SnapshotEpoch::new(self.context, generation, sequence);
-        let referenced = pending.referenced_user_textures();
+        let referenced = pending.referenced_user_textures(&requests);
         registry.record_snapshot_references(&referenced, sequence.get())?;
-        for request in &pending.texture_requests {
+        for request in &requests {
             if matches!(request.texture, SnapshotTextureId::FontAtlas { .. }) {
                 atlas.record_request_reference(request.texture, sequence.get());
             }
         }
-        let (snapshot, expected) = pending.into_frame(epoch, self.sender.clone());
+        let (snapshot, expected) = pending.into_frame(requests, epoch, self.sender.clone());
         let previous = self.outstanding.insert(
             sequence.get(),
             OutstandingEpoch {
@@ -734,19 +735,23 @@ impl Context {
         consumer: &DetachedRendererConsumer,
         draw_data: *const crate::render::DrawData,
     ) -> Result<FrameSnapshot, SnapshotError> {
+        self.snapshot_hub
+            .validate_consumer(consumer, ConsumerMode::Detached)?;
         let atlas = self.font_atlas_snapshot_target();
         let _ = self.poll_snapshot_completions_with_target(&atlas)?;
-        let mut pending = {
+        let pending = {
             let registry = self.texture_registry.borrow();
             let mut resolve = |native| registry.resolve_snapshot_texture(native, &atlas);
             capture_draw_data(unsafe { &*draw_data }, &mut resolve)?
         };
-        self.texture_registry
+        let requests = self
+            .texture_registry
             .borrow_mut()
-            .track_snapshot_operations(&mut pending.texture_requests, &atlas)?;
+            .stage_snapshot_operations(&pending.texture_operations, &atlas)?;
         self.snapshot_hub.begin_snapshot(
             consumer,
             pending,
+            requests,
             &mut self.texture_registry.borrow_mut(),
             &atlas,
         )
@@ -757,22 +762,36 @@ impl Context {
         consumer: &SynchronousRendererConsumer,
         draw_data: *const crate::render::DrawData,
     ) -> Result<(SnapshotEpoch, Vec<TextureRequest>), SnapshotError> {
+        self.snapshot_hub
+            .validate_consumer(consumer, ConsumerMode::Synchronous)?;
         let native_frame_count = unsafe { (*self.raw).FrameCount };
         self.snapshot_hub
             .begin_synchronous_native_frame(native_frame_count);
         let atlas = self.font_atlas_snapshot_target();
         let _ = self.poll_snapshot_completions_with_target(&atlas)?;
-        let mut pending = {
+        let captured = {
             let registry = self.texture_registry.borrow();
             let mut resolve = |native| registry.resolve_snapshot_texture(native, &atlas);
             capture_texture_requests_only(unsafe { &*draw_data }, &mut resolve)?
         };
+        let pending = self
+            .texture_registry
+            .borrow_mut()
+            .stage_snapshot_operations(&captured, &atlas)?;
+        let (epoch, requests) = self
+            .snapshot_hub
+            .begin_synchronous(consumer, pending, &atlas)?;
+        let ids = requests
+            .iter()
+            .filter_map(|request| match request.texture() {
+                crate::render::snapshot::SnapshotTextureId::User(id) => Some(id),
+                crate::render::snapshot::SnapshotTextureId::FontAtlas { .. } => None,
+            })
+            .collect();
         self.texture_registry
             .borrow_mut()
-            .track_snapshot_operations(&mut pending, &atlas)?;
-        Ok(self
-            .snapshot_hub
-            .begin_synchronous(consumer, pending, &atlas)?)
+            .record_snapshot_references(&ids, epoch.sequence())?;
+        Ok((epoch, requests))
     }
 
     pub(crate) fn complete_synchronous_render(
@@ -803,24 +822,28 @@ impl Context {
         &mut self,
         consumer: &DetachedRendererConsumer,
     ) -> Result<FrameSnapshot, SnapshotError> {
+        self.snapshot_hub
+            .validate_consumer(consumer, ConsumerMode::Detached)?;
         let atlas = self.font_atlas_snapshot_target();
         let _ = self.poll_snapshot_completions_with_target(&atlas)?;
         let platform_io_ptr = self.platform_io_ptr("Context::capture_platform_snapshot()");
         let platform_io =
             unsafe { crate::platform_io::PlatformIo::from_raw(platform_io_ptr.cast_const()) };
-        let mut pending = {
+        let pending = {
             let registry = self.texture_registry.borrow();
             let mut resolve = |native| registry.resolve_snapshot_texture(native, &atlas);
             // SAFETY: this Context owns the live rendered frame and PlatformIO draw pointers;
             // capture copies all data before either can be advanced or destroyed.
             unsafe { capture_platform_io(platform_io, &mut resolve)? }
         };
-        self.texture_registry
+        let requests = self
+            .texture_registry
             .borrow_mut()
-            .track_snapshot_operations(&mut pending.texture_requests, &atlas)?;
+            .stage_snapshot_operations(&pending.texture_operations, &atlas)?;
         self.snapshot_hub.begin_snapshot(
             consumer,
             pending,
+            requests,
             &mut self.texture_registry.borrow_mut(),
             &atlas,
         )
@@ -839,7 +862,6 @@ impl Context {
                         stamp: identity.stamp,
                         generation: identity.texture_generation,
                     },
-                    identity.revision,
                     identity.texture,
                 )
             })

@@ -6,8 +6,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::render::snapshot::{
-    PendingTextureRequest, RendererConsumerError, ResolvedSnapshotTexture, SnapshotError,
-    SnapshotTextureId, TextureFeedback, TextureFeedbackResult, TextureOp, TextureRequestKind,
+    CapturedTextureOperation, PendingTextureRequest, RendererConsumerError,
+    ResolvedSnapshotTexture, SnapshotError, SnapshotTextureId, TextureFeedback,
+    TextureFeedbackResult, TextureOp, TextureRequestKind,
 };
 use crate::sys;
 use crate::texture::{
@@ -16,6 +17,7 @@ use crate::texture::{
 };
 
 use super::binding::CTX_MUTEX;
+use super::texture_sync::{TextureSyncQueue, cumulative_update_rect, update_pending_create};
 use super::{Context, ContextId};
 
 pub(crate) type SharedTextureRegistry = Rc<RefCell<ManagedTextureRegistry>>;
@@ -30,7 +32,6 @@ pub(crate) struct FontAtlasSnapshotTarget {
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct FontAtlasTextureTarget {
     id: SnapshotTextureId,
-    revision: u64,
     texture: *mut sys::ImTextureData,
 }
 
@@ -54,24 +55,11 @@ impl FontAtlasSnapshotTarget {
         self.textures
             .iter()
             .find(|target| std::ptr::eq(native, target.texture.cast_const()))
-            .map(|target| ResolvedSnapshotTexture {
-                id: target.id,
-                revision: target.revision,
-            })
+            .map(|target| ResolvedSnapshotTexture { id: target.id })
     }
 
     fn find(&self, id: SnapshotTextureId) -> Option<FontAtlasTextureTarget> {
         self.textures.iter().find(|target| target.id == id).copied()
-    }
-
-    fn track_operation(&self, id: SnapshotTextureId, operation: &mut Arc<TextureOp>) -> u64 {
-        let target = self
-            .find(id)
-            .expect("font atlas operation must target the current texture list");
-        unsafe {
-            TextureData::from_raw(target.texture).claim_managed_queue();
-        }
-        crate::fonts::track_font_atlas_texture_operation(self.atlas, id, operation)
     }
 
     pub(crate) fn record_request_reference(&self, id: SnapshotTextureId, epoch: u64) {
@@ -81,11 +69,6 @@ impl FontAtlasSnapshotTarget {
     fn identity_is_known(&self, id: SnapshotTextureId) -> bool {
         matches!(id, SnapshotTextureId::FontAtlas { context, .. } if context == self.context)
             && crate::fonts::font_atlas_texture_identity_is_known(self.atlas, id)
-    }
-
-    fn revision_is_current(&self, id: SnapshotTextureId, revision: u64) -> bool {
-        self.find(id).is_some()
-            && crate::fonts::font_atlas_texture_revision_is_current(self.atlas, id, revision)
     }
 
     pub(crate) fn prune_tombstones(&self, watermark: u64) {
@@ -109,16 +92,8 @@ impl FontAtlasSnapshotTarget {
 }
 
 impl FontAtlasTextureTarget {
-    pub(crate) fn new(
-        id: SnapshotTextureId,
-        revision: u64,
-        texture: *mut sys::ImTextureData,
-    ) -> Self {
-        Self {
-            id,
-            revision,
-            texture,
-        }
+    pub(crate) fn new(id: SnapshotTextureId, texture: *mut sys::ImTextureData) -> Self {
+        Self { id, texture }
     }
 }
 
@@ -128,6 +103,7 @@ pub(crate) struct ManagedTextureRegistry {
     reusable: Vec<u32>,
     by_native: HashMap<usize, ManagedTextureId>,
     native_refresh_generation: u64,
+    sync: TextureSyncQueue,
 }
 
 enum TextureSlot {
@@ -145,45 +121,9 @@ enum TextureSlot {
 
 struct TextureEntry {
     generation: NonZeroU64,
-    revision: u64,
-    operation: Option<Arc<TextureOp>>,
     last_reference_epoch: u64,
     destroy_ack_epoch: Option<u64>,
     texture: OwnedTextureData,
-}
-
-impl TextureEntry {
-    fn advance_revision(&mut self) {
-        advance_revision(&mut self.revision);
-    }
-}
-
-struct ManagedTextureMutationRevision<'revision> {
-    revision: &'revision mut u64,
-    mutated: bool,
-}
-
-impl ManagedTextureMutationRevision<'_> {
-    fn new(revision: &mut u64) -> ManagedTextureMutationRevision<'_> {
-        ManagedTextureMutationRevision {
-            revision,
-            mutated: false,
-        }
-    }
-}
-
-impl Drop for ManagedTextureMutationRevision<'_> {
-    fn drop(&mut self) {
-        if self.mutated {
-            advance_revision(self.revision);
-        }
-    }
-}
-
-fn advance_revision(revision: &mut u64) {
-    *revision = revision
-        .checked_add(1)
-        .expect("managed texture revision space exhausted");
 }
 
 impl fmt::Debug for ManagedTextureRegistry {
@@ -222,6 +162,7 @@ impl ManagedTextureRegistry {
             reusable: Vec::new(),
             by_native: HashMap::new(),
             native_refresh_generation: 0,
+            sync: TextureSyncQueue::default(),
         }))
     }
 
@@ -327,8 +268,6 @@ impl ManagedTextureRegistry {
         }
         let entry = TextureEntry {
             generation,
-            revision: 0,
-            operation: None,
             last_reference_epoch: 0,
             destroy_ack_epoch: None,
             texture,
@@ -370,17 +309,16 @@ impl ManagedTextureRegistry {
         atlas: &FontAtlasSnapshotTarget,
     ) -> Result<ResolvedSnapshotTexture, SnapshotError> {
         if let Some(id) = self.id_for_native(native) {
-            let entry = match self.slot(id)? {
-                TextureSlot::Active(entry) | TextureSlot::Retiring(entry) => entry,
+            match self.slot(id)? {
+                TextureSlot::Active(_) | TextureSlot::Retiring(_) => {}
                 TextureSlot::NativeExposed { .. }
                 | TextureSlot::Retired { .. }
                 | TextureSlot::Exhausted => {
                     return Err(ManagedTextureError::AlreadyRemoved(id).into());
                 }
-            };
+            }
             return Ok(ResolvedSnapshotTexture {
                 id: SnapshotTextureId::User(id),
-                revision: entry.revision,
             });
         }
         if let Some(resolved) = atlas.resolve(native) {
@@ -432,57 +370,105 @@ impl ManagedTextureRegistry {
         f: impl for<'texture> FnOnce(ManagedTextureMut<'texture>) -> R,
     ) -> Result<R, ManagedTextureError> {
         let entry = self.active_entry_mut(id)?;
-        let TextureEntry {
-            revision, texture, ..
-        } = entry;
-        let mut mutation_revision = ManagedTextureMutationRevision::new(revision);
-        let result = f(ManagedTextureMut::new(
-            texture,
-            &mut mutation_revision.mutated,
-        ));
-        Ok(result)
+        Ok(f(ManagedTextureMut::new(&mut entry.texture)))
     }
 
-    pub(crate) fn track_snapshot_operations(
+    pub(crate) fn stage_snapshot_operations(
         &mut self,
-        requests: &mut [PendingTextureRequest],
+        requests: &[CapturedTextureOperation],
         atlas: &FontAtlasSnapshotTarget,
-    ) -> Result<(), ManagedTextureError> {
-        for request in requests {
-            request.revision = match request.texture {
-                SnapshotTextureId::User(id) => {
-                    match self.slot(id)? {
-                        TextureSlot::Active(_) | TextureSlot::Retiring(_) => {}
-                        TextureSlot::NativeExposed { .. }
-                        | TextureSlot::Retired { .. }
-                        | TextureSlot::Exhausted => {
-                            return Err(ManagedTextureError::AlreadyRemoved(id));
-                        }
+    ) -> Result<Vec<PendingTextureRequest>, SnapshotError> {
+        // Capture validated bytes first. Native OK means the persistent queue owns them,
+        // not that the renderer has uploaded them.
+        let mut staged = Vec::with_capacity(requests.len());
+        for request in requests.iter() {
+            let native = match request.texture {
+                SnapshotTextureId::User(id) => match self.slot(id)? {
+                    TextureSlot::Active(entry) | TextureSlot::Retiring(entry) => {
+                        entry.texture.as_raw()
                     }
-                    let slot_index = id.slot() as usize;
-                    let entry = match &mut self.slots[slot_index] {
-                        TextureSlot::Active(entry) | TextureSlot::Retiring(entry) => entry,
-                        _ => unreachable!("validated texture slot changed without mutation"),
-                    };
-                    entry.texture.claim_managed_queue();
-                    if entry
-                        .operation
-                        .as_deref()
-                        .is_none_or(|current| current != request.op.as_ref())
-                    {
-                        entry.advance_revision();
-                        entry.operation = Some(Arc::clone(&request.op));
-                    } else if let Some(current) = &entry.operation {
-                        request.op = Arc::clone(current);
-                    }
-                    entry.revision
-                }
-                SnapshotTextureId::FontAtlas { .. } => {
-                    atlas.track_operation(request.texture, &mut request.op)
-                }
+                    _ => return Err(ManagedTextureError::AlreadyRemoved(id).into()),
+                },
+                SnapshotTextureId::FontAtlas { .. } => atlas
+                    .find(request.texture)
+                    .ok_or(SnapshotError::UnknownManagedTexture)?
+                    .texture
+                    .cast_const(),
             };
+            let texture = unsafe { TextureData::from_raw(native.cast_mut()) };
+            let mut operation = Arc::clone(&request.op);
+            if let Some(create) = self
+                .sync
+                .operation(request.texture)
+                .and_then(|previous| update_pending_create(previous, operation.as_ref()))
+            {
+                operation = Arc::new(create);
+            } else if let TextureOp::Update {
+                format,
+                width,
+                height,
+                rects,
+            } = operation.as_ref()
+            {
+                let previous_update = self
+                    .sync
+                    .operation(request.texture)
+                    .filter(|previous| matches!(previous, TextureOp::Update { .. }));
+                if previous_update.is_none() && rects.len() == 1 {
+                    staged.push((request.texture, native, operation));
+                    continue;
+                }
+                let previous = previous_update.unwrap_or(operation.as_ref());
+                let rect = cumulative_update_rect(previous, operation.as_ref()).ok_or(
+                    SnapshotError::TextureFullUpdateOutOfRange {
+                        id: request.texture,
+                        width: *width,
+                        height: *height,
+                    },
+                )?;
+                let pixels = texture
+                    .pixels()
+                    .ok_or(SnapshotError::TexturePixelsMissing {
+                        id: request.texture,
+                        status: texture.status(),
+                    })?;
+                let upload = crate::render::snapshot::copy_upload_rect(
+                    pixels,
+                    *width,
+                    *height,
+                    texture.raw_bytes_per_pixel_i32() as usize,
+                    rect,
+                )
+                .ok_or(SnapshotError::TextureInvalidLayout {
+                    id: request.texture,
+                    width: texture.raw_width_i32(),
+                    height: texture.raw_height_i32(),
+                    bpp: texture.raw_bytes_per_pixel_i32(),
+                })?;
+                operation = Arc::new(TextureOp::Update {
+                    format: *format,
+                    width: *width,
+                    height: *height,
+                    rects: vec![upload],
+                });
+            }
+            staged.push((request.texture, native, operation));
         }
-        Ok(())
+        for (id, native, operation) in staged {
+            let destroy = matches!(operation.as_ref(), TextureOp::Destroy);
+            self.sync.stage(id, operation);
+            let texture = unsafe { TextureData::from_raw(native.cast_mut()) };
+            texture.claim_managed_queue();
+            if !destroy {
+                unsafe {
+                    texture.set_status(TextureStatus::OK);
+                }
+            }
+            if matches!(id, SnapshotTextureId::FontAtlas { .. }) {
+                crate::fonts::mark_font_atlas_texture_staged(atlas.atlas);
+            }
+        }
+        Ok(self.sync.requests())
     }
 
     fn remove(&mut self, id: ManagedTextureId, watermark: u64) -> Result<(), ManagedTextureError> {
@@ -524,7 +510,8 @@ impl ManagedTextureRegistry {
         let has_renderer_binding =
             !entry.texture.tex_id().is_null() || !entry.texture.backend_user_data().is_null();
         let has_outstanding_reference = entry.last_reference_epoch > watermark;
-        if has_renderer_binding || has_outstanding_reference {
+        let queue_owned = unsafe { !(*entry.texture.as_raw()).QueueUserData.is_null() };
+        if has_renderer_binding || has_outstanding_reference || queue_owned {
             mark_want_destroy(&mut entry.texture);
             self.slots[slot_index] = TextureSlot::Retiring(entry);
         } else {
@@ -592,83 +579,51 @@ impl ManagedTextureRegistry {
             ) {
                 continue;
             }
-            match key.texture {
-                SnapshotTextureId::User(id) => {
-                    let slot = &mut self.slots[id.slot() as usize];
-                    let (entry, retiring) = match slot {
-                        TextureSlot::Active(entry) => (entry, false),
-                        TextureSlot::Retiring(entry) => (entry, true),
-                        TextureSlot::NativeExposed { .. }
-                        | TextureSlot::Retired { .. }
-                        | TextureSlot::Exhausted => unreachable!(),
-                    };
-                    if entry.revision != key.revision {
-                        continue;
+            let native = match key.texture {
+                SnapshotTextureId::User(id) => match &self.slots[id.slot() as usize] {
+                    TextureSlot::Active(entry) | TextureSlot::Retiring(entry) => {
+                        entry.texture.as_raw()
                     }
-                    match item.result() {
-                        TextureFeedbackResult::Uploaded { texture_id } => {
-                            unsafe {
-                                // The complete feedback batch was validated against this Context,
-                                // consumer generation, epoch, request, and texture revision above.
-                                entry.texture.set_tex_id(texture_id);
-                            }
-                            if retiring {
-                                mark_want_destroy(&mut entry.texture);
-                            } else {
-                                unsafe {
-                                    // This is the sole validated reconciliation path for managed
-                                    // renderer state.
-                                    entry.texture.set_status(TextureStatus::OK);
-                                }
-                            }
-                        }
-                        TextureFeedbackResult::Destroyed => {
-                            unsafe {
-                                // Request validation proves that the renderer acknowledged this
-                                // texture's matching destroy request for the active generation.
-                                entry.texture.set_status(TextureStatus::Destroyed);
-                            }
+                    _ => unreachable!("feedback identities were validated"),
+                },
+                SnapshotTextureId::FontAtlas { .. } => {
+                    let Some(target) = atlas.find(key.texture) else {
+                        continue;
+                    };
+                    target.texture.cast_const()
+                }
+            };
+            let texture = unsafe { TextureData::from_raw(native.cast_mut()) };
+            // Native changes may have happened since the last capture. In particular a
+            // pending Create must stay self-contained until that newer content is staged.
+            let expected_status = if key.kind == TextureRequestKind::Destroy {
+                TextureStatus::WantDestroy
+            } else {
+                TextureStatus::OK
+            };
+            if texture.status() != expected_status
+                || !self.sync.acknowledge(key.texture, key.revision)
+            {
+                continue;
+            }
+            match item.result() {
+                TextureFeedbackResult::Uploaded { texture_id } => unsafe {
+                    texture.set_tex_id(texture_id);
+                },
+                TextureFeedbackResult::Destroyed => {
+                    unsafe {
+                        texture.set_status(TextureStatus::Destroyed);
+                    }
+                    if let SnapshotTextureId::User(id) = key.texture {
+                        if let TextureSlot::Retiring(entry) = &mut self.slots[id.slot() as usize] {
                             entry.destroy_ack_epoch = Some(epoch);
                         }
-                        TextureFeedbackResult::Superseded | TextureFeedbackResult::Retry => {
-                            unreachable!("non-mutating outcomes were filtered before slot access")
-                        }
                     }
-                    applied += 1;
+                    self.sync.forget(key.texture);
                 }
-                SnapshotTextureId::FontAtlas { .. } => {
-                    if !atlas.revision_is_current(key.texture, key.revision) {
-                        continue;
-                    }
-                    let target = atlas.find(key.texture).expect(
-                        "current font atlas ledger entry must be present in the fresh observation",
-                    );
-                    let texture = unsafe { TextureData::from_raw(target.texture) };
-                    match item.result() {
-                        TextureFeedbackResult::Uploaded { texture_id } => {
-                            unsafe {
-                                // The atlas target and request identity were validated above.
-                                texture.set_tex_id(texture_id);
-                            }
-                            unsafe {
-                                // Matching revision proves this upload completes the current
-                                // atlas contents.
-                                texture.set_status(TextureStatus::OK);
-                            }
-                        }
-                        TextureFeedbackResult::Destroyed => {
-                            unsafe {
-                                // The matching request-bound destroy was validated above.
-                                texture.set_status(TextureStatus::Destroyed);
-                            }
-                        }
-                        TextureFeedbackResult::Superseded | TextureFeedbackResult::Retry => {
-                            unreachable!("non-mutating outcomes were filtered before atlas access")
-                        }
-                    }
-                    applied += 1;
-                }
+                TextureFeedbackResult::Superseded | TextureFeedbackResult::Retry => unreachable!(),
             }
+            applied += 1;
         }
         Ok(applied)
     }
@@ -710,6 +665,7 @@ impl ManagedTextureRegistry {
     }
 
     pub(crate) fn reset_renderer_bindings(&mut self, watermark: u64) {
+        self.sync.clear();
         for slot in &mut self.slots {
             let (entry, retiring) = match slot {
                 TextureSlot::Active(entry) => (entry, false),
@@ -1030,20 +986,19 @@ mod tests {
             row_pitch: 4,
             pixels: vec![1, 2, 3, 4],
         });
-        let mut pending = vec![PendingTextureRequest {
+        let captured = vec![CapturedTextureOperation {
             texture: SnapshotTextureId::User(id),
-            revision: 0,
             op: create,
         }];
 
         {
             let mut registry = context.texture_registry.borrow_mut();
-            registry
-                .track_snapshot_operations(&mut pending, &atlas)
+            let pending = registry
+                .stage_snapshot_operations(&captured, &atlas)
                 .expect("create request should claim the managed queue");
             let first_revision = pending[0].revision;
-            registry
-                .track_snapshot_operations(&mut pending, &atlas)
+            let pending = registry
+                .stage_snapshot_operations(&[], &atlas)
                 .expect("claiming the same managed queue must be idempotent");
             assert_eq!(pending[0].revision, first_revision);
         }
@@ -1061,15 +1016,14 @@ mod tests {
             registry.remove(id, 0).expect("bound texture should retire");
         }
 
-        let mut destroy = vec![PendingTextureRequest {
+        let captured = vec![CapturedTextureOperation {
             texture: SnapshotTextureId::User(id),
-            revision: 0,
             op: Arc::new(TextureOp::Destroy),
         }];
-        context
+        let destroy = context
             .texture_registry
             .borrow_mut()
-            .track_snapshot_operations(&mut destroy, &atlas)
+            .stage_snapshot_operations(&captured, &atlas)
             .expect("destroy request should remain queue-owned");
 
         let mut hub = SnapshotHub::new(context.id());
