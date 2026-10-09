@@ -8,7 +8,8 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 ## Versioning Policy
 
 - Unified release train: all published `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
-- Stable 0.18 train: unified `v0.18.0` (use `version = "0.18"`).
+- Stable 0.19 train: unified `v0.19.0` (use `version = "0.19"`).
+- Previous stable train: unified `v0.18.0` (use `version = "0.18"`).
 - Previous stable train: unified `v0.17.0` (use `version = "0.17"`).
 - Previous stable train: unified `v0.16.0` (use `version = "0.16"`).
 - Previous prerelease: unified `v0.16.0-alpha.3` (prereleases require exact requirements).
@@ -20,7 +21,15 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 - Previous train: unified `v0.10.4` (use `version = "0.10"`).
 - Previous train: unified `v0.9.0` (use `version = "0.9"`).
 - Previous train: unified `v0.8.0` (use `version = "0.8"`).
-- Internal dependency constraints use the compatible current stable minor (`0.18`); prerelease trains use exact requirements. Mixing different release trains across our crates is unsupported.
+- Internal dependency constraints use the compatible current stable minor (`0.19`); prerelease trains use exact requirements. Mixing different release trains across our crates is unsupported.
+
+## 0.19 Stable Release
+
+All 29 published crates move together to `0.19.0`. Use `version = "0.19"` for every workspace crate in an application. The Dear ImGui baseline and external dependency versions remain unchanged from 0.18.
+
+- Ash enables `render-pass` by default. With `default-features = false`, explicitly enable `render-pass` or `dynamic-rendering`. Enable both to select the rendering mode through `AshRendererConfig` at runtime; secondary viewports follow that mode. Dynamic rendering requires the device feature to be enabled, and secondary viewports use Vulkan 1.3 core rendering commands.
+- Managed texture uploads persist independently of snapshots. Custom renderers continue consuming `texture_requests()` and reporting `uploaded`, `destroyed`, or `retry` outcomes. Native `TextureStatus::OK` means the upload has been staged, not completed on the GPU; do not use it to decide whether snapshot requests need processing.
+- Dropping a detached snapshot leaves its texture work pending. A committed snapshot must provide one outcome per request. Execute texture operations and drawing in epoch order, even if snapshots are skipped or completion messages arrive out of order. See [the architecture contracts](#016-architecture-contracts) for ownership and lifetime details.
 
 ## 0.18 Stable Release
 

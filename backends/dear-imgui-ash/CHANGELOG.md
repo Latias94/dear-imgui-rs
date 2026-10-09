@@ -4,6 +4,16 @@ All notable changes to this crate will be documented in this file.
 
 ## Unreleased
 
+## 0.19.0 - 2026-10-10
+
+### Breaking
+
+- Builds with `default-features = false` must explicitly enable `render-pass` or `dynamic-rendering`. The default configuration enables `render-pass`.
+
+### Added
+
+- Enable both rendering features to choose a render pass or dynamic rendering through `AshRendererConfig` at runtime. Winit and SDL3 secondary viewports use the same mode. Thanks to [@Qustio](https://github.com/Qustio) for [PR #84](https://github.com/Latias94/dear-imgui-rs/pull/84).
+
 ## 0.16.0 - 2026-08-14
 
 ### Breaking

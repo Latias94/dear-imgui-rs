@@ -17,12 +17,12 @@ The repository workflow token defaults to read-only. The protected crates.io job
 Preparation intentionally changes the worktree; validation requires the resulting commit to be clean.
 
 ```bash
-python3 tools/tasks.py release-prepare 0.18.0
+python3 tools/tasks.py release-prepare 0.19.0
 
 # Review generated bindings, source metadata, Cargo.lock, CHANGELOG.md, and docs.
 git diff
 git add -A
-git commit -m "chore: prepare release v0.18.0"
+git commit -m "chore: prepare release v0.19.0"
 
 python3 tools/tasks.py release-check
 ```
@@ -34,7 +34,7 @@ Before merging, require normal CI to pass on Linux, Windows, and macOS. The root
 Merge the candidate to `main`, then dispatch the release workflow with the matching tag:
 
 ```bash
-gh workflow run release.yml --ref main -f tag=v0.18.0
+gh workflow run release.yml --ref main -f tag=v0.19.0
 ```
 
 The workflow binds the tag to the workspace version and the exact `main` commit before doing any irreversible work. It then:
