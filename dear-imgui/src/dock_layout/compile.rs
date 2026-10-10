@@ -511,7 +511,7 @@ fn decode_node_remap(
         staged_indices.len() * 2,
         "DockBuilderCopyNode returned an incomplete node remap"
     );
-    for pair in remap.chunks_exact(2) {
+    for pair in remap.as_chunks::<2>().0 {
         let index = *staged_indices
             .get(&pair[0])
             .expect("DockBuilderCopyNode returned an unknown staged node");
