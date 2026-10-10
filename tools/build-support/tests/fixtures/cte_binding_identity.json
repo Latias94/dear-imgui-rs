@@ -1,0 +1,5 @@
+{
+  "provenance": "// dear-imgui-rs-binding-provenance-v1 crate=dear-imgui-cte-sys target=native source=3cdee0b5e1d8f0a59a40fda80c4a6b894d752240 nested=f28136480fa4091164e0b528dc9cca147c5a6ee9 spec=fnv1a64:0c65c543347193cb inputs=fnv1a64:153d74bda748cd36 output=fnv1a64:91e401dbbc51b904",
+  "identity": "fnv1a64:4ac57db3943d504a",
+  "unpatched_identity": "fnv1a64:feb5781f882f9c5e"
+}

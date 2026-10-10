@@ -478,6 +478,8 @@ def expected_extension_binding_identity(source_root: Path, spec: ExtensionSpec) 
     identity.field("schema", "extension-binding-identity-v1")
     identity.field("extension", spec.extension_id)
     identity.field("provenance", provenance.finish())
+    if spec.extension_id == "cte":
+        identity.field("source_overlay", "cte-unicode-range-lookup-v1")
     return identity.finish()
 
 

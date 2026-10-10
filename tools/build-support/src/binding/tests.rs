@@ -1763,6 +1763,29 @@ fn provenance_changes_are_isolated_to_the_owning_crate_profiles() {
 }
 
 #[test]
+fn cte_binding_identity_matches_the_python_consumer_test_vector() {
+    let vector: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/cte_binding_identity.json"
+    ))
+    .unwrap();
+    let provenance = CrateBindingProvenance::parse(vector["provenance"].as_str().unwrap()).unwrap();
+    let binding = ExtensionBindingIdentity::new(
+        ExtensionBinding::Cte,
+        extension_spec(ExtensionBinding::Cte),
+        provenance,
+    )
+    .unwrap();
+    assert_eq!(
+        binding.deterministic_hash(),
+        vector["identity"].as_str().unwrap()
+    );
+    assert_ne!(
+        binding.deterministic_hash(),
+        vector["unpatched_identity"].as_str().unwrap()
+    );
+}
+
+#[test]
 fn cte_prebuilt_rejects_the_legacy_wide_glyph_overlay_identity() {
     let binding = extension_identity(ExtensionBinding::Cte);
     let mut old = super::StableHash::new();
