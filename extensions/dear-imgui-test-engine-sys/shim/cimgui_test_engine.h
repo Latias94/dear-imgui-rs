@@ -292,6 +292,8 @@ ImGuiTestEngineStatus imgui_test_engine_script_item_hold_for_frames(ImGuiTestEng
 ImGuiTestEngineStatus imgui_test_engine_script_item_drag_over_and_hold(ImGuiTestEngineScript* script, const char* ref_src, const char* ref_dst);
 ImGuiTestEngineStatus imgui_test_engine_script_item_drag_and_drop(ImGuiTestEngineScript* script, const char* ref_src, const char* ref_dst, int button);
 ImGuiTestEngineStatus imgui_test_engine_script_item_drag_with_delta(ImGuiTestEngineScript* script, const char* ref, float dx, float dy);
+ImGuiTestEngineStatus imgui_test_engine_script_item_make_visible(ImGuiTestEngineScript* script, const char* ref);
+ImGuiTestEngineStatus imgui_test_engine_script_item_drag_to_pos(ImGuiTestEngineScript* script, const char* ref, float x, float y);
 ImGuiTestEngineStatus imgui_test_engine_script_scroll_to_x(ImGuiTestEngineScript* script, const char* ref, float scroll_x);
 ImGuiTestEngineStatus imgui_test_engine_script_scroll_to_y(ImGuiTestEngineScript* script, const char* ref, float scroll_y);
 ImGuiTestEngineStatus imgui_test_engine_script_scroll_to_pos_x(ImGuiTestEngineScript* script, const char* window_ref, float pos_x);

@@ -201,6 +201,11 @@ engine.add_script_test("my_app", "open_settings", |t| {
 Script tests do not provide a `GuiFunc` (they don't draw any UI). They are meant to drive UI that your
 application already renders every frame.
 
+Use `item_make_visible(reference)` to open the item's ancestor path and scroll it into view before
+an assertion. `item_drag_to_pos(reference, x, y)` drags with the left mouse button to an absolute
+screen position; `item_drag_with_delta` uses a displacement instead. These commands use the upstream
+default operation flags and reject execution while a scripted mouse button is held.
+
 ## Build notes
 
 - This crate enables `dear-imgui-rs/test-engine` (and therefore `dear-imgui-sys/test-engine`) because the upstream Test Engine relies on ImGui hook symbols.

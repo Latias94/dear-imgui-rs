@@ -1,4 +1,5 @@
 import io
+import os
 import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -19,6 +20,42 @@ PUBLISH = load_tool("publish")
 
 
 class PrepublishTests(unittest.TestCase):
+    def test_binding_check_pins_cargo_and_nested_rustfmt(self):
+        for allow_dirty in (False, True):
+            with (
+                self.subTest(allow_dirty=allow_dirty),
+                patch.dict(os.environ, {"RUSTUP_TOOLCHAIN": "1.99.0", "LIBCLANG_PATH": "/llvm/lib"}),
+                patch.object(PREPUBLISH, "run_command", return_value=(0, "", "")) as run,
+                redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(
+                    PREPUBLISH.check_core_binding_contract(REPO_ROOT, allow_dirty),
+                    (True, []),
+                )
+                command = ["cargo", "+1.95.0", "run", "-p", "xtask", "--", "verify-bindings"]
+                if allow_dirty:
+                    command.append("--allow-dirty")
+                self.assertEqual(run.call_args.args[0], command)
+                env = run.call_args.kwargs["env"]
+                self.assertEqual(env["RUSTUP_TOOLCHAIN"], "1.95.0")
+                specification = (
+                    REPO_ROOT / "tools/build-support/src/binding/spec.rs"
+                ).read_text(encoding="utf-8")
+                self.assertIn(
+                    f'CANONICAL_BINDING_RUSTC_VERSION: &str = "rustc {env["RUSTUP_TOOLCHAIN"]}";',
+                    specification,
+                )
+                self.assertEqual(env["LIBCLANG_PATH"], "/llvm/lib")
+                self.assertEqual(os.environ["RUSTUP_TOOLCHAIN"], "1.99.0")
+
+    def test_command_forwards_binding_environment_to_subprocess(self):
+        from subprocess import CompletedProcess
+
+        env = {"RUSTUP_TOOLCHAIN": "1.95.0"}
+        with patch.object(PREPUBLISH.subprocess, "run", return_value=CompletedProcess([], 0, "", "")) as run:
+            self.assertEqual(PREPUBLISH.run_command(["cargo"], env=env), (0, "", ""))
+        self.assertEqual(run.call_args.kwargs["env"], env)
+
     def setUp(self):
         self.metadata = metadata_for(
             [package("dear-imgui-rs", "dear-imgui", version="0.16.0")]

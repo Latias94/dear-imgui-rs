@@ -84,6 +84,34 @@ mod tests {
     }
 
     #[test]
+    fn gamepad_device_events_preserve_the_joystick_identity() {
+        let which = sdl3::joystick::JoystickId::new(23);
+        let events = [
+            Event::GamepadAdded {
+                timestamp: 42,
+                which,
+            },
+            Event::GamepadRemoved {
+                timestamp: 84,
+                which,
+            },
+        ];
+
+        for event in events {
+            let expected = event.to_ll().unwrap();
+            let device = Sdl3CallbackEvent::from_owned_event(&event)
+                .unwrap()
+                .expect("gamepad device changes must reach Dear ImGui")
+                .with_raw_event(|raw| raw.map(|raw| unsafe { raw.gdevice }))
+                .unwrap();
+
+            assert_eq!(device.r#type, expected.event_type());
+            assert_eq!(device.timestamp, event.get_timestamp());
+            assert_eq!(device.which.0, 23);
+        }
+    }
+
+    #[test]
     fn sdl_3_4_usable_bounds_event_reaches_the_safe_backend_path() {
         let event = Event::Unknown {
             timestamp: 84,

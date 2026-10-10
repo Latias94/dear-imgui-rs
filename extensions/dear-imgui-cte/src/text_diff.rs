@@ -4,7 +4,7 @@ use crate::{
     error::c_string,
     sys,
     validation::{
-        validate_finite_f32, validate_finite_vec2, validate_nonzero_usize, validate_render_flags,
+        validate_finite_f32, validate_finite_vec2, validate_render_flags, validate_tab_size,
     },
 };
 use dear_imgui_rs::{ChildFlags, Context, ContextId, Ui, WindowFlags};
@@ -69,8 +69,9 @@ impl TextDiff {
         Ok(())
     }
 
+    /// Sets the tab width in columns, in `1..=255` to fit upstream glyph storage.
     pub fn set_tab_size(&mut self, value: usize) -> CteResult<()> {
-        validate_nonzero_usize("TextDiff::set_tab_size", "value", value)?;
+        validate_tab_size("TextDiff::set_tab_size", "value", value)?;
         self.with_context("TextDiff::set_tab_size", |raw| unsafe {
             sys::TextDiff_SetTabSize(raw, value)
         });

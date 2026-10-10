@@ -479,8 +479,7 @@ def expected_extension_binding_identity(source_root: Path, spec: ExtensionSpec) 
     identity.field("extension", spec.extension_id)
     identity.field("provenance", provenance.finish())
     if spec.extension_id == "cte":
-        # Keep in sync with CTE_WIDE_GLYPH_PATCH_VERSION in build-support.
-        identity.field("source_overlay", "cte-wide-glyphs-v1")
+        identity.field("source_overlay", "cte-unicode-range-lookup-v1")
     return identity.finish()
 
 

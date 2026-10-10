@@ -90,6 +90,11 @@ fn upstream_configuration_defaults_remain_representable() {
     assert_eq!(editor.minimap_columns(), 48);
     editor.set_minimap_columns(0);
     assert_eq!(editor.minimap_columns(), 0);
+    editor.set_tab_size(255).unwrap();
+    assert_eq!(editor.tab_size(), 255);
+    assert!(editor.set_tab_size(256).is_err());
+    assert!(editor.set_tab_size(usize::MAX).is_err());
+    assert_eq!(editor.tab_size(), 255);
 
     assert_eq!(
         SearchOptions::default(),
@@ -161,6 +166,61 @@ fn editing_navigation_diagnostics_and_undo_are_safe() {
     editor.scroll_to_line(2, Default::default()).unwrap();
     editor.set_cursor(Position::new(2, 5)).unwrap();
     assert_eq!(editor.current_cursor_position(), Position::new(2, 5));
+}
+
+#[test]
+fn whole_word_occurrences_do_not_select_identifier_substrings() {
+    let context = Context::create();
+    let mut editor = TextEditor::create(&context);
+    editor.set_text("cat cats cat").unwrap();
+    let first = Selection::new(Position::new(0, 0), Position::new(0, 3));
+
+    editor.select_region(first).unwrap();
+    editor.add_next_occurrence_with_whole_word(true);
+    assert_eq!(editor.cursor_count(), 2);
+    assert_eq!(
+        editor.cursor_selection(1).unwrap(),
+        Selection::new(Position::new(0, 9), Position::new(0, 12))
+    );
+
+    editor.select_region(first).unwrap();
+    editor.select_all_occurrences_with_whole_word(true);
+    assert_eq!(editor.cursor_count(), 2);
+
+    editor.select_region(first).unwrap();
+    editor.select_all_occurrences();
+    assert_eq!(editor.cursor_count(), 3);
+}
+
+#[test]
+fn whole_word_boundaries_leave_punctuation_and_whitespace_in_place() {
+    let context = Context::create();
+    let mut editor = TextEditor::create(&context);
+    editor.set_text("abc  !!def").unwrap();
+    let whitespace = Position::new(0, 4);
+    assert_eq!(editor.word_start(whitespace).unwrap(), Position::new(0, 3));
+    assert_eq!(editor.word_end(whitespace).unwrap(), Position::new(0, 5));
+    assert_eq!(
+        editor.word_start_with_whole_word(whitespace, true).unwrap(),
+        whitespace
+    );
+    assert_eq!(
+        editor.word_end_with_whole_word(whitespace, true).unwrap(),
+        whitespace
+    );
+    let punctuation = Position::new(0, 6);
+    assert_eq!(editor.word_start(punctuation).unwrap(), Position::new(0, 5));
+    assert_eq!(editor.word_end(punctuation).unwrap(), Position::new(0, 7));
+    assert_eq!(
+        editor
+            .word_start_with_whole_word(punctuation, true)
+            .unwrap(),
+        punctuation
+    );
+    assert_eq!(
+        editor.word_end_with_whole_word(punctuation, true).unwrap(),
+        punctuation
+    );
 }
 
 #[test]
@@ -392,5 +452,90 @@ fn wide_glyph_columns_keep_cursor_mapping_and_tabs_consistent() {
         let visual = editor.document_to_visual(document).unwrap();
         assert_eq!(visual.column % 2, 0);
         assert_eq!(editor.visual_to_document(visual), document);
+    }
+}
+
+#[test]
+fn maximum_tab_width_preserves_visual_column_mapping() {
+    let mut context = render_context();
+    let mut editor = TextEditor::create(&context);
+    editor.set_text("a\tb").unwrap();
+    editor.set_word_wrap_enabled(false);
+    editor.set_tab_size(255).unwrap();
+    assert!(editor.set_tab_size(256).is_err());
+    for _ in 0..2 {
+        render_editor_host(&mut context, &mut editor, Some([0.0, 0.0]));
+    }
+    for (index, column) in [(0, 0), (1, 1), (2, 255), (3, 256)] {
+        let position = Position::new(0, index);
+        let visual = VisualPosition::new(0, column);
+        assert_eq!(editor.document_to_visual(position).unwrap(), visual);
+        assert_eq!(editor.visual_to_document(visual), position);
+    }
+}
+
+#[test]
+fn unicode_width_queries_cover_fullwidth_ranges_and_table_edges() {
+    for (codepoint, width) in [
+        (0x10ff, 1),
+        (0x1100, 2),
+        (0x115f, 2),
+        (0x1160, 1),
+        (0xfe6b, 2),
+        (0xfe6c, 1),
+        (0xff00, 1),
+        (0xff01, 2),
+        (0xff21, 2),
+        (0xff60, 2),
+        (0xff61, 1),
+        (0xffdf, 1),
+        (0xffe0, 2),
+        (0xffe6, 2),
+        (0xffe7, 1),
+        (0xffff, 1),
+        (0x10000, 1),
+        (0x16fdf, 1),
+        (0x16fe0, 2),
+        (0x16fe4, 2),
+        (0x16fe5, 1),
+        (0x2fffd, 2),
+        (0x2fffe, 1),
+        (0x30000, 2),
+        (0x3fffd, 2),
+        (0x3fffe, 1),
+        (0x10ffff, 1),
+    ] {
+        assert_eq!(
+            unsafe { dear_imgui_cte_sys::CodePoint_getGlyphWidth(codepoint) },
+            width,
+            "unexpected grid width for U+{codepoint:04X}"
+        );
+    }
+}
+
+#[test]
+fn fullwidth_range_endpoints_reserve_two_columns_in_the_editor() {
+    let mut context = render_context();
+    let mut editor = TextEditor::create(&context);
+    let text = "\u{ff01}\u{ff60}\u{ffe0}\u{ffe6}";
+    editor.set_text(text).unwrap();
+    for wrap in [false, true] {
+        editor.set_word_wrap_enabled(wrap);
+        for _ in 0..2 {
+            render_editor_host(&mut context, &mut editor, Some([0.0, 0.0]));
+        }
+        for index in 0..=4 {
+            let document = Position::new(0, index);
+            let visual = VisualPosition::new(0, index * 2);
+            assert_eq!(editor.document_to_visual(document).unwrap(), visual);
+            assert_eq!(editor.visual_to_document(visual), document);
+            if index < 4 {
+                assert_eq!(
+                    editor.visual_to_document(VisualPosition::new(0, index * 2 + 1)),
+                    document
+                );
+            }
+        }
+        assert_eq!(editor.text().unwrap(), text);
     }
 }

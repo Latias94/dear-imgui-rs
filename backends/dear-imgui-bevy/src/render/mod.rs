@@ -40,8 +40,12 @@ use bevy_render::{
     renderer::{
         RenderContext, RenderDevice, RenderGraph, RenderGraphSystems, RenderQueue, ViewQuery,
     },
+    sync_world::MainEntity,
     texture::GpuImage,
-    view::{ExtractedView, ExtractedWindows, Msaa, RetainedViewEntity, ViewTarget},
+    view::{
+        ExtractedView, ExtractedWindow, Msaa, ResolvedCompositingSpace, RetainedViewEntity,
+        ViewTarget,
+    },
 };
 use bevy_shader::Shader;
 use bevy_window::{PrimaryWindow, Window};
@@ -389,7 +393,7 @@ mod tests {
         struct RecoveryContextPass;
 
         let mut app = App::new();
-        app.add_plugins(bevy_render::extract_plugin::ExtractPlugin::default());
+        app.add_plugins(crate::test_util::render_extraction_plugin());
         app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
         app.add_plugins(crate::ImguiPlugin::default());
         let recovery_pass = app.declare_imgui_pass::<RecoveryContextPass>().unwrap();
@@ -472,7 +476,7 @@ mod tests {
         use crate::ImguiAppExt as _;
 
         let mut app = App::new();
-        app.add_plugins(bevy_render::extract_plugin::ExtractPlugin::default());
+        app.add_plugins(crate::test_util::render_extraction_plugin());
         app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
         app.add_plugins(crate::ImguiPlugin::default());
         app.world_mut().spawn((Window::default(), PrimaryWindow));
@@ -496,7 +500,7 @@ mod tests {
     #[test]
     fn renderer_release_and_viewport_drain_converge_without_resuming_frames() {
         let mut app = App::new();
-        app.add_plugins(bevy_render::extract_plugin::ExtractPlugin::default());
+        app.add_plugins(crate::test_util::render_extraction_plugin());
         app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
         app.add_plugins(crate::ImguiPlugin::new(
             crate::ImguiPluginConfig::default().with_multi_viewport(true),
@@ -1240,35 +1244,9 @@ mod tests {
     }
 
     #[test]
-    fn gamma_helper_uses_srgb_for_srgb_targets_and_compositing_space() {
-        assert_eq!(
-            ImguiUniforms::gamma_for_target(TextureFormat::Rgba8UnormSrgb, None),
-            2.2
-        );
-        assert_eq!(
-            ImguiUniforms::gamma_for_target(
-                TextureFormat::Rgba8Unorm,
-                Some(CompositingSpace::Srgb)
-            ),
-            2.2
-        );
-        assert_eq!(
-            ImguiUniforms::gamma_for_target(TextureFormat::Rgba8Unorm, None),
-            1.0
-        );
-        assert_eq!(
-            ImguiUniforms::gamma_for_target(
-                TextureFormat::Rgba8Unorm,
-                Some(CompositingSpace::Linear)
-            ),
-            1.0
-        );
-    }
-
-    #[test]
     fn render_installation_exposes_standard_sampler_callbacks() {
         let mut app = App::new();
-        app.add_plugins(bevy_render::extract_plugin::ExtractPlugin::default());
+        app.add_plugins(crate::test_util::render_extraction_plugin());
         app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
         app.add_plugins(crate::ImguiPlugin::default());
 
@@ -2240,11 +2218,10 @@ mod tests {
         ));
         let render_device = resources.0.clone();
         let render_queue = resources.1.clone();
-        let render_adapter = resources.3.clone();
         RenderHarnessResources {
             render_device: render_device.clone(),
             render_queue,
-            pipeline_cache: PipelineCache::new(render_device, render_adapter, true),
+            pipeline_cache: PipelineCache::new(render_device, true),
         }
     }
 

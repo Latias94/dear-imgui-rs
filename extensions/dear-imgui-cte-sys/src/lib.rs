@@ -51,7 +51,8 @@ pub struct Glyph {
     pub codepoint: ImWchar,
     pub color: Color,
     pub breakOption: BreakOption,
-    pub squiggle: usize,
+    pub columns: u8,
+    pub squiggle: u32,
 }
 
 impl Default for Glyph {
@@ -60,14 +61,15 @@ impl Default for Glyph {
             codepoint: 0,
             color: text,
             breakOption: undefined,
+            columns: 1,
             squiggle: 0,
         }
     }
 }
 
 const GLYPH_SQUIGGLE_OFFSET: usize = {
-    let before_squiggle = ::std::mem::size_of::<ImWchar>() + 2;
-    let align = ::std::mem::align_of::<usize>();
+    let before_squiggle = ::std::mem::size_of::<ImWchar>() + 3;
+    let align = ::std::mem::align_of::<u32>();
     (before_squiggle + align - 1) & !(align - 1)
 };
 
@@ -78,8 +80,9 @@ const _: () = assert!(::std::mem::offset_of!(Glyph, color) == ::std::mem::size_o
 const _: () =
     assert!(::std::mem::offset_of!(Glyph, breakOption) == ::std::mem::size_of::<ImWchar>() + 1);
 const _: () = assert!(::std::mem::offset_of!(Glyph, squiggle) == GLYPH_SQUIGGLE_OFFSET);
-const _: () = assert!(
-    ::std::mem::size_of::<Glyph>() == GLYPH_SQUIGGLE_OFFSET + ::std::mem::size_of::<usize>()
-);
+const _: () =
+    assert!(::std::mem::offset_of!(Glyph, columns) == ::std::mem::size_of::<ImWchar>() + 2);
+const _: () =
+    assert!(::std::mem::size_of::<Glyph>() == GLYPH_SQUIGGLE_OFFSET + ::std::mem::size_of::<u32>());
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));

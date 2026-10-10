@@ -1324,8 +1324,7 @@ fn prepare_wasm_provider_inputs(
                 | ProviderTransform::PatchImguiDemo
                 | ProviderTransform::PatchImguiWidgetsNumericConversions
                 | ProviderTransform::PatchImnodesFileIo
-                | ProviderTransform::PatchCteTextEditorWideGlyphs
-                | ProviderTransform::PatchCteTextDiffWideGlyphs => {
+                | ProviderTransform::PatchCteUnicodeRangeLookup => {
                     let contents =
                         fs::read_to_string(&provider_source.path).with_context(|| {
                             format!("read provider source {}", provider_source.path.display())
@@ -1345,11 +1344,8 @@ fn prepare_wasm_provider_inputs(
                         ProviderTransform::PatchImnodesFileIo => {
                             build_support::patch_imnodes_cpp_for_file_handle(&contents)
                         }
-                        ProviderTransform::PatchCteTextEditorWideGlyphs => {
-                            build_support::patch_cte_text_editor_for_wide_glyphs(&contents)
-                        }
-                        ProviderTransform::PatchCteTextDiffWideGlyphs => {
-                            build_support::patch_cte_text_diff_for_wide_glyphs(&contents)
+                        ProviderTransform::PatchCteUnicodeRangeLookup => {
+                            build_support::patch_cte_text_editor_unicode_range_lookup(&contents)
                         }
                         ProviderTransform::Direct => unreachable!(),
                     }
@@ -1755,7 +1751,7 @@ mod tests {
     }
 
     #[test]
-    fn cte_provider_compiles_patched_sources_only() {
+    fn cte_provider_patches_unicode_ranges_and_keeps_text_diff_upstream() {
         let mut inventory = SourceInventory::embedded().clone();
         inventory
             .sources
@@ -1763,31 +1759,30 @@ mod tests {
         let output = tempfile::tempdir().unwrap();
         let inputs =
             prepare_wasm_provider_inputs(&inventory, &project_root(), output.path()).unwrap();
-        for (id, file, transform) in [
-            (
-                "text-editor",
-                "TextEditor.cpp",
-                build_support::patch_cte_text_editor_for_wide_glyphs
-                    as fn(&str) -> Result<String, String>,
-            ),
-            (
-                "text-diff",
-                "TextDiff.cpp",
-                build_support::patch_cte_text_diff_for_wide_glyphs
-                    as fn(&str) -> Result<String, String>,
-            ),
-        ] {
-            let original = project_root()
-                .join("extensions/dear-imgui-cte-sys/third-party/cimCTE/ImGuiColorTextEdit")
-                .join(file);
-            assert!(!inputs.source_files.contains(&original));
-            let patched = output.path().join(format!("provider-cte-{id}-patched.cpp"));
-            assert!(inputs.source_files.contains(&patched));
-            assert_eq!(
-                std::fs::read_to_string(patched).unwrap(),
-                transform(&std::fs::read_to_string(original).unwrap()).unwrap()
-            );
-        }
+        let source_root = project_root()
+            .join("extensions/dear-imgui-cte-sys/third-party/cimCTE/ImGuiColorTextEdit");
+        let original = source_root.join("TextEditor.cpp");
+        let patched = output.path().join("provider-cte-text-editor-patched.cpp");
+        assert!(!inputs.source_files.contains(&original));
+        assert!(inputs.source_files.contains(&patched));
+        assert_eq!(
+            std::fs::read_to_string(patched).unwrap(),
+            build_support::patch_cte_text_editor_unicode_range_lookup(
+                &std::fs::read_to_string(original).unwrap()
+            )
+            .unwrap()
+        );
+        assert!(
+            inputs
+                .source_files
+                .contains(&source_root.join("TextDiff.cpp"))
+        );
+        assert!(
+            !output
+                .path()
+                .join("provider-cte-text-diff-patched.cpp")
+                .exists()
+        );
     }
 
     #[test]

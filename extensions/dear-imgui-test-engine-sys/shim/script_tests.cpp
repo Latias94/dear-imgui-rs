@@ -59,6 +59,8 @@ struct ImGuiTestEngineScript {
         ItemDragOverAndHold,
         ItemDragAndDrop,
         ItemDragWithDelta,
+        ItemMakeVisible,
+        ItemDragToPos,
         ScrollToX,
         ScrollToY,
         ScrollToPosX,
@@ -389,6 +391,19 @@ static void script_test_func_impl(ImGuiTestContext* ctx) {
                 break;
             case ImGuiTestEngineScript::CmdKind::ItemDragWithDelta:
                 ctx->ItemDragWithDelta(cmd.A.c_str(), ImVec2(cmd.F, cmd.G));
+                break;
+            case ImGuiTestEngineScript::CmdKind::ItemMakeVisible: {
+                // Upstream assumes a valid window after resolving the item.
+                const ImGuiTestItemInfo item = ctx->ItemInfoOpenFullPath(cmd.A.c_str());
+                if (ctx->IsError() || item.ID == 0 || item.Window == nullptr) {
+                    report_script_error("item_make_visible", "item or its window was not found");
+                    return;
+                }
+                ctx->ItemMakeVisible(item.ID, ImGuiTestOpFlags_NoAutoOpenFullPath);
+                break;
+            }
+            case ImGuiTestEngineScript::CmdKind::ItemDragToPos:
+                ctx->ItemDragToPos(cmd.A.c_str(), ImVec2(cmd.F, cmd.G));
                 break;
             case ImGuiTestEngineScript::CmdKind::ScrollToX:
                 ctx->ScrollToX(cmd.A.c_str(), cmd.F);
@@ -978,6 +993,8 @@ static bool command_requires_released_mouse(ImGuiTestEngineScript::CmdKind kind)
         case Kind::ItemDragOverAndHold:
         case Kind::ItemDragAndDrop:
         case Kind::ItemDragWithDelta:
+        case Kind::ItemMakeVisible:
+        case Kind::ItemDragToPos:
         case Kind::TabClose:
         case Kind::ComboClick:
         case Kind::ComboClickAll:
@@ -1246,6 +1263,7 @@ SCRIPT_REF_FUNCTION(imgui_test_engine_script_set_ref, SetRef)
 SCRIPT_REF_FUNCTION(imgui_test_engine_script_item_click, ItemClick)
 SCRIPT_REF_FUNCTION(imgui_test_engine_script_item_double_click, ItemDoubleClick)
 SCRIPT_REF_FUNCTION(imgui_test_engine_script_item_open, ItemOpen)
+SCRIPT_REF_FUNCTION(imgui_test_engine_script_item_make_visible, ItemMakeVisible)
 SCRIPT_REF_FUNCTION(imgui_test_engine_script_item_close, ItemClose)
 SCRIPT_REF_FUNCTION(imgui_test_engine_script_item_check, ItemCheck)
 SCRIPT_REF_FUNCTION(imgui_test_engine_script_item_uncheck, ItemUncheck)
@@ -1516,6 +1534,23 @@ ImGuiTestEngineStatus imgui_test_engine_script_item_drag_with_delta(
         command.Kind = ImGuiTestEngineScript::CmdKind::ItemDragWithDelta;
         command.F = dx;
         command.G = dy;
+        return status;
+    });
+}
+
+ImGuiTestEngineStatus imgui_test_engine_script_item_drag_to_pos(
+    ImGuiTestEngineScript* script,
+    const char* ref,
+    float x,
+    float y
+) {
+    return append_command("imgui_test_engine_script_item_drag_to_pos", script, [&](auto& command) {
+        ImGuiTestEngineStatus status = required_ref(command.A, ref);
+        if (status == ImGuiTestEngineStatus_Success) status = finite_value(x);
+        if (status == ImGuiTestEngineStatus_Success) status = finite_value(y);
+        command.Kind = ImGuiTestEngineScript::CmdKind::ItemDragToPos;
+        command.F = x;
+        command.G = y;
         return status;
     });
 }

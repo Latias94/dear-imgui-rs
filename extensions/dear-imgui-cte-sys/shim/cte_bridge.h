@@ -39,6 +39,7 @@ typedef struct DearImGuiCteChangeView {
 } DearImGuiCteChangeView;
 
 typedef void (*DearImGuiCteChangeCallback)(void* userdata);
+typedef void (*DearImGuiCteLineNumberCallback)(void* userdata, const CustomLineNumber* number);
 typedef void (*DearImGuiCteTransactionCallback)(
     void* userdata,
     const DearImGuiCteChangeView* change);
@@ -110,6 +111,10 @@ CIMGUI_API DearImGuiCteStatus dear_imgui_cte_set_custom_caret_callback(
 CIMGUI_API DearImGuiCteStatus dear_imgui_cte_set_line_number_context_callback(
     TextEditor* editor,
     DearImGuiCtePopupCallback callback,
+    void* userdata) DEAR_IMGUI_CTE_NOEXCEPT;
+CIMGUI_API DearImGuiCteStatus dear_imgui_cte_set_custom_line_number_callback(
+    TextEditor* editor,
+    DearImGuiCteLineNumberCallback callback,
     void* userdata) DEAR_IMGUI_CTE_NOEXCEPT;
 CIMGUI_API DearImGuiCteStatus dear_imgui_cte_set_text_context_callback(
     TextEditor* editor,

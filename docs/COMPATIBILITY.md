@@ -7,6 +7,10 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 
 ## Versioning Policy
 
+### Unreleased dependency updates
+
+The development branch uses Bevy 0.20.0 (Rust 1.97.1 minimum), SDL3 0.20 with sdl3-sys 0.7 (SDL 3.4.18), and glam 0.34. Applications exchanging Bevy, SDL3, or glam types with these crates must upgrade those dependencies together. The workspace core MSRV remains Rust 1.92; the development toolchain is Rust 1.99. WGPU 30 remains the default, with the existing 27/28/29 compatibility routes.
+
 - Unified release train: all published `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
 - Stable 0.19 train: unified `v0.19.0` (use `version = "0.19"`).
 - Previous stable train: unified `v0.18.0` (use `version = "0.18"`).

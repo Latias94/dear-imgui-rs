@@ -1315,7 +1315,7 @@ pub(super) fn texture_upload_to_rgba(
         match format {
             ImGuiTextureFormat::RGBA32 => destination.copy_from_slice(source),
             ImGuiTextureFormat::Alpha8 => {
-                for (pixel, alpha) in destination.chunks_exact_mut(4).zip(source) {
+                for (pixel, alpha) in destination.as_chunks_mut::<4>().0.iter_mut().zip(source) {
                     pixel.copy_from_slice(&[255, 255, 255, *alpha]);
                 }
             }

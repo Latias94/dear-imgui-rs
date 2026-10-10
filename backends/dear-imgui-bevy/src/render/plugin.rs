@@ -413,7 +413,7 @@ fn install_imgui_shader_asset(app: &mut App) {
         .resource_mut::<Assets<Shader>>()
         .insert(
             IMGUI_SHADER_HANDLE.id(),
-            Shader::from_wgsl(IMGUI_SHADER_SOURCE, "dear_imgui_bevy/imgui.wgsl"),
+            Shader::from_wesl(IMGUI_SHADER_SOURCE, "dear_imgui_bevy/imgui.wesl"),
         )
         .expect("UUID shader handles are always valid asset ids");
 }

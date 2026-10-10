@@ -30,16 +30,16 @@ pub(crate) fn validate_finite_f32(
     Ok(())
 }
 
-pub(crate) fn validate_nonzero_usize(
+pub(crate) fn validate_tab_size(
     operation: &'static str,
     parameter: &'static str,
     value: usize,
 ) -> CteResult<()> {
-    if value == 0 {
+    if !(1..=u8::MAX as usize).contains(&value) {
         return Err(CteError::InvalidValue {
             operation,
             parameter,
-            requirement: "greater than zero",
+            requirement: "between 1 and 255 inclusive",
         });
     }
     Ok(())

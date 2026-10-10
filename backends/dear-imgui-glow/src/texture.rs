@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_TEXTURE_ID: AtomicU64 = AtomicU64::new(1);
 
+#[allow(deprecated, reason = "Keep compatibility with the Rust 1.92 MSRV")]
 fn allocate_texture_id() -> InitResult<TextureId> {
     let id = NEXT_TEXTURE_ID
         .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {

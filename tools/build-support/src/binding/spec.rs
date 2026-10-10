@@ -12,7 +12,7 @@ pub const RELEASE_CANDIDATE_SHA_ENV: &str = "DEAR_IMGUI_RS_CANDIDATE_SHA";
 pub const RELEASE_CORE_ARTIFACT_IDENTITY_HASH_ENV: &str = "DEAR_IMGUI_CORE_ARTIFACT_IDENTITY_HASH";
 pub const DEP_CORE_ARTIFACT_IDENTITY_HASH_ENV: &str = "DEP_DEAR_IMGUI_ARTIFACT_IDENTITY_HASH";
 pub const DEP_CORE_CANDIDATE_SHA_ENV: &str = "DEP_DEAR_IMGUI_CANDIDATE_SHA";
-pub const CANONICAL_BINDGEN_VERSION: &str = "0.72.1";
+pub const CANONICAL_BINDGEN_VERSION: &str = "0.73.2";
 pub const CANONICAL_BINDING_LIBCLANG_VERSION: (u32, u32) = (14, 0);
 pub const CANONICAL_BINDING_RUSTC_VERSION: &str = "rustc 1.95.0";
 pub const CANONICAL_BINDING_RUSTFMT_VERSION: &str = "rustfmt 1.9.0-stable";
@@ -923,7 +923,10 @@ impl ExtensionBindingIdentity {
         hash.field("extension", self.extension.artifact_spec().extension_id);
         hash.field("provenance", &self.provenance.identity_hash());
         if self.extension == ExtensionBinding::Cte {
-            hash.field("source_overlay", crate::CTE_WIDE_GLYPH_PATCH_VERSION);
+            hash.field(
+                "source_overlay",
+                crate::CTE_UNICODE_RANGE_LOOKUP_PATCH_VERSION,
+            );
         }
         hash.finish()
     }
@@ -1428,11 +1431,12 @@ const CTE_FUNCTIONS: &[&str] = &[
     "TrieAutoComplete_.*",
     "CodePoint_.*",
     "GetDejavu",
+    "Getnotosans",
     "SetDejavu",
     "dear_imgui_cte_.*",
 ];
 const CTE_TYPES: &[&str] = &[
-    "(TextEditor|TextDiff|DocPos.*|DocSelection.*|VisPos.*|Glyph|Iterator|Language|Notifications|Palette|TrieAutoComplete|CodePoint|Change|Decorator|CustomCaret|PopupData|AutoComplete.*|LineBreakConfig|Color|BreakOption|Scroll|Type)",
+    "(TextEditor|TextDiff|DocPos.*|DocSelection.*|VisPos.*|Glyph|Iterator|Language|Notifications|Palette|TrieAutoComplete|CodePoint|Change|Decorator|CustomCaret|CustomLineNumber|PopupData|AutoComplete.*|LineBreakConfig|Color|BreakOption|Scroll|Type)",
     "DearImGuiCte.*",
 ];
 const CTE_BLOCKLIST_TYPES: &[&str] = &[
@@ -1488,6 +1492,7 @@ const CTE_SYMBOLS: &[&str] = &[
     "Language_Cpp",
     "CodePoint_write",
     "GetDejavu",
+    "Getnotosans",
     "SetDejavu",
     "dear_imgui_cte_text_editor_create",
     "dear_imgui_cte_text_editor_destroy",

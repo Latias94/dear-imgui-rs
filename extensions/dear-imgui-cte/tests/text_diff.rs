@@ -102,6 +102,17 @@ fn text_diff_validates_inputs_before_rendering() {
         diff.set_tab_size(0),
         Err(CteError::InvalidValue { .. })
     ));
+    diff.set_tab_size(255).unwrap();
+    assert_eq!(diff.tab_size(), 255);
+    assert!(matches!(
+        diff.set_tab_size(256),
+        Err(CteError::InvalidValue { .. })
+    ));
+    assert!(matches!(
+        diff.set_tab_size(usize::MAX),
+        Err(CteError::InvalidValue { .. })
+    ));
+    assert_eq!(diff.tab_size(), 255);
     assert!(matches!(
         diff.set_line_spacing(f32::INFINITY),
         Err(CteError::NonFinite { .. })

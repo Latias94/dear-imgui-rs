@@ -23,7 +23,7 @@ bytemuck = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 tracing = { workspace = true, optional = true }
 winit = { workspace = true, optional = true }
-sdl3-sys = { version = "0.6", optional = true }
+sdl3-sys = { version = "0.7", optional = true }
 raw-window-handle = { workspace = true, optional = true }
 
 [features]
@@ -69,7 +69,7 @@ wasm-font-atlas-experimental = ["wasm", "dear-imgui-rs/wasm-font-atlas-experimen
 objc2 = { version = "0.6", optional = true }
 
 [target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
-sdl3-sys = { version = "0.6", features = ["build-from-source"], optional = true }
+sdl3-sys = { version = "0.7", features = ["build-from-source"], optional = true }
 
 [dev-dependencies]
 pollster.workspace = true

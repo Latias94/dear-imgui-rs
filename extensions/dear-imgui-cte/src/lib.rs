@@ -53,9 +53,11 @@ mod validation;
 pub use autocomplete::{
     AutocompleteConfig, AutocompleteContext, AutocompleteRequest, TrieAutocomplete,
 };
-pub use callbacks::{CaretEvent, DecoratorEvent, PopupEvent, TextChange, TextChangeKind};
+pub use callbacks::{
+    CaretEvent, DecoratorEvent, LineNumberEvent, PopupEvent, TextChange, TextChangeKind,
+};
 pub use error::{CteError, CteResult};
-pub use font::dejavu_font_source;
+pub use font::{dejavu_font_source, noto_sans_sc_font_source};
 pub use language::Language;
 pub use notifications::{NotificationType, Notifications, NotificationsRenderer};
 pub use palette::{Palette, PaletteColor};

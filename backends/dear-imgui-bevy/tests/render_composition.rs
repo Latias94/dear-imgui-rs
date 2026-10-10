@@ -6,22 +6,22 @@ use bevy::ecs::schedule::ScheduleLabel;
 use bevy::ecs::schedule::{NodeId, ScheduleGraph};
 use bevy::{
     app::App,
-    asset::{Assets, Handle},
-    camera::{Hdr, RenderTarget},
+    asset::{Assets, Handle, RenderAssetUsages},
+    camera::{ClearColorConfig, CompositingSpace, Hdr, RenderTarget},
     color::LinearRgba,
-    core_pipeline::{Core2d, Core3d, tonemapping::Tonemapping},
+    core_pipeline::{Core2d, Core3d},
     ecs::prelude::*,
     image::Image,
-    prelude::{Camera2d, Camera3d, DefaultPlugins, PluginGroup, Window},
+    prelude::{Camera, Camera2d, Camera3d, DefaultPlugins, PluginGroup, Window},
     render::{
         RenderApp,
         gpu_readback::{Readback, ReadbackComplete},
         render_resource::{
-            LoadOp, Operations, RenderPassColorAttachment, RenderPassDescriptor, StoreOp,
-            TextureFormat, TextureUsages,
+            Extent3d, LoadOp, Operations, RenderPassColorAttachment, RenderPassDescriptor, StoreOp,
+            TextureDimension, TextureFormat, TextureUsages,
         },
         renderer::{RenderContext, ViewQuery},
-        view::{Msaa, ViewTarget},
+        view::{Msaa, Tonemapping, ViewTarget},
     },
     window::{ExitCondition, PrimaryWindow, WindowPlugin, WindowResolution},
     winit::WinitPlugin,
@@ -32,8 +32,8 @@ use bevy::{
     prelude::{BackgroundColor, Node, UiTargetCamera, percent},
 };
 use dear_imgui_bevy::{
-    ImguiAppExt, ImguiContextConfig, ImguiContexts, ImguiFrame, ImguiPlugin, ImguiPluginConfig,
-    ImguiRenderSystems,
+    ImguiAppExt, ImguiBevyTextures, ImguiContextConfig, ImguiContexts, ImguiFrame, ImguiPlugin,
+    ImguiPluginConfig, ImguiRenderSystems, ImguiTexture,
     route::{ImguiInputPolicy, ImguiInputRoute, ImguiInputSource, ImguiRenderRoute},
 };
 #[cfg(feature = "bevy-ui")]
@@ -77,6 +77,9 @@ enum CompositionExpectation {
         at: [u32; 2],
     },
     OrderedContexts,
+    ColorEncoding {
+        blended_gray: u8,
+    },
 }
 
 impl CompositionExpectation {
@@ -98,6 +101,11 @@ impl CompositionExpectation {
                     && is_dominant_blue(rgba8_pixel(data, 40, 40))
                     && is_dominant_blue(rgba8_pixel(data, 24, 24))
             }
+            Self::ColorEncoding { blended_gray } => color_encoding_samples(blended_gray)
+                .iter()
+                .all(|(position, expected)| {
+                    pixel_near(rgba8_pixel(data, position[0], position[1]), *expected)
+                }),
         }
     }
 }
@@ -105,6 +113,283 @@ impl CompositionExpectation {
 struct CompositionPass;
 
 struct SameCameraSecondaryPass;
+
+struct ColorEncodingPass;
+
+struct ColorEncodingTextures {
+    managed: dear_imgui_rs::ManagedTextureId,
+    srgb: ImguiTexture,
+    linear: ImguiTexture,
+}
+
+#[derive(Resource, Default)]
+struct ColorEncodingFixtures(HashMap<dear_imgui_rs::ContextId, ColorEncodingTextures>);
+
+#[test]
+fn imgui_colors_and_textures_preserve_encoding_in_each_compositing_space() {
+    if std::env::var("DEAR_IMGUI_BEVY_GPU_TESTS").as_deref() != Ok("1") {
+        eprintln!("set DEAR_IMGUI_BEVY_GPU_TESTS=1 to require the color encoding GPU test");
+        return;
+    }
+    let _guard = gpu_test_guard();
+    let mut app = App::new();
+    app.add_plugins(
+        DefaultPlugins
+            .set(WindowPlugin {
+                primary_window: None,
+                exit_condition: ExitCondition::DontExit,
+                ..Default::default()
+            })
+            .disable::<WinitPlugin>(),
+    )
+    .add_plugins(ImguiPlugin::new(
+        ImguiPluginConfig::default().with_docking(false),
+    ))
+    .init_resource::<CompositionReadbacks>()
+    .init_resource::<ColorEncodingFixtures>()
+    .add_observer(collect_readback);
+    app.world_mut().spawn((
+        Window {
+            resolution: WindowResolution::new(WIDTH, HEIGHT),
+            ..Default::default()
+        },
+        PrimaryWindow,
+    ));
+
+    for (name, space, hdr, inherited, blended_gray) in [
+        (
+            "color-linear-ldr",
+            CompositingSpace::Linear,
+            false,
+            false,
+            93,
+        ),
+        ("color-srgb-ldr", CompositingSpace::Srgb, false, false, 64),
+        ("color-linear", CompositingSpace::Linear, true, false, 93),
+        ("color-srgb", CompositingSpace::Srgb, true, false, 64),
+        ("color-oklab", CompositingSpace::Oklab, true, false, 46),
+        (
+            "color-inherited-srgb",
+            CompositingSpace::Srgb,
+            true,
+            true,
+            64,
+        ),
+    ] {
+        let mut output =
+            Image::new_target_texture(WIDTH, HEIGHT, TextureFormat::Rgba8UnormSrgb, None);
+        output.texture_descriptor.usage |= TextureUsages::COPY_SRC;
+        let output = app.world_mut().resource_mut::<Assets<Image>>().add(output);
+        if inherited {
+            app.world_mut().spawn((
+                Camera2d,
+                Camera {
+                    order: -1,
+                    clear_color: ClearColorConfig::Custom(bevy::color::Color::BLACK),
+                    ..Default::default()
+                },
+                Hdr,
+                Tonemapping::None,
+                Msaa::Off,
+                space,
+                RenderTarget::Image(output.clone().into()),
+            ));
+        }
+        let camera = app
+            .world_mut()
+            .spawn((
+                Camera2d,
+                Camera {
+                    clear_color: if inherited {
+                        ClearColorConfig::None
+                    } else {
+                        ClearColorConfig::Custom(bevy::color::Color::BLACK)
+                    },
+                    ..Default::default()
+                },
+                Tonemapping::None,
+                Msaa::Off,
+                RenderTarget::Image(output.clone().into()),
+            ))
+            .id();
+        if hdr {
+            app.world_mut().entity_mut(camera).insert(Hdr);
+        }
+        if !inherited {
+            app.world_mut().entity_mut(camera).insert(space);
+        }
+        let pass = app.declare_imgui_pass::<ColorEncodingPass>().unwrap();
+        app.add_imgui_systems(&pass, pass.system(draw_color_encoding_fixture))
+            .unwrap();
+        let (context_id, managed) = {
+            let mut contexts = app.world_mut().non_send_mut::<ImguiContexts>();
+            let context_id = contexts
+                .create(ImguiContextConfig::new(&pass).with_docking(false))
+                .unwrap();
+            let managed = contexts
+                .configure(context_id, |context| {
+                    let _ = context.set_ini_filename::<std::path::PathBuf>(None);
+                    context.register_texture(
+                        dear_imgui_rs::texture::OwnedTextureData::from_pixels(
+                            dear_imgui_rs::texture::TextureFormat::RGBA32,
+                            1,
+                            1,
+                            &[128, 128, 128, 255],
+                        )
+                        .unwrap(),
+                    )
+                })
+                .unwrap();
+            (context_id, managed)
+        };
+        let make_image = |format| {
+            Image::new(
+                Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D2,
+                vec![128, 128, 128, 255],
+                format,
+                RenderAssetUsages::default(),
+            )
+        };
+        let srgb = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(make_image(TextureFormat::Rgba8UnormSrgb));
+        let linear = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(make_image(TextureFormat::Rgba8Unorm));
+        let (srgb, linear) = {
+            let mut textures = app.world_mut().resource_mut::<ImguiBevyTextures>();
+            (
+                textures.register_strong(srgb).unwrap(),
+                textures.register_strong(linear).unwrap(),
+            )
+        };
+        app.world_mut()
+            .resource_mut::<ColorEncodingFixtures>()
+            .0
+            .insert(
+                context_id,
+                ColorEncodingTextures {
+                    managed,
+                    srgb,
+                    linear,
+                },
+            );
+        app.world_mut()
+            .spawn(ImguiRenderRoute::new(context_id, camera));
+        app.world_mut().spawn((
+            CompositionReadbackTarget {
+                image: output,
+                expectation: CompositionExpectation::ColorEncoding { blended_gray },
+            },
+            CompositionCase(name),
+        ));
+    }
+    app.finish();
+    app.cleanup();
+    install_composition_readbacks(&mut app);
+    wait_for_composition_readbacks(&mut app, 6);
+    let readbacks = app.world().resource::<CompositionReadbacks>();
+    for (name, blended_gray) in [
+        ("color-linear-ldr", 93),
+        ("color-srgb-ldr", 64),
+        ("color-linear", 93),
+        ("color-srgb", 64),
+        ("color-oklab", 46),
+        ("color-inherited-srgb", 64),
+    ] {
+        let pixels = readbacks
+            .samples
+            .get(name)
+            .expect("each color camera must produce a readback");
+        for (position, expected) in color_encoding_samples(blended_gray) {
+            let actual = rgba8_pixel(pixels, position[0], position[1]);
+            assert!(
+                pixel_near(actual, expected),
+                "{name} at {position:?}: expected {expected:?}, got {actual:?}"
+            );
+        }
+    }
+}
+
+fn draw_color_encoding_fixture(
+    frame: ImguiFrame<'_, ColorEncodingPass>,
+    fixtures: Res<ColorEncodingFixtures>,
+) {
+    let textures = &fixtures.0[&frame.context_id()];
+    let draw = frame.ui().get_background_draw_list();
+    let gray = 128.0 / 255.0;
+    draw.add_rect([4.0, 4.0], [20.0, 20.0], [gray, gray, gray, 1.0])
+        .filled(true)
+        .build();
+    draw.add_rect([24.0, 4.0], [40.0, 20.0], [gray, gray, gray, gray])
+        .filled(true)
+        .build();
+    draw.add_rect(
+        [44.0, 4.0],
+        [60.0, 20.0],
+        [gray, 64.0 / 255.0, 192.0 / 255.0, 1.0],
+    )
+    .filled(true)
+    .build();
+    draw.add_image(
+        textures.managed,
+        [4.0, 24.0],
+        [20.0, 40.0],
+        [0.0; 2],
+        [1.0; 2],
+        [1.0; 4],
+    );
+    draw.add_image(
+        &textures.srgb,
+        [24.0, 24.0],
+        [40.0, 40.0],
+        [0.0; 2],
+        [1.0; 2],
+        [1.0; 4],
+    );
+    draw.add_image(
+        &textures.linear,
+        [44.0, 24.0],
+        [60.0, 40.0],
+        [0.0; 2],
+        [1.0; 2],
+        [1.0; 4],
+    );
+    draw.add_image(
+        textures.managed,
+        [4.0, 44.0],
+        [20.0, 60.0],
+        [0.0; 2],
+        [1.0; 2],
+        [gray, gray, gray, 1.0],
+    );
+}
+
+fn color_encoding_samples(blended_gray: u8) -> [([u32; 2], [u8; 4]); 7] {
+    [
+        ([12, 12], [128, 128, 128, 255]),
+        ([32, 12], [blended_gray, blended_gray, blended_gray, 255]),
+        ([52, 12], [128, 64, 192, 255]),
+        ([12, 32], [128, 128, 128, 255]),
+        ([32, 32], [128, 128, 128, 255]),
+        ([52, 32], [188, 188, 188, 255]),
+        ([12, 52], [61, 61, 61, 255]),
+    ]
+}
+
+fn pixel_near(actual: [u8; 4], expected: [u8; 4]) -> bool {
+    actual
+        .into_iter()
+        .zip(expected)
+        .all(|(actual, expected)| actual.abs_diff(expected) <= 3)
+}
 
 #[derive(Resource, Default)]
 struct CompositionReadbacks {

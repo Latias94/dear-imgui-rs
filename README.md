@@ -34,7 +34,7 @@
   - `dear-imgui-sys` — low-level FFI via cimgui (docking branch), with pregenerated bindings for Dear ImGui v1.92.9b
   - `dear-imgui-rs` — safe, idiomatic Rust API (RAII + builder style similar to imgui-rs)
   - Backends: `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-ash`, `dear-imgui-winit`, `dear-imgui-sdl3`, `dear-imgui-bevy`
-    - `dear-imgui-bevy` is an experimental Bevy-native backend on Bevy `0.19.1`, with docking,
+    - `dear-imgui-bevy` is an experimental Bevy-native backend on Bevy `0.20.0`, with docking,
       texture interop, and native multi-viewport on supported targets.
   - `dear-app` — generation-aware Winit + WGPU application runtime (docking, themes, add-ons)
 - Extensions
@@ -369,9 +369,9 @@ Quick examples (enable auto prebuilt download):
 - Env (Unix): `IMGUI_SYS_USE_PREBUILT=1 cargo build -p dear-imgui-rs --features prebuilt`
 - Env (Windows PowerShell): `$env:IMGUI_SYS_USE_PREBUILT='1'; cargo build -p dear-imgui-rs --features prebuilt`
 
-## Compatibility (0.19.0)
+## Compatibility (Development Branch)
 
-The workspace follows a release-train model. The table below lists the combinations validated for the 0.19.0 release. See [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for version history and compatibility policy.
+The workspace follows a release-train model. The tables below describe the development branch, including unreleased dependency upgrades; package versions remain 0.19.0 until the next release is prepared. For the published 0.19.0 dependency matrix, use the [tagged README](https://github.com/Latias94/dear-imgui-rs/blob/v0.19.0/README.md). See [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for version history and compatibility policy.
 
 Core
 
@@ -388,8 +388,8 @@ Backends
 | dear-imgui-glow  | 0.19.0 | glow = 0.18       | OpenGL renderer (winit/glutin) |
 | dear-imgui-ash   | 0.19.0 | ash = 0.38        | Native Vulkan renderer with Winit/SDL3 multi-viewport adapters |
 | dear-imgui-winit | 0.19.0 | winit = 0.30.13   | Winit platform backend         |
-| dear-imgui-sdl3  | 0.19.0 | sdl3 = 0.18.4     | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
-| dear-imgui-bevy  | 0.19.0 | Bevy = 0.19.1     | Experimental Bevy-native backend with docking, texture interop, and native multi-viewport |
+| dear-imgui-sdl3  | 0.19.0 | sdl3 = 0.20.0     | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
+| dear-imgui-bevy  | 0.19.0 | Bevy = 0.20.0     | Experimental Bevy-native backend with docking, texture interop, and native multi-viewport |
 
 Application Runtime
 
@@ -412,7 +412,7 @@ Extensions
 | dear-imgui-test-engine | 0.19.0 | 0.19.0 | dear-imgui-test-engine-sys 0.19.0 | UI automation and test runner |
 | dear-imgui-reflect  | 0.19.0 | 0.19.0 | —                              | Session-owned reflection UI              |
 
-The workspace MSRV is Rust 1.92. The experimental Bevy backend requires Rust 1.95 because Bevy 0.19 does. Select exactly one WGPU major; `dear-app` follows the WGPU 30 default.
+The workspace MSRV is Rust 1.92. The experimental Bevy backend requires Rust 1.97.1 because Bevy 0.20 does. The development toolchain is Rust 1.99. Select exactly one WGPU major; `dear-app` follows the WGPU 30 default.
 
 Maintenance rules
 

@@ -25,6 +25,32 @@ fn empty_and_unicode_text_round_trip_as_owned_strings() {
 }
 
 #[test]
+fn document_text_preserves_trailing_newlines_without_file_serialization() {
+    let context = Context::create();
+    let mut editor = TextEditor::create(&context);
+    for text in [
+        "",
+        "\n",
+        "\n\n",
+        "alpha",
+        "alpha\n",
+        "alpha\n\n",
+        "alpha\nbeta",
+        "\u{4e2d}\n\u{1f642}",
+    ] {
+        editor.set_text(text).unwrap();
+        assert_eq!(editor.text().unwrap(), text);
+        editor
+            .replace_section(
+                Selection::new(Position::default(), Position::default()),
+                "prefix",
+            )
+            .unwrap();
+        assert_eq!(editor.text().unwrap(), format!("prefix{text}"));
+    }
+}
+
+#[test]
 fn repeated_allocated_and_static_getters_do_not_invalidate_prior_results() {
     let context = Context::create();
     let mut editor = TextEditor::create(&context);

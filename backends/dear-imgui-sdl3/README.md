@@ -77,8 +77,8 @@ dear-imgui-sdl3 = { version = "0.19", features = ["sdlgpu3-renderer"] }
 |---------------|----------|
 | Crate         | 0.19.0  |
 | dear-imgui-rs | 0.19.0  |
-| SDL3 crate    | 0.18.4   |
-| sdl3-sys      | 0.6      |
+| SDL3 crate    | 0.20.0   |
+| sdl3-sys      | 0.7.2    |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md)
 for the full workspace matrix.
@@ -422,7 +422,7 @@ Example:
 ```toml
 [dependencies]
 dear-imgui-sdl3 = { version = "0.19", features = ["opengl3-renderer"] }
-sdl3 = { version = "0.18", features = ["build-from-source"] }
+sdl3 = { version = "0.20", features = ["build-from-source"] }
 ```
 
 On Android, that route usually also requires the standard SDL/NDK build

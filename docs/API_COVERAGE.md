@@ -40,8 +40,8 @@ state that the sys API is the intended unsafe route.
 ## ImGuiColorTextEdit API family ledger
 
 This is a family-level semantic ledger over the checked-in native and WASM cimCTE binding
-snapshots at wrapper revision `b340b99748f9b13307a8e88b938c4c9f8d77df48` and nested
-ImGuiColorTextEdit revision `3b46d759975dfd628ef20fd51b7e1c81ef635be5`. It is not a second
+snapshots at wrapper revision `3cdee0b5e1d8f0a59a40fda80c4a6b894d752240` and nested
+ImGuiColorTextEdit revision `f28136480fa4091164e0b528dc9cca147c5a6ee9`. It is not a second
 declaration inventory, does not infer safety from symbol names, and does not parse Rust source.
 
 The canonical binding specification owns the generated family allowlist. Its static required-symbol
@@ -59,7 +59,8 @@ human ownership review; a symbol-presence check is not proof of safe coverage.
 | `TextDiff_*` | Context-bound `TextDiff` with copied configuration and a `Ui`-checked render builder. |
 | `Notifications_*` | Context-bound `Notifications` queue with validated messages, durations, positions, and a `Ui`-checked renderer. |
 | `Glyph_*`, `Iterator_*`, `CodePoint_*` | Sys-only. Their native pointer/iterator graph has no stable ownership benefit over the copied editor values exposed by the safe layer. |
-| `GetDejavu`, `SetDejavu` | `GetDejavu` is wrapped by `dejavu_font_source`, which returns a static compressed source for the managed atlas. `SetDejavu` remains sys-only because it clears the full atlas and changes the global loader outside renderer texture management. |
+| `CustomLineNumber` and line-number callback configuration | Editor-owned typed callbacks receive copied `LineNumberEvent` geometry and the active `Ui`; the native draw-list pointer remains sys-only. |
+| `GetDejavu`, `Getnotosans`, `SetDejavu` | `dejavu_font_source` and `noto_sans_sc_font_source` return static compressed sources for the managed atlas. `SetDejavu` remains sys-only because it clears the full atlas and changes the global loader outside renderer texture management. |
 
 Unsafe `as_raw` escape hatches on safe owners require the caller to preserve every native
 ownership, pointer-lifetime, Context, and wrapper invariant before returning to safe methods.

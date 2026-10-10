@@ -14,14 +14,18 @@ use bevy::{
     core_pipeline::{
         Core2d,
         fullscreen_material::{FullscreenMaterial, FullscreenMaterialPlugin},
-        tonemapping::Tonemapping,
     },
     ecs::{
         schedule::{IntoScheduleConfigs, ScheduleConfigs, ScheduleLabel},
         system::BoxedSystem,
     },
     prelude::*,
-    render::{extract_component::ExtractComponent, render_resource::ShaderType, view::Msaa},
+    render::{
+        RenderApp,
+        extract_component::ExtractComponent,
+        render_resource::ShaderType,
+        view::{Msaa, Tonemapping},
+    },
     shader::ShaderRef,
     window::{PresentMode, WindowPlugin, WindowTheme},
 };
@@ -62,12 +66,14 @@ struct AnimatedShape {
 }
 
 #[derive(Component, ExtractComponent, Clone, Copy, ShaderType, Default)]
+#[extract_app(RenderApp)]
 struct BeforeOverlayEffect {
     intensity: f32,
     _padding: Vec3,
 }
 
 #[derive(Component, ExtractComponent, Clone, Copy, ShaderType, Default)]
+#[extract_app(RenderApp)]
 struct AfterOverlayEffect {
     intensity: f32,
     _padding: Vec3,

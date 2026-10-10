@@ -17,7 +17,6 @@ use bevy_render::{
     Render, RenderApp,
     camera::CameraRenderGraph,
     camera::ExtractedCamera,
-    extract_plugin::ExtractPlugin,
     render_resource::{TextureFormat, TextureUsages},
     view::{ColorGrading, ExtractedView, Msaa, RetainedViewEntity},
 };
@@ -48,7 +47,7 @@ struct OneShotBevyImageTexture(Option<ImguiTexture>);
 
 fn app_with_render_world() -> App {
     let mut app = App::new();
-    app.add_plugins(ExtractPlugin::default());
+    app.add_plugins(crate::test_util::render_extraction_plugin());
     app.add_plugins(ImguiPlugin::default());
     app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
 
@@ -125,7 +124,6 @@ fn install_render_view(app: &mut App, camera: Entity, target: NormalizedRenderTa
             sorted_camera_index_for_target: 0,
             exposure: 1.0,
             hdr: false,
-            compositing_space: None,
         },
         CameraMainTextureUsages(TextureUsages::RENDER_ATTACHMENT),
         Msaa::Off,
@@ -579,7 +577,9 @@ fn one_bevy_image_lease_can_draw_from_two_contexts() {
     let texture = app
         .world_mut()
         .resource_mut::<ImguiBevyTextures>()
-        .register_weak(AssetId::<Image>::invalid());
+        .register_weak(AssetId::Uuid {
+            uuid: bevy_asset::uuid::Uuid::from_u128(1),
+        });
     let texture_id = texture.id();
     app.insert_resource(BevyImageTexture { texture });
     app.add_imgui_systems(
@@ -707,7 +707,9 @@ fn bevy_image_texture_leases_wait_for_render_acknowledgement_before_slot_reuse()
 fn weak_bevy_image_leases_use_the_fallback_and_publish_a_recoverable_diagnostic() {
     let _guard = imgui_context_guard();
     let mut app = app_with_render_world();
-    let asset_id = AssetId::<Image>::invalid();
+    let asset_id = AssetId::<Image>::Uuid {
+        uuid: bevy_asset::uuid::Uuid::from_u128(1),
+    };
     let texture = app
         .world_mut()
         .resource_mut::<ImguiBevyTextures>()
@@ -774,7 +776,9 @@ fn a_lease_dropped_during_ui_submission_survives_the_in_flight_snapshot() {
     let texture = app
         .world_mut()
         .resource_mut::<ImguiBevyTextures>()
-        .register_weak(AssetId::<Image>::invalid());
+        .register_weak(AssetId::Uuid {
+            uuid: bevy_asset::uuid::Uuid::from_u128(1),
+        });
     let texture_id = texture.id();
     app.insert_resource(OneShotBevyImageTexture(Some(texture)));
     let primary_pass = app.imgui_primary_pass().unwrap();

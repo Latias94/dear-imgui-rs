@@ -8,29 +8,29 @@ The backend owns Dear ImGui Contexts on Bevy's main thread, routes Bevy window i
 
 | Component | Version |
 | --- | --- |
-| Rust | `1.95.0` or newer |
-| Bevy | exactly `0.19.1` |
+| Rust | `1.97.1` or newer |
+| Bevy | exactly `0.20.0` |
 | dear-imgui-rs | matching `0.19` release train |
 
 `dear-imgui-bevy` defaults to the renderer plus deterministic Bevy UI ordering. Native multi-viewport is supported through an explicit feature and runtime opt-in. WASM supports the normal and headless feature sets but cannot create native platform windows.
 
 ## Installation
 
-Use matching stable release dependencies:
+Use the matching Git dependencies to test the Bevy 0.20 integration from `main`. The published `0.19.0` backend targets Bevy `0.19.1`.
 
 ```toml
 [dependencies]
-bevy = "=0.19.1"
-dear-imgui-bevy = "0.19"
-dear-imgui-rs = "0.19"
+bevy = "=0.20.0"
+dear-imgui-bevy = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
+dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
 ```
 
-Users upgrading from a 0.16 prerelease must apply the Bevy migration steps in the root changelog.
+This checkout targets Bevy 0.20.0. Upgrade Bevy and its subcrates together, and use Rust 1.97.1 or newer. The Context, private UI pass, texture lease, and route APIs are unchanged by this backend upgrade. See the root changelog for earlier backend API migrations.
 
 For a headless integration that drives private UI passes without installing the Bevy renderer:
 
 ```toml
-dear-imgui-bevy = { version = "0.19", default-features = false }
+dear-imgui-bevy = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", default-features = false }
 ```
 
 ## Quick Start
@@ -194,6 +194,10 @@ ImguiPlugin::default()
 ```
 
 The renderer writes the final single-sample attachment, so the overlay composes consistently with 1x/4x MSAA, LDR/HDR cameras, Bevy UI, and ordered custom post-processing.
+
+Dear ImGui vertex colors and managed RGBA texture bytes use sRGB RGB channels and linear alpha. They are decoded separately before tint multiplication. Bevy `Image` textures follow their declared GPU format: sRGB formats are decoded by the GPU, while unorm and float formats are sampled as linear values. The renderer encodes its fragment output in the camera stack's resolved `Linear`, `Srgb`, or `Oklab` compositing space. Changing the camera's compositing space changes translucent blending, not the appearance of opaque colors.
+
+When upgrading, replace managed textures containing linear RGB bytes with Bevy `Image` textures declaring a linear unorm or float format. Midtones and translucent blending may differ from the previous approximate gamma handling. No public renderer API changes are required; the uniform representation is private to the backend.
 
 ### Input Capture
 

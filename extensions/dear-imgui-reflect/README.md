@@ -31,7 +31,7 @@ Optional math support:
 
 ```toml
 dear-imgui-reflect = { version = "0.19", features = ["glam", "mint"] }
-glam = "0.32"
+glam = "0.34"
 mint = "0.5"
 ```
 

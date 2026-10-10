@@ -170,6 +170,43 @@ def write_base_extension_matrix(
 
 
 class CteBindingIdentityTests(unittest.TestCase):
+    def test_identity_matches_the_rust_producer_test_vector(self):
+        vector = json.loads(
+            (REPO_ROOT / "tools/build-support/tests/fixtures/cte_binding_identity.json")
+            .read_text(encoding="utf-8")
+        )
+        spec = PREBUILT.EXTENSION_BY_ID["cte"]
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            binding = root / "extensions/dear-imgui-cte-sys/src/bindings_pregenerated.rs"
+            binding.parent.mkdir(parents=True)
+            binding.write_text(vector["provenance"], encoding="utf-8")
+            actual = PREBUILT.expected_extension_binding_identity(root, spec)
+            self.assertEqual(actual, vector["identity"])
+            self.assertNotEqual(actual, vector["unpatched_identity"])
+            core = {"normal": write_prebuilt_archive(root, "normal")}
+            with patch.object(PREBUILT, "EXTENSION_SPECS", (spec,)):
+                for identity in (vector["identity"], vector["unpatched_identity"]):
+                    archive = write_extension_prebuilt_archive(
+                        root, spec, "normal", core["normal"],
+                        overrides={"extension_binding_identity": identity},
+                    )
+                    arguments = (
+                        root, "x86_64-unknown-linux-gnu", "", CANDIDATE_SHA, root, core,
+                    )
+                    if identity == vector["identity"]:
+                        selected = PREBUILT.select_extension_prebuilt_archives(
+                            *arguments, profile_scope="base",
+                        )
+                        self.assertEqual(selected, {("cte", "normal"): archive.resolve()})
+                    else:
+                        with self.assertRaisesRegex(
+                            PREBUILT.VerificationError, "extension_binding_identity mismatch"
+                        ):
+                            PREBUILT.select_extension_prebuilt_archives(
+                                *arguments, profile_scope="base",
+                            )
+
     def test_nested_revision_participates_in_cte_identity(self):
         spec = PREBUILT.EXTENSION_BY_ID["cte"]
         relative = Path("extensions") / spec.sys_crate / "src/bindings_pregenerated.rs"

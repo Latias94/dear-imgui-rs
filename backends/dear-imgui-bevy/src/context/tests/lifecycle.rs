@@ -8,7 +8,7 @@ use bevy_app::{App, Last, PostUpdate, PreUpdate, Update};
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::{ScheduleLabel, Schedules};
 #[cfg(feature = "render")]
-use bevy_render::{Render, RenderApp, extract_plugin::ExtractPlugin};
+use bevy_render::{Render, RenderApp};
 use bevy_time::{Real, Time};
 use bevy_window::{PrimaryWindow, Window, WindowResolution};
 use dear_imgui_bevy::{
@@ -685,7 +685,7 @@ fn plugin_finish_skips_a_context_already_transferred_to_managed_retirement() {
         .remove(primary)
         .expect("managed retirement must accept the Context before plugin finish");
 
-    app.add_plugins(ExtractPlugin::default());
+    app.add_plugins(crate::test_util::render_extraction_plugin());
     app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
     app.finish();
     app.world_mut()
@@ -1611,7 +1611,7 @@ fn context_removal_abandons_unextracted_snapshot_without_pausing_another_context
     let _guard = imgui_context_guard();
     let mut app = app_with_primary_window();
     let pass_a = app.declare_imgui_pass::<ContextPassA>().unwrap();
-    app.add_plugins(ExtractPlugin::default())
+    app.add_plugins(crate::test_util::render_extraction_plugin())
         .init_resource::<LifecycleTrace>()
         .add_plugins(ImguiPlugin::default());
     let primary_pass = app.imgui_primary_pass().unwrap();
@@ -1724,7 +1724,7 @@ fn context_removal_abandons_unextracted_snapshot_without_pausing_another_context
 fn removed_registry_retires_a_context_with_an_unextracted_snapshot() {
     let _guard = imgui_context_guard();
     let mut app = app_with_primary_window();
-    app.add_plugins(ExtractPlugin::default())
+    app.add_plugins(crate::test_util::render_extraction_plugin())
         .init_resource::<LifecycleTrace>()
         .add_plugins(ImguiPlugin::default());
     let primary_pass = app.imgui_primary_pass().unwrap();
