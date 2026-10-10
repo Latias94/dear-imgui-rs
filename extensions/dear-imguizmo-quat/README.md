@@ -19,9 +19,9 @@ Safe, idiomatic Rust bindings for ImGuIZMO.quat (quaternion + 3D gizmo helpers) 
 
 | Item                   | Version |
 |------------------------|---------|
-| Crate                  | 0.16.0  |
-| dear-imgui-rs          | 0.16.0  |
-| dear-imguizmo-quat-sys | 0.16.0  |
+| Crate                  | 0.19.0  |
+| dear-imgui-rs          | 0.19.0  |
+| dear-imguizmo-quat-sys | 0.19.0  |
 
 See also: docs/COMPATIBILITY.md in the workspace for the full matrix.
 
@@ -56,7 +56,7 @@ python -m http.server -d target/web-demo 8080
 
 Notes:
 - The `dear-imgui-web-demo` crate in `examples-wasm` can enable the `imguizmo-quat` feature; when present, an “ImGuIZMO.quat (Web)” window is shown if bindings + provider are available.
-- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific compatible `0.16` release and follow changes in `docs/WASM.md`.
+- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific compatible `0.19` release and follow changes in `docs/WASM.md`.
 
 ## Features
 
@@ -97,8 +97,8 @@ Use compatible stable requirements:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.16"
-dear-imguizmo-quat = "0.16"
+dear-imgui-rs = "0.19"
+dear-imguizmo-quat = "0.19"
 ```
 
 Minimal usage with the Ui extension and builder API:

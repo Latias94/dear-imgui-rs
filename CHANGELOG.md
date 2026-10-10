@@ -8,6 +8,21 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-10
+
+### Breaking Changes and Migration
+
+- `dear-imgui-ash` now requires at least one rendering feature. Applications using `default-features = false` must explicitly enable `render-pass` or `dynamic-rendering`; the default remains `render-pass`. Update all workspace crate dependencies together to `"0.19"`.
+- In managed rendering, `TextureStatus::OK` now means the Context has captured the upload into its persistent queue, not that the GPU upload has completed. Custom renderers must process `PendingFrame::texture_requests()` or `FrameSnapshot::texture_requests()` and report request-bound outcomes. Detached snapshots may be skipped and feedback may arrive out of order, but texture operations and drawing must execute in epoch order. Existing request-based integrations retain the same public API.
+
+### Added
+
+- Ash applications can enable both `render-pass` and `dynamic-rendering`, then choose the rendering mode with `AshRendererConfig` after querying device capabilities. Winit and SDL3 secondary viewports follow the selected mode. Thanks to [@Qustio](https://github.com/Qustio) for the contribution. [PR #84](https://github.com/Latias94/dear-imgui-rs/pull/84)
+
+### Fixed
+
+- Fixed missing font-atlas glyph uploads when detached snapshots are dropped or renderer feedback is delayed. The Context retains pending texture work across frames, preserves all unacknowledged pixel changes, and prevents older feedback from clearing newer updates. The fix also applies to registered managed textures. Thanks to [@K0bin](https://github.com/K0bin) for the report. [#85](https://github.com/Latias94/dear-imgui-rs/issues/85), [PR #86](https://github.com/Latias94/dear-imgui-rs/pull/86)
+
 ## [0.18.0] - 2026-09-14
 
 ### Breaking Changes and Migration

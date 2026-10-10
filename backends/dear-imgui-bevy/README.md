@@ -10,7 +10,7 @@ The backend owns Dear ImGui Contexts on Bevy's main thread, routes Bevy window i
 | --- | --- |
 | Rust | `1.95.0` or newer |
 | Bevy | exactly `0.19.1` |
-| dear-imgui-rs | exactly `0.16.0` |
+| dear-imgui-rs | matching `0.19` release train |
 
 `dear-imgui-bevy` defaults to the renderer plus deterministic Bevy UI ordering. Native multi-viewport is supported through an explicit feature and runtime opt-in. WASM supports the normal and headless feature sets but cannot create native platform windows.
 
@@ -21,8 +21,8 @@ Use matching stable release dependencies:
 ```toml
 [dependencies]
 bevy = "=0.19.1"
-dear-imgui-bevy = "0.16"
-dear-imgui-rs = "0.16"
+dear-imgui-bevy = "0.19"
+dear-imgui-rs = "0.19"
 ```
 
 Users upgrading from a 0.16 prerelease must apply the Bevy migration steps in the root changelog.
@@ -30,7 +30,7 @@ Users upgrading from a 0.16 prerelease must apply the Bevy migration steps in th
 For a headless integration that drives private UI passes without installing the Bevy renderer:
 
 ```toml
-dear-imgui-bevy = { version = "0.16", default-features = false }
+dear-imgui-bevy = { version = "0.19", default-features = false }
 ```
 
 ## Quick Start
