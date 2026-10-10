@@ -199,7 +199,12 @@ fn convert_rows_to_rgba(
         match format {
             ImGuiTextureFormat::RGBA32 => destination.copy_from_slice(source),
             ImGuiTextureFormat::Alpha8 => {
-                for (rgba, alpha) in destination.chunks_exact_mut(4).zip(source.iter().copied()) {
+                for (rgba, alpha) in destination
+                    .as_chunks_mut::<4>()
+                    .0
+                    .iter_mut()
+                    .zip(source.iter().copied())
+                {
                     rgba.copy_from_slice(&[255, 255, 255, alpha]);
                 }
             }
