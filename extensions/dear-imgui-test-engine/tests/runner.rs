@@ -816,11 +816,11 @@ fn runner_pumps_ui_render_and_swap_boundaries_once_per_frame_in_order() {
 
     let events = events.borrow();
     assert_eq!(events.len() as u64, report.frames() * 6);
-    for (index, phases) in events.chunks_exact(6).enumerate() {
+    for (index, phases) in events.as_chunks::<6>().0.iter().enumerate() {
         let frame = index as u64 + 1;
         assert_eq!(
             phases,
-            [
+            &[
                 (frame, "ui"),
                 (frame, "prepare"),
                 (frame, "render-main"),
