@@ -23,7 +23,7 @@ use bevy_math::{Rect, Vec2};
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
 use bevy_render::camera::CameraRenderGraph;
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
-use bevy_render::{Render, RenderApp, extract_plugin::ExtractPlugin};
+use bevy_render::{Render, RenderApp};
 #[cfg(feature = "multi-viewport")]
 use bevy_window::CompositeAlphaMode;
 #[cfg(feature = "multi-viewport")]
@@ -228,7 +228,7 @@ fn app_with_multi_viewport_window_config(viewport_window: ImguiViewportWindowCon
     );
     #[cfg(feature = "render")]
     {
-        app.add_plugins(ExtractPlugin::default());
+        app.add_plugins(crate::test_util::render_extraction_plugin());
         app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
     }
     app.add_message::<WindowCloseRequested>();
@@ -1589,7 +1589,7 @@ fn viewport_and_render_release_converge_without_pausing_another_context() {
             crate::viewport::native_window::DesktopPositionSupport::Available,
         ),
     );
-    app.add_plugins(ExtractPlugin::default())
+    app.add_plugins(crate::test_util::render_extraction_plugin())
         .add_plugins(ImguiPlugin::new(
             ImguiPluginConfig::default().with_multi_viewport(true),
         ));
@@ -1694,7 +1694,7 @@ fn registry_drop_drains_native_viewports_while_renderer_release_is_pending() {
             crate::viewport::native_window::DesktopPositionSupport::Available,
         ),
     );
-    app.add_plugins(ExtractPlugin::default())
+    app.add_plugins(crate::test_util::render_extraction_plugin())
         .add_message::<WindowCloseRequested>()
         .add_plugins(ImguiPlugin::new(
             ImguiPluginConfig::default().with_multi_viewport(true),
@@ -2185,7 +2185,7 @@ fn invalid_window_config_is_rejected_before_backend_attachment() {
 fn callback_userdata_drift_fails_before_platform_window_update() {
     let _guard = imgui_context_guard();
     let mut app = App::new();
-    app.add_plugins(ExtractPlugin::default());
+    app.add_plugins(crate::test_util::render_extraction_plugin());
     app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
     app.add_plugins(ImguiPlugin::new(
         ImguiPluginConfig::default().with_multi_viewport(true),

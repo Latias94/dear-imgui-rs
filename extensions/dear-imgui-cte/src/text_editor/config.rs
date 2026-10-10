@@ -1,7 +1,7 @@
 use super::TextEditor;
 use crate::{
     CteResult, MiddleMouseMode, sys,
-    validation::{validate_finite_f32, validate_nonzero_usize},
+    validation::{validate_finite_f32, validate_tab_size},
 };
 
 macro_rules! bool_property {
@@ -38,8 +38,9 @@ macro_rules! layout_bool_property {
 }
 
 impl TextEditor {
+    /// Sets the tab width in columns, in `1..=255` to fit upstream glyph storage.
     pub fn set_tab_size(&mut self, value: usize) -> CteResult<()> {
-        validate_nonzero_usize("TextEditor::set_tab_size", "value", value)?;
+        validate_tab_size("TextEditor::set_tab_size", "value", value)?;
         self.with_context("TextEditor::set_tab_size", |raw| unsafe {
             sys::TextEditor_SetTabSize(raw, value)
         });

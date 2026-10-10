@@ -16,7 +16,7 @@ path = "src/lib.rs"
 
 [dependencies]
 cc = { workspace = true }
-ureq = { version = "3.3", default-features = false, features = ["rustls"], optional = true }
+ureq = { version = "3.4", default-features = false, features = ["rustls"], optional = true }
 flate2 = { workspace = true, optional = true }
 tar = { workspace = true, optional = true }
 pkg-config = { workspace = true, optional = true }

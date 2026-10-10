@@ -31,7 +31,7 @@ exclude = [
 ]
 
 [package.metadata.dear-imgui-sources]
-cimgui-revision = "bf9b984ef74470996fc6c9a6963d9e988e310101"
+cimgui-revision = "125f397e0982fe9466eb0a162de547be5efec849"
 imgui-revision = "b48d1afbe8ee8b238e2961dc363a949dd7304e23"
 
 # docs.rs configuration for offline builds

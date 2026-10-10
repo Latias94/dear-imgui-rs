@@ -186,8 +186,8 @@ impl Sdl3CallbackEvent {
             | Event::MouseButtonUp { .. }
             | Event::MouseWheel { .. }
             | Event::Display { .. }
-            | Event::ControllerDeviceAdded { .. }
-            | Event::ControllerDeviceRemoved { .. } => Ok(event.to_ll().as_ref().map(|raw| {
+            | Event::GamepadAdded { .. }
+            | Event::GamepadRemoved { .. } => Ok(event.to_ll().as_ref().map(|raw| {
                 // SAFETY: SDL's safe Event conversion selects the active raw union member, and
                 // this constructor copies every payload before the temporary raw value is dropped.
                 unsafe { Self::from_callback_raw(raw) }
@@ -295,6 +295,7 @@ impl Sdl3CallbackEvent {
                     timestamp: *timestamp,
                     windowID: *window_id,
                     text: text.as_ptr(),
+                    ..Default::default()
                 },
             }),
             Some(ImGuiEvent::Keyboard(event)) => Some(SDL_Event { key: *event }),
@@ -864,6 +865,7 @@ mod tests {
                 timestamp: 42,
                 windowID: SDL_WindowID(7),
                 text: text.as_ptr(),
+                ..Default::default()
             },
         }
     }
@@ -874,6 +876,7 @@ mod tests {
                 r#type: SDL_EVENT_QUIT,
                 reserved: 0,
                 timestamp,
+                ..Default::default()
             },
         }
     }
@@ -930,6 +933,7 @@ mod tests {
                 y: 0.0,
                 source: source.as_ptr(),
                 data: data.as_ptr(),
+                ..Default::default()
             },
         };
         let handoff = Sdl3CallbackEventHandoff::with_capacity(2);
@@ -966,6 +970,7 @@ mod tests {
                 displayID: SDL_DisplayID(1),
                 data1: 0,
                 data2: 0,
+                ..Default::default()
             },
         };
         let handoff = Sdl3CallbackEventHandoff::default();
@@ -995,6 +1000,7 @@ mod tests {
                 windowID: SDL_WindowID(7),
                 data1: 1920,
                 data2: 1080,
+                ..Default::default()
             },
         };
         let close = SDL_Event {
@@ -1005,6 +1011,7 @@ mod tests {
                 windowID: SDL_WindowID(8),
                 data1: 0,
                 data2: 0,
+                ..Default::default()
             },
         };
         let handoff = Sdl3CallbackEventHandoff::default();
@@ -1036,6 +1043,7 @@ mod tests {
                     r#type: SDL_EVENT_QUIT,
                     reserved: 0,
                     timestamp: 42,
+                    ..Default::default()
                 },
             };
             // SAFETY: `raw` has the active quit member and contains no pointer payload.
@@ -1056,6 +1064,7 @@ mod tests {
                 r#type: SDL_EVENT_QUIT,
                 reserved: 0,
                 timestamp: 1,
+                ..Default::default()
             },
         };
         // SAFETY: `first` has the active quit member and contains no pointer payload.
@@ -1069,6 +1078,7 @@ mod tests {
                     r#type: SDL_EVENT_QUIT,
                     reserved: 0,
                     timestamp: 2,
+                    ..Default::default()
                 },
             };
             // SAFETY: `second` has the active quit member and contains no pointer payload.
@@ -1363,6 +1373,7 @@ mod tests {
                 r#type: SDL_EVENT_QUIT,
                 reserved: 0,
                 timestamp: 42,
+                ..Default::default()
             },
         };
         // SAFETY: `raw` has the active quit member and contains no pointer payload.

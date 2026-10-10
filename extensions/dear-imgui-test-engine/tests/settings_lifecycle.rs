@@ -447,6 +447,17 @@ fn script_inputs_are_rejected_before_native_vector_growth() {
                 })
             ));
             assert!(matches!(
+                script.item_drag_to_pos("Item", 0.0, f32::NAN),
+                Err(TestEngineError::InvalidInput {
+                    argument: "position",
+                    ..
+                })
+            ));
+            assert!(matches!(
+                script.item_make_visible("contains\0nul"),
+                Err(TestEngineError::InvalidInput { .. })
+            ));
+            assert!(matches!(
                 script.item_click("contains\0nul"),
                 Err(TestEngineError::InvalidInput { .. })
             ));
@@ -464,6 +475,20 @@ fn script_inputs_are_rejected_before_native_vector_growth() {
                     ..
                 })
             ));
+            script.mouse_down(dear_imgui_rs::MouseButton::Left)?;
+            for result in [
+                script.item_make_visible("Item"),
+                script.item_drag_to_pos("Item", 1.0, 1.0),
+            ] {
+                assert!(matches!(
+                    result,
+                    Err(TestEngineError::Ffi {
+                        status: TestEngineStatus::InvalidState,
+                        ..
+                    })
+                ));
+            }
+            script.mouse_up(dear_imgui_rs::MouseButton::Left)?;
             script.yield_frames(ScriptCount::new(1)?)
         })
         .expect("valid command remains registerable");

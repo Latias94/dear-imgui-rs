@@ -23,8 +23,8 @@ The checked-in binding and source identity is:
 
 | Component | Revision |
 | --- | --- |
-| `cimCTE` `main_goossens` | `b340b99748f9b13307a8e88b938c4c9f8d77df48` |
-| nested ImGuiColorTextEdit | `3b46d759975dfd628ef20fd51b7e1c81ef635be5` |
+| `cimCTE` `main_goossens` | `3cdee0b5e1d8f0a59a40fda80c4a6b894d752240` |
+| nested ImGuiColorTextEdit | `f28136480fa4091164e0b528dc9cca147c5a6ee9` |
 | Dear ImGui baseline | v1.92.9b docking through the workspace cimgui pin |
 
 Native and WASM snapshots are generated from one canonical C++20 specification
@@ -38,22 +38,33 @@ Maintained source builds compile exactly these translation units:
 - `third-party/cimCTE/ImGuiColorTextEdit/TextEditor.cpp`
 - `third-party/cimCTE/ImGuiColorTextEdit/TextDiff.cpp`
 - `third-party/cimCTE/ImGuiColorTextEdit/example/dejavu.cpp`
+- `third-party/cimCTE/ImGuiColorTextEdit/example/notosans.cpp`
 - `third-party/cimCTE/ImGuiColorTextEdit/extras/TrieAutoComplete.cpp`
 - `shim/cte_bridge.cpp`
 
-## Temporary Wide-glyph Overlay
+## Wide Glyphs and Callback Ownership
 
-Source builds apply the ImGuiColorTextEdit #88 fix from commit `26da49ecbbde309595c01bef1aa0b0ecd293a464` to copies of `TextEditor.cpp` in the build output directory. Both `TextDiff.cpp` renderers use the same column rule to stay consistent with the shared typesetter. Native builds, packaged native libraries, and the WASM provider all apply these overlays; the pinned submodules and public headers remain unchanged.
+The pinned upstream source now owns wide-glyph column calculation and rendering.
+Native, packaged, and WebAssembly builds compile that source directly; the old
+`cte-wide-glyphs-v1` overlay and its prebuilt identity marker have been removed.
 
-The overlay reserves two grid cells for the ranges handled by the original upstream fix. It does not provide complete Unicode grapheme shaping. Applications still need a font containing the requested glyphs. This backport does not include the later upstream `Glyph` layout changes.
+The public `Glyph` mirror follows upstream's `columns: u8` and `squiggle: u32`
+layout. Rust offset assertions and C++ source-build assertions check the mirror.
+Applications still need a font containing the requested glyphs; grid-column
+calculation does not provide complete Unicode grapheme shaping.
 
-Each replacement checks its expected occurrence count and fails if the upstream source drifts. The CTE artifact identity includes `cte-wide-glyphs-v1`, rejecting earlier unpatched archives. Once cimCTE incorporates the upstream fix, remove the overlays and their native/WASM wiring together, then regenerate and verify bindings before producing new archives.
+The bridge includes a userdata-bearing custom line-number renderer. Safe callbacks
+copy geometry and palette values and borrow the active `Ui` only for the invocation.
+Raw insert/delete callbacks and their `void*` line data remain sys-only; clearing
+them directly bypasses the safe editor's ownership bookkeeping. C++ text overloads
+using string-view vectors or UTF-16/UTF-32 have no matching C ABI in cimCTE; safe
+Rust text access continues to use UTF-8 with owned results.
 
 ## Build Modes
 
 | Route | Contract |
 | --- | --- |
-| Native source, default | Compiles only cimCTE, TextEditor, TextDiff, DejaVu, Trie, and the repository bridge |
+| Native source, default | Compiles only cimCTE, TextEditor, TextDiff, DejaVu, Noto Sans SC, Trie, and the repository bridge |
 | `build-from-source` | Forces the native source route even if Cargo also enables `prebuilt` |
 | `prebuilt` | Accepts only an archive whose target, CRT, source revisions, binding identity, feature profile, candidate SHA, and shared-core identity match |
 | `wasm` | Uses import bindings for the single fixed `imgui-sys-v1` provider on `wasm32-unknown-unknown`; Cargo does not compile C++ for this target |
@@ -83,7 +94,7 @@ obey the same C++ runtime, ABI, shared-core, and no-unwind contract.
 
 Generated native and WASM bindings cover editor/document/configuration,
 positions and selections, languages and palettes, glyph/iterator/codepoint
-helpers, TextDiff, Notifications, Trie autocomplete, DejaVu, and every
+helpers, TextDiff, Notifications, Trie autocomplete, bundled fonts, and every
 `dear_imgui_cte_*` bridge family. Required representative symbols are checked
 against both generated snapshots by the canonical binding specification. This
 is an ABI-presence check, not proof that a safe Rust wrapper is sound.
@@ -111,7 +122,11 @@ contracts of both cimCTE and Dear ImGui.
   `dear_imgui_cte_text_editor_reset_autocomplete`, and
   `dear_imgui_cte_text_editor_clear_callbacks`.
 - Upstream string getters use temporary static storage. Copy bytes before the
-  same getter is called again. Memory from `TextEditor_GetText_alloc` must be
+  same getter is called again. Upstream `GetText` adds a terminal newline when
+  the last document line is nonempty; section and line getters return actual
+  document content. The safe crate uses a complete document section for `text()`.
+  Raw tab widths must be in `1..=255` to fit `Glyph::columns` without truncation.
+  Memory from `TextEditor_GetText_alloc` must be
   released only with `TextEditor_GetText_free`.
 - Bridge callbacks retain userdata until replacement,
   `dear_imgui_cte_clear_callbacks`,

@@ -15,7 +15,6 @@ use bevy_math::{Mat4, UVec2, UVec4};
 use bevy_render::{
     ExtractSchedule, Render, RenderApp,
     camera::{CameraRenderGraph, ExtractedCamera},
-    extract_plugin::ExtractPlugin,
     render_resource::{
         BindGroupLayoutEntry, BindingType, BlendState, SamplerBindingType,
         SpecializedRenderPipeline, TextureFormat, TextureUsages,
@@ -100,7 +99,7 @@ struct SecondaryViewportRouteState {
 
 fn app_with_primary_window() -> (App, Entity, Entity, imgui::ManagedTextureId) {
     let mut app = App::new();
-    app.add_plugins(ExtractPlugin::default());
+    app.add_plugins(crate::test_util::render_extraction_plugin());
     app.add_plugins(ImguiPlugin::default());
     app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
 
@@ -229,7 +228,6 @@ fn install_render_view(
                 sorted_camera_index_for_target: 0,
                 exposure: 1.0,
                 hdr,
-                compositing_space: None,
             },
             CameraMainTextureUsages(texture_usages),
             msaa,
@@ -1176,7 +1174,7 @@ fn renderer_prepare_routes_secondary_viewport_and_rejects_relocated_camera_marke
             crate::viewport::native_window::DesktopPositionSupport::Available,
         ),
     );
-    app.add_plugins(ExtractPlugin::default());
+    app.add_plugins(crate::test_util::render_extraction_plugin());
     app.add_plugins(ImguiPlugin::new(
         ImguiPluginConfig::default().with_multi_viewport(true),
     ));

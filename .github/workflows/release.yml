@@ -85,7 +85,10 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
-          toolchain: '1.95.0'
+          toolchain: '1.99.0'
+
+      - name: Install canonical binding toolchain and formatter
+        run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt
 
       - name: Revalidate release identity
         run: >-
@@ -144,7 +147,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
-          toolchain: '1.95.0'
+          toolchain: '1.99.0'
 
       - name: Download prebuilt packages
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8

@@ -142,6 +142,7 @@ enum ManagedContextEntry {
 pub struct ContextId(NonZeroU64);
 
 impl ContextId {
+    #[allow(deprecated, reason = "Keep compatibility with the Rust 1.92 MSRV")]
     pub(crate) fn allocate() -> Option<Self> {
         let value = NEXT_CONTEXT_ID
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {

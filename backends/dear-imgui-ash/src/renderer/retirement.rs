@@ -65,6 +65,7 @@ impl<K, T> RetirementQueue<K, T>
 where
     K: Copy + Eq + Hash,
 {
+    #[allow(deprecated, reason = "Keep compatibility with the Rust 1.92 MSRV")]
     pub(super) fn new() -> Self {
         let queue_id = NEXT_QUEUE_ID
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {

@@ -40,7 +40,7 @@ use bevy_input::touch::{TouchInput, TouchPhase};
 use bevy_math::UVec2;
 use bevy_math::{IVec2, Vec2};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-use bevy_render::{Render, extract_plugin::ExtractPlugin};
+use bevy_render::Render;
 #[cfg(feature = "render")]
 use bevy_render::{
     RenderApp,
@@ -176,7 +176,7 @@ fn app_with_primary_window_and_native_viewports() -> (App, Entity) {
             crate::viewport::native_window::DesktopPositionSupport::Available,
         ),
     );
-    app.add_plugins(ExtractPlugin::default());
+    app.add_plugins(crate::test_util::render_extraction_plugin());
     app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
     app_with_primary_window_in(
         app,

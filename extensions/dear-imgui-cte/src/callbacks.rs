@@ -62,10 +62,24 @@ pub struct PopupEvent {
     pub position: Position,
 }
 
+/// Copied geometry and palette color for one line-number render callback.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LineNumberEvent {
+    pub position: [f32; 2],
+    pub size: [f32; 2],
+    pub digits: usize,
+    /// Zero-based document line being rendered.
+    pub line: usize,
+    /// Zero-based document line containing the cursor.
+    pub cursor_line: usize,
+    pub color: u32,
+}
+
 type EmptyCallback = dyn FnMut();
 type TransactionCallback = dyn for<'a> FnMut(TextChange<'a>);
 type DecoratorCallback = dyn FnMut(&Ui, DecoratorEvent);
 type CaretCallback = dyn FnMut(&Ui, CaretEvent);
+type LineNumberCallback = dyn FnMut(&Ui, LineNumberEvent);
 type PopupCallback = dyn FnMut(&Ui, PopupEvent);
 
 pub(crate) type AutocompleteCallback = dyn for<'a> FnMut(&mut crate::AutocompleteRequest<'a>);
@@ -155,6 +169,7 @@ pub(crate) struct CallbackRegistry {
     transaction: Option<Box<CallbackSlot<TransactionCallback>>>,
     decorator: Option<Box<UiCallbackSlot<DecoratorCallback>>>,
     caret: Option<Box<UiCallbackSlot<CaretCallback>>>,
+    line_number: Option<Box<UiCallbackSlot<LineNumberCallback>>>,
     line_number_context: Option<Box<UiCallbackSlot<PopupCallback>>>,
     text_context: Option<Box<UiCallbackSlot<PopupCallback>>>,
     text_hover: Option<Box<UiCallbackSlot<PopupCallback>>>,
@@ -172,6 +187,7 @@ impl CallbackRegistry {
             transaction: None,
             decorator: None,
             caret: None,
+            line_number: None,
             line_number_context: None,
             text_context: None,
             text_hover: None,
@@ -247,6 +263,13 @@ impl TextEditor {
         Ok(())
     }
 
+    /// Returns whether a change callback is installed, including the built-in Trie callback.
+    pub fn has_change_callback(&self) -> bool {
+        self.with_context("TextEditor::has_change_callback", |raw| unsafe {
+            sys::TextEditor_HasChangeCallback(raw)
+        })
+    }
+
     /// Installs a callback for each inserted or deleted transaction segment.
     pub fn set_transaction_callback<F>(&mut self, callback: F) -> CteResult<()>
     where
@@ -276,6 +299,12 @@ impl TextEditor {
         check_status(OPERATION, status)?;
         self.callbacks.transaction = None;
         Ok(())
+    }
+
+    pub fn has_transaction_callback(&self) -> bool {
+        self.with_context("TextEditor::has_transaction_callback", |raw| unsafe {
+            sys::TextEditor_HasTransactionCallback(raw)
+        })
     }
 
     /// Installs a line decorator called while the editor is rendering.
@@ -343,6 +372,50 @@ impl TextEditor {
         check_status(OPERATION, status)?;
         self.callbacks.caret = None;
         Ok(())
+    }
+
+    /// Installs a line-number renderer called during editor rendering.
+    ///
+    /// Submit drawing commands through the provided [`Ui`]. The event owns its geometry;
+    /// no upstream draw-list pointer can escape the callback.
+    pub fn set_custom_line_number_callback<F>(&mut self, callback: F) -> CteResult<()>
+    where
+        F: FnMut(&Ui, LineNumberEvent) + 'static,
+    {
+        const OPERATION: &str = "TextEditor::set_custom_line_number_callback";
+        self.clear_custom_line_number_callback()?;
+        let slot = UiCallbackSlot::new(
+            Rc::clone(&self.callbacks.active_ui),
+            Box::new(callback) as Box<LineNumberCallback>,
+        );
+        let userdata = slot.userdata();
+        let status = self.try_with_context(OPERATION, |raw| unsafe {
+            sys::dear_imgui_cte_set_custom_line_number_callback(
+                raw,
+                Some(line_number_trampoline),
+                userdata,
+            )
+        })?;
+        check_status(OPERATION, status)?;
+        self.callbacks.line_number = Some(slot);
+        Ok(())
+    }
+
+    pub fn clear_custom_line_number_callback(&mut self) -> CteResult<()> {
+        const OPERATION: &str = "TextEditor::clear_custom_line_number_callback";
+        let status = self.try_with_context(OPERATION, |raw| unsafe {
+            sys::dear_imgui_cte_set_custom_line_number_callback(raw, None, ptr::null_mut())
+        })?;
+        check_status(OPERATION, status)?;
+        self.callbacks.line_number = None;
+        Ok(())
+    }
+
+    pub fn has_custom_line_number_callback(&self) -> bool {
+        self.with_context(
+            "TextEditor::has_custom_line_number_callback",
+            |raw| unsafe { sys::TextEditor_HasCustomLineNumberRenderer(raw) },
+        )
     }
 
     /// Installs content for the popup opened by right-clicking a line number.
@@ -802,6 +875,36 @@ unsafe extern "C" fn popup_trampoline(userdata: *mut c_void, popup: *mut sys::Po
         };
         slot.invoke(|callback, ui| callback(ui, event));
     });
+}
+
+unsafe extern "C" fn line_number_trampoline(
+    userdata: *mut c_void,
+    number: *const sys::CustomLineNumber,
+) {
+    let Some(slot) = (unsafe {
+        userdata
+            .cast::<UiCallbackSlot<LineNumberCallback>>()
+            .as_ref()
+    }) else {
+        return;
+    };
+    let Some(number) = (unsafe { number.as_ref() }) else {
+        return;
+    };
+    abort_on_panic(
+        "dear-imgui-cte: panic in custom-line-number callback",
+        || {
+            let event = LineNumberEvent {
+                position: [number.pos.x, number.pos.y],
+                size: [number.size.x, number.size.y],
+                digits: number.digits,
+                line: number.lineNumber,
+                cursor_line: number.cursorLineNumber,
+                color: number.color,
+            };
+            slot.invoke(|callback, ui| callback(ui, event));
+        },
+    );
 }
 
 unsafe extern "C" fn identifier_trampoline<F: FnMut(&str)>(

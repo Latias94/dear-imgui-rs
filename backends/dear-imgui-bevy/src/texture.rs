@@ -688,7 +688,9 @@ mod render {
         #[test]
         fn stale_generation_acknowledgements_cannot_reclaim_a_reused_slot() {
             let first_asset = AssetId::<Image>::default();
-            let second_asset = AssetId::<Image>::invalid();
+            let second_asset = AssetId::<Image>::Uuid {
+                uuid: bevy_asset::uuid::Uuid::from_u128(1),
+            };
             let mut textures = ImguiBevyTextures::default();
             let first = textures.register_weak(first_asset);
             let stale_identity = first.identity;
@@ -744,7 +746,9 @@ mod render {
             let strong = textures
                 .register_strong(images.add(Image::default()))
                 .expect("Assets::add should return a retaining Bevy handle");
-            let weak = textures.register_weak(AssetId::invalid());
+            let weak = textures.register_weak(AssetId::Uuid {
+                uuid: bevy_asset::uuid::Uuid::from_u128(1),
+            });
 
             assert!(strong.is_strong());
             assert!(strong.strong_asset.is_some());

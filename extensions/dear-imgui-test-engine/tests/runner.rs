@@ -568,6 +568,74 @@ fn runner_distinguishes_pass_failure_and_no_match() {
 }
 
 #[test]
+fn scripts_make_scrolled_items_visible_and_drag_to_screen_positions() {
+    let _guard = test_lock();
+    let mut context = context();
+    let mut engine = attached_engine(&mut context);
+    let reached_destination = Cell::new(false);
+    engine
+        .add_script_test("interaction", "visible-and-drag", |script| {
+            script.set_ref("Script interaction")?;
+            script.yield_frames(ScriptCount::new(2)?)?;
+            script.item_make_visible("Drag target")?;
+            script.assert_item_visible("Drag target")?;
+            script.item_drag_to_pos("Drag target", 90.0, 90.0)?;
+            script.item_drag_with_delta("Drag target", 5.0, 0.0)
+        })
+        .expect("interaction script");
+    let report = TestRunner::new(&mut engine)
+        .filter("visible-and-drag")
+        .frame_budget(nonzero(600))
+        .run_headless(&mut context, |ui, _| {
+            ui.window("Script interaction")
+                .position([0.0, 0.0], dear_imgui_rs::Condition::Always)
+                .size([120.0, 120.0], dear_imgui_rs::Condition::Always)
+                .build(|| {
+                    for _ in 0..20 {
+                        ui.text("scroll padding");
+                    }
+                    ui.button("Drag target");
+                });
+            let [x, y] = ui.mouse_pos();
+            if ui.is_mouse_down(dear_imgui_rs::MouseButton::Left)
+                && (x - 90.0).abs() < 1.0
+                && (y - 90.0).abs() < 1.0
+            {
+                reached_destination.set(true);
+            }
+            Ok::<_, Infallible>(RunnerControl::Continue)
+        })
+        .expect("interaction run");
+    assert_eq!(report.outcome(), RunOutcome::Passed);
+    assert!(reached_destination.get());
+    engine.shutdown().expect("interaction shutdown");
+}
+
+#[test]
+fn scripts_make_visible_reports_missing_items_without_crashing() {
+    let _guard = test_lock();
+    let mut context = context();
+    let mut engine = attached_engine(&mut context);
+    engine
+        .add_script_test("interaction", "missing-visible-item", |script| {
+            script.set_ref("Missing item host")?;
+            script.item_make_visible("Missing item")
+        })
+        .expect("missing item script");
+    let report = TestRunner::new(&mut engine)
+        .filter("missing-visible-item")
+        .frame_budget(nonzero(600))
+        .run_headless(&mut context, |ui, _| {
+            ui.window("Missing item host")
+                .build(|| ui.text("Existing item"));
+            Ok::<_, Infallible>(RunnerControl::Continue)
+        })
+        .expect("missing item is a product failure");
+    assert_eq!(report.outcome(), RunOutcome::Failed);
+    engine.shutdown().expect("missing item shutdown");
+}
+
+#[test]
 fn runner_distinguishes_timeout_and_explicit_abort_after_cleanup() {
     let _guard = test_lock();
 

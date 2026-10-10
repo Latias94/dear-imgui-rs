@@ -25,6 +25,7 @@ Requirements:
 """
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -118,7 +119,7 @@ def print_error(msg: str):
     print(f"{Colors.FAIL}ERR: {msg}{Colors.ENDC}")
 
 
-def run_command(cmd: List[str], cwd: Optional[Path] = None, capture: bool = True, show_output: bool = False) -> Tuple[int, str, str]:
+def run_command(cmd: List[str], cwd: Optional[Path] = None, capture: bool = True, show_output: bool = False, env=None) -> Tuple[int, str, str]:
     """
     Run a command and return (exit_code, stdout, stderr).
 
@@ -138,6 +139,7 @@ def run_command(cmd: List[str], cwd: Optional[Path] = None, capture: bool = True
                 encoding="utf-8",
                 errors="replace",
                 check=False,
+                env=env,
             )
             if show_output:
                 if result.stdout:
@@ -147,7 +149,7 @@ def run_command(cmd: List[str], cwd: Optional[Path] = None, capture: bool = True
             return result.returncode, result.stdout, result.stderr
         else:
             # Stream output in real-time
-            result = subprocess.run(cmd, cwd=cwd, check=False)
+            result = subprocess.run(cmd, cwd=cwd, check=False, env=env)
             return result.returncode, "", ""
     except Exception as e:
         return 1, "", str(e)
@@ -431,10 +433,14 @@ def check_core_binding_contract(
 ) -> Tuple[bool, List[str]]:
     """Regenerate every supported core ABI profile and require exact parity."""
     print_check("Core binding specification and ABI profiles")
-    command = ["cargo", "run", "-p", "xtask", "--", "verify-bindings"]
+    # Keep in sync with CANONICAL_BINDING_RUSTC_VERSION in binding/spec.rs.
+    toolchain = "1.95.0"
+    command = ["cargo", f"+{toolchain}", "run", "-p", "xtask", "--", "verify-bindings"]
     if allow_dirty:
         command.append("--allow-dirty")
-    code, stdout, stderr = run_command(command, cwd=repo_root, capture=True)
+    binding_env = os.environ.copy()
+    binding_env["RUSTUP_TOOLCHAIN"] = toolchain
+    code, stdout, stderr = run_command(command, cwd=repo_root, capture=True, env=binding_env)
     if code != 0:
         detail = stderr.strip() or stdout.strip() or "core binding verification failed"
         print_error(detail)

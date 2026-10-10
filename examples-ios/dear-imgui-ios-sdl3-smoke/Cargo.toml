@@ -16,4 +16,4 @@ dear-imgui-rs = { path = "../../dear-imgui", default-features = false }
 dear-imgui-sdl3 = { path = "../../backends/dear-imgui-sdl3" }
 dear-imgui-wgpu = { path = "../../backends/dear-imgui-wgpu" }
 pollster = "1.0"
-sdl3 = { version = "0.18", features = ["raw-window-handle"] }
+sdl3 = { version = "0.20", features = ["raw-window-handle"] }

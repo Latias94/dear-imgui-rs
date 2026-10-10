@@ -42,6 +42,7 @@ fn representative_upstream_and_bridge_symbols_are_generated() {
     let _ = sys::dear_imgui_cte_iterate_line_data;
     let _ = sys::dear_imgui_cte_set_line_decorator;
     let _ = sys::dear_imgui_cte_set_custom_caret_callback;
+    let _ = sys::dear_imgui_cte_set_custom_line_number_callback;
     let _ = sys::dear_imgui_cte_set_line_number_context_callback;
     let _ = sys::dear_imgui_cte_set_text_context_callback;
     let _ = sys::dear_imgui_cte_set_text_hover_callback;

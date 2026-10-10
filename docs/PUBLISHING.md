@@ -16,6 +16,18 @@ The repository workflow token defaults to read-only. The protected crates.io job
 
 Preparation intentionally changes the worktree; validation requires the resulting commit to be clean.
 
+Install both the development/publishing toolchain (Rust 1.99.0) and the
+canonical binding toolchain before preparing or validating a release:
+
+```bash
+rustup toolchain install 1.95.0 --profile minimal --component rustfmt
+```
+
+The binding updater and pre-publication checks explicitly run Rust 1.95.0
+and its rustfmt, independently of the workspace development toolchain or a
+parent `RUSTUP_TOOLCHAIN` setting. Keep the canonical LLVM version available
+through `LIBCLANG_PATH` when regenerating bindings.
+
 ```bash
 python3 tools/tasks.py release-prepare 0.19.0
 

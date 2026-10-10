@@ -141,6 +141,7 @@ impl ScriptTest<'_> {
         item_click => imgui_test_engine_script_item_click;
         item_double_click => imgui_test_engine_script_item_double_click;
         item_open => imgui_test_engine_script_item_open;
+        item_make_visible => imgui_test_engine_script_item_make_visible;
         item_close => imgui_test_engine_script_item_close;
         item_check => imgui_test_engine_script_item_check;
         item_uncheck => imgui_test_engine_script_item_uncheck;
@@ -413,6 +414,16 @@ impl ScriptTest<'_> {
             sys::imgui_test_engine_script_item_drag_with_delta(self.script.raw(), pointer, dx, dy)
         });
         ffi_status("imgui_test_engine_script_item_drag_with_delta", status)
+    }
+
+    /// Drags an item with the left mouse button to an absolute screen position.
+    pub fn item_drag_to_pos(&mut self, reference: &str, x: f32, y: f32) -> TestEngineResult<()> {
+        validate_reference("item_drag_to_pos", "reference", reference, true)?;
+        validate_finite_pair("item_drag_to_pos", "position", x, y)?;
+        let status = with_scratch_txt(reference, |pointer| unsafe {
+            sys::imgui_test_engine_script_item_drag_to_pos(self.script.raw(), pointer, x, y)
+        });
+        ffi_status("imgui_test_engine_script_item_drag_to_pos", status)
     }
 
     pub fn scroll_to_x(&mut self, reference: &str, value: f32) -> TestEngineResult<()> {

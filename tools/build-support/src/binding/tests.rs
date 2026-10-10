@@ -211,8 +211,8 @@ fn binding_spec_hash_is_stable_and_covers_target_policy() {
     let wasm = BindingSpec::core_wasm("imgui-sys-v1");
 
     assert_eq!(native.deterministic_hash(), native.deterministic_hash());
-    assert_eq!(native.deterministic_hash(), "fnv1a64:b7fbb34dde098a66");
-    assert_eq!(non_windows.deterministic_hash(), "fnv1a64:56a8814db35b4c70");
+    assert_eq!(native.deterministic_hash(), "fnv1a64:3d7b05c3764194ec");
+    assert_eq!(non_windows.deterministic_hash(), "fnv1a64:6c40e31dc302e556");
     assert_ne!(
         native.deterministic_hash(),
         non_windows.deterministic_hash()
@@ -1763,12 +1763,13 @@ fn provenance_changes_are_isolated_to_the_owning_crate_profiles() {
 }
 
 #[test]
-fn cte_prebuilt_rejects_the_identity_without_the_wide_glyph_overlay() {
+fn cte_prebuilt_rejects_the_legacy_wide_glyph_overlay_identity() {
     let binding = extension_identity(ExtensionBinding::Cte);
     let mut old = super::StableHash::new();
     old.field("schema", "extension-binding-identity-v1");
     old.field("extension", "cte");
     old.field("provenance", &binding.provenance().identity_hash());
+    old.field("source_overlay", "cte-wide-glyphs-v1");
     let old_hash = old.finish();
     let profile = ExtensionArtifactProfile::new(
         &extension_core_profile(),
@@ -1785,4 +1786,14 @@ fn cte_prebuilt_rejects_the_identity_without_the_wide_glyph_overlay() {
             .unwrap_err()
             .contains("extension_binding_identity")
     );
+}
+
+#[test]
+fn cte_prebuilt_rejects_unpatched_unicode_range_lookup() {
+    let binding = extension_identity(ExtensionBinding::Cte);
+    let mut unpatched = super::StableHash::new();
+    unpatched.field("schema", "extension-binding-identity-v1");
+    unpatched.field("extension", "cte");
+    unpatched.field("provenance", &binding.provenance().identity_hash());
+    assert_ne!(binding.deterministic_hash(), unpatched.finish());
 }

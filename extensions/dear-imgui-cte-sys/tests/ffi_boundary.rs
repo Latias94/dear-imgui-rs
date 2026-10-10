@@ -60,7 +60,7 @@ fn bridge_owns_cpp_callbacks_and_preserves_length_aware_text() {
         let editor = sys::dear_imgui_cte_text_editor_create();
         assert!(!editor.is_null());
         let source = CString::new("alpha\nbeta").unwrap();
-        sys::TextEditor_SetText(editor, source.as_ptr());
+        sys::TextEditor_SetText_std_string_view(editor, source.as_ptr());
 
         let mut state = FilterState {
             calls: 0,
@@ -79,7 +79,8 @@ fn bridge_owns_cpp_callbacks_and_preserves_length_aware_text() {
 
         let text = sys::TextEditor_GetText_alloc(editor);
         assert!(!text.is_null());
-        assert_eq!(CStr::from_ptr(text).to_bytes(), b"alpha!\nbeta!");
+        // Upstream GetText serializes a final newline; document-range getters do not.
+        assert_eq!(CStr::from_ptr(text).to_bytes(), b"alpha!\nbeta!\n");
         sys::TextEditor_GetText_free(text);
 
         state.fail = true;

@@ -397,7 +397,7 @@ dear-file-browser = { workspace = true, optional = true }
 dear-imgui-reflect = { workspace = true, optional = true, features = ["glam"] }
 dear-imgui-test-engine = { workspace = true, optional = true }
 dear-imgui-cte = { workspace = true, optional = true }
-sdl3-main = { version = "0.6", optional = true }
+sdl3-main = { version = "0.7", optional = true }
 wgpu = { workspace = true }
 winit = { workspace = true }
 glam = { workspace = true }
@@ -420,11 +420,11 @@ ash-window = "0.13"
 [target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
 # On Linux/Windows, prefer building SDL3 from source so CI and users don't
 # need a pre-installed system SDL3. This uses sdl3-sys + CMake internally.
-sdl3 = { version = "0.18", features = ["raw-window-handle", "build-from-source", "ash"], optional = true }
+sdl3 = { version = "0.20", features = ["raw-window-handle", "build-from-source", "ash"], optional = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 # On Apple targets, keep SDL3 acquisition owned by the consuming application.
 # On macOS that usually means a Homebrew/system install. On iOS that usually
 # means an app-provided SDL3.xcframework or an app-owned build-from-source
 # setup. The `raw-window-handle` feature is still required for WGPU.
-sdl3 = { version = "0.18", features = ["raw-window-handle", "ash"], optional = true }
+sdl3 = { version = "0.20", features = ["raw-window-handle", "ash"], optional = true }

@@ -15,6 +15,15 @@
 #include <utility>
 #include <vector>
 
+// Glyph is mirrored by the sys crate because its enums use one-byte storage.
+static_assert(sizeof(TextEditor::Glyph) == 12);
+static_assert(alignof(TextEditor::Glyph) == alignof(uint32_t));
+static_assert(offsetof(TextEditor::Glyph, codepoint) == 0);
+static_assert(offsetof(TextEditor::Glyph, color) == 4);
+static_assert(offsetof(TextEditor::Glyph, breakOption) == 5);
+static_assert(offsetof(TextEditor::Glyph, columns) == 6);
+static_assert(offsetof(TextEditor::Glyph, squiggle) == 8);
+
 struct DearImGuiCteAutocompleteConfig {
     TextEditor::AutoCompleteConfig value;
 };
@@ -54,6 +63,7 @@ public:
         SetDeletor(nullptr);
         ClearLineDecorator();
         ClearCustomCaretRenderer();
+        ClearCustomLineNumberRenderer();
         ClearLineNumberContextMenuCallback();
         ClearTextContextMenuCallback();
         ClearTextHoverCallback();
@@ -245,6 +255,24 @@ DearImGuiCteStatus dear_imgui_cte_set_custom_caret_callback(
     return DearImGuiCteStatus_Ok;
 }
 
+DearImGuiCteStatus dear_imgui_cte_set_custom_line_number_callback(
+    TextEditor* editor,
+    DearImGuiCteLineNumberCallback callback,
+    void* userdata) noexcept {
+    if (editor == nullptr) {
+        return DearImGuiCteStatus_NullArgument;
+    }
+    if (callback == nullptr) {
+        editor->ClearCustomLineNumberRenderer();
+    } else {
+        editor->SetCustomLineNumberRenderer(
+            [callback, userdata](const TextEditor::CustomLineNumber& number) {
+                callback(userdata, &number);
+            });
+    }
+    return DearImGuiCteStatus_Ok;
+}
+
 DearImGuiCteStatus dear_imgui_cte_set_line_number_context_callback(
     TextEditor* editor,
     DearImGuiCtePopupCallback callback,
@@ -393,6 +421,7 @@ DearImGuiCteStatus dear_imgui_cte_clear_callbacks(TextEditor* editor) noexcept {
     editor->SetDeletor(nullptr);
     editor->ClearLineDecorator();
     editor->ClearCustomCaretRenderer();
+    editor->ClearCustomLineNumberRenderer();
     editor->ClearLineNumberContextMenuCallback();
     editor->ClearTextContextMenuCallback();
     editor->ClearTextHoverCallback();

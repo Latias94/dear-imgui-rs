@@ -488,11 +488,12 @@ pub(crate) unsafe fn finish_sdlgpu_renderer_create(
         // Upstream assigns its sentinel even when SDL rejected claim/configuration. Clearing it
         // prevents DestroyWindow from releasing an unclaimed window or releasing a
         // configure-failure claim that the native transaction already rolled back.
-        let _ = control.set_viewport_renderer_user_data(viewport, std::ptr::null_mut());
+        let _ = unsafe { control.set_viewport_renderer_user_data(viewport, std::ptr::null_mut()) };
         control.mark_viewport_failed(viewport);
         return;
     }
-    let Some(renderer_user_data) = control.viewport_renderer_user_data(viewport) else {
+    let Some(renderer_user_data) = (unsafe { control.viewport_renderer_user_data(viewport) })
+    else {
         control.record_renderer_state_replaced("Viewport liveness(create)");
         control.mark_viewport_failed(viewport);
         return;

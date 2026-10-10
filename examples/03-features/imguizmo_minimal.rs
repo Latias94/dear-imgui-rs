@@ -3,7 +3,7 @@
 use dear_app::{AppConfig, RunError, run_ui};
 use dear_imgui_rs::Condition;
 use dear_imguizmo::{GuizmoExt, Mode, Operation};
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Vec3, camera::rh};
 
 fn main() -> Result<(), RunError> {
     let config = AppConfig {
@@ -13,7 +13,7 @@ fn main() -> Result<(), RunError> {
     };
 
     let mut model = Mat4::IDENTITY;
-    let view = Mat4::look_at_rh(Vec3::new(4.0, 3.0, 6.0), Vec3::ZERO, Vec3::Y);
+    let view = rh::view::look_at_mat4(Vec3::new(4.0, 3.0, 6.0), Vec3::ZERO, Vec3::Y);
 
     run_ui(config, move |ui| {
         ui.window("ImGuizmo Minimal")
@@ -29,7 +29,7 @@ fn main() -> Result<(), RunError> {
                 let canvas_position = ui.cursor_screen_pos();
                 let available = ui.content_region_avail();
                 let canvas_size = [available[0].max(1.0), available[1].max(1.0)];
-                let projection = Mat4::perspective_rh_gl(
+                let projection = rh::proj::opengl::perspective(
                     45.0_f32.to_radians(),
                     canvas_size[0] / canvas_size[1],
                     0.1,

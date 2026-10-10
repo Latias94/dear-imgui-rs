@@ -19,6 +19,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Keep the installed prebuilt compiler selected despite rust-toolchain.toml.
+  RUSTUP_TOOLCHAIN: '1.95.0'
 
 jobs:
   build-prebuilt:

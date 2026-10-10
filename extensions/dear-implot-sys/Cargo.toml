@@ -23,7 +23,7 @@ exclude = [
 ]
 
 [package.metadata.dear-imgui-binding]
-source-revision = "8213880419a5d72f2c898ef90a73df6c16507f27"
+source-revision = "11f13e6cd0f80e83d6409e78592b392967fa7954"
 
 # docs.rs configuration for offline builds
 [package.metadata.docs.rs]

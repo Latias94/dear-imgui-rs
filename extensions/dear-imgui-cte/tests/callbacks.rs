@@ -465,14 +465,28 @@ fn clear_callbacks_releases_every_registered_family_once() {
     let raw = unsafe { editor.as_raw() };
     assert!(unsafe { sys::TextEditor_HasLineDecorator(raw) });
     assert!(unsafe { sys::TextEditor_HasCustomCaretRenderer(raw) });
+    let token = token!();
+    editor
+        .set_custom_line_number_callback(move |_, _| {
+            let _ = &token;
+        })
+        .unwrap();
+    assert!(unsafe { sys::TextEditor_HasCustomLineNumberRenderer(raw) });
+    assert!(editor.has_custom_line_number_callback());
+    assert!(editor.has_change_callback());
+    assert!(editor.has_transaction_callback());
     assert!(unsafe { sys::TextEditor_HasLineNumberContextMenuCallback(raw) });
     assert!(unsafe { sys::TextEditor_HasTextContextMenuCallback(raw) });
     assert!(unsafe { sys::TextEditor_HasTextHoverCallback(raw) });
 
     editor.clear_callbacks().unwrap();
-    assert_eq!(drops.get(), 9);
+    assert_eq!(drops.get(), 10);
     assert!(!unsafe { sys::TextEditor_HasLineDecorator(raw) });
     assert!(!unsafe { sys::TextEditor_HasCustomCaretRenderer(raw) });
+    assert!(!unsafe { sys::TextEditor_HasCustomLineNumberRenderer(raw) });
+    assert!(!editor.has_custom_line_number_callback());
+    assert!(!editor.has_change_callback());
+    assert!(!editor.has_transaction_callback());
     assert!(!unsafe { sys::TextEditor_HasLineNumberContextMenuCallback(raw) });
     assert!(!unsafe { sys::TextEditor_HasTextContextMenuCallback(raw) });
     assert!(!unsafe { sys::TextEditor_HasTextHoverCallback(raw) });
@@ -480,5 +494,59 @@ fn clear_callbacks_releases_every_registered_family_once() {
     assert_eq!(language_calls.get(), 0);
     editor.clear_callbacks().unwrap();
     drop(editor);
-    assert_eq!(drops.get(), 9);
+    assert_eq!(drops.get(), 10);
+}
+
+#[test]
+fn custom_line_numbers_render_copied_events_and_release_replaced_callbacks() {
+    let mut context = render_context();
+    let mut editor = TextEditor::create(&context);
+    editor.set_text("alpha\nbeta\ngamma").unwrap();
+    editor.set_show_line_numbers(true);
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let drops = Rc::new(Cell::new(0));
+    let recorded = Rc::clone(&events);
+    let token = DropToken(Rc::clone(&drops));
+    editor
+        .set_custom_line_number_callback(move |ui, event| {
+            let _ = &token;
+            ui.get_window_draw_list()
+                .add_text(event.position, event.color, event.line.to_string());
+            recorded.borrow_mut().push(event);
+        })
+        .unwrap();
+    for _ in 0..2 {
+        render_editor(&mut context, &mut editor, "Custom line numbers");
+    }
+    assert!(events.borrow().iter().any(|event| event.line == 0));
+    assert!(events.borrow().iter().any(|event| event.line == 2));
+    assert!(events.borrow().iter().all(|event| {
+        event.size[0] > 0.0 && event.size[1] > 0.0 && event.digits == 1 && event.cursor_line == 0
+    }));
+    let token = DropToken(Rc::clone(&drops));
+    editor
+        .set_custom_line_number_callback(move |_, _| {
+            let _ = &token;
+        })
+        .unwrap();
+    assert_eq!(drops.get(), 1);
+    editor.clear_custom_line_number_callback().unwrap();
+    assert_eq!(drops.get(), 2);
+    let event_count = events.borrow().len();
+    render_editor(&mut context, &mut editor, "Custom line numbers");
+    assert_eq!(events.borrow().len(), event_count);
+}
+
+#[test]
+fn custom_line_number_bridge_rejects_a_null_editor() {
+    assert_eq!(
+        unsafe {
+            sys::dear_imgui_cte_set_custom_line_number_callback(
+                std::ptr::null_mut(),
+                None,
+                std::ptr::null_mut(),
+            )
+        },
+        sys::DearImGuiCteStatus_NullArgument,
+    );
 }

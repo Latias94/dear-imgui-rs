@@ -66,11 +66,17 @@ class SourceInventoryTests(unittest.TestCase):
                 "third-party/cimCTE/ImGuiColorTextEdit/TextEditor.cpp",
                 "third-party/cimCTE/ImGuiColorTextEdit/TextDiff.cpp",
                 "third-party/cimCTE/ImGuiColorTextEdit/example/dejavu.cpp",
+                "third-party/cimCTE/ImGuiColorTextEdit/example/notosans.cpp",
                 "third-party/cimCTE/ImGuiColorTextEdit/extras/TrieAutoComplete.cpp",
                 "shim/cte_bridge.cpp",
             },
         )
         self.assertIn("bridge", source.native_required_files)
+        editor_source = next(item for item in source.files if item.id == "text-editor")
+        self.assertEqual(
+            editor_source.provider_transform,
+            "patch-cte-unicode-range-lookup",
+        )
         self.assertIsNotNone(source.provider)
         self.assertIn("TextEditor_", source.provider.symbol_prefixes)
         self.assertIn("dear_imgui_cte_", source.provider.symbol_prefixes)

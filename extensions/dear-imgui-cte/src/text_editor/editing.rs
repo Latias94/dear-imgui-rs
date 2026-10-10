@@ -101,8 +101,29 @@ impl TextEditor {
 
     editor_command_invalidate!(grow_selections, sys::TextEditor_GrowSelections);
     editor_command_invalidate!(shrink_selections, sys::TextEditor_ShrinkSelections);
-    editor_command_invalidate!(add_next_occurrence, sys::TextEditor_AddNextOccurrence);
-    editor_command_invalidate!(select_all_occurrences, sys::TextEditor_SelectAllOccurrences);
+    pub fn add_next_occurrence(&mut self) {
+        self.add_next_occurrence_with_whole_word(false);
+    }
+
+    /// Adds the next occurrence, optionally matching complete identifiers only.
+    pub fn add_next_occurrence_with_whole_word(&mut self, whole_word: bool) {
+        self.with_context("TextEditor::add_next_occurrence", |raw| unsafe {
+            sys::TextEditor_AddNextOccurrence(raw, whole_word)
+        });
+        self.invalidate_layout();
+    }
+
+    pub fn select_all_occurrences(&mut self) {
+        self.select_all_occurrences_with_whole_word(false);
+    }
+
+    /// Selects all occurrences, optionally matching complete identifiers only.
+    pub fn select_all_occurrences_with_whole_word(&mut self, whole_word: bool) {
+        self.with_context("TextEditor::select_all_occurrences", |raw| unsafe {
+            sys::TextEditor_SelectAllOccurrences(raw, whole_word)
+        });
+        self.invalidate_layout();
+    }
     editor_bool_query!(
         any_cursor_has_selection,
         sys::TextEditor_AnyCursorHasSelection
@@ -358,21 +379,41 @@ impl TextEditor {
     }
 
     pub fn word_start(&self, position: Position) -> CteResult<Position> {
+        self.word_start_with_whole_word(position, false)
+    }
+
+    /// Finds the word start, optionally disabling runs of whitespace or punctuation.
+    pub fn word_start_with_whole_word(
+        &self,
+        position: Position,
+        whole_word: bool,
+    ) -> CteResult<Position> {
         self.with_context("TextEditor::word_start", |raw| unsafe {
             validate_position(raw, "TextEditor::word_start", position)?;
             Ok(Position::from_raw(sys::TextEditor_FindWordStart(
                 raw,
                 position.into_raw(),
+                whole_word,
             )))
         })
     }
 
     pub fn word_end(&self, position: Position) -> CteResult<Position> {
+        self.word_end_with_whole_word(position, false)
+    }
+
+    /// Finds the word end, optionally disabling runs of whitespace or punctuation.
+    pub fn word_end_with_whole_word(
+        &self,
+        position: Position,
+        whole_word: bool,
+    ) -> CteResult<Position> {
         self.with_context("TextEditor::word_end", |raw| unsafe {
             validate_position(raw, "TextEditor::word_end", position)?;
             Ok(Position::from_raw(sys::TextEditor_FindWordEnd(
                 raw,
                 position.into_raw(),
+                whole_word,
             )))
         })
     }

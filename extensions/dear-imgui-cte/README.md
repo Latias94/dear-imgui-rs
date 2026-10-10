@@ -65,7 +65,7 @@ cargo run -p xtask -- web-demo cte
 
 - `TextEditor` covers document ownership, editing, selection, navigation,
   diagnostics, languages, palettes, undo/redo, search, and render configuration.
-- Typed callbacks cover changes, transactions, decorators, carets, popups,
+- Typed callbacks cover changes, transactions, decorators, carets, line numbers, popups,
   language changes, identifier iteration, and atomic selection/line filters.
 - Custom autocomplete owns its callback and exposes only callback-scoped request
   state. The built-in Trie is attached to and destroyed with its editor.
@@ -73,8 +73,12 @@ cargo run -p xtask -- web-demo cte
   language, palette, and display configuration.
 - `Notifications` owns a timed notification queue rendered through the same
   `Ui` context.
-- `dejavu_font_source` exposes the bundled font through the safe managed atlas
+- `dejavu_font_source` and `noto_sans_sc_font_source` expose bundled fonts through the safe managed atlas
   path without clearing the application's other fonts.
+
+The default occurrence and word-boundary methods retain upstream defaults.
+Use their `_with_whole_word` variants to request complete-word occurrences or
+word-only navigation that leaves whitespace and punctuation in place.
 
 See the family-level disposition ledger in
 [`docs/API_COVERAGE.md`](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/API_COVERAGE.md#imguicolortextedit-api-family-ledger)
@@ -97,8 +101,12 @@ callbacks validate a complete batch before native mutation. Trie autocomplete
 uses upstream-exclusive change, language-change, and autocomplete slots, so the
 safe API reports callback conflicts instead of silently replacing user state.
 
-String getters and palettes return owned Rust copies. Callback event views and
-autocomplete requests are valid only for their invocation. The unsafe `as_raw`
+String getters and palettes return owned Rust copies.
+`TextEditor::text()` preserves the document's existing trailing newlines; it does
+not add upstream `GetText`'s file-serialization newline. Editor and diff tab widths
+must be in `1..=255`, matching upstream's per-glyph column storage.
+
+Callback event views and autocomplete requests are valid only for their invocation. The unsafe `as_raw`
 methods require callers to preserve every ownership, pointer-lifetime, Context,
 and wrapper invariant before returning to safe methods.
 

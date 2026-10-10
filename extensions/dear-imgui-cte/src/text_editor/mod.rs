@@ -77,18 +77,28 @@ impl TextEditor {
     pub fn set_text(&mut self, text: &str) -> CteResult<()> {
         let text = c_string("TextEditor::set_text", text)?;
         self.with_context("TextEditor::set_text", |raw| unsafe {
-            sys::TextEditor_SetText(raw, text.as_ptr())
+            sys::TextEditor_SetText_std_string_view(raw, text.as_ptr())
         });
         self.invalidate_layout();
         Ok(())
     }
 
     /// Returns an owned copy of the complete document.
+    ///
+    /// Preserves existing trailing newlines without adding the terminal newline
+    /// synthesized by upstream's file-oriented `GetText` serialization.
     pub fn text(&self) -> CteResult<String> {
         self.with_context("TextEditor::text", |raw| unsafe {
-            let raw_text = sys::TextEditor_GetText_alloc(raw);
-            let allocation = AllocatedText::new(raw_text, "TextEditor::text")?;
-            copy_c_string("TextEditor::text", allocation.as_ptr())
+            // Upstream normalizes an out-of-range line to the document end.
+            let end = Position::new(sys::TextEditor_GetLineCount(raw), 0);
+            copy_c_string(
+                "TextEditor::text",
+                sys::TextEditor_GetSectionText_DocPos(
+                    raw,
+                    Position::default().into_raw(),
+                    end.into_raw(),
+                ),
+            )
         })
     }
 
@@ -261,26 +271,6 @@ impl Drop for TextEditor {
         }
         // If context teardown already started, touching CTE state is no longer proven safe.
         // Native handles are intentionally leaked rather than calling into a dead context.
-    }
-}
-
-struct AllocatedText(NonNull<c_char>);
-
-impl AllocatedText {
-    fn new(raw: *mut c_char, operation: &'static str) -> CteResult<Self> {
-        NonNull::new(raw)
-            .map(Self)
-            .ok_or(CteError::NullResult { operation })
-    }
-
-    fn as_ptr(&self) -> *const c_char {
-        self.0.as_ptr()
-    }
-}
-
-impl Drop for AllocatedText {
-    fn drop(&mut self) {
-        unsafe { sys::TextEditor_GetText_free(self.0.as_ptr()) };
     }
 }
 

@@ -4,11 +4,11 @@ use bevy_app::{App, MainScheduleOrder, PreUpdate};
 use bevy_ecs::message::Messages;
 #[cfg(feature = "render")]
 use bevy_ecs::prelude::{ResMut, Resource};
-#[cfg(feature = "render")]
-use bevy_ecs::schedule::ScheduleLabel;
 use bevy_ecs::schedule::Schedules;
 #[cfg(feature = "render")]
-use bevy_render::{Render, RenderApp, extract_plugin::ExtractPlugin};
+use bevy_ecs::schedule::{ScheduleLabel, SystemSet};
+#[cfg(feature = "render")]
+use bevy_render::{Render, RenderApp, RenderSystems, extract_plugin::ExtractPlugin};
 #[cfg(feature = "render")]
 use bevy_window::{PrimaryWindow, Window};
 use dear_imgui_bevy::{
@@ -86,12 +86,12 @@ fn plugin_registers_the_primary_registry_and_private_driver_schedule() {
         "the plugin must install its private serial driver schedule"
     );
 
-    assert_eq!(BEVY_TARGET_VERSION, "0.19.1");
+    assert_eq!(BEVY_TARGET_VERSION, "0.20.0");
     assert_eq!(
         BEVY_TARGET_COMMIT,
-        "b56fc29d3016e641754765244b5ba3f9cc504671"
+        "b3bdd75becaffe9a16677cf5bae5bd6d198f052b"
     );
-    assert_eq!(WGPU_TARGET_VERSION, "29.0.3");
+    assert_eq!(WGPU_TARGET_VERSION, "30.0.1");
 }
 
 #[test]
@@ -371,7 +371,13 @@ fn foreign_platform_name_is_not_overwritten_when_bevy_does_not_own_the_platform_
 #[cfg(feature = "render")]
 fn app_with_render_schedule() -> App {
     let mut app = App::new();
-    app.add_plugins(ExtractPlugin::default());
+    app.add_plugins(ExtractPlugin::<RenderApp>::new(
+        |_, _| {},
+        Render::base_schedule,
+        Render.intern(),
+        RenderSystems::ExtractCommands.intern(),
+        RenderSystems::PostCleanup.intern(),
+    ));
     app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
     app
 }

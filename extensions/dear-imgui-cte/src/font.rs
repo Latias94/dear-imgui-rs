@@ -8,33 +8,58 @@ use std::{ffi::c_void, slice};
 /// the renderer builds or uploads the atlas. Unlike cimCTE's raw `SetDejavu`,
 /// this helper does not clear the atlas or bypass renderer texture management.
 pub fn dejavu_font_source(size_pixels: f32) -> CteResult<FontSource<'static>> {
-    const OPERATION: &str = "dejavu_font_source";
-    validate_finite_f32(OPERATION, "size_pixels", size_pixels)?;
+    bundled_font_source(
+        "dejavu_font_source",
+        "DejaVu",
+        size_pixels,
+        sys::GetDejavu,
+        FontLoaderFlags::MONO_HINTING,
+    )
+}
+
+/// Returns cimCTE's bundled Noto Sans SC font through the managed font atlas.
+///
+/// Add the returned source before renderer initialization. The compressed bytes
+/// are immutable upstream storage and remain valid for the application's lifetime.
+pub fn noto_sans_sc_font_source(size_pixels: f32) -> CteResult<FontSource<'static>> {
+    bundled_font_source(
+        "noto_sans_sc_font_source",
+        "Noto Sans SC",
+        size_pixels,
+        sys::Getnotosans,
+        FontLoaderFlags::LIGHT_HINTING,
+    )
+}
+
+fn bundled_font_source(
+    operation: &'static str,
+    name: &str,
+    size_pixels: f32,
+    getter: unsafe extern "C" fn(*mut *mut c_void) -> std::ffi::c_int,
+    flags: FontLoaderFlags,
+) -> CteResult<FontSource<'static>> {
+    validate_finite_f32(operation, "size_pixels", size_pixels)?;
     if size_pixels <= 0.0 {
         return Err(CteError::InvalidValue {
-            operation: OPERATION,
+            operation,
             parameter: "size_pixels",
             requirement: "greater than zero",
         });
     }
 
     let config = FontConfig::new()
-        .name("DejaVu")
+        .name(name)
         .oversample_h(1)
         .oversample_v(1)
-        .font_loader_flags(FontLoaderFlags::MONO_HINTING);
-    let source =
-        unsafe { FontSource::compressed_ttf_data_with_size(bundled_dejavu_data(), size_pixels) };
-    Ok(source.with_config(config))
-}
-
-fn bundled_dejavu_data() -> &'static [u8] {
+        .font_loader_flags(flags);
     let mut data: *mut c_void = std::ptr::null_mut();
-    let size = unsafe { sys::GetDejavu(&mut data) };
+    let size = unsafe { getter(&mut data) };
     assert!(
         !data.is_null() && size > 0,
-        "cimCTE returned invalid bundled DejaVu font data"
+        "cimCTE returned invalid bundled font data"
     );
     let size = usize::try_from(size).expect("positive c_int must fit usize");
-    unsafe { slice::from_raw_parts(data.cast::<u8>(), size) }
+    let bytes = unsafe { slice::from_raw_parts(data.cast::<u8>(), size) };
+    let source = unsafe { FontSource::compressed_ttf_data_with_size(bytes, size_pixels) };
+    Ok(source.with_config(config))
 }

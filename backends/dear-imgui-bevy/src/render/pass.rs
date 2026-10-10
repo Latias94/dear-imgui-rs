@@ -17,14 +17,17 @@ pub(super) struct ImguiRenderPassParams<'w> {
     renderer_releases: Res<'w, ImguiRendererReleases>,
 }
 
+type ImguiOverlayView<'a> = (
+    &'a ViewTarget,
+    &'a ExtractedView,
+    &'a ExtractedCamera,
+    &'a CameraMainTextureUsages,
+    &'a Msaa,
+    Option<&'a ResolvedCompositingSpace>,
+);
+
 pub(super) fn render_imgui_overlay(
-    view: ViewQuery<(
-        &ViewTarget,
-        &ExtractedView,
-        &ExtractedCamera,
-        &CameraMainTextureUsages,
-        &Msaa,
-    )>,
+    view: ViewQuery<ImguiOverlayView>,
     params: ImguiRenderPassParams,
     mut render_context: RenderContext,
 ) {
@@ -41,7 +44,7 @@ pub(super) fn render_imgui_overlay(
         return;
     }
 
-    let (view_target, view, camera, texture_usages, msaa) = view.into_inner();
+    let (view_target, view, camera, texture_usages, msaa, compositing_space) = view.into_inner();
     let view_id = view.retained_view_entity;
     let Some(pipeline_id) = params.queued.get(view_id) else {
         return;
@@ -65,7 +68,7 @@ pub(super) fn render_imgui_overlay(
     }
     drawable.sort_by_key(|draw| (draw.order, draw.context_id.get().get()));
 
-    let gamma = ImguiUniforms::gamma_for_target(view.target_format, camera.compositing_space);
+    let compositing_space = ResolvedCompositingSpace::space(compositing_space);
     let mut common_bind_groups = HashMap::new();
     for context_id in drawable.iter().map(|draw| draw.context_id) {
         let Entry::Vacant(entry) = common_bind_groups.entry(context_id) else {
@@ -74,7 +77,7 @@ pub(super) fn render_imgui_overlay(
         let Some(uniforms) = params
             .prepared
             .uniforms_for_view(context_id, view_id)
-            .map(|uniforms| uniforms.with_gamma(gamma))
+            .map(|uniforms| uniforms.with_compositing_space(compositing_space))
         else {
             continue;
         };
@@ -202,7 +205,7 @@ fn prepared_draw_matches_view(
 /// do an initial present or mark a view as needing present before a real output pass reaches the
 /// swapchain, so this final pass is intentionally attached to the root render graph `Finish` set.
 pub(super) fn ensure_presentable_window_outputs(
-    windows: Res<ExtractedWindows>,
+    windows: Query<(&MainEntity, &ExtractedWindow)>,
     extracted: Res<ImguiExtractedRenderFrame>,
     views: Query<(&ViewTarget, &ExtractedCamera)>,
     clear_color: Res<ClearColor>,
@@ -216,15 +219,15 @@ pub(super) fn ensure_presentable_window_outputs(
             .flat_map(|context_id| extracted.camera_targets(context_id)),
     );
 
-    for window in windows
-        .values()
-        .filter(|window| imgui_window_outputs.contains(&window.entity))
+    for (main_entity, window) in windows
+        .iter()
+        .filter(|(main_entity, _)| imgui_window_outputs.contains(&main_entity.id()))
     {
         let mut view_needs_present = false;
         let mut output_color = None;
 
         for (view_target, camera) in &views {
-            if !camera_targets_window(camera, window.entity) {
+            if !camera_targets_window(camera, main_entity.id()) {
                 continue;
             }
             view_needs_present |= view_target.needs_present();

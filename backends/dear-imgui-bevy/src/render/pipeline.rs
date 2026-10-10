@@ -11,12 +11,14 @@ pub const IMGUI_VERTEX_ENTRY_POINT: &str = "vs_main";
 /// Fragment shader entry point used by the Bevy-native ImGui pipeline.
 pub const IMGUI_FRAGMENT_ENTRY_POINT: &str = "fs_main";
 
-/// WGSL source for the Bevy-native Dear ImGui renderer.
+/// WESL source for the Bevy-native Dear ImGui renderer.
 ///
 /// BEVY-090 keeps this shader local to the Bevy backend instead of reusing
 /// `dear-imgui-wgpu`, because Bevy owns render schedules, target formats, and pipeline
 /// specialization.
 pub const IMGUI_SHADER_SOURCE: &str = r#"
+import bevy_render::color_operations::{srgb_to_linear, linear_to_srgb, linear_rgb_to_oklab};
+
 struct VertexInput {
     @location(0) position: vec2<f32>,
     @location(1) uv: vec2<f32>,
@@ -31,8 +33,8 @@ struct VertexOutput {
 
 struct ImguiUniforms {
     mvp: mat4x4<f32>,
-    gamma: f32,
-    _padding: vec3<f32>,
+    compositing_space: u32,
+    _padding: vec3<u32>,
 };
 
 @group(0) @binding(0)
@@ -48,7 +50,7 @@ var imgui_sampler: sampler;
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     out.position = uniforms.mvp * vec4<f32>(in.position, 0.0, 1.0);
-    out.color = in.color;
+    out.color = vec4<f32>(srgb_to_linear(in.color.rgb), in.color.a);
     out.uv = in.uv;
     return out;
 }
@@ -56,8 +58,13 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let color = in.color * textureSample(imgui_texture, imgui_sampler, in.uv);
-    let corrected = pow(color.rgb, vec3<f32>(uniforms.gamma));
-    return vec4<f32>(corrected, color.a);
+    if uniforms.compositing_space == 1u {
+        return vec4<f32>(linear_to_srgb(color.rgb), color.a);
+    }
+    if uniforms.compositing_space == 2u {
+        return vec4<f32>(linear_rgb_to_oklab(color.rgb), color.a);
+    }
+    return color;
 }
 "#;
 
@@ -67,10 +74,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 pub struct ImguiUniforms {
     /// Orthographic projection matrix that maps ImGui display coordinates to clip space.
     pub mvp: [[f32; 4]; 4],
-    /// Gamma used to linearize colors before writing into the render target.
-    pub gamma: f32,
+    /// Target encoding: 0 for linear RGB, 1 for sRGB, and 2 for Oklab.
+    pub compositing_space: u32,
     /// Padding to satisfy WGSL uniform layout.
-    pub _padding: [f32; 7],
+    pub _padding: [u32; 7],
 }
 
 impl ImguiUniforms {
@@ -93,29 +100,20 @@ impl ImguiUniforms {
                     1.0,
                 ],
             ],
-            gamma: 1.0,
-            _padding: [0.0; 7],
+            compositing_space: 0,
+            _padding: [0; 7],
         }
     }
 
-    /// Set the gamma value used by the fragment shader.
+    /// Encode the fragment output in the camera stack's resolved compositing space.
     #[must_use]
-    pub fn with_gamma(mut self, gamma: f32) -> Self {
-        self.gamma = gamma;
+    pub fn with_compositing_space(mut self, space: Option<CompositingSpace>) -> Self {
+        self.compositing_space = match space {
+            None | Some(CompositingSpace::Linear) => 0,
+            Some(CompositingSpace::Srgb) => 1,
+            Some(CompositingSpace::Oklab) => 2,
+        };
         self
-    }
-
-    /// Gamma correction value for a given render target format and Bevy compositing space.
-    #[must_use]
-    pub fn gamma_for_target(
-        format: TextureFormat,
-        compositing_space: Option<CompositingSpace>,
-    ) -> f32 {
-        if format.is_srgb() || compositing_space == Some(CompositingSpace::Srgb) {
-            2.2
-        } else {
-            1.0
-        }
     }
 }
 

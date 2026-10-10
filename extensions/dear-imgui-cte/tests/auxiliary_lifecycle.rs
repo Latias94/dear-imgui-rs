@@ -1,4 +1,6 @@
-use dear_imgui_cte::{CteError, Notifications, TextDiff, dejavu_font_source};
+use dear_imgui_cte::{
+    CteError, Notifications, TextDiff, dejavu_font_source, noto_sans_sc_font_source,
+};
 use dear_imgui_rs::{Context, sys};
 
 #[test]
@@ -71,6 +73,26 @@ fn bundled_dejavu_source_rejects_invalid_reference_sizes() {
     ));
     assert!(matches!(
         dejavu_font_source(f32::NAN),
+        Err(CteError::NonFinite { .. })
+    ));
+}
+
+#[test]
+fn bundled_noto_source_builds_through_the_managed_font_atlas() {
+    let context = Context::create();
+    let source = noto_sans_sc_font_source(15.0).unwrap();
+    let _font = context.font_atlas().add_font(&[source]);
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .expect("headless CTE tests require the legacy font-atlas capability")
+        .build();
+    assert!(matches!(
+        noto_sans_sc_font_source(0.0),
+        Err(CteError::InvalidValue { .. })
+    ));
+    assert!(matches!(
+        noto_sans_sc_font_source(f32::NAN),
         Err(CteError::NonFinite { .. })
     ));
 }

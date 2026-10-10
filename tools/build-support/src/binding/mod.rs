@@ -157,7 +157,7 @@ const CORE_WASM_DEFINES: &[&str] = &[
     "IMGUI_USE_WCHAR32",
 ];
 const CORE_INCLUDE_PATHS: &[&str] = &[".", "imgui"];
-pub const CORE_BINDGEN_GENERATOR: &str = "rust-bindgen 0.72.1";
+pub const CORE_BINDGEN_GENERATOR: &str = "rust-bindgen 0.73.2";
 pub const BINDGEN_EXTRA_CLANG_ARGS_PREFIX: &str = "BINDGEN_EXTRA_CLANG_ARGS";
 pub const CORE_WASM_TARGET: &str = "wasm32-unknown-unknown";
 

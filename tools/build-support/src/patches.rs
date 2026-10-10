@@ -1073,152 +1073,6 @@ bool ImGui::DataTypeApplyFromText(const char* buf, ImGuiDataType data_type, void
     Ok(restore_cpp_newlines(patched, newline))
 }
 
-/// Version of the temporary CTE wide-glyph source overlay.
-///
-/// This is part of the CTE prebuilt identity. Bump it whenever the overlay
-/// changes so artifacts built from an older implementation cannot be reused.
-pub const CTE_WIDE_GLYPH_PATCH_VERSION: &str = "cte-wide-glyphs-v1";
-
-const CTE_GLYPH_COLUMNS: &str = concat!(
-    "// Glyph columns reserved on the monospace grid.\n",
-    "// East Asian wide/fullwidth codepoints occupy two cells.\n",
-    "static size_t glyphColumns(uint32_t codepoint) {\n",
-    "    if ((codepoint >= 0x1100 && codepoint <= 0x115F)\n",
-    "        || (codepoint >= 0x2E80 && codepoint <= 0xA4CF)\n",
-    "        || (codepoint >= 0xAC00 && codepoint <= 0xD7A3)\n",
-    "        || (codepoint >= 0xF900 && codepoint <= 0xFAFF)\n",
-    "        || (codepoint >= 0xFE30 && codepoint <= 0xFE4F)\n",
-    "        || (codepoint >= 0xFF00 && codepoint <= 0xFF60)\n",
-    "        || (codepoint >= 0xFFE0 && codepoint <= 0xFFE6)\n",
-    "        || (codepoint >= 0x1F300 && codepoint <= 0x1FAFF)\n",
-    "        || (codepoint >= 0x20000 && codepoint <= 0x3FFFD)) {\n",
-    "        return 2;\n",
-    "    }\n",
-    "    return 1;\n",
-    "}\n\n"
-);
-
-/// Apply the upstream ImGuiColorTextEdit #88 wide-glyph layout fix.
-///
-/// Backport of goossens/ImGuiColorTextEdit commit
-/// 26da49ecbbde309595c01bef1aa0b0ecd293a464 by chemPolonium (MIT).
-/// Remove both CTE overlays once the cimCTE pin incorporates the upstream fix.
-///
-/// cimCTE currently pins a revision before the fix. The overlay is deliberately
-/// source based and fail-closed: any upstream drift must be reviewed before a
-/// build can continue.
-pub fn patch_cte_text_editor_for_wide_glyphs(source: &str) -> Result<String, String> {
-    let (mut patched, newline) = normalize_cpp_source(source);
-
-    patched = replace_cpp_source_once(
-        &patched,
-        "#include \"TextEditor.h\"\n\n",
-        &format!("#include \"TextEditor.h\"\n\n{CTE_GLYPH_COLUMNS}"),
-        "CTE wide-glyph helper insertion",
-    )?;
-
-    patched = replace_cpp_source_once(
-        &patched,
-        concat!(
-            "\t\t\t\t// handle tabs\n",
-            "\t\t\t\tif (codepoint == '\\t') {\n",
-            "\t\t\t\t\tcolumn += config.tabSize - (column % config.tabSize);\n",
-            "\n",
-            "\t\t\t\t// handle regular glyphs\n",
-            "\t\t\t\t} else {\n",
-            "\t\t\t\t\tcolumn++;\n",
-            "\t\t\t\t}"
-        ),
-        concat!(
-            "\t\t\t\t// handle tabs\n",
-            "\t\t\t\tif (codepoint == '\\t') {\n",
-            "\t\t\t\t\tcolumn += config.tabSize - (column % config.tabSize);\n",
-            "\n",
-            "\t\t\t\t// handle regular glyphs\n",
-            "\t\t\t\t} else {\n",
-            "\t\t\t\t\tcolumn += glyphColumns(codepoint);\n",
-            "\t\t\t\t}"
-        ),
-        "CTE squiggle column advance",
-    )?;
-
-    patched = replace_cpp_source_once(
-        &patched,
-        concat!(
-            "\t\t\t// handle regular glyphs\n",
-            "\t\t\t} else {\n",
-            "\t\t\t\tif (column >= firstRenderableColumn) {\n",
-            "\t\t\t\t\tfont->RenderChar(drawList, fontSize, glyphPos, palette.get(glyph.color), codepoint);\n",
-            "\t\t\t\t}\n",
-            "\n",
-            "\t\t\t\tcolumn++;\n",
-            "\t\t\t}"
-        ),
-        concat!(
-            "\t\t\t// handle regular glyphs\n",
-            "\t\t\t} else {\n",
-            "\t\t\t\tif (column >= firstRenderableColumn) {\n",
-            "\t\t\t\t\tfont->RenderChar(drawList, fontSize, glyphPos, palette.get(glyph.color), codepoint);\n",
-            "\t\t\t\t}\n",
-            "\n",
-            "\t\t\t\tcolumn += glyphColumns(codepoint);\n",
-            "\t\t\t}"
-        ),
-        "CTE text column advance",
-    )?;
-
-    for (before, after, description) in [
-        (
-            "columns = (codepoint == '\\t') ? ((columns / tabSize) + 1) * tabSize : columns + 1;",
-            "columns = (codepoint == '\\t') ? ((columns / tabSize) + 1) * tabSize : columns + glyphColumns(codepoint);",
-            "CTE wrapped-line column advance",
-        ),
-        (
-            "line.columns = (glyph.codepoint == '\\t') ? ((line.columns / tabSize) + 1) * tabSize : line.columns + 1;",
-            "line.columns = (glyph.codepoint == '\\t') ? ((line.columns / tabSize) + 1) * tabSize : line.columns + glyphColumns(glyph.codepoint);",
-            "CTE line column calculation",
-        ),
-    ] {
-        patched = replace_cpp_source_once(&patched, before, after, description)?;
-    }
-
-    patched = replace_cpp_source_exact(
-        &patched,
-        "visPos.column = (glyph->codepoint == '\\t') ? ((visPos.column / tabSize) + 1) * tabSize : visPos.column + 1;",
-        "visPos.column = (glyph->codepoint == '\\t') ? ((visPos.column / tabSize) + 1) * tabSize : visPos.column + glyphColumns(glyph->codepoint);",
-        2,
-        "CTE document/visual column calculations",
-    )?;
-    patched = replace_cpp_source_exact(
-        &patched,
-        "rightColumn = (glyph->codepoint == '\\t') ? ((rightColumn / tabSize) + 1) * tabSize : rightColumn + 1;",
-        "rightColumn = (glyph->codepoint == '\\t') ? ((rightColumn / tabSize) + 1) * tabSize : rightColumn + glyphColumns(glyph->codepoint);",
-        2,
-        "CTE visual/screen column calculations",
-    )?;
-
-    Ok(restore_cpp_newlines(patched, newline))
-}
-
-/// Keep both TextDiff renderers consistent with the patched typesetter.
-/// Without this overlay, their one-cell advance can run past the glyph array.
-pub fn patch_cte_text_diff_for_wide_glyphs(source: &str) -> Result<String, String> {
-    let (mut patched, newline) = normalize_cpp_source(source);
-    patched = replace_cpp_source_once(
-        &patched,
-        "#include \"TextDiff.h\"",
-        &format!("#include \"TextDiff.h\"\n\n{CTE_GLYPH_COLUMNS}"),
-        "CTE diff wide-glyph helper insertion",
-    )?;
-    let before = concat!(
-        "\t\t\t\tfont->RenderChar(drawList, fontSize, glyphPos, diff.palette.get(glyph.color), codepoint);\n",
-        "\t\t\t}\n\n\t\t\tcolumn++;"
-    );
-    let after = before.replace("column++;", "column += glyphColumns(codepoint);");
-    patched = replace_cpp_source_exact(&patched, before, &after, 2, "CTE diff glyph advances")?;
-    Ok(restore_cpp_newlines(patched, newline))
-}
-
 /// Patch ImNodes persistence to use Dear ImGui's file-handle abstraction.
 ///
 /// Upstream ImNodes currently assigns `ImFileOpen()` to `FILE*` and calls the
@@ -1258,6 +1112,58 @@ pub fn patch_imnodes_cpp_for_file_handle(source: &str) -> Result<String, String>
     Ok(restore_cpp_newlines(patched, newline))
 }
 
+/// Source contract for CTE's bounded Unicode range searches and fullwidth ranges.
+pub const CTE_UNICODE_RANGE_LOOKUP_PATCH_VERSION: &str = "cte-unicode-range-lookup-v1";
+
+/// Correct closed Unicode range lookup without stepping outside the table.
+pub fn patch_cte_text_editor_unicode_range_lookup(source: &str) -> Result<String, String> {
+    let (mut patched, newline) = normalize_cpp_source(source);
+    for (signature, found, missing) in [
+        (
+            "LBC lineBreakRangeFind(const T& table, C codepoint)",
+            "mid->lbc",
+            "LBC::undefined",
+        ),
+        (
+            "bool rangeContains(const T& table, C codepoint)",
+            "(mid->stride == 1) || ((codepoint - mid->low) % mid->stride == 0)",
+            "false",
+        ),
+        (
+            "bool rangeFind(const T& table, C codepoint)",
+            "true",
+            "false",
+        ),
+        (
+            "const CaseRange<C>* caseRangeFind(const T& table, C codepoint)",
+            "mid",
+            "nullptr",
+        ),
+    ] {
+        let original = format!(
+            "{signature} {{\n\tauto low = std::begin(table);\n\tauto high = std::end(table);\n\n\twhile (low <= high) {{\n\t\tauto mid = low + (high - low) / 2;\n\n\t\tif (codepoint >= mid->low && codepoint <= mid->high) {{\n\t\t\treturn {found};\n\n\t\t}} else if (codepoint < mid->low) {{\n\t\t\thigh = mid - 1;\n\n\t\t}} else {{\n\t\t\tlow = mid + 1;\n\t\t}}\n\t}}\n\n\treturn {missing};\n}}"
+        );
+        let replacement = format!(
+            "{signature} {{\n\tauto mid = std::lower_bound(std::begin(table), std::end(table), codepoint,\n\t\t[](const auto& range, C value) {{ return range.high < value; }});\n\tif (mid != std::end(table) && codepoint >= mid->low) {{\n\t\treturn {found};\n\t}}\n\treturn {missing};\n}}"
+        );
+        patched = replace_cpp_source_once(&patched, &original, &replacement, signature)?;
+    }
+    // Unicode EastAsianWidth marks U+3000 and these FFxx ranges as Fullwidth (F).
+    patched = replace_cpp_source_once(
+        &patched,
+        "{0x2ff0, 0x2fff}, {0x3001, 0x303e}",
+        "{0x2ff0, 0x2fff}, {0x3000, 0x303e}",
+        "CTE fullwidth ideographic space",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        "{0xfe10, 0xfe19}, {0xfe30, 0xfe52}, {0xfe54, 0xfe66}, {0xfe68, 0xfe6b}\n};",
+        "{0xfe10, 0xfe19}, {0xfe30, 0xfe52}, {0xfe54, 0xfe66}, {0xfe68, 0xfe6b},\n\t{0xff01, 0xff60}, {0xffe0, 0xffe6}\n};",
+        "CTE fullwidth forms",
+    )?;
+    Ok(restore_cpp_newlines(patched, newline))
+}
+
 fn normalize_cpp_source(source: &str) -> (String, &'static str) {
     let newline = if source.contains("\r\n") {
         "\r\n"
@@ -1273,22 +1179,6 @@ fn restore_cpp_newlines(source: String, newline: &str) -> String {
     } else {
         source
     }
-}
-
-fn replace_cpp_source_exact(
-    source: &str,
-    marker: &str,
-    replacement: &str,
-    expected: usize,
-    description: &str,
-) -> Result<String, String> {
-    let count = source.matches(marker).count();
-    if count != expected {
-        return Err(format!(
-            "{description}: expected {expected} source markers, found {count}"
-        ));
-    }
-    Ok(source.replace(marker, replacement))
 }
 
 fn replace_cpp_source_once(
@@ -1309,45 +1199,34 @@ fn replace_cpp_source_once(
 #[cfg(test)]
 mod tests {
     use super::{
-        patch_imgui_cpp_for_safe_demo, patch_imgui_demo_cpp_for_safe_demo,
+        patch_cte_text_editor_unicode_range_lookup, patch_imgui_cpp_for_safe_demo,
+        patch_imgui_demo_cpp_for_safe_demo,
         patch_imgui_widgets_cpp_for_defined_numeric_conversions, patch_imnodes_cpp_for_file_handle,
         patch_test_engine_capture_cpp_for_defined_geometry,
         patch_test_engine_cpp_for_presentation_abort,
     };
 
     #[test]
-    fn cte_wide_glyph_overlays_preserve_newlines_and_reject_drift() {
-        let editor = include_str!(concat!(
-            "../../../extensions/dear-imgui-cte-sys/third-party/",
-            "cimCTE/ImGuiColorTextEdit/TextEditor.cpp"
+    fn cte_unicode_range_patch_matches_upstream_and_rejects_drift() {
+        let source = include_str!(concat!(
+            "../../../extensions/dear-imgui-cte-sys/third-party/cimCTE/",
+            "ImGuiColorTextEdit/TextEditor.cpp"
         ));
-        let diff = include_str!(concat!(
-            "../../../extensions/dear-imgui-cte-sys/third-party/",
-            "cimCTE/ImGuiColorTextEdit/TextDiff.cpp"
-        ));
-        for (source, transform) in [
-            (
-                editor,
-                super::patch_cte_text_editor_for_wide_glyphs as fn(&str) -> Result<String, String>,
-            ),
-            (
-                diff,
-                super::patch_cte_text_diff_for_wide_glyphs as fn(&str) -> Result<String, String>,
-            ),
-        ] {
-            let lf = source.replace("\r\n", "\n");
-            let patched = transform(&lf).unwrap();
-            assert_eq!(
-                transform(&lf.replace('\n', "\r\n")).unwrap(),
-                patched.replace('\n', "\r\n")
-            );
-            assert!(
-                transform(&patched).is_err(),
-                "already patched source must require review"
-            );
-            assert!(transform(&lf.replace("column++;", "++column;")).is_err());
-            assert!(transform(&(lf.clone() + &lf)).is_err());
-        }
+        let patched = patch_cte_text_editor_unicode_range_lookup(source).unwrap();
+        assert_eq!(patched.matches("auto mid = std::lower_bound(").count(), 4);
+        assert!(!patched.contains("while (low <= high)"));
+        assert!(patched.contains("{0x3000, 0x303e}"));
+        assert!(patched.contains("{0xff01, 0xff60}, {0xffe0, 0xffe6}"));
+        assert!(patch_cte_text_editor_unicode_range_lookup(&patched).is_err());
+        let drifted = source.replace("bool rangeFind(", "bool renamedRangeFind(");
+        assert!(patch_cte_text_editor_unicode_range_lookup(&drifted).is_err());
+        let crlf = source.replace("\r\n", "\n").replace('\n', "\r\n");
+        assert_eq!(
+            patch_cte_text_editor_unicode_range_lookup(&crlf)
+                .unwrap()
+                .replace("\r\n", "\n"),
+            patched.replace("\r\n", "\n")
+        );
     }
 
     #[test]

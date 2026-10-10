@@ -11,7 +11,7 @@ mod scene;
 use dear_imgui_rs::*;
 use dear_imgui_wgpu::{FramebufferExtent, WgpuRenderer};
 use dear_imgui_winit::WinitPlatform;
-use glam::{Mat4, Quat, Vec3, Vec4};
+use glam::{Mat4, Quat, Vec3, Vec4, camera::rh};
 use pollster::block_on;
 use scene::{RenderTarget, SceneRenderer};
 use std::{error::Error, sync::Arc, time::Instant};
@@ -184,9 +184,9 @@ impl EditorState {
             self.camera_distance * self.camera_pitch.sin(),
             self.camera_distance * self.camera_yaw.sin() * self.camera_pitch.cos(),
         );
-        self.camera_view = Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Y);
+        self.camera_view = rh::view::look_at_mat4(eye, Vec3::ZERO, Vec3::Y);
         self.camera_proj =
-            Mat4::perspective_rh(45.0_f32.to_radians(), aspect.max(0.01), 0.1, 100.0);
+            rh::proj::directx::perspective(45.0_f32.to_radians(), aspect.max(0.01), 0.1, 100.0);
     }
 
     fn process_console_command(&mut self) {
@@ -505,8 +505,8 @@ impl AppWindow {
             &mut encoder,
             &imgui.scene_renderer,
             &self.queue,
-            Mat4::look_at_rh(Vec3::new(4.0, 3.2, 4.0), Vec3::ZERO, Vec3::Y),
-            Mat4::perspective_rh(45.0_f32.to_radians(), 16.0 / 9.0, 0.1, 100.0),
+            rh::view::look_at_mat4(Vec3::new(4.0, 3.2, 4.0), Vec3::ZERO, Vec3::Y),
+            rh::proj::directx::perspective(45.0_f32.to_radians(), 16.0 / 9.0, 0.1, 100.0),
             &models,
             true,
         );

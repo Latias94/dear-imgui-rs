@@ -1225,11 +1225,12 @@ impl AppWindow {
         let eye = glam::Vec3::new(12.0, 6.0, 4.0);
         let target = glam::Vec3::ZERO;
         let up = glam::Vec3::new(3.0, 1.0, 0.0).normalize();
-        let view = glam::Mat4::look_at_rh(eye, target, up);
+        let view = glam::camera::rh::view::look_at_mat4(eye, target, up);
         // Match upstream: aspectRatio = height/width; fov = 45deg * aspectRatio; perspective(fov, 1/aspectRatio, ...)
         let aspect_ratio_hw = self.rtt.size.1.max(1) as f32 / self.rtt.size.0.max(1) as f32;
         let fov = std::f32::consts::FRAC_PI_4 * aspect_ratio_hw;
-        let proj = glam::Mat4::perspective_rh(fov, 1.0 / aspect_ratio_hw, 0.1, 100.0);
+        let proj =
+            glam::camera::rh::proj::directx::perspective(fov, 1.0 / aspect_ratio_hw, 0.1, 100.0);
 
         // Model matrices
         let model_rot = glam::Mat4::from_quat(*rot);

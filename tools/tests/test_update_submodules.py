@@ -2,6 +2,7 @@ import importlib
 import re
 import subprocess
 import sys
+import tomllib
 import unittest
 from pathlib import Path
 from unittest.mock import Mock
@@ -219,14 +220,14 @@ class RepositoryScriptContractTests(unittest.TestCase):
             / "binding"
             / "spec.rs"
         ).read_text(encoding="utf-8")
-        dependency = re.search(r'^bindgen = "=([0-9.]+)"$', xtask_manifest, re.MULTILINE)
+        dependency = tomllib.loads(xtask_manifest)["dependencies"]["bindgen"]
+        version = dependency if isinstance(dependency, str) else dependency["version"]
         contract = re.search(
             r'CANONICAL_BINDGEN_VERSION: &str = "([0-9.]+)"', binding_spec
         )
 
-        self.assertIsNotNone(dependency)
         self.assertIsNotNone(contract)
-        self.assertEqual(dependency.group(1), contract.group(1))
+        self.assertEqual(version, "=" + contract.group(1))
 
     def test_binding_updater_previews_wasm_generation_without_running_cargo(self):
         result = subprocess.run(

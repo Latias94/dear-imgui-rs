@@ -264,8 +264,7 @@ def _parse_source_file(raw: Any, source_context: str, index: int) -> MaintainedS
             "patch-imgui-demo",
             "patch-imgui-widgets-numeric-conversions",
             "patch-imnodes-file-io",
-            "patch-cte-text-editor-wide-glyphs",
-            "patch-cte-text-diff-wide-glyphs",
+            "patch-cte-unicode-range-lookup",
         }:
             raise SourceInventoryError(
                 f"{context}.provider_transform has unsupported value {transform!r}"
