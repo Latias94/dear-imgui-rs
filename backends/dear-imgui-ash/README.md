@@ -437,8 +437,8 @@ the shader gamma path will not match (you'll effectively decode twice).
 
 | Item          | Version |
 |---------------|---------|
-| Crate         | 0.16.0  |
-| dear-imgui-rs | 0.16.0  |
+| Crate         | 0.19.0  |
+| dear-imgui-rs | 0.19.0  |
 | ash           | 0.38    |
 | ash-window    | 0.13 (`multi-viewport-winit`) |
 

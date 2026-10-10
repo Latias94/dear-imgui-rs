@@ -21,9 +21,9 @@ For native build/link options (source, system/prebuilt, remote prebuilt), see `e
 
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.16.0  |
-| dear-imgui-rs     | 0.16.0  |
-| dear-implot-sys   | 0.16.0  |
+| Crate             | 0.19.0  |
+| dear-imgui-rs     | 0.19.0  |
+| dear-implot-sys   | 0.19.0  |
 
 ### WASM (WebAssembly) support
 
@@ -55,7 +55,7 @@ python -m http.server -d target/web-demo 8080
 
 Notes:
 - The `dear-imgui-web-demo` crate in `examples-wasm` enables the `implot` feature by default, so the “ImPlot (Web)” window is shown when ImPlot bindings + provider are available.
-- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific compatible `0.16` release and follow changes in `docs/WASM.md`.
+- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific compatible `0.19` release and follow changes in `docs/WASM.md`.
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
@@ -68,8 +68,8 @@ Use compatible stable requirements:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.16"
-dear-implot = "0.16"
+dear-imgui-rs = "0.19"
+dear-implot = "0.19"
 ```
 
 ```rust
@@ -134,8 +134,8 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.16"
-dear-implot = "0.16"
+dear-imgui-rs = "0.19"
+dear-implot = "0.19"
 ```
 
 Basic usage:
