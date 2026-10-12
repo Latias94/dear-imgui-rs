@@ -88,56 +88,69 @@ frame through that renderer. For a complete application, run:
 cargo run -p dear-imgui-examples --bin file_browser_imgui --features file-browser
 ```
 
-```rust
+Native async dialog (desktop only; add `pollster = "0.4"` to dependencies):
+
+```rust,no_run
 use dear_file_browser::{Backend, DialogMode, FileDialog};
 
-// Native async dialog (desktop only; add pollster = "0.4" to dependencies):
-# #[cfg(feature = "native-rfd")]
-let selection = pollster::block_on(
-    FileDialog::new(DialogMode::OpenFiles)
-        .backend(Backend::Auto)
-        .max_selection(5)
-        .filter(("Images", &["png", "jpg"]))
-        .open_async()
-);
+fn choose_files() {
+    let selection = pollster::block_on(
+        FileDialog::new(DialogMode::OpenFiles)
+            .backend(Backend::Auto)
+            .max_selection(5)
+            .filter(("Images", &["png", "jpg"][..]))
+            .open_async()
+    );
+    // Handle the selection in your application.
+    let _ = selection;
+}
+```
 
-// ImGui-embedded browser (native background scan by default):
-# use dear_imgui_rs::*;
-# let mut ctx = Context::create();
-# let ui = ctx.frame();
-use dear_file_browser::{ClickAction, ExtensionPolicy, FileDialogExt, FileDialogState, LayoutStyle};
-use dear_file_browser::HeaderStyle;
-use dear_file_browser::FileListViewMode;
-let mut state = FileDialogState::new(DialogMode::OpenFile);
-// Optional: make it feel closer to ImGuiFileDialog (IGFD).
-// (This also sets `ui.header_style = HeaderStyle::IgfdClassic`.)
-state.apply_igfd_classic_preset();
-// Optional configuration
-state.ui.layout = LayoutStyle::Standard; // or Minimal
-state.ui.header_style = HeaderStyle::IgfdClassic; // or ToolbarAndAddress
-state.ui.file_list_view = FileListViewMode::List; // or Grid (enables thumbnails)
-state.ui.file_list_columns.show_preview = false; // compact list without preview column
-state.ui.file_list_columns.show_modified = false; // optional
-state.core.click_action = ClickAction::Select; // or Navigate
-state.core.double_click = true;
-state.core.dirs_first = true;
-state.core.save_policy.confirm_overwrite = true;
-state.core.save_policy.extension_policy = ExtensionPolicy::AddIfMissing;
-state.ui.breadcrumbs_max_segments = 6;
-state.ui.empty_hint_enabled = true;
-state.ui.empty_hint_color = [0.7, 0.7, 0.7, 1.0];
-ui.window("Open")
-    .size([600.0, 420.0], dear_imgui_rs::Condition::FirstUseEver)
-    .build(|| {
-        if let Some(res) = ui.file_browser().show(&mut state) {
-            match res {
-                Ok(sel) => {
-                    for p in sel.paths { println!("{:?}", p); }
+For the ImGui-embedded browser, create the state once and pass it to `draw` on
+each initialized application frame. The snippet does not create a platform or
+renderer:
+
+```rust
+use dear_imgui_rs::Ui;
+use dear_file_browser::{
+    ClickAction, DialogMode, ExtensionPolicy, FileDialogExt, FileDialogState,
+    FileListViewMode, HeaderStyle, LayoutStyle,
+};
+
+fn create_dialog() -> FileDialogState {
+    let mut state = FileDialogState::new(DialogMode::OpenFile);
+    // Optional: make it feel closer to ImGuiFileDialog (IGFD).
+    state.apply_igfd_classic_preset();
+    state.ui.config.layout = LayoutStyle::Standard; // or Minimal
+    state.ui.config.header_style = HeaderStyle::IgfdClassic; // or ToolbarAndAddress
+    state.ui.config.file_list_view = FileListViewMode::List; // or Grid (enables thumbnails)
+    state.ui.config.file_list_columns.show_preview = false; // compact list
+    state.ui.config.file_list_columns.show_modified = false;
+    state.core.click_action = ClickAction::Select; // or Navigate
+    state.core.double_click = true;
+    state.core.dirs_first = true;
+    state.core.save_policy.confirm_overwrite = true;
+    state.core.save_policy.extension_policy = ExtensionPolicy::AddIfMissing;
+    state.ui.config.breadcrumbs_max_segments = 6;
+    state.ui.config.empty_hint_enabled = true;
+    state.ui.config.empty_hint_color = [0.7, 0.7, 0.7, 1.0];
+    state
+}
+
+fn draw(ui: &Ui, state: &mut FileDialogState) {
+    ui.window("Open")
+        .size([600.0, 420.0], dear_imgui_rs::Condition::FirstUseEver)
+        .build(|| {
+            if let Some(res) = ui.file_browser().show(state) {
+                match res {
+                    Ok(sel) => {
+                        for p in sel.paths { println!("{:?}", p); }
+                    }
+                    Err(e) => eprintln!("dialog: {e}"),
                 }
-                Err(e) => eprintln!("dialog: {e}"),
             }
-        }
-    });
+        });
+}
 ```
 
 ### Filesystem Ownership and Scan Policy
@@ -223,7 +236,7 @@ if state.is_open() {
 ```
 ## List Column Preferences
 
-List-view columns can be tuned per dialog instance. When users drag-resize or drag-reorder list columns, runtime preferences are written back into `state.ui.file_list_columns` automatically:
+List-view columns can be tuned per dialog instance. When users drag-resize or drag-reorder list columns, runtime preferences are written back into `state.ui.config.file_list_columns` automatically:
 
 - The `Columns` menu also provides one-click layouts:
   - `Compact`: hides `Preview` + `Modified`, keeps `Size` visible.
@@ -233,18 +246,18 @@ List-view columns can be tuned per dialog instance. When users drag-resize or dr
 ```rust
 use dear_file_browser::{FileListColumnsConfig, FileListDataColumn};
 
-state.ui.file_list_columns.order = [
+state.ui.config.file_list_columns.order = [
     FileListDataColumn::Name,
     FileListDataColumn::Size,
     FileListDataColumn::Modified,
     FileListDataColumn::Extension,
 ];
-state.ui.file_list_columns.weight_overrides.name = Some(0.60);
-state.ui.file_list_columns.weight_overrides.size = Some(0.18);
+state.ui.config.file_list_columns.weight_overrides.name = Some(0.60);
+state.ui.config.file_list_columns.weight_overrides.size = Some(0.18);
 
-let persisted = state.ui.file_list_columns.serialize_compact();
+let persisted = state.ui.config.file_list_columns.serialize_compact();
 let restored = FileListColumnsConfig::deserialize_compact(&persisted)?;
-state.ui.file_list_columns = restored;
+state.ui.config.file_list_columns = restored;
 ```
 ## Result Convenience (IGFD-style)
 
@@ -346,14 +359,14 @@ if let Some(res) = ui
 
 ## Validation Buttons
 
-To tune the bottom action row (placement/order/width/labels), edit `state.ui.validation_buttons`:
+To tune the bottom action row (placement/order/width/labels), edit `state.ui.config.validation_buttons`:
 
 ```rust
 use dear_file_browser::{ValidationButtonsAlign, ValidationButtonsOrder};
 
-state.ui.validation_buttons.align = ValidationButtonsAlign::Right;
-state.ui.validation_buttons.order = ValidationButtonsOrder::CancelConfirm;
-state.ui.validation_buttons.button_width = Some(120.0);
+state.ui.config.validation_buttons.align = ValidationButtonsAlign::Right;
+state.ui.config.validation_buttons.order = ValidationButtonsOrder::CancelConfirm;
+state.ui.config.validation_buttons.button_width = Some(120.0);
 ```
 
 ## Managing Multiple Dialogs
@@ -433,7 +446,7 @@ To decorate entries (folder icon, per-extension colors, tooltips), configure the
 ```rust
 use dear_file_browser::{FileStyle, StyleMatcher};
 
-state.ui.file_styles.push_rule(
+state.ui.config.file_styles.push_rule(
     StyleMatcher::AnyDir,
     FileStyle {
         icon: Some("[DIR]".into()),
@@ -442,13 +455,13 @@ state.ui.file_styles.push_rule(
         font_token: None,
     },
 );
-state.ui.file_styles.push_link_style(FileStyle {
+state.ui.config.file_styles.push_link_style(FileStyle {
     icon: Some("[LNK]".into()),
     text_color: Some([0.8, 0.6, 1.0, 1.0]),
     tooltip: Some("Symbolic link".into()),
     font_token: None,
 });
-state.ui.file_styles.push_extension_style(
+state.ui.config.file_styles.push_extension_style(
     "png",
     FileStyle {
         icon: Some("[IMG]".into()),
@@ -459,7 +472,7 @@ state.ui.file_styles.push_extension_style(
 );
 
 // Name-based matching (case-insensitive):
-state.ui.file_styles.push_name_contains_style(
+state.ui.config.file_styles.push_name_contains_style(
     "readme",
     FileStyle {
         icon: Some("[DOC]".into()),
@@ -468,7 +481,7 @@ state.ui.file_styles.push_name_contains_style(
         font_token: None,
     },
 );
-state.ui.file_styles.push_name_regex_style(
+state.ui.config.file_styles.push_name_regex_style(
     r"((^imgui_.*\.rs$))",
     FileStyle {
         icon: Some("[SRC]".into()),
@@ -498,14 +511,14 @@ state
     }));
 
 // Optional font mapping for style font_token:
-// state.ui.file_style_fonts.insert("icons".into(), my_icon_font_id);
+// state.ui.config.file_style_fonts.insert("icons".into(), my_icon_font_id);
 ```
 
 ## Thumbnails (ImGui UI)
 
 `dear-file-browser` provides a renderer-agnostic thumbnail request queue and LRU cache. There are two integration styles:
 
-1) Manual: decode/upload in your app, then call `fulfill_request()` and retire evicted textures after the current draw data/GPU work no longer uses them.
+1) Manual: decode/upload in your app, then call `fulfill_request()` and queue evicted IDs for retirement. Preserve their renderer mappings until the current frame is consumed/recorded; release GPU resources only when the relevant draws permit it.
 2) Backend-driven: implement `ThumbnailProvider` + `ThumbnailRenderer`, pass a `ThumbnailBackend` to the UI, and the UI
    will call `maintain()` each frame.
 
@@ -513,8 +526,8 @@ state
 use dear_imgui_rs::texture::TextureId;
 use dear_file_browser::ThumbnailRequest;
 
-state.ui.thumbnails_enabled = true;
-state.ui.thumbnail_size = [48.0, 48.0];
+state.ui.config.thumbnails_enabled = true;
+state.ui.config.thumbnail_size = [48.0, 48.0];
 
 // API sketch: replace the placeholder with your renderer's registered texture.
 // Manual integration (per-frame, after drawing the dialog):
@@ -525,16 +538,19 @@ for req in &requests {
     state.ui.thumbnails.fulfill_request(req, Ok(tex));
 }
 
-// Retire evicted IDs through the renderer after the current frame is consumed.
-// Defer physical GPU destruction until in-flight draws no longer reference them:
+// Queue retirement; keep ID mappings until the renderer consumes/records this frame.
+// Unregister afterward, and retain GPU storage until submitted draws finish (or let
+// the graphics API retain it, as OpenGL does for textures deleted after their draws):
 let to_destroy: Vec<TextureId> = state.ui.thumbnails.take_pending_destroys();
 for tex in to_destroy {
-    // renderer.destroy(tex);
+    // pending_retirements.push(tex);
     let _ = tex;
 }
 ```
 
-Backend-driven integration:
+Backend-driven integration: implement `ThumbnailRenderer::destroy` by queuing IDs,
+then unregister them only after the renderer consumes/records the current frame.
+Retaining a GPU allocation while removing its ID mapping earlier is insufficient.
 
 ```rust
 use dear_file_browser::{ThumbnailBackend, ThumbnailProvider, ThumbnailRenderer};
