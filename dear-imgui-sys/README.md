@@ -389,18 +389,17 @@ Preferred use:
 
 There are two first-class Android directions.
 
-1. Custom Android backend without a dedicated first-party crate yet:
+1. Raw Android backend integration without a dedicated first-party crate yet:
 
    ```toml
    [dependencies]
-   dear-imgui-rs = "0.19"
    dear-imgui-sys = { version = "0.19", features = ["backend-shim-android", "backend-shim-opengl3"] }
    ```
 
-   Use `dear-imgui-rs` for the safe core (`Context`, IO, frame lifecycle,
-   textures, render snapshots) and call
-   `dear_imgui_sys::backend_shim::{android, opengl3}` for the low-level official
-   backend pieces.
+   Use the raw `dear-imgui-sys` context and frame API with
+   `dear_imgui_sys::backend_shim::{android, opengl3}`. The official OpenGL3
+   backend owns native texture updates, so this route does not use the safe
+   core's managed texture protocol.
 
    A concrete repository template for this route lives at
    `examples-android/dear-imgui-android-smoke/`. It is intentionally kept
@@ -414,11 +413,11 @@ There are two first-class Android directions.
    introducing a new published crate, and now also owns a minimal EGL / GLES3
    render loop that renders actual Dear ImGui UI on-device.
 
-   Important nuance: if your Android app uses `android-activity`, its input API
-   wraps raw `AInputEvent*` values. In that setup you will typically translate
-   input into `dear-imgui-rs::Io` manually, or choose a lower-level glue path
-   that gives direct access to raw Android input events before delegating to
-   `backend_shim::android`.
+   The example uses `android-activity` and translates its input events into
+   raw ImGui IO calls. Applications with direct access to raw `AInputEvent*`
+   values can instead forward them to `backend_shim::android`. A safe
+   `dear-imgui-rs` integration needs a renderer that implements its managed
+   texture protocol; the raw OpenGL3 shim is not such an adapter.
 
 2. SDL3-based Android integration:
 
