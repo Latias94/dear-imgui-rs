@@ -264,10 +264,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src/stack_layout_imgui_item_add.cpp.inc");
     println!("cargo:rerun-if-changed=src/stack_layout_imgui_item_size.cpp.inc");
     println!("cargo:rerun-if-changed=src/stack_layout_imgui_item_size_horizontal_compat.cpp.inc");
-    println!("cargo:rerun-if-changed=backend-shims/opengl3.cpp");
-    println!("cargo:rerun-if-changed=backend-shims/android.cpp");
-    println!("cargo:rerun-if-changed=backend-shims/win32.cpp");
-    println!("cargo:rerun-if-changed=backend-shims/dx11.cpp");
+    println!("cargo:rerun-if-changed=backend-shims");
     for path in sources.all_candidate_paths() {
         println!("cargo:rerun-if-changed={}", path.display());
     }
@@ -302,6 +299,9 @@ fn main() {
         "cargo:BUILD_REQUEST_HASH={}",
         build_request.deterministic_hash()
     );
+    if cfg.is_core_wasm_target() && any_backend_shim_enabled() {
+        panic!("backend-shim-* features are native-only and cannot be combined with WASM");
+    }
     // docs.rs: generate bindings only
     if cfg.docs_rs {
         docsrs_build(&cfg);
@@ -914,10 +914,7 @@ fn write_stack_layout_patched_imgui_cpp(cfg: &BuildConfig, imgui_cpp: &Path) -> 
 }
 
 fn any_backend_shim_enabled() -> bool {
-    cfg!(feature = "backend-shim-android")
-        || cfg!(feature = "backend-shim-dx11")
-        || cfg!(feature = "backend-shim-opengl3")
-        || cfg!(feature = "backend-shim-win32")
+    backend_shim_specs().iter().any(|spec| spec.enabled)
 }
 
 fn new_native_cpp_build(cfg: &BuildConfig) -> cc::Build {
@@ -958,12 +955,13 @@ fn build_backend_shims(cfg: &BuildConfig) {
         return;
     }
 
-    if cfg.is_core_wasm_target() {
-        panic!("backend-shim-* features are not supported for wasm targets yet.");
-    }
-
+    // Track auxiliary backend headers too, including the embedded OpenGL loader.
+    println!(
+        "cargo:rerun-if-changed={}",
+        cfg.imgui_src().join("backends").display()
+    );
     for spec in backend_shim_specs() {
-        if spec.enabled && backend_shim_supported_on_target(spec, cfg) {
+        if spec.enabled && backend_shim_target_matches(spec.target, cfg) {
             build_backend_shim_from_spec(cfg, spec);
         }
     }
@@ -981,7 +979,9 @@ fn generate_bindings_native(_cfg: &BuildConfig) {
 enum BackendShimTarget {
     Any,
     Android,
+    Apple,
     Linux,
+    Macos,
     Windows,
 }
 
@@ -1045,6 +1045,55 @@ const DX11_BACKEND_LINK_LIBS: &[BackendShimLinkLib] = &[
     },
 ];
 
+const DX12_BACKEND_LINK_LIBS: &[BackendShimLinkLib] = &[
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "d3d12",
+    },
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "dxgi",
+    },
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "d3dcompiler",
+    },
+];
+
+const METAL_BACKEND_LINK_LIBS: &[BackendShimLinkLib] = &[
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "framework=Foundation",
+    },
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "framework=Metal",
+    },
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "framework=QuartzCore",
+    },
+    BackendShimLinkLib {
+        target: BackendShimTarget::Macos,
+        name: "framework=Cocoa",
+    },
+];
+
+const OSX_BACKEND_LINK_LIBS: &[BackendShimLinkLib] = &[
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "framework=Cocoa",
+    },
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "framework=Carbon",
+    },
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "framework=GameController",
+    },
+];
+
 fn backend_shim_specs() -> &'static [BackendShimSpec] {
     &[
         BackendShimSpec {
@@ -1079,18 +1128,40 @@ fn backend_shim_specs() -> &'static [BackendShimSpec] {
             output_lib: "dear_imgui_backend_dx11",
             link_libs: DX11_BACKEND_LINK_LIBS,
         },
+        BackendShimSpec {
+            enabled: cfg!(feature = "backend-shim-dx12"),
+            target: BackendShimTarget::Windows,
+            upstream_source: "imgui_impl_dx12.cpp",
+            shim_source: "dx12.cpp",
+            output_lib: "dear_imgui_backend_dx12",
+            link_libs: DX12_BACKEND_LINK_LIBS,
+        },
+        BackendShimSpec {
+            enabled: cfg!(feature = "backend-shim-metal"),
+            target: BackendShimTarget::Apple,
+            upstream_source: "imgui_impl_metal.mm",
+            shim_source: "metal.mm",
+            output_lib: "dear_imgui_backend_metal",
+            link_libs: METAL_BACKEND_LINK_LIBS,
+        },
+        BackendShimSpec {
+            enabled: cfg!(feature = "backend-shim-osx"),
+            target: BackendShimTarget::Macos,
+            upstream_source: "imgui_impl_osx.mm",
+            shim_source: "osx.mm",
+            output_lib: "dear_imgui_backend_osx",
+            link_libs: OSX_BACKEND_LINK_LIBS,
+        },
     ]
-}
-
-fn backend_shim_supported_on_target(spec: &BackendShimSpec, cfg: &BuildConfig) -> bool {
-    backend_shim_target_matches(spec.target, cfg)
 }
 
 fn backend_shim_target_matches(target: BackendShimTarget, cfg: &BuildConfig) -> bool {
     match target {
         BackendShimTarget::Any => true,
         BackendShimTarget::Android => cfg.target_os == "android",
+        BackendShimTarget::Apple => matches!(cfg.target_os.as_str(), "macos" | "ios"),
         BackendShimTarget::Linux => cfg.target_os == "linux",
+        BackendShimTarget::Macos => cfg.target_os == "macos",
         BackendShimTarget::Windows => cfg.is_windows(),
     }
 }
@@ -1101,6 +1172,9 @@ fn build_backend_shim_from_spec(cfg: &BuildConfig, spec: &BackendShimSpec) {
     let mut build = new_native_cpp_build(cfg);
     build.file(imgui_src.join("backends").join(spec.upstream_source));
     build.file(shim_root.join(spec.shim_source));
+    if spec.upstream_source.ends_with(".mm") {
+        build.flag("-fobjc-arc");
+    }
     build_support::compile_cpp_archive(
         &mut build,
         spec.output_lib,

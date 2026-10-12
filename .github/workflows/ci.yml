@@ -137,6 +137,43 @@ jobs:
       - name: Test cross-platform release tooling
         run: cargo nextest run -p xtask
 
+      - name: Link OpenGL3 backend shim
+        run: cargo nextest run -p dear-imgui-sys --no-default-features --features backend-shim-opengl3 --test backend_shims
+
+      - name: Test native Windows backend shims and DX12 WARP rendering
+        if: runner.os == 'Windows'
+        run: >-
+          cargo nextest run -p dear-imgui-sys --no-default-features
+          --features backend-shim-win32,backend-shim-dx11,backend-shim-dx12
+          --test backend_shims
+
+      - name: Link native Cocoa and Metal backend shims
+        if: runner.os == 'macOS'
+        run: >-
+          cargo nextest run -p dear-imgui-sys --no-default-features
+          --features backend-shim-osx,backend-shim-metal
+          --test backend_shims
+
+      - name: Build Win32 backend example
+        if: runner.os == 'Windows'
+        run: cargo build -p dear-imgui-sys --example win32_dx11 --features backend-shim-win32,backend-shim-dx11
+
+      - name: Build Win32 and OpenGL3 backend example
+        if: runner.os == 'Windows'
+        run: cargo build -p dear-imgui-sys --example win32_opengl3 --features backend-shim-win32,backend-shim-opengl3
+
+      - name: Build Cocoa and Metal backend example
+        if: runner.os == 'macOS'
+        run: cargo build -p dear-imgui-sys --example cocoa_metal --features backend-shim-osx,backend-shim-metal
+
+      - name: Install iOS simulator Rust target
+        if: runner.os == 'macOS'
+        run: rustup target add aarch64-apple-ios-sim
+
+      - name: Compile iOS Metal backend shim
+        if: runner.os == 'macOS'
+        run: cargo build -p dear-imgui-sys --no-default-features --features backend-shim-metal --target aarch64-apple-ios-sim
+
       - name: Check FreeType feature through native package metadata
         if: runner.os != 'Windows'
         run: cargo check -p dear-imgui-sys --no-default-features --features freetype
@@ -1695,6 +1732,40 @@ jobs:
           IMNODES_SYS_SKIP_CC: "1"
           NODE_EDITOR_SYS_SKIP_CC: "1"
 
+  android-native-check:
+    name: Android native shim example (aarch64)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+
+      - name: Init required nested submodules (selective)
+        run: python3 tools/ci/update_submodules.py
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        with:
+          cache-bin: "false"
+          shared-key: android-native
+
+      - name: Add Android target
+        run: rustup target add aarch64-linux-android
+
+      - name: Build and lint Android NativeActivity example with the NDK
+        run: |
+          ndk_bin="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export CC_aarch64_linux_android="$ndk_bin/aarch64-linux-android26-clang"
+          export CXX_aarch64_linux_android="$ndk_bin/aarch64-linux-android26-clang++"
+          export AR_aarch64_linux_android="$ndk_bin/llvm-ar"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CC_aarch64_linux_android"
+          cargo build --locked --manifest-path examples-android/dear-imgui-android-smoke/Cargo.toml --target aarch64-linux-android --target-dir target
+          cargo clippy --locked --manifest-path examples-android/dear-imgui-android-smoke/Cargo.toml --target aarch64-linux-android --target-dir target -- -D warnings
+
   apple-mobile-check:
     name: Apple mobile compile check (iOS)
     runs-on: macos-latest
@@ -1877,6 +1948,14 @@ jobs:
           --contains 'feature `stack-layout` is native-only and cannot be combined with WASM'
           -- cargo check -p dear-imgui-rs --target wasm32-unknown-unknown
           --no-default-features --features wasm,stack-layout
+
+      - name: Reject native backend shims on WASM
+        run: >-
+          python3 tools/ci/run_contract.py expect-failure
+          --label wasm-backend-shims
+          --contains 'backend-shim-* features are native-only and cannot be combined with WASM'
+          -- cargo check -p dear-imgui-sys --target wasm32-unknown-unknown
+          --no-default-features --features wasm,backend-shim-opengl3
 
       - name: Reject native test-engine hooks on WASM
         run: >-

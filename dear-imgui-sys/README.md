@@ -203,7 +203,7 @@ unsafe {
     igSetCurrentContext(ctx);
 
     // Configure ImGui...
-    let io = igGetIO();
+    let io = igGetIO_Nil();
     (*io).DisplaySize = ImVec2 { x: 800.0, y: 600.0 };
 
     // Main loop
@@ -230,8 +230,38 @@ These features expose self-contained modules such as:
 
 - `dear_imgui_sys::backend_shim::win32`
 - `dear_imgui_sys::backend_shim::dx11`
+- `dear_imgui_sys::backend_shim::dx12`
+- `dear_imgui_sys::backend_shim::metal` (macOS and iOS)
+- `dear_imgui_sys::backend_shim::osx` (macOS Cocoa)
 - `dear_imgui_sys::backend_shim::android`
 - `dear_imgui_sys::backend_shim::opengl3`
+
+Enable `backend-shim-dx12` for a native D3D12 application; combine it with
+`backend-shim-win32` when using the official Win32 platform backend. On macOS,
+combine `backend-shim-metal` and `backend-shim-osx` for an existing Cocoa/Metal
+application. Metal also supports application-owned iOS platform integration.
+
+The DX12 shim uses modern initialization with a borrowed, stable-address
+`DescriptorAllocator`; descriptor handles cross the C ABI as integers. Keep its
+callbacks and user data alive until renderer shutdown returns. The obsolete
+single-font-descriptor initialization API is not exposed.
+
+Run the window-free DX12 WARP example:
+
+```bash
+cargo run -p dear-imgui-sys --example dx12_headless --features backend-shim-dx12
+```
+
+Windowed examples are available as `win32_dx11` with features
+`backend-shim-win32,backend-shim-dx11`, `win32_opengl3` with features
+`backend-shim-win32,backend-shim-opengl3`, and `cocoa_metal` with features
+`backend-shim-osx,backend-shim-metal`. These show platform input, resize,
+rendering, and ordered teardown; append `-- --frames=3` for a short smoke run.
+The standalone Android example combines Android and OpenGL ES 3 shims; its
+[README](../examples-android/dear-imgui-android-smoke/README.md) covers NDK/APK setup.
+
+See [the backend support matrix and ownership guide](../docs/BACKEND_SHIMS.md)
+for target restrictions, callback/GPU lifetimes, and CI coverage.
 
 SDLRenderer3 and SDLGPU3 renderer shims are owned by `dear-imgui-sdl3`, not
 `dear-imgui-sys`. Use `dear-imgui-sdl3` with feature `sdlrenderer3-renderer`
@@ -246,6 +276,10 @@ Important scope note:
 - SDL3 renderer shims are framework-specific and are compiled by `dear-imgui-sdl3`
 - this does not mean `dear-imgui-rs` already provides a safe wrapper for those
   backends
+- shims compile locally even when the core uses a prebuilt archive; they need
+  the native compiler and platform SDK
+- native-only shim features are rejected on the supported WASM target; `wasm`
+  feature unification on a native target still uses the native shims
 
 ### Why Shim ABI Matters
 
@@ -267,7 +301,7 @@ stable C interface.
 There are two supported low-level patterns.
 
 1. For self-contained official backends such as `opengl3`, `android`, `win32`,
-   and `dx11`, enable the matching `backend-shim-*` feature and call the shim
+   `dx11`, `dx12`, `metal`, and `osx`, enable the matching `backend-shim-*` feature and call the shim
    module directly from Rust.
 2. For framework-specific integrations such as SDL3, keep the framework build
    logic in the backend crate, optionally reuse upstream backend sources exported

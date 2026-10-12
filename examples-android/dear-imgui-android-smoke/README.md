@@ -1,7 +1,7 @@
 # dear-imgui-android-smoke
 
 Minimal Android compile-target template for the low-level
-`dear-imgui-rs` + `dear-imgui-sys` route, including a minimal
+`dear-imgui-sys` route, including a minimal
 EGL / OpenGL ES 3 render loop.
 
 <p align="center">
@@ -20,13 +20,16 @@ This sample is intentionally:
 
 ## What It Demonstrates
 
-- `dear-imgui-rs` owns the safe core `Context`, `Io`, and frame lifecycle.
+- `dear-imgui-sys` owns a raw Dear ImGui context and frame lifecycle.
 - `dear-imgui-sys::backend_shim::android` can own the official Android platform
   backend lifecycle (`Init`, `NewFrame`, `Shutdown`).
 - a downstream Android app can translate lifecycle and input itself without
   waiting for a dedicated Android convenience crate.
 - the sample owns a minimal EGL display / context / window-surface setup and
   wires it into `dear-imgui-sys::backend_shim::opengl3`.
+- the EGL state retains its `NativeWindow` until both backends have shut down.
+- rendering pauses on `Pause` / `Stop`, resumes on `Resume`, and recreates the
+  backend state when Android provides a replacement window.
 - a downstream Android app can keep this ownership split and swap in its own
   EGL policy, renderer bootstrap, or packaging layer later.
 
@@ -34,13 +37,41 @@ This sample is intentionally:
 
 This template uses `android-activity` because it is a practical modern entry
 point for Rust Android apps. Its input API does not expose raw `AInputEvent*`
-values directly, so this sample feeds `dear-imgui-rs::Io` manually from the
-safe event wrappers.
+values directly, so this sample translates its event wrappers into raw
+`ImGuiIO_Add*Event` calls.
 
 If your app uses a lower-level glue path that gives direct `AInputEvent*`
 access, you can route those events to
 `dear_imgui_sys::backend_shim::android::dear_imgui_backend_android_handle_input_event`
 instead.
+
+## Backend Call Order
+
+The source enables `backend-shim-android` and `backend-shim-opengl3` and follows
+the upstream native backend contract:
+
+1. Create the Dear ImGui context with `igCreateContext`.
+2. On `InitWindow`, create EGL / GLES 3, make it current, retain the
+   `NativeWindow`, and call Android `init` followed by OpenGL3 `init` with
+   `#version 300 es`.
+3. For each continuous frame while resumed, call Android `new_frame`, OpenGL3
+   `new_frame`, and then `igNewFrame`. Android supplies display metrics and frame
+   timing. Submit widgets through `ig*` calls.
+   A system `RedrawNeeded` request also draws once while paused, before the poll
+   callback returns, provided the window/backends are still valid.
+4. Call `igRender`, pass `igGetDrawData()` to OpenGL3 `render_draw_data`, and
+   present with `eglSwapBuffers`.
+5. On `TerminateWindow` or rendering failure, shut down OpenGL3 first and Android
+   second while EGL and the retained window are still alive, then destroy EGL.
+   The Dear ImGui context survives window replacement and is destroyed at app
+   exit after backend shutdown.
+
+The official OpenGL3 backend processes `ImDrawData::Textures` and updates native
+texture IDs / statuses itself. This example therefore uses raw sys frames
+throughout. `dear-imgui-rs::Context::render()` requires a registered renderer
+consumer and texture feedback reconciliation; its borrowed frame types cannot
+be cast directly into this native renderer. Use the Rust renderer crates for
+that managed frame API, or implement a proper adapter before mixing the two.
 
 ## Prerequisites
 

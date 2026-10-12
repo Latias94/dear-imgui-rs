@@ -63,6 +63,12 @@ Rules:
 - Put framework-specific official shims in the framework backend crate.
   `dear-imgui-sdl3` is the model for this ownership split.
 
+Self-contained shims cover Win32, DX11, DX12, OpenGL3, Android, macOS Cocoa,
+and Metal on macOS/iOS. See [the support matrix](BACKEND_SHIMS.md) for feature
+gates and application-owned prerequisites. A raw shim does not implement the
+safe `PendingFrame` reconciliation contract: a safe renderer adapter must
+process request-bound textures before drawing, as the SDL3 renderer does.
+
 ### Application-only integration
 
 If only one application needs the backend, keep it in the application first.

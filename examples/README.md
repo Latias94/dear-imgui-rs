@@ -104,6 +104,20 @@ Winit native multi-viewport is disabled on Wayland because Winit does not expose
 top-level window positioning there. Use X11 (`WINIT_UNIX_BACKEND=x11`) or an SDL3 route when native
 secondary windows are required.
 
+Native SDK applications can instead start from the unsafe sys-owned shim examples:
+
+| Example | Backend shims | Command | Prerequisites |
+| --- | --- | --- | --- |
+| `win32_dx11` | Win32 + DX11 | `cargo run -p dear-imgui-sys --example win32_dx11 --features backend-shim-win32,backend-shim-dx11` | Windows + D3D11 driver |
+| `dx12_headless` | DX12 | `cargo run -p dear-imgui-sys --example dx12_headless --features backend-shim-dx12` | Windows; software WARP, no window/GPU required |
+| `win32_opengl3` | Win32 + OpenGL3 | `cargo run -p dear-imgui-sys --example win32_opengl3 --features backend-shim-win32,backend-shim-opengl3` | Windows + OpenGL 3+ driver |
+| `cocoa_metal` | Cocoa + Metal | `cargo run -p dear-imgui-sys --example cocoa_metal --features backend-shim-osx,backend-shim-metal` | macOS + Metal device |
+| Android smoke | Android + OpenGL ES 3 | [NDK build and APK packaging](../examples-android/dear-imgui-android-smoke/README.md) | Android SDK/NDK and device/emulator |
+
+The windowed sys examples accept `-- --frames=3` for bounded manual runs. They
+own raw ImGui frames and native texture processing; an adapter for the safe
+managed-frame protocol is a separate integration. See the [shim ownership guide](../docs/BACKEND_SHIMS.md).
+
 Before implementing a custom renderer, run the headless contract example. It covers synchronous
 texture feedback, draw traversal, and reset without choosing a GPU API:
 
