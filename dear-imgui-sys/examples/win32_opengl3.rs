@@ -122,6 +122,7 @@ fn main() -> windows::core::Result<()> {
             c"#version 130".as_ptr()
         ));
         context.renderer = true;
+        let mut dpi = native_window::DpiStyle::new(&window);
         window.show();
         let limit = std::env::args().find_map(|arg| {
             arg.strip_prefix("--frames=")
@@ -136,7 +137,15 @@ fn main() -> windows::core::Result<()> {
             }
             opengl3::dear_imgui_backend_opengl3_new_frame();
             win32::dear_imgui_backend_win32_new_frame();
+            let scale = dpi.update(&window);
             sys::igNewFrame();
+            sys::igSetNextWindowSize(
+                sys::ImVec2_c {
+                    x: 520.0 * scale,
+                    y: 150.0 * scale,
+                },
+                sys::ImGuiCond_FirstUseEver,
+            );
             if sys::igBegin(c"Native backend shims".as_ptr(), ptr::null_mut(), 0) {
                 sys::igTextUnformatted(
                     c"The application owns HWND, WGL, resize, and presentation.".as_ptr(),

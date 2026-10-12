@@ -2,9 +2,14 @@
 //! Run with `cargo run -p dear-imgui-sys --example dx12_headless --features backend-shim-dx12`.
 
 #[cfg(windows)]
+#[path = "support/dx12.rs"]
+mod native_dx12;
+
+#[cfg(windows)]
 pub fn run() -> windows::core::Result<()> {
     use dear_imgui_sys::{self as sys, backend_shim::dx12};
-    use std::{ffi::c_void, mem::ManuallyDrop, ptr};
+    use native_dx12::{Allocator, wait_gpu};
+    use std::{mem::ManuallyDrop, ptr};
     use windows::{
         Win32::Graphics::{
             Direct3D::D3D_FEATURE_LEVEL_11_0,
@@ -14,79 +19,6 @@ pub fn run() -> windows::core::Result<()> {
         core::Interface,
     };
 
-    struct Allocator {
-        cpu: usize,
-        gpu: u64,
-        step: usize,
-        used: [bool; 32],
-        allocations: usize,
-        frees: usize,
-        valid: bool,
-    }
-    unsafe extern "C" fn allocate(data: *mut c_void, cpu: *mut usize, gpu: *mut u64) {
-        // SAFETY: the boxed allocator and both output pointers remain live during the callback.
-        unsafe {
-            let state = &mut *data.cast::<Allocator>();
-            let Some(index) = state.used.iter().position(|used| !used) else {
-                std::process::abort()
-            };
-            state.used[index] = true;
-            state.allocations += 1;
-            *cpu = state.cpu + index * state.step;
-            *gpu = state.gpu + (index * state.step) as u64;
-        }
-    }
-    unsafe extern "C" fn free(data: *mut c_void, cpu: usize, gpu: u64) {
-        // SAFETY: the backend returns descriptor pairs issued by allocate above.
-        unsafe {
-            let state = &mut *data.cast::<Allocator>();
-            let index = cpu.wrapping_sub(state.cpu) / state.step;
-            if index >= state.used.len()
-                || !state.used[index]
-                || cpu != state.cpu + index * state.step
-                || gpu != state.gpu + (index * state.step) as u64
-            {
-                state.valid = false;
-                return;
-            }
-            state.used[index] = false;
-            state.frees += 1;
-        }
-    }
-    fn wait_gpu(queue: &ID3D12CommandQueue, fence: &ID3D12Fence) -> windows::core::Result<()> {
-        // SAFETY: both objects belong to the same live device; the fence outlives the signal.
-        unsafe {
-            let completed = fence.GetCompletedValue();
-            let value = completed.checked_add(1).ok_or_else(|| {
-                windows::core::Error::new(
-                    windows::Win32::Foundation::E_FAIL,
-                    "D3D12 device was removed",
-                )
-            })?;
-            queue.Signal(fence, value)?;
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-            loop {
-                let completed = fence.GetCompletedValue();
-                if completed == u64::MAX {
-                    return Err(windows::core::Error::new(
-                        windows::Win32::Foundation::E_FAIL,
-                        "D3D12 device was removed",
-                    ));
-                }
-                if completed >= value {
-                    break;
-                }
-                if std::time::Instant::now() >= deadline {
-                    return Err(windows::core::Error::new(
-                        windows::Win32::Foundation::E_FAIL,
-                        "D3D12 fence timed out",
-                    ));
-                }
-                std::thread::sleep(std::time::Duration::from_millis(1));
-            }
-        }
-        Ok(())
-    }
     struct ContextGuard<'a> {
         raw: *mut sys::ImGuiContext,
         initialized: bool,
@@ -96,7 +28,7 @@ pub fn run() -> windows::core::Result<()> {
     impl Drop for ContextGuard<'_> {
         fn drop(&mut self) {
             // Do not destroy renderer resources while submitted work may still use them.
-            if self.initialized && wait_gpu(self.queue, self.fence).is_err() {
+            if self.initialized && unsafe { wait_gpu(self.queue, self.fence) }.is_err() {
                 std::process::abort();
             }
             // SAFETY: the guard owns this context; GPU objects and callback storage outlive it.
@@ -212,21 +144,8 @@ pub fn run() -> windows::core::Result<()> {
             None::<&ID3D12PipelineState>,
         )?;
 
-        let mut state = Box::new(Allocator {
-            cpu: srv_heap.GetCPUDescriptorHandleForHeapStart().ptr,
-            gpu: srv_heap.GetGPUDescriptorHandleForHeapStart().ptr,
-            step: device.GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
-                as usize,
-            used: [false; 32],
-            allocations: 0,
-            frees: 0,
-            valid: true,
-        });
-        let allocator = Box::new(dx12::DescriptorAllocator {
-            user_data: ptr::from_mut(state.as_mut()).cast(),
-            allocate: Some(allocate),
-            free: Some(free),
-        });
+        let mut state = Allocator::new(&device, &srv_heap);
+        let allocator = state.callbacks();
         let raw = sys::igCreateContext(ptr::null_mut());
         assert!(!raw.is_null());
         let mut context = ContextGuard {

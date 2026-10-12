@@ -67,6 +67,9 @@ Windowed examples show platform integration and a complete frame loop:
 # Windows: Win32 messages, DX11 device/swapchain, resize, and presentation.
 cargo run -p dear-imgui-sys --example win32_dx11 --features backend-shim-win32,backend-shim-dx11
 
+# Windows: interactive DX12 demo, descriptor allocation, barriers, and GPU fences.
+cargo run -p dear-imgui-sys --example win32_dx12 --features backend-shim-win32,backend-shim-dx12
+
 # Windows: an application-owned WGL context, Win32 messages, and OpenGL3 rendering.
 cargo run -p dear-imgui-sys --example win32_opengl3 --features backend-shim-win32,backend-shim-opengl3
 
@@ -77,8 +80,18 @@ cargo run -p dear-imgui-sys --example cocoa_metal --features backend-shim-osx,ba
 Close the window to exit, or append `-- --frames=3` for a bounded manual smoke
 run. These examples intentionally use single-window raw sys integration. They
 show application-owned resize and teardown rather than an owning safe backend.
-The Metal example waits for each submitted buffer to keep GPU lifetimes clear;
-production applications normally use an in-flight ring.
+The DX12 and Metal examples wait for each submitted buffer to keep GPU lifetimes
+clear; production applications normally use an in-flight ring. The DX12 window
+uses hardware by default, falls back to software WARP when needed, and accepts
+`-- --warp` to select WARP explicitly. Its control panel and the Dear ImGui demo
+show interactive widgets, font-atlas uploads, resize, and presentation.
+
+All three Win32 examples request a 960-by-640 logical-pixel client area, scale it
+for the window's monitor, and constrain the initial window to that monitor's work
+area. Font size, widget padding, and initial panel geometry follow the monitor's
+DPI. Moving between monitors restores the original style before applying the new
+absolute scale; the official Win32 backend applies `WM_DPICHANGED`'s suggested
+window rectangle. Dynamic font-atlas uploads keep the fonts sharp at each scale.
 
 The existing [Android NativeActivity example](../examples-android/dear-imgui-android-smoke/README.md)
 combines Android and OpenGL ES 3 shims. It owns EGL, native-window references,
@@ -89,6 +102,7 @@ binary. Together these examples exercise every sys-owned shim:
 | Shims | Reference |
 | --- | --- |
 | Win32 + DX11 | [`win32_dx11.rs`](../dear-imgui-sys/examples/win32_dx11.rs) |
+| Win32 + DX12 | [`win32_dx12.rs`](../dear-imgui-sys/examples/win32_dx12.rs) |
 | DX12 | [`dx12_headless.rs`](../dear-imgui-sys/examples/dx12_headless.rs) |
 | Win32 + OpenGL3 | [`win32_opengl3.rs`](../dear-imgui-sys/examples/win32_opengl3.rs) |
 | Cocoa + Metal | [`cocoa_metal.rs`](../dear-imgui-sys/examples/cocoa_metal.rs) |

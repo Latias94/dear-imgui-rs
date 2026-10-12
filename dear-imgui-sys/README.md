@@ -177,7 +177,7 @@ End users typically interact with the flow indirectly through:
 For a complete, up-to-date guide (including required tools, commands, and troubleshooting), see:
 
 - `docs/WASM.md` in this repository.
-- The `examples-wasm` crate (`examples-wasm/dear-imgui-web-demo`), which demonstrates the web demo setup.
+- The [`dear-imgui-web-demo` package](../examples-wasm/README.md) in `examples-wasm/`, which demonstrates the web demo setup.
 
 ## Basic Usage
 
@@ -253,10 +253,13 @@ cargo run -p dear-imgui-sys --example dx12_headless --features backend-shim-dx12
 ```
 
 Windowed examples are available as `win32_dx11` with features
-`backend-shim-win32,backend-shim-dx11`, `win32_opengl3` with features
+`backend-shim-win32,backend-shim-dx11`, `win32_dx12` with features
+`backend-shim-win32,backend-shim-dx12`, `win32_opengl3` with features
 `backend-shim-win32,backend-shim-opengl3`, and `cocoa_metal` with features
 `backend-shim-osx,backend-shim-metal`. These show platform input, resize,
 rendering, and ordered teardown; append `-- --frames=3` for a short smoke run.
+The interactive DX12 example shows the Dear ImGui demo window, uses hardware
+with a WARP fallback, and accepts `-- --warp` to force software rendering.
 The standalone Android example combines Android and OpenGL ES 3 shims; its
 [README](../examples-android/dear-imgui-android-smoke/README.md) covers NDK/APK setup.
 
