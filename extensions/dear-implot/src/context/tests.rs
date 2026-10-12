@@ -323,6 +323,11 @@ fn typed_axis_apis_accept_valid_axes() {
     let _guard = test_guard();
     let mut imgui = Context::create();
     prepare_imgui(&mut imgui);
+    // Storage outlives PlotContext, including during unwinding.
+    let mut x_min = 0.0;
+    let mut x_max = 1.0;
+    let mut min = 0.0;
+    let mut max = 1.0;
     let plot = PlotContext::create(&imgui);
 
     {
@@ -330,17 +335,73 @@ fn typed_axis_apis_accept_valid_axes() {
         let plot_ui = plot.get_plot_ui(frame.ui());
         plot_ui.set_next_axis_to_fit(Axis::X1);
 
+        // SAFETY: distinct, stable storage outlives PlotContext and is not accessed while linked.
+        unsafe { plot_ui.set_next_axis_links(Axis::X1, Some(&mut x_min), Some(&mut x_max)) };
+        plot_ui.set_next_x_axis_limits(XAxis::X1, -2.0, 2.0, PlotCond::Always);
+
         let token = plot_ui
             .begin_plot("typed-axis")
             .expect("failed to begin plot");
         plot_ui.setup_x_axis(XAxis::X1, None, crate::AxisFlags::NONE);
         plot_ui.setup_y_axis(YAxis::Y1, None, crate::AxisFlags::NONE);
-        let mut min = 0.0;
-        let mut max = 1.0;
-        plot_ui.setup_axis_links(Axis::Y1, Some(&mut min), Some(&mut max));
+        // SAFETY: Y1 is enabled and setup is unlocked; storage outlives PlotContext.
+        unsafe { plot_ui.setup_axis_links(Axis::Y1, Some(&mut min), Some(&mut max)) };
+        plot_ui.setup_y_axis_limits(YAxis::Y1, 2.0, 5.0, PlotCond::Always);
         plot_ui.setup_axis_limits_constraints(Axis::Y1, -10.0, 10.0);
         plot_ui.setup_axis_zoom_constraints(Axis::Y1, 0.1, 20.0);
         token.end();
     }
     drop(plot);
+    assert_eq!((x_min, x_max), (-2.0, 2.0));
+    assert_eq!((min, max), (2.0, 5.0));
+}
+
+#[test]
+fn secondary_axis_links_are_explicitly_unlinked_on_the_same_plot() {
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    prepare_imgui(&mut imgui);
+    // Storage also outlives PlotContext if any frame panics before unlinking.
+    let mut min = 0.0;
+    let mut max = 1.0;
+    let plot = PlotContext::create(&imgui);
+
+    {
+        let frame = imgui.begin_frame();
+        let plot_ui = plot.get_plot_ui(frame.ui());
+        let token = plot_ui
+            .begin_plot("secondary-links")
+            .expect("plot must begin");
+        plot_ui.setup_y_axis(YAxis::Y2, None, crate::AxisFlags::NONE);
+        // SAFETY: Y2 is enabled; distinct storage outlives PlotContext even on unwinding.
+        unsafe { plot_ui.setup_axis_links(Axis::Y2, Some(&mut min), Some(&mut max)) };
+        plot_ui.setup_y_axis_limits(YAxis::Y2, 3.0, 7.0, PlotCond::Always);
+        token.end();
+    }
+    {
+        let frame = imgui.begin_frame();
+        let plot_ui = plot.get_plot_ui(frame.ui());
+        let token = plot_ui
+            .begin_plot("secondary-links")
+            .expect("plot must begin");
+        plot_ui.setup_y_axis(YAxis::Y2, None, crate::AxisFlags::NONE);
+        // SAFETY: the same plot ID and enabled axis are in their setup phase.
+        unsafe { plot_ui.setup_axis_links(Axis::Y2, None, None) };
+        token.end();
+    }
+    assert_eq!((min, max), (3.0, 7.0));
+    // Explicit unlinking permits access before PlotContext is destroyed.
+    min = 11.0;
+    max = 13.0;
+    {
+        let frame = imgui.begin_frame();
+        let plot_ui = plot.get_plot_ui(frame.ui());
+        let token = plot_ui
+            .begin_plot("secondary-links")
+            .expect("plot must begin");
+        token.end();
+    }
+    drop(plot);
+    // A disabled Y2 must not write its old limits back through retained pointers.
+    assert_eq!((min, max), (11.0, 13.0));
 }

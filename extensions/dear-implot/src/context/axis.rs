@@ -70,8 +70,27 @@ impl<'ui> PlotUi<'ui> {
         })
     }
 
-    /// Link an axis to external min/max values (live binding)
-    pub fn setup_axis_links(
+    /// Link an enabled axis to external min/max values for the active plot.
+    ///
+    /// # Safety
+    ///
+    /// Call after `begin_plot` succeeds, before plotting or any other setup-locking call.
+    /// The axis must be enabled. Every supplied value must stay initialized at a stable
+    /// address until this `PlotContext` is destroyed, unless its link is explicitly cleared.
+    /// To clear it, begin the same plot ID, enable this axis, call this method with `None`
+    /// for the corresponding value, and end that plot. Also clear any pending next-plot
+    /// link for that value. `EndPlot` alone does not unlink every axis: later uses of the
+    /// same plot can still write through retained pointers, even when an axis is disabled.
+    /// Do not move, drop, or otherwise access values while linked, including during
+    /// unwinding. Separate linked values must not alias.
+    ///
+    /// ```compile_fail
+    /// use dear_implot::{Axis, PlotUi};
+    /// fn link(plot_ui: &PlotUi<'_>, min: &mut f64, max: &mut f64) {
+    ///     plot_ui.setup_axis_links(Axis::Y1, Some(min), Some(max));
+    /// }
+    /// ```
+    pub unsafe fn setup_axis_links(
         &self,
         axis: Axis,
         link_min: Option<&mut f64>,
@@ -88,6 +107,14 @@ impl<'ui> PlotUi<'ui> {
     ///
     /// `axis` must be a valid ImPlot `ImAxis` value for the active plot. Passing an
     /// out-of-range value lets ImPlot index internal axis arrays out of bounds.
+    /// Call after `begin_plot` succeeds, before any setup-locking call, with the axis enabled.
+    /// Every supplied value must stay initialized at a stable address until the owning
+    /// `PlotContext` is destroyed or the corresponding stored and pending links are
+    /// explicitly cleared. Clear the stored link on the same plot ID and enabled axis
+    /// with `None`, then end that plot; clear pending next-plot links separately.
+    /// `EndPlot` alone does not unlink every axis, and later plots may still write to it.
+    /// Do not move, drop, or otherwise access values while linked, including during
+    /// unwinding. Separate linked values must not alias.
     pub unsafe fn setup_axis_links_unchecked(
         &self,
         axis: sys::ImAxis,
@@ -187,8 +214,26 @@ impl<'ui> PlotUi<'ui> {
         })
     }
 
-    /// Link an axis to external min/max for next frame
-    pub fn set_next_axis_links(
+    /// Link an axis to external min/max values for the next plot.
+    ///
+    /// # Safety
+    ///
+    /// Call before `begin_plot`, with no plot active. Enable the axis in the next plot.
+    /// Every supplied value must stay initialized at a stable address until the owning
+    /// `PlotContext` is destroyed or all corresponding pending and stored links are cleared.
+    /// Clear a pending link with this method and `None`; clear an applied link with
+    /// `setup_axis_links` and `None` on the same plot ID and enabled axis, then end that plot.
+    /// `EndPlot`, a rejected `begin_plot`, a frame change, or disabling an axis does not
+    /// generally unlink it. Do not move, drop, or otherwise access values while linked,
+    /// including during unwinding. Separate linked values must not alias.
+    ///
+    /// ```compile_fail
+    /// use dear_implot::{Axis, PlotUi};
+    /// fn link(plot_ui: &PlotUi<'_>, min: &mut f64, max: &mut f64) {
+    ///     plot_ui.set_next_axis_links(Axis::Y1, Some(min), Some(max));
+    /// }
+    /// ```
+    pub unsafe fn set_next_axis_links(
         &self,
         axis: Axis,
         link_min: Option<&mut f64>,
@@ -201,12 +246,20 @@ impl<'ui> PlotUi<'ui> {
         })
     }
 
-    /// Link a raw axis to external min/max for the next frame.
+    /// Link a raw axis to external min/max values for the next plot.
     ///
     /// # Safety
     ///
     /// `axis` must be a valid ImPlot `ImAxis` value. Passing an out-of-range
     /// value lets ImPlot index internal next-plot arrays out of bounds.
+    /// Call before `begin_plot`, with no plot active, and enable the axis in the next plot.
+    /// Every supplied value must stay initialized at a stable address until the owning
+    /// `PlotContext` is destroyed or all corresponding pending and stored links are cleared.
+    /// Clear pending links with `None` here; clear applied links with `None` on the same
+    /// plot ID and enabled axis using `setup_axis_links_unchecked`, then end that plot.
+    /// `EndPlot`, rejected `begin_plot` calls, frame changes, and disabled axes do not
+    /// generally unlink it. Do not move, drop, or otherwise access values while linked,
+    /// including during unwinding. Separate linked values must not alias.
     pub unsafe fn set_next_axis_links_unchecked(
         &self,
         axis: sys::ImAxis,
@@ -218,7 +271,7 @@ impl<'ui> PlotUi<'ui> {
         self.with_bound_context(|| unsafe { sys::ImPlot_SetNextAxisLinks(axis, pmin, pmax) })
     }
 
-    /// Set next frame limits for both axes
+    /// Set limits for both axes on the next plot
     pub fn set_next_axes_limits(
         &self,
         x_min: f64,
@@ -234,17 +287,17 @@ impl<'ui> PlotUi<'ui> {
         })
     }
 
-    /// Fit next frame both axes
+    /// Fit both axes on the next plot
     pub fn set_next_axes_to_fit(&self) {
         self.with_bound_context(|| unsafe { sys::ImPlot_SetNextAxesToFit() })
     }
 
-    /// Fit next frame a specific axis
+    /// Fit a specific axis on the next plot
     pub fn set_next_axis_to_fit(&self, axis: Axis) {
         self.with_bound_context(|| unsafe { sys::ImPlot_SetNextAxisToFit(axis.to_sys()) })
     }
 
-    /// Fit next frame a raw axis.
+    /// Fit a raw axis on the next plot.
     ///
     /// # Safety
     ///
@@ -254,12 +307,12 @@ impl<'ui> PlotUi<'ui> {
         self.with_bound_context(|| unsafe { sys::ImPlot_SetNextAxisToFit(axis) })
     }
 
-    /// Fit next frame a specific X axis
+    /// Fit a specific X axis on the next plot
     pub fn set_next_x_axis_to_fit(&self, axis: XAxis) {
         self.with_bound_context(|| unsafe { sys::ImPlot_SetNextAxisToFit(axis as sys::ImAxis) })
     }
 
-    /// Fit next frame a specific Y axis
+    /// Fit a specific Y axis on the next plot
     pub fn set_next_y_axis_to_fit(&self, axis: YAxis) {
         self.with_bound_context(|| unsafe { sys::ImPlot_SetNextAxisToFit(axis as sys::ImAxis) })
     }
