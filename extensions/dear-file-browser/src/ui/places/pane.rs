@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use dear_imgui_rs::input::{Key, MouseButton};
 use dear_imgui_rs::{
-    SelectableFlags, TableColumnFlags, TableColumnSetup, TableFlags, TableSizingPolicy,
+    SelectableFlags, StyleVar, TableColumnFlags, TableColumnSetup, TableFlags, TableSizingPolicy,
     TreeNodeFlags, Ui,
 };
 
@@ -400,6 +400,7 @@ pub(in crate::ui) fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> O
             let row_hovered = ui.is_mouse_hovering_rect(row_min, row_max);
             let after = ui.cursor_pos();
 
+            let mut has_edit_overlay = false;
             if editable {
                 let is_editing = state
                     .ui
@@ -411,6 +412,7 @@ pub(in crate::ui) fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> O
                     .is_some_and(|(group, path)| group == &g.label && path == &p.path);
                 let show_edit = row_hovered || selected || is_editing;
                 if show_edit {
+                    has_edit_overlay = true;
                     let frame_h = ui.frame_height();
                     let row_h = (row_max[1] - row_min[1]).max(0.0);
                     let y = row_min[1] + ((row_h - frame_h) * 0.5).max(0.0);
@@ -432,7 +434,6 @@ pub(in crate::ui) fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> O
                     }
                 }
             }
-            ui.set_cursor_pos(after);
 
             if clicked {
                 state.ui.operations.places.selected = Some((g.label.clone(), p.path.clone()));
@@ -471,6 +472,14 @@ pub(in crate::ui) fn draw_places_pane(ui: &Ui, state: &mut FileDialogState) -> O
                 if ui.menu_item_enabled_selected("Remove", None::<&str>, false, editable) {
                     *remove_place = Some((g.label.clone(), p.path.clone()));
                 }
+            }
+
+            if has_edit_overlay {
+                // Submit the restored boundary after item queries; restoring alone is not an item.
+                // Zero spacing keeps the row pitch unchanged for the list clipper.
+                ui.set_cursor_pos(after);
+                let _spacing = ui.push_style_var(StyleVar::ItemSpacing([0.0, 0.0]));
+                ui.dummy([0.0, 0.0]);
             }
         };
 
