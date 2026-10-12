@@ -1461,8 +1461,8 @@ fn build_cimgui_provider(options: BuildProviderOptions) -> Result<()> {
 
     // 2b) Compose em++ command to build imgui-sys-v1.wasm (shared imported memory) with explicit exports
 
-    let mut cmd = Command::new(&empp);
-    cmd.arg(format!("-std={}", cpp_standard.id()))
+    let mut compiler_args = Command::new(&empp);
+    compiler_args.arg(format!("-std={}", cpp_standard.id()))
         .arg("-O2")
         .arg("-s")
         .arg("MODULARIZE=1")  // Generate a module function
@@ -1500,15 +1500,37 @@ fn build_cimgui_provider(options: BuildProviderOptions) -> Result<()> {
         .arg("-fno-exceptions")
         .arg("-fno-rtti");
     for define in &compile_defines {
-        cmd.arg(define);
+        compiler_args.arg(define);
     }
     for include_dir in &include_dirs {
-        cmd.arg("-I").arg(include_dir);
+        compiler_args.arg("-I").arg(include_dir);
     }
     for source_file in &source_files {
-        cmd.arg(source_file);
+        compiler_args.arg(source_file);
     }
-    cmd.arg("-o").arg(&out_js);
+    compiler_args.arg("-o").arg(&out_js);
+
+    // em++.bat is limited by cmd.exe even when Rust can pass a longer command.
+    // Emscripten reads UTF-8 response files using shlex, so quote each argument
+    // and escape backslashes and double quotes inside the surrounding quotes.
+    let response_contents = compiler_args
+        .get_args()
+        .map(|argument| {
+            let argument = argument
+                .to_str()
+                .context("Emscripten response-file arguments must be valid UTF-8")?;
+            Ok(format!(
+                "\"{}\"\n",
+                argument.replace('\\', "\\\\").replace('"', "\\\"")
+            ))
+        })
+        .collect::<Result<String>>()?;
+    let response_path = out_dir.join("imgui-provider.rsp.utf-8");
+    fs::write(&response_path, response_contents)?;
+    let mut cmd = Command::new(&empp);
+    let mut response_argument = std::ffi::OsString::from("@");
+    response_argument.push(&response_path);
+    cmd.arg(response_argument);
 
     // Ensure tools can find config and binaries
     let emscripten_dir = emcc.parent().unwrap();

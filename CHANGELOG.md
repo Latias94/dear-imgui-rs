@@ -41,6 +41,7 @@ This release expands native backend integration and improves the examples used t
 - Existing desktop and mobile examples respect DPI and client bounds, preserve docking style scopes, handle Android activity lifecycle, and initialize the Test Engine demo correctly. Platform build recipes and asset paths are corrected, including the iOS SDL3 host's framework headers. [PR #90](https://github.com/Latias94/dear-imgui-rs/pull/90)
 - Game-engine examples isolate camera uniforms and maintain valid scene and selection state. Bevy offscreen examples route input to visible images and avoid unintended texture flipping; Ash examples enable advertised Vulkan portability extensions and keep detached windows updating while the main window is minimized. [PR #90](https://github.com/Latias94/dear-imgui-rs/pull/90)
 - Native builds track header changes and selected prebuilt archives and manifests; docs.rs builds consistently export include paths and ABI defines to downstream crates. [PR #90](https://github.com/Latias94/dear-imgui-rs/pull/90)
+- The WASM provider builder passes compiler arguments through a UTF-8 response file, avoiding Windows batch command-length limits when building from packaged sources or long paths.
 
 ## [0.19.0] - 2026-10-10
 
