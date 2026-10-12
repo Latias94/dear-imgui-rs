@@ -3,10 +3,11 @@ use super::*;
 impl AshRenderer {
     /// Reconcile managed textures before recording any viewport from this frame.
     ///
-    /// Multi-viewport integrations must consume the pending frame here before renderer callbacks
-    /// draw secondary viewports. The returned [`ReconciledFrame`] is the only capability that can
-    /// expose draw data. The retirement batch must remain associated with the submission/fence
-    /// that covers every draw which may still reference the retired resources.
+    /// This is the single-window entry point. First-party multi-viewport integrations instead
+    /// pass an open `FrameToken` to their owning route's `prepare` method, which includes texture
+    /// reconciliation and secondary-window dispatch in one transaction. The retirement batch
+    /// returned here must remain associated with completion covering every draw which may still
+    /// reference the retired resources.
     pub fn prepare_frame<'ctx>(
         &mut self,
         frame: PendingFrame<'ctx>,

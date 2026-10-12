@@ -9,11 +9,15 @@ This crate pairs with `dear-imgui-sys` and is intended for advanced users. Most 
 
 ## ABI Contract
 
-- Every shim operation returns `ImGuiTestEngineStatus`; values are written through validated output
-  pointers only after the operation succeeds.
+- Shim operations return `ImGuiTestEngineStatus` and validate output pointers.
+  Check the status before consuming ordinary result outputs.
+  `post_swap` also reports `out_presentation_completed` on failure: a capture
+  error can occur after the presentation cycle completed, so inspect that flag
+  before attempting presentation cleanup.
 - The shim catches C++ exceptions at every exported boundary. No exception is allowed to unwind into
-  Rust. Call `imgui_test_engine_get_last_error()` immediately after a failing operation to copy its
-  thread-local diagnostic.
+  Rust. Call `imgui_test_engine_get_last_error(buffer, capacity, &required_size)` immediately
+  after a failing operation to copy its thread-local diagnostic. Query the required
+  capacity with a null buffer and zero capacity; the size includes the trailing NUL.
 - Engine and script handles are non-thread-safe and must follow the documented create, transfer,
   unbind, and destroy lifecycle. A successfully destroyed raw handle is invalid immediately.
 - The shim owns the authoritative process-wide binding lease required by upstream's global Test
@@ -31,7 +35,7 @@ This crate pairs with `dear-imgui-sys` and is intended for advanced users. Most 
 ## Features
 
 - `freetype`: passthrough to `dear-imgui-sys/freetype`.
-- `capture` (default): enable screenshot/video capture helpers (`IMGUI_TEST_ENGINE_ENABLE_CAPTURE=1`).
+- `capture` (optional, disabled by default): enable screenshot/video capture helpers (`IMGUI_TEST_ENGINE_ENABLE_CAPTURE=1`).
 
 ## Build Modes
 

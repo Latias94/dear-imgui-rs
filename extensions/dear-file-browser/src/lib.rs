@@ -9,8 +9,12 @@
 //! Chinese common glyphs).
 //!
 //! Two backends:
-//! - Native (via `rfd`) for OS dialogs (desktop) and Web File Picker (wasm)
-//! - ImGui (pure-UI) browser that works everywhere and is fully themeable
+//! - Native (via `rfd`) for desktop OS dialogs; the path-based adapter is desktop-only.
+//! - ImGui (pure-UI) browser, using an application-provided virtual filesystem on WASM.
+//!
+//! On WASM, disable default features and enable `imgui`; do not enable `native-rfd`.
+//! Browser pickers need `rfd::AsyncFileDialog` directly because their file handles
+//! do not expose host paths that can be stored in this crate's [`Selection`].
 
 mod core;
 #[cfg(feature = "imgui")]

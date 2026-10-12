@@ -13,6 +13,7 @@ Use this file for the repository-specific parts of an ImGui-stack upgrade.
 | `dear-node-editor-sys` | `cimnodes_editor` + imgui-node-editor | `main` | Native only. Keep the local `dne_*` uintptr ID shim in sync with upstream ID and callback APIs. |
 | `dear-imguizmo-sys` | `cimguizmo` + ImGuizmo | `master` | Usually independent, but scan if cimgui/imgui integration changed. |
 | `dear-imguizmo-quat-sys` | `cimguizmo_quat` + ImGuIZMO.quat | `master` | Independent from `cimguizmo`; select it with `--cimguizmo-quat-branch`. |
+| `dear-imgui-cte-sys` | `cimCTE` + ImGuiColorTextEdit | `main_goossens` | Audit editor/diff text semantics, glyph layout, callbacks, and Unicode source transforms; regenerate native and WASM profiles together. |
 | `dear-imgui-test-engine-sys` | `imgui_test_engine` | `main` | Re-audit whenever Dear ImGui internals or hooks changed. Native only, no wasm support. |
 
 ## Primary sources to inspect
@@ -56,7 +57,7 @@ correctness.
 ### Bump unified release version
 
 ```powershell
-cargo run -p xtask -- release-version 0.16.0
+cargo run -p xtask -- release-version 0.20.0
 ```
 
 The root workspace version is the single source of truth. Publishable packages
@@ -71,15 +72,16 @@ cargo metadata --locked --format-version 1 --no-deps
 Also refresh standalone example lockfiles if their local path dependencies changed version:
 
 ```powershell
-cargo update
+cargo metadata --format-version 1 --no-deps | Out-Null
+cargo metadata --locked --format-version 1 --no-deps | Out-Null
 ```
 
-Run that in each standalone example workspace that carries its own `Cargo.lock`.
+Run those commands in each standalone example workspace that carries its own `Cargo.lock`. This refreshes changed local package versions while retaining locked external dependencies. Use `release-prepare` for the complete version/lockfile/binding preparation and edit the changelog and installation docs before committing.
 
 ## Repository-specific audit checklist
 
 1. Safe API completeness
-   - Compare new sys symbols against `dear-imgui-rs`, `dear-implot`, `dear-implot3d`, `dear-imnodes`, and `dear-imgui-test-engine`.
+   - Compare new sys symbols against `dear-imgui-rs`, `dear-implot`, `dear-implot3d`, `dear-imnodes`, `dear-imgui-cte`, and `dear-imgui-test-engine`.
    - For `dear-node-editor`, audit the local `dne_*` C ABI shim first; do not expose upstream `NodeId*` / `PinId*` / `LinkId*` helper-pointer APIs directly.
    - Audit new enums, flags, struct fields, style/spec arrays, callback setters, and renamed upstream items.
    - Audit removed functions and changed return types as source-breaking changes; generated code compiling does not prove the old safe wrapper still models upstream behavior.
@@ -151,7 +153,10 @@ cargo nextest run -j 1 -p dear-imgui-rs --features multi-viewport,abi-probe `
 ### Recommended targeted tests
 
 ```powershell
-cargo nextest run -p dear-imgui-rs -p dear-implot -p dear-implot3d -p dear-imnodes -p dear-imgui-test-engine -p dear-imgui-test-engine-sys --test-threads=1
+foreach ($package in @("dear-imgui-rs", "dear-implot", "dear-implot3d", "dear-imnodes", "dear-imgui-cte", "dear-imgui-test-engine", "dear-imgui-test-engine-sys")) {
+    cargo nextest run --locked -p $package --test-threads=1
+    if ($LASTEXITCODE -ne 0) { throw "Tests failed for $package" }
+}
 cargo check -p dear-imgui-rs --features wasm --target wasm32-unknown-unknown
 ```
 
@@ -174,7 +179,9 @@ $env:DOCS_RS = '1'; cargo check -p dear-imnodes-sys
 $env:DOCS_RS = '1'; cargo check -p dear-node-editor-sys
 $env:DOCS_RS = '1'; cargo check -p dear-imguizmo-sys
 $env:DOCS_RS = '1'; cargo check -p dear-imguizmo-quat-sys
+$env:DOCS_RS = '1'; cargo check -p dear-imgui-cte-sys
 $env:DOCS_RS = '1'; cargo check -p dear-imgui-test-engine-sys
+Remove-Item Env:DOCS_RS
 ```
 
 ### Example checks to consider
@@ -194,6 +201,6 @@ For an actual release:
 
 1. Convert the top `Unreleased` notes into `## [x.y.z] - YYYY-MM-DD`.
 2. Add a short release summary paragraph.
-3. Add `Highlights` for the few changes users should notice first.
+3. Lead with the few changes users should notice first; avoid duplicating the detailed entries in a second highlights list.
 4. Keep `Breaking Changes` explicit and migration-oriented.
 5. Mention version-train or publish-flow changes if they affect downstream users.

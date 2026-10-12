@@ -26,13 +26,10 @@ use winit::{
 #[path = "../support/wgpu_init.rs"]
 mod wgpu_init;
 
-/// Configure fonts for this example.
+/// Merge the optional, application-controlled CJK font into the existing default font.
 ///
-/// - Always ensure a default font is present.
-/// - If a CJK font is available under `examples/assets`, merge it so IME
-///   input (e.g. Chinese/Japanese) renders instead of showing `?`.
-/// Load the example's optional, application-controlled CJK font asset.
-///
+/// `init_fonts` adds the default font first. The asset path is independent of the
+/// process working directory; missing or invalid assets leave the default font intact.
 fn try_merge_noto_sans_sc(context: &mut Context) -> Result<(), String> {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/NotoSansSC-Regular.ttf");
     let data = StbTrueTypeFontData::from_file(path)

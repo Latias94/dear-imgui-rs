@@ -35,8 +35,9 @@ This sample is intentionally:
 
 ## Build Targets
 
-Use macOS with Xcode and the matching iOS SDK installed. The checked-in Xcode host
-below acquires SDL3 and supplies its headers automatically. The direct Cargo
+Use macOS with Xcode and the matching iOS SDK installed. Run the commands below
+from the workspace root. The checked-in Xcode host acquires SDL3 and supplies
+its headers automatically. The direct Cargo
 commands in this section instead require `SDL3_INCLUDE_DIR` to point to an
 include root containing the matching `SDL3/SDL.h`, or another configured SDL3
 header discovery path. They build the Rust library, not a runnable app bundle.
@@ -158,6 +159,11 @@ Common choices:
 
 ## Notes
 
+- UI coordinates use SDL window units. Font and widget scaling excludes Retina
+  pixel density, which the platform supplies through framebuffer scaling. The
+  panel and demo are rearranged within the client area when its size changes.
+- The WGPU renderer processes the managed frame's texture requests, including
+  dynamic font-atlas updates. This route does not use the raw native Metal shim.
 - This smoke sample requests redraw continuously and is meant only as a
   proof-of-shape.
 - The sample uses a regular SDL event loop inside a Rust-exported callback, so

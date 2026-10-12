@@ -1,9 +1,10 @@
 //! SDL3 platform backend bindings for `dear-imgui-rs`.
 //!
 //! This crate is a thin, opinionated wrapper around the official C++ SDL3
-//! platform backend (`imgui_impl_sdl3.cpp`). When the `opengl3-renderer`,
-//! `sdlrenderer3-renderer`, or `sdlgpu3-renderer` features are enabled, this
-//! crate compiles the matching official renderer backend and local C shim.
+//! platform backend (`imgui_impl_sdl3.cpp`). When the `sdlrenderer3-renderer` or
+//! `sdlgpu3-renderer` features are enabled, this crate compiles
+//! the matching official renderer backend and local C shim. `opengl3-renderer` instead uses
+//! the shared official OpenGL3 shim exported by `dear-imgui-sys`.
 //!
 //! The intent is to provide a simple, ownership-aware API that:
 //! - plugs into an existing `dear-imgui-rs::Context`

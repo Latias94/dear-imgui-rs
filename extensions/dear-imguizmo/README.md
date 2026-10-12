@@ -80,43 +80,33 @@ Use compatible stable requirements:
 [dependencies]
 dear-imgui-rs = "0.20"
 dear-imguizmo = "0.20"
+glam = "0.34"
 ```
 
-Minimal usage (dear-imgui-style API):
+Draw within a frame from an initialized platform and renderer. Keep the model and
+camera matrices in application state so edits survive the next frame:
 
 ```rust
-use dear_imgui_rs::Context;
+use dear_imgui_rs::Ui;
 use dear_imguizmo::{Operation, Mode, GuizmoExt};
 use glam::Mat4;
 
-let mut ctx = Context::create();
-let ui = ctx.frame();
+fn draw(ui: &Ui, model: &mut Mat4, view: &Mat4, proj: &Mat4) {
+    let giz = ui.guizmo();
+    let ds = ui.io().display_size();
+    giz.set_rect(0.0, 0.0, ds[0], ds[1]);
+    giz.set_drawlist_window();
 
-// Begin ImGuizmo for this frame via Ui extension
-let giz = ui.guizmo();
+    let used = giz
+        .manipulate_config(view, proj, model)
+        .operation(Operation::TRANSLATE)
+        .mode(Mode::Local)
+        //.snap([1.0, 1.0, 1.0])
+        //.bounds([minx,miny,minz], [maxx,maxy,maxz])
+        .build();
 
-// Set the drawing rectangle to the full viewport
-let ds = ui.io().display_size();
-giz.set_rect(0.0, 0.0, ds[0], ds[1]);
-
-// Choose where to draw (window/background/foreground)
-giz.set_drawlist_window();
-
-// Matrices (column-major). With the default `glam` feature, use `glam::Mat4`.
-let mut model = Mat4::IDENTITY;
-let view = Mat4::IDENTITY;
-let proj = Mat4::IDENTITY;
-
-// Manipulate the model matrix
-let used: bool = giz
-    .manipulate_config(&view, &proj, &mut model)
-    .operation(Operation::TRANSLATE)
-    .mode(Mode::Local)
-    //.snap([1.0, 1.0, 1.0])
-    //.bounds([minx,miny,minz], [maxx,maxy,maxz])
-    .build();
-
-if used { /* object moved */ }
+    if used { /* object moved */ }
+}
 ```
 
 Start with `examples/03-features/imguizmo_minimal.rs` for a copy-ready integration. See

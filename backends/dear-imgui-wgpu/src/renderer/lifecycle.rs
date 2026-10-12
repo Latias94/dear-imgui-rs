@@ -216,8 +216,9 @@ impl WgpuRenderer {
     ///
     /// This corresponds to `ImGui_ImplWGPU_InvalidateDeviceObjects`. Passing the context makes
     /// destroying renderer-owned GPU textures and requeueing Context-owned uploads one operation.
-    /// Application-owned external texture handles remain registered; after device loss, replace
-    /// their views through [`Self::update_external_texture`] before drawing them again.
+    /// Application-owned external texture handles remain registered on this same live device.
+    /// This does not replace a lost WGPU device. After actual device loss, shut down this renderer,
+    /// construct a new one with the replacement device and queue, and register new external views.
     pub fn invalidate_device_objects(&mut self, imgui_context: &mut Context) -> RendererResult<()> {
         self.ensure_context_matches(imgui_context)?;
         self.ensure_renderer_contract()?;

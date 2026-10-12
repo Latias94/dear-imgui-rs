@@ -5,7 +5,7 @@
 
 File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
 
-- Native (`rfd`): OS dialogs on desktop, Web File Picker on WASM
+- Native (`rfd`): OS dialogs on desktop (the path-based adapter is desktop-only)
 - ImGui UI: a pure Dear ImGui file browser/widget (configurable layout + UX)
 
 ![ImGui File Browser](https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/file_browser_imgui.png)
@@ -40,7 +40,7 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
 
 - Backends: `Backend::Auto|Native|ImGui` with runtime selection
 - Modes: `OpenFile`, `OpenFiles`, `PickFolder`, `SaveFile`
-- Native (rfd): blocking and async APIs (desktop); Web File Picker on WASM
+- Native (rfd): blocking and async APIs on desktop
 - ImGui (pure UI):
   - Layouts: `Standard` (quick locations + list) or `Minimal`
   - Filters by extension, substring Search, directories-first (configurable)
@@ -73,16 +73,25 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
 - `imgui` (default): enable the in-UI file browser
 - `native-rfd` (default): enable native dialogs via `rfd`
 - `tracing` (default): enable internal tracing spans
+- `thumbnails-image` (optional): enable the PNG/JPEG thumbnail decoder and `imgui`
 
 Default enables both backends; at runtime `Backend::Auto` prefers native and
 falls back to ImGui if not available.
 
 ## Quick Start
 
+These snippets show API integration inside an initialized ImGui frame. Keep
+`FileDialogState` across frames, configure a platform/renderer, and submit the
+frame through that renderer. For a complete application, run:
+
+```text
+cargo run -p dear-imgui-examples --bin file_browser_imgui --features file-browser
+```
+
 ```rust
 use dear_file_browser::{Backend, DialogMode, FileDialog};
 
-// Native async dialog (desktop/wasm):
+// Native async dialog (desktop only; add pollster = "0.4" to dependencies):
 # #[cfg(feature = "native-rfd")]
 let selection = pollster::block_on(
     FileDialog::new(DialogMode::OpenFiles)
@@ -496,7 +505,7 @@ state
 
 `dear-file-browser` provides a renderer-agnostic thumbnail request queue and LRU cache. There are two integration styles:
 
-1) Manual: decode/upload in your app, then call `fulfill_request()` and destroy evicted textures.
+1) Manual: decode/upload in your app, then call `fulfill_request()` and retire evicted textures after the current draw data/GPU work no longer uses them.
 2) Backend-driven: implement `ThumbnailProvider` + `ThumbnailRenderer`, pass a `ThumbnailBackend` to the UI, and the UI
    will call `maintain()` each frame.
 
@@ -507,6 +516,7 @@ use dear_file_browser::ThumbnailRequest;
 state.ui.thumbnails_enabled = true;
 state.ui.thumbnail_size = [48.0, 48.0];
 
+// API sketch: replace the placeholder with your renderer's registered texture.
 // Manual integration (per-frame, after drawing the dialog):
 let requests: Vec<ThumbnailRequest> = state.ui.thumbnails.take_requests();
 for req in &requests {
@@ -515,7 +525,8 @@ for req in &requests {
     state.ui.thumbnails.fulfill_request(req, Ok(tex));
 }
 
-// Destroy evicted textures in your renderer:
+// Retire evicted IDs through the renderer after the current frame is consumed.
+// Defer physical GPU destruction until in-flight draws no longer reference them:
 let to_destroy: Vec<TextureId> = state.ui.thumbnails.take_pending_destroys();
 for tex in to_destroy {
     // renderer.destroy(tex);
@@ -543,7 +554,7 @@ Optional decoder (`thumbnails-image` feature):
 
 ```rust
 // Cargo.toml:
-// dear-file-browser = { version = "...", features = ["thumbnails-image"] }
+// dear-file-browser = { version = "0.20", features = ["thumbnails-image"] }
 
 use dear_file_browser::ImageThumbnailProvider;
 
@@ -553,9 +564,17 @@ let mut provider = ImageThumbnailProvider::default();
 
 ## WASM
 
-- Native dialog route (`native-rfd`): supported asynchronously through the Web
-  File Picker. Browser security rules expose only files or directories selected
-  by the user; this is not arbitrary host filesystem access.
+- The path-based `native-rfd` adapter is desktop-only. Its `Selection` stores
+  `PathBuf` values, while browser `rfd` pickers return file handles without host
+  paths. Disable default features and enable `imgui` for the in-UI route on WASM:
+
+  ```toml
+  dear-file-browser = { version = "0.20", default-features = false, features = ["imgui"] }
+  ```
+
+  For a browser file picker, use `rfd::AsyncFileDialog` directly and retain its
+  `FileHandle` to read/write bytes. Do not enable `native-rfd` on this crate for
+  that purpose; it does not adapt browser handles into path-based selections.
 - In-UI route (`imgui`): `FileDialogState::new` owns a blocking
   `StdFileSystem` capability on wasm32. The browser cannot enumerate host paths
   through `std::fs`, so that default capability normally produces no useful OS

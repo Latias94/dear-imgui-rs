@@ -31,8 +31,8 @@ mod tests;
 /// - `#[imgui(name = "Custom Label")]` — override the label used for this field.
 /// - `#[imgui(slider, min = ..., max = ..., format = "...")]` — use a slider
 ///   with a format validated against the exact numeric field type.
-/// - `#[imgui(multiline, hint = "...", read_only)]` — use multiline text
-///   widgets for String/ImString fields.
+/// - `#[imgui(multiline, lines = 3, read_only)]` — use multiline text
+///   widgets for String/ImString fields. `hint = "..."` is single-line only.
 #[proc_macro_derive(ImGuiReflect, attributes(imgui))]
 pub fn derive_imgui_reflect(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

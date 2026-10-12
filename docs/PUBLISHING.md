@@ -20,21 +20,36 @@ Install both the development/publishing toolchain (Rust 1.99.0) and the
 canonical binding toolchain before preparing or validating a release:
 
 ```bash
+rustup toolchain install 1.99.0 --profile minimal --component rustfmt --component clippy
 rustup toolchain install 1.95.0 --profile minimal --component rustfmt
 ```
 
 The binding updater and pre-publication checks explicitly run Rust 1.95.0
 and its rustfmt, independently of the workspace development toolchain or a
 parent `RUSTUP_TOOLCHAIN` setting. Keep the canonical LLVM version available
-through `LIBCLANG_PATH` when regenerating bindings.
+through `LIBCLANG_PATH` when regenerating bindings (LLVM 14.0.6 in CI).
+Install `cargo-nextest`, add the `wasm32-unknown-unknown` target, and activate
+Emscripten 5.0.1 for the packaged WASM-provider gate:
+
+```bash
+cargo install cargo-nextest --locked
+rustup target add wasm32-unknown-unknown
+# In an emsdk checkout, install and activate 5.0.1, then load its environment.
+```
+
+`release-check` builds native code and offline consumers; the host needs its
+C++ compiler and any dependencies required by the selected platform profiles.
+The package gate intentionally uses a clean clone and isolated consumers so
+workspace files and previously built libraries cannot hide missing crate inputs.
 
 ```bash
 python3 tools/tasks.py release-prepare 0.20.0
 
 # Review generated bindings, source metadata, Cargo.lock, CHANGELOG.md, and docs.
 git diff
-git add -A
-git commit -m "chore: prepare release v0.20.0"
+git add -p
+# Stage reviewed new files explicitly with git add -- <path>.
+git commit -m "chore(release): prepare v0.20.0"
 
 python3 tools/tasks.py release-check
 ```

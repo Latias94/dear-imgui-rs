@@ -79,8 +79,8 @@ pub struct Shaders {
 impl Shaders {
     /// Create and compile shaders
     ///
-    /// Following the official OpenGL3 backend approach: uses simple shaders that rely on
-    /// OpenGL's GL_FRAMEBUFFER_SRGB for automatic sRGB conversion.
+    /// The fragment shader decodes vertex RGB through `ColorGamma`; desktop
+    /// `GL_FRAMEBUFFER_SRGB`, when enabled, encodes the final framebuffer output.
     pub fn new(gl: &Context, gl_version: GlVersion) -> InitResult<Self> {
         let glsl_version = GlslVersion::for_gl_version(gl_version);
 
@@ -217,9 +217,9 @@ void main()
 
     /// Generate fragment shader source
     ///
-    /// Following the official OpenGL3 backend approach: simple shader that relies on
-    /// OpenGL's GL_FRAMEBUFFER_SRGB for automatic sRGB conversion, rather than
-    /// manual shader-based conversion like the WGPU backend.
+    /// Decode vertex RGB with `ColorGamma` before multiplying sampled texture values.
+    /// Desktop `GL_FRAMEBUFFER_SRGB` performs the final framebuffer encoding when enabled;
+    /// texture decoding remains controlled by the application's GL texture format.
     fn fragment_shader_source(glsl_version: &GlslVersion) -> String {
         let version_str = glsl_version.as_str();
         let is_legacy =

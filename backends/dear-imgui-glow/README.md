@@ -18,7 +18,10 @@ let gl = unsafe { glow::Context::from_loader_function(|s| loader.get_proc_addres
 let mut imgui = Context::create();
 let mut renderer = GlowRenderer::new(gl, &mut imgui)?;
 
-// Per frame, after building the UI. The renderer owns the synchronous consumer capability.
+// Per frame, update platform metrics/input before opening the UI.
+// The renderer owns the synchronous consumer capability used below.
+let ui = imgui.frame();
+ui.window("Hello").build(|| ui.text("Dear ImGui + OpenGL"));
 let frame = imgui.render(renderer.renderer_consumer()?);
 renderer.render(frame)?;
 ```

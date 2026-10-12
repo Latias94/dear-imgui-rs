@@ -479,7 +479,10 @@ let mut renderer = unsafe {
     )?
 };
 
-// In your render loop (inside a render pass):
+// In your render loop, update platform metrics/input and build the UI first.
+let ui = imgui.frame();
+ui.window("Hello").build(|| ui.text("Dear ImGui + Vulkan"));
+// Record inside the compatible render pass:
 # let command_buffer = vk::CommandBuffer::null();
 let pending = imgui.render(renderer.renderer_consumer()?);
 let (frame, retirement) = renderer.prepare_frame(pending)?;

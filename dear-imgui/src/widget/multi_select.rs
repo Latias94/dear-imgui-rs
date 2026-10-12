@@ -1,7 +1,7 @@
 //! Multi-select helpers (BeginMultiSelect/EndMultiSelect)
 //!
 //! This module provides a small, safe wrapper around Dear ImGui's multi-select
-//! API introduced in 1.92 (`BeginMultiSelect` / `EndMultiSelect`), following
+//! API (`BeginMultiSelect` / `EndMultiSelect`), following
 //! the "external storage" pattern described in the official docs:
 //! <https://github.com/ocornut/imgui/wiki/Multi-Select>
 //!

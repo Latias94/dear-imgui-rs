@@ -58,7 +58,8 @@ impl Context {
     /// Get shared access to the platform IO.
     ///
     /// Note: `ImGuiPlatformIO` exists even when multi-viewport is disabled. We expose it
-    /// unconditionally so callers can use ImGui 1.92+ texture management via `PlatformIO.Textures[]`.
+    /// unconditionally for platform configuration. Managed renderer texture work is exposed through
+    /// request-bound `PendingFrame` or `FrameSnapshot` APIs, not raw texture pointers.
     #[doc(alias = "GetPlatformIO")]
     pub fn platform_io(&self) -> &crate::platform_io::PlatformIo {
         let _guard = CTX_MUTEX.lock();
@@ -71,7 +72,8 @@ impl Context {
     /// Get mutable access to the platform IO.
     ///
     /// Note: `ImGuiPlatformIO` exists even when multi-viewport is disabled. We expose it
-    /// unconditionally so callers can use ImGui 1.92+ texture management via `PlatformIO.Textures[]`.
+    /// unconditionally for platform configuration. Managed renderer texture work is exposed through
+    /// request-bound `PendingFrame` or `FrameSnapshot` APIs, not raw texture pointers.
     pub fn platform_io_mut(&mut self) -> &mut crate::platform_io::PlatformIo {
         let _guard = CTX_MUTEX.lock();
         unsafe {

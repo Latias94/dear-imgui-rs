@@ -16,6 +16,9 @@ let mut renderer = WgpuRenderer::new(WgpuInitInfo::new(device, queue, surface_fo
 renderer.set_gamma_mode(GammaMode::Auto); // Auto | Linear | Gamma22
 
 // per-frame
+// First update platform metrics/input, then open and build the UI.
+let ui = imgui.frame();
+ui.window("Hello").build(|| ui.text("Dear ImGui + WGPU"));
 let frame = imgui.render(renderer.renderer_consumer()?);
 let framebuffer_extent = FramebufferExtent::from_texture(&surface_texture.texture);
 renderer.render(frame, &mut render_pass, framebuffer_extent)?;
@@ -25,26 +28,27 @@ Each `WgpuRenderer` is fully initialized and bound to the `Context` passed to `n
 
 ## External texture views
 
-Register an application-owned texture view. The renderer clones the view handle, but the application must not explicitly destroy the underlying GPU resource until the handle is unregistered:
+Register an application-owned texture view and retain the returned handle in application state.
+The renderer clones the view handle. Keep the mapping registered until all UI frames referring to
+it have been recorded, and do not explicitly destroy the underlying resource until both the
+mapping is removed and GPU work using it has completed:
 
 ```rust,no_run
-# use dear_imgui_rs::Ui;
-# use dear_imgui_wgpu::{RendererResult, WgpuRenderer, wgpu};
-# fn external_texture(
+# use dear_imgui_wgpu::{ExternalTextureId, RendererResult, WgpuRenderer, wgpu};
+# fn register_image(
 #     renderer: &mut WgpuRenderer,
-#     ui: &Ui,
 #     view: &wgpu::TextureView,
-#     replacement_view: &wgpu::TextureView,
-# ) -> RendererResult<()> {
+# ) -> RendererResult<ExternalTextureId> {
 let texture = renderer.register_external_texture(view)?;
-
-ui.image(texture.texture_id(), [320.0, 180.0]);
-
-renderer.update_external_texture(texture, replacement_view)?;
-renderer.unregister_external_texture(texture)?;
-# Ok(())
+# Ok(texture)
 # }
 ```
+
+Use `ui.image(texture.texture_id(), size)` while building a later frame. Call
+`update_external_texture(texture, replacement_view)` before recording a frame that should use the
+replacement. Call `unregister_external_texture(texture)` only after recording the final frame
+that uses the handle; unregistering immediately after `ui.image` leaves that frame without a
+texture mapping.
 
 Sampling is renderer state rather than texture ownership. The renderer owns the standard linear and nearest samplers; enqueue an explicit draw-list command around images that need nearest sampling:
 
@@ -253,7 +257,7 @@ dear-imgui-wgpu = { version = "0.20", default-features = false, features = ["wgp
 ## What You Get
 
 - ImGui v1.92 texture system integration (create/update/destroy)
-- Multi-frame buffering and device-object management
+- Upload buffers isolated by render epoch and viewport pass, with device-object invalidation
 - Format-aware or user-controlled gamma (see below)
 
 ## sRGB / Gamma

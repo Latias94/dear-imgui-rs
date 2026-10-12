@@ -1,6 +1,7 @@
 //! ImGui-embedded File Browser example
 //! - Uses dear-file-browser `FileDialogState` and `Ui` extension
-//! - Works on desktop and WASM without native dialogs
+//! - Runs on desktop with Winit + Glow and an application-owned filesystem
+//! - Browser integrations can reuse the dialog UI with their own filesystem and renderer
 
 use std::{collections::HashMap, num::NonZeroU32, sync::Arc, time::Instant};
 

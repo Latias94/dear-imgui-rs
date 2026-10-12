@@ -152,7 +152,7 @@ per-frame platform state.
 
 ```rust,no_run
 use dear_imgui_rs::{
-    BackendFlags, Context, Key, MouseButton,
+    Context, Key, MouseButton,
 };
 use std::time::Instant;
 
@@ -178,12 +178,10 @@ pub enum MyEvent {
 impl MyPlatformBackend {
     pub fn new(imgui: &mut Context) -> Self {
         imgui
-            .set_platform_name("my-platform")
+            .set_platform_name(Some("my-platform"))
             .expect("platform name must not contain NUL bytes");
 
-        let mut flags = imgui.io().backend_flags();
-        flags.insert(BackendFlags::HAS_MOUSE_CURSORS);
-        imgui.io_mut().set_backend_flags(flags);
+        // Advertise HAS_MOUSE_CURSORS only after implementing OS cursor updates.
 
         Self {
             last_frame: Instant::now(),

@@ -22,6 +22,17 @@ Notes:
 
 ## Build Modes
 
+Prebuilt artifacts must match the release train, target, CRT, source revisions,
+binding identity, feature profile, and shared Dear ImGui core recorded in their
+manifest. Bare remote `.lib`/`.a` downloads do not supply that manifest.
+`build-from-source` (or `IMNODES_SYS_FORCE_BUILD`) forces source compilation.
+Choose one prebuilt route at a time: clear `IMNODES_SYS_LIB_DIR` before using
+`IMNODES_SYS_PREBUILT_URL`; a local directory override takes precedence.
+Source builds are the default and do not require libclang unless binding
+regeneration is explicitly requested. `wasm` uses import bindings for the fixed
+`imgui-sys-v1` provider and skips C++ compilation in Cargo; build the provider
+separately with Emscripten.
+
 This crate supports three ways to obtain the native `dear_imnodes` static library:
 
 - Source build (default)
@@ -30,15 +41,15 @@ This crate supports three ways to obtain the native `dear_imnodes` static librar
 - System/prebuilt library
   - Links an existing static library from a directory you provide.
 - Docs.rs
-  - Generates Rust bindings only; native code is not compiled.
+  - Uses validated checked-in Rust bindings; native code is not compiled.
 
 ## Environment Variables
 
 - `IMNODES_SYS_LIB_DIR`
-  - Directory containing the prebuilt static library.
+  - Directory containing the matching static library and its packaged manifest.
   - Expected names: `dear_imnodes.lib` (Windows/MSVC), `libdear_imnodes.a` (Unix).
 - `IMNODES_SYS_PREBUILT_URL`
-  - Local file path or direct URL to the prebuilt static library file (HTTP(S) and `.tar.gz` extraction require feature `prebuilt`).
+  - Local path or URL to a matching `.tar.gz` package containing the library and manifest (HTTP(S) and archive extraction require `prebuilt`). A local bare library path is accepted only when the matching manifest is beside it.
   - Downloaded files are cached and reused on subsequent builds.
 - `IMNODES_SYS_SKIP_CC`
   - If set, skips native C/C++ compilation. Typically used with one of the above.
@@ -52,5 +63,5 @@ The build script also consumes the include paths and defines exported by `dear-i
 
 - Linking to the base ImGui static library is provided by `dear-imgui-sys`; this crate does not duplicate `cargo:rustc-link-lib` for it.
 - MSVC (Windows) builds align CRT and exception flags with `dear-imgui-sys`.
-- `docs.rs` builds generate bindings only and export include paths for downstream crates.
+- `docs.rs` builds use checked-in bindings and export include paths for downstream crates.
 - Higher-level Rust APIs live in `extensions/dear-imnodes/`. See that crate and `examples/03-features/imnodes_minimal.rs` for a copy-ready integration.

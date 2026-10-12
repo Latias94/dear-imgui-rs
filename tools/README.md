@@ -11,13 +11,14 @@ The workspace uses a **unified release train** model. All 29 publishable package
 ### Prepare a New Release
 
 ```bash
-# Generate the complete release diff.
+# Update versions, lockfiles, and maintained bindings; edit release notes and docs next.
 python3 tools/tasks.py release-prepare 0.20.0
 
 # Review and commit versions, bindings, lockfile, changelog, and docs.
 git diff
-git add -A
-git commit -m "chore: prepare release v0.20.0"
+git add -p
+# Stage reviewed new files explicitly with git add -- <path>.
+git commit -m "chore(release): prepare v0.20.0"
 
 # Validate the committed clean release candidate.
 python3 tools/tasks.py release-check
@@ -26,7 +27,7 @@ python3 tools/tasks.py release-check
 gh workflow run release.yml --ref main -f tag=v0.20.0
 ```
 
-`release-prepare` intentionally leaves changes in the working tree. `release-check` runs the strict clean-tree, changelog, locked dependency graph, reproducible binding, package/offline, documentation, and test gates. Keeping these phases separate prevents release preparation from failing its own clean-tree check.
+`release-prepare` intentionally leaves changes in the working tree. It does not write the changelog or update installation documentation; finish those edits before committing. `release-check` runs the strict clean-tree, changelog, locked dependency graph, reproducible binding, package/offline, documentation, and test gates. Keeping these phases separate prevents release preparation from failing its own clean-tree check.
 
 Local success is necessary but not sufficient. `release.yml` binds the candidate
 to the exact `main` commit, requires successful normal CI, builds and consumes all
@@ -226,8 +227,9 @@ python3 tools/tasks.py release-prepare 0.20.0
 git diff
 
 # 3. Commit and validate the exact candidate.
-git add -A
-git commit -m "chore: prepare release v0.20.0"
+git add -p
+# Stage reviewed new files explicitly with git add -- <path>.
+git commit -m "chore(release): prepare v0.20.0"
 python3 tools/tasks.py release-check
 
 # 4. Merge to main, require normal CI to pass, then run the complete release.
@@ -260,8 +262,9 @@ python3 tools/update_submodule_and_bindings.py \
 
 ### Verify docs.rs Offline Builds
 
-```bash
-# Windows PowerShell
+Windows PowerShell:
+
+```powershell
 $env:DOCS_RS = '1'
 cargo check -p dear-imgui-sys
 cargo check -p dear-implot-sys
@@ -272,8 +275,12 @@ cargo check -p dear-implot3d-sys
 cargo check -p dear-imguizmo-quat-sys
 cargo check -p dear-imgui-cte-sys
 cargo check -p dear-imgui-test-engine-sys
+Remove-Item Env:DOCS_RS
+```
 
-# Linux/macOS
+Linux/macOS:
+
+```bash
 DOCS_RS=1 cargo check -p dear-imgui-sys
 DOCS_RS=1 cargo check -p dear-implot-sys
 DOCS_RS=1 cargo check -p dear-imnodes-sys
@@ -343,7 +350,7 @@ gh workflow run release.yml --ref main -f tag=v<next-version>
 
 Ensure pregenerated bindings are up-to-date:
 ```bash
-python3 tools/update_submodule_and_bindings.py --crates all
+python3 tools/update_submodule_and_bindings.py --crates all --submodules skip --wasm
 ```
 
 Then verify locally:

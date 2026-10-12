@@ -25,12 +25,13 @@ This crate supports multiple build strategies to fit different development workf
 ### 1. Prebuilt Static Libraries (Recommended)
 
 The fastest way to get started is to use prebuilt static libraries instead of compiling from source.
-Official release archives cover the supported release targets and profiles. Use an archive matching the crate version.
+Official release archives cover the supported release targets and profiles. Use an archive matching the crate version. Choose one of the alternatives below; unset previous `IMGUI_SYS_LIB_DIR` or `IMGUI_SYS_PREBUILT_URL` overrides when switching routes.
 
 ```bash
 # Option A: Point to the library directory inside an extracted core artifact.
 # The strict manifest.txt may be in this directory or its parent artifact root.
 export IMGUI_SYS_LIB_DIR=/path/to/extracted/dear-imgui-artifact/lib
+cargo build -p dear-imgui-sys
 
 # Option B: Use a package-tool-generated local archive or HTTP(S) URL.
 export IMGUI_SYS_PREBUILT_URL=/path/to/dear-imgui-prebuilt-0.20.0-<target>-static.tar.gz
@@ -110,10 +111,12 @@ Skip C/C++ compilation for faster Rust-only iteration:
 
 ```bash
 export IMGUI_SYS_SKIP_CC=1
-cargo build -p dear-imgui-sys
+cargo check -p dear-imgui-sys
 ```
 
-This uses pregenerated bindings and skips native compilation, useful when working on higher-level Rust code.
+This uses pregenerated bindings and skips native compilation. Use `cargo check`
+for Rust-only iteration; binaries and tests still need the native libraries to
+link. Native `backend-shim-*` features reject this mode.
 
 ## Offline Builds & docs.rs
 
@@ -143,7 +146,7 @@ then verify them:
 ```bash
 cargo run -p xtask -- verify-bindings --update --allow-dirty
 python3 tools/update_submodule_and_bindings.py \
-  --crates dear-imgui-sys --submodules auto --wasm
+  --crates dear-imgui-sys --submodules skip --wasm
 ```
 
 Canonical generation rejects `BINDGEN_EXTRA_CLANG_ARGS*`. The target profile,
@@ -189,8 +192,8 @@ Use the compatible stable requirement:
 [dependencies]
 dear-imgui-sys = "0.20"
 
-# Enable features as needed
-dear-imgui-sys = { version = "0.20", features = ["freetype", "wasm"] }
+# Alternatively, enable native FreeType (replace the preceding dependency entry).
+# dear-imgui-sys = { version = "0.20", features = ["freetype"] }
 ```
 
 ### Direct FFI Usage (Advanced)
@@ -202,19 +205,26 @@ unsafe {
     let ctx = igCreateContext(std::ptr::null_mut());
     igSetCurrentContext(ctx);
 
-    // Configure ImGui...
+    // Build a backend-free legacy atlas before creating the first frame.
     let io = igGetIO_Nil();
+    (*io).IniFilename = std::ptr::null();
     (*io).DisplaySize = ImVec2 { x: 800.0, y: 600.0 };
+    (*io).DeltaTime = 1.0 / 60.0;
+    igImFontAtlasBuildMain((*io).Fonts);
 
-    // Main loop
+    // Produce one CPU-side frame. This does not display a window or submit GPU work.
     igNewFrame();
-    igText(b"Hello from Dear ImGui!\0".as_ptr() as *const std::os::raw::c_char);
+    igTextUnformatted(c"Hello from Dear ImGui!".as_ptr(), std::ptr::null());
     igRender();
 
     // Clean up
     igDestroyContext(ctx);
 }
 ```
+
+For a windowed application, use the complete backend examples below. Their
+renderers own font uploads; do not combine this legacy-atlas setup with a
+managed renderer or an official backend that advertises texture support.
 
 ## Backend Shim Features (Advanced)
 

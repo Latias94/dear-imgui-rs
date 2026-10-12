@@ -90,6 +90,10 @@ to the available native window area.
 
 ## Prerequisites
 
+Run the commands below from the workspace root. The compiler setup shown in
+`Build` uses PowerShell on Windows; APK packaging uses the cross-platform Python
+helper or `cargo-apk2`.
+
 Install and configure these tools before using the smoke template:
 
 - Rust with the Android target you want to build, at minimum
@@ -125,6 +129,7 @@ PowerShell example for `aarch64-linux-android`:
 
 ```powershell
 $ndk = $env:ANDROID_NDK_HOME
+if (-not $ndk) { $ndk = $env:ANDROID_NDK_ROOT }
 $llvm = Join-Path $ndk 'toolchains/llvm/prebuilt/windows-x86_64/bin'
 
 $env:CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = Join-Path $llvm 'aarch64-linux-android26-clang.cmd'

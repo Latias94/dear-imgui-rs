@@ -388,7 +388,7 @@ impl<'ui> Plot3DUi<'ui> {
         })
     }
 
-    /// Convenience: plot triangles from interleaved xyz arrays (count must be multiple of 3)
+    /// Convenience: plot triangles from separate X/Y/Z arrays (count must be multiple of 3)
     pub fn plot_triangles_f32<S: AsRef<str>>(
         &self,
         label: S,
@@ -462,7 +462,7 @@ impl<'ui> Plot3DUi<'ui> {
         })
     }
 
-    /// Convenience: plot quads from interleaved xyz arrays (count must be multiple of 4)
+    /// Convenience: plot quads from separate X/Y/Z arrays (count must be multiple of 4)
     pub fn plot_quads_f32<S: AsRef<str>>(
         &self,
         label: S,
@@ -536,7 +536,7 @@ impl<'ui> Plot3DUi<'ui> {
         })
     }
 
-    /// Convenience: plot triangles from interleaved xyz arrays (f64)
+    /// Convenience: plot triangles from separate X/Y/Z arrays (f64)
     pub fn plot_triangles_f64<S: AsRef<str>>(
         &self,
         label: S,
@@ -610,7 +610,7 @@ impl<'ui> Plot3DUi<'ui> {
         })
     }
 
-    /// Convenience: plot quads from interleaved xyz arrays (f64)
+    /// Convenience: plot quads from separate X/Y/Z arrays (f64)
     pub fn plot_quads_f64<S: AsRef<str>>(
         &self,
         label: S,

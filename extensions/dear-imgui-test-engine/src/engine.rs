@@ -791,6 +791,10 @@ impl TestEngine {
     }
 
     /// Returns counters derived from the exact active run manifest without consuming it.
+    ///
+    /// Requires a queued, running, or terminal run; returns an invalid-state error in
+    /// [`RunState::Ready`]. Retain the result of [`Self::take_terminal_summary`] in
+    /// application state to display a completed run after consumption.
     pub fn result_summary(&mut self) -> TestEngineResult<ResultSummary> {
         self.require_attached("TestEngine::result_summary")?;
         self.refresh_run_state()?;

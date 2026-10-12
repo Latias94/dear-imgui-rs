@@ -99,23 +99,23 @@ Use compatible stable requirements:
 [dependencies]
 dear-imgui-rs = "0.20"
 dear-imguizmo-quat = "0.20"
+glam = "0.34"
 ```
 
-Minimal usage with the Ui extension and builder API:
+Draw within an initialized application frame. Store the rotation in application
+state and pass it to the Ui extension and builder API:
 
 ```rust
 use dear_imgui_rs::Ui;
 use dear_imguizmo_quat::{GizmoQuatExt, Mode};
 
-fn draw(ui: &Ui) {
-    let mut rot = glam::Quat::IDENTITY; // or [f32; 4]
-
+fn draw(ui: &Ui, rot: &mut glam::Quat) {
     let used = ui
         .gizmo_quat()
         .builder()
         .size(220.0)
         .mode(Mode::MODE_DUAL | Mode::CUBE_AT_ORIGIN)
-        .quat("##rot", &mut rot);
+        .quat("##rot", rot);
 
     if used {
         // rotation changed this frame
@@ -123,7 +123,8 @@ fn draw(ui: &Ui) {
 }
 ```
 
-Pan+Dolly + quaternion + light direction variant:
+Pan+Dolly + quaternion + light direction API sketch (keep these values in
+application state and draw with the current `ui`):
 
 ```rust
 use dear_imguizmo_quat::{GizmoQuatExt, Mode};

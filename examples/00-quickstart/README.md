@@ -1,5 +1,7 @@
 # dear-app quickstarts
 
+Run the commands below from the workspace root.
+
 These three binaries use the same `dear-app` runtime state machine. Move the UI body to the next
 level only when the application needs the additional capability.
 

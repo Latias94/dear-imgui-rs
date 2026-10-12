@@ -25,8 +25,14 @@ dear-imgui-cte = "0.20"
 
 ## Quick Start
 
-Create persistent widget state while the Dear ImGui `Context` is alive, then
-submit it through `CteUiExt` on every frame:
+Add bundled fonts during initialization, before attaching a managed-texture
+renderer. Create persistent widget state while that Dear ImGui `Context` is
+alive, then submit it through `CteUiExt` on each renderer-driven frame.
+
+This API fragment assumes the application supplies platform input, display
+size/delta time, renderer attachment, and normal frame reconciliation. The
+commented integration point represents that setup; use `cte_minimal` below for
+a complete runnable application:
 
 ```rust,no_run
 use dear_imgui_cte::{CteUiExt, Language, TextEditor, dejavu_font_source};
@@ -41,6 +47,7 @@ let mut editor = TextEditor::try_create(&imgui)?;
 editor.set_text("int main() { return 0; }\n")?;
 editor.set_language(Some(Language::Cpp));
 
+// Attach/configure your platform and managed renderer here before starting a frame.
 let ui = imgui.frame();
 ui.text_editor(&mut editor, "Source")
     .size([640.0, 480.0])
@@ -83,6 +90,20 @@ word-only navigation that leaves whitespace and punctuation in place.
 See the family-level disposition ledger in
 [`docs/API_COVERAGE.md`](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/API_COVERAGE.md#imguicolortextedit-api-family-ledger)
 for the small set of raw-only capabilities.
+
+## Migrating from 0.18
+
+The 0.20 source pin includes upstream wide-glyph column handling. Remove the
+`cte-wide-glyphs-v1` overlays and rebuild custom native archives and CTE-enabled
+WASM providers together with the matching core. Raw `Glyph` mirrors now use
+`columns: u8` and `squiggle: u32`; inspect the generated sys bindings before
+updating raw callers. Both editor and diff tab sizes must be in `1..=255`.
+
+`TextEditor::text()` now returns exact document content. Remove workarounds that
+trimmed the former appended newline; append a newline explicitly when required
+by your file format. Use `noto_sans_sc_font_source` for the bundled CJK font and
+keep font installation within the managed atlas path. For the complete raw API
+migration, see [the compatibility guide](../../docs/COMPATIBILITY.md#020-stable-release).
 
 ## Safety and Lifecycle
 

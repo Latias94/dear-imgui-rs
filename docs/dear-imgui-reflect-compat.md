@@ -204,14 +204,15 @@ Formatting and display
 
 - [x] Basic format string and helpers for numeric widgets
   - Attribute: `format = "..."` on numeric fields.
-  - Applied to sliders and drags via `display_format`, and to input scalars
-    via `display_format`.
+  - Applied through a `NumericFormat` validated for the exact field type;
+    input, slider, and drag builders receive that typed format.
   - Additional helpers on numeric fields:
-    - `hex` on integral types uses a hexadecimal format (e.g. `%#x`).
+    - `hex` on unsigned integer fields uses a carrier-correct hexadecimal
+      format (e.g. `%#x` for `u32`). Signed integer `hex` is rejected.
     - `percentage` on floating-point types uses a percentage format
-      (e.g. `\"%.2f%%\"`); values are not scaled.
+      (e.g. `"%.2f%%"`); values are not scaled.
     - `scientific` on floating-point types uses scientific notation (e.g. `%e`).
-    - `prefix = \"...\"` / `suffix = \"...\"` wrap the core format string with
+    - `prefix = "..."` / `suffix = "..."` wrap the core format string with
       a prefix/suffix. These are compiled into a single printf-style format
       string at derive-time, similar to ImReflect's `format_settings<T>` prefix
       and suffix helpers.
@@ -302,9 +303,8 @@ Single-line text:
     (`builder.read_only(true)`) and, more generally, all fields (including
     strings) also honor field-level `#[imgui(read_only)]` and
     `MemberSettings::read_only` by wrapping the UI in `ui.begin_disabled()`.
-    This achieves the same "const string" editing semantics as ImReflect's
-    read-only string handling (layout may differ slightly; we do not yet
-    implement a dedicated `TextWrapped`+tooltip mode for const strings).
+    This preserves read-only editing semantics. The distinct `display_only`
+    attribute selects the text-wrapped plus tooltip presentation described below.
 
 Multi-line text:
 
@@ -364,15 +364,16 @@ Containers and Option Types
     scalar control per element (`label[index]` using `ImGuiValue` for the
     element type). In contrast to ImReflect's `std::array`, insertion/removal
     are disabled, but elements can be reordered via drag handles when enabled.
-    Global `ArraySettings` control whether arrays are wrapped in a dropdown and
+    Session `ArraySettings` control whether arrays are wrapped in a dropdown and
     whether reordering is allowed.
 - [x] Smart pointers (`Box<T>`)
   - `Box<T>` where `T: ImGuiReflect` is treated transparently by implementing
     `ImGuiReflect` for `Box<T>` and delegating to the inner value. This
     corresponds to ImReflect's smart-pointer handling for engaged pointers.
     Other smart pointers (`Rc<T>`, `Arc<T>`) are partially supported by
-    forwarding editing only when there is a unique strong reference (otherwise
-    a read-only marker is shown), which is conceptually similar to ImReflect's
+    forwarding editing only when there is one strong reference and no weak
+    references (`Rc::get_mut` / `Arc::get_mut`); otherwise a read-only marker
+    is shown, which is conceptually similar to ImReflect's
     handling of shared pointers but constrained by Rust's aliasing rules.
 - [~] Tuples `(T, U, ...)`
   - `dear-imgui-reflect` provides `ImGuiValue` implementations for Rust tuples
@@ -527,7 +528,8 @@ above (or are still intentionally partial):
   - Support for key types beyond `String` where feasible, while preserving
     good UX and safety.
 - Extended math support:
-  - Matrices, quaternions, and additional `glam` / `mint` types.
+  - Additional math types beyond the implemented `glam::Mat4`, `glam::Quat`,
+    `glam::Vec2/3/4`, and `mint::Vector2/3/4<f32>` set.
 - Additional "complex object" demos and stress tests:
   - A demo even closer to ImReflect's `complex_object_test`, exercising deep
     nesting, maps, optional fields, tuples, and shared-pointer graphs beyond

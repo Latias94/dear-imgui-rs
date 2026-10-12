@@ -17,3 +17,15 @@ Run the documented commands from the workspace root. Serve the generated
 `target/web-demo/` directory over HTTP and open it in a browser with WebGL2 or
 WebGPU support. The checked-in HTML becomes runnable after both the Rust module
 and the `imgui-sys-v1` provider have been generated.
+
+Canvas size comes from CSS in `web/index.html`; Winit supplies the corresponding
+backing size and pixel density. UI sizes stay in logical points while
+framebuffer scaling handles backing pixels. The initial panel and demo layout
+uses the available client area, and existing windows are clamped before drawing
+if they extend outside it.
+
+`src/lib.rs` acquires a presentable surface before opening an ImGui frame and
+uses a frame token to close the frame on errors. The Rust WGPU renderer handles
+managed texture requests, including font-atlas updates; the native import
+provider is not a renderer backend. Enable `experimental-fonts` to exercise
+custom font configuration (`cte` includes that feature).

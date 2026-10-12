@@ -27,7 +27,10 @@ pub trait ThumbnailProvider {
 
 /// Thumbnail renderer interface (upload/destroy).
 ///
-/// Implementations own the GPU lifecycle of `TextureId`.
+/// Implementations own the GPU lifecycle of `TextureId`. Register uploaded textures
+/// with the application's ImGui renderer. Removal may be requested while the current
+/// frame still references an ID; defer physical GPU destruction until all such draws
+/// are complete. This cache does not participate in ImGui's managed font-atlas protocol.
 pub trait ThumbnailRenderer {
     /// Upload an RGBA8 thumbnail image to the GPU and return a `TextureId`.
     fn upload_rgba8(&mut self, image: &DecodedRgbaImage) -> Result<TextureId, String>;
@@ -248,7 +251,8 @@ impl ThumbnailCache {
 
     /// Complete a request with either a ready texture id or an error string.
     ///
-    /// Returns any evicted texture ids that should be destroyed by the renderer.
+    /// Queues evicted/replaced texture IDs for [`Self::take_pending_destroys`].
+    /// This method does not return IDs or destroy GPU resources itself.
     pub fn fulfill(&mut self, path: &Path, result: Result<TextureId, String>, _max_size: [u32; 2]) {
         let key = path.to_path_buf();
         let stamp = self.alloc_stamp();

@@ -7,7 +7,7 @@
 //!
 //! - **docking**: Always enabled in this crate
 //! - **freetype**: Enable FreeType font rasterizer support
-//! - **wasm**: Enable WebAssembly compatibility
+//! - **wasm**: Enable the `wasm32-unknown-unknown` browser import-provider ABI
 //! - **stack-layout**: Enable the native patched core artifact used by blueprint-style layouts
 //! - **prebuilt**: Allow downloading a compatible native prebuilt artifact
 //! - **build-from-source**: Force compilation of the native artifact from vendored sources
@@ -17,10 +17,12 @@
 //!
 //! ## WebAssembly Support
 //!
-//! When the `wasm` feature is enabled, this crate provides full WASM compatibility:
-//! - Disables platform-specific functions (file I/O, shell functions, etc.)
-//! - Configures Dear ImGui for WASM environment
-//! - Compatible with wasm-bindgen and web targets
+//! On `wasm32-unknown-unknown`, the explicit `wasm` feature selects bindings that
+//! import cimgui functions from the fixed `imgui-sys-v1` provider. Build the
+//! matching Emscripten provider and share its memory with the Rust application.
+//! WASI and Rust's Emscripten targets are unsupported. Enabling this feature on a
+//! native target leaves the native ABI selected. Native shims, prebuilts, and
+//! Test Engine cannot be used on the browser target.
 //!
 //! ## Safety
 //!

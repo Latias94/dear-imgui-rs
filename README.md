@@ -109,7 +109,7 @@ The 0.16 train is intentionally breaking. Alpha.1 introduced the main architectu
 - implicit WASM target selection to the explicit `wasm32-unknown-unknown` plus `wasm` feature contract; and
 - `dear_imgui_sys::IMGUI_VERSION` to `BINDING_VERSION`, without a compatibility alias.
 
-Alpha.2 replaces alpha.1's `RenderedFrame` with the linear `PendingFrame` -> `ReconciledFrame` protocol and replaces the mode-selecting `RendererConsumer` with separate synchronous and detached capabilities. It also hardens Context, Docking, multi-viewport renderer, Test Engine, and Bevy frame ownership. See the [alpha.2 migration table](CHANGELOG.md#0160-alpha2); applications migrating directly from 0.15 should also read the [alpha.1 migration guide](CHANGELOG.md#0160-alpha1).
+Alpha.2 replaces alpha.1's `RenderedFrame` with the linear `PendingFrame` -> `ReconciledFrame` protocol and replaces the mode-selecting `RendererConsumer` with separate synchronous and detached capabilities. It also hardens Context, Docking, multi-viewport renderer, Test Engine, and Bevy frame ownership. See the [alpha.2 migration table](CHANGELOG.md#0160-alpha2---2026-08-09); applications migrating directly from 0.15 should also read the [alpha.1 migration guide](CHANGELOG.md#0160-alpha1---2026-08-02).
 
 ## Examples
 

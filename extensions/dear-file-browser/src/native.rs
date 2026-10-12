@@ -1,19 +1,21 @@
 //! Native (rfd) backend.
 //!
 //! This module implements the OS-native file dialogs via the `rfd` crate.
-//! On desktop platforms it opens the system dialog; on `wasm32` targets it
-//! uses the Web File Picker. Both blocking and async flows are exposed via the
+//! This path-based adapter supports desktop platforms. Browser `rfd` handles
+//! have no host paths, so `native-rfd` must be disabled on `wasm32`. Both blocking
+//! and async desktop flows are exposed via the
 //! `FileDialog` builder:
 //!
 //! - `open_blocking()` opens a modal, OS-native dialog and returns on close.
-//! - `open_async()` awaits the selection (desktop and wasm32 supported).
+//! - `open_async()` awaits the desktop selection.
 //!
 //! Notes
 //! - Filters map to `rfd::FileDialog::add_filter` and accept lowercase
 //!   extensions without dots (e.g. "png").
 //! - When `start_dir` is provided it is forwarded to `rfd`.
 //! - On the Web (wasm32), the ImGui in-UI browser cannot enumerate the local
-//!   filesystem – prefer the native backend to access user files.
+//!   filesystem. Use `rfd::AsyncFileDialog` directly and retain its file handle,
+//!   or supply an application virtual-filesystem adapter to the in-UI browser.
 use crate::core::{Backend, DialogMode, FileDialog, FileDialogError, Selection};
 
 #[cfg(feature = "tracing")]

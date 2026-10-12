@@ -4,8 +4,9 @@ use dear_imgui_rs::{Context, ContextBinding, Ui};
 
 /// Plot3D context wrapper
 ///
-/// This manages the ImPlot3D context lifetime. Create one instance per application
-/// and keep it alive for the duration of your program.
+/// This manages ImPlot3D state bound to one owning Dear ImGui Context. Keep it
+/// across frames and drop it before that Context. Multiple plotting contexts are
+/// supported, but native current-context access must remain serial.
 ///
 /// # Example
 ///
@@ -65,17 +66,13 @@ impl Plot3DContext {
         Self::try_create(imgui).expect("Failed to create ImPlot3D context")
     }
 
-    /// Set this context as the current ImPlot3D context.
-    /// Get a raw pointer to the current ImPlot3D style
-    ///
-    /// This is an advanced function for direct style manipulation.
-    /// Prefer using the safe style functions in the `style` module.
-    /// Get the raw ImPlot3D context pointer.
+    /// Get the raw ImPlot3D context pointer without changing the current context.
     ///
     /// # Safety
     ///
-    /// The caller must ensure the pointer is used safely and not stored beyond the lifetime of
-    /// this context wrapper.
+    /// Use it only while this plotting context and its owning Dear ImGui Context are
+    /// alive and correctly bound. Preserve native ownership and pointer invariants; do
+    /// not destroy the context or retain the pointer beyond this wrapper's lifetime.
     pub unsafe fn raw(&self) -> *mut sys::ImPlot3DContext {
         self.raw
     }

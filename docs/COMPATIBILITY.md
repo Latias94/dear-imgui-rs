@@ -3,7 +3,7 @@
 This document tracks compatibility across the workspace crates, upstream Dear ImGui, and key external dependencies. The root README shows the latest recommendations; this file keeps version history and compatibility policy.
 
 For Apple-specific integration notes and the repository-owned iOS example
-paths, see `docs/workstreams/apple-platform-support.md`.
+paths, see [the Apple platform guide](workstreams/apple-platform-support.md).
 
 ## Versioning Policy
 
@@ -40,8 +40,10 @@ All 29 publishable crates move together to `0.20.0`. Use `version = "0.20"` for 
 
 - Upgrade direct Bevy, SDL3, and glam dependencies together with the corresponding backend or extension; older versions' types cannot cross these crate boundaries. `dear-app` continues to use WGPU 30.
 - Bevy vertex RGB and managed RGBA texture RGB bytes are interpreted as sRGB and decoded before tint multiplication. The renderer follows the camera stack's resolved Linear, Srgb, or Oklab compositing space. For linear source RGB, register a Bevy `Image` with an explicitly linear unorm or float format; alpha remains linear.
+- ImPlot live axis linking (`PlotUi::setup_axis_links` and `set_next_axis_links`) now requires `unsafe`. Linked limit storage must remain valid at stable addresses with no conflicting access until the affected plot/axis links and pending next-plot links are explicitly cleared, or the `PlotContext` is destroyed. `EndPlot` alone does not generally release links; disabled secondary axes can retain them across later plots. Prefer copied `setup_x_axis_limits` / `setup_y_axis_limits` when writeback is unnecessary. The unchecked variants additionally require a valid enabled raw axis.
 - CTE tab sizes are restricted to 1 through 255. The editor getter now preserves exact text without appending LF; remove workarounds that trimmed the former extra newline.
 - Source-provider tools must replace the removed `ProviderTransform::PatchCteTextEditorWideGlyphs` and `PatchCteTextDiffWideGlyphs` branches with support for `PatchCteUnicodeRangeLookup`. Rebuild custom native archives for 0.20.0; older core and extension artifacts are rejected by version and binding provenance checks.
+- Regenerated raw bindings reflect the matching native headers; some opaque sys types no longer implement `Copy` or `Clone`. Keep those values behind the native ownership APIs instead of copying their storage.
 - CTE raw `Glyph` adds `columns: u8` and changes `squiggle` from `usize` to `u32`. Replace `TextEditor_SetText` calls with `TextEditor_SetText_std_string_view`; `TextEditor_AddNextOccurrence`, `TextEditor_SelectAllOccurrences`, `TextEditor_FindWordStart`, and `TextEditor_FindWordEnd` now take a `wholeWord` argument. The safe wrapper retains its existing methods and adds explicit whole-word variants. Regenerate custom raw bindings and rebuild CTE-enabled WASM providers against the matching headers.
 - The new DX12, Metal, and Cocoa integrations are unsafe raw sys shims, not safe renderer adapters. DX12 requires stable descriptor allocator callbacks and GPU completion before shutdown. All native shim features are rejected on `wasm32-unknown-unknown`; shims compile locally even when the core uses a prebuilt archive. See [the backend shim guide](BACKEND_SHIMS.md) for target and ownership requirements.
 

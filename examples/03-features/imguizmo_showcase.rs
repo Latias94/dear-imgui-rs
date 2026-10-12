@@ -814,8 +814,6 @@ impl AppWindow {
 
         Ok(())
     }
-
-    // (build_ui removed; content moved inline into render())
 }
 
 impl ApplicationHandler for App {

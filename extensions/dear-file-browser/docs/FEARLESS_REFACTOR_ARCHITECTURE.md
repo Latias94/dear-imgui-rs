@@ -1,5 +1,13 @@
 # Fearless Refactor: File Browser Architecture (IGFD Reference-Driven)
 
+> Status for the 0.20 release train: this document preserves the refactor design
+> and dated milestone history. API sketches and old status snapshots are not the
+> current public contract. Use [the crate README](../README.md),
+> [selection migration](API_MIGRATION_ID_SELECTION.md), and
+> [the implemented scan runtime](FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md)
+> for current methods and ownership. `repo-ref/ImGuiFileDialog` is an optional
+> local reference checkout and is not included in published crates.
+
 This document proposes and documents a "fearless refactor" of `dear-file-browser` to reach feature parity (or near-parity) with ImGuiFileDialog (IGFD) while staying idiomatic to Rust and compatible with `dear-imgui-rs`.
 
 Key policy: **IGFD is the reference implementation for UI/behavior** in the ImGui backend. We keep a copy of IGFD source under `repo-ref/ImGuiFileDialog` and prefer source-diff driven parity work.

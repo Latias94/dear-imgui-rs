@@ -85,7 +85,7 @@ unsafe { dear_imnodes_sys::imnodes_SetImGuiContext(dear_imgui_sys::igGetCurrentC
 let imnodes = dear_imnodes::Context::create(&imgui_ctx);
 ```
 
-Rationale: it prevents undefined behavior from querying ImGui state through a stale or null context inside the extension. If your wrapper stores raw pointers and may be dropped after the owning `Context`, record `ContextAliveToken` and guard drops/calls (panic or best-effort leak instead of UB).
+Rationale: it prevents querying ImGui state through a stale or null context. Record the owner's `ContextBinding`, enter it for native calls and destruction, and reject a `Ui` with a different `ContextId`. Use `ContextAttachment` when hooks must detach before Context destruction. Applications should drop extension owners before their Context; after Context death, avoid native destruction rather than dereferencing stale state. Dear ImGui's process-current Context and extensions' global state require serial use across contexts.
 
 ## Layering
 
@@ -112,8 +112,9 @@ Use C bindings (cimgui family) + bindgen when available:
 - Sources: compile upstream C/C++ sources with `cc` (e.g., `cimplot.cpp`, `implot/*.cpp`)
 - Base linking: do not duplicate linking of the base ImGui library; rely on `dear-imgui-sys` to emit the correct `cargo:rustc-link-lib` for `dear_imgui`/`cimgui`. Your `-sys` crate should only emit its own static lib.
 - Blocklist ImGui types in bindgen (re-use dear-imgui-sys): ImVec2, ImVec4, ImGuiContext, ImDrawList, etc.
-- WASM: generally exclude native build; emit bindings only if you need docs.rs builds
-- Docs.rs/offline builds: commit a full `src/bindings_pregenerated.rs` and have `build.rs` copy/sanitize it to `OUT_DIR/bindings.rs` when headers or toolchains are not available
+- WASM: supported extensions use checked-in import bindings for the fixed `imgui-sys-v1` provider on `wasm32-unknown-unknown`. Cargo skips C++ compilation; build the matching provider separately with Emscripten. Enable `wasm` on every highest safe dependency path. A new extension needs provider exports, source wiring, and WASM bindings before it can claim support.
+- Checked-in bindings: use `CrateBindingSpec::copy_embedded_checked_in_to_out_dir` to validate provenance before copying to `OUT_DIR`. Regeneration is explicit (`DEAR_IMGUI_RS_REGEN_BINDINGS=1` plus `bindgen`) and requires headers and libclang.
+- docs.rs skips native compilation. Ordinary offline source builds still require the maintained C++ sources and a compiler; pregenerated bindings do not replace the native library.
 
 ### Prebuilt Helper Crate
 
@@ -123,7 +124,7 @@ Centralize all prebuilt download/extract/naming logic via the shared helper crat
   Use the compatible stable requirement:
   ```toml
   [build-dependencies]
-  build-support = { package = "dear-imgui-build-support", version = "0.16", features = ["binding-spec"] }
+  build-support = { package = "dear-imgui-build-support", version = "0.20", features = ["binding-spec"] }
   ```
 
   Workspace members should inherit the repository catalog instead:
@@ -133,16 +134,15 @@ Centralize all prebuilt download/extract/naming logic via the shared helper crat
   build-support.workspace = true
   ```
 
-- In `build.rs`, prefer the helpers instead of duplicating logic:
-  ```rust
-  let lib_name = build_support::expected_lib_name(&cfg.target_env, "dear_your_ext");
-  let cache_root = build_support::prebuilt_cache_root_from_env_or_target(
-      &cfg.manifest_dir, "YOUR_EXT_SYS_CACHE_DIR", "dear-your-ext-prebuilt",
-  );
-  if let Ok(dir) = build_support::download_prebuilt(&cache_root, &url, &lib_name, &cfg.target_env) {
-      // link from prebuilt dir
-  }
-  ```
+- Use `CrateBindingSpec` and the maintained source inventory for bindings,
+  defines, and source selection. Register a new extension in those catalogs
+  before using the helpers.
+- Use `ExtensionArtifactProfile` to validate a prebuilt directory before linking.
+  Matching packages include a manifest identifying target, CRT, source pins,
+  binding identity, feature profile, and the shared Dear ImGui core.
+- Use `expected_lib_name`, `prebuilt_cache_root_from_env_or_target`, and
+  `download_prebuilt` for naming and transport. Download/extraction does not
+  validate ABI compatibility; the artifact profile performs that check.
 
 Benefits:
 - No direct HTTP client dependency in each extension crate
@@ -151,11 +151,13 @@ Benefits:
 
 ### Build Modes
 
-Provide three modes (opt-in via env):
+For extensions that support prebuilt artifacts, provide these routes:
 
 - Source build (default)
-- System/prebuilt: `*_SYS_LIB_DIR` -> add `cargo:rustc-link-search` and `-l static=<name>`
-- Remote prebuilt: `*_SYS_PREBUILT_URL` -> download (HTTP(S) requires feature `prebuilt`)
+- Local prebuilt: `*_SYS_LIB_DIR` -> validate the matching library and manifest, then emit search/link directives
+- Remote/archive prebuilt: `*_SYS_PREBUILT_URL` -> download/extract with `prebuilt`, validate, then link
+
+Document route precedence. `build-from-source` and `*_SYS_FORCE_BUILD` force source builds; a local directory override precedes an explicit archive URL, which precedes automatic release lookup. Choose one override at a time. Test Engine is source-only and does not implement the prebuilt routes.
 
 Tip: allow automated downloads from GitHub Releases by generating candidate URLs via
 `build_support::release_candidate_urls_env()` and trying them in order.
@@ -171,7 +173,7 @@ Naming convention for static libs:
 - Cargo `links`: `dear_<ext>`; native static library name follows the same
 - Env vars: `<EXT>_SYS_LIB_DIR`, `<EXT>_SYS_PREBUILT_URL`, `<EXT>_SYS_SKIP_CC`, optional `<EXT>_SYS_USE_PREBUILT`, `<EXT>_SYS_FORCE_BUILD`
 - Features: `prebuilt`, `build-from-source` (opt-in toggles) and passthroughs like `freetype` to `dear-imgui-sys`
-- Optional: `bin/package` helper for producing release archives consistent with `tools/build-support`
+- Optional: `package-bin` gates the internal `bin/package` helper for producing release archives consistent with `tools/build-support`; it is a maintainer tool, not an application dependency feature.
 
 ## High-Level API Design
 
@@ -237,72 +239,26 @@ Guideline:
 
 This keeps your extension portable across compilers/targets where C typedefs differ.
 
-## Example: Minimal `build.rs` Sketch
+## Build Script References
 
-```rust
-let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+Start from a maintained build script rather than an incomplete download or
+bindgen sketch:
 
-// Resolve include paths from dear-imgui-sys
-let imgui_src = PathBuf::from(env::var("DEP_DEAR_IMGUI_IMGUI_INCLUDE_PATH").unwrap());
-let cimgui_root = PathBuf::from(env::var("DEP_DEAR_IMGUI_CIMGUI_INCLUDE_PATH").unwrap());
-let third_party = manifest_dir.join("third-party/your-upstream");
-let binding_spec = build_support::binding::CrateBindingSpec::for_crate_and_target(
-    env!("CARGO_PKG_NAME"),
-    "native",
-)
-.expect("missing canonical native binding spec for this extension");
+- [`dear-implot-sys/build.rs`](dear-implot-sys/build.rs): shared-core source builds,
+  checked-in bindings, canonical defines, and verified prebuilt artifacts.
+- [`dear-imgui-cte-sys/build.rs`](dear-imgui-cte-sys/build.rs): C++20 and a
+  repository-owned no-unwind bridge.
+- [`dear-imgui-test-engine-sys/build.rs`](dear-imgui-test-engine-sys/build.rs):
+  source-only integration with exception translation at exported boundaries.
 
-// Generate bindings
-let mut builder = bindgen::Builder::default()
-    .header(third_party.join("your_c_api.h").to_string_lossy())
-    .clang_arg(format!("-I{}", imgui_src.display()))
-    .clang_arg(format!("-I{}", cimgui_root.display()))
-    .clang_arg(format!("-I{}", third_party.display()))
-    .blocklist_type("ImVec2").blocklist_type("ImVec4").blocklist_type("ImGuiContext")
-    .derive_default(true).derive_debug(true).derive_copy(true)
-    .layout_tests(false);
-for define in binding_spec.binding_defines() {
-    builder = builder.clang_arg(define.clang_arg());
-}
-let bindings = builder.generate().unwrap();
-bindings.write_to_file(out_path.join("bindings.rs")).unwrap();
-
-// Compile sources
-let mut build = cc::Build::new();
-build.cpp(true).std("c++17");
-binding_spec.apply_extension_binding_defines(&mut build, env::vars());
-build.include(&imgui_src).include(&cimgui_root).include(&third_party);
-build.file(third_party.join("your_c_api.cpp"));
-build.compile("dear_your_ext");
-
-// Try prebuilt if requested (optional)
-// let cache_root = build_support::prebuilt_cache_root_from_env_or_target(&manifest_dir, "YOUR_EXT_SYS_CACHE_DIR", "dear-your-ext-prebuilt");
-// let _ = build_support::download_prebuilt(&cache_root, url, build_support::expected_lib_name(&target_env, "dear_your_ext"), &target_env);
-```
-
-### MSVC (Windows) parity
-
-When targeting MSVC, match Rust's CRT selection and exception model to avoid ABI/debug iterator mismatches:
-
-```rust
-let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
-let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-if target_env == "msvc" && target_os == "windows" {
-    build.flag("/EHsc");
-    let target_features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
-    let use_static_crt = target_features.split(',').any(|f| f == "crt-static");
-    build.static_crt(use_static_crt);
-    if use_static_crt { build.flag("/MT"); } else { build.flag("/MD"); }
-    let profile = env::var("PROFILE").unwrap_or_else(|_| "release".to_string());
-    if profile == "debug" { build.debug(true); build.opt_level(0); } else { build.debug(false); build.opt_level(2); }
-    build.flag("/D_ITERATOR_DEBUG_LEVEL=0");
-}
-```
+On MSVC, match Rust's CRT selection using the workspace helpers and preserve the
+core's iterator-debug ABI. Exceptions must be caught before crossing the C ABI,
+or disabled for a bridge that intentionally terminates on allocation failure.
+`/EHsc` alone does not make an exported C entry point safe to unwind through.
 
 ## Checklist
 
-- [ ] `-sys` builds with source, system/prebuilt, and remote prebuilt
+- [ ] `-sys` validates every supported source/prebuilt route and explicitly rejects unsupported targets
 - [ ] Inherit `DEP_DEAR_IMGUI_*` include paths and consume defines through `CrateBindingSpec`
 - [ ] Blocklist overlapping ImGui types in bindgen
 - [ ] High-level uses bitflags for masks, enums for discrete choices
@@ -334,7 +290,7 @@ Sometimes upstream provides functionality only in the C++ API (e.g., ImGuizmo Gr
   - Opaque pointers owned by Rust via `NonNull<T>` newtype; implement `Drop` to call `destroy`.
   - Avoid callbacks across FFI unless necessary; prefer pull APIs.
 - Platform notes:
-  - MSVC: match CRT (`/MT` vs `/MD`) and enable `/EHsc`; set `_ITERATOR_DEBUG_LEVEL=0` for debug parity (see MSVC parity section).
+  - MSVC: match the core CRT and iterator-debug ABI, and translate exceptions or disable them before exposing the C ABI (see Build Script References).
   - WASM: avoid C++ unless toolchain is guaranteed; prefer Rust path.
 
 Decision guideline:

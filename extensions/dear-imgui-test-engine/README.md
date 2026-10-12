@@ -151,6 +151,9 @@ headless run capable of screenshots.
   upstream hooks remain installed; `shutdown()` or Context destruction releases it after unbind.
 - Call `shutdown()` when cleanup errors must be handled. `Drop` is non-panicking and retries
   one-shot native failures on a best-effort basis.
+- `result_summary()` requires a queued, running, or terminal run; it returns
+  `InvalidState` in `Ready`. Keep the consumed terminal summary in application state
+  to display completed results while the engine is ready for the next run.
 - A queued/running run rejects another queue request. Consume a terminal summary with
   `take_terminal_summary()` before queuing again. The summary is derived only from that run's exact
   queue manifest; results from earlier filters cannot affect it.

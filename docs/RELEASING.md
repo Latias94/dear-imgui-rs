@@ -144,6 +144,7 @@ $env:DOCS_RS = '1'; cargo check -p dear-implot3d-sys
 $env:DOCS_RS = '1'; cargo check -p dear-imguizmo-quat-sys
 $env:DOCS_RS = '1'; cargo check -p dear-imgui-cte-sys
 $env:DOCS_RS = '1'; cargo check -p dear-imgui-test-engine-sys
+Remove-Item Env:DOCS_RS
 ```
 
 Linux/macOS:
@@ -168,8 +169,9 @@ Preparation and validation remain separate because preparation intentionally cha
 ```bash
 python3 tools/tasks.py release-prepare 0.20.0
 git diff
-git add -A
-git commit -m "chore: prepare release v0.20.0"
+git add -p
+# Stage reviewed new files explicitly with git add -- <path>.
+git commit -m "chore(release): prepare v0.20.0"
 python3 tools/tasks.py release-check
 ```
 

@@ -54,7 +54,7 @@ python -m http.server -d target/web-demo 8080
 ```
 
 Notes:
-- The `dear-imgui-web-demo` crate in `examples-wasm` enables the `implot` feature by default, so the “ImPlot (Web)” window is shown when ImPlot bindings + provider are available.
+- The `dear-imgui-web-demo` crate in `examples-wasm` enables `implot` when passed to `xtask web-demo implot`; it is not a default feature.
 - This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific compatible `0.20` release and follow changes in `docs/WASM.md`.
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
@@ -73,14 +73,18 @@ dear-implot = "0.20"
 ```
 
 ```rust
-use dear_imgui as imgui;
+use dear_imgui_rs as imgui;
 use dear_implot::*;
 
 fn main() {
     let mut ctx = imgui::Context::create();
+    ctx.io_mut().set_display_size([800.0, 600.0]);
+    ctx.io_mut().set_delta_time(1.0 / 60.0);
+    ctx.font_atlas().try_claim_legacy_renderer()
+        .expect("CPU-only example requires the legacy atlas").build();
     let plot_ctx = PlotContext::create(&ctx);
 
-    // frame loop
+    // Build one CPU-only frame without a platform or GPU renderer.
     let ui = ctx.frame();
     // Ui extension: obtain PlotUi from Ui + PlotContext
     let plot_ui = ui.implot(&plot_ctx);
@@ -92,12 +96,35 @@ fn main() {
             token.end();
         }
     });
+    drop(plot_ui);
+    drop(ctx.render_legacy());
 }
 ```
+
+This backend-free sample builds CPU draw data only. A visible application needs
+a platform backend and renderer; use `implot_minimal` below for that integration.
+Managed renderers must consume their normal frame/texture protocol instead of
+this CPU-only legacy path.
 
 Notes:
 - Base ImGui static library linking is handled by `dear-imgui-sys`; you do not need to link it here.
 - Refer to the `-sys` README for `IMPLOT_SYS_*` env vars when using prebuilt libraries.
+
+### Migrating live axis links
+
+`PlotUi::setup_axis_links` and `set_next_axis_links` now require `unsafe`, like
+their raw-axis variants. ImPlot retains the supplied `f64` pointers and writes
+back at `EndPlot`, so a short Rust reference cannot prove their full lifetime.
+Keep storage at a stable address without other access until `PlotContext` is
+destroyed, or explicitly clear all stored/pending links. To clear an applied
+link, begin the same plot ID, enable the axis, call `setup_axis_links` with
+`None`, then end that plot. Clear pending next-plot links separately.
+`EndPlot` alone does not unlink every axis: subsequent plots can still write
+through a retained secondary-axis pointer. Rejected begin calls and frame
+changes do not generally discard pending links. `set_next_axis_links` targets
+the next plot, not the next frame. Follow each method's setup-phase requirements.
+Prefer `setup_*_axis_limits` / `set_next_*_axis_limits` when live writeback is
+unnecessary; these copy values and remain safe.
 
 ### Validated numeric formats
 
@@ -146,9 +173,13 @@ use dear_implot::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut ctx = Context::create();
+    ctx.io_mut().set_display_size([800.0, 600.0]);
+    ctx.io_mut().set_delta_time(1.0 / 60.0);
+    ctx.font_atlas().try_claim_legacy_renderer()
+        .expect("CPU-only example requires the legacy atlas").build();
     let plot_ctx = PlotContext::create(&ctx);
 
-    // In your main loop:
+    // One CPU-only frame; use a renderer-driven loop in a visible application.
     let ui = ctx.frame();
     // Or via Ui extension:
     let plot_ui = ui.implot(&plot_ctx);
@@ -166,10 +197,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 token.end();
             }
         });
-
+    drop(plot_ui);
+    drop(ctx.render_legacy());
     Ok(())
 }
 ```
+
+The following plot snippets assume an initialized renderer-driven frame, an
+active plot, and application-owned input arrays. They illustrate API calls;
+`implot_minimal` and `implot_showcase` are complete runnable applications.
 
 ## Plot Types
 
@@ -339,8 +375,6 @@ if let Ok(token) = multi_plot.begin(&plot_ui) {
 }
 ```
 
-### Universal Plot Builder
-
 ### Axis Setup & Selection
 
 ```rust
@@ -381,7 +415,9 @@ let bounds_max = ImPlotPoint { x: 1.0, y: 1.0 };
 plot_ui.plot_image("image", my_tex_id, bounds_min, bounds_max)?;
 ```
 
-For a more unified API, you can use the `PlotBuilder`:
+### Universal Plot Builder
+
+For a unified fallible API, use `PlotBuilder`:
 
 ```rust
 // Line plot
@@ -399,7 +435,9 @@ PlotBuilder::heatmap("Heat", &data, 10, 10).build(&plot_ui)?;
 
 ## Error Handling
 
-All plot functions return `Result<(), PlotError>` for proper error handling:
+`PlotBuilder::build` and the fallible `PlotUi` helpers return `Result<(), PlotError>`.
+The `Plot::plot` trait method returns `()` and skips invalid data; call `validate()`
+first when the application needs an error:
 
 ```rust
 match LinePlot::new("My Plot", &x_data, &y_data).validate() {
@@ -432,23 +470,32 @@ This crate is designed to work seamlessly with the dear-imgui ecosystem:
 
 See the `examples/` directory for complete working examples:
 
-- `plot_gallery.rs` - Comprehensive showcase of all plot types
-- `advanced_features.rs` - Subplots and multi-axis examples
-- `real_time_plotting.rs` - Dynamic data visualization
+- `examples/03-features/implot_minimal.rs` - Minimal plot integration.
+- `examples/03-features/implot_showcase.rs` - Plot gallery, subplots, and dynamic data.
+
+```text
+cargo run -p dear-imgui-examples --bin implot_minimal --features implot
+cargo run -p dear-imgui-examples --bin implot_showcase --features implot
+```
 
 ## Building
 
 This crate requires:
 
-- Rust 1.70 or later
-- C++ compiler (for building ImPlot)
-- CMake (for building dependencies)
+- Rust 1.92 or later (the workspace minimum).
+- A C++17 compiler for default native source builds.
+- Initialized recursive submodules when building from a Git checkout.
+
+CMake is optional: `IMPLOT_SYS_USE_CMAKE` requests its alternate source route,
+which can fall back to the maintained `cc` route when an upstream wrapper needs
+a repository patch. Ordinary builds use validated checked-in Rust bindings and
+do not require libclang. Explicit regeneration requires `bindgen` and libclang.
 
 The build process automatically handles:
 
-- Building ImPlot from source
-- Generating C++ wrapper functions
-- Linking with dear-imgui
+- Compiling the pinned ImPlot and cimplot sources.
+- Validating checked-in binding provenance.
+- Linking to the shared Dear ImGui core supplied by `dear-imgui-sys`.
 
 ## Architecture
 
@@ -462,7 +509,8 @@ This crate follows the same architectural patterns as `dear-imgui-rs`:
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+The Rust crate is licensed under MIT OR Apache-2.0, matching the workspace.
+The pinned ImPlot/cimplot sources retain their upstream license notices.
 
 ## Contributing
 

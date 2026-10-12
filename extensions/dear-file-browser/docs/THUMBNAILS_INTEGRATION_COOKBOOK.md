@@ -21,7 +21,9 @@ This document explains the minimal integration patterns and the typical lifecycl
 2) Implement a renderer for your graphics backend:
 
 - Implement `ThumbnailRenderer::upload_rgba8` and `ThumbnailRenderer::destroy`
-- `TextureId` is a Dear ImGui texture handle; how it maps to your engine depends on your renderer.
+- Register each uploaded texture with the ImGui renderer and return its renderer-owned `TextureId`. These are application textures, separate from managed font-atlas requests.
+- `destroy` must respect draw/GPU lifetimes. `maintain` can request eviction after UI commands already reference an ID, so defer physical deletion until those commands and in-flight submissions complete.
+- The renderer owns remaining GPU allocations at shutdown; dropping the cache alone does not call renderer destruction.
 
 3) Pass `ThumbnailBackend` into the dialog draw call:
 

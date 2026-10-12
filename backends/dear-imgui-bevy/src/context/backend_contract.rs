@@ -13,11 +13,9 @@ use super::ImguiContextConfig;
 
 const BACKEND_NAME: &str = "dear-imgui-bevy";
 
-/// Non-send Bevy resource that owns the Dear ImGui context.
+/// Exact renderer publications captured for one Bevy-managed Dear ImGui Context.
 ///
-/// Dear ImGui has process-global current-context state and `dear_imgui_rs::Context` is intentionally
-/// not `Send`/`Sync`. Storing it as a Bevy non-send resource keeps UI lifecycle work on the main
-/// thread until later tasks add schedule-specific accessors.
+/// The private Context driver validates these values before entering renderer-owned native state.
 #[cfg(feature = "render")]
 #[derive(Clone, Copy)]
 pub(super) struct ImguiRendererRuntimeContract {

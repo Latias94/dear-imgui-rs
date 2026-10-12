@@ -143,7 +143,12 @@ An App claims its `ImguiContexts` registry exactly once. Temporarily removing th
 
 Configure a Context's font atlas through the non-send registry, normally from a `Startup` system:
 
+Place your font in the application's `assets` directory or adjust the `include_bytes!` path to its
+location relative to this Rust source file. The checkout example includes its own licensed font.
+
 ```rust
+use dear_imgui_rs::{FontSource, StbTrueTypeFontData};
+
 const ROBOTO_MEDIUM: &[u8] = include_bytes!("../assets/Roboto-Medium.ttf");
 
 fn configure_fonts(mut contexts: NonSendMut<ImguiContexts>) -> Result {
@@ -181,6 +186,13 @@ commands.spawn((
 ```
 
 Render and input routes are independent. An image or manual-texture render target never receives OS input implicitly; use `ImguiInputRoute::logical(context_id, host_window, region)` when a displayed image should be interactive. Ambiguous, stale, conflicting, or unsupported routes fail closed and publish structured entries through `ImguiDiagnostics` instead of broadcasting one Context to arbitrary cameras or windows.
+
+Logical input regions use the host window's logical coordinates, not framebuffer pixels. Keep the
+region synchronized with the image's visible content rectangle, and remove or disable its input
+route while that image is hidden. When the region overlaps the primary Context's automatic input
+route, use `.with_policy(ImguiInputPolicy::exclusive(1))` on the image route: the automatic route
+uses priority `0`, and equal-priority exclusive overlaps fail closed. See
+[`render_to_image`](examples/advanced/render_to_image.rs) for the full visibility and input policy.
 
 ### Composition Order
 

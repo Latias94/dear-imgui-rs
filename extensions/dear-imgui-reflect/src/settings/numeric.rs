@@ -118,7 +118,7 @@ pub struct NumericTypeSettings<T> {
     pub clamp: bool,
     /// Always-clamp flag for slider/drag widgets.
     pub always_clamp: bool,
-    /// Wrap-around flag for slider widgets.
+    /// Wrap-around flag for drag widgets; not passed to slider widgets.
     pub wrap_around: bool,
     /// Disable rounding to format for slider/drag widgets.
     pub no_round_to_format: bool,
