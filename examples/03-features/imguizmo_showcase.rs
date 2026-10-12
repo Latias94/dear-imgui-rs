@@ -265,6 +265,22 @@ impl AppWindow {
             .io_mut()
             .set_delta_time(delta_time.as_secs_f32());
 
+        // Acquire before opening an ImGui frame so skipped frames leave no frame in progress.
+        let (output, reconfigure_after_present) = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
+                self.surface.configure(&self.device, &self.surface_desc);
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                return Err("surface acquisition failed with a WGPU validation error".into());
+            }
+        };
+
         self.imgui
             .platform
             .prepare_frame(&mut self.imgui.context, &self.window)?;
@@ -733,10 +749,20 @@ impl AppWindow {
                     self.state.objects[idx] = guizmo::recompose_matrix(&tr, &rt, &sc);
                 });
 
-            // Additional controls like C++ sample: toggle Graph Editor visibility
+            // Keep the graph toggle visible beside the inspector, below the gizmo window.
+            let controls_size = [
+                (ds[0] - 20.0).clamp(1.0, 300.0),
+                (ds[1] - 20.0).clamp(1.0, 120.0),
+            ];
             ui.window("Graph Controls")
-                .size([300.0, 120.0], Condition::FirstUseEver)
-                .position([10.0, 680.0], Condition::FirstUseEver)
+                .size(controls_size, Condition::FirstUseEver)
+                .position(
+                    [
+                        (ds[0] - controls_size[0] - 10.0).max(0.0),
+                        (ds[1] - controls_size[1] - 10.0).max(0.0),
+                    ],
+                    Condition::FirstUseEver,
+                )
                 .build(|| {
                     if ui.collapsing_header("Graph Editor", dear_imgui_rs::TreeNodeFlags::empty()) {
                         ui.checkbox("Show GraphEditor", &mut self.state.graph_show_editor);
@@ -750,20 +776,6 @@ impl AppWindow {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("imgui encoder"),
             });
-        let (output, reconfigure_after_present) = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
-            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
-            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
-                self.surface.configure(&self.device, &self.surface_desc);
-                return Ok(());
-            }
-            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
-                return Ok(());
-            }
-            wgpu::CurrentSurfaceTexture::Validation => {
-                return Err("surface acquisition failed with a WGPU validation error".into());
-            }
-        };
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());

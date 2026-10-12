@@ -203,6 +203,7 @@
 				"$(SRCROOT)/../Cargo.toml",
 				"$(SRCROOT)/../src/lib.rs",
 				"$(SRCROOT)/scripts/build-rust.py",
+				"$(SRCROOT)/build/frameworks/SDL3.framework/Headers/SDL.h",
 			);
 			name = "Build Rust Static Library";
 			outputFileListPaths = (

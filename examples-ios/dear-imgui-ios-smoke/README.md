@@ -49,7 +49,7 @@ cargo build --manifest-path examples-ios/dear-imgui-ios-smoke/Cargo.toml --targe
 The output is a static library named similar to:
 
 ```text
-target/aarch64-apple-ios/debug/libdear_imgui_ios_smoke.a
+examples-ios/dear-imgui-ios-smoke/target/aarch64-apple-ios/debug/libdear_imgui_ios_smoke.a
 ```
 
 ## Build An XCFramework

@@ -13,6 +13,7 @@ use std::time::Instant;
 use dear_imgui_examples::sdl3_callbacks::{
     Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
 };
+use dear_imgui_examples::sdl3_dpi::DpiStyle;
 use dear_imgui_glow::{
     ExternalTextureId, GlTexture, GlowRenderer, create_texture_from_rgba,
     multi_viewport::{GlowPreparedViewportFrame, GlowViewportRuntime},
@@ -529,6 +530,7 @@ struct MainData<S: ViewportScenario> {
     scenario: S,
     sdl3_backend: Sdl3PlatformBackend,
     imgui: Context,
+    dpi_style: DpiStyle,
     renderer: GlowViewportRuntime,
     gl: Rc<glow::Context>,
     gl_context: sdl3::video::GLContext,
@@ -763,25 +765,13 @@ impl<S: ViewportScenario> MainData<S> {
 
         let mut imgui = Context::create();
         scenario.configure_context(&mut imgui)?;
-        let window_scale = window.display_scale();
-        let window_scale = if window_scale.is_finite() && window_scale > 0.0 {
-            window_scale
-        } else {
-            1.0
-        };
         {
             let io = imgui.io_mut();
             let mut flags = io.config_flags();
             flags.insert(ConfigFlags::DOCKING_ENABLE | ConfigFlags::VIEWPORTS_ENABLE);
             io.set_config_flags(flags);
-            io.set_config_dpi_scale_fonts(true);
-            io.set_config_dpi_scale_viewports(true);
         }
-        {
-            let style = imgui.style_mut();
-            style.scale_all_sizes(window_scale);
-            style.set_font_scale_dpi(window_scale);
-        }
+        let dpi_style = DpiStyle::new(&mut imgui, &window);
 
         // SAFETY: `window` and `gl_context` outlive renderer/platform shutdown and Context teardown.
         let mut sdl3_backend = unsafe {
@@ -905,6 +895,7 @@ impl<S: ViewportScenario> MainData<S> {
             scenario,
             sdl3_backend,
             imgui,
+            dpi_style,
             renderer,
             gl,
             gl_context,
@@ -928,6 +919,8 @@ impl<S: ViewportScenario> MainData<S> {
         self.last_frame = now;
 
         self.sdl3_backend.new_frame(&mut self.imgui)?;
+        self.dpi_style.update(&mut self.imgui, &self.window);
+        let scale = self.dpi_style.scale();
         let mut viewport_count =
             i32::try_from(self.imgui.platform_io().viewports_iter().count()).unwrap_or(i32::MAX);
         self.scenario.before_ui(viewport_count);
@@ -938,7 +931,7 @@ impl<S: ViewportScenario> MainData<S> {
         let external_texture = self.external_texture.view()?;
         let scenario = &mut self.scenario;
         ui.window("Main")
-            .size([420.0, 260.0], Condition::FirstUseEver)
+            .size([420.0 * scale, 260.0 * scale], Condition::FirstUseEver)
             .build(|| {
                 ui.text("SDL3 + Glow + Dear ImGui multi-viewport");
                 ui.separator();

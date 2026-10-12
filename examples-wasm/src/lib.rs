@@ -21,12 +21,11 @@ use dear_implot3d::{Axis3DFlags, Plot3DContext, Plot3DFlags, Scatter3DFlags};
 use log::info;
 #[cfg(feature = "cte")]
 use std::{cell::Cell, rc::Rc, time::Duration};
-use std::{cell::RefCell, sync::Arc};
+use std::{cell::RefCell, ffi::CStr, sync::Arc};
 use wasm_bindgen::prelude::*;
 use web_time::Instant;
 use winit::{
     application::ApplicationHandler,
-    dpi::LogicalSize,
     event::WindowEvent,
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::{Window, WindowId},
@@ -83,6 +82,8 @@ struct ImguiState {
     demo_open: bool,
     last_frame: Instant,
     frames: u32,
+    layout_size: [f32; 2],
+    demo_needs_layout: bool,
     #[cfg(feature = "implot")]
     implot_ctx: PlotContext,
     #[cfg(feature = "implot3d")]
@@ -126,7 +127,6 @@ impl AppWindow {
     async fn new_with_window(
         window: Arc<Window>,
         surface: wgpu::Surface<'static>,
-        size: LogicalSize<f64>,
         instance: wgpu::Instance,
     ) -> Result<Self, JsValue> {
         // Request adapter and device
@@ -140,8 +140,16 @@ impl AppWindow {
             .await
             .map_err(|e| JsValue::from_str(&format!("request_adapter: {e}")))?;
 
+        // Dear ImGui needs no compute or storage buffers. Keep device limits compatible
+        // with WebGL2 while preserving this adapter's texture sizes and buffer alignment.
+        let required_limits = wgpu::Limits::downlevel_webgl2_defaults()
+            .using_resolution(adapter.limits())
+            .using_alignment(adapter.limits());
         let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor::default())
+            .request_device(&wgpu::DeviceDescriptor {
+                required_limits,
+                ..Default::default()
+            })
             .await
             .map_err(|e| JsValue::from_str(&format!("request_device: {e}")))?;
 
@@ -172,13 +180,6 @@ impl AppWindow {
         // Setup ImGui
         let mut context = Context::create();
         context.set_ini_filename(None::<String>).unwrap();
-
-        // Set initial display size before creating platform
-        {
-            let io = context.io_mut();
-            io.set_display_size([size.width as f32, size.height as f32]);
-            io.set_display_framebuffer_scale([1.0, 1.0]);
-        }
 
         let mut platform = WinitPlatform::new(&mut context)
             .map_err(|e| JsValue::from_str(&format!("init platform: {e}")))?;
@@ -250,6 +251,8 @@ impl AppWindow {
             demo_open: true,
             last_frame: Instant::now(),
             frames: 0,
+            layout_size: [0.0, 0.0],
+            demo_needs_layout: true,
             #[cfg(feature = "implot")]
             implot_ctx,
             #[cfg(feature = "implot3d")]
@@ -326,13 +329,13 @@ impl AppWindow {
             .prepare_frame(&mut self.imgui.context, &self.window)
             .map_err(|e| JsValue::from_str(&format!("prepare platform frame: {e}")))?;
 
-        // Skip rendering if surface is zero-sized (e.g., hidden tab)
-        if self.surface_desc.width == 0 || self.surface_desc.height == 0 {
+        // Skip a zero-sized canvas (e.g. a hidden element) before acquiring or opening a frame.
+        let physical = self.window.inner_size();
+        if physical.width == 0 || physical.height == 0 {
             return Ok(());
         }
 
-        // Ensure surface matches current canvas/backing buffer size (DPR changes, CSS resize, etc.)
-        let physical = self.window.inner_size();
+        // Ensure surface matches current canvas/backing buffer size (DPR changes, CSS resize, etc.).
         if physical.width != self.surface_desc.width || physical.height != self.surface_desc.height
         {
             self.resize(physical);
@@ -355,10 +358,77 @@ impl AppWindow {
             }
         };
 
-        let ui = self.imgui.context.frame();
+        // Dropping this token closes the frame if a fallible widget or platform call returns early.
+        let frame_token = self
+            .imgui
+            .context
+            .try_begin_frame()
+            .map_err(|error| JsValue::from_str(&format!("begin frame: {error}")))?;
+        let ui = frame_token.ui();
+        let display_size = ui.io().display_size();
+        let orientation_changed = (self.imgui.layout_size[0] >= self.imgui.layout_size[1])
+            != (display_size[0] >= display_size[1]);
+        self.imgui.layout_size = display_size;
+        if orientation_changed {
+            self.imgui.demo_needs_layout = true;
+        }
+        let condition = if orientation_changed {
+            Condition::Always
+        } else {
+            Condition::FirstUseEver
+        };
+        let margin = [
+            10.0_f32.min((display_size[0] - 1.0).max(0.0) * 0.5),
+            10.0_f32.min((display_size[1] - 1.0).max(0.0) * 0.5),
+        ];
+        let available = [
+            (display_size[0] - margin[0] * 2.0).max(1.0),
+            (display_size[1] - margin[1] * 2.0).max(1.0),
+        ];
+        let panel_width = available[0].min(400.0);
+        let gap = 10.0_f32.min(available[1] * 0.1);
+        let side_by_side = available[0] >= panel_width + gap + 240.0;
+        // A stacked layout shares the height so both windows retain scrollable content.
+        let panel_height = if side_by_side {
+            available[1].min(300.0)
+        } else {
+            ((available[1] - gap) * 0.4).clamp(1.0, 300.0)
+        };
+        let panel_size = [panel_width, panel_height];
+        let demo_pos = if side_by_side {
+            [margin[0] + panel_width + gap, margin[1]]
+        } else {
+            [margin[0], margin[1] + panel_height + gap]
+        };
+        let demo_size = [
+            (display_size[0] - demo_pos[0] - margin[0]).clamp(1.0, 550.0),
+            (display_size[1] - demo_pos[1] - margin[1]).clamp(1.0, 680.0),
+        ];
+
+        // Preserve user positioning while it fits. A smaller canvas only clamps windows
+        // that leave the client area, including optional extension windows.
+        for title in [
+            c"Hello, Dear ImGui (Web)",
+            c"Dear ImGui Demo",
+            #[cfg(feature = "cte")]
+            c"ImGuiColorTextEdit (Web)",
+            #[cfg(feature = "implot")]
+            c"ImPlot (Web)",
+            #[cfg(feature = "implot3d")]
+            c"ImPlot3D (Web)",
+            #[cfg(feature = "imnodes")]
+            c"ImNodes (Web)",
+            #[cfg(feature = "imguizmo")]
+            c"ImGuizmo (Web)",
+            #[cfg(feature = "imguizmo-quat")]
+            c"ImGuIZMO.quat (Web)",
+        ] {
+            clamp_window_to_canvas(ui, title);
+        }
 
         ui.window("Hello, Dear ImGui (Web)")
-            .size([400.0, 300.0], Condition::FirstUseEver)
+            .size(panel_size, condition)
+            .position(margin, condition)
             .build(|| {
                 ui.text("This is running under wasm32-unknown-unknown");
                 ui.separator();
@@ -369,6 +439,12 @@ impl AppWindow {
 
         if self.imgui.demo_open {
             ui.show_demo_window(&mut self.imgui.demo_open);
+            // The demo chooses its own first-use geometry. Set its visible layout after creation.
+            if self.imgui.demo_needs_layout {
+                ui.set_window_pos_by_name("Dear ImGui Demo", demo_pos);
+                ui.set_window_size_by_name("Dear ImGui Demo", demo_size);
+                self.imgui.demo_needs_layout = false;
+            }
         }
 
         #[cfg(feature = "cte")]
@@ -425,7 +501,7 @@ impl AppWindow {
             ui.window("ImPlot (Web)")
                 .size([480.0, 320.0], Condition::FirstUseEver)
                 .build(|| {
-                    let plot_ui = self.imgui.implot_ctx.get_plot_ui(&ui);
+                    let plot_ui = self.imgui.implot_ctx.get_plot_ui(ui);
                     let xs = [0.0_f64, 1.0, 2.0, 3.0];
                     let ys = [0.0_f64, 1.0, 0.0, 1.0];
                     if let Some(token) = plot_ui.begin_plot("ImPlot demo") {
@@ -440,7 +516,7 @@ impl AppWindow {
             ui.window("ImPlot3D (Web)")
                 .size([480.0, 320.0], Condition::FirstUseEver)
                 .build(|| {
-                    let plot_ui = self.imgui.implot3d_ctx.get_plot_ui(&ui);
+                    let plot_ui = self.imgui.implot3d_ctx.get_plot_ui(ui);
                     if let Some(_token) = plot_ui
                         .begin_plot("ImPlot3D demo")
                         .size([0.0, 0.0])
@@ -566,12 +642,14 @@ impl AppWindow {
             .platform
             .prepare_render(ui, &self.window)
             .map_err(|e| JsValue::from_str(&format!("prepare platform render: {e}")))?;
-        let pending_frame = self.imgui.context.render(
-            self.imgui
-                .renderer
-                .renderer_consumer()
-                .map_err(|e| JsValue::from_str(&format!("renderer consumer: {e}")))?,
-        );
+        let pending_frame = frame_token
+            .try_render(
+                self.imgui
+                    .renderer
+                    .renderer_consumer()
+                    .map_err(|e| JsValue::from_str(&format!("renderer consumer: {e}")))?,
+            )
+            .map_err(|e| JsValue::from_str(&format!("capture frame: {e}")))?;
 
         {
             let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -606,6 +684,42 @@ impl AppWindow {
     }
 }
 
+// This small query also covers the upstream demo, whose Begin call lives outside this example.
+fn clamp_window_to_canvas(ui: &Ui, title: &CStr) {
+    let geometry = ui.with_bound_context(|| {
+        // SAFETY: the bound, live UI owns this context. Dear ImGui keeps window objects alive
+        // for the frame. Copy geometry before calling any API that mutates the window.
+        unsafe {
+            let window = sys::igFindWindowByName(title.as_ptr());
+            window.as_ref().map(|window| {
+                (
+                    [window.Pos.x, window.Pos.y],
+                    [window.SizeFull.x, window.SizeFull.y],
+                )
+            })
+        }
+    });
+    let Some((position, size)) = geometry else {
+        return;
+    };
+    let display = ui.io().display_size();
+    let bounded_size = [
+        size[0].clamp(1.0, display[0].max(1.0)),
+        size[1].clamp(1.0, display[1].max(1.0)),
+    ];
+    let bounded_position = [
+        position[0].clamp(0.0, (display[0] - bounded_size[0]).max(0.0)),
+        position[1].clamp(0.0, (display[1] - bounded_size[1]).max(0.0)),
+    ];
+    let title = title.to_str().expect("example window titles are UTF-8");
+    if bounded_size != size {
+        ui.set_window_size_by_name(title, bounded_size);
+    }
+    if bounded_position != position {
+        ui.set_window_pos_by_name(title, bounded_position);
+    }
+}
+
 thread_local! {
     static APP_READY: RefCell<Option<AppWindow>> = const { RefCell::new(None) };
 }
@@ -629,14 +743,13 @@ impl ApplicationHandler for App {
             .dyn_into()
             .expect("element is not canvas");
 
-        let size = LogicalSize::new(1280.0, 720.0);
+        // The page owns the canvas CSS size; winit observes its size and pixel density.
         let window = Arc::new(
             event_loop
                 .create_window(
                     Window::default_attributes()
                         .with_title("Dear ImGui Web Demo")
-                        .with_canvas(Some(canvas))
-                        .with_inner_size(size),
+                        .with_canvas(Some(canvas)),
                 )
                 .expect("create_window"),
         );
@@ -648,7 +761,7 @@ impl ApplicationHandler for App {
         // Finish GPU init on the JS task queue
         let window_for_redraw = window.clone();
         wasm_bindgen_futures::spawn_local(async move {
-            match AppWindow::new_with_window(window, surface, size, instance).await {
+            match AppWindow::new_with_window(window, surface, instance).await {
                 Ok(appwin) => {
                     APP_READY.with(|cell| *cell.borrow_mut() = Some(appwin));
                     window_for_redraw.request_redraw();

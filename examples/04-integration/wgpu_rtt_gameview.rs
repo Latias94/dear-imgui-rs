@@ -295,6 +295,22 @@ impl AppWindow {
             .io_mut()
             .set_delta_time(delta.as_secs_f32());
 
+        // Acquire before opening an ImGui frame so skipped frames leave no frame in progress.
+        let (frame, reconfigure_after_present) = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
+                self.surface.configure(&self.device, &self.surface_desc);
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                return Err("surface acquisition failed with a WGPU validation error".into());
+            }
+        };
+
         // Ensure RTT size fits a fraction of window
         let logical = self.window.inner_size();
         let target = (
@@ -416,20 +432,6 @@ impl AppWindow {
         }
 
         // Render to swapchain
-        let (frame, reconfigure_after_present) = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
-            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
-            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
-                self.surface.configure(&self.device, &self.surface_desc);
-                return Ok(());
-            }
-            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
-                return Ok(());
-            }
-            wgpu::CurrentSurfaceTexture::Validation => {
-                return Err("surface acquisition failed with a WGPU validation error".into());
-            }
-        };
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());

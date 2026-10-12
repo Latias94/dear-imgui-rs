@@ -30,6 +30,8 @@ use winit::{
 
 #[path = "../support/ash_frame_sync.rs"]
 mod ash_frame_sync;
+#[path = "../support/ash_portability.rs"]
+mod ash_portability;
 use ash_frame_sync::{
     FrameSync, clear_fence_references, create_frame_syncs, create_present_semaphores,
     destroy_frame_syncs, destroy_present_semaphores, replace_frame_sync,
@@ -218,9 +220,18 @@ impl VulkanContext {
                 vk::API_VERSION_1_0
             });
 
-        let extensions = ash_window::enumerate_required_extensions(display_handle)?.to_vec();
+        let mut extensions = ash_window::enumerate_required_extensions(display_handle)?.to_vec();
+        // SAFETY: ash-window supplies static extension names; `entry` is live.
+        let instance_flags = unsafe {
+            ash_portability::enable_instance_extensions(
+                &entry,
+                app_info.api_version,
+                &mut extensions,
+            )?
+        };
 
         let instance_create_info = vk::InstanceCreateInfo::default()
+            .flags(instance_flags)
             .application_info(&app_info)
             .enabled_extension_names(&extensions);
         let mut init = VulkanContextInit::new(entry);
@@ -847,6 +858,10 @@ impl AppWindow {
 
     fn render(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let window = &*self.window;
+        let size = window.inner_size();
+        if size.width == 0 || size.height == 0 {
+            return Ok(());
+        }
         let vk = &mut *self.vk;
         let ImguiState {
             renderer,
@@ -1232,7 +1247,11 @@ fn create_device(
         .queue_family_index(queue_family_index)
         .queue_priorities(&priorities);
 
-    let extensions = [khr_swapchain::NAME.as_ptr()];
+    let mut extensions = vec![khr_swapchain::NAME.as_ptr()];
+    // SAFETY: this physical device belongs to `instance`; all names are static.
+    unsafe {
+        ash_portability::enable_device_extensions(instance, physical_device, &mut extensions)?
+    };
     let device_create_info = vk::DeviceCreateInfo::default()
         .queue_create_infos(std::slice::from_ref(&queue_create_info))
         .enabled_extension_names(&extensions);

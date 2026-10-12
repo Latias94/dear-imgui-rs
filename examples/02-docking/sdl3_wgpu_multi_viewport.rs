@@ -18,6 +18,7 @@ use std::time::Instant;
 use dear_imgui_examples::sdl3_callbacks::{
     Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
 };
+use dear_imgui_examples::sdl3_dpi::DpiStyle;
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
 use dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRoute;
@@ -36,6 +37,7 @@ struct MainData {
     renderer: Sdl3ViewportRoute,
     sdl3_backend: Sdl3PlatformBackend,
     imgui: Context,
+    dpi_style: DpiStyle,
     surface: wgpu::Surface<'static>,
     queue: wgpu::Queue,
     device: wgpu::Device,
@@ -130,14 +132,8 @@ impl WgpuMultiViewportApp {
             let mut flags = io.config_flags();
             flags.insert(ConfigFlags::DOCKING_ENABLE);
             io.set_config_flags(flags);
-            io.set_config_dpi_scale_fonts(true);
-            io.set_config_dpi_scale_viewports(true);
         }
-        {
-            let style = imgui.style_mut();
-            style.scale_all_sizes(main_scale);
-            style.set_font_scale_dpi(main_scale);
-        }
+        let dpi_style = DpiStyle::new(&mut imgui, &window);
         if ENABLE_VIEWPORTS {
             imgui.enable_multi_viewport();
         }
@@ -160,6 +156,7 @@ impl WgpuMultiViewportApp {
                 renderer,
                 sdl3_backend,
                 imgui,
+                dpi_style,
                 surface,
                 queue,
                 device,
@@ -219,11 +216,13 @@ impl WgpuMultiViewportApp {
             .set_delta_time((now - main.last_frame).as_secs_f32());
         main.last_frame = now;
         main.sdl3_backend.new_frame(&mut main.imgui)?;
+        main.dpi_style.update(&mut main.imgui, &main.window);
+        let scale = main.dpi_style.scale();
         let frame = main.imgui.begin_frame();
         let ui = frame.ui();
         ui.dockspace().build()?;
         ui.window("SDL3 + WGPU (multi-viewport)")
-            .size([420.0, 260.0], Condition::FirstUseEver)
+            .size([420.0 * scale, 260.0 * scale], Condition::FirstUseEver)
             .build(|| {
                 ui.text("Drag ImGui windows outside to spawn OS windows.");
                 ui.separator();

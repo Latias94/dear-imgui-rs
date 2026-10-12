@@ -9,6 +9,7 @@ use std::error::Error;
 use dear_imgui_examples::sdl3_callbacks::{
     Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
 };
+use dear_imgui_examples::sdl3_dpi::DpiStyle;
 use dear_imgui_rs::{Condition, Context};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, SdlRenderer3Backend};
 use sdl3::pixels::Color;
@@ -23,6 +24,7 @@ struct SdlRendererApp {
 struct MainData {
     sdl3_backend: SdlRenderer3Backend,
     imgui: Context,
+    dpi_style: DpiStyle,
     canvas: sdl3::render::Canvas<sdl3::video::Window>,
     _video: VideoSubsystem,
     _sdl: Sdl,
@@ -43,6 +45,11 @@ impl SdlRendererApp {
             .get_primary_display()?
             .get_content_scale()
             .unwrap_or(1.0);
+        let main_scale = if main_scale.is_finite() && main_scale > 0.0 {
+            main_scale
+        } else {
+            1.0
+        };
         let window = video
             .window(
                 "SDL Test",
@@ -62,6 +69,7 @@ impl SdlRendererApp {
         let mut imgui = Context::create();
         imgui.set_ini_filename(None::<String>)?;
         imgui.set_log_filename(None::<String>)?;
+        let dpi_style = DpiStyle::new(&mut imgui, canvas.window());
 
         // SAFETY: `canvas` owns the Window and SDL_Renderer through shutdown or Context teardown.
         let sdl3_backend = unsafe { SdlRenderer3Backend::init(&mut imgui, &canvas)? };
@@ -70,6 +78,7 @@ impl SdlRendererApp {
             main: MainThreadData::assert_new(RefCell::new(MainData {
                 sdl3_backend,
                 imgui,
+                dpi_style,
                 canvas,
                 _video: video,
                 _sdl: sdl_ctx,
@@ -99,10 +108,12 @@ impl SdlRendererApp {
 
         main.canvas.clear();
         main.sdl3_backend.new_frame(&mut main.imgui)?;
+        main.dpi_style.update(&mut main.imgui, main.canvas.window());
+        let scale = main.dpi_style.scale();
         let ui = main.imgui.frame();
 
         ui.window("SDL3 + IMGUI")
-            .size([400.0, 200.0], Condition::FirstUseEver)
+            .size([400.0 * scale, 200.0 * scale], Condition::FirstUseEver)
             .build(|| {
                 ui.text("Dear ImGui running on SDL3 + SDL_Renderer");
                 ui.separator();

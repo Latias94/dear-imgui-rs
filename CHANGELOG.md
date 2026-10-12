@@ -24,12 +24,20 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ### Added
 
-- Added low-level native DX12, Metal (macOS/iOS), and macOS Cocoa backend shims. DX12 uses modern descriptor allocator callbacks through a repository-owned C ABI. Examples cover DX12 WARP rendering with pixel readback, Win32/DX11 and Win32/OpenGL3 window input and resize, and Cocoa/Metal window rendering; native symbol checks cover shim linkage. [#89](https://github.com/Latias94/dear-imgui-rs/issues/89)
+- Added low-level native DX12, Metal (macOS/iOS), and macOS Cocoa backend shims. DX12 uses modern descriptor allocator callbacks through a repository-owned C ABI. Examples cover DX12 WARP rendering with pixel readback, an interactive Win32/DX12 demo, Win32/DX11 and Win32/OpenGL3 window input and resize, and Cocoa/Metal window rendering; native symbol checks cover shim linkage. [#89](https://github.com/Latias94/dear-imgui-rs/issues/89)
 - Test Engine scripts can scroll an item into view with `item_make_visible` and drag it to a screen position with `item_drag_to_pos`.
 - CTE supports custom line-number drawing callbacks, explicit whole-word occurrence selection and word-boundary options, and the bundled Noto Sans SC font through the managed font atlas.
 
 ### Fixed
 
+- Raw Win32 DX11, DX12, and OpenGL3 examples now size windows in logical pixels and scale fonts and widgets for their monitor's DPI, including monitor changes.
+- SDL3 and Winit multi-viewport examples initialize UI content scale correctly, while SDL3 single-window examples follow the actual window's DPI without applying Retina pixel density twice. Android follows display density, and iOS/browser example layouts fit the client area.
+- WGPU showcase and render-to-texture examples acquire their surface before opening an ImGui frame. The browser demo follows canvas CSS sizing, requests WebGL2-compatible device limits, and closes fallible frames when rendering returns an error.
+- Game engine examples keep Scene and Game camera uniforms independent, clear empty scenes, enforce duplication limits, preserve valid selection after deletion, and separate labels from widget IDs. Bevy offscreen examples route input only to visible images with an explicit priority and display textures without an unintended vertical flip.
+- Ash examples enable advertised Vulkan portability extensions and keep detached windows updating while the main window is minimized. Docking and showcase examples place initial windows within the available work area.
+- Docking examples restore style tokens outside the dockspace host, and file-browser place rows submit valid layout boundaries without changing the clipper's row spacing.
+- The interactive Test Engine example handles ready, active, and completed runs without terminating on its first frame. Dear App flushes pending uploads and waits for GPU submissions before releasing its renderer, including after a frame error.
+- Example instructions use correct Android APK and iOS static-library paths. The iOS SDL3 host builds Rust against the selected framework's headers, and IME font paths work from any process directory.
 - Core builds now track native header changes and the selected prebuilt archive and manifest. docs.rs builds consistently export include paths and ABI defines to downstream crates, including when using pregenerated bindings.
 - Updated the Android/OpenGL ES smoke example to use raw native frames without bypassing the safe managed-texture protocol. It retains its borrowed native window through backend teardown, pauses continuous rendering with the activity, and acknowledges system redraw after presentation.
 - CTE retains exact document text without the upstream getter's appended LF, restores fullwidth character columns, and bounds Unicode range lookups without stepping outside their tables. Native and WASM builds share the same versioned source correction.

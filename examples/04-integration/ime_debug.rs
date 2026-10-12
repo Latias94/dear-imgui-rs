@@ -34,7 +34,7 @@ mod wgpu_init;
 /// Load the example's optional, application-controlled CJK font asset.
 ///
 fn try_merge_noto_sans_sc(context: &mut Context) -> Result<(), String> {
-    let path = "examples/assets/NotoSansSC-Regular.ttf";
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/NotoSansSC-Regular.ttf");
     let data = StbTrueTypeFontData::from_file(path)
         .map_err(|error| format!("{path} is not a safe stb_truetype font: {error}"))?;
 

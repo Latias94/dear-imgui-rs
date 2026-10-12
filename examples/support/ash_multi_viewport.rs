@@ -40,6 +40,8 @@ use winit::{
 
 #[path = "ash_frame_sync.rs"]
 mod ash_frame_sync;
+#[path = "ash_portability.rs"]
+mod ash_portability;
 use ash_frame_sync::{
     FrameSync, clear_fence_references, create_frame_syncs, create_present_semaphores,
     destroy_frame_syncs, destroy_present_semaphores, replace_frame_sync,
@@ -484,10 +486,16 @@ impl VulkanContext {
                 vk::API_VERSION_1_0
             });
 
-        let extensions =
+        let mut extensions =
             ash_window::enumerate_required_extensions(window.display_handle()?.as_raw())?.to_vec();
-        #[cfg(feature = "ash-validation-smoke")]
-        let mut extensions = extensions;
+        // SAFETY: ash-window supplies static names; the initialization guard owns `entry`.
+        let instance_flags = unsafe {
+            ash_portability::enable_instance_extensions(
+                init.entry.as_ref().expect("Vulkan entry was initialized"),
+                app_info.api_version,
+                &mut extensions,
+            )?
+        };
         #[cfg(feature = "ash-validation-smoke")]
         let layer_names = if policy.validation_enabled {
             let available_layers = unsafe {
@@ -511,6 +519,7 @@ impl VulkanContext {
         let layer_names: Vec<*const i8> = Vec::new();
 
         let instance_create_info = vk::InstanceCreateInfo::default()
+            .flags(instance_flags)
             .application_info(&app_info)
             .enabled_extension_names(&extensions)
             .enabled_layer_names(&layer_names);
@@ -1458,11 +1467,24 @@ impl<S: RuntimeScenario> AppWindow<S> {
         if enable_viewports {
             imgui.enable_multi_viewport();
         }
+        // Scale UI only in physical desktop coordinates. macOS and single-window
+        // mode preserve logical geometry and rasterize through framebuffer scaling.
+        let scale_ui = enable_viewports && !cfg!(target_os = "macos");
         {
             let io = imgui.io_mut();
             let mut flags = io.config_flags();
             flags.insert(ConfigFlags::DOCKING_ENABLE);
             io.set_config_flags(flags);
+            if scale_ui {
+                io.set_config_dpi_scale_fonts(true);
+                io.set_config_dpi_scale_viewports(true);
+            }
+        }
+        if scale_ui {
+            let scale = window.scale_factor() as f32;
+            let style = imgui.style_mut();
+            style.scale_all_sizes(scale);
+            style.set_font_scale_dpi(scale);
         }
         init.context = Some(imgui);
 
@@ -1680,10 +1702,8 @@ impl<S: RuntimeScenario> AppWindow<S> {
         } = &mut *self.imgui;
 
         let window_size = window.inner_size();
-        if window_size.width == 0 || window_size.height == 0 {
-            return Ok(());
-        }
-        if vk.swapchain_dirty {
+        let main_visible = window_size.width > 0 && window_size.height > 0;
+        if main_visible && vk.swapchain_dirty {
             vk.swapchain.recreate(&vk.ctx, window, vk.render_target)?;
             vk.images_in_flight = vec![vk::Fence::null(); vk.swapchain.images.len()];
             vk.swapchain_dirty = false;
@@ -1731,6 +1751,13 @@ impl<S: RuntimeScenario> AppWindow<S> {
                 rendered: report.render_submitted_viewport_ids(),
                 presented: report.present_submitted_viewport_ids(),
             });
+        }
+
+        // Detached windows keep receiving frames while the main window is minimized.
+        if !main_visible {
+            let completion = prepared.skip_main();
+            renderer.wait_for_frame_completion(completion)?;
+            return Ok(());
         }
 
         let frame_index = vk.frame_index % vk.frames.len();
@@ -2162,7 +2189,11 @@ fn create_device(
         .queue_family_index(queue_family_index)
         .queue_priorities(&priorities);
 
-    let extensions = [khr_swapchain::NAME.as_ptr()];
+    let mut extensions = vec![khr_swapchain::NAME.as_ptr()];
+    // SAFETY: this physical device belongs to `instance`; all names are static.
+    unsafe {
+        ash_portability::enable_device_extensions(instance, physical_device, &mut extensions)?
+    };
     let device_create_info = vk::DeviceCreateInfo::default()
         .queue_create_infos(std::slice::from_ref(&queue_create_info))
         .enabled_extension_names(&extensions);

@@ -30,6 +30,8 @@ This sample is intentionally:
 - the EGL state retains its `NativeWindow` until both backends have shut down.
 - rendering pauses on `Pause` / `Stop`, resumes on `Resume`, and recreates the
   backend state when Android provides a replacement window.
+- font and widget sizes use Android's actual density (`density / 160`), updated
+  on `ConfigChanged`; missing or non-physical density values use a 1× fallback.
 - a downstream Android app can keep this ownership split and swap in its own
   EGL policy, renderer bootstrap, or packaging layer later.
 
@@ -72,6 +74,19 @@ throughout. `dear-imgui-rs::Context::render()` requires a registered renderer
 consumer and texture feedback reconciliation; its borrowed frame types cannot
 be cast directly into this native renderer. Use the Rust renderer crates for
 that managed frame API, or implement a proper adapter before mixing the two.
+
+## Display Density
+
+Android's native window size and input positions are already physical pixels, so
+`DisplayFramebufferScale` stays at `[1, 1]`. The application reads
+`app.config().density()` at startup and on `ConfigChanged`, scales the style from
+its original unscaled values, and sets `FontScaleDpi` to `density / 160`. This
+keeps font, padding, and touch-target sizes consistent without accumulating
+rounding errors after configuration changes. The upstream OpenGL3 renderer
+continues to upload the dynamic font-atlas texture requests normally.
+
+The smoke panel's initial size also follows this density scale and is limited
+to the available native window area.
 
 ## Prerequisites
 
@@ -176,7 +191,7 @@ python examples-android/dear-imgui-android-smoke/scripts/build-apk.py --profile 
 The release APK is written to:
 
 ```text
-examples-android/dear-imgui-android-smoke/target/release/apk/dear-imgui-android-smoke.apk
+examples-android/dear-imgui-android-smoke/target/packaged-apks/aarch64-linux-android/release/apk/dear-imgui-android-smoke.apk
 ```
 
 ## Multi-ABI Packaging Strategy

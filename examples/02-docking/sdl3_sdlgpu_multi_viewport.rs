@@ -1,6 +1,7 @@
 use dear_imgui_examples::sdl3_callbacks::{
     Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
 };
+use dear_imgui_examples::sdl3_dpi::DpiStyle;
 use dear_imgui_examples::sdl3_gpu_present::{primary_present_mode, secondary_present_mode};
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, SdlGpu3InitInfo, SdlGpu3RendererBackend};
@@ -31,6 +32,7 @@ struct SdlGpuApp {
 struct MainData {
     sdl3_backend: SdlGpu3RendererBackend,
     imgui: Context,
+    dpi_style: DpiStyle,
     gpu: sdl3::gpu::Device,
     window: sdl3::video::Window,
     _video: VideoSubsystem,
@@ -76,12 +78,6 @@ impl SdlGpuApp {
         .with_window(&window)?;
 
         let mut imgui = Context::create();
-        let window_scale = window.display_scale();
-        let window_scale = if window_scale.is_finite() && window_scale > 0.0 {
-            window_scale
-        } else {
-            1.0
-        };
 
         {
             let io = imgui.io_mut();
@@ -89,13 +85,8 @@ impl SdlGpuApp {
             flags.insert(ConfigFlags::DOCKING_ENABLE);
             flags.insert(ConfigFlags::VIEWPORTS_ENABLE);
             io.set_config_flags(flags);
-            io.set_config_dpi_scale_fonts(true);
-            io.set_config_dpi_scale_viewports(true);
         }
-
-        let style = imgui.style_mut();
-        style.scale_all_sizes(window_scale);
-        style.set_font_scale_dpi(window_scale);
+        let dpi_style = DpiStyle::new(&mut imgui, &window);
 
         let present_mode = low_latency_present_mode(&gpu, &window);
         gpu.set_swapchain_parameters(&window, present_mode, SwapchainComposition::Sdr)?;
@@ -109,6 +100,7 @@ impl SdlGpuApp {
             main: MainThreadData::assert_new(RefCell::new(MainData {
                 sdl3_backend,
                 imgui,
+                dpi_style,
                 gpu,
                 window,
                 _video: video,
@@ -138,11 +130,13 @@ impl SdlGpuApp {
         }
 
         main.sdl3_backend.new_frame(&mut main.imgui)?;
+        main.dpi_style.update(&mut main.imgui, &main.window);
+        let scale = main.dpi_style.scale();
         let frame = main.imgui.begin_frame();
         let ui = frame.ui();
 
         ui.window("SDL3 + IMGUI")
-            .size([400.0, 200.0], Condition::FirstUseEver)
+            .size([400.0 * scale, 200.0 * scale], Condition::FirstUseEver)
             .build(|| {
                 ui.text("Dear ImGui running on SDL3 + SDL_GPU");
                 ui.separator();

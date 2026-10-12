@@ -191,12 +191,39 @@ impl AppWindow {
             .io_mut()
             .set_delta_time(delta_time.as_secs_f32());
 
+        // Acquire before opening an ImGui frame so skipped frames leave no frame in progress.
+        let (output, reconfigure_after_present) = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
+                self.surface.configure(&self.device, &self.surface_desc);
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                return Err("surface acquisition failed with a WGPU validation error".into());
+            }
+        };
+
         self.imgui
             .platform
             .prepare_frame(&mut self.imgui.context, &self.window)?;
 
         let ui = self.imgui.context.frame();
         let plot_ui = ui.implot(&self.imgui.plot_context);
+        let display_size = ui.io().display_size();
+        let margin = [
+            20.0_f32.min((display_size[0] - 1.0).max(0.0) * 0.5),
+            20.0_f32.min((display_size[1] - 1.0).max(0.0) * 0.5),
+        ];
+        let available_size = [
+            (display_size[0] - margin[0] * 2.0).max(1.0),
+            (display_size[1] - margin[1] * 2.0).max(1.0),
+        ];
+        let main_size = [available_size[0].min(1200.0), available_size[1].min(800.0)];
+        let advanced_size = [available_size[0].min(600.0), available_size[1].min(500.0)];
 
         // Sample data for plots
         let x_data: Vec<f64> = (0..100).map(|i| i as f64 * 0.1).collect();
@@ -253,7 +280,8 @@ impl AppWindow {
 
         // Main window with tabbed interface
         ui.window("ImPlot Demo - Modular API Showcase")
-            .size([1200.0, 800.0], Condition::FirstUseEver)
+            .size(main_size, Condition::FirstUseEver)
+            .position(margin, Condition::FirstUseEver)
             .build(|| {
                 ui.text("Welcome to Dear ImGui + ImPlot with New Modular API!");
                 ui.text("This demo showcases all the new plot types and features.");
@@ -578,8 +606,14 @@ impl AppWindow {
 
         // Advanced Features Window
         ui.window("Advanced Features")
-            .size([600.0, 500.0], Condition::FirstUseEver)
-            .position([850.0, 50.0], Condition::FirstUseEver)
+            .size(advanced_size, Condition::FirstUseEver)
+            .position(
+                [
+                    (display_size[0] - advanced_size[0] - margin[0]).max(0.0),
+                    margin[1],
+                ],
+                Condition::FirstUseEver,
+            )
             .build(|| {
                 ui.text("Advanced ImPlot Features:");
                 ui.separator();
@@ -632,20 +666,6 @@ impl AppWindow {
             });
 
         // Render
-        let (output, reconfigure_after_present) = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
-            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
-            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
-                self.surface.configure(&self.device, &self.surface_desc);
-                return Ok(());
-            }
-            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
-                return Ok(());
-            }
-            wgpu::CurrentSurfaceTexture::Validation => {
-                return Err("surface acquisition failed with a WGPU validation error".into());
-            }
-        };
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());

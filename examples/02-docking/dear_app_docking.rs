@@ -130,8 +130,8 @@ impl Application for DockDemoState {
         // Fullscreen host window with dockspace
         let viewport = ui.main_viewport();
         ui.set_next_window_viewport(viewport.id());
-        let pos = viewport.pos();
-        let size = viewport.size();
+        let pos = viewport.work_pos();
+        let size = viewport.work_size();
 
         let mut host_flags = WindowFlags::NO_TITLE_BAR
             | WindowFlags::NO_RESIZE
@@ -168,10 +168,6 @@ impl Application for DockDemoState {
             .position([pos[0], pos[1]], Condition::Always)
             .size([size[0], size[1]], Condition::Always)
             .build(|| {
-                // Pop padding/border/rounding to restore defaults inside
-                padding.pop();
-                border.pop();
-                rounding.pop();
                 let dockspace_id = ui.get_id("MainDockSpace");
                 let avail = ui.content_region_avail();
                 dockspace_result = ui
@@ -232,6 +228,11 @@ impl Application for DockDemoState {
                     _bar.end();
                 }
             });
+        // End the host before popping styles created in the parent Begin scope.
+        // Restore them before building any docked windows or returning an error.
+        padding.pop();
+        border.pop();
+        rounding.pop();
         dockspace_result.map_err(|error| RunError::application(ApplicationStage::Frame, error))?;
 
         // Windows content

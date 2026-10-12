@@ -1,7 +1,7 @@
 use std::ffi::{c_char, c_int};
 use std::time::Instant;
 
-use dear_imgui_rs::{Condition, ConfigFlags, Context};
+use dear_imgui_rs::{Condition, ConfigFlags, Context, FontSource};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
 use dear_imgui_wgpu::{FramebufferExtent, WgpuInitInfo, WgpuRenderer, wgpu};
 use pollster::block_on;
@@ -86,10 +86,13 @@ fn run_inner(_argc: c_int, _argv: *mut *mut c_char) -> Result<c_int, Box<dyn std
         flags.insert(ConfigFlags::NAV_ENABLE_KEYBOARD);
         flags.insert(ConfigFlags::NAV_ENABLE_GAMEPAD);
         io.set_config_flags(flags);
-
-        let style = imgui.style_mut();
-        style.set_font_scale_dpi(main_scale);
     }
+
+    imgui
+        .font_atlas()
+        .add_font(&[FontSource::default_font_with_size(16.0)]);
+    let baseline_style = imgui.style().clone();
+    let mut dpi_scale = 0.0_f32;
 
     // SAFETY: `window` outlives explicit shutdown and Context teardown on early return.
     let mut sdl3_backend = unsafe { Sdl3PlatformBackend::init_for_other(&mut imgui, &window)? };
@@ -100,6 +103,8 @@ fn run_inner(_argc: c_int, _argv: *mut *mut c_char) -> Result<c_int, Box<dyn std
 
     let mut last_frame = Instant::now();
     let mut show_demo_window = true;
+    let mut layout_size = [0.0, 0.0];
+    let mut demo_needs_layout = true;
     let mut tap_count = 0u32;
     let mut input_text = String::from(
         "Tap here and focus the input field to validate the SDL3 iOS soft keyboard path.",
@@ -146,10 +151,65 @@ fn run_inner(_argc: c_int, _argv: *mut *mut c_char) -> Result<c_int, Box<dyn std
         imgui.io_mut().set_delta_time(dt);
 
         sdl3_backend.new_frame(&mut imgui)?;
+        // SDL reports positions in window units. Retina pixel density already lives in
+        // framebuffer scale, so only the remaining content scale enlarges the logical UI.
+        let logical_scale = window.display_scale() / window.pixel_density();
+        let logical_scale = if logical_scale.is_finite() && logical_scale > 0.0 {
+            logical_scale
+        } else {
+            1.0
+        };
+        let dpi_changed = (logical_scale - dpi_scale).abs() > 0.001;
+        if dpi_changed {
+            let style = imgui.style_mut();
+            *style = baseline_style.clone();
+            style.scale_all_sizes(logical_scale);
+            style.set_font_scale_dpi(logical_scale);
+            dpi_scale = logical_scale;
+        }
         let ui = imgui.frame();
+        let display_size = ui.io().display_size();
+        let layout_changed = layout_size != display_size || dpi_changed;
+        if layout_changed {
+            layout_size = display_size;
+            demo_needs_layout = true;
+        }
+        let condition = if layout_changed {
+            Condition::Always
+        } else {
+            Condition::FirstUseEver
+        };
+        let margin = [
+            (10.0_f32 * dpi_scale).min((display_size[0] - 1.0).max(0.0) * 0.5),
+            (10.0_f32 * dpi_scale).min((display_size[1] - 1.0).max(0.0) * 0.5),
+        ];
+        let available = [
+            (display_size[0] - margin[0] * 2.0).max(1.0),
+            (display_size[1] - margin[1] * 2.0).max(1.0),
+        ];
+        let panel_width = available[0].min(460.0 * dpi_scale);
+        let gap = (10.0_f32 * dpi_scale).min(available[1] * 0.1);
+        let side_by_side = available[0] >= panel_width + gap + 240.0 * dpi_scale;
+        // A stacked layout shares the height so both windows retain scrollable content.
+        let panel_height = if side_by_side {
+            available[1].min(300.0 * dpi_scale)
+        } else {
+            ((available[1] - gap) * 0.4).clamp(1.0, 300.0 * dpi_scale)
+        };
+        let panel_size = [panel_width, panel_height];
+        let demo_pos = if side_by_side {
+            [margin[0] + panel_width + gap, margin[1]]
+        } else {
+            [margin[0], margin[1] + panel_height + gap]
+        };
+        let demo_size = [
+            (display_size[0] - demo_pos[0] - margin[0]).clamp(1.0, 550.0 * dpi_scale),
+            (display_size[1] - demo_pos[1] - margin[1]).clamp(1.0, 680.0 * dpi_scale),
+        ];
 
         ui.window("Dear ImGui iOS SDL3 Smoke")
-            .size([460.0, 300.0], Condition::FirstUseEver)
+            .size(panel_size, condition)
+            .position(margin, condition)
             .build(|| {
                 ui.text("Reference path: SDL3 + WGPU");
                 ui.separator();
@@ -180,6 +240,8 @@ fn run_inner(_argc: c_int, _argv: *mut *mut c_char) -> Result<c_int, Box<dyn std
                     clear_color.a = color[3] as f64;
                 }
 
+                ui.checkbox("Show Dear ImGui demo", &mut show_demo_window);
+
                 ui.text_wrapped(
                     "This route keeps SDL3 packaging and the app entry point in the host application.",
                 );
@@ -187,6 +249,13 @@ fn run_inner(_argc: c_int, _argv: *mut *mut c_char) -> Result<c_int, Box<dyn std
 
         if show_demo_window {
             ui.show_demo_window(&mut show_demo_window);
+            // The upstream demo overrides next-window geometry on first use. Set its
+            // geometry after creation so the following frame uses the visible layout.
+            if demo_needs_layout {
+                ui.set_window_pos_by_name("Dear ImGui Demo", demo_pos);
+                ui.set_window_size_by_name("Dear ImGui Demo", demo_size);
+                demo_needs_layout = false;
+            }
         }
 
         let pending_frame = imgui.try_render(renderer.renderer_consumer()?)?;

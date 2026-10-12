@@ -67,12 +67,12 @@ These examples combine UI with application-owned state, GPU resources, threads, 
 | `dear_app_external_texture` | Application-owned WGPU texture | Default | `cargo run -p dear-imgui-examples --bin dear_app_external_texture` | Desktop GPU | `wgpu_rtt_gameview` |
 | `wgpu_rtt_gameview` | Render to texture | Default | `cargo run -p dear-imgui-examples --bin wgpu_rtt_gameview` | Desktop GPU | `game_engine_showcase` |
 | `console_log` | Filterable console | Default | `cargo run -p dear-imgui-examples --bin console_log` | Desktop GPU | `game_engine_showcase` |
-| `asset_browser_grid` | Asset grid | Default | `cargo run -p dear-imgui-examples --bin asset_browser_grid` | Bundled image assets | `game_engine_showcase` |
-| `file_dialog_native` | Native file dialog | `file-browser` | `cargo run -p dear-imgui-examples --bin file_dialog_native --features file-browser` | Desktop file system | `file_browser_imgui` |
-| `file_browser_imgui` | In-UI file browser | `file-browser` | `cargo run -p dear-imgui-examples --bin file_browser_imgui --features file-browser` | Desktop file system | File Browser crate README |
-| `ime_debug` | IME diagnostics | Default | `cargo run -p dear-imgui-examples --bin ime_debug` | OS input method | Winit backend README |
-| `threaded_snapshot_minimal` | Render-thread handoff | Default | `cargo run -p dear-imgui-examples --bin threaded_snapshot_minimal` | Desktop GPU | Custom renderer contract |
-| `multi_context_switch` | Multiple Contexts | Default | `cargo run -p dear-imgui-examples --bin multi_context_switch` | Desktop GPU | Context activation docs |
+| `asset_browser_grid` | Asset grid | Default | `cargo run -p dear-imgui-examples --bin asset_browser_grid` | OpenGL driver; bundled image assets | `game_engine_showcase` |
+| `file_dialog_native` | Native file dialog | `file-browser` | `cargo run -p dear-imgui-examples --bin file_dialog_native --features file-browser` | OpenGL driver; OS file dialogs | `file_browser_imgui` |
+| `file_browser_imgui` | In-UI file browser | `file-browser` | `cargo run -p dear-imgui-examples --bin file_browser_imgui --features file-browser` | OpenGL driver; desktop file system | File Browser crate README |
+| `ime_debug` | IME diagnostics | Default | `cargo run -p dear-imgui-examples --bin ime_debug` | OS input method; optional CJK font below | Winit backend README |
+| `threaded_snapshot_minimal` | Render-thread handoff | Default | `cargo run -p dear-imgui-examples --bin threaded_snapshot_minimal` | Terminal; completes without a window or GPU | Custom renderer contract |
+| `multi_context_switch` | Multiple Contexts | Default | `cargo run -p dear-imgui-examples --bin multi_context_switch` | Terminal; completes without a window or GPU | Context activation docs |
 | `test_engine_integration` | Automated UI tests | `test-engine` | `cargo run -p dear-imgui-examples --bin test_engine_integration --features test-engine` | Native source build; not WASM | Test Engine crate README |
 
 `dear-app` supports docking in its main window but does not own native platform multi-viewport.
@@ -104,11 +104,23 @@ Winit native multi-viewport is disabled on Wayland because Winit does not expose
 top-level window positioning there. Use X11 (`WINIT_UNIX_BACKEND=x11`) or an SDL3 route when native
 secondary windows are required.
 
+Window sizes requested through Winit are logical sizes. Single-window integrations keep ImGui
+coordinates logical and let framebuffer scale handle backing pixels. Native multi-viewport
+integrations use the platform's window coordinates; on Windows/X11, initial widget and font
+sizes also follow the monitor's content scale. SDL3 examples share
+[`DpiStyle`](src/sdl3_dpi.rs): capture your theme once, then update it after the platform's
+`new_frame` and before opening the ImGui frame. It divides window display scale by pixel
+density, restores the baseline before scaling, and keeps Retina density in the framebuffer.
+
+Ash examples enable advertised Vulkan portability extensions for MoltenVK. On macOS, install
+a Vulkan loader and MoltenVK; the extension configuration does not install those native libraries.
+
 Native SDK applications can instead start from the unsafe sys-owned shim examples:
 
 | Example | Backend shims | Command | Prerequisites |
 | --- | --- | --- | --- |
 | `win32_dx11` | Win32 + DX11 | `cargo run -p dear-imgui-sys --example win32_dx11 --features backend-shim-win32,backend-shim-dx11` | Windows + D3D11 driver |
+| `win32_dx12` | Win32 + DX12 | `cargo run -p dear-imgui-sys --example win32_dx12 --features backend-shim-win32,backend-shim-dx12` | Windows; hardware with software WARP fallback |
 | `dx12_headless` | DX12 | `cargo run -p dear-imgui-sys --example dx12_headless --features backend-shim-dx12` | Windows; software WARP, no window/GPU required |
 | `win32_opengl3` | Win32 + OpenGL3 | `cargo run -p dear-imgui-sys --example win32_opengl3 --features backend-shim-win32,backend-shim-opengl3` | Windows + OpenGL 3+ driver |
 | `cocoa_metal` | Cocoa + Metal | `cargo run -p dear-imgui-sys --example cocoa_metal --features backend-shim-osx,backend-shim-metal` | macOS + Metal device |
@@ -133,6 +145,10 @@ use `DockLayoutApply::IfMissing`; reserve `Replace` for an explicit reset comman
 
 Examples resolve bundled assets from the workspace manifest path rather than the process working
 directory, so IDE and terminal launches behave the same.
+
+`ime_debug` can load an optional `examples/assets/NotoSansSC-Regular.ttf`. Supply a trusted CJK
+font at that path to display its Chinese/Japanese test text; without it the diagnostic still runs
+with the default font. Embedded-font examples use their bundled font and need no extra download.
 
 ## Contributing
 

@@ -174,8 +174,34 @@ fn plot_demo_ui(
     push_sample(&mut state.fps_history, fps.min(240.0));
     push_sample(&mut state.x_history, marker_x);
 
+    let viewport = ui.main_viewport();
+    let work_pos = viewport.work_pos();
+    let work_size = viewport.work_size();
+    let origin = [work_pos[0] + 16.0, work_pos[1] + 16.0];
+    let available = [
+        (work_size[0] - 32.0).max(1.0),
+        (work_size[1] - 32.0).max(1.0),
+    ];
+    // Keep both windows visible on first use; narrow clients stack them and allow scrolling.
+    let (controls_size, profiler_pos, profiler_size) = if available[0] >= 956.0 {
+        (
+            [380.0, available[1].min(280.0)],
+            [origin[0] + 396.0, origin[1]],
+            [560.0, available[1].min(440.0)],
+        )
+    } else {
+        let controls_height = (available[1] * 0.4).min(280.0);
+        let gap = 16.0_f32.min(available[1] * 0.1);
+        (
+            [available[0], controls_height],
+            [origin[0], origin[1] + controls_height + gap],
+            [available[0], available[1] - controls_height - gap],
+        )
+    };
+
     ui.window("Controls")
-        .size([380.0, 280.0], Condition::FirstUseEver)
+        .position(origin, Condition::FirstUseEver)
+        .size(controls_size, Condition::FirstUseEver)
         .build(|| {
             ui.text("Bevy drives the motion; ImPlot shows the live state.");
             ui.separator();
@@ -192,7 +218,8 @@ fn plot_demo_ui(
         });
 
     ui.window("Profiler")
-        .size([560.0, 420.0], Condition::FirstUseEver)
+        .position(profiler_pos, Condition::FirstUseEver)
+        .size(profiler_size, Condition::FirstUseEver)
         .build(|| {
             ui.text("The plot history is kept in memory only.");
             ui.text(format!("History points: {}", state.frame_time_ms.len()));

@@ -361,11 +361,6 @@ impl AppWindow {
             .position(pos, Condition::Always)
             .size(size, Condition::Always)
             .build(|| {
-                // Pop padding/border/rounding to restore defaults
-                padding.pop();
-                border.pop();
-                rounding.pop();
-
                 // Render DockSpace inside the host window
                 let color = ui.push_style_color(StyleColor::DockingEmptyBg, [1.0, 0.0, 0.0, 1.0]);
                 dockspace_result = ui
@@ -376,6 +371,11 @@ impl AppWindow {
                     .build();
                 color.pop();
             });
+        // End the host before popping styles created in the parent Begin scope.
+        // Restore them before building any docked windows or returning an error.
+        padding.pop();
+        border.pop();
+        rounding.pop();
         dockspace_result?;
 
         // 2) Create docked windows

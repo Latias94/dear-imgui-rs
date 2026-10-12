@@ -26,6 +26,9 @@ Support files:
     crate
 - copies the selected/built `SDL3.framework` into a local build folder and
   embeds it in the host app
+- gives the Rust backend the selected framework's matching headers through a
+  local `include/SDL3` symlink and `SDL3_INCLUDE_DIR`, without requiring a
+  separate Homebrew SDL3 installation
 - intentionally avoids requiring the upstream multi-platform
   `SDL3.xcframework` target during local iOS smoke builds
 

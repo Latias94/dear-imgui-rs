@@ -7,6 +7,7 @@ use android_activity::{AndroidApp, InputStatus, MainEvent, PollEvent};
 use dear_imgui_sys as sys;
 use dear_imgui_sys::backend_shim::{android as android_backend, opengl3 as opengl3_backend};
 use log::{error, info};
+use ndk::configuration::Density;
 use ndk::hardware_buffer_format::HardwareBufferFormat;
 use ndk::native_window::NativeWindow;
 
@@ -280,6 +281,8 @@ impl EglState {
 
 struct SmokeApp {
     context: *mut sys::ImGuiContext,
+    baseline_style: sys::ImGuiStyle,
+    dpi_scale: f32,
     platform_ready: bool,
     renderer_ready: bool,
     resumed: bool,
@@ -289,30 +292,52 @@ struct SmokeApp {
 }
 
 impl SmokeApp {
-    fn new() -> Self {
+    fn new(density: Option<u32>) -> Self {
         // The upstream renderer owns texture updates directly, so the entire frame
         // uses raw sys calls rather than the safe core's renderer-consumer protocol.
         let context = unsafe { sys::igCreateContext(ptr::null_mut()) };
         assert!(!context.is_null(), "create Dear ImGui context");
-        let style_scale = 2.0;
         unsafe {
             let io = sys::igGetIO_Nil();
             (*io).IniFilename = ptr::null();
             (*io).ConfigFlags |=
                 sys::ImGuiConfigFlags_IsTouchScreen | sys::ImGuiConfigFlags_NavEnableKeyboard;
-            let style = sys::igGetStyle();
-            (*style).FontScaleDpi = style_scale;
-            sys::ImGuiStyle_ScaleAllSizes(style, style_scale);
+            // The Android backend and input events both use physical window pixels.
+            (*io).DisplayFramebufferScale = sys::ImVec2 { x: 1.0, y: 1.0 };
         }
 
-        Self {
+        let mut smoke = Self {
             context,
+            baseline_style: unsafe { *sys::igGetStyle() },
+            dpi_scale: 0.0,
             platform_ready: false,
             renderer_ready: false,
             resumed: false,
             show_demo_window: true,
             clear_color: [0.18, 0.24, 0.32, 1.0],
             tap_count: 0,
+        };
+        smoke.update_density(density);
+        smoke
+    }
+
+    fn update_density(&mut self, density: Option<u32>) {
+        // Configuration::density already maps ANY/NONE to None. Reject zero and sentinel-sized
+        // values defensively, while accepting physical densities outside Android's named buckets.
+        let density = density
+            .filter(|dpi| *dpi > 0 && *dpi < i32::from(Density::Any) as u32)
+            .unwrap_or(160);
+        let scale = density as f32 / 160.0;
+        if scale != self.dpi_scale {
+            unsafe {
+                sys::igSetCurrentContext(self.context);
+                let style = sys::igGetStyle();
+                // Reapply absolute scaling from unscaled values instead of accumulating rounding.
+                *style = self.baseline_style;
+                sys::ImGuiStyle_ScaleAllSizes(style, scale);
+                (*style).FontScaleDpi = scale;
+            }
+            self.dpi_scale = scale;
         }
     }
 
@@ -468,8 +493,21 @@ impl SmokeApp {
         // ImDrawData::Textures. It performs upstream managed-texture processing.
         unsafe {
             sys::igNewFrame();
+            let display = (*sys::igGetIO_Nil()).DisplaySize;
+            let margin = 20.0 * self.dpi_scale;
+            sys::igSetNextWindowPos(
+                sys::ImVec2 {
+                    x: margin,
+                    y: margin,
+                },
+                sys::ImGuiCond_FirstUseEver,
+                sys::ImVec2 { x: 0.0, y: 0.0 },
+            );
             sys::igSetNextWindowSize(
-                sys::ImVec2 { x: 520.0, y: 360.0 },
+                sys::ImVec2 {
+                    x: (520.0 * self.dpi_scale).min((display.x - 2.0 * margin).max(1.0)),
+                    y: (360.0 * self.dpi_scale).min((display.y - 2.0 * margin).max(1.0)),
+                },
                 sys::ImGuiCond_FirstUseEver,
             );
             if sys::igBegin(c"Dear ImGui Android Smoke".as_ptr(), ptr::null_mut(), 0) {
@@ -625,7 +663,7 @@ fn android_main(app: AndroidApp) {
 
     info!("starting Dear ImGui Android smoke app");
 
-    let mut smoke = SmokeApp::new();
+    let mut smoke = SmokeApp::new(app.config().density());
     let mut egl_state: Option<EglState> = None;
     let mut should_quit = false;
 
@@ -695,6 +733,9 @@ fn android_main(app: AndroidApp) {
                 }
                 MainEvent::Pause | MainEvent::Stop => {
                     smoke.resumed = false;
+                }
+                MainEvent::ConfigChanged { .. } => {
+                    smoke.update_density(app.config().density());
                 }
                 MainEvent::RedrawNeeded { .. } => {
                     // NativeActivity expects presentation before acknowledging redraw.
