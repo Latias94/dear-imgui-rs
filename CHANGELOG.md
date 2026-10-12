@@ -30,6 +30,7 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ### Fixed
 
+- Core builds now track native header changes and the selected prebuilt archive and manifest. docs.rs builds consistently export include paths and ABI defines to downstream crates, including when using pregenerated bindings.
 - Updated the Android/OpenGL ES smoke example to use raw native frames without bypassing the safe managed-texture protocol. It retains its borrowed native window through backend teardown, pauses continuous rendering with the activity, and acknowledges system redraw after presentation.
 - CTE retains exact document text without the upstream getter's appended LF, restores fullwidth character columns, and bounds Unicode range lookups without stepping outside their tables. Native and WASM builds share the same versioned source correction.
 
