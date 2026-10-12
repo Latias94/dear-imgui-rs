@@ -14,7 +14,7 @@ They are intentionally:
 
 | Example | Use when | Type |
 |---|---|---|
-| `dear-imgui-android-smoke` | you need the low-level Android route built from `dear-imgui-rs` + `dear-imgui-sys` backend shims | Android smoke template |
+| `dear-imgui-android-smoke` | you need the low-level Android route built from raw `dear-imgui-sys` Android / OpenGL3 backend shims | Android smoke template |
 
 ## How To Use This Template
 
@@ -31,7 +31,6 @@ They are intentionally:
 
 Low-level Android route:
 
-- `dear-imgui-rs`
 - `dear-imgui-sys`
 - `backend_shim::android`
 - `backend_shim::opengl3`
@@ -39,9 +38,11 @@ Low-level Android route:
 Includes:
 
 - a minimal Android `NativeActivity` smoke path
+- a raw sys frame loop that lets the upstream OpenGL3 renderer own native
+  texture processing, with pause / resume and window replacement handling
 - a Python helper for per-target APK builds
 - a checked-in README showing the ownership split and packaging expectations
 
 See:
 
-- `examples-android/dear-imgui-android-smoke/README.md`
+- [dear-imgui-android-smoke/README.md](dear-imgui-android-smoke/README.md)

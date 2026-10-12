@@ -35,6 +35,12 @@ This sample is intentionally:
 
 ## Build Targets
 
+Use macOS with Xcode and the matching iOS SDK installed. The checked-in Xcode host
+below acquires SDL3 and supplies its headers automatically. The direct Cargo
+commands in this section instead require `SDL3_INCLUDE_DIR` to point to an
+include root containing the matching `SDL3/SDL.h`, or another configured SDL3
+header discovery path. They build the Rust library, not a runnable app bundle.
+
 Install the Rust std targets you need:
 
 ```bash
@@ -62,7 +68,7 @@ cargo build --manifest-path examples-ios/dear-imgui-ios-sdl3-smoke/Cargo.toml --
 The output is a static library named similar to:
 
 ```text
-target/aarch64-apple-ios/debug/libdear_imgui_ios_sdl3_smoke.a
+examples-ios/dear-imgui-ios-sdl3-smoke/target/aarch64-apple-ios/debug/libdear_imgui_ios_sdl3_smoke.a
 ```
 
 ## Run The Checked-In Xcode Host
@@ -93,6 +99,10 @@ shipping an app-owned `SDL3.xcframework` is still the cleaner distribution
 story. The auto-resolve path intentionally builds the per-platform `SDL3`
 target instead of the upstream `SDL3.xcframework` packaging target, so local
 iOS smoke builds do not require unrelated tvOS/visionOS SDK components.
+
+The Rust build helper uses the selected framework's `Headers` directory through
+a local `include/SDL3` bridge and sets `SDL3_INCLUDE_DIR` for Cargo. A separate
+Homebrew SDL3 installation is not required by the host project.
 
 ## iOS Integration Shape
 

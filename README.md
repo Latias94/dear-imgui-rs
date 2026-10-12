@@ -236,6 +236,13 @@ crate yet, `dear-imgui-sys` can expose selected official backend pieces behind
 `backend-shim-*` feature gates. These are repository-owned C shim entry points,
 not direct promises about the upstream `imgui_impl_*` C++ ABI.
 
+Native SDK integrations include Win32, DX11, DX12, macOS Cocoa, Metal
+(macOS/iOS), Android, and OpenGL3. An existing D3D12 application can enable
+`backend-shim-dx12`; an existing Cocoa/Metal application can combine
+`backend-shim-osx` and `backend-shim-metal`. These remain unsafe low-level
+interfaces with application-owned GPU and window lifetimes. See the
+[backend shim support matrix](docs/BACKEND_SHIMS.md).
+
 Example: low-level Android route without a dedicated Android convenience crate:
 
 ```toml

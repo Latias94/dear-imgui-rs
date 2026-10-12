@@ -317,16 +317,41 @@ impl AppWindow {
             .io_mut()
             .set_delta_time(delta_time.as_secs_f32());
 
+        // Acquire before opening an ImGui frame so skipped frames leave no frame in progress.
+        let (output, reconfigure_after_present) = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
+                self.surface.configure(&self.device, &self.surface_desc);
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                return Err("surface acquisition failed with a WGPU validation error".into());
+            }
+        };
+
         self.imgui
             .platform
             .prepare_frame(&mut self.imgui.context, &self.window)?;
 
         let ui = self.imgui.context.frame();
+        let display_size = ui.io().display_size();
+        let margin = [
+            20.0_f32.min((display_size[0] - 1.0).max(0.0) * 0.5),
+            20.0_f32.min((display_size[1] - 1.0).max(0.0) * 0.5),
+        ];
+        let initial_size = [
+            (display_size[0] - margin[0] * 2.0).clamp(1.0, 1100.0),
+            (display_size[1] - margin[1] * 2.0).clamp(1.0, 800.0),
+        ];
 
         // Build a simple node editor UI
         ui.window("ImNodes Demo")
-            .size([1100.0, 800.0], Condition::FirstUseEver)
-            .position([50.0, 50.0], Condition::FirstUseEver)
+            .size(initial_size, Condition::FirstUseEver)
+            .position(margin, Condition::FirstUseEver)
             .build(|| {
                 if let Some(tab_bar) = ui.tab_bar("imnodes_tabs") {
                     if let Some(tab) = ui.tab_item("Hello") {
@@ -1207,20 +1232,6 @@ impl AppWindow {
             });
 
         // Render
-        let (output, reconfigure_after_present) = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
-            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
-            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
-                self.surface.configure(&self.device, &self.surface_desc);
-                return Ok(());
-            }
-            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
-                return Ok(());
-            }
-            wgpu::CurrentSurfaceTexture::Validation => {
-                return Err("surface acquisition failed with a WGPU validation error".into());
-            }
-        };
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());

@@ -7,7 +7,7 @@
 //! - the Rust WGPU renderer backend, `dear-imgui-wgpu`.
 //!
 //! Run with:
-//! `cargo run -p dear-imgui-examples --bin sdl3_wgpu`
+//! `cargo run -p dear-imgui-examples --bin sdl3_wgpu --features sdl3-platform`
 //!
 //! For native multi-viewport, see `sdl3_wgpu_multi_viewport.rs` and run it with the
 //! `sdl3-wgpu-multi-viewport` feature.
@@ -19,6 +19,7 @@ use std::time::Instant;
 use dear_imgui_examples::sdl3_callbacks::{
     Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
 };
+use dear_imgui_examples::sdl3_dpi::DpiStyle;
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
 use dear_imgui_wgpu::{FramebufferExtent, WgpuInitInfo, WgpuRenderer};
@@ -34,6 +35,7 @@ struct MainData {
     renderer: WgpuRenderer,
     sdl3_backend: Sdl3PlatformBackend,
     imgui: Context,
+    dpi_style: DpiStyle,
     surface: wgpu::Surface<'static>,
     queue: wgpu::Queue,
     device: wgpu::Device,
@@ -58,6 +60,11 @@ impl WgpuApp {
             .get_primary_display()?
             .get_content_scale()
             .unwrap_or(1.0);
+        let main_scale = if main_scale.is_finite() && main_scale > 0.0 {
+            main_scale
+        } else {
+            1.0
+        };
         let mut window = video
             .window(
                 "Dear ImGui SDL3 + WGPU",
@@ -124,8 +131,8 @@ impl WgpuApp {
             flags.insert(ConfigFlags::NAV_ENABLE_KEYBOARD);
             flags.insert(ConfigFlags::NAV_ENABLE_GAMEPAD);
             io.set_config_flags(flags);
-            imgui.style_mut().set_font_scale_dpi(main_scale);
         }
+        let dpi_style = DpiStyle::new(&mut imgui, &window);
         // SAFETY: the retained window outlives explicit platform shutdown.
         let mut sdl3_backend = unsafe { Sdl3PlatformBackend::init_for_other(&mut imgui, &window)? };
         sdl3_backend.set_gamepad_mode(&mut imgui, GamepadMode::AutoAll)?;
@@ -140,6 +147,7 @@ impl WgpuApp {
                 renderer,
                 sdl3_backend,
                 imgui,
+                dpi_style,
                 surface,
                 queue,
                 device,
@@ -199,9 +207,11 @@ impl WgpuApp {
             .set_delta_time((now - main.last_frame).as_secs_f32());
         main.last_frame = now;
         main.sdl3_backend.new_frame(&mut main.imgui)?;
+        main.dpi_style.update(&mut main.imgui, &main.window);
+        let scale = main.dpi_style.scale();
         let ui = main.imgui.frame();
         ui.window("SDL3 + WGPU")
-            .size([400.0, 200.0], Condition::FirstUseEver)
+            .size([400.0 * scale, 200.0 * scale], Condition::FirstUseEver)
             .build(|| {
                 ui.text("Dear ImGui running on SDL3 + WGPU");
                 ui.separator();

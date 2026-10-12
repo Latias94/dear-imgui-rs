@@ -60,9 +60,6 @@ required-features = ["package-bin"]
 [features]
 default = []
 bindgen = ["dep:bindgen"]
-# Docking is always enabled; feature removed.
-# Enable multi-viewport support (commented out while WIP)
-# multi-viewport = []
 # Enable Dear ImGui test engine hooks (requires linking dear-imgui-test-engine-sys).
 # Test engine hooks alter the native core artifact and therefore require a source build.
 test-engine = ["build-from-source"]
@@ -83,5 +80,36 @@ build-from-source = []
 glam = ["dep:glam"]
 backend-shim-android = []
 backend-shim-dx11 = []
+backend-shim-dx12 = []
+backend-shim-metal = []
 backend-shim-opengl3 = []
+backend-shim-osx = []
 backend-shim-win32 = []
+
+[target.'cfg(windows)'.dev-dependencies]
+windows = { version = "0.62", features = ["Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Direct3D12", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_Graphics_Gdi", "Win32_Graphics_OpenGL", "Win32_System_LibraryLoader", "Win32_UI_HiDpi", "Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry", "NSString", "NSDate", "NSRunLoop", "NSObjCRuntime", "objc2-core-foundation"] }
+objc2-metal = { version = "0.3", default-features = false, features = ["std", "MTLRenderPass"] }
+
+[[example]]
+name = "dx12_headless"
+required-features = ["backend-shim-dx12"]
+
+[[example]]
+name = "win32_dx11"
+required-features = ["backend-shim-win32", "backend-shim-dx11"]
+
+[[example]]
+name = "win32_dx12"
+required-features = ["backend-shim-win32", "backend-shim-dx12"]
+
+[[example]]
+name = "win32_opengl3"
+required-features = ["backend-shim-win32", "backend-shim-opengl3"]
+
+[[example]]
+name = "cocoa_metal"
+required-features = ["backend-shim-osx", "backend-shim-metal"]

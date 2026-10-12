@@ -160,6 +160,12 @@ impl EditorState {
             self.selected = None;
             return;
         };
+        if self.entities.len() >= MAX_ENTITIES {
+            self.log(format!(
+                "[error] this showcase is limited to {MAX_ENTITIES} scene entities"
+            ));
+            return;
+        }
         entity.name.push_str(" Copy");
         entity.position[0] += 0.75;
         self.entities.push(entity);
@@ -175,7 +181,7 @@ impl EditorState {
             let entity = self.entities.remove(index);
             self.log(format!("[info] deleted {}", entity.name));
         }
-        self.selected = (!self.entities.is_empty()).then_some(index.min(self.entities.len() - 1));
+        self.selected = (!self.entities.is_empty()).then(|| index.min(self.entities.len() - 1));
     }
 
     fn update_camera(&mut self, aspect: f32) {
@@ -389,11 +395,13 @@ impl AppWindow {
         let scene_renderer = SceneRenderer::new(&self.device, self.surface_config.format);
         let scene_target = RenderTarget::create(
             &self.device,
+            &scene_renderer,
             self.surface_config.format,
             "game-engine-scene-target",
         );
         let game_target = RenderTarget::create(
             &self.device,
+            &scene_renderer,
             self.surface_config.format,
             "game-engine-game-target",
         );
@@ -602,6 +610,7 @@ fn render_hierarchy(ui: &Ui, editor: &mut EditorState) {
         ui.text("Scene");
         ui.separator();
         for (index, entity) in editor.entities.iter().enumerate() {
+            let _id = ui.push_id(index as i32);
             if ui
                 .selectable_config(&entity.name)
                 .selected(editor.selected == Some(index))
@@ -1061,5 +1070,49 @@ fn main() -> AppResult<()> {
         Ok(())
     } else {
         Err(errors.join("; ").into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deleting_all_entities_clears_selection() {
+        let mut editor = EditorState::default();
+        for _ in 0..editor.entities.len() {
+            editor.delete_selected();
+        }
+        assert!(editor.entities.is_empty());
+        assert_eq!(editor.selected, None);
+        editor.delete_selected();
+        assert!(editor.entities.is_empty());
+    }
+
+    #[test]
+    fn deleting_selection_selects_a_remaining_entity() {
+        let mut editor = EditorState::default();
+        editor.spawn_cube();
+        editor.selected = Some(1);
+        editor.delete_selected();
+        assert_eq!(editor.selected, Some(1));
+        assert_eq!(editor.entities[1].name, "Cube 3");
+        editor.delete_selected();
+        assert_eq!(editor.selected, Some(0));
+        assert_eq!(editor.entities[0].name, "Cube");
+    }
+
+    #[test]
+    fn duplication_and_spawning_respect_the_entity_limit() {
+        let mut editor = EditorState::default();
+        for _ in editor.entities.len()..MAX_ENTITIES {
+            editor.duplicate_selected();
+        }
+        assert_eq!(editor.entities.len(), MAX_ENTITIES);
+        let selected = editor.selected;
+        editor.duplicate_selected();
+        editor.spawn_cube();
+        assert_eq!(editor.entities.len(), MAX_ENTITIES);
+        assert_eq!(editor.selected, selected);
     }
 }

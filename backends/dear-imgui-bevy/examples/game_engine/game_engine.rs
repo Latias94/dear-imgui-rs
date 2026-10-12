@@ -327,10 +327,7 @@ fn render_scene_window(ui: &dear_imgui_rs::Ui, preview: &ScenePreview, editor: &
         (fit[0] * editor.viewport_zoom).max(96.0),
         (fit[1] * editor.viewport_zoom).max(96.0),
     ];
-    ui.image_config(&preview.texture, image_size)
-        .uv0([0.0, 1.0])
-        .uv1([1.0, 0.0])
-        .build();
+    ui.image(&preview.texture, image_size);
     editor.scene_hovered = ui.is_item_hovered();
 }
 

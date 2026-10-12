@@ -37,8 +37,7 @@ pub(crate) struct SceneRenderer {
     cube_vertex_buffer: wgpu::Buffer,
     cube_index_buffer: wgpu::Buffer,
     cube_index_count: u32,
-    uniform_buffer: wgpu::Buffer,
-    uniform_bind_group: wgpu::BindGroup,
+    uniform_layout: wgpu::BindGroupLayout,
     uniform_stride: u64,
     max_objects: usize,
 }
@@ -123,25 +122,6 @@ var<uniform> u: SceneUniform;
             label: Some("simple_scene_pipeline_layout"),
             bind_group_layouts: &[Some(&uniform_layout)],
             immediate_size: 0,
-        });
-
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("simple_scene_uniform_buffer"),
-            size: uniform_stride * max_objects as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("simple_scene_uniform_bg"),
-            layout: &uniform_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &uniform_buffer,
-                    offset: 0,
-                    size: NonZeroU64::new(uniform_size),
-                }),
-            }],
         });
 
         let depth_state_grid = wgpu::DepthStencilState {
@@ -416,8 +396,7 @@ var<uniform> u: SceneUniform;
             cube_vertex_buffer,
             cube_index_buffer,
             cube_index_count: cube_indices.len() as u32,
-            uniform_buffer,
-            uniform_bind_group,
+            uniform_layout,
             uniform_stride,
             max_objects,
         }
@@ -426,8 +405,7 @@ var<uniform> u: SceneUniform;
     fn render(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        target: &wgpu::TextureView,
-        depth: &wgpu::TextureView,
+        target: &RenderTarget,
         queue: &wgpu::Queue,
         view_proj: Mat4,
         models: &[Mat4],
@@ -435,9 +413,6 @@ var<uniform> u: SceneUniform;
     ) {
         let uniform_size = std::mem::size_of::<SceneUniform>() as usize;
         let object_count = models.len() + if show_grid { 1 } else { 0 };
-        if object_count == 0 {
-            return;
-        }
         assert!(
             object_count <= self.max_objects,
             "too many scene objects for this example"
@@ -462,12 +437,14 @@ var<uniform> u: SceneUniform;
         for (i, model) in models.iter().copied().enumerate() {
             write_uniform(base + i, model);
         }
-        queue.write_buffer(&self.uniform_buffer, 0, &uniform_bytes);
+        if object_count > 0 {
+            queue.write_buffer(&target.uniform_buffer, 0, &uniform_bytes);
+        }
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("simple_scene_pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target,
+                view: &target.view,
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -481,7 +458,7 @@ var<uniform> u: SceneUniform;
                 depth_slice: None,
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: depth,
+                view: &target.depth_view,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(1.0),
                     store: wgpu::StoreOp::Store,
@@ -493,8 +470,12 @@ var<uniform> u: SceneUniform;
             multiview_mask: None,
         });
 
+        if object_count == 0 {
+            return;
+        }
+
         if show_grid {
-            pass.set_bind_group(0, &self.uniform_bind_group, &[0]);
+            pass.set_bind_group(0, &target.uniform_bind_group, &[0]);
             pass.set_pipeline(&self.grid_pipeline);
             pass.set_vertex_buffer(0, self.grid_vertex_buffer.slice(..));
             pass.draw(0..self.grid_vertex_count, 0..1);
@@ -506,7 +487,7 @@ var<uniform> u: SceneUniform;
         for i in 0..models.len() {
             let idx = i + if show_grid { 1 } else { 0 };
             let offset_bytes = (idx as u64 * self.uniform_stride) as u32;
-            pass.set_bind_group(0, &self.uniform_bind_group, &[offset_bytes]);
+            pass.set_bind_group(0, &target.uniform_bind_group, &[offset_bytes]);
             pass.draw_indexed(0..self.cube_index_count, 0, 0..1);
         }
     }
@@ -517,11 +498,18 @@ pub(crate) struct RenderTarget {
     view: wgpu::TextureView,
     _depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
+    uniform_buffer: wgpu::Buffer,
+    uniform_bind_group: wgpu::BindGroup,
     texture_id: Option<dear_imgui_wgpu::ExternalTextureId>,
 }
 
 impl RenderTarget {
-    pub(crate) fn create(device: &wgpu::Device, format: wgpu::TextureFormat, label: &str) -> Self {
+    pub(crate) fn create(
+        device: &wgpu::Device,
+        scene_renderer: &SceneRenderer,
+        format: wgpu::TextureFormat,
+        label: &str,
+    ) -> Self {
         let size = (512, 512);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some(label),
@@ -555,11 +543,33 @@ impl RenderTarget {
         });
         let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
+        // Queue writes run before the submitted passes, so each target needs independent uniforms.
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(&format!("{label}_uniform_buffer")),
+            size: scene_renderer.uniform_stride * scene_renderer.max_objects as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(&format!("{label}_uniform_bg")),
+            layout: &scene_renderer.uniform_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &uniform_buffer,
+                    offset: 0,
+                    size: NonZeroU64::new(std::mem::size_of::<SceneUniform>() as u64),
+                }),
+            }],
+        });
+
         Self {
             _texture: texture,
             view,
             _depth_texture: depth_texture,
             depth_view,
+            uniform_buffer,
+            uniform_bind_group,
             texture_id: None,
         }
     }
@@ -601,14 +611,6 @@ impl RenderTarget {
         show_grid: bool,
     ) {
         let view_proj = proj * view;
-        scene_renderer.render(
-            encoder,
-            &self.view,
-            &self.depth_view,
-            queue,
-            view_proj,
-            models,
-            show_grid,
-        );
+        scene_renderer.render(encoder, self, queue, view_proj, models, show_grid);
     }
 }

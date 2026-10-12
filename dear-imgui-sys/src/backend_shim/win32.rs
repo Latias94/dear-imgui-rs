@@ -10,6 +10,8 @@
 //! the order required by the official backend. The DPI helpers forward directly
 //! to upstream Win32 backend functions and require the corresponding raw Win32
 //! handles to be valid for the duration of each call.
+//! The WndProc handler is also valid before a context/platform backend has been initialized and
+//! returns zero in that case. DPI helpers do not require a current ImGui context.
 
 use std::ffi::c_void;
 

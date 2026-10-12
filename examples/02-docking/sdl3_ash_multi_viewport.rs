@@ -21,6 +21,8 @@ use std::time::Instant;
 
 use ash::khr::{surface as khr_surface, swapchain as khr_swapchain};
 use ash::{Device, Entry, Instance, vk};
+#[path = "../support/ash_portability.rs"]
+mod ash_portability;
 #[cfg(feature = "ash-dynamic-rendering")]
 use dear_imgui_ash::DynamicRendering;
 use dear_imgui_ash::multi_viewport_sdl3::{
@@ -32,6 +34,7 @@ use dear_imgui_ash::{
 use dear_imgui_examples::sdl3_callbacks::{
     Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
 };
+use dear_imgui_examples::sdl3_dpi::DpiStyle;
 use dear_imgui_rs::{Condition, ConfigFlags, Context, FrameToken, render::ReconciledFrame};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
 use sdl3::video::{SwapInterval, WindowPos};
@@ -204,9 +207,19 @@ impl VulkanContext {
             .into_iter()
             .map(CString::new)
             .collect::<Result<Vec<_>, _>>()?;
-        let extension_ptrs: Vec<*const i8> = extensions_cstr.iter().map(|s| s.as_ptr()).collect();
+        let mut extension_ptrs: Vec<*const i8> =
+            extensions_cstr.iter().map(|s| s.as_ptr()).collect();
+        // SAFETY: SDL extension strings remain live through instance creation.
+        let instance_flags = unsafe {
+            ash_portability::enable_instance_extensions(
+                init.entry.as_ref().expect("Vulkan entry was initialized"),
+                api_version,
+                &mut extension_ptrs,
+            )?
+        };
 
         let instance_create_info = vk::InstanceCreateInfo::default()
+            .flags(instance_flags)
             .application_info(&app_info)
             .enabled_extension_names(&extension_ptrs);
         let instance = unsafe {
@@ -865,7 +878,15 @@ fn create_device(
         .queue_family_index(queue_family_index)
         .queue_priorities(&priorities)];
 
-    let device_extensions = [khr_swapchain::NAME.as_ptr()];
+    let mut device_extensions = vec![khr_swapchain::NAME.as_ptr()];
+    // SAFETY: this physical device belongs to `instance`; all names are static.
+    unsafe {
+        ash_portability::enable_device_extensions(
+            instance,
+            physical_device,
+            &mut device_extensions,
+        )?
+    };
     let device_create_info = vk::DeviceCreateInfo::default()
         .queue_create_infos(&queue_info)
         .enabled_extension_names(&device_extensions);
@@ -1260,6 +1281,7 @@ impl RendererRuntime {
 
 struct ImguiState {
     context: Context,
+    dpi_style: DpiStyle,
     renderer: RendererRuntime,
     last_frame: Instant,
     clear_color: [f32; 4],
@@ -1345,7 +1367,12 @@ impl AppInit {
         }
     }
 
-    fn finish(mut self, img_tex: dear_imgui_rs::ManagedTextureId, tex_size: (u32, u32)) -> App {
+    fn finish(
+        mut self,
+        img_tex: dear_imgui_rs::ManagedTextureId,
+        tex_size: (u32, u32),
+        dpi_style: DpiStyle,
+    ) -> App {
         let image_count = self
             .swapchain
             .as_ref()
@@ -1357,6 +1384,7 @@ impl AppInit {
             sdl3_backend: ManuallyDrop::new(self.sdl3_backend.take()),
             imgui: ManuallyDrop::new(ImguiState {
                 context: self.context.take().expect("ImGui context was initialized"),
+                dpi_style,
                 renderer: self.renderer.take().expect("Ash renderer was initialized"),
                 last_frame: Instant::now(),
                 clear_color: [0.1, 0.12, 0.15, 1.0],
@@ -1551,14 +1579,11 @@ impl App {
             let mut flags = io.config_flags();
             flags.insert(ConfigFlags::DOCKING_ENABLE);
             io.set_config_flags(flags);
-            io.set_config_dpi_scale_fonts(true);
-            io.set_config_dpi_scale_viewports(true);
         }
-        {
-            let style = context.style_mut();
-            style.scale_all_sizes(main_scale);
-            style.set_font_scale_dpi(main_scale);
-        }
+        let dpi_style = DpiStyle::new(
+            &mut context,
+            init.window.as_ref().expect("SDL3 window was initialized"),
+        );
 
         if ENABLE_VIEWPORTS {
             context.enable_multi_viewport();
@@ -1759,7 +1784,7 @@ impl App {
             FRAMES_IN_FLIGHT,
         )?;
 
-        Ok(init.finish(img_tex, (tex_w, tex_h)))
+        Ok(init.finish(img_tex, (tex_w, tex_h), dpi_style))
     }
 
     fn shutdown(&mut self) -> Result<(), Box<dyn Error>> {
@@ -1918,6 +1943,7 @@ impl App {
             context,
             renderer,
             last_frame,
+            dpi_style,
             clear_color,
             img_tex,
             show_demo,
@@ -1931,13 +1957,15 @@ impl App {
         context.io_mut().set_delta_time(dt);
 
         backend.new_frame(context)?;
+        dpi_style.update(context, window);
+        let scale = dpi_style.scale();
         let frame = context.begin_frame();
         let ui = frame.ui();
 
         ui.dockspace().build()?;
 
         ui.window("SDL3 + Ash (multi-viewport)")
-            .size([460.0, 280.0], Condition::FirstUseEver)
+            .size([460.0 * scale, 280.0 * scale], Condition::FirstUseEver)
             .build(|| {
                 ui.text("Drag ImGui windows outside to spawn OS windows.");
                 ui.separator();

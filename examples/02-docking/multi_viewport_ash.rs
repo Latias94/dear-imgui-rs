@@ -34,8 +34,9 @@ impl AshViewportScenario for InteractiveScenario {
 
     fn draw_ui(&mut self, frame: AshFrameUi<'_>) -> ExampleResult {
         let ui = frame.ui;
+        let scale = ui.clone_style().font_scale_dpi();
         ui.window("Multi-Viewport (ash)")
-            .size([460.0, 260.0], Condition::FirstUseEver)
+            .size([460.0 * scale, 260.0 * scale], Condition::FirstUseEver)
             .build(|| {
                 ui.text("Renderer: dear-imgui-ash (Vulkan)");
                 ui.text(format!("Viewports: {}", frame.viewport_count));

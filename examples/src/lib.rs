@@ -4,6 +4,9 @@
 pub mod sdl3_callbacks;
 
 #[cfg(feature = "sdl3-platform")]
+pub mod sdl3_dpi;
+
+#[cfg(feature = "sdl3-platform")]
 pub mod sdl3_gl;
 
 #[cfg(feature = "sdl3-gpu-multi-viewport")]

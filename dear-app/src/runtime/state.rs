@@ -1,4 +1,10 @@
-use std::sync::Arc;
+use std::{
+    panic::{AssertUnwindSafe, catch_unwind},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use dear_imgui_rs as imgui;
 use dear_imgui_rs::ConfigFlags;
@@ -466,6 +472,40 @@ pub(crate) struct GpuState {
     pub(crate) device: wgpu::Device,
     pub(crate) queue: wgpu::Queue,
     pub(crate) renderer: dear_imgui_wgpu::WgpuRenderer,
+    device_lost: Arc<AtomicBool>,
+    drain_panicked: bool,
+}
+
+fn drain_gpu_submissions(
+    device_lost: &AtomicBool,
+    drain_panicked: &mut bool,
+    drain: impl FnOnce() -> Result<(), wgpu::PollError>,
+) -> Result<(), RunError> {
+    if device_lost.load(Ordering::Acquire) {
+        return Ok(());
+    }
+    if *drain_panicked {
+        return Err(RunError::GpuInternal {
+            message: "GPU submission drain previously panicked; keeping GPU ownership quarantined"
+                .to_owned(),
+        });
+    }
+    match catch_unwind(AssertUnwindSafe(drain)) {
+        Ok(result) => result.map_err(|error| RunError::GpuInternal {
+            message: format!("waiting for GPU submissions before renderer release: {error}"),
+        }),
+        Err(payload) => {
+            *drain_panicked = true;
+            let detail = payload
+                .downcast_ref::<&str>()
+                .copied()
+                .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+                .unwrap_or("native GPU submission drain panicked");
+            Err(RunError::GpuInternal {
+                message: format!("waiting for GPU submissions before renderer release: {detail}"),
+            })
+        }
+    }
 }
 
 impl GpuState {
@@ -473,6 +513,15 @@ impl GpuState {
         &mut self,
         context: &mut imgui::Context,
     ) -> Result<(), RunError> {
+        // Flush uploads even if the application failed before its first rendered frame. Native
+        // device errors can make WGPU's poll panic instead of returning PollError. Keep renderer
+        // and Context ownership intact until the drain succeeds or loss has been confirmed.
+        let device = &self.device;
+        let queue = &self.queue;
+        drain_gpu_submissions(&self.device_lost, &mut self.drain_panicked, || {
+            queue.submit(std::iter::empty());
+            device.poll(wgpu::PollType::wait_indefinitely()).map(|_| ())
+        })?;
         self.renderer
             .shutdown(context)
             .map_err(RunError::RendererRelease)
@@ -484,6 +533,8 @@ impl GpuState {
             device,
             queue,
             renderer,
+            device_lost: _,
+            drain_panicked: _,
         } = self;
         drop(renderer);
         device.destroy();
@@ -578,7 +629,10 @@ impl WgpuRuntimeFactory {
                 message: error.to_string(),
             });
         }));
+        let device_lost = Arc::new(AtomicBool::new(false));
+        let callback_device_lost = Arc::clone(&device_lost);
         device.set_device_lost_callback(move |reason, message| {
+            callback_device_lost.store(true, Ordering::Release);
             let _ = event_proxy.send_event(RuntimeEvent::DeviceLost {
                 generation,
                 message: format!("{reason:?}: {message}"),
@@ -598,6 +652,8 @@ impl WgpuRuntimeFactory {
                 device,
                 queue,
                 renderer,
+                device_lost,
+                drain_panicked: false,
             },
         })
     }
@@ -636,15 +692,70 @@ fn configure_context(context: &mut imgui::Context, config: &AppConfig) {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::Cell, rc::Rc};
+    use std::{
+        cell::Cell,
+        rc::Rc,
+        sync::atomic::{AtomicBool, Ordering},
+    };
 
     use dear_imgui_rs::{FrameLifecycleState, FramePrepareOptions};
 
     use super::{
-        initialize_configured_ui, platform_error, preserve_initialization_error,
-        run_application_frame_boundary,
+        drain_gpu_submissions, initialize_configured_ui, platform_error,
+        preserve_initialization_error, run_application_frame_boundary,
     };
     use crate::{ApplicationStage, RunError};
+
+    #[test]
+    fn known_device_loss_skips_gpu_submission_drain() {
+        let device_lost = AtomicBool::new(true);
+        let mut drain_panicked = false;
+        drain_gpu_submissions(&device_lost, &mut drain_panicked, || {
+            panic!("a lost device must not receive new work or waits")
+        })
+        .unwrap();
+        assert!(!drain_panicked);
+    }
+
+    #[test]
+    fn gpu_drain_panic_without_confirmed_loss_blocks_teardown_retries() {
+        let device_lost = AtomicBool::new(false);
+        let mut drain_panicked = false;
+        let error = drain_gpu_submissions(&device_lost, &mut drain_panicked, || {
+            panic!("injected native GPU wait failure")
+        })
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("injected native GPU wait failure")
+        );
+        assert!(drain_panicked);
+        let retry_called = Cell::new(false);
+        let retry = drain_gpu_submissions(&device_lost, &mut drain_panicked, || {
+            retry_called.set(true);
+            Ok(())
+        });
+        assert!(matches!(retry, Err(RunError::GpuInternal { .. })));
+        assert!(!retry_called.get());
+    }
+
+    #[test]
+    fn device_loss_during_gpu_drain_panic_allows_later_release() {
+        let device_lost = AtomicBool::new(false);
+        let mut drain_panicked = false;
+        let error = drain_gpu_submissions(&device_lost, &mut drain_panicked, || {
+            device_lost.store(true, Ordering::Release);
+            panic!("injected device loss during native wait")
+        })
+        .unwrap_err();
+        assert!(matches!(error, RunError::GpuInternal { .. }));
+        assert!(drain_panicked);
+        drain_gpu_submissions(&device_lost, &mut drain_panicked, || {
+            panic!("retry must release the lost device without draining it again")
+        })
+        .unwrap();
+    }
 
     #[derive(Debug)]
     struct TestPlatform(Rc<Cell<usize>>);

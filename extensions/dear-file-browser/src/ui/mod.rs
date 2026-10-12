@@ -846,6 +846,7 @@ mod tests {
         FileListViewMode,
     };
     use crate::fs::{FileSystem, FsEntry, FsMetadata, ScanVisit};
+    use crate::places::{Place, PlaceGroup, PlaceOrigin};
     use dear_imgui_rs::TableColumnIndex;
     use std::path::{Path, PathBuf};
 
@@ -885,6 +886,66 @@ mod tests {
                 .unwrap();
         assert_eq!(min, [300.0, 0.0]);
         assert_eq!(max, [300.0, f32::MAX]);
+    }
+
+    #[test]
+    fn places_rows_finish_layout_without_changing_clipper_stride() {
+        use dear_imgui_rs::{Condition, Context, StyleVar};
+
+        let mut context = Context::create();
+        context.set_ini_filename(None::<String>).unwrap();
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        context.io_mut().set_display_size([640.0, 480.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+
+        for (origin, frame_padding) in [
+            (PlaceOrigin::Code, [4.0, 3.0]),
+            (PlaceOrigin::User, [0.0, 0.0]),
+        ] {
+            let mut heights = Vec::new();
+            let mut row_height = 0.0;
+            for count in 1..=2 {
+                let mut state = FileDialogState::with_blocking_filesystem(
+                    DialogMode::OpenFile,
+                    Box::<UiTestFs>::default(),
+                );
+                state.core.places.groups = vec![PlaceGroup {
+                    label: "Layout regression".into(),
+                    default_opened: true,
+                    places: (0..count)
+                        .map(|index| {
+                            Place::new(
+                                format!("Place {index}"),
+                                PathBuf::from(index.to_string()),
+                                origin,
+                            )
+                        })
+                        .collect(),
+                    ..PlaceGroup::default()
+                }];
+                state.core.cwd = PathBuf::from((count - 1).to_string());
+
+                let frame = context.begin_frame();
+                let ui = frame.ui();
+                row_height = ui.text_line_height_with_spacing();
+                ui.window("Places layout regression")
+                    .position([0.0, 0.0], Condition::Always)
+                    .size([320.0, 400.0], Condition::Always)
+                    .build(|| {
+                        let _padding = ui.push_style_var(StyleVar::FramePadding(frame_padding));
+                        let start = ui.cursor_pos_y();
+                        let _ = super::places::draw_places_pane(ui, &mut state);
+                        heights.push(ui.cursor_pos_y() - start);
+                    })
+                    .expect("the regression host must remain visible");
+                drop(frame);
+            }
+            assert!((heights[1] - heights[0] - row_height).abs() < 0.01);
+        }
     }
 
     #[derive(Clone, Default)]

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use dear_imgui_rs::{Condition, ConfigFlags, Context};
+use dear_imgui_rs::{Condition, ConfigFlags, Context, FontSource};
 use dear_imgui_wgpu::{FramebufferExtent, GammaMode, WgpuInitInfo, WgpuRenderer, wgpu};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform};
 use pollster::block_on;
@@ -31,6 +31,8 @@ struct AppWindow {
     imgui: ImguiState,
     clear_color: wgpu::Color,
     tap_counter: u32,
+    layout_size: [f32; 2],
+    demo_needs_layout: bool,
 }
 
 #[derive(Default)]
@@ -119,7 +121,13 @@ impl AppWindow {
         context
             .io_mut()
             .set_config_flags(ConfigFlags::DOCKING_ENABLE | ConfigFlags::NAV_ENABLE_KEYBOARD);
-        context.set_ini_filename(None::<String>).unwrap();
+        context.set_ini_filename(None::<String>)?;
+        // Winit maps window pixels to logical points; framebuffer scale handles Retina density.
+        // Keep fonts and spacing in points instead of multiplying them by the pixel density.
+        context
+            .font_atlas()
+            .add_font(&[FontSource::default_font_with_size(16.0)]);
+        context.style_mut().set_font_scale_dpi(1.0);
 
         let mut platform = WinitPlatform::new(&mut context)?;
         platform.attach_window(Arc::clone(&window), HiDpiMode::Default, &mut context)?;
@@ -151,6 +159,8 @@ impl AppWindow {
                 a: 1.0,
             },
             tap_counter: 0,
+            layout_size: [0.0, 0.0],
+            demo_needs_layout: true,
         })
     }
 
@@ -172,9 +182,48 @@ impl AppWindow {
             .platform
             .prepare_frame(&mut self.imgui.context, &self.window)?;
         let ui = self.imgui.context.frame();
+        let display_size = ui.io().display_size();
+        let layout_changed = self.layout_size != display_size;
+        if layout_changed {
+            self.layout_size = display_size;
+            self.demo_needs_layout = true;
+        }
+        let condition = if layout_changed {
+            Condition::Always
+        } else {
+            Condition::FirstUseEver
+        };
+        let margin = [
+            10.0_f32.min((display_size[0] - 1.0).max(0.0) * 0.5),
+            10.0_f32.min((display_size[1] - 1.0).max(0.0) * 0.5),
+        ];
+        let available = [
+            (display_size[0] - margin[0] * 2.0).max(1.0),
+            (display_size[1] - margin[1] * 2.0).max(1.0),
+        ];
+        let panel_width = available[0].min(460.0);
+        let gap = 10.0_f32.min(available[1] * 0.1);
+        let side_by_side = available[0] >= panel_width + gap + 240.0;
+        // A stacked layout shares the height so both windows retain scrollable content.
+        let panel_height = if side_by_side {
+            available[1].min(320.0)
+        } else {
+            ((available[1] - gap) * 0.4).clamp(1.0, 320.0)
+        };
+        let panel_size = [panel_width, panel_height];
+        let demo_pos = if side_by_side {
+            [margin[0] + panel_width + gap, margin[1]]
+        } else {
+            [margin[0], margin[1] + panel_height + gap]
+        };
+        let demo_size = [
+            (display_size[0] - demo_pos[0] - margin[0]).clamp(1.0, 550.0),
+            (display_size[1] - demo_pos[1] - margin[1]).clamp(1.0, 680.0),
+        ];
 
         ui.window("Dear ImGui iOS Smoke")
-            .size([460.0, 320.0], Condition::FirstUseEver)
+            .size(panel_size, condition)
+            .position(margin, condition)
             .build(|| {
                 ui.text("Reference path: winit + wgpu");
                 ui.separator();
@@ -205,6 +254,8 @@ impl AppWindow {
                     self.clear_color.a = color[3] as f64;
                 }
 
+                ui.checkbox("Show Dear ImGui demo", &mut self.imgui.show_demo_window);
+
                 ui.text_wrapped(
                     "Focus the input field to validate the iOS soft keyboard path handled by dear-imgui-winit.",
                 );
@@ -212,11 +263,16 @@ impl AppWindow {
 
         if self.imgui.show_demo_window {
             ui.show_demo_window(&mut self.imgui.show_demo_window);
+            // The upstream demo overrides next-window geometry on first use. Set its
+            // geometry after creation so the following frame uses the visible layout.
+            if self.demo_needs_layout {
+                ui.set_window_pos_by_name("Dear ImGui Demo", demo_pos);
+                ui.set_window_size_by_name("Dear ImGui Demo", demo_size);
+                self.demo_needs_layout = false;
+            }
         }
 
-        self.imgui
-            .platform
-            .prepare_render(&ui, &self.window)?;
+        self.imgui.platform.prepare_render(&ui, &self.window)?;
         let pending_frame = self
             .imgui
             .context

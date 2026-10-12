@@ -15,7 +15,6 @@ fn core_wasm_import_module() -> &'static str {
     &build_support::source_inventory::SourceInventory::embedded().wasm_import_module
 }
 
-// Asset-importer style build configuration and structure
 #[derive(Clone, Debug)]
 struct BuildConfig {
     manifest_dir: PathBuf,
@@ -234,7 +233,6 @@ fn main() {
             "dear-imgui-sys: feature `abi-probe` requires a native source build and cannot be combined with WASM or IMGUI_SYS_SKIP_CC"
         );
     }
-    let mut has_platform_io_hooks = false;
     let artifact_profile = cfg.artifact_profile();
     let build_request = cfg.build_request();
     if cfg!(feature = "package-bin") {
@@ -255,21 +253,40 @@ fn main() {
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/bindings_pregenerated_windows.rs");
     println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
-    println!("cargo:rerun-if-changed=src/imgui_test_engine_hooks.cpp");
-    println!("cargo:rerun-if-changed=src/demo_window_shim.cpp");
-    println!("cargo:rerun-if-changed=src/dock_builder_shim.cpp");
-    println!("cargo:rerun-if-changed=src/platform_io_hooks.cpp");
-    println!("cargo:rerun-if-changed=src/stack_layout_shim.cpp");
     println!("cargo:rerun-if-changed=src/stack_layout_imgui_externs.cpp.inc");
     println!("cargo:rerun-if-changed=src/stack_layout_imgui_item_add.cpp.inc");
     println!("cargo:rerun-if-changed=src/stack_layout_imgui_item_size.cpp.inc");
     println!("cargo:rerun-if-changed=src/stack_layout_imgui_item_size_horizontal_compat.cpp.inc");
-    println!("cargo:rerun-if-changed=backend-shims/opengl3.cpp");
-    println!("cargo:rerun-if-changed=backend-shims/android.cpp");
-    println!("cargo:rerun-if-changed=backend-shims/win32.cpp");
-    println!("cargo:rerun-if-changed=backend-shims/dx11.cpp");
+    println!("cargo:rerun-if-changed=backend-shims");
     for path in sources.all_candidate_paths() {
         println!("cargo:rerun-if-changed={}", path.display());
+    }
+    // Pregenerated bindings bypass bindgen's header tracking, but native objects
+    // still depend on these headers.
+    let cimgui_root = cfg.manifest_dir.join(&sources.source().source_root);
+    println!(
+        "cargo:rerun-if-changed={}",
+        cimgui_root.join("cimgui.h").display()
+    );
+    let imgui_src = cimgui_root.join("imgui");
+    for header in [
+        "imgui.h",
+        "imgui_internal.h",
+        "imconfig.h",
+        "imstb_rectpack.h",
+        "imstb_textedit.h",
+        "imstb_truetype.h",
+    ] {
+        println!(
+            "cargo:rerun-if-changed={}",
+            imgui_src.join(header).display()
+        );
+    }
+    if cfg!(feature = "freetype") {
+        println!(
+            "cargo:rerun-if-changed={}",
+            imgui_src.join("misc/freetype/imgui_freetype.h").display()
+        );
     }
     for name in CORE_BUILD_ENV_VARS {
         println!("cargo:rerun-if-env-changed={name}");
@@ -302,7 +319,10 @@ fn main() {
         "cargo:BUILD_REQUEST_HASH={}",
         build_request.deterministic_hash()
     );
-    // docs.rs: generate bindings only
+    if cfg.is_core_wasm_target() && any_backend_shim_enabled() {
+        panic!("backend-shim-* features are native-only and cannot be combined with WASM");
+    }
+    // docs.rs: prepare bindings and downstream metadata without compiling C++.
     if cfg.docs_rs {
         docsrs_build(&cfg);
         return;
@@ -350,44 +370,35 @@ fn main() {
         build_backend_shims(&cfg);
     }
 
-    // Build strategy selection via features + env var override. `test-engine`
-    // enables `build-from-source` in Cargo.toml because its hooks alter the
-    // native artifact profile.
-    let force_build =
-        cfg!(feature = "build-from-source") || env::var("IMGUI_SYS_FORCE_BUILD").is_ok();
-
-    // Try prebuilt dear_imgui first (static lib) unless force_build
-    let linked_prebuilt = if force_build || cfg.is_core_wasm_target() {
+    // WASM imports its core symbols from the provider. Native builds prefer a
+    // compatible prebuilt unless a source build is explicitly required.
+    let has_native_symbols = if cfg.is_core_wasm_target() {
         false
     } else {
-        try_link_prebuilt_all(&cfg)
-    };
-    if linked_prebuilt {
-        // `try_link_prebuilt` accepts only archives that declare the v3 aggregate hook capability.
-        // The hook object is part of the same `dear_imgui` archive and therefore shares its C++
-        // compiler, CRT, defines, and source profile.
-        has_platform_io_hooks = true;
-    }
-
-    // Build from sources when needed
-    if !linked_prebuilt && !skip_cc {
-        if !cfg.is_core_wasm_target() {
+        let force_build =
+            cfg!(feature = "build-from-source") || env::var("IMGUI_SYS_FORCE_BUILD").is_ok();
+        if !force_build && try_link_prebuilt_all(&cfg) {
+            // Accepted archives include the same aggregate ABI hooks as source builds.
+            true
+        } else if !skip_cc {
             build_with_cc_cfg(&cfg, &sources);
-            has_platform_io_hooks = true;
-        }
-    } else if !linked_prebuilt && skip_cc && !cfg.is_core_wasm_target() {
-        if cfg!(feature = "stack-layout") {
-            panic!(
-                "IMGUI_SYS_SKIP_CC with feature `stack-layout` requires a compatible prebuilt \
-                 dear_imgui artifact whose manifest declares features=stack-layout"
+            true
+        } else {
+            if cfg!(feature = "stack-layout") {
+                panic!(
+                    "IMGUI_SYS_SKIP_CC with feature `stack-layout` requires a compatible prebuilt \
+                     dear_imgui artifact whose manifest declares features=stack-layout"
+                );
+            }
+            println!(
+                "cargo:warning=IMGUI_SYS_SKIP_CC is set but no prebuilt dear_imgui library was linked; the Rust build will likely fail at link time."
             );
+            false
         }
-        println!(
-            "cargo:warning=IMGUI_SYS_SKIP_CC is set but no prebuilt dear_imgui library was linked; the Rust build will likely fail at link time."
-        );
-    }
+    };
 
-    if has_platform_io_hooks {
+    if has_native_symbols {
+        println!("cargo:rustc-cfg=dear_imgui_rs_native_symbols");
         println!("cargo:rustc-cfg=dear_imgui_rs_platform_io_hooks");
     } else if !cfg.is_core_wasm_target() {
         println!(
@@ -395,10 +406,6 @@ fn main() {
              aggregate callback installation \
              will panic if used."
         );
-    }
-
-    if linked_prebuilt || (!skip_cc && !cfg.is_core_wasm_target()) {
-        println!("cargo:rustc-cfg=dear_imgui_rs_native_symbols");
     }
 
     // ImGui core includes default platform handlers on Windows (clipboard, IME, open-in-shell)
@@ -418,24 +425,12 @@ fn main() {
 }
 
 fn docsrs_build(cfg: &BuildConfig) {
-    println!("cargo:warning=DOCS_RS detected: generating bindings, skipping native build");
+    println!("cargo:warning=DOCS_RS detected: preparing bindings, skipping native build");
     println!("cargo:rustc-cfg=docsrs");
+    export_include_paths(cfg);
     if use_pregenerated_bindings(cfg) {
         return;
     }
-    let cimgui_root = cfg.cimgui_root();
-    let imgui_src = cfg.imgui_src();
-    // Expose include paths to dependent crates during docs.rs builds
-    println!("cargo:IMGUI_INCLUDE_PATH={}", imgui_src.display());
-    println!(
-        "cargo:IMGUI_BACKENDS_PATH={}",
-        imgui_src.join("backends").display()
-    );
-    println!("cargo:CIMGUI_INCLUDE_PATH={}", cimgui_root.display());
-    println!(
-        "cargo:IMGUI_BACKEND_SHIMS_PATH={}",
-        cfg.manifest_dir.join("backend-shims").display()
-    );
     generate_bindings_native(cfg);
 }
 
@@ -555,91 +550,81 @@ fn find_freetype_dependency(emit_cargo_metadata: bool) -> build_support::NativeD
 }
 
 fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
-    let mut linked = false;
-    if !cfg.is_core_wasm_target() {
-        if let Some(lib_dir) = env::var_os("IMGUI_SYS_LIB_DIR") {
-            let lib_dir = PathBuf::from(lib_dir);
-            assert_explicit_artifact_profile(&lib_dir, cfg, "IMGUI_SYS_LIB_DIR");
-            if try_link_prebuilt(&lib_dir, cfg) {
-                println!(
-                    "cargo:warning=Using prebuilt dear_imgui from {}",
-                    lib_dir.display()
-                );
-                linked = true;
-            }
+    if let Some(lib_dir) = env::var_os("IMGUI_SYS_LIB_DIR") {
+        let lib_dir = PathBuf::from(lib_dir);
+        assert_explicit_artifact_profile(&lib_dir, cfg, "IMGUI_SYS_LIB_DIR");
+        if try_link_prebuilt(&lib_dir, cfg) {
+            println!(
+                "cargo:warning=Using prebuilt dear_imgui from {}",
+                lib_dir.display()
+            );
+            return true;
         }
-        if !linked && let Some(url) = env::var_os("IMGUI_SYS_PREBUILT_URL") {
-            let url = url.to_string_lossy();
-            if (is_http_url(&url) || is_archive_urlish(&url)) && !cfg!(feature = "prebuilt") {
-                println!(
-                    "cargo:warning=IMGUI_SYS_PREBUILT_URL is an HTTP(S) URL or a .tar.gz archive, but feature `prebuilt` is disabled; \
-                     enable it to allow downloads/extraction (e.g. `cargo build -p dear-imgui-sys --features prebuilt`) \
-                     or use IMGUI_SYS_LIB_DIR / repo prebuilts instead."
-                );
-            } else {
-                let cache_root = explicit_prebuilt_cache_root(cfg, &url);
-                if let Ok(lib_dir) = try_download_prebuilt(&cache_root, &url, &cfg.target_env) {
-                    assert_explicit_artifact_profile(&lib_dir, cfg, "IMGUI_SYS_PREBUILT_URL");
-                    if try_link_prebuilt(&lib_dir, cfg) {
-                        println!(
-                            "cargo:warning=Downloaded and using prebuilt dear_imgui from {}",
-                            lib_dir.display()
-                        );
-                        linked = true;
-                    }
+    }
+    if let Some(url) = env::var_os("IMGUI_SYS_PREBUILT_URL") {
+        let url = url.to_string_lossy();
+        if (is_http_url(&url) || is_archive_urlish(&url)) && !cfg!(feature = "prebuilt") {
+            println!(
+                "cargo:warning=IMGUI_SYS_PREBUILT_URL is an HTTP(S) URL or a .tar.gz archive, but feature `prebuilt` is disabled; \
+                 enable it to allow downloads/extraction (e.g. `cargo build -p dear-imgui-sys --features prebuilt`) \
+                 or use IMGUI_SYS_LIB_DIR / repo prebuilts instead."
+            );
+        } else {
+            let cache_root = explicit_prebuilt_cache_root(cfg, &url);
+            if let Ok(lib_dir) = try_download_prebuilt(&cache_root, &url, &cfg.target_env) {
+                assert_explicit_artifact_profile(&lib_dir, cfg, "IMGUI_SYS_PREBUILT_URL");
+                if try_link_prebuilt(&lib_dir, cfg) {
+                    println!(
+                        "cargo:warning=Downloaded and using prebuilt dear_imgui from {}",
+                        lib_dir.display()
+                    );
+                    return true;
                 }
             }
         }
-        // Only attempt automatic release download when explicitly enabled.
-        let allow_feature = cfg!(feature = "prebuilt");
-        let allow_env = matches!(
-            env::var("IMGUI_SYS_USE_PREBUILT").ok().as_deref(),
-            Some("1") | Some("true") | Some("yes")
+    }
+    // Only attempt automatic release download when explicitly enabled.
+    let allow_feature = cfg!(feature = "prebuilt");
+    let allow_env = matches!(
+        env::var("IMGUI_SYS_USE_PREBUILT").ok().as_deref(),
+        Some("1") | Some("true") | Some("yes")
+    );
+    if allow_env && !allow_feature {
+        println!(
+            "cargo:warning=IMGUI_SYS_USE_PREBUILT is set, but feature `prebuilt` is disabled; \
+             downloads are unavailable without enabling the feature (e.g. `cargo build -p dear-imgui-sys --features prebuilt`)."
         );
-        if allow_env && !allow_feature {
+    }
+    if allow_feature {
+        let source = if allow_env { "feature+env" } else { "feature" };
+        let (owner, repo) = build_support::release_owner_repo();
+        println!(
+            "cargo:warning=auto-prebuilt enabled (dear-imgui-sys): source={}, repo={}/{}",
+            source, owner, repo
+        );
+        if let Some(lib_dir) = try_download_prebuilt_from_release(cfg)
+            && try_link_prebuilt(&lib_dir, cfg)
+        {
             println!(
-                "cargo:warning=IMGUI_SYS_USE_PREBUILT is set, but feature `prebuilt` is disabled; \
-                 downloads are unavailable without enabling the feature (e.g. `cargo build -p dear-imgui-sys --features prebuilt`)."
+                "cargo:warning=Downloaded and using prebuilt dear_imgui from release at {}",
+                lib_dir.display()
             );
-        }
-        let allow_auto_prebuilt = allow_feature;
-        if !linked && allow_auto_prebuilt {
-            let source = match (allow_feature, allow_env) {
-                (true, true) => "feature+env",
-                (true, false) => "feature",
-                _ => "",
-            };
-            let (owner, repo) = build_support::release_owner_repo();
-            println!(
-                "cargo:warning=auto-prebuilt enabled (dear-imgui-sys): source={}, repo={}/{}",
-                source, owner, repo
-            );
-            if let Some(lib_dir) = try_download_prebuilt_from_release(cfg)
-                && try_link_prebuilt(&lib_dir, cfg)
-            {
-                println!(
-                    "cargo:warning=Downloaded and using prebuilt dear_imgui from release at {}",
-                    lib_dir.display()
-                );
-                linked = true;
-            }
-        }
-        if !linked {
-            let repo_prebuilt = cfg
-                .manifest_dir
-                .join("third-party")
-                .join("prebuilt")
-                .join(&cfg.target_triple);
-            if try_link_prebuilt(&repo_prebuilt, cfg) {
-                println!(
-                    "cargo:warning=Using repo prebuilt dear_imgui from {}",
-                    repo_prebuilt.display()
-                );
-                linked = true;
-            }
+            return true;
         }
     }
-    linked
+    let repo_prebuilt = cfg
+        .manifest_dir
+        .join("third-party")
+        .join("prebuilt")
+        .join(&cfg.target_triple);
+    if try_link_prebuilt(&repo_prebuilt, cfg) {
+        println!(
+            "cargo:warning=Using repo prebuilt dear_imgui from {}",
+            repo_prebuilt.display()
+        );
+        return true;
+    }
+    false
 }
 
 fn build_with_cc_cfg(
@@ -688,7 +673,7 @@ fn build_with_cc_cfg(
     }
     // Include official demo/metrics/debug windows for native builds so symbols like
     // ImGui::ShowDemoWindow/ShowAboutWindow/ShowStyleEditor resolve.
-    // This is excluded from the WASM single‑module path below.
+    // The WASM provider is compiled separately by xtask.
     build.file(write_safe_demo_patched_imgui_demo_cpp(
         cfg,
         &sources
@@ -914,10 +899,7 @@ fn write_stack_layout_patched_imgui_cpp(cfg: &BuildConfig, imgui_cpp: &Path) -> 
 }
 
 fn any_backend_shim_enabled() -> bool {
-    cfg!(feature = "backend-shim-android")
-        || cfg!(feature = "backend-shim-dx11")
-        || cfg!(feature = "backend-shim-opengl3")
-        || cfg!(feature = "backend-shim-win32")
+    backend_shim_specs().iter().any(|spec| spec.enabled)
 }
 
 fn new_native_cpp_build(cfg: &BuildConfig) -> cc::Build {
@@ -958,12 +940,13 @@ fn build_backend_shims(cfg: &BuildConfig) {
         return;
     }
 
-    if cfg.is_core_wasm_target() {
-        panic!("backend-shim-* features are not supported for wasm targets yet.");
-    }
-
+    // Track auxiliary backend headers too, including the embedded OpenGL loader.
+    println!(
+        "cargo:rerun-if-changed={}",
+        cfg.imgui_src().join("backends").display()
+    );
     for spec in backend_shim_specs() {
-        if spec.enabled && backend_shim_supported_on_target(spec, cfg) {
+        if spec.enabled && backend_shim_target_matches(spec.target, cfg) {
             build_backend_shim_from_spec(cfg, spec);
         }
     }
@@ -981,7 +964,9 @@ fn generate_bindings_native(_cfg: &BuildConfig) {
 enum BackendShimTarget {
     Any,
     Android,
+    Apple,
     Linux,
+    Macos,
     Windows,
 }
 
@@ -1045,6 +1030,55 @@ const DX11_BACKEND_LINK_LIBS: &[BackendShimLinkLib] = &[
     },
 ];
 
+const DX12_BACKEND_LINK_LIBS: &[BackendShimLinkLib] = &[
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "d3d12",
+    },
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "dxgi",
+    },
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "d3dcompiler",
+    },
+];
+
+const METAL_BACKEND_LINK_LIBS: &[BackendShimLinkLib] = &[
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "framework=Foundation",
+    },
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "framework=Metal",
+    },
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "framework=QuartzCore",
+    },
+    BackendShimLinkLib {
+        target: BackendShimTarget::Macos,
+        name: "framework=Cocoa",
+    },
+];
+
+const OSX_BACKEND_LINK_LIBS: &[BackendShimLinkLib] = &[
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "framework=Cocoa",
+    },
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "framework=Carbon",
+    },
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "framework=GameController",
+    },
+];
+
 fn backend_shim_specs() -> &'static [BackendShimSpec] {
     &[
         BackendShimSpec {
@@ -1079,18 +1113,40 @@ fn backend_shim_specs() -> &'static [BackendShimSpec] {
             output_lib: "dear_imgui_backend_dx11",
             link_libs: DX11_BACKEND_LINK_LIBS,
         },
+        BackendShimSpec {
+            enabled: cfg!(feature = "backend-shim-dx12"),
+            target: BackendShimTarget::Windows,
+            upstream_source: "imgui_impl_dx12.cpp",
+            shim_source: "dx12.cpp",
+            output_lib: "dear_imgui_backend_dx12",
+            link_libs: DX12_BACKEND_LINK_LIBS,
+        },
+        BackendShimSpec {
+            enabled: cfg!(feature = "backend-shim-metal"),
+            target: BackendShimTarget::Apple,
+            upstream_source: "imgui_impl_metal.mm",
+            shim_source: "metal.mm",
+            output_lib: "dear_imgui_backend_metal",
+            link_libs: METAL_BACKEND_LINK_LIBS,
+        },
+        BackendShimSpec {
+            enabled: cfg!(feature = "backend-shim-osx"),
+            target: BackendShimTarget::Macos,
+            upstream_source: "imgui_impl_osx.mm",
+            shim_source: "osx.mm",
+            output_lib: "dear_imgui_backend_osx",
+            link_libs: OSX_BACKEND_LINK_LIBS,
+        },
     ]
-}
-
-fn backend_shim_supported_on_target(spec: &BackendShimSpec, cfg: &BuildConfig) -> bool {
-    backend_shim_target_matches(spec.target, cfg)
 }
 
 fn backend_shim_target_matches(target: BackendShimTarget, cfg: &BuildConfig) -> bool {
     match target {
         BackendShimTarget::Any => true,
         BackendShimTarget::Android => cfg.target_os == "android",
+        BackendShimTarget::Apple => matches!(cfg.target_os.as_str(), "macos" | "ios"),
         BackendShimTarget::Linux => cfg.target_os == "linux",
+        BackendShimTarget::Macos => cfg.target_os == "macos",
         BackendShimTarget::Windows => cfg.is_windows(),
     }
 }
@@ -1101,6 +1157,9 @@ fn build_backend_shim_from_spec(cfg: &BuildConfig, spec: &BackendShimSpec) {
     let mut build = new_native_cpp_build(cfg);
     build.file(imgui_src.join("backends").join(spec.upstream_source));
     build.file(shim_root.join(spec.shim_source));
+    if spec.upstream_source.ends_with(".mm") {
+        build.flag("-fobjc-arc");
+    }
     build_support::compile_cpp_archive(
         &mut build,
         spec.output_lib,
@@ -1117,13 +1176,19 @@ fn build_backend_shim_from_spec(cfg: &BuildConfig, spec: &BackendShimSpec) {
 }
 
 fn export_include_paths(cfg: &BuildConfig) {
-    println!("cargo:THIRD_PARTY={}", cfg.imgui_src().display());
-    println!("cargo:IMGUI_INCLUDE_PATH={}", cfg.imgui_src().display());
+    // Export canonical paths even when docs.rs only needs pregenerated bindings.
+    // Native compilation validates the source directory separately.
+    let cimgui_root = cfg
+        .manifest_dir
+        .join(&cfg.maintained_source_paths().source().source_root);
+    let imgui_src = cimgui_root.join("imgui");
+    println!("cargo:THIRD_PARTY={}", imgui_src.display());
+    println!("cargo:IMGUI_INCLUDE_PATH={}", imgui_src.display());
     println!(
         "cargo:IMGUI_BACKENDS_PATH={}",
-        cfg.imgui_src().join("backends").display()
+        imgui_src.join("backends").display()
     );
-    println!("cargo:CIMGUI_INCLUDE_PATH={}", cfg.cimgui_root().display());
+    println!("cargo:CIMGUI_INCLUDE_PATH={}", cimgui_root.display());
     println!(
         "cargo:IMGUI_BACKEND_SHIMS_PATH={}",
         cfg.manifest_dir.join("backend-shims").display()
@@ -1158,7 +1223,10 @@ fn read_prebuilt_manifest(dir: &Path) -> Result<Vec<u8>, String> {
     }
     for manifest in candidates {
         match std::fs::read(&manifest) {
-            Ok(content) => return Ok(content),
+            Ok(content) => {
+                println!("cargo:rerun-if-changed={}", manifest.display());
+                return Ok(content);
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => {
                 return Err(format!("failed to read {}: {error}", manifest.display()));
@@ -1233,6 +1301,7 @@ fn try_link_prebuilt(dir: &Path, cfg: &BuildConfig) -> bool {
             return false;
         }
     };
+    println!("cargo:rerun-if-changed={}", lib_path.display());
     println!("cargo:rustc-link-search=native={}", dir.display());
     println!("cargo:rustc-link-lib=static=dear_imgui");
     build_support::emit_prebuilt_cpp_runtime_linkage(
@@ -1351,8 +1420,6 @@ fn stable_cache_key(value: &str) -> String {
     }
     format!("{hash:016x}")
 }
-
-// (removed duplicate prebuilt_extract_dir_env/extract_archive_to_cache; using build_support equivalents)
 
 fn use_pregenerated_bindings(cfg: &BuildConfig) -> bool {
     if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {

@@ -70,11 +70,33 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def run(argv: list[str]) -> None:
+def run(argv: list[str], *, env: dict[str, str] | None = None) -> None:
     print("+", " ".join(argv), flush=True)
-    completed = subprocess.run(argv)
+    completed = subprocess.run(argv, env=env)
     if completed.returncode != 0:
         raise SystemExit(completed.returncode)
+
+
+def prepare_sdl3_include_root(framework_dir: Path, include_root: Path) -> Path:
+    headers_dir = (framework_dir / "Headers").resolve()
+    if not (headers_dir / "SDL.h").is_file():
+        raise SystemExit(
+            f"SDL3 framework headers are missing: {headers_dir / 'SDL.h'}. "
+            "Run the host's Build SDL3 Framework phase first."
+        )
+
+    # The framework exposes Headers/SDL.h; the ImGui backend includes SDL3/SDL.h.
+    # Point the bridge at the selected framework rather than unrelated system headers.
+    include_root.mkdir(parents=True, exist_ok=True)
+    sdl3_include = include_root / "SDL3"
+    if sdl3_include.is_symlink():
+        if sdl3_include.resolve() != headers_dir:
+            sdl3_include.unlink()
+    elif sdl3_include.exists():
+        raise SystemExit(f"Expected an SDL3 header symlink at {sdl3_include}.")
+    if not sdl3_include.is_symlink():
+        sdl3_include.symlink_to(headers_dir, target_is_directory=True)
+    return include_root
 
 
 def resolve_rust_target(platform: str, arch: str) -> str:
@@ -154,6 +176,10 @@ def main() -> int:
     manifest_path = example_root / "Cargo.toml"
     cargo_target_dir = example_root / "target" / "xcode-host-build"
     output_dir = Path(args.output_dir).expanduser().resolve()
+    framework_dir = example_root / "xcode-host" / "build" / "frameworks" / "SDL3.framework"
+    include_root = prepare_sdl3_include_root(framework_dir, output_dir / "include")
+    cargo_env = os.environ.copy()
+    cargo_env["SDL3_INCLUDE_DIR"] = str(include_root)
 
     if shutil.which("cargo") is None:
         raise SystemExit("cargo was not found on PATH.")
@@ -200,7 +226,7 @@ def main() -> int:
             f"({requested_arch}) as {rust_target}...",
             flush=True,
         )
-        run(cargo_args)
+        run(cargo_args, env=cargo_env)
 
         staticlib_path = cargo_target_dir / rust_target / profile / f"lib{CRATE_NAME}.a"
         if not staticlib_path.exists():

@@ -9,6 +9,9 @@
 //! handles, keep the intended Dear ImGui context current, and pair
 //! init/new-frame/render/shutdown calls in the order required by the official
 //! backend.
+//! Device and immediate context must belong to the same device. The application owns render-target
+//! binding, presentation, resizing, and native-object lifetimes; shut down the backend before
+//! destroying its ImGui context. Calls are serialized under the shared shim safety contract.
 //!
 //! Render and texture update entry points may mutate Dear ImGui texture feedback
 //! stored in `ImDrawData` / `ImTextureData`, so Rust callers must pass uniquely

@@ -9,6 +9,11 @@
 //! the intended Dear ImGui context current, and pair init/new-frame/input/shutdown
 //! calls in the order required by the official backend. Android activity, EGL /
 //! GLES context creation, and APK packaging remain owned by the application.
+//! The official Android backend stores its window and timing in process-global state: only one
+//! Android backend may be active, even across different ImGui contexts. It borrows the native
+//! window without acquiring a reference; keep that window alive until shutdown returns, and shut
+//! down during the window-termination callback before acknowledging it. Do not initialize a second window
+//! or context while the first backend is active.
 //!
 //! Typical usage:
 //!

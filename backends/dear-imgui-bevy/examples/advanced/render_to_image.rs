@@ -150,7 +150,8 @@ fn primary_ui(
 ) -> Result {
     let ui = frame.ui();
 
-    ui.window("Offscreen Context Host")
+    let image_region = ui
+        .window("Offscreen Context Host")
         .position([32.0, 32.0], Condition::FirstUseEver)
         .size([840.0, 650.0], Condition::FirstUseEver)
         .build(|| {
@@ -179,20 +180,32 @@ fn primary_ui(
                 state.target_size,
             );
             ui.image(&state.texture, display_size);
+            if !ui.is_item_visible() {
+                return None;
+            }
 
             let min = ui.item_rect_min();
             let max = ui.item_rect_max();
-            let region = Rect {
+            Some(Rect {
                 min: Vec2::new(min[0], min[1]),
                 max: Vec2::new(max[0], max[1]),
-            };
-            let route = ImguiInputRoute::logical(state.context_id, state.host_window, region);
-            if let Some(route_entity) = state.input_route {
-                commands.entity(route_entity).insert(route);
-            } else {
-                state.input_route = Some(commands.spawn(route).id());
-            }
-        });
+            })
+        })
+        .flatten();
+
+    if let Some(region) = image_region {
+        // The image wins over the primary window's implicit priority-0 route only inside its rect.
+        // Outside the image, host controls keep receiving input through the primary Context.
+        let route = ImguiInputRoute::logical(state.context_id, state.host_window, region)
+            .with_policy(ImguiInputPolicy::exclusive(1));
+        if let Some(route_entity) = state.input_route {
+            commands.entity(route_entity).insert(route);
+        } else {
+            state.input_route = Some(commands.spawn(route).id());
+        }
+    } else if let Some(route_entity) = state.input_route.take() {
+        commands.entity(route_entity).despawn();
+    }
 
     Ok(())
 }

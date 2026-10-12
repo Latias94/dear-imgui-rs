@@ -17,6 +17,7 @@ use std::time::Instant;
 use dear_imgui_examples::sdl3_callbacks::{
     Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
 };
+use dear_imgui_examples::sdl3_dpi::DpiStyle;
 use dear_imgui_rs::{Condition, ConfigFlags, Context, TextureId};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3OpenGl3Backend};
 use sdl3::video::{GLProfile, SwapInterval, WindowPos};
@@ -32,6 +33,7 @@ struct OpenGlApp {
 struct MainData {
     sdl3_backend: Sdl3OpenGl3Backend,
     imgui: Context,
+    dpi_style: DpiStyle,
     game_tex: Option<glow::Texture>,
     gl: glow::Context,
     gl_context: sdl3::video::GLContext,
@@ -178,12 +180,6 @@ impl OpenGlApp {
         let gl = unsafe { create_glow_context(&video) };
 
         let mut imgui = Context::create();
-        let main_scale = window.display_scale();
-        let main_scale = if main_scale.is_finite() && main_scale > 0.0 {
-            main_scale
-        } else {
-            1.0
-        };
         {
             let io = imgui.io_mut();
             let mut flags = io.config_flags();
@@ -192,14 +188,8 @@ impl OpenGlApp {
                 flags.insert(ConfigFlags::VIEWPORTS_ENABLE);
             }
             io.set_config_flags(flags);
-            io.set_config_dpi_scale_fonts(true);
-            io.set_config_dpi_scale_viewports(true);
         }
-        {
-            let style = imgui.style_mut();
-            style.scale_all_sizes(main_scale);
-            style.set_font_scale_dpi(main_scale);
-        }
+        let dpi_style = DpiStyle::new(&mut imgui, &window);
 
         // SAFETY: the window and GL context are retained until explicit backend shutdown.
         let sdl3_backend =
@@ -207,6 +197,7 @@ impl OpenGlApp {
         let mut main = MainData {
             sdl3_backend,
             imgui,
+            dpi_style,
             game_tex: None,
             gl,
             gl_context,
@@ -290,12 +281,14 @@ impl OpenGlApp {
         main.last_frame = now;
 
         main.sdl3_backend.new_frame(&mut main.imgui)?;
+        main.dpi_style.update(&mut main.imgui, &main.window);
+        let scale = main.dpi_style.scale();
         let frame = main.imgui.begin_frame();
         let ui = frame.ui();
         ui.dockspace().build()?;
 
         ui.window("Main")
-            .size([420.0, 260.0], Condition::FirstUseEver)
+            .size([420.0 * scale, 260.0 * scale], Condition::FirstUseEver)
             .build(|| {
                 ui.text("SDL3 + OpenGL3 + Dear ImGui multi-viewport");
                 ui.separator();
@@ -309,7 +302,7 @@ impl OpenGlApp {
             .ok_or("application texture is unavailable after shutdown")?;
         let game_tex_id = TextureId::from(game_tex.0.get());
         ui.window("Game View")
-            .size([420.0, 420.0], Condition::FirstUseEver)
+            .size([420.0 * scale, 420.0 * scale], Condition::FirstUseEver)
             .build(|| {
                 let avail = ui.content_region_avail();
                 let side = avail[0].min(avail[1]).max(64.0);

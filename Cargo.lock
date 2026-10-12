@@ -2954,7 +2954,11 @@ dependencies = [
  "flate2",
  "glam 0.34.1",
  "mint",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
+ "objc2-metal 0.3.2",
  "tar",
+ "windows 0.62.2",
 ]
 
 [[package]]

@@ -1,16 +1,13 @@
-use std::ffi::{CString, c_uint, c_void};
+use std::ffi::{CStr, CString, c_uint, c_void};
 use std::ptr;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use android_activity::input::{Axis, InputEvent, KeyAction, Keycode, MotionAction, ToolType};
 use android_activity::{AndroidApp, InputStatus, MainEvent, PollEvent};
-use dear_imgui_rs::input::{MouseButton, MouseSource};
-use dear_imgui_rs::internal::RawWrapper;
-use dear_imgui_rs::render::DrawData;
-use dear_imgui_rs::{Condition, ConfigFlags, Context, Io, Key};
+use dear_imgui_sys as sys;
 use dear_imgui_sys::backend_shim::{android as android_backend, opengl3 as opengl3_backend};
-use dear_imgui_sys::{ImDrawData, ImGuiStyle_ScaleAllSizes};
 use log::{error, info};
+use ndk::configuration::Density;
 use ndk::hardware_buffer_format::HardwareBufferFormat;
 use ndk::native_window::NativeWindow;
 
@@ -96,10 +93,12 @@ struct EglState {
     display: EGLDisplay,
     context: EGLContext,
     surface: EGLSurface,
+    // The platform backend borrows this window until shutdown.
+    window: NativeWindow,
 }
 
 impl EglState {
-    fn create(window: &NativeWindow) -> Result<Self, String> {
+    fn create(window: NativeWindow) -> Result<Self, String> {
         let display = unsafe { eglGetDisplay(EGL_DEFAULT_DISPLAY) };
         if display == EGL_NO_DISPLAY {
             return Err(format!(
@@ -208,12 +207,13 @@ impl EglState {
             eglCreateContext(display, config, EGL_NO_CONTEXT, context_attributes.as_ptr())
         };
         if context == EGL_NO_CONTEXT {
+            let error = unsafe { eglGetError() };
             unsafe {
                 let _ = eglTerminate(display);
             }
             return Err(format!(
                 "eglCreateContext failed with EGL error {}",
-                format_egl_error(unsafe { eglGetError() })
+                format_egl_error(error)
             ));
         }
 
@@ -221,13 +221,14 @@ impl EglState {
             eglCreateWindowSurface(display, config, window.ptr().as_ptr().cast(), ptr::null())
         };
         if surface == EGL_NO_SURFACE {
+            let error = unsafe { eglGetError() };
             unsafe {
                 let _ = eglDestroyContext(display, context);
                 let _ = eglTerminate(display);
             }
             return Err(format!(
                 "eglCreateWindowSurface failed with EGL error {}",
-                format_egl_error(unsafe { eglGetError() })
+                format_egl_error(error)
             ));
         }
 
@@ -247,6 +248,7 @@ impl EglState {
             display,
             context,
             surface,
+            window,
         })
     }
 
@@ -278,50 +280,70 @@ impl EglState {
 }
 
 struct SmokeApp {
-    imgui: Context,
-    last_frame: Instant,
+    context: *mut sys::ImGuiContext,
+    baseline_style: sys::ImGuiStyle,
+    dpi_scale: f32,
     platform_ready: bool,
     renderer_ready: bool,
+    resumed: bool,
     show_demo_window: bool,
     clear_color: [f32; 4],
     tap_count: u32,
 }
 
 impl SmokeApp {
-    fn new() -> Self {
-        let mut imgui = Context::create();
-        imgui
-            .set_ini_filename(None::<String>)
-            .expect("disable imgui.ini for Android smoke sample");
-
-        let io = imgui.io_mut();
-        io.set_config_flags(
-            io.config_flags() | ConfigFlags::IS_TOUCH_SCREEN | ConfigFlags::NAV_ENABLE_KEYBOARD,
-        );
-
-        let style_scale = 2.0;
-        let style = imgui.style_mut();
-        style.set_font_scale_dpi(style_scale);
+    fn new(density: Option<u32>) -> Self {
+        // The upstream renderer owns texture updates directly, so the entire frame
+        // uses raw sys calls rather than the safe core's renderer-consumer protocol.
+        let context = unsafe { sys::igCreateContext(ptr::null_mut()) };
+        assert!(!context.is_null(), "create Dear ImGui context");
         unsafe {
-            ImGuiStyle_ScaleAllSizes(style.raw_mut(), style_scale);
+            let io = sys::igGetIO_Nil();
+            (*io).IniFilename = ptr::null();
+            (*io).ConfigFlags |=
+                sys::ImGuiConfigFlags_IsTouchScreen | sys::ImGuiConfigFlags_NavEnableKeyboard;
+            // The Android backend and input events both use physical window pixels.
+            (*io).DisplayFramebufferScale = sys::ImVec2 { x: 1.0, y: 1.0 };
         }
 
-        Self {
-            imgui,
-            last_frame: Instant::now(),
+        let mut smoke = Self {
+            context,
+            baseline_style: unsafe { *sys::igGetStyle() },
+            dpi_scale: 0.0,
             platform_ready: false,
             renderer_ready: false,
+            resumed: false,
             show_demo_window: true,
             clear_color: [0.18, 0.24, 0.32, 1.0],
             tap_count: 0,
+        };
+        smoke.update_density(density);
+        smoke
+    }
+
+    fn update_density(&mut self, density: Option<u32>) {
+        // Configuration::density already maps ANY/NONE to None. Reject zero and sentinel-sized
+        // values defensively, while accepting physical densities outside Android's named buckets.
+        let density = density
+            .filter(|dpi| *dpi > 0 && *dpi < i32::from(Density::Any) as u32)
+            .unwrap_or(160);
+        let scale = density as f32 / 160.0;
+        if scale != self.dpi_scale {
+            unsafe {
+                sys::igSetCurrentContext(self.context);
+                let style = sys::igGetStyle();
+                // Reapply absolute scaling from unscaled values instead of accumulating rounding.
+                *style = self.baseline_style;
+                sys::ImGuiStyle_ScaleAllSizes(style, scale);
+                (*style).FontScaleDpi = scale;
+            }
+            self.dpi_scale = scale;
         }
     }
 
     fn bind_window(&mut self, window: &NativeWindow) -> Result<(), &'static str> {
-        self.sync_display_metrics(window);
-        self.last_frame = Instant::now();
-
         unsafe {
+            sys::igSetCurrentContext(self.context);
             if !android_backend::dear_imgui_backend_android_init(window.ptr().as_ptr().cast()) {
                 return Err("ImGui Android backend init failed");
             }
@@ -331,13 +353,8 @@ impl SmokeApp {
         Ok(())
     }
 
-    fn sync_display_metrics(&mut self, window: &NativeWindow) {
-        let width = window.width().max(1) as f32;
-        let height = window.height().max(1) as f32;
-        self.imgui.io_mut().set_display_size([width, height]);
-    }
-
     fn unbind_window(&mut self) {
+        unsafe { sys::igSetCurrentContext(self.context) };
         if self.renderer_ready {
             unsafe {
                 opengl3_backend::dear_imgui_backend_opengl3_shutdown();
@@ -353,15 +370,13 @@ impl SmokeApp {
         }
     }
 
-    unsafe fn init_renderer_once(&mut self) -> Result<(), &'static str> {
+    fn init_renderer(&mut self) -> Result<(), &'static str> {
         if self.renderer_ready {
             return Ok(());
         }
 
-        let glsl_version =
-            CString::new("#version 300 es").expect("static GLSL version must not contain NUL");
-
-        if !unsafe { opengl3_backend::dear_imgui_backend_opengl3_init(glsl_version.as_ptr()) } {
+        if !unsafe { opengl3_backend::dear_imgui_backend_opengl3_init(c"#version 300 es".as_ptr()) }
+        {
             return Err("ImGui OpenGL3 backend init failed");
         }
 
@@ -370,36 +385,37 @@ impl SmokeApp {
     }
 
     fn can_render(&self) -> bool {
-        self.platform_ready && self.renderer_ready
+        self.resumed && self.platform_ready && self.renderer_ready
     }
 
-    fn prepare_frame(&mut self, window: &NativeWindow) {
-        self.sync_display_metrics(window);
-
-        let now = Instant::now();
-        let delta = now.saturating_duration_since(self.last_frame);
-        self.last_frame = now;
-        self.imgui
-            .io_mut()
-            .set_delta_time(delta.as_secs_f32().max(1.0 / 240.0));
-
+    fn prepare_frame(&mut self) {
         unsafe {
+            sys::igSetCurrentContext(self.context);
+            // Android supplies DisplaySize, framebuffer scale, and DeltaTime.
             android_backend::dear_imgui_backend_android_new_frame();
-            if self.renderer_ready {
-                opengl3_backend::dear_imgui_backend_opengl3_new_frame();
-            }
+            opengl3_backend::dear_imgui_backend_opengl3_new_frame();
+            // Exclude time spent paused from the first resumed frame.
+            (*sys::igGetIO_Nil()).DeltaTime = (*sys::igGetIO_Nil()).DeltaTime.min(0.1);
+        }
+    }
+
+    fn set_focus(&mut self, focused: bool) {
+        unsafe {
+            sys::igSetCurrentContext(self.context);
+            sys::ImGuiIO_AddFocusEvent(sys::igGetIO_Nil(), focused);
         }
     }
 
     fn handle_input(&mut self, event: &InputEvent<'_>) -> InputStatus {
+        unsafe { sys::igSetCurrentContext(self.context) };
         match event {
             InputEvent::MotionEvent(event) => self.handle_motion_event(event),
             InputEvent::KeyEvent(event) => self.handle_key_event(event),
             InputEvent::TextEvent(state) => {
-                let io = self.imgui.io_mut();
+                let io = unsafe { sys::igGetIO_Nil() };
                 for ch in state.text.chars() {
                     if ch != '\0' {
-                        io.add_input_character(ch);
+                        unsafe { sys::ImGuiIO_AddInputCharacter(io, ch as u32) };
                     }
                 }
                 InputStatus::Handled
@@ -412,30 +428,43 @@ impl SmokeApp {
         &mut self,
         event: &android_activity::input::MotionEvent<'_>,
     ) -> InputStatus {
+        if event.pointer_count() == 0 {
+            return InputStatus::Unhandled;
+        }
         let pointer_index = event
             .pointer_index()
             .min(event.pointer_count().saturating_sub(1));
         let pointer = event.pointer_at_index(pointer_index);
 
-        let io = self.imgui.io_mut();
-        io.add_mouse_source_event(map_mouse_source(pointer.tool_type()));
-        io.add_mouse_pos_event([pointer.x(), pointer.y()]);
+        let io = unsafe { sys::igGetIO_Nil() };
+        unsafe {
+            sys::ImGuiIO_AddMouseSourceEvent(io, map_mouse_source(pointer.tool_type()));
+            sys::ImGuiIO_AddMousePosEvent(io, pointer.x(), pointer.y());
+        }
 
         match event.action() {
             MotionAction::Down | MotionAction::PointerDown => {
-                io.add_mouse_button_event(MouseButton::Left, true);
+                unsafe { sys::ImGuiIO_AddMouseButtonEvent(io, 0, true) };
                 InputStatus::Handled
             }
             MotionAction::Up | MotionAction::PointerUp | MotionAction::Cancel => {
-                io.add_mouse_button_event(MouseButton::Left, false);
+                unsafe {
+                    sys::ImGuiIO_AddMouseButtonEvent(io, 0, false);
+                    if map_mouse_source(pointer.tool_type()) == sys::ImGuiMouseSource_TouchScreen {
+                        sys::ImGuiIO_AddMousePosEvent(io, -f32::MAX, -f32::MAX);
+                    }
+                }
                 InputStatus::Handled
             }
             MotionAction::Move | MotionAction::HoverMove => InputStatus::Handled,
             MotionAction::Scroll => {
-                io.add_mouse_wheel_event([
-                    pointer.axis_value(Axis::Hscroll),
-                    pointer.axis_value(Axis::Vscroll),
-                ]);
+                unsafe {
+                    sys::ImGuiIO_AddMouseWheelEvent(
+                        io,
+                        pointer.axis_value(Axis::Hscroll),
+                        pointer.axis_value(Axis::Vscroll),
+                    );
+                }
                 InputStatus::Handled
             }
             _ => InputStatus::Unhandled,
@@ -443,12 +472,16 @@ impl SmokeApp {
     }
 
     fn handle_key_event(&mut self, event: &android_activity::input::KeyEvent<'_>) -> InputStatus {
-        let io = self.imgui.io_mut();
-        update_modifiers(io, event.meta_state());
+        let io = unsafe { sys::igGetIO_Nil() };
+        unsafe { update_modifiers(io, event.meta_state()) };
 
-        let down = matches!(event.action(), KeyAction::Down);
+        let down = match event.action() {
+            KeyAction::Down => true,
+            KeyAction::Up => false,
+            _ => return InputStatus::Unhandled,
+        };
         if let Some(key) = map_keycode(event.key_code()) {
-            io.add_key_event(key, down);
+            unsafe { sys::ImGuiIO_AddKeyEvent(io, key, down) };
             return InputStatus::Handled;
         }
 
@@ -456,108 +489,129 @@ impl SmokeApp {
     }
 
     fn render_frame(&mut self, window: &NativeWindow) {
-        let ui = self.imgui.frame();
-        let show_demo_window = &mut self.show_demo_window;
-        let clear_color = &mut self.clear_color;
-        let tap_count = &mut self.tap_count;
-
-        ui.window("Dear ImGui Android Smoke")
-            .size([520.0, 360.0], Condition::FirstUseEver)
-            .build(|| {
-                ui.text("Low-level Android route: dear-imgui-rs + dear-imgui-sys");
-                ui.separator();
-                ui.text(format!(
+        // No Context/Ui/DrawData borrow is held while the native renderer mutates
+        // ImDrawData::Textures. It performs upstream managed-texture processing.
+        unsafe {
+            sys::igNewFrame();
+            let display = (*sys::igGetIO_Nil()).DisplaySize;
+            let margin = 20.0 * self.dpi_scale;
+            sys::igSetNextWindowPos(
+                sys::ImVec2 {
+                    x: margin,
+                    y: margin,
+                },
+                sys::ImGuiCond_FirstUseEver,
+                sys::ImVec2 { x: 0.0, y: 0.0 },
+            );
+            sys::igSetNextWindowSize(
+                sys::ImVec2 {
+                    x: (520.0 * self.dpi_scale).min((display.x - 2.0 * margin).max(1.0)),
+                    y: (360.0 * self.dpi_scale).min((display.y - 2.0 * margin).max(1.0)),
+                },
+                sys::ImGuiCond_FirstUseEver,
+            );
+            if sys::igBegin(c"Dear ImGui Android Smoke".as_ptr(), ptr::null_mut(), 0) {
+                text(c"Low-level Android route: dear-imgui-sys backend shims");
+                sys::igSeparator();
+                let io = sys::igGetIO_Nil();
+                let display_size = (*io).DisplaySize;
+                text_owned(format!(
                     "Display size: {:.0} x {:.0}",
-                    ui.io().display_size()[0],
-                    ui.io().display_size()[1]
+                    display_size.x, display_size.y
                 ));
-                ui.text(format!(
-                    "Platform backend ready: {}",
-                    if self.platform_ready { "yes" } else { "no" }
-                ));
-                ui.text(format!(
-                    "OpenGL3 renderer ready: {}",
-                    if self.renderer_ready { "yes" } else { "no" }
-                ));
-                ui.text(format!("Framerate: {:.1} FPS", ui.io().framerate()));
-                ui.separator();
-                ui.checkbox("Show Dear ImGui demo window", show_demo_window);
-                ui.color_edit4("Clear color", clear_color);
-                if ui.button("Tap me") {
-                    *tap_count += 1;
+                text(c"Android platform + OpenGL3 renderer ready");
+                text_owned(format!("Framerate: {:.1} FPS", (*io).Framerate));
+                sys::igSeparator();
+                sys::igCheckbox(
+                    c"Show Dear ImGui demo window".as_ptr(),
+                    &mut self.show_demo_window,
+                );
+                sys::igColorEdit4(c"Clear color".as_ptr(), self.clear_color.as_mut_ptr(), 0);
+                if sys::igButton(c"Tap me".as_ptr(), sys::ImVec2 { x: 0.0, y: 0.0 }) {
+                    self.tap_count += 1;
                 }
-                ui.same_line();
-                ui.text(format!("Tap count: {}", *tap_count));
-                ui.separator();
-                ui.text(
-                    "This sample owns NativeActivity packaging, EGL setup, and backend shim lifecycle.",
-                );
-            });
-
-        if *show_demo_window {
-            ui.show_demo_window(show_demo_window);
-        }
-
-        let clear_color = *clear_color;
-        let draw_data = self.imgui.render();
-        if self.renderer_ready {
-            unsafe {
-                glViewport(0, 0, window.width().max(1), window.height().max(1));
-                glClearColor(
-                    clear_color[0] * clear_color[3],
-                    clear_color[1] * clear_color[3],
-                    clear_color[2] * clear_color[3],
-                    clear_color[3],
-                );
-                glClear(GL_COLOR_BUFFER_BIT);
-                opengl3_backend::dear_imgui_backend_opengl3_render_draw_data(
-                    draw_data as *mut DrawData as *mut ImDrawData,
-                );
+                sys::igSameLine(0.0, -1.0);
+                text_owned(format!("Tap count: {}", self.tap_count));
+                sys::igSeparator();
+                text(c"This sample owns NativeActivity, EGL, and backend shim lifecycle.");
             }
+            sys::igEnd();
+            if self.show_demo_window {
+                sys::igShowDemoWindow(&mut self.show_demo_window);
+            }
+            sys::igRender();
+            let clear_color = self.clear_color;
+            glViewport(0, 0, window.width().max(1), window.height().max(1));
+            glClearColor(
+                clear_color[0] * clear_color[3],
+                clear_color[1] * clear_color[3],
+                clear_color[2] * clear_color[3],
+                clear_color[3],
+            );
+            glClear(GL_COLOR_BUFFER_BIT);
+            opengl3_backend::dear_imgui_backend_opengl3_render_draw_data(sys::igGetDrawData());
         }
     }
 }
 
-fn map_mouse_source(tool_type: ToolType) -> MouseSource {
-    match tool_type {
-        ToolType::Mouse => MouseSource::Mouse,
-        ToolType::Stylus | ToolType::Eraser => MouseSource::Pen,
-        _ => MouseSource::TouchScreen,
+impl Drop for SmokeApp {
+    fn drop(&mut self) {
+        // android_main shuts both backends down while EGL is still current.
+        unsafe { sys::igDestroyContext(self.context) };
     }
 }
 
-fn update_modifiers(io: &mut Io, meta_state: android_activity::input::MetaState) {
-    io.add_key_event(Key::ModCtrl, meta_state.ctrl_on());
-    io.add_key_event(Key::ModShift, meta_state.shift_on());
-    io.add_key_event(Key::ModAlt, meta_state.alt_on());
-    io.add_key_event(Key::ModSuper, meta_state.meta_on());
+unsafe fn text(value: &CStr) {
+    unsafe { sys::igTextUnformatted(value.as_ptr(), ptr::null()) };
 }
 
-fn map_keycode(keycode: Keycode) -> Option<Key> {
+unsafe fn text_owned(value: String) {
+    let value = CString::new(value).expect("sample text contains no NUL");
+    unsafe { text(&value) };
+}
+
+fn map_mouse_source(tool_type: ToolType) -> sys::ImGuiMouseSource {
+    match tool_type {
+        ToolType::Mouse => sys::ImGuiMouseSource_Mouse,
+        ToolType::Stylus | ToolType::Eraser => sys::ImGuiMouseSource_Pen,
+        _ => sys::ImGuiMouseSource_TouchScreen,
+    }
+}
+
+unsafe fn update_modifiers(io: *mut sys::ImGuiIO, meta_state: android_activity::input::MetaState) {
+    unsafe {
+        sys::ImGuiIO_AddKeyEvent(io, sys::ImGuiMod_Ctrl, meta_state.ctrl_on());
+        sys::ImGuiIO_AddKeyEvent(io, sys::ImGuiMod_Shift, meta_state.shift_on());
+        sys::ImGuiIO_AddKeyEvent(io, sys::ImGuiMod_Alt, meta_state.alt_on());
+        sys::ImGuiIO_AddKeyEvent(io, sys::ImGuiMod_Super, meta_state.meta_on());
+    }
+}
+
+fn map_keycode(keycode: Keycode) -> Option<sys::ImGuiKey> {
     Some(match keycode {
-        Keycode::Back | Keycode::Escape => Key::Escape,
-        Keycode::Tab => Key::Tab,
-        Keycode::Space => Key::Space,
-        Keycode::Enter | Keycode::NumpadEnter => Key::Enter,
-        Keycode::Del => Key::Backspace,
-        Keycode::ForwardDel => Key::Delete,
-        Keycode::DpadLeft => Key::LeftArrow,
-        Keycode::DpadRight => Key::RightArrow,
-        Keycode::DpadUp => Key::UpArrow,
-        Keycode::DpadDown => Key::DownArrow,
-        Keycode::PageUp => Key::PageUp,
-        Keycode::PageDown => Key::PageDown,
-        Keycode::MoveHome => Key::Home,
-        Keycode::MoveEnd => Key::End,
-        Keycode::Insert => Key::Insert,
-        Keycode::CtrlLeft => Key::LeftCtrl,
-        Keycode::CtrlRight => Key::RightCtrl,
-        Keycode::ShiftLeft => Key::LeftShift,
-        Keycode::ShiftRight => Key::RightShift,
-        Keycode::AltLeft => Key::LeftAlt,
-        Keycode::AltRight => Key::RightAlt,
-        Keycode::MetaLeft => Key::LeftSuper,
-        Keycode::MetaRight => Key::RightSuper,
+        Keycode::Back | Keycode::Escape => sys::ImGuiKey_Escape,
+        Keycode::Tab => sys::ImGuiKey_Tab,
+        Keycode::Space => sys::ImGuiKey_Space,
+        Keycode::Enter | Keycode::NumpadEnter => sys::ImGuiKey_Enter,
+        Keycode::Del => sys::ImGuiKey_Backspace,
+        Keycode::ForwardDel => sys::ImGuiKey_Delete,
+        Keycode::DpadLeft => sys::ImGuiKey_LeftArrow,
+        Keycode::DpadRight => sys::ImGuiKey_RightArrow,
+        Keycode::DpadUp => sys::ImGuiKey_UpArrow,
+        Keycode::DpadDown => sys::ImGuiKey_DownArrow,
+        Keycode::PageUp => sys::ImGuiKey_PageUp,
+        Keycode::PageDown => sys::ImGuiKey_PageDown,
+        Keycode::MoveHome => sys::ImGuiKey_Home,
+        Keycode::MoveEnd => sys::ImGuiKey_End,
+        Keycode::Insert => sys::ImGuiKey_Insert,
+        Keycode::CtrlLeft => sys::ImGuiKey_LeftCtrl,
+        Keycode::CtrlRight => sys::ImGuiKey_RightCtrl,
+        Keycode::ShiftLeft => sys::ImGuiKey_LeftShift,
+        Keycode::ShiftRight => sys::ImGuiKey_RightShift,
+        Keycode::AltLeft => sys::ImGuiKey_LeftAlt,
+        Keycode::AltRight => sys::ImGuiKey_RightAlt,
+        Keycode::MetaLeft => sys::ImGuiKey_LeftSuper,
+        Keycode::MetaRight => sys::ImGuiKey_RightSuper,
         _ => return None,
     })
 }
@@ -577,6 +631,30 @@ fn format_egl_error(error: EGLint) -> String {
     format!("0x{error:04X}")
 }
 
+fn render_current_frame(smoke: &mut SmokeApp, egl_state: &mut Option<EglState>) {
+    // A system redraw must be presented before its callback returns, including while paused.
+    // Only continuous animation is gated on the activity's resumed state.
+    if !smoke.platform_ready || !smoke.renderer_ready {
+        return;
+    }
+    let Some(egl) = egl_state.as_ref() else {
+        return;
+    };
+    if egl.window.width() <= 0 || egl.window.height() <= 0 {
+        return;
+    }
+
+    smoke.prepare_frame();
+    smoke.render_frame(&egl.window);
+    if let Err(err) = egl.swap_buffers() {
+        error!("render loop lost EGL surface: {err}");
+        smoke.unbind_window();
+        if let Some(egl) = egl_state.take() {
+            egl.destroy();
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
     android_logger::init_once(
@@ -585,7 +663,7 @@ fn android_main(app: AndroidApp) {
 
     info!("starting Dear ImGui Android smoke app");
 
-    let mut smoke = SmokeApp::new();
+    let mut smoke = SmokeApp::new(app.config().density());
     let mut egl_state: Option<EglState> = None;
     let mut should_quit = false;
 
@@ -599,6 +677,7 @@ fn android_main(app: AndroidApp) {
         } else {
             None
         };
+        let mut redrawn = false;
 
         app.poll_events(timeout, |event| match event {
             PollEvent::Wake | PollEvent::Timeout => {}
@@ -610,12 +689,12 @@ fn android_main(app: AndroidApp) {
                     }
 
                     if let Some(window) = app.native_window() {
-                        match EglState::create(&window) {
+                        match EglState::create(window) {
                             Ok(egl) => {
-                                if let Err(err) = smoke.bind_window(&window) {
+                                if let Err(err) = smoke.bind_window(&egl.window) {
                                     error!("failed to bind Android backend: {err}");
                                     egl.destroy();
-                                } else if let Err(err) = unsafe { smoke.init_renderer_once() } {
+                                } else if let Err(err) = smoke.init_renderer() {
                                     error!("failed to init OpenGL3 backend: {err}");
                                     smoke.unbind_window();
                                     egl.destroy();
@@ -644,15 +723,26 @@ fn android_main(app: AndroidApp) {
                     }
                 },
                 MainEvent::GainedFocus => {
-                    smoke.imgui.io_mut().add_focus_event(true);
+                    smoke.set_focus(true);
                 }
                 MainEvent::LostFocus => {
-                    smoke.imgui.io_mut().add_focus_event(false);
+                    smoke.set_focus(false);
                 }
-                MainEvent::WindowResized { .. }
-                | MainEvent::RedrawNeeded { .. }
-                | MainEvent::Resume { .. }
-                | MainEvent::Start => {}
+                MainEvent::Resume { .. } => {
+                    smoke.resumed = true;
+                }
+                MainEvent::Pause | MainEvent::Stop => {
+                    smoke.resumed = false;
+                }
+                MainEvent::ConfigChanged { .. } => {
+                    smoke.update_density(app.config().density());
+                }
+                MainEvent::RedrawNeeded { .. } => {
+                    // NativeActivity expects presentation before acknowledging redraw.
+                    render_current_frame(&mut smoke, &mut egl_state);
+                    redrawn = true;
+                }
+                MainEvent::WindowResized { .. } | MainEvent::Start => {}
                 MainEvent::Destroy => {
                     should_quit = true;
                 }
@@ -661,28 +751,10 @@ fn android_main(app: AndroidApp) {
             _ => {}
         });
 
-        if should_quit || !smoke.can_render() {
+        if should_quit || redrawn || !smoke.can_render() {
             continue;
         }
-
-        let Some(window) = app.native_window() else {
-            continue;
-        };
-
-        let Some(egl) = egl_state.as_ref() else {
-            continue;
-        };
-
-        smoke.prepare_frame(&window);
-        smoke.render_frame(&window);
-
-        if let Err(err) = egl.swap_buffers() {
-            error!("render loop lost EGL surface: {err}");
-            smoke.unbind_window();
-            if let Some(egl) = egl_state.take() {
-                egl.destroy();
-            }
-        }
+        render_current_frame(&mut smoke, &mut egl_state);
     }
 
     smoke.unbind_window();

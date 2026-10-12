@@ -52,6 +52,9 @@
 //! - `backend-shim-android`
 //! - `backend-shim-win32`
 //! - `backend-shim-dx11`
+//! - `backend-shim-dx12`
+//! - `backend-shim-metal` (macOS / iOS)
+//! - `backend-shim-osx` (macOS)
 //!
 //! SDLRenderer3 and SDLGPU3 renderer shims are owned by `dear-imgui-sdl3`.
 //!
@@ -61,8 +64,8 @@
 //!
 //! ```toml
 //! [dependencies]
-//! dear-imgui-rs = "0.10"
-//! dear-imgui-sys = { version = "0.10", features = ["backend-shim-android", "backend-shim-opengl3"] }
+//! dear-imgui-rs = "0.19"
+//! dear-imgui-sys = { version = "0.19", features = ["backend-shim-android", "backend-shim-opengl3"] }
 //! ```
 //!
 //! Recommended split of responsibilities:

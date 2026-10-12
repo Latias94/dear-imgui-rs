@@ -495,11 +495,24 @@ impl<S: ViewportScenario> AppWindow<S> {
         if enable_viewports {
             imgui.enable_multi_viewport();
         }
+        // Windows/X11 viewports use physical desktop pixels. macOS and single-window
+        // mode use logical coordinates with a separate framebuffer scale.
+        let scale_ui = enable_viewports && !cfg!(target_os = "macos");
         {
             let io = imgui.io_mut();
             let mut flags = io.config_flags();
             flags.insert(dear_imgui_rs::ConfigFlags::DOCKING_ENABLE);
             io.set_config_flags(flags);
+            if scale_ui {
+                io.set_config_dpi_scale_fonts(true);
+                io.set_config_dpi_scale_viewports(true);
+            }
+        }
+        if scale_ui {
+            let scale = window.scale_factor() as f32;
+            let style = imgui.style_mut();
+            style.scale_all_sizes(scale);
+            style.set_font_scale_dpi(scale);
         }
         let mut platform = WinitPlatform::new(&mut imgui)?;
         platform.attach_window(Arc::clone(&window), HiDpiMode::Default, &mut imgui)?;
@@ -620,10 +633,15 @@ impl<S: ViewportScenario> AppWindow<S> {
         if self.scenario.show_example_ui() {
             ui.dockspace().build()?;
             let enable_viewports = self.enable_viewports;
+            let scale = if enable_viewports && !cfg!(target_os = "macos") {
+                self.window.scale_factor() as f32
+            } else {
+                1.0
+            };
             let game_tex_id = self.game_tex_id;
             let scenario = &mut self.scenario;
             ui.window("Main")
-                .size([420.0, 260.0], Condition::FirstUseEver)
+                .size([420.0 * scale, 260.0 * scale], Condition::FirstUseEver)
                 .build(|| {
                     if enable_viewports {
                         ui.text("Drag this window outside to create a new OS window.");
@@ -637,7 +655,7 @@ impl<S: ViewportScenario> AppWindow<S> {
                     scenario.extend_main_window(ui, &mut viewport_count);
                 });
             ui.window("Game View")
-                .size([520.0, 540.0], Condition::FirstUseEver)
+                .size([520.0 * scale, 540.0 * scale], Condition::FirstUseEver)
                 .build(|| {
                     scenario.extend_game_window(ui);
                     let avail = ui.content_region_avail();
