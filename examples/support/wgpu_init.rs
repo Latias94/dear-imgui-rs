@@ -28,7 +28,7 @@ pub fn init_wgpu_for_window(
 > {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
 
-    // SAFETY: winit guarantees the window outlives the surface; using Arc<Window> gives 'static.
+    // The surface retains its own Arc<Window>, keeping the native window alive for its lifetime.
     let surface = instance.create_surface(window.clone())?;
 
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {

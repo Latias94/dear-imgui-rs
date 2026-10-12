@@ -2,7 +2,7 @@
 //!
 //! High-level Rust bindings for ImPlot, the immediate mode plotting library.
 //! This crate provides safe, idiomatic Rust bindings designed to work seamlessly
-//! with dear-imgui (C++ bindgen) rather than imgui-rs (cimgui).
+//! with `dear-imgui-rs` through the shared cimgui core and the cimplot C API.
 //!
 //! ## Features
 //!

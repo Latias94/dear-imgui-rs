@@ -526,7 +526,6 @@ impl TextEditor {
         check_status(OPERATION, status)
     }
 
-    /// Replaces every selected range with the callback result.
     /// Replaces each single-line selection with the callback result.
     ///
     /// The selected upstream snapshot applies a multi-line selection filter more than

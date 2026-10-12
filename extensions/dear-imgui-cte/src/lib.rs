@@ -1,7 +1,9 @@
 //! Preview, context-bound ImGuiColorTextEdit bindings through cimCTE.
 //!
 //! Persistent [`TextEditor`], [`TextDiff`], and [`Notifications`] values are created from a
-//! [`dear_imgui_rs::Context`] and rendered through [`CteUiExt`] on that same Context:
+//! [`dear_imgui_rs::Context`] and rendered through [`CteUiExt`] on that same Context.
+//! This fragment assumes an attached managed renderer and platform frame setup;
+//! see `examples/03-features/cte_minimal.rs` for a runnable application:
 //!
 //! ```no_run
 //! use dear_imgui_cte::{CteUiExt, Language, TextEditor};
@@ -21,7 +23,7 @@
 //! # }
 //! ```
 //!
-//! Native owners are neither [`Send`] nor [`Sync`]. A renderer built from another Context is
+//! Native owners are neither [`Send`] nor [`Sync`]. Rendering with a `Ui` from another Context is
 //! rejected before FFI, and applications should drop every CTE owner before its Context. If the
 //! Context has already died, Drop deliberately leaks the native handle rather than dereferencing
 //! invalid native state.

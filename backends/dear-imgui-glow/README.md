@@ -18,7 +18,10 @@ let gl = unsafe { glow::Context::from_loader_function(|s| loader.get_proc_addres
 let mut imgui = Context::create();
 let mut renderer = GlowRenderer::new(gl, &mut imgui)?;
 
-// Per frame, after building the UI. The renderer owns the synchronous consumer capability.
+// Per frame, update platform metrics/input before opening the UI.
+// The renderer owns the synchronous consumer capability used below.
+let ui = imgui.frame();
+ui.window("Hello").build(|| ui.text("Dear ImGui + OpenGL"));
 let frame = imgui.render(renderer.renderer_consumer()?);
 renderer.render(frame)?;
 ```
@@ -233,8 +236,8 @@ proof; shared runtime tests remain the teardown evidence. See the
 
 | Item          | Version |
 |---------------|---------|
-| Crate         | 0.19.0  |
-| dear-imgui-rs | 0.19.0  |
+| Crate         | 0.20.0  |
+| dear-imgui-rs | 0.20.0  |
 | glow          | 0.18    |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.

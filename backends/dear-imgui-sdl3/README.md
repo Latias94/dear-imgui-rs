@@ -44,39 +44,39 @@ Typical use cases:
 Use the compatible stable requirement for the desired feature combination:
 
 ```toml
-dear-imgui-sdl3 = { version = "0.19", features = ["opengl3-renderer"] }
+dear-imgui-sdl3 = { version = "0.20", features = ["opengl3-renderer"] }
 ```
 
 Platform-only usage (SDL3 + WGPU/Glow, no official OpenGL3 renderer):
 
 ```toml
-dear-imgui-sdl3 = { version = "0.19", default-features = false }
+dear-imgui-sdl3 = { version = "0.20", default-features = false }
 ```
 
 Enable the official OpenGL3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "0.19", features = ["opengl3-renderer"] }
+dear-imgui-sdl3 = { version = "0.20", features = ["opengl3-renderer"] }
 ```
 
 Enable the official SDLRenderer3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "0.19", features = ["sdlrenderer3-renderer"] }
+dear-imgui-sdl3 = { version = "0.20", features = ["sdlrenderer3-renderer"] }
 ```
 
 Enable the official SDLGPU3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "0.19", features = ["sdlgpu3-renderer"] }
+dear-imgui-sdl3 = { version = "0.20", features = ["sdlgpu3-renderer"] }
 ```
 
 ## Compatibility
 
 | Item          | Version  |
 |---------------|----------|
-| Crate         | 0.19.0  |
-| dear-imgui-rs | 0.19.0  |
+| Crate         | 0.20.0  |
+| dear-imgui-rs | 0.20.0  |
 | SDL3 crate    | 0.20.0   |
 | sdl3-sys      | 0.7.2    |
 
@@ -85,11 +85,12 @@ for the full workspace matrix.
 
 ## Quick Start
 
-Minimal SDL3 + OpenGL3 flow (single window):
+Minimal SDL3 + OpenGL3 flow (single window; enable `opengl3-renderer`):
 
 ```rust,no_run
 use dear_imgui_rs::{Context, Condition};
 use dear_imgui_sdl3::{enable_native_ime_ui, Sdl3OpenGl3Backend};
+use sdl3::event::{Event, WindowEvent};
 use sdl3::video::GLProfile;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -128,11 +129,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     'main: loop {
         // 1) Poll SDL3 events and feed ImGui
         for event in event_pump.poll_iter() {
-            if sdl3_backend.process_event(&mut imgui, &event)? {
-                // ImGui consumed the event; continue if you do not need it.
+            // The return value reports backend handling, not application input capture.
+            sdl3_backend.process_event(&mut imgui, &event)?;
+            match event {
+                Event::Quit { .. } => break 'main,
+                Event::Window {
+                    window_id,
+                    win_event: WindowEvent::CloseRequested,
+                    ..
+                } if window_id == window.id() => break 'main,
+                _ => {}
             }
-
-            // Handle your own events or quit logic as needed...
         }
 
         // 2) Start a new frame for the SDL3 + OpenGL backends
@@ -153,8 +160,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         sdl3_backend.render_main(prepared)?;
         window.gl_swap_window();
     }
+
+    // Report teardown errors while the main GL context and SDL window are still live.
+    window.gl_make_current(&gl_context)?;
+    sdl3_backend.shutdown(&mut imgui)?;
+    Ok(())
 }
 ```
+
+Always forward events to the backend. Use `imgui.io().want_capture_mouse()` and
+`want_capture_keyboard()` to decide whether gameplay should also respond; a `true` return from
+`process_event` only means the backend recognized the event.
+
+The platform backend maintains window coordinates and framebuffer pixel density. UI font and
+style sizes still need a content-scale policy. The checkout's
+[`DpiStyle` helper](../../examples/src/sdl3_dpi.rs) scales from an unmodified theme using
+`window.display_scale() / window.pixel_density()` before the frame opens, which avoids applying
+Retina backing density twice. See the runnable
+[`SDL3 + OpenGL3 example](../../examples/02-docking/sdl3_opengl_multi_viewport.rs) for complete
+window, DPI, frame, and shutdown handling.
 
 APIs of interest (see `src/lib.rs` for full docs):
 
@@ -421,7 +445,7 @@ Example:
 
 ```toml
 [dependencies]
-dear-imgui-sdl3 = { version = "0.19", features = ["opengl3-renderer"] }
+dear-imgui-sdl3 = { version = "0.20", features = ["opengl3-renderer"] }
 sdl3 = { version = "0.20", features = ["build-from-source"] }
 ```
 
@@ -487,8 +511,11 @@ $env:CXX_aarch64_linux_android = Join-Path $llvm 'aarch64-linux-android24-clang+
 This is not something `dear-imgui-sdl3` can infer safely on behalf of the
 application. The final app build must own it.
 
-If you do not want SDL3 at all, you can still build an Android backend manually
-on top of `dear-imgui-rs` plus `dear-imgui-sys::backend_shim::{android, opengl3}`.
+If you do not want SDL3, the repository's
+[`Android smoke template](../../examples-android/dear-imgui-android-smoke/README.md) uses the raw
+`dear-imgui-sys` context/frame API with `backend_shim::{android, opengl3}`. A safe
+`dear-imgui-rs` integration needs a renderer implementing its managed texture protocol; the raw
+OpenGL3 shim does not provide that adapter.
 
 ## IME and Gamepad Configuration
 
@@ -528,7 +555,7 @@ For advanced use cases, you can also opt into **manual** gamepad selection by
 providing raw `SDL_Gamepad*` handles opened by your application:
 
 ```rust
-// Safety: gamepads must be valid, opened SDL_Gamepad pointers.
+// SAFETY: keep these opened SDL_Gamepad objects alive until selecting another mode or shutdown.
 unsafe {
     sdl3_backend.set_gamepad_mode_manual(&mut imgui, &[gamepad1, gamepad2])?;
 }
@@ -615,6 +642,18 @@ available. See the [`renderer route evidence matrix`](../../docs/renderer-route-
 
   ```bash
   cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport
+  ```
+
+- SDL3 + Ash, multi-viewport (native Vulkan loader and device required):
+
+  ```bash
+  cargo run -p dear-imgui-examples --bin sdl3_ash_multi_viewport --features sdl3-ash-multi-viewport
+  ```
+
+- SDL3 + SDLGPU3, multi-viewport (supported SDL GPU device required):
+
+  ```bash
+  cargo run -p dear-imgui-examples --bin sdl3_sdlgpu_multi_viewport --features sdl3-gpu-multi-viewport
   ```
 
 Note: WGPU multi-viewport support is experimental and only available on native targets

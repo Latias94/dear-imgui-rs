@@ -7,7 +7,7 @@
 //!
 //! - **docking**: Always enabled in this crate
 //! - **freetype**: Enable FreeType font rasterizer support
-//! - **wasm**: Enable WebAssembly compatibility
+//! - **wasm**: Enable the `wasm32-unknown-unknown` browser import-provider ABI
 //! - **stack-layout**: Enable the native patched core artifact used by blueprint-style layouts
 //! - **prebuilt**: Allow downloading a compatible native prebuilt artifact
 //! - **build-from-source**: Force compilation of the native artifact from vendored sources
@@ -17,10 +17,12 @@
 //!
 //! ## WebAssembly Support
 //!
-//! When the `wasm` feature is enabled, this crate provides full WASM compatibility:
-//! - Disables platform-specific functions (file I/O, shell functions, etc.)
-//! - Configures Dear ImGui for WASM environment
-//! - Compatible with wasm-bindgen and web targets
+//! On `wasm32-unknown-unknown`, the explicit `wasm` feature selects bindings that
+//! import cimgui functions from the fixed `imgui-sys-v1` provider. Build the
+//! matching Emscripten provider and share its memory with the Rust application.
+//! WASI and Rust's Emscripten targets are unsupported. Enabling this feature on a
+//! native target leaves the native ABI selected. Native shims, prebuilts, and
+//! Test Engine cannot be used on the browser target.
 //!
 //! ## Safety
 //!
@@ -64,14 +66,13 @@
 //!
 //! ```toml
 //! [dependencies]
-//! dear-imgui-rs = "0.19"
-//! dear-imgui-sys = { version = "0.19", features = ["backend-shim-android", "backend-shim-opengl3"] }
+//! dear-imgui-sys = { version = "0.20", features = ["backend-shim-android", "backend-shim-opengl3"] }
 //! ```
 //!
 //! Recommended split of responsibilities:
 //!
-//! - `dear-imgui-rs` owns the safe core `Context`, `Io`, frame lifecycle, and
-//!   render snapshots
+//! - `dear-imgui-sys` owns the raw context and frame API; the official OpenGL3
+//!   backend owns native texture updates
 //! - `dear-imgui-sys::backend_shim::{android, opengl3}` exposes the low-level
 //!   official backend pieces
 //! - the Android application still owns lifecycle glue, input translation
@@ -80,8 +81,10 @@
 //! The repository's concrete reference for this path is
 //! `examples-android/dear-imgui-android-smoke/`, which now carries a minimal
 //! NativeActivity + EGL / GLES3 render loop proving that downstream users can
-//! build Android support on top of `dear-imgui-rs` + `dear-imgui-sys` even
-//! before a dedicated first-party Android convenience crate exists.
+//! build Android support on top of `dear-imgui-sys` before a dedicated
+//! first-party Android convenience crate exists. A safe `dear-imgui-rs` route
+//! needs a renderer implementing its managed texture protocol; the raw
+//! OpenGL3 shim is not such an adapter.
 
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]

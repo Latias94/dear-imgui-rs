@@ -19,9 +19,9 @@ Safe, idiomatic Rust bindings for ImGuIZMO.quat (quaternion + 3D gizmo helpers) 
 
 | Item                   | Version |
 |------------------------|---------|
-| Crate                  | 0.19.0  |
-| dear-imgui-rs          | 0.19.0  |
-| dear-imguizmo-quat-sys | 0.19.0  |
+| Crate                  | 0.20.0  |
+| dear-imgui-rs          | 0.20.0  |
+| dear-imguizmo-quat-sys | 0.20.0  |
 
 See also: docs/COMPATIBILITY.md in the workspace for the full matrix.
 
@@ -56,7 +56,7 @@ python -m http.server -d target/web-demo 8080
 
 Notes:
 - The `dear-imgui-web-demo` crate in `examples-wasm` can enable the `imguizmo-quat` feature; when present, an “ImGuIZMO.quat (Web)” window is shown if bindings + provider are available.
-- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific compatible `0.19` release and follow changes in `docs/WASM.md`.
+- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific compatible `0.20` release and follow changes in `docs/WASM.md`.
 
 ## Features
 
@@ -97,25 +97,25 @@ Use compatible stable requirements:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.19"
-dear-imguizmo-quat = "0.19"
+dear-imgui-rs = "0.20"
+dear-imguizmo-quat = "0.20"
+glam = "0.34"
 ```
 
-Minimal usage with the Ui extension and builder API:
+Draw within an initialized application frame. Store the rotation in application
+state and pass it to the Ui extension and builder API:
 
 ```rust
 use dear_imgui_rs::Ui;
 use dear_imguizmo_quat::{GizmoQuatExt, Mode};
 
-fn draw(ui: &Ui) {
-    let mut rot = glam::Quat::IDENTITY; // or [f32; 4]
-
+fn draw(ui: &Ui, rot: &mut glam::Quat) {
     let used = ui
         .gizmo_quat()
         .builder()
         .size(220.0)
         .mode(Mode::MODE_DUAL | Mode::CUBE_AT_ORIGIN)
-        .quat("##rot", &mut rot);
+        .quat("##rot", rot);
 
     if used {
         // rotation changed this frame
@@ -123,7 +123,8 @@ fn draw(ui: &Ui) {
 }
 ```
 
-Pan+Dolly + quaternion + light direction variant:
+Pan+Dolly + quaternion + light direction API sketch (keep these values in
+application state and draw with the current `ui`):
 
 ```rust
 use dear_imguizmo_quat::{GizmoQuatExt, Mode};

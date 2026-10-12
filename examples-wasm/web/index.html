@@ -13,7 +13,7 @@
     <canvas id="wasm-canvas"></canvas>
     <script>
       // Prepare a shared memory for both provider (cimgui) and main (wasm-bindgen) modules
-      // 256 pages (~16MiB) initial, growable up to 4096 pages (~256MiB)
+      // 2048 pages (128MiB) initial, growable up to 4096 pages (256MiB)
       if (!globalThis.__imgui_shared_memory) {
         // Use a larger initial heap so provider static data placed high (GLOBAL_BASE) fits
         // 2048 pages = 128MiB

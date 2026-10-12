@@ -618,23 +618,29 @@ impl AppWindow {
                 ui.text("Advanced ImPlot Features:");
                 ui.separator();
 
-                // Subplot example (commented out as it requires additional bindings)
-                ui.text("Subplots (Future Feature):");
-                ui.text_disabled("SubplotGrid::new(\"Grid\", 2usize, 2usize).begin(&plot_ui)");
-                ui.text_disabled("  // Multiple plots in grid layout");
-                ui.text_disabled("  // Each subplot can have different plot types");
+                // These supported APIs are shown as outlines rather than live plots here.
+                ui.text("Subplots (API outline):");
+                ui.text_disabled("SubplotGrid::new(\"Grid\", 2, 2)");
+                ui.text_disabled("  .begin(&plot_ui)");
+                ui.text_disabled("  // Keep the Ok token alive while building plots");
+                ui.text_disabled("  // Each plot uses the next grid cell");
                 ui.separator();
 
-                // Multi-axis example (commented out as it requires additional bindings)
-                ui.text("Multi-Axis Plots (Future Feature):");
-                ui.text_disabled("MultiAxisPlot::new(\"Multi\").begin(&plot_ui)");
-                ui.text_disabled("  .add_y_axis(YAxisConfig { ... })");
-                ui.text_disabled("  // Multiple Y-axes with different scales");
+                // Configure axes on the builder before beginning the plot scope.
+                ui.text("Multi-axis plots (API outline):");
+                ui.text_disabled("MultiAxisPlot::new(\"Multi\")");
+                ui.text_disabled("  .add_y_axis(YAxisConfig {");
+                ui.text_disabled("    label: Some(\"Left\"),");
+                ui.text_disabled("    flags: AxisFlags::empty(),");
+                ui.text_disabled("    range: None,");
+                ui.text_disabled("  }).begin(&plot_ui)");
+                ui.text_disabled("  // On Ok, select the plot's Y axis with:");
+                ui.text_disabled("  // token.set_y_axis(YAxis::Y1)");
                 ui.separator();
 
                 // Error handling demonstration
                 ui.text("Error Handling:");
-                ui.text("The new API provides comprehensive error handling:");
+                ui.text("Plot builders validate data before opening a plot:");
 
                 if ui.button("Test Empty Data Error") {
                     let empty_data: &[f64] = &[];
@@ -657,7 +663,7 @@ impl AppWindow {
                 ui.separator();
                 ui.text("API Comparison:");
                 ui.text("0.15 API (historical): plot_ui.plot_line(\"label\", &x, &y)");
-                ui.text("New API: LinePlot::new(\"label\", &x, &y).plot(&plot_ui)");
+                ui.text("Builder API: LinePlot::new(\"label\", &x, &y).plot(&plot_ui)");
                 ui.text("Benefits:");
                 ui.bullet_text("Type safety and validation");
                 ui.bullet_text("Builder pattern for configuration");

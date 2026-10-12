@@ -9,8 +9,7 @@
 //!
 //! Run with:
 //! ```text
-//! cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport \
-//!     --features sdl3-glow-multi-viewport
+//! cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features sdl3-glow-multi-viewport
 //! ```
 
 // The shared lifecycle also exposes evidence consumed only by the private runtime probe.

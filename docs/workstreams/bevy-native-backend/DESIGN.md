@@ -1,5 +1,10 @@
 # Bevy Native Backend Workstream
 
+> Historical workstream record from May 2026. API names, paths, commands, dependency
+> versions, and gate results below describe that checkout, not the current setup.
+> Use the [current Bevy backend guide](../../../backends/dear-imgui-bevy/README.md)
+> for supported APIs, runnable examples, and development checks.
+
 Status: Closed
 Last updated: 2026-05-23
 

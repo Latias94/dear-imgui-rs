@@ -16,7 +16,8 @@
 //! - **Gamma correction**: Automatic sRGB format detection and gamma correction
 //! - **Epoch-isolated uploads**: Vertex, index, and uniform buffers are never reused across
 //!   render epochs
-//! - **Device object management**: Helpers to recreate device objects (pipelines/buffers/textures) after loss
+//! - **Device object management**: Invalidate and rebuild renderer objects on the same live device;
+//!   actual device loss requires a replacement renderer
 //! - **Multi-viewport support**: Support for multiple windows (feature-gated via `multi-viewport-winit` for winit or `multi-viewport-sdl3` for SDL3 on native targets)
 //!
 //! # Example
@@ -36,7 +37,7 @@
 //! let mut renderer = WgpuRenderer::new(init_info, &mut imgui)?;
 //!
 //! // In your render loop:
-//! // imgui.new_frame();
+//! // let ui = imgui.frame();
 //! // ... build your UI ...
 //! // let frame = imgui.render(renderer.renderer_consumer()?);
 //! // let extent = FramebufferExtent::from_texture(&surface_texture.texture);

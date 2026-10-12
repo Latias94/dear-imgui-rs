@@ -1,6 +1,7 @@
 //! ImGui-embedded File Browser example
 //! - Uses dear-file-browser `FileDialogState` and `Ui` extension
-//! - Works on desktop and WASM without native dialogs
+//! - Runs on desktop with Winit + Glow and an application-owned filesystem
+//! - Browser integrations can reuse the dialog UI with their own filesystem and renderer
 
 use std::{collections::HashMap, num::NonZeroU32, sync::Arc, time::Instant};
 
@@ -109,6 +110,7 @@ struct AppWindow {
     browser: FileDialogState,
     thumbnails_provider: ImageThumbnailProvider,
     thumbnail_textures: HashMap<TextureId, RendererTextureId>,
+    pending_thumbnail_destroys: Vec<TextureId>,
     status: String,
     gl_context: CurrentGlContext,
     surface: Surface<WindowSurface>,
@@ -255,6 +257,7 @@ impl AppWindow {
             browser,
             thumbnails_provider: ImageThumbnailProvider::default(),
             thumbnail_textures: HashMap::new(),
+            pending_thumbnail_destroys: Vec::new(),
             status: String::new(),
             gl_context,
             surface,
@@ -264,6 +267,7 @@ impl AppWindow {
 
     fn release_thumbnail_textures(&mut self) -> Vec<String> {
         let mut errors = Vec::new();
+        self.pending_thumbnail_destroys.clear();
         let textures = std::mem::take(&mut self.thumbnail_textures);
         for (texture_id, texture) in textures {
             if let Err(error) = self.imgui.renderer.unregister_texture(texture) {
@@ -356,6 +360,7 @@ impl AppWindow {
                     let mut renderer = GlowThumbnailRenderer {
                         renderer: &mut self.imgui.renderer,
                         textures: &mut self.thumbnail_textures,
+                        pending_destroys: &mut self.pending_thumbnail_destroys,
                     };
                     let mut backend = ThumbnailBackend {
                         provider: &mut self.thumbnails_provider,
@@ -393,6 +398,19 @@ impl AppWindow {
             .context
             .render(self.imgui.renderer.renderer_consumer()?);
         self.imgui.renderer.render(pending_frame)?;
+        // Keep renderer IDs registered until all current-frame draws have been issued.
+        // OpenGL retains deleted texture storage for commands already submitted.
+        for texture_id in std::mem::take(&mut self.pending_thumbnail_destroys) {
+            let Some(texture) = self.thumbnail_textures.remove(&texture_id) else {
+                eprintln!("Unknown thumbnail texture {texture_id:?}");
+                continue;
+            };
+            if let Err(error) = self.imgui.renderer.unregister_texture(texture) {
+                eprintln!("Failed to release thumbnail texture {texture_id:?}: {error}");
+                self.thumbnail_textures.insert(texture_id, texture);
+                self.pending_thumbnail_destroys.push(texture_id);
+            }
+        }
         self.surface.swap_buffers(self.gl_context.get())?;
         Ok(())
     }
@@ -409,6 +427,7 @@ impl Drop for AppWindow {
 struct GlowThumbnailRenderer<'a> {
     renderer: &'a mut GlowRenderer,
     textures: &'a mut HashMap<TextureId, RendererTextureId>,
+    pending_destroys: &'a mut Vec<TextureId>,
 }
 
 impl ThumbnailRenderer for GlowThumbnailRenderer<'_> {
@@ -432,14 +451,8 @@ impl ThumbnailRenderer for GlowThumbnailRenderer<'_> {
     }
 
     fn destroy(&mut self, texture_id: TextureId) {
-        let Some(texture) = self.textures.remove(&texture_id) else {
-            eprintln!("Unknown thumbnail texture {texture_id:?}");
-            return;
-        };
-        if let Err(error) = self.renderer.unregister_texture(texture) {
-            eprintln!("Failed to release thumbnail texture {texture_id:?}: {error}");
-            self.textures.insert(texture_id, texture);
-        }
+        // Cache eviction can happen after this frame has referenced the texture.
+        self.pending_destroys.push(texture_id);
     }
 }
 

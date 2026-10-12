@@ -6,7 +6,8 @@ impl WgpuRenderer {
     ///
     /// The renderer clones the view handle. The application retains ownership of the texture
     /// contents and must not explicitly destroy the underlying GPU resource while it is
-    /// registered.
+    /// registered or while recorded/submitted GPU work still uses it. Keep the registration until
+    /// all Dear ImGui frames referencing its identifier have been recorded.
     pub fn register_external_texture(
         &mut self,
         view: &wgpu::TextureView,
@@ -38,6 +39,9 @@ impl WgpuRenderer {
     /// Unregisters an application-owned external texture view.
     ///
     /// The underlying WGPU texture remains application-owned and is not destroyed by this call.
+    /// Record every Dear ImGui frame referencing this handle before unregistering it. This method
+    /// removes the mapping immediately and does not wait for GPU completion; explicit destruction
+    /// of the application texture must wait for its remaining GPU users.
     pub fn unregister_external_texture(
         &mut self,
         texture: ExternalTextureId,

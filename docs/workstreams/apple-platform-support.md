@@ -1,7 +1,7 @@
 # Apple Platform Example Notes
 
 Status: Draft
-Last updated: 2026-03-27
+Last updated: 2026-10-12
 
 This document explains how to read the repository-owned Apple examples.
 
@@ -47,6 +47,18 @@ For macOS, the regular native examples in `examples/` remain the main reference
 path. They are regular desktop/native examples and do not need a separate smoke
 folder.
 
+Applications using AppKit and Metal directly can start from
+`dear-imgui-sys/examples/cocoa_metal.rs`. From the workspace root on macOS:
+
+```text
+cargo run -p dear-imgui-sys --example cocoa_metal --features backend-shim-osx,backend-shim-metal
+```
+
+This example owns raw Dear ImGui frames and lets the upstream Metal backend
+process native texture requests. It is a low-level native integration rather
+than a safe managed-frame renderer. See [`BACKEND_SHIMS.md`](../BACKEND_SHIMS.md)
+for context, resource, and callback ownership requirements.
+
 ### iOS
 
 The repository currently includes two iOS smoke examples under `examples-ios/`.
@@ -68,6 +80,10 @@ The repository does not currently provide iOS smoke examples for:
 
 - `glow` / OpenGL
 - `ash` / Vulkan
+
+The low-level `backend-shim-metal` feature also supports iOS, but neither iOS
+smoke template uses it; both use `dear-imgui-wgpu`. Applications adopting the
+native Metal shim still own their UIKit host and raw-frame integration.
 
 That does not make those routes impossible. It only means they are not the
 mobile smoke examples the repository is currently using for validation and

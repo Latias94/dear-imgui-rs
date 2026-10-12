@@ -2,9 +2,12 @@
 
 This document is a practical guide for **source-diff driven** work: we treat ImGuiFileDialog (IGFD) as the reference implementation for UI/behavior, and keep `dear-file-browser` (ImGui backend) at or above parity while staying Rust-first.
 
-Reference source lives in this repo at:
+The optional, ignored reference checkout is expected at:
 
 - `repo-ref/ImGuiFileDialog/ImGuiFileDialog.cpp`
+
+It is a local research checkout, not a packaged crate dependency. The public API
+is documented in the crate README; the mapping below is a source-comparison guide.
 
 Non-goals:
 
@@ -71,6 +74,8 @@ IGFD runs a fixed frame layout:
   - Popup opener: breadcrumb separator click opens `"##igfd_path_popup"`
   - Popup render: `extensions/dear-file-browser/src/ui/igfd_path_popup.rs`
   - Filtering: uses `core.search` (shared search)
+  - Content differs intentionally: known recent descendants only, without synchronous
+    filesystem enumeration from the UI popup.
 
 ### Main content sizing (footer reservation)
 

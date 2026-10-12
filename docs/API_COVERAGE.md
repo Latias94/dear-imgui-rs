@@ -32,8 +32,8 @@ Every user-relevant native or provisional high-level surface must have one recor
 - `delete`: no high-level replacement is justified, so callers use a safer composition or the sys
   escape hatch.
 
-The single release ledger is [0.16 alpha.2 public API disposition](COMPATIBILITY.md#016-alpha2-public-api-disposition).
-Do not duplicate it in generated coverage reports or infer a `keep` decision merely because a Rust
+The [0.16 alpha.2 public API disposition](COMPATIBILITY.md#016-alpha2-public-api-disposition) records the ownership migration baseline. Later release sections in [the compatibility guide](COMPATIBILITY.md) and `CHANGELOG.md` record subsequent additions and migrations.
+Do not duplicate these decisions in generated coverage reports or infer a `keep` decision merely because a Rust
 method and native symbol share a name. Every removal must identify one replacement or explicitly
 state that the sys API is the intended unsafe route.
 
@@ -74,7 +74,7 @@ symbol names or maintain a second generated snapshot of the same declarations.
 2. Regenerate all maintained bindings with the canonical libclang version:
 
    ```console
-   cargo run -p xtask -- verify-bindings --allow-dirty
+   python3 tools/update_submodule_and_bindings.py --crates all --submodules skip --wasm
    ```
 
 3. Review generated binding changes, especially callback signatures, aggregate parameters and

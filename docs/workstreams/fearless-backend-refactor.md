@@ -1,7 +1,13 @@
 # Fearless Backend Refactor Workstream
 
-Status: In Progress  
-Last updated: 2026-03-26
+Status: Historical architecture plan; core shim boundary implemented
+Last reviewed: 2026-10-12
+
+This document preserves the original plan and its checklist. Current integration
+contracts and the expanded DX12/Metal/Cocoa support live in
+[the backend shim guide](../BACKEND_SHIMS.md) and
+[the custom backend guide](../CUSTOM_BACKENDS.md). Unchecked convenience-crate
+ideas below are follow-ups, not missing requirements for the 0.20 release.
 
 ## Summary
 

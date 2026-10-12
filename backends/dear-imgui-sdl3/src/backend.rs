@@ -601,6 +601,10 @@ macro_rules! impl_sdl3_event_controls {
     ($backend:ty) => {
         impl $backend {
             /// Process an owned SDL3 event with the captured ImGui context.
+            ///
+            /// The returned boolean reports whether the native backend handled the event. It does
+            /// not report application input capture; use Dear ImGui's `WantCaptureMouse` and
+            /// `WantCaptureKeyboard` flags to decide whether gameplay should also respond.
             pub fn process_event(
                 &mut self,
                 imgui: &mut Context,
@@ -613,6 +617,7 @@ macro_rules! impl_sdl3_event_controls {
             ///
             /// Unlike [`Self::process_raw_event`], this path is safe because the handoff owns every
             /// pointer-bearing payload used by the official SDL3 backend.
+            /// Its boolean has the same backend-handling meaning as [`Self::process_event`].
             pub fn process_callback_event(
                 &mut self,
                 imgui: &mut Context,
@@ -1120,6 +1125,8 @@ impl Sdl3OpenGl3Backend {
     /// `window` and `gl_context` must remain valid and associated with each other until explicit
     /// shutdown succeeds or `imgui` finishes attachment teardown. Dropping this owner alone does
     /// not end their lifetime requirement.
+    /// Make `gl_context` current on `window` before initialization and every OpenGL renderer
+    /// operation, including device-object changes and shutdown.
     pub unsafe fn init_default(
         imgui: &mut Context,
         window: &Window,
@@ -1143,6 +1150,8 @@ impl Sdl3OpenGl3Backend {
     /// `window` and `gl_context` must remain valid and associated with each other until explicit
     /// shutdown succeeds or `imgui` finishes attachment teardown. Dropping this owner alone does
     /// not end their lifetime requirement.
+    /// Make `gl_context` current on `window` before initialization and every OpenGL renderer
+    /// operation, including device-object changes and shutdown.
     pub unsafe fn init_default_with_viewport_swap_interval(
         imgui: &mut Context,
         window: &Window,

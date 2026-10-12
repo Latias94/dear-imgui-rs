@@ -2,7 +2,9 @@
 
 This document tracks capability parity between `dear-file-browser` (ImGui backend) and ImGuiFileDialog (IGFD), focused on **non-C-API** behavior.
 
-Last updated: 2026-02-12
+Original parity baseline: 2026-02-12. Later scan-runtime notes describe the
+implemented 0.20 ownership model; this is capability parity, not a guarantee of
+identical APIs or full filesystem enumeration in every auxiliary popup.
 
 ## Scope
 
@@ -107,7 +109,7 @@ The items below act as a **concrete acceptance checklist** for flipping the abov
 
 ## Reference implementation
 
-We keep a copy of ImGuiFileDialog source under `repo-ref/ImGuiFileDialog` and treat it as the reference for ImGui-backend UI/behavior parity work.
+An optional local checkout under `repo-ref/ImGuiFileDialog` serves as the source reference for ImGui-backend UI/behavior parity work; it is not a packaged dependency.
 See `docs/IGFD_SOURCE_REFERENCE_MAP.md` for a practical function map.
 
 ## Post-Parity Backlog (P2)

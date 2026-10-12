@@ -27,11 +27,22 @@ pub trait ThumbnailProvider {
 
 /// Thumbnail renderer interface (upload/destroy).
 ///
-/// Implementations own the GPU lifecycle of `TextureId`.
+/// Implementations own the GPU lifecycle of `TextureId`. Register uploaded textures
+/// with the application's ImGui renderer. Removal may be requested while the current
+/// frame still references an ID. Queue retirement and retain both the ID mapping and
+/// texture until the renderer has consumed that frame and recorded every draw using it;
+/// only then unregister the ID. Release GPU resources after the relevant submitted
+/// draws complete, or use an API that retains their storage until completion (such as
+/// deleting an OpenGL texture after issuing its draws). Retaining only the GPU allocation
+/// while unregistering the ID early is insufficient. This cache does not participate in
+/// ImGui's managed font-atlas protocol.
 pub trait ThumbnailRenderer {
     /// Upload an RGBA8 thumbnail image to the GPU and return a `TextureId`.
     fn upload_rgba8(&mut self, image: &DecodedRgbaImage) -> Result<TextureId, String>;
-    /// Destroy a previously created `TextureId`.
+    /// Request retirement of a previously created `TextureId`.
+    ///
+    /// Queue the ID; do not unregister it before the current frame is consumed/recorded.
+    /// GPU resource release must also respect draw completion as described on this trait.
     fn destroy(&mut self, texture_id: TextureId);
 }
 
@@ -117,7 +128,8 @@ impl ThumbnailFrameIndex {
 ///    currently visible,
 /// 3) drain requests via [`take_requests`](Self::take_requests), decode/upload thumbnails in user
 ///    code, then call [`fulfill`](Self::fulfill),
-/// 4) destroy evicted GPU textures from [`take_pending_destroys`](Self::take_pending_destroys).
+/// 4) queue evicted IDs from [`take_pending_destroys`](Self::take_pending_destroys) for
+///    retirement according to the [`ThumbnailRenderer`] lifetime contract.
 #[derive(Clone, Debug)]
 pub struct ThumbnailCache {
     /// Cache configuration.
@@ -248,7 +260,8 @@ impl ThumbnailCache {
 
     /// Complete a request with either a ready texture id or an error string.
     ///
-    /// Returns any evicted texture ids that should be destroyed by the renderer.
+    /// Queues evicted/replaced texture IDs for [`Self::take_pending_destroys`].
+    /// This method does not return IDs or destroy GPU resources itself.
     pub fn fulfill(&mut self, path: &Path, result: Result<TextureId, String>, _max_size: [u32; 2]) {
         let key = path.to_path_buf();
         let stamp = self.alloc_stamp();
@@ -277,14 +290,17 @@ impl ThumbnailCache {
         self.fulfill(&req.path, result, req.max_size);
     }
 
-    /// Process queued requests and perform pending destroys.
+    /// Process queued requests and request retirement of evicted textures.
     ///
     /// This is a convenience helper for applications that want `dear-file-browser` to drive the
     /// request lifecycle:
     /// - Decodes queued requests using [`ThumbnailProvider`],
     /// - Uploads them using [`ThumbnailRenderer`],
     /// - Fulfills the cache, and
-    /// - Destroys evicted/replaced GPU textures via the renderer.
+    /// - Requests retirement of evicted/replaced textures via [`ThumbnailRenderer::destroy`].
+    ///
+    /// The renderer must queue these requests until the current frame is consumed/recorded
+    /// before unregistering IDs, and retain GPU storage for all relevant draws.
     ///
     /// If you prefer to manage decoding/upload externally, you can instead use
     /// [`take_requests`](Self::take_requests), [`fulfill_request`](Self::fulfill_request), and
@@ -306,7 +322,11 @@ impl ThumbnailCache {
         }
     }
 
-    /// Drain GPU textures that should be destroyed after eviction or replacement.
+    /// Drain texture IDs queued for retirement after eviction or replacement.
+    ///
+    /// Keep renderer ID mappings until the current frame is consumed/recorded; then
+    /// unregister IDs and release GPU storage according to the [`ThumbnailRenderer`]
+    /// lifetime contract. Draining this queue does not itself make immediate release safe.
     pub fn take_pending_destroys(&mut self) -> Vec<TextureId> {
         std::mem::take(&mut self.pending_destroys)
     }

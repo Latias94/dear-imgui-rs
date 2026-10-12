@@ -16,6 +16,9 @@ let mut renderer = WgpuRenderer::new(WgpuInitInfo::new(device, queue, surface_fo
 renderer.set_gamma_mode(GammaMode::Auto); // Auto | Linear | Gamma22
 
 // per-frame
+// First update platform metrics/input, then open and build the UI.
+let ui = imgui.frame();
+ui.window("Hello").build(|| ui.text("Dear ImGui + WGPU"));
 let frame = imgui.render(renderer.renderer_consumer()?);
 let framebuffer_extent = FramebufferExtent::from_texture(&surface_texture.texture);
 renderer.render(frame, &mut render_pass, framebuffer_extent)?;
@@ -25,26 +28,27 @@ Each `WgpuRenderer` is fully initialized and bound to the `Context` passed to `n
 
 ## External texture views
 
-Register an application-owned texture view. The renderer clones the view handle, but the application must not explicitly destroy the underlying GPU resource until the handle is unregistered:
+Register an application-owned texture view and retain the returned handle in application state.
+The renderer clones the view handle. Keep the mapping registered until all UI frames referring to
+it have been recorded, and do not explicitly destroy the underlying resource until both the
+mapping is removed and GPU work using it has completed:
 
 ```rust,no_run
-# use dear_imgui_rs::Ui;
-# use dear_imgui_wgpu::{RendererResult, WgpuRenderer, wgpu};
-# fn external_texture(
+# use dear_imgui_wgpu::{ExternalTextureId, RendererResult, WgpuRenderer, wgpu};
+# fn register_image(
 #     renderer: &mut WgpuRenderer,
-#     ui: &Ui,
 #     view: &wgpu::TextureView,
-#     replacement_view: &wgpu::TextureView,
-# ) -> RendererResult<()> {
+# ) -> RendererResult<ExternalTextureId> {
 let texture = renderer.register_external_texture(view)?;
-
-ui.image(texture.texture_id(), [320.0, 180.0]);
-
-renderer.update_external_texture(texture, replacement_view)?;
-renderer.unregister_external_texture(texture)?;
-# Ok(())
+# Ok(texture)
 # }
 ```
+
+Use `ui.image(texture.texture_id(), size)` while building a later frame. Call
+`update_external_texture(texture, replacement_view)` before recording a frame that should use the
+replacement. Call `unregister_external_texture(texture)` only after recording the final frame
+that uses the handle; unregistering immediately after `ui.image` leaves that frame without a
+texture mapping.
 
 Sampling is renderer state rather than texture ownership. The renderer owns the standard linear and nearest samplers; enqueue an explicit draw-list command around images that need nearest sampling:
 
@@ -226,34 +230,34 @@ replacements are preserved rather than overwritten.
 
 ## Selecting wgpu version
 
-The `0.19.0` release defaults to WGPU 30:
+The `0.20.0` release defaults to WGPU 30:
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = "0.19"
+dear-imgui-wgpu = "0.20"
 ```
 
 If your ecosystem is pinned to `wgpu` v29, v28, or v27, select it explicitly:
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "0.19", default-features = false, features = ["wgpu-29"] }
+dear-imgui-wgpu = { version = "0.20", default-features = false, features = ["wgpu-29"] }
 ```
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "0.19", default-features = false, features = ["wgpu-28"] }
+dear-imgui-wgpu = { version = "0.20", default-features = false, features = ["wgpu-28"] }
 ```
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "0.19", default-features = false, features = ["wgpu-27"] }
+dear-imgui-wgpu = { version = "0.20", default-features = false, features = ["wgpu-27"] }
 ```
 
 ## What You Get
 
 - ImGui v1.92 texture system integration (create/update/destroy)
-- Multi-frame buffering and device-object management
+- Upload buffers isolated by render epoch and viewport pass, with device-object invalidation
 - Format-aware or user-controlled gamma (see below)
 
 ## sRGB / Gamma
@@ -266,6 +270,7 @@ dear-imgui-wgpu = { version = "0.19", default-features = false, features = ["wgp
 
 | Track | wgpu support |
 |-------|--------------|
+| `0.20.0` | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
 | `0.19.0` | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.

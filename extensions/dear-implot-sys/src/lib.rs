@@ -7,7 +7,11 @@
 //!
 //! ## Features
 //!
-//! - **docking**: Enable docking and multi-viewport features (default)
+//! - Docking is part of the pinned Dear ImGui core; there is no `docking` feature.
+//! - **prebuilt**: Allow verified prebuilt archive download/extraction.
+//! - **build-from-source**: Force the native source route.
+//! - **bindgen**: Enable explicit binding regeneration with
+//!   `DEAR_IMGUI_RS_REGEN_BINDINGS=1`; ordinary builds use checked-in bindings.
 //! - **freetype**: Enable FreeType font rasterizer support
 //! - **wasm**: Enable WebAssembly compatibility
 //!

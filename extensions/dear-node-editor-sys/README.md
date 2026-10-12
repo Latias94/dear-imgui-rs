@@ -30,7 +30,12 @@ shim; they are not official Dear ImGui APIs.
 - The `stack-layout` feature forwards the patched native core artifact profile to `dear-imgui-sys`.
 - `NODE_EDITOR_SYS_SKIP_CC=1` skips native compilation and uses pregenerated bindings.
 - `NODE_EDITOR_SYS_LIB_DIR`, `NODE_EDITOR_SYS_PREBUILT_URL`, and the `prebuilt` feature follow
-  the same prebuilt-library flow as the other workspace `*-sys` crates.
+  the same verified prebuilt-library flow as the other workspace `*-sys` crates.
+  Supply a matching library and manifest, or a packaged archive with `prebuilt`;
+  choose one override at a time (`LIB_DIR` takes precedence over `PREBUILT_URL`).
+  The artifact must match the target, CRT, binding/source identity, and shared-core
+  feature profile. `build-from-source` forces source compilation even when
+  `prebuilt` is also enabled.
 - `wasm32` is intentionally unsupported in the first integration phase.
 
 ## WebAssembly Scope

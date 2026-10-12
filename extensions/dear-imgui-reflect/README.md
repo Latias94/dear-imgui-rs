@@ -23,14 +23,14 @@ Use compatible stable requirements:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.19"
-dear-imgui-reflect = "0.19"
+dear-imgui-rs = "0.20"
+dear-imgui-reflect = "0.20"
 ```
 
 Optional math support:
 
 ```toml
-dear-imgui-reflect = { version = "0.19", features = ["glam", "mint"] }
+dear-imgui-reflect = { version = "0.20", features = ["glam", "mint"] }
 glam = "0.34"
 mint = "0.5"
 ```
@@ -199,8 +199,8 @@ See `examples/03-features/reflect_demo.rs` for a complete inspector and
 
 | Item | Version |
 |---|---|
-| Crate | 0.19.0 |
-| dear-imgui-rs | 0.19.0 |
+| Crate | 0.20.0 |
+| dear-imgui-rs | 0.20.0 |
 
 ## License
 

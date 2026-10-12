@@ -45,6 +45,15 @@ let lib_name = expected_lib_name(target_env, "dear_imgui");
 let lib_dir = download_prebuilt(&cache_root, url, &lib_name, target_env)?;
 ```
 
+The simple `compose_manifest_bytes` helper above does not create the strict
+provenance manifest required by the core and extension sys consumers. Enable
+`binding-spec` and use `binding::ArtifactProfile` / `CoreArtifactIdentity` for
+core artifacts and `binding::ExtensionArtifactProfile` for extensions; those
+profiles bind source revisions, binding and source-contract hashes, and the
+release candidate. `download_prebuilt` stages files but does not establish that
+they are compatible: validate the matching profile before emitting link flags.
+Use the repository package tools to produce release-compatible archives.
+
 ## Build-script target ABI migration
 
 Build scripts must preserve Rust's complete target identity, including `CARGO_CFG_TARGET_ABI`. Populate `TargetFacts::target_abi`, `NativeAbiTarget::target_abi`, and `BuildRequestInput::target_abi` with the exact Rust cfg value (usually an empty string, and `llvm` for Windows gnullvm). `BuildRequest::new` carries that value into the public `BuildRequest::target_abi` field, so callers that construct or destructure `BuildRequest` directly must handle it. The field participates in strict target validation and deterministic binding/build-request hashes.
@@ -93,8 +102,11 @@ the `download` feature. Note that extracting `.tar.gz` archives requires the fea
 
 ## Docs.rs / Offline Builds
 
-This crate is not required for docs.rs. For crates that generate bindings at build time, consider
-checking in `src/bindings_pregenerated.rs` and copying/sanitizing it in `build.rs` during docs.rs builds.
+The sys crates still compile this helper as a build dependency on docs.rs.
+Their `DOCS_RS` routes select validated, target-appropriate checked-in bindings
+and skip native compilation. Those routes must work without source submodules,
+Git metadata, or network access; do not regenerate bindings from unversioned
+headers in a consumer build.
 
 ## License
 

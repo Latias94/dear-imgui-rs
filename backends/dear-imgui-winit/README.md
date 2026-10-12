@@ -8,8 +8,8 @@ cursor handling and DPI awareness into Dear ImGui. Inspired by
 
 | Item          | Version |
 |---------------|---------|
-| Crate         | 0.19.0  |
-| dear-imgui-rs | 0.19.0  |
+| Crate         | 0.20.0  |
+| dear-imgui-rs | 0.20.0  |
 | winit         | 0.30.13 |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
@@ -61,7 +61,11 @@ impl winit::application::ApplicationHandler for App {
                 let pending = self
                     .imgui
                     .context
-                    .render(self.renderer.consumer());
+                    .render(
+                        self.renderer
+                            .renderer_consumer()
+                            .expect("renderer must remain attached"),
+                    );
                 self.renderer.render(pending /*, target-specific arguments */);
             }
             _ => {}
@@ -106,7 +110,7 @@ coordinates ImGui uses:
 
 ## Input & IME
 
-- Keyboard: press/release is mapped to `dear-imgui::Key`. When `event.text`
+- Keyboard: press/release is mapped to `dear_imgui_rs::Key`. When `event.text`
   is present on key press, characters are injected via `io.add_input_character`.
   Coverage includes letters/digits, punctuation (',.-/;=[]\\`), function and lock keys,
   and numpad (0-9, decimal/divide/multiply/subtract/add/equal/enter).
@@ -142,11 +146,12 @@ Basic touch-to-mouse translation is provided:
 
 `prepare_render(&Ui, &Window)` updates the OS cursor from `ui.mouse_cursor()`.
 Changes are cached to avoid redundant OS calls. If `ConfigFlags::NO_MOUSE_CURSOR_CHANGE`
-is set, OS cursor updates are skipped. The software-drawn cursor flag is currently not
-exposed via our `Io` wrapper (defaults to OS cursor).
+is set, OS cursor updates are skipped. `Io::set_mouse_draw_cursor(true)` enables Dear ImGui's
+software cursor; the default uses the OS cursor.
 
-If Dear ImGui requests repositioning (`io.want_set_mouse_pos()`), `prepare_frame`
-will set the OS cursor position accordingly.
+In single-window mode, `prepare_frame` honors `io.want_set_mouse_pos()` by setting the window-local
+OS cursor position. Native multi-viewport does not advertise `HAS_SET_MOUSE_POS`, because Winit has
+no portable global desktop cursor-position setter.
 
 ### Software Cursor
 
@@ -288,5 +293,5 @@ surface. It’s intentionally separate from `imgui-rs/imgui-winit-support`, thou
 many behaviors are aligned for familiarity.
 
 Known limitations:
-- Key mapping covers digits, letters, navigation, modifiers, and function keys.
-  Some punctuation/numpad-specific variants are not mapped yet.
+- Clipboard integration and gamepad navigation remain application-owned.
+- Native multi-viewport does not support Wayland or a portable global cursor-position setter.

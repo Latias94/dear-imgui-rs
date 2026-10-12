@@ -26,9 +26,9 @@ This project is a Rust wrapper around the C shim (cimguizmo), not a direct C++ b
 
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.19.0  |
-| dear-imgui-rs     | 0.19.0  |
-| dear-imguizmo-sys | 0.19.0  |
+| Crate             | 0.20.0  |
+| dear-imgui-rs     | 0.20.0  |
+| dear-imguizmo-sys | 0.20.0  |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
@@ -62,7 +62,7 @@ python -m http.server -d target/web-demo 8080
 
 Notes:
 - The `dear-imgui-web-demo` crate in `examples-wasm` can enable the `imguizmo` feature; when present, an “ImGuizmo (Web)” window is shown if bindings + provider are available.
-- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific compatible `0.19` release and follow changes in `docs/WASM.md`.
+- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific compatible `0.20` release and follow changes in `docs/WASM.md`.
 
 ## Features
 
@@ -78,45 +78,35 @@ Use compatible stable requirements:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.19"
-dear-imguizmo = "0.19"
+dear-imgui-rs = "0.20"
+dear-imguizmo = "0.20"
+glam = "0.34"
 ```
 
-Minimal usage (dear-imgui-style API):
+Draw within a frame from an initialized platform and renderer. Keep the model and
+camera matrices in application state so edits survive the next frame:
 
 ```rust
-use dear_imgui_rs::Context;
+use dear_imgui_rs::Ui;
 use dear_imguizmo::{Operation, Mode, GuizmoExt};
 use glam::Mat4;
 
-let mut ctx = Context::create();
-let ui = ctx.frame();
+fn draw(ui: &Ui, model: &mut Mat4, view: &Mat4, proj: &Mat4) {
+    let giz = ui.guizmo();
+    let ds = ui.io().display_size();
+    giz.set_rect(0.0, 0.0, ds[0], ds[1]);
+    giz.set_drawlist_window();
 
-// Begin ImGuizmo for this frame via Ui extension
-let giz = ui.guizmo();
+    let used = giz
+        .manipulate_config(view, proj, model)
+        .operation(Operation::TRANSLATE)
+        .mode(Mode::Local)
+        //.snap([1.0, 1.0, 1.0])
+        //.bounds([minx,miny,minz], [maxx,maxy,maxz])
+        .build();
 
-// Set the drawing rectangle to the full viewport
-let ds = ui.io().display_size();
-giz.set_rect(0.0, 0.0, ds[0], ds[1]);
-
-// Choose where to draw (window/background/foreground)
-giz.set_drawlist_window();
-
-// Matrices (column-major). With the default `glam` feature, use `glam::Mat4`.
-let mut model = Mat4::IDENTITY;
-let view = Mat4::IDENTITY;
-let proj = Mat4::IDENTITY;
-
-// Manipulate the model matrix
-let used: bool = giz
-    .manipulate_config(&view, &proj, &mut model)
-    .operation(Operation::TRANSLATE)
-    .mode(Mode::Local)
-    //.snap([1.0, 1.0, 1.0])
-    //.bounds([minx,miny,minz], [maxx,maxy,maxz])
-    .build();
-
-if used { /* object moved */ }
+    if used { /* object moved */ }
+}
 ```
 
 Start with `examples/03-features/imguizmo_minimal.rs` for a copy-ready integration. See

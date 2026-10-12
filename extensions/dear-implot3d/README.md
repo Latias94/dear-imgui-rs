@@ -22,9 +22,9 @@ the ergonomics of `dear-implot`.
 
 | Item               | Version |
 |--------------------|---------|
-| Crate              | 0.19.0  |
-| dear-imgui-rs      | 0.19.0  |
-| dear-implot3d-sys  | 0.19.0  |
+| Crate              | 0.20.0  |
+| dear-imgui-rs      | 0.20.0  |
+| dear-implot3d-sys  | 0.20.0  |
 
 See also: docs/COMPATIBILITY.md in the workspace for the full matrix.
 
@@ -61,7 +61,7 @@ Notes:
 - The `dear-imgui-web-demo` crate in `examples-wasm` enables the `implot3d` feature when
   you pass `implot3d` to `xtask web-demo`, which shows an “ImPlot3D (Web)” window when
   ImPlot3D bindings + provider are available.
-- This is an early, experimental path in the current 0.19 release train; API and build
+- This is an early, experimental path in the current 0.20 release train; API and build
   steps may evolve. For production use, pin to a specific compatible release and follow changes in
   `docs/WASM.md`.
 
@@ -79,30 +79,30 @@ Notes:
 
 ## Quick Start
 
+Create `Plot3DContext` once alongside your ImGui context and drop it before its
+owner. Call this draw function from an initialized platform and renderer frame;
+it is a UI fragment, not a standalone window application:
+
 ```rust
-use dear_imgui_rs::*;
+use dear_imgui_rs::Ui;
 use dear_implot3d::*;
 
-let mut imgui_ctx = Context::create();
-let plot3d_ctx = Plot3DContext::create(&imgui_ctx);
+fn draw(ui: &Ui, plot3d_ctx: &Plot3DContext) {
+    let plot_ui = plot3d_ctx.get_plot_ui(ui);
+    if let Some(_token) = plot_ui.begin_plot("3D Demo")
+        .size([600.0, 400.0])
+        .build()
+    {
+        plot_ui.setup_axes("X", "Y", "Z",
+            Axis3DFlags::NONE,
+            Axis3DFlags::NONE,
+            Axis3DFlags::NONE);
 
-// In your main loop:
-let ui = imgui_ctx.frame();
-let plot_ui = plot3d_ctx.get_plot_ui(&ui);
-
-if let Some(_token) = plot_ui.begin_plot("3D Demo")
-    .size([600.0, 400.0])
-    .build()
-{
-    plot_ui.setup_axes("X", "Y", "Z",
-        Axis3DFlags::NONE,
-        Axis3DFlags::NONE,
-        Axis3DFlags::NONE);
-
-    let xs = [0.0, 1.0, 2.0];
-    let ys = [0.0, 1.0, 0.0];
-    let zs = [0.0, 0.5, 1.0];
-    plot_ui.plot_line_f32("Line", &xs, &ys, &zs, Line3DFlags::NONE);
+        let xs = [0.0, 1.0, 2.0];
+        let ys = [0.0, 1.0, 0.0];
+        let zs = [0.0, 0.5, 1.0];
+        plot_ui.plot_line_f32("Line", &xs, &ys, &zs, Line3DFlags::NONE);
+    }
 }
 ```
 

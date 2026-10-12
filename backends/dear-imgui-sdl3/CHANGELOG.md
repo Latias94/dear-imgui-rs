@@ -6,12 +6,12 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-12
+
 ### Changed
 
-- Upgrade to `sdl3` 0.20 and `sdl3-sys` 0.7. Applications passing SDL3 events or
-  handles to this backend must upgrade their direct dependencies to the same versions.
-- Forward the renamed `Event::GamepadAdded` and `Event::GamepadRemoved` events to
-  the native platform backend.
+- Upgrade to `sdl3` 0.20 and `sdl3-sys` 0.7. Applications passing SDL3 events or handles to this backend must upgrade their direct dependencies to the same versions. [PR #88](https://github.com/Latias94/dear-imgui-rs/pull/88)
+- Forward the renamed `Event::GamepadAdded` and `Event::GamepadRemoved` events to the native platform backend. [PR #88](https://github.com/Latias94/dear-imgui-rs/pull/88)
 
 ## [0.16.0] - 2026-08-14
 

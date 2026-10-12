@@ -1,13 +1,14 @@
 //! # Dear ImGui - Rust Bindings with Docking Support
 //!
 //! High-level Rust bindings for Dear ImGui, the immediate mode GUI library.
-//! This crate provides safe, idiomatic Rust bindings with full support for
-//! docking and multi-viewport features.
+//! This crate provides safe, idiomatic Rust bindings with docking support and
+//! optional native multi-viewport primitives. Multi-viewport also requires a
+//! supported platform and renderer backend; browser applications use one canvas.
 //!
 //! ## Features
 //!
 //! - Safe, idiomatic Rust API
-//! - Full docking and multi-viewport support
+//! - Docking and optional backend-specific native multi-viewport support
 //! - Builder pattern for widgets
 //! - Memory-safe string handling
 //! - Integration with modern Rust graphics ecosystems
@@ -18,6 +19,9 @@
 //! use dear_imgui_rs::*;
 //!
 //! let mut ctx = Context::create();
+//! ctx.io_mut().set_display_size([640.0, 480.0]);
+//! ctx.io_mut().set_delta_time(1.0 / 60.0);
+//! ctx.font_atlas().try_claim_legacy_renderer()?.build();
 //! let ui = ctx.frame();
 //!
 //! ui.window("Hello World")
@@ -26,7 +30,14 @@
 //!         ui.text("Hello, world!");
 //!         ui.text("This is Dear ImGui with docking support!");
 //!     });
+//! let frame = ctx.render_legacy();
+//! let _draw_data = frame.draw_data();
+//! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
+//!
+//! This backend-free example only builds draw commands. A windowed application
+//! also needs platform input and a renderer. Managed renderers own a consumer
+//! and use the texture protocol below instead of building a legacy atlas.
 //!
 //! ## Math Interop (mint/glam)
 //!
@@ -219,7 +230,7 @@
 //! This crate offers two ways to edit text:
 //! - String-backed builders: `ui.input_text(label, &mut String)` and
 //!   `ui.input_text_multiline(label, &mut String, size)`.
-//!   - Internally stage a growable UTF�? buffer for the call and copy the
+//!   - Internally stage a growable UTF-8 buffer for the call and copy the
 //!     edited bytes back into your `String` afterwards.
 //!   - For very large fields, use `.capacity_hint(bytes)` on the builder to
 //!     reduce reallocations, e.g.:
@@ -235,7 +246,7 @@
 //!   `ui.input_text_multiline_imstr(label, &mut ImString, size)`.
 //!   - Zero‑copy: pass your `ImString` buffer directly to ImGui.
 //!   - Uses ImGui's `CallbackResize` under the hood to grow the same buffer the
-//!     widget edits �?no copy before/after the call.
+//!     widget edits, without copying before or after the call.
 //!
 //! Choose String for convenience (especially for small/medium inputs). Prefer
 //! ImString when you want to avoid copies for large or frequently edited text.

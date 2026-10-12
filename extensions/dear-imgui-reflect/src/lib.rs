@@ -76,7 +76,8 @@
 //! - type-checked numeric helpers like
 //!   `#[imgui(slider, min = 0.0, max = 1.0, format = "%.2f")]`,
 //!   `#[imgui(as_drag, speed = 0.1)]`, `#[imgui(as_input, step = 1)]`;
-//! - text helpers like `#[imgui(multiline, lines = 4, hint = "Search...")]`,
+//! - text helpers like `#[imgui(multiline, lines = 4)]` or single-line
+//!   `#[imgui(hint = "Search...")]` (hints cannot be combined with multiline),
 //!   `#[imgui(read_only)]`, `#[imgui(display_only)]`;
 //! - tuple layout helpers such as
 //!   `#[imgui(tuple_render = "grid", tuple_columns = 3)]`.
@@ -353,9 +354,9 @@ impl<T: ImGuiReflect> ImGuiReflect for Box<T> {
 
 /// Transparent reflection for reference-counted values (`Rc<T>`).
 ///
-/// When there is exactly one strong reference, this forwards editing to the
-/// inner `T`. Otherwise, it renders a read-only marker indicating that the
-/// value is shared and cannot be safely mutated.
+/// When there is exactly one strong reference and no weak references, this forwards
+/// editing to the inner `T` through `get_mut`. Otherwise, it renders a read-only
+/// marker because the allocation cannot be uniquely borrowed.
 impl<T: ImGuiReflect> ImGuiReflect for Rc<T> {
     fn imgui_reflect(&mut self, inspector: &mut Inspector<'_, '_>, label: &str) -> bool {
         if let Some(inner) = Rc::get_mut(self) {
@@ -372,9 +373,9 @@ impl<T: ImGuiReflect> ImGuiReflect for Rc<T> {
 
 /// Transparent reflection for atomically reference-counted values (`Arc<T>`).
 ///
-/// When there is exactly one strong reference, this forwards editing to the
-/// inner `T`. Otherwise, it renders a read-only marker indicating that the
-/// value is shared and cannot be safely mutated.
+/// When there is exactly one strong reference and no weak references, this forwards
+/// editing to the inner `T` through `get_mut`. Otherwise, it renders a read-only
+/// marker because the allocation cannot be uniquely borrowed.
 impl<T: ImGuiReflect> ImGuiReflect for Arc<T> {
     fn imgui_reflect(&mut self, inspector: &mut Inspector<'_, '_>, label: &str) -> bool {
         if let Some(inner) = Arc::get_mut(self) {

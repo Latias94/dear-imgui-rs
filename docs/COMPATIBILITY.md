@@ -3,16 +3,13 @@
 This document tracks compatibility across the workspace crates, upstream Dear ImGui, and key external dependencies. The root README shows the latest recommendations; this file keeps version history and compatibility policy.
 
 For Apple-specific integration notes and the repository-owned iOS example
-paths, see `docs/workstreams/apple-platform-support.md`.
+paths, see [the Apple platform guide](workstreams/apple-platform-support.md).
 
 ## Versioning Policy
 
-### Unreleased dependency updates
-
-The development branch uses Bevy 0.20.0 (Rust 1.97.1 minimum), SDL3 0.20 with sdl3-sys 0.7 (SDL 3.4.18), and glam 0.34. Applications exchanging Bevy, SDL3, or glam types with these crates must upgrade those dependencies together. The workspace core MSRV remains Rust 1.92; the development toolchain is Rust 1.99. WGPU 30 remains the default, with the existing 27/28/29 compatibility routes.
-
 - Unified release train: all published `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
-- Stable 0.19 train: unified `v0.19.0` (use `version = "0.19"`).
+- Stable 0.20 train: unified `v0.20.0` (use `version = "0.20"`).
+- Previous stable train: unified `v0.19.0` (use `version = "0.19"`).
 - Previous stable train: unified `v0.18.0` (use `version = "0.18"`).
 - Previous stable train: unified `v0.17.0` (use `version = "0.17"`).
 - Previous stable train: unified `v0.16.0` (use `version = "0.16"`).
@@ -25,7 +22,30 @@ The development branch uses Bevy 0.20.0 (Rust 1.97.1 minimum), SDL3 0.20 with sd
 - Previous train: unified `v0.10.4` (use `version = "0.10"`).
 - Previous train: unified `v0.9.0` (use `version = "0.9"`).
 - Previous train: unified `v0.8.0` (use `version = "0.8"`).
-- Internal dependency constraints use the compatible current stable minor (`0.19`); prerelease trains use exact requirements. Mixing different release trains across our crates is unsupported.
+- Internal dependency constraints use the compatible current stable minor (`0.20`); prerelease trains use exact requirements. Mixing different release trains across our crates is unsupported.
+
+## 0.20 Stable Release
+
+All 29 publishable crates move together to `0.20.0`. Use `version = "0.20"` for every workspace crate in an application. Dear ImGui remains v1.92.9b docking, the core MSRV remains Rust 1.92, and development and publishing use Rust 1.99.
+
+| Integration | Required external versions |
+| --- | --- |
+| WGPU | 30 by default; select exactly one of the 30/29/28/27 feature routes |
+| Winit | 0.30.13 |
+| Glow | 0.18 |
+| Ash | 0.38 |
+| SDL3 | sdl3 0.20, sdl3-sys 0.7, SDL 3.4.18 |
+| Bevy | exactly 0.20.0; Rust 1.97.1 or newer |
+| glam interoperability | 0.34 |
+
+- Upgrade direct Bevy, SDL3, and glam dependencies together with the corresponding backend or extension; older versions' types cannot cross these crate boundaries. `dear-app` continues to use WGPU 30.
+- Bevy vertex RGB and managed RGBA texture RGB bytes are interpreted as sRGB and decoded before tint multiplication. The renderer follows the camera stack's resolved Linear, Srgb, or Oklab compositing space. For linear source RGB, register a Bevy `Image` with an explicitly linear unorm or float format; alpha remains linear.
+- ImPlot live axis linking (`PlotUi::setup_axis_links` and `set_next_axis_links`) now requires `unsafe`. Linked limit storage must remain valid at stable addresses with no conflicting access until the affected plot/axis links and pending next-plot links are explicitly cleared, or the `PlotContext` is destroyed. `EndPlot` alone does not generally release links; disabled secondary axes can retain them across later plots. Prefer copied `setup_x_axis_limits` / `setup_y_axis_limits` when writeback is unnecessary. The unchecked variants additionally require a valid enabled raw axis.
+- CTE tab sizes are restricted to 1 through 255. The editor getter now preserves exact text without appending LF; remove workarounds that trimmed the former extra newline.
+- Source-provider tools must replace the removed `ProviderTransform::PatchCteTextEditorWideGlyphs` and `PatchCteTextDiffWideGlyphs` branches with support for `PatchCteUnicodeRangeLookup`. Rebuild custom native archives for 0.20.0; older core and extension artifacts are rejected by version and binding provenance checks.
+- Regenerated raw bindings reflect the matching native headers; some opaque sys types no longer implement `Copy` or `Clone`. Keep those values behind the native ownership APIs instead of copying their storage.
+- CTE raw `Glyph` adds `columns: u8` and changes `squiggle` from `usize` to `u32`. Replace `TextEditor_SetText` calls with `TextEditor_SetText_std_string_view`; `TextEditor_AddNextOccurrence`, `TextEditor_SelectAllOccurrences`, `TextEditor_FindWordStart`, and `TextEditor_FindWordEnd` now take a `wholeWord` argument. The safe wrapper retains its existing methods and adds explicit whole-word variants. Regenerate custom raw bindings and rebuild CTE-enabled WASM providers against the matching headers.
+- The new DX12, Metal, and Cocoa integrations are unsafe raw sys shims, not safe renderer adapters. DX12 requires stable descriptor allocator callbacks and GPU completion before shutdown. All native shim features are rejected on `wasm32-unknown-unknown`; shims compile locally even when the core uses a prebuilt archive. See [the backend shim guide](BACKEND_SHIMS.md) for target and ownership requirements.
 
 ## 0.19 Stable Release
 

@@ -22,6 +22,10 @@ This sample is intentionally:
 
 ## Build Targets
 
+Use macOS with Xcode and the matching iOS SDK installed. Run the commands below
+from the workspace root. Cargo builds the Rust static library; use the checked-in
+Xcode host to build and launch an app bundle.
+
 Install the Rust std targets you need:
 
 ```bash
@@ -116,6 +120,11 @@ open examples-ios/dear-imgui-ios-smoke/xcode-host/DearImguiIosSmokeHost.xcodepro
 
 ## Notes
 
+- UI coordinates and font sizes use logical points; Retina pixel density stays
+  in framebuffer scaling. The panel and demo share the client area and are
+  rearranged when its size changes, including rotation.
+- The WGPU renderer processes the managed frame's texture requests, including
+  dynamic font-atlas updates. This route does not use the raw native Metal shim.
 - This smoke sample requests redraw continuously and is meant only as a proof-of-shape.
 - The sample uses `winit` iOS window attributes to hide the status bar and
   prefer deferred system gestures.

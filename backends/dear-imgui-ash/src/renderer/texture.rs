@@ -495,12 +495,11 @@ impl AshRenderer {
 
     /// Update a single texture manually.
     ///
-    /// This mirrors the `dear-imgui-wgpu` API and is useful when the texture is not registered
-    /// in ImGui's `PlatformIO.Textures[]` list (e.g. user-created `ImTextureData` that isn't
-    /// registered via ImGui's experimental `RegisterUserTexture()` API).
-    ///
-    /// Call this before rendering if you pass `&mut TextureData` to widgets (e.g. `ui.image()`),
-    /// otherwise `ImDrawCmd_GetTexID()` may assert if `TexID` is still invalid.
+    /// This is a legacy escape hatch for an unregistered `TextureData`. Apply the returned
+    /// transition to that exact texture through unsafe `TextureUpdateResult::apply_to_texture`.
+    /// Safe image widgets do not accept borrowed `TextureData`; normal applications should
+    /// register `OwnedTextureData` with the Context and let [`Self::prepare_frame`] reconcile
+    /// request-bound feedback instead.
     ///
     /// This operation may replace or destroy Vulkan resources. Any recorded but unsubmitted
     /// command buffer that references those resources becomes invalid and must never be submitted;

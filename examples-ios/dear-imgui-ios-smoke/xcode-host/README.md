@@ -25,8 +25,10 @@ Support files:
 
 ## Open In Xcode
 
+Run these commands on macOS from the workspace root.
+
 ```bash
-open DearImguiIosSmokeHost.xcodeproj
+open examples-ios/dear-imgui-ios-smoke/xcode-host/DearImguiIosSmokeHost.xcodeproj
 ```
 
 ## Build From The Command Line
@@ -35,7 +37,7 @@ Recommended simulator build:
 
 ```bash
 xcodebuild \
-  -project DearImguiIosSmokeHost.xcodeproj \
+  -project examples-ios/dear-imgui-ios-smoke/xcode-host/DearImguiIosSmokeHost.xcodeproj \
   -target DearImguiIosSmokeHost \
   -configuration Debug \
   -sdk iphonesimulator \
