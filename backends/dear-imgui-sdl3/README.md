@@ -330,8 +330,9 @@ Build behavior is aligned with `Cargo.toml`:
 2. `DEP_SDL3_INCLUDE_PATH` / `DEP_SDL3_INCLUDE_DIR` from an upstream SDL3 build
    script, when present.
 3. `DEP_SDL3_OUT_DIR/include` from `sdl3-sys` build-from-source.
-4. Cargo's target `build/sdl3-sys-*/out/include` cache, used as a fallback when
-   Cargo metadata is not directly available to the current build script.
+4. Cargo's build cache, used as a fallback when dependency metadata is not directly
+   available: `build/sdl3-sys-*/out/include` on older Cargo versions, or
+   `build/sdl3-sys/*/out/include` on Cargo 1.100 and newer.
 5. `pkg-config sdl3` with Cargo link metadata disabled.
 6. vcpkg `sdl3` with Cargo link metadata disabled.
 7. A small set of common default paths (e.g. `/opt/homebrew/include`,

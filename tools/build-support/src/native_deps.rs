@@ -396,6 +396,20 @@ fn find_cargo_target_include(out_dir: &Path, dir_prefix: &str, header: &str) -> 
     let entries = std::fs::read_dir(&cargo_build_dir).ok()?;
     for entry in entries.flatten() {
         let file_name = entry.file_name();
+        if let Some(package_name) = dir_prefix.strip_suffix('-')
+            && file_name == package_name
+        {
+            // Cargo 1.100 groups build units under the package name.
+            let Ok(units) = std::fs::read_dir(entry.path()) else {
+                continue;
+            };
+            for unit in units.flatten() {
+                let include_root = unit.path().join("out/include");
+                if include_root_has_header(&include_root, header) {
+                    return Some(include_root);
+                }
+            }
+        }
         if !file_name.to_string_lossy().starts_with(dir_prefix) {
             continue;
         }
@@ -696,19 +710,24 @@ mod tests {
     fn sdl3_cargo_target_include_is_used_after_env_vars() {
         let _lock = lock_sdl3_env();
         let _env = EnvSnapshot::clear_sdl3_vars();
-        let root = unique_tmp_dir("sdl3-target-dir");
-        let build_dir = root.join("target").join("debug").join("build");
-        let current_out_dir = build_dir.join("current-crate").join("out");
-        let sdl3_include_root = build_dir.join("sdl3-sys-test").join("out").join("include");
-        std::fs::create_dir_all(&current_out_dir).unwrap();
-        write_sdl3_header(&sdl3_include_root);
+        for (current_unit, sdl3_unit) in [
+            ("current-crate-test", "sdl3-sys-test"),
+            ("current-crate/test", "sdl3-sys/test"),
+        ] {
+            let root = unique_tmp_dir("sdl3-target-dir");
+            let build_dir = root.join("target/debug/build");
+            let current_out_dir = build_dir.join(current_unit).join("out");
+            let sdl3_include_root = build_dir.join(sdl3_unit).join("out/include");
+            std::fs::create_dir_all(&current_out_dir).unwrap();
+            write_sdl3_header(&sdl3_include_root);
 
-        let found = sdl3_search(&current_out_dir);
+            let found = sdl3_search(&current_out_dir);
 
-        assert_eq!(found.include_paths, vec![sdl3_include_root.clone()]);
-        assert!(found.source.starts_with("Cargo target dir="));
+            assert_eq!(found.include_paths, vec![sdl3_include_root.clone()]);
+            assert!(found.source.starts_with("Cargo target dir="));
 
-        let _ = std::fs::remove_dir_all(&root);
+            let _ = std::fs::remove_dir_all(&root);
+        }
     }
 
     #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]

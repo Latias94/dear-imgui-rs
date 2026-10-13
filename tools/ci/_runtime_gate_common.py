@@ -234,7 +234,11 @@ def _sdl3_runtime_library_directories(workspace_root: Path) -> tuple[Path, ...]:
     build_root = _target_directory(workspace_root) / "debug" / "build"
     directories = {
         library.parent.resolve()
-        for library in build_root.glob("sdl3-sys-*/out/**/libSDL3.so.0")
+        for pattern in (
+            "sdl3-sys-*/out/**/libSDL3.so.0",
+            "sdl3-sys/*/out/**/libSDL3.so.0",
+        )
+        for library in build_root.glob(pattern)
         if library.is_file()
     }
     if not directories:

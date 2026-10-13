@@ -37,6 +37,9 @@ rustup target add wasm32-unknown-unknown
 # In an emsdk checkout, install and activate 5.0.1, then load its environment.
 ```
 
+When testing with Rust 1.100 or newer, use cargo-nextest 0.9.143 or newer. Earlier
+nextest versions can fail to locate dynamic libraries in Cargo's new build layout.
+
 `release-check` builds native code and offline consumers; the host needs its
 C++ compiler and any dependencies required by the selected platform profiles.
 The package gate intentionally uses a clean clone and isolated consumers so

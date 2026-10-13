@@ -499,7 +499,7 @@ fn docsrs_build(cfg: &BuildConfig, cimplot3d_root: &Path, imgui_src: &Path, cimg
         panic!(
             "DOCS_RS build: Required headers not found and no pregenerated bindings present.\n\
              Please add src/bindings_pregenerated.rs (full bindgen output) to enable docs.rs builds.\n\
-             Run: cargo build -p dear-implot3d-sys && cp target/debug/build/dear-implot3d-sys-*/out/bindings.rs extensions/dear-implot3d-sys/src/bindings_pregenerated.rs"
+             From the repository root, run: cargo run -p xtask -- verify-bindings --update"
         );
     }
     generate_bindings(cfg, cimplot3d_root, imgui_src, cimgui_root);

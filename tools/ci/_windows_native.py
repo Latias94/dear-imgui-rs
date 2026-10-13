@@ -548,9 +548,11 @@ def restore_cached_sdl3_runtime(
         sorted(
             (
                 path
-                for path in (
-                    profile_directory / "build"
-                ).glob(f"sdl3-sys-*/out/bin/{_SDL3_RUNTIME_NAME}")
+                for pattern in (
+                    f"sdl3-sys-*/out/bin/{_SDL3_RUNTIME_NAME}",
+                    f"sdl3-sys/*/out/bin/{_SDL3_RUNTIME_NAME}",
+                )
+                for path in (profile_directory / "build").glob(pattern)
                 if path.is_file()
             ),
             key=lambda path: (path.as_posix().casefold(), path.as_posix()),
@@ -609,7 +611,7 @@ def find_windows_test_executables(
     deps_directory: PathInput,
     patterns: Sequence[str],
 ) -> tuple[Path, ...]:
-    """Resolve every explicit PE sentinel pattern and return a stable union."""
+    """Resolve PE sentinels in both Cargo layouts and return a stable union."""
     directory = Path(deps_directory)
     if not patterns:
         raise MissingTestBinaryError("at least one PE test-binary pattern is required")
@@ -619,6 +621,12 @@ def find_windows_test_executables(
         if not pattern:
             raise MissingTestBinaryError("PE test-binary patterns must not be empty")
         matches = tuple(path for path in directory.glob(pattern) if path.is_file())
+        if directory.name == "deps":
+            matches += tuple(
+                path
+                for path in (directory.parent / "build").glob(f"*/*/out/{pattern}")
+                if path.is_file()
+            )
         if not matches:
             raise MissingTestBinaryError(
                 f"no test binaries matched pattern {pattern!r} in {directory}"
