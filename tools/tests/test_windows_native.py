@@ -168,6 +168,18 @@ class Sdl3RuntimeTests(unittest.TestCase):
 
             self.assertEqual(restored.read_bytes(), b"MZ-first")
 
+    def test_restores_cargo_v2_runtime_without_legacy_cache(self):
+        with TemporaryDirectory() as temporary:
+            target = Path(temporary) / "target"
+            cached = target / "release/build/sdl3-sys/unit/out/bin/SDL3.dll"
+            cached.parent.mkdir(parents=True)
+            cached.write_bytes(b"MZ-v2-sdl3")
+
+            restored = WINDOWS_NATIVE.restore_cached_sdl3_runtime(target, "release")
+
+            self.assertEqual(restored, target / "release/SDL3.dll")
+            self.assertEqual(restored.read_bytes(), b"MZ-v2-sdl3")
+
     def test_rejects_missing_or_empty_cached_runtime(self):
         with TemporaryDirectory() as temporary:
             target = Path(temporary) / "target"
@@ -390,6 +402,36 @@ class MinGwEnvironmentTests(unittest.TestCase):
 
 
 class WindowsPeEvidenceTests(unittest.TestCase):
+    def test_discovers_v2_sentinels_without_a_legacy_deps_directory(self):
+        with TemporaryDirectory() as temporary:
+            profile = Path(temporary) / "target/x86_64-pc-windows-gnu/debug"
+            core = profile / "build/dear-imgui-sys/unit/out/numeric_contract-core.exe"
+            implot = (
+                profile / "build/dear-implot-sys/unit/out/native_link_implot-smoke.exe"
+            )
+            for binary in (core, implot):
+                binary.parent.mkdir(parents=True)
+                binary.touch()
+            unrelated = (
+                profile / "build/dear-imgui-sys/unit/run/numeric_contract-stale.exe"
+            )
+            unrelated.parent.mkdir()
+            unrelated.touch()
+
+            binaries = WINDOWS_NATIVE.find_windows_test_executables(
+                profile / "deps",
+                ("numeric_contract-*.exe", "native_link_implot-*.exe"),
+            )
+
+            self.assertEqual(binaries, (implot, core))
+            with self.assertRaisesRegex(
+                WINDOWS_NATIVE.MissingTestBinaryError, "native_link_imnodes"
+            ):
+                WINDOWS_NATIVE.find_windows_test_executables(
+                    profile / "deps",
+                    ("numeric_contract-*.exe", "native_link_imnodes-*.exe"),
+                )
+
     def test_explicit_patterns_require_every_sentinel_and_deduplicate(self):
         with TemporaryDirectory() as temporary:
             deps = Path(temporary)

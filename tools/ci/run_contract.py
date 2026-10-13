@@ -639,7 +639,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--binary-pattern",
         action="append",
         required=True,
-        help="Glob relative to --deps; repeat once per required sentinel",
+        help="Glob in --deps or adjacent Cargo build units; repeat per sentinel",
     )
     pe_evidence.add_argument("--require-import", action="append", default=[])
     pe_evidence.add_argument("--forbid-import", action="append", default=[])

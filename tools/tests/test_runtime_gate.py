@@ -21,6 +21,38 @@ PROCESS = importlib.import_module("_process")
 CANDIDATE_SHA = "a" * 40
 
 
+class Sdl3RuntimeDiscoveryTests(unittest.TestCase):
+    def test_discovers_each_cargo_layout_without_other_cached_units(self):
+        for unit in ("sdl3-sys-unit", "sdl3-sys/unit"):
+            with self.subTest(unit=unit), TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                target = root / "custom-target"
+                library = target / "debug/build" / unit / "out/lib/libSDL3.so.0"
+                library.parent.mkdir(parents=True)
+                library.write_bytes(b"SDL3 runtime")
+                with patch.dict(os.environ, {"CARGO_TARGET_DIR": str(target)}):
+                    directories = COMMON._sdl3_runtime_library_directories(root)
+
+                self.assertEqual(directories, (library.parent.resolve(),))
+
+    def test_rejects_unrelated_package_or_build_cache_files(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "target"
+            for relative in (
+                "other-sys/unit/out/lib/libSDL3.so.0",
+                "sdl3-sys/unit/run/libSDL3.so.0",
+            ):
+                library = target / "debug/build" / relative
+                library.parent.mkdir(parents=True)
+                library.write_bytes(b"unrelated runtime")
+            with patch.dict(os.environ, {"CARGO_TARGET_DIR": str(target)}):
+                with self.assertRaisesRegex(
+                    COMMON.RuntimeContractError, "without producing the bundled SDL3"
+                ):
+                    COMMON._sdl3_runtime_library_directories(root)
+
+
 def bounded_result(
     *,
     stdout_log: Path,
