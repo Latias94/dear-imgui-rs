@@ -36,21 +36,25 @@ impl WinitPlatformControl {
         focused: bool,
         context: &mut Context,
     ) -> WinitEventForwarding {
-        if !focused {
+        let released_touch = if !focused {
             context
                 .binding()
-                .with_bound_context(|| self.release_single_touch_in_current_context());
-        }
-        events::handle_focused(focused, context)
+                .with_bound_context(|| self.release_single_touch_in_current_context())
+        } else {
+            false
+        };
+        let mut forwarded = events::handle_focused(focused, context);
+        forwarded.pointer |= released_touch;
+        forwarded
     }
 
-    pub(super) fn release_single_touch_in_current_context(&self) {
+    pub(super) fn release_single_touch_in_current_context(&self) -> bool {
         if self.active_touch.take().is_none() {
-            return;
+            return false;
         }
         let io = unsafe { dear_imgui_rs::sys::igGetIO_Nil() };
         if io.is_null() {
-            return;
+            return false;
         }
         unsafe {
             dear_imgui_rs::sys::ImGuiIO_AddMouseSourceEvent(
@@ -63,6 +67,7 @@ impl WinitPlatformControl {
                 false,
             );
         }
+        true
     }
 
     #[cfg(feature = "multi-viewport")]
@@ -125,7 +130,7 @@ impl WinitPlatformControl {
         window_id: winit::window::WindowId,
         focused: bool,
         context: &mut Context,
-    ) -> bool {
+    ) -> Option<bool> {
         let runtime = self
             .runtime
             .borrow()
@@ -133,10 +138,9 @@ impl WinitPlatformControl {
             .filter(|runtime| !runtime.is_released())
             .cloned();
         let Some(runtime) = runtime else {
-            return false;
+            return None;
         };
-        runtime.note_window_focus(window_id, focused, context);
-        true
+        Some(runtime.note_window_focus(window_id, focused, context))
     }
 
     #[cfg(feature = "multi-viewport")]
@@ -458,12 +462,12 @@ impl WinitPlatform {
             }
             WindowEvent::Focused(focused) => {
                 #[cfg(feature = "multi-viewport")]
-                if self
-                    .control
-                    .note_runtime_window_focus(window.id(), *focused, imgui_ctx)
+                if let Some(forwarded) =
+                    self.control
+                        .note_runtime_window_focus(window.id(), *focused, imgui_ctx)
                 {
                     return WinitEventForwarding {
-                        focus: true,
+                        focus: forwarded,
                         ..Default::default()
                     };
                 }
@@ -511,9 +515,14 @@ mod tests {
             platform.control.note_single_touch(&touch(7)),
             Some(events::TouchAction::Press)
         );
-        platform
+        let released = platform
             .control
             .handle_single_window_focus(false, &mut context);
+        assert!(released.focus && released.pointer);
+        let repeated = platform
+            .control
+            .handle_single_window_focus(false, &mut context);
+        assert!(!repeated.pointer);
         platform
             .control
             .handle_single_window_focus(true, &mut context);

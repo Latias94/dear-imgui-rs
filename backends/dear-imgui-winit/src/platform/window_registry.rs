@@ -274,6 +274,28 @@ mod tests {
             platform.with_window(instance, Window::id),
             Ok(Some(window.id()))
         );
+        let pressed = platform
+            .handle_window_event(
+                &mut context,
+                window.id(),
+                &winit::event::WindowEvent::Touch(winit::event::Touch {
+                    device_id: winit::event::DeviceId::dummy(),
+                    phase: winit::event::TouchPhase::Started,
+                    location: winit::dpi::PhysicalPosition::new(40.0, 60.0),
+                    force: None,
+                    id: 7,
+                }),
+            )
+            .unwrap();
+        assert!(pressed.forwarded.pointer);
+        let released = platform
+            .handle_window_event(
+                &mut context,
+                window.id(),
+                &winit::event::WindowEvent::Focused(false),
+            )
+            .unwrap();
+        assert!(released.forwarded.focus && released.forwarded.pointer);
 
         platform
             .attach_window(Arc::clone(&window), crate::HiDpiMode::Default, &mut context)

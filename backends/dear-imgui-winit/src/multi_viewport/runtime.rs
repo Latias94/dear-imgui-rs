@@ -821,7 +821,7 @@ impl RuntimeControl {
         window_id: WindowId,
         focused: bool,
         context: &mut Context,
-    ) {
+    ) -> bool {
         let mut platform_focus = self.platform_focus.get();
         platform_focus.note_native_event(focused);
         self.platform_focus.set(platform_focus);
@@ -831,6 +831,9 @@ impl RuntimeControl {
             .note_window_focus(window_id, focused)
         {
             context.io_mut().add_focus_event(true);
+            true
+        } else {
+            false
         }
     }
 

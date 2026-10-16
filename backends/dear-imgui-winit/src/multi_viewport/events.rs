@@ -148,13 +148,10 @@ pub(crate) fn route_secondary_window_event(
                     control.note_cursor_available();
                     WinitEventForwarding::default()
                 }
-                WindowEvent::Focused(focused) => {
-                    control.note_window_focus(window_id, *focused, context);
-                    WinitEventForwarding {
-                        focus: true,
-                        ..Default::default()
-                    }
-                }
+                WindowEvent::Focused(focused) => WinitEventForwarding {
+                    focus: control.note_window_focus(window_id, *focused, context),
+                    ..Default::default()
+                },
                 WindowEvent::Ime(ime) => crate::events::handle_ime_event(ime, context),
                 WindowEvent::Touch(touch) => {
                     let mut forwarded = WinitEventForwarding::default();
