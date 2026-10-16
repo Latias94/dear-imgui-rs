@@ -30,6 +30,8 @@ pub struct AppConfig {
     pub clear_color: [f32; 4],
     pub wgpu: WgpuConfig,
     pub docking: DockingConfig,
+    /// Enables native secondary windows. Requires the `multi-viewport` Cargo feature.
+    pub multi_viewport: bool,
     pub addons: AddOnsConfig,
     pub ini_filename: Option<PathBuf>,
     pub restore_previous_geometry: bool,
@@ -49,6 +51,7 @@ impl Default for AppConfig {
             clear_color: [0.1, 0.2, 0.3, 1.0],
             wgpu: WgpuConfig::default(),
             docking: DockingConfig::default(),
+            multi_viewport: false,
             addons: AddOnsConfig::default(),
             ini_filename: None,
             restore_previous_geometry: true,

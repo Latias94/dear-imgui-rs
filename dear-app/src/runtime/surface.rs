@@ -28,7 +28,10 @@ impl SurfaceAdmissionBackend for RuntimeSurfaceAdmission<'_> {
     type Frame = wgpu::SurfaceTexture;
 
     fn acquire(&mut self) -> SurfaceAcquisition<Self::Frame> {
-        match self.window.surface.get_current_texture() {
+        let Some(surface) = self.window.surface.as_ref() else {
+            return SurfaceAcquisition::Validation;
+        };
+        match surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => SurfaceAcquisition::Success(frame),
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => SurfaceAcquisition::Suboptimal(frame),
             wgpu::CurrentSurfaceTexture::Lost => SurfaceAcquisition::Lost,
@@ -249,7 +252,22 @@ pub(super) fn render_surface_frame<A: Application>(
     application: &mut A,
     config: &AppConfig,
     wake: &crate::AppWakeHandle,
+    event_loop: &winit::event_loop::ActiveEventLoop,
 ) -> Result<SurfaceDispatch<bool>, RunError> {
+    #[cfg(feature = "multi-viewport")]
+    if config.multi_viewport {
+        return super::multi_viewport::render_frame(
+            ownership,
+            clear_color,
+            admitted_frame_count,
+            application,
+            config,
+            wake,
+            event_loop,
+        );
+    }
+    #[cfg(not(feature = "multi-viewport"))]
+    let _ = event_loop;
     let admitted = {
         let RuntimeOwnership {
             window,
@@ -275,64 +293,8 @@ pub(super) fn render_surface_frame<A: Application>(
                 .ok_or_else(|| RunError::Recovery {
                     message: "render requested without an active GPU generation".to_owned(),
                 })?;
-            let UiState {
-                context,
-                platform,
-                #[cfg(feature = "implot")]
-                implot,
-                #[cfg(feature = "imnodes")]
-                imnodes,
-                #[cfg(feature = "implot3d")]
-                implot3d,
-                docking,
-            } = ui;
-
-            super::state::run_application_frame_boundary(
-                context,
-                ApplicationStage::PrepareFrame,
-                |context| {
-                    let mut prepare_frame = PrepareFrameContext {
-                        imgui: context,
-                        window: &window.window,
-                    };
-                    application.prepare_frame(&mut prepare_frame)
-                },
-            )?;
-            super::state::validate_supported_imgui_config(context)?;
-            platform
-                .prepare_frame(context, &window.window)
-                .map_err(|error| super::state::platform_error("Winit frame preparation", error))?;
-            let mut exit_requested = false;
-            let frame = build_frame(context, |ui| {
-                draw_dockspace(ui, docking.flags, config)?;
-                let addons = AddOns {
-                    #[cfg(feature = "implot")]
-                    implot: implot.as_ref(),
-                    #[cfg(feature = "imnodes")]
-                    imnodes: imnodes.as_ref(),
-                    #[cfg(feature = "implot3d")]
-                    implot3d: implot3d.as_ref(),
-                    docking: DockingApi {
-                        controller: docking,
-                    },
-                };
-                let mut frame = FrameContext {
-                    ui,
-                    addons,
-                    gpu: generation.api(),
-                    exit_requested: &mut exit_requested,
-                    wake,
-                };
-                application
-                    .frame(&mut frame)
-                    .map_err(|error| error.during_application_stage(ApplicationStage::Frame))?;
-                platform
-                    .prepare_render(ui, &window.window)
-                    .map_err(|error| {
-                        super::state::platform_error("Winit render preparation", error)
-                    })?;
-                Ok(())
-            })?;
+            let (frame, exit_requested) =
+                build_application_frame(ui, generation, window, application, config, wake)?;
 
             let generation = generations
                 .current_mut()
@@ -364,8 +326,9 @@ pub(super) fn render_surface_frame<A: Application>(
             application
                 .record_render(&mut render_context)
                 .map_err(|error| error.during_application_stage(ApplicationStage::RecordRender))?;
+            let renderer = gpu.renderer.single_mut()?;
             let mut driver = AdmittedWgpuFrameDriver::new(
-                &mut gpu.renderer,
+                renderer,
                 &gpu.queue,
                 admitted.frame,
                 clear_color,
@@ -380,6 +343,74 @@ pub(super) fn render_surface_frame<A: Application>(
             Ok(exit_requested)
         })?;
     Ok(dispatch)
+}
+
+pub(super) fn build_application_frame<'ctx, A: Application>(
+    ui: &'ctx mut UiState,
+    generation: &mut RuntimeGeneration,
+    window: &WindowState,
+    application: &mut A,
+    config: &AppConfig,
+    wake: &crate::AppWakeHandle,
+) -> Result<(FrameToken<'ctx>, bool), RunError> {
+    let UiState {
+        context,
+        platform,
+        #[cfg(feature = "implot")]
+        implot,
+        #[cfg(feature = "imnodes")]
+        imnodes,
+        #[cfg(feature = "implot3d")]
+        implot3d,
+        docking,
+        multi_viewport,
+    } = ui;
+
+    super::state::run_application_frame_boundary(
+        context,
+        ApplicationStage::PrepareFrame,
+        |context| {
+            let mut prepare_frame = PrepareFrameContext {
+                imgui: context,
+                window: &window.window,
+            };
+            application.prepare_frame(&mut prepare_frame)
+        },
+    )?;
+    super::state::validate_supported_imgui_config(context, *multi_viewport)?;
+    platform
+        .prepare_frame(context, &window.window)
+        .map_err(|error| super::state::platform_error("Winit frame preparation", error))?;
+    let mut exit_requested = false;
+    let frame = build_frame(context, |ui| {
+        draw_dockspace(ui, docking.flags, config)?;
+        let addons = AddOns {
+            #[cfg(feature = "implot")]
+            implot: implot.as_ref(),
+            #[cfg(feature = "imnodes")]
+            imnodes: imnodes.as_ref(),
+            #[cfg(feature = "implot3d")]
+            implot3d: implot3d.as_ref(),
+            docking: DockingApi {
+                controller: docking,
+            },
+        };
+        let mut frame = FrameContext {
+            ui,
+            addons,
+            gpu: generation.api(),
+            exit_requested: &mut exit_requested,
+            wake,
+        };
+        application
+            .frame(&mut frame)
+            .map_err(|error| error.during_application_stage(ApplicationStage::Frame))?;
+        platform
+            .prepare_render(ui, &window.window)
+            .map_err(|error| super::state::platform_error("Winit render preparation", error))?;
+        Ok(())
+    })?;
+    Ok((frame, exit_requested))
 }
 
 pub(super) fn build_frame<'ctx>(

@@ -8,14 +8,12 @@ mod tests {
 
     use dear_imgui_rs::FrameLifecycleState;
     use winit::error::EventLoopError;
-    use winit::window::WindowId;
 
     use crate::runtime::ownership::{OrderedRuntimeOwner, RuntimeOwnershipLifecycle};
     use crate::runtime::runner::{
-        GpuFaultDisposition, RunnerOwnership, classify_uncaptured_gpu_fault,
-        dispatch_live_window_event, earliest_deadline, initialize_runtime_once,
-        should_process_runtime_event, uncaptured_gpu_fault, validate_config,
-        window_event_requests_redraw,
+        GpuFaultDisposition, RunnerOwnership, classify_uncaptured_gpu_fault, earliest_deadline,
+        initialize_runtime_once, should_process_runtime_event, uncaptured_gpu_fault,
+        validate_config, window_event_requests_redraw,
     };
     use crate::runtime::shutdown::{
         RuntimeShutdownErrors, ShutdownCoordinator, finish_runtime_shutdown, resolve_run_result,
@@ -480,6 +478,28 @@ mod tests {
     }
 
     #[test]
+    fn native_viewport_opt_in_requires_the_compiled_route() {
+        let config = AppConfig {
+            multi_viewport: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            validate_config(&config).is_ok(),
+            cfg!(feature = "multi-viewport")
+        );
+    }
+
+    #[test]
+    fn callbacks_cannot_disable_an_enabled_native_route() {
+        let _guard = super::super::imgui_test_guard();
+        let context = dear_imgui_rs::Context::create();
+        assert!(matches!(
+            super::super::state::validate_supported_imgui_config(&context, true),
+            Err(RunError::MultiViewportUnsupported)
+        ));
+    }
+
+    #[test]
     fn live_context_rejects_multi_viewport_enabled_by_application_callbacks() {
         let _guard = super::super::imgui_test_guard();
         let mut context = dear_imgui_rs::Context::create();
@@ -488,7 +508,7 @@ mod tests {
         context.io_mut().set_config_flags(flags);
 
         assert!(matches!(
-            super::super::state::validate_supported_imgui_config(&context),
+            super::super::state::validate_supported_imgui_config(&context, false),
             Err(RunError::MultiViewportUnsupported)
         ));
     }
@@ -552,31 +572,6 @@ mod tests {
         );
         assert_eq!(calls.get(), 1);
         assert!(runtime.is_none());
-    }
-
-    #[test]
-    fn only_the_live_window_id_dispatches_an_event() {
-        let live = WindowId::from(41_u64);
-        let foreign = WindowId::from(42_u64);
-        let calls = Cell::new(0);
-
-        assert_eq!(
-            dispatch_live_window_event(live, foreign, || {
-                calls.set(calls.get() + 1);
-                "foreign"
-            }),
-            None
-        );
-        assert_eq!(calls.get(), 0);
-
-        assert_eq!(
-            dispatch_live_window_event(live, live, || {
-                calls.set(calls.get() + 1);
-                "live"
-            }),
-            Some("live")
-        );
-        assert_eq!(calls.get(), 1);
     }
 
     #[test]

@@ -112,7 +112,10 @@ fn release_then_teardown_or_quarantine<T: RuntimeOwnershipLifecycle>(
 
 impl RuntimeOwnershipLifecycle for RuntimeOwnership {
     fn release_renderer(&mut self) -> Result<(), RunError> {
-        let mut release = RuntimeRelease { ui: &mut self.ui };
+        let mut release = RuntimeRelease {
+            ui: &mut self.ui,
+            window: &mut self.window,
+        };
         self.generations.shutdown(&mut release)
     }
 
@@ -134,10 +137,13 @@ impl RuntimeOwnershipLifecycle for RuntimeOwnership {
 
 struct RuntimeRelease<'a> {
     ui: &'a mut UiState,
+    window: &'a mut WindowState,
 }
 
 impl GenerationRelease<RuntimeGeneration> for RuntimeRelease<'_> {
     fn release_generation(&mut self, generation: &mut RuntimeGeneration) -> Result<(), RunError> {
-        generation.gpu.release_renderer(&mut self.ui.context)
+        generation
+            .gpu
+            .release_renderer(&mut self.ui.context, self.window)
     }
 }

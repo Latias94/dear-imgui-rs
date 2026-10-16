@@ -1,7 +1,10 @@
 mod admission;
 mod lifecycle;
+#[cfg(feature = "multi-viewport")]
+mod multi_viewport;
 mod ownership;
 mod recovery;
+pub(crate) mod renderer;
 mod runner;
 #[cfg(test)]
 mod runner_tests;

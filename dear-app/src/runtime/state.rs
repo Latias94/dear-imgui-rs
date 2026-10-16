@@ -1,7 +1,7 @@
 use std::{
     panic::{AssertUnwindSafe, catch_unwind},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
 };
@@ -22,6 +22,8 @@ use crate::{
 };
 
 use super::recovery::OwnedGpuGeneration;
+
+const GPU_RELEASE_WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub(crate) fn platform_error(
     operation: &'static str,
@@ -178,11 +180,15 @@ fn initialize_configured_ui<A, P>(
     Ok((context, platform))
 }
 
-pub(crate) fn validate_supported_imgui_config(context: &imgui::Context) -> Result<(), RunError> {
+pub(crate) fn validate_supported_imgui_config(
+    context: &imgui::Context,
+    multi_viewport: bool,
+) -> Result<(), RunError> {
     if context
         .io()
         .config_flags()
         .contains(ConfigFlags::VIEWPORTS_ENABLE)
+        != multi_viewport
     {
         return Err(RunError::MultiViewportUnsupported);
     }
@@ -203,7 +209,7 @@ pub(crate) enum GpuFaultKind {
     Internal,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum RuntimeEvent {
     Wake,
     DeviceLost {
@@ -218,9 +224,10 @@ pub(crate) enum RuntimeEvent {
 }
 
 pub(crate) struct WindowState {
+    // Residual unconfigured surfaces from failed construction also release before native owners.
+    pub(crate) surface: Option<wgpu::Surface<'static>>,
     instance: wgpu::Instance,
     pub(crate) window: Arc<Window>,
-    pub(crate) surface: wgpu::Surface<'static>,
     pub(crate) surface_config: Option<wgpu::SurfaceConfiguration>,
 }
 
@@ -247,7 +254,7 @@ impl WindowState {
         Ok(Self {
             instance,
             window,
-            surface,
+            surface: Some(surface),
             surface_config: None,
         })
     }
@@ -258,7 +265,7 @@ impl WindowState {
         device: &wgpu::Device,
         config: &AppConfig,
     ) -> Result<wgpu::TextureFormat, RunError> {
-        let capabilities = self.surface.get_capabilities(adapter);
+        let capabilities = self.surface()?.get_capabilities(adapter);
         let current_format = self.surface_config.as_ref().map(|config| config.format);
         let preferred_srgb = [
             wgpu::TextureFormat::Bgra8UnormSrgb,
@@ -286,15 +293,33 @@ impl WindowState {
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
-        self.surface.configure(device, &surface_config);
+        self.surface()?.configure(device, &surface_config);
         self.surface_config = Some(surface_config);
         Ok(format)
     }
 
     pub(crate) fn reconfigure(&self, device: &wgpu::Device) {
-        if let Some(surface_config) = self.surface_config.as_ref() {
-            self.surface.configure(device, surface_config);
+        if let (Some(surface), Some(surface_config)) = (&self.surface, &self.surface_config) {
+            surface.configure(device, surface_config);
         }
+    }
+
+    pub(crate) fn surface(&self) -> Result<&wgpu::Surface<'static>, RunError> {
+        self.surface.as_ref().ok_or_else(|| RunError::Recovery {
+            message: "main surface is retired until a GPU generation creates its replacement"
+                .to_owned(),
+        })
+    }
+
+    fn ensure_surface(&mut self) -> Result<(), RunError> {
+        if self.surface.is_none() {
+            self.surface = Some(
+                self.instance
+                    .create_surface(Arc::clone(&self.window))
+                    .map_err(RunError::SurfaceCreation)?,
+            );
+        }
+        Ok(())
     }
 
     pub(crate) fn recreate_surface(
@@ -304,10 +329,11 @@ impl WindowState {
         config: &AppConfig,
     ) -> Result<(), RunError> {
         let previous_format = self.surface_config().map(|config| config.format)?;
-        self.surface = self
+        let replacement = self
             .instance
             .create_surface(self.window.clone())
             .map_err(RunError::SurfaceCreation)?;
+        drop(self.surface.replace(replacement));
         let replacement_format = self.configure_surface(adapter, device, config)?;
         if replacement_format != previous_format {
             return Err(RunError::SurfaceFormatChanged {
@@ -322,10 +348,10 @@ impl WindowState {
         if size.width == 0 || size.height == 0 {
             return;
         }
-        if let Some(surface_config) = self.surface_config.as_mut() {
+        if let (Some(surface), Some(surface_config)) = (&self.surface, &mut self.surface_config) {
             surface_config.width = size.width;
             surface_config.height = size.height;
-            self.surface.configure(device, surface_config);
+            surface.configure(device, surface_config);
         }
     }
 
@@ -341,6 +367,7 @@ impl WindowState {
 pub(crate) struct UiState {
     pub(crate) context: imgui::Context,
     pub(crate) platform: dear_imgui_winit::WinitPlatform,
+    pub(crate) multi_viewport: bool,
     #[cfg(feature = "implot")]
     pub(crate) implot: Option<implot::PlotContext>,
     #[cfg(feature = "imnodes")]
@@ -374,7 +401,7 @@ impl UiState {
                         application.configure_imgui(&mut init)
                     },
                 )?;
-                validate_supported_imgui_config(context)
+                validate_supported_imgui_config(context, config.multi_viewport)
             },
             |_, context| {
                 dear_imgui_winit::WinitPlatform::new(context)
@@ -387,7 +414,14 @@ impl UiState {
                         dear_imgui_winit::HiDpiMode::Default,
                         context,
                     )
-                    .map_err(|error| platform_error("Winit main-window attachment", error))
+                    .map_err(|error| platform_error("Winit main-window attachment", error))?;
+                #[cfg(feature = "multi-viewport")]
+                if config.multi_viewport {
+                    platform
+                        .enable_viewports(context)
+                        .map_err(|error| platform_error("Winit viewport initialization", error))?;
+                }
+                Ok(())
             },
             |application, context, error| {
                 abort_context_initialization(application, context, &window.window, error)
@@ -416,6 +450,7 @@ impl UiState {
         Ok(Self {
             context,
             platform,
+            multi_viewport: config.multi_viewport,
             #[cfg(feature = "implot")]
             implot,
             #[cfg(feature = "imnodes")]
@@ -449,6 +484,7 @@ impl UiState {
         let Self {
             context,
             platform,
+            multi_viewport: _,
             #[cfg(feature = "implot")]
             implot,
             #[cfg(feature = "imnodes")]
@@ -472,8 +508,9 @@ pub(crate) struct GpuState {
     pub(crate) adapter: wgpu::Adapter,
     pub(crate) device: wgpu::Device,
     pub(crate) queue: wgpu::Queue,
-    pub(crate) renderer: dear_imgui_wgpu::WgpuRenderer,
+    pub(crate) renderer: super::renderer::AppRenderer,
     device_lost: Arc<AtomicBool>,
+    pending_signals: Arc<Mutex<Vec<RuntimeEvent>>>,
     drain_panicked: bool,
 }
 
@@ -509,10 +546,69 @@ fn drain_gpu_submissions(
     }
 }
 
+fn drain_gpu_signal_mailbox(
+    mailbox: &Mutex<Vec<RuntimeEvent>>,
+    device_lost: &AtomicBool,
+    generation: GpuGeneration,
+) -> Vec<RuntimeEvent> {
+    let mut pending = mailbox
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut events = std::mem::take(&mut *pending);
+    // Validation is never evidence of loss. Only the exact generation's device-lost callback
+    // publishes this atomic, including when its Winit wake event has not been dispatched yet.
+    if device_lost.load(Ordering::Acquire)
+        && !events
+            .iter()
+            .any(|event| matches!(event, RuntimeEvent::DeviceLost { .. }))
+    {
+        events.push(RuntimeEvent::DeviceLost {
+            generation,
+            message: "device-lost callback confirmed loss before event dispatch".to_owned(),
+        });
+    }
+    events
+}
+
+fn release_renderer_and_surface<Surface>(
+    surface: &mut Option<Surface>,
+    release_renderer: impl FnOnce() -> Result<(), RunError>,
+) -> Result<(), RunError> {
+    release_renderer()?;
+    drop(surface.take());
+    Ok(())
+}
+
 impl GpuState {
+    pub(crate) fn take_pending_signals(
+        &self,
+        generation: GpuGeneration,
+        poll: bool,
+    ) -> Vec<RuntimeEvent> {
+        if poll {
+            // Surface rejection can precede Winit's delivery of the callback's user event. A
+            // non-blocking poll cannot dispatch DeviceLost until already queued work drains, so
+            // give this exact generation one bounded wait. Timeout preserves the original
+            // validation error; it is never treated as loss evidence.
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                self.device.poll(wgpu::PollType::Wait {
+                    submission_index: None,
+                    timeout: Some(std::time::Duration::from_millis(250)),
+                })
+            }));
+            if !matches!(result, Ok(Ok(_))) {
+                tracing::warn!(
+                    "GPU callback polling failed after render rejection; preserving the render error unless device loss was confirmed"
+                );
+            }
+        }
+        drain_gpu_signal_mailbox(&self.pending_signals, &self.device_lost, generation)
+    }
+
     pub(crate) fn release_renderer(
         &mut self,
         context: &mut imgui::Context,
+        window: &mut WindowState,
     ) -> Result<(), RunError> {
         // Flush uploads even if the application failed before its first rendered frame. Native
         // device errors can make WGPU's poll panic instead of returning PollError. Keep renderer
@@ -521,11 +617,20 @@ impl GpuState {
         let queue = &self.queue;
         drain_gpu_submissions(&self.device_lost, &mut self.drain_panicked, || {
             queue.submit(std::iter::empty());
-            device.poll(wgpu::PollType::wait_indefinitely()).map(|_| ())
+            // Renderer teardown must not block the event loop forever when a backend has stopped
+            // making progress. A device-loss callback skips this wait; a live device gets a
+            // bounded drain and reports a retryable GPU error on timeout.
+            device
+                .poll(wgpu::PollType::Wait {
+                    submission_index: None,
+                    timeout: Some(GPU_RELEASE_WAIT_TIMEOUT),
+                })
+                .map(|_| ())
         })?;
-        self.renderer
-            .shutdown(context)
-            .map_err(RunError::RendererRelease)
+        // A Surface retains WSI configuration for its Device. Destroy that configuration while
+        // its exact GPU generation still owns the Device, before teardown destroys the Device or
+        // any later generation can configure a replacement surface for the same native window.
+        release_renderer_and_surface(&mut window.surface, || self.renderer.shutdown(context))
     }
 
     pub(crate) fn teardown(self) {
@@ -535,6 +640,7 @@ impl GpuState {
             queue,
             renderer,
             device_lost: _,
+            pending_signals: _,
             drain_panicked: _,
         } = self;
         drop(renderer);
@@ -596,12 +702,13 @@ impl WgpuRuntimeFactory {
         event_proxy: EventLoopProxy<RuntimeEvent>,
         generation: GpuGeneration,
     ) -> Result<RuntimeGeneration, RunError> {
+        window.ensure_surface()?;
         let adapter = block_on(
             window
                 .instance
                 .request_adapter(&wgpu::RequestAdapterOptions {
                     power_preference: config.wgpu.power_preference,
-                    compatible_surface: Some(&window.surface),
+                    compatible_surface: Some(window.surface()?),
                     apply_limit_buckets: false,
                     force_fallback_adapter: config.wgpu.force_fallback_adapter,
                 }),
@@ -617,6 +724,8 @@ impl WgpuRuntimeFactory {
         let (device, queue) =
             block_on(adapter.request_device(&descriptor)).map_err(RunError::DeviceRequest)?;
 
+        let pending_signals = Arc::new(Mutex::new(Vec::new()));
+        let fault_signals = Arc::clone(&pending_signals);
         let fault_proxy = event_proxy.clone();
         device.on_uncaptured_error(std::sync::Arc::new(move |error| {
             let kind = match &error {
@@ -624,27 +733,81 @@ impl WgpuRuntimeFactory {
                 wgpu::Error::Validation { .. } => GpuFaultKind::Validation,
                 wgpu::Error::Internal { .. } => GpuFaultKind::Internal,
             };
-            let _ = fault_proxy.send_event(RuntimeEvent::GpuFault {
+            let signal = RuntimeEvent::GpuFault {
                 generation,
                 kind,
                 message: error.to_string(),
-            });
+            };
+            fault_signals
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(signal.clone());
+            let _ = fault_proxy.send_event(signal);
         }));
         let device_lost = Arc::new(AtomicBool::new(false));
         let callback_device_lost = Arc::clone(&device_lost);
+        let lost_signals = Arc::clone(&pending_signals);
         device.set_device_lost_callback(move |reason, message| {
-            callback_device_lost.store(true, Ordering::Release);
-            let _ = event_proxy.send_event(RuntimeEvent::DeviceLost {
+            let signal = RuntimeEvent::DeviceLost {
                 generation,
                 message: format!("{reason:?}: {message}"),
-            });
+            };
+            {
+                let mut pending = lost_signals
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                pending.push(signal.clone());
+                callback_device_lost.store(true, Ordering::Release);
+            }
+            let _ = event_proxy.send_event(signal);
         });
 
         let format = window.configure_surface(&adapter, &device, config)?;
         let init_info = dear_imgui_wgpu::WgpuInitInfo::new(device.clone(), queue.clone(), format);
+        #[cfg(feature = "multi-viewport")]
+        let init_info = if config.multi_viewport {
+            init_info
+                .with_instance(window.instance.clone())
+                .with_adapter(adapter.clone())
+        } else {
+            init_info
+        };
         let mut renderer = dear_imgui_wgpu::WgpuRenderer::new(init_info, &mut ui.context)
             .map_err(RunError::RendererInit)?;
         renderer.set_gamma_mode(dear_imgui_wgpu::GammaMode::Auto);
+        #[cfg(feature = "multi-viewport")]
+        renderer.set_viewport_clear_color(wgpu::Color {
+            r: config.clear_color[0] as f64,
+            g: config.clear_color[1] as f64,
+            b: config.clear_color[2] as f64,
+            a: config.clear_color[3] as f64,
+        });
+
+        #[cfg(feature = "multi-viewport")]
+        let renderer = if config.multi_viewport {
+            match dear_imgui_wgpu::multi_viewport::WinitViewportRoute::attach(
+                &mut ui.context,
+                &ui.platform,
+                renderer,
+            ) {
+                Ok(route) => super::renderer::AppRenderer::Multi(route),
+                Err(error) => {
+                    let (error, mut renderer) = error.into_parts();
+                    return Err(preserve_initialization_error(
+                        RunError::Viewport(error),
+                        || {
+                            renderer
+                                .shutdown(&mut ui.context)
+                                .map_err(RunError::RendererRelease)
+                        },
+                    ));
+                }
+            }
+        } else {
+            super::renderer::AppRenderer::Single(renderer)
+        };
+        #[cfg(not(feature = "multi-viewport"))]
+        let renderer = super::renderer::AppRenderer::Single(renderer);
 
         Ok(RuntimeGeneration {
             id: generation,
@@ -654,6 +817,7 @@ impl WgpuRuntimeFactory {
                 queue,
                 renderer,
                 device_lost,
+                pending_signals,
                 drain_panicked: false,
             },
         })
@@ -685,6 +849,9 @@ fn configure_context(context: &mut imgui::Context, config: &AppConfig) {
     if config.docking.is_enabled() {
         flags.insert(ConfigFlags::DOCKING_ENABLE);
     }
+    if config.multi_viewport {
+        flags.insert(ConfigFlags::VIEWPORTS_ENABLE);
+    }
     if let Some(extra) = config.io_config_flags {
         flags = ConfigFlags::from_bits_retain(flags.bits() | extra.bits());
     }
@@ -694,18 +861,124 @@ fn configure_context(context: &mut imgui::Context, config: &AppConfig) {
 #[cfg(test)]
 mod tests {
     use std::{
-        cell::Cell,
+        cell::{Cell, RefCell},
         rc::Rc,
-        sync::atomic::{AtomicBool, Ordering},
+        sync::{
+            Mutex,
+            atomic::{AtomicBool, Ordering},
+        },
     };
 
     use dear_imgui_rs::{FrameLifecycleState, FramePrepareOptions};
 
     use super::{
-        drain_gpu_submissions, initialize_configured_ui, platform_error,
-        preserve_initialization_error, run_application_frame_boundary,
+        drain_gpu_signal_mailbox, drain_gpu_submissions, initialize_configured_ui, platform_error,
+        preserve_initialization_error, release_renderer_and_surface,
+        run_application_frame_boundary,
     };
     use crate::{ApplicationStage, RunError};
+
+    #[test]
+    fn renderer_release_destroys_surface_before_its_device_owner() {
+        struct SurfaceProbe {
+            device_alive: Rc<Cell<bool>>,
+            released: Rc<Cell<bool>>,
+            events: Rc<RefCell<Vec<&'static str>>>,
+        }
+        impl Drop for SurfaceProbe {
+            fn drop(&mut self) {
+                assert!(
+                    self.device_alive.get(),
+                    "WSI configuration must release while its Device is alive"
+                );
+                self.released.set(true);
+                self.events.borrow_mut().push("surface");
+            }
+        }
+        struct DeviceProbe {
+            alive: Rc<Cell<bool>>,
+            surface_released: Rc<Cell<bool>>,
+            events: Rc<RefCell<Vec<&'static str>>>,
+        }
+        impl Drop for DeviceProbe {
+            fn drop(&mut self) {
+                assert!(
+                    self.surface_released.get(),
+                    "Device teardown must follow Surface retirement"
+                );
+                self.alive.set(false);
+                self.events.borrow_mut().push("device");
+            }
+        }
+        let alive = Rc::new(Cell::new(true));
+        let released = Rc::new(Cell::new(false));
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let device = DeviceProbe {
+            alive: Rc::clone(&alive),
+            surface_released: Rc::clone(&released),
+            events: Rc::clone(&events),
+        };
+        let mut surface = Some(SurfaceProbe {
+            device_alive: alive,
+            released,
+            events: Rc::clone(&events),
+        });
+        release_renderer_and_surface(&mut surface, || {
+            events.borrow_mut().push("renderer");
+            Ok(())
+        })
+        .unwrap();
+        assert!(surface.is_none());
+        drop(device);
+        assert_eq!(*events.borrow(), ["renderer", "surface", "device"]);
+    }
+
+    #[test]
+    fn renderer_release_failure_keeps_surface_for_the_same_live_generation() {
+        let mut surface = Some(41);
+        let result = release_renderer_and_surface(&mut surface, || {
+            Err(RunError::Recovery {
+                message: "renderer reset permit is still borrowed".to_owned(),
+            })
+        });
+        assert!(result.is_err());
+        assert_eq!(surface, Some(41));
+    }
+
+    #[test]
+    fn validation_signal_does_not_invent_device_loss() {
+        let generation = crate::GpuGeneration(4);
+        let pending = Mutex::new(vec![super::RuntimeEvent::GpuFault {
+            generation,
+            kind: super::GpuFaultKind::Validation,
+            message: "invalid commands".to_owned(),
+        }]);
+        let lost = AtomicBool::new(false);
+        let signals = drain_gpu_signal_mailbox(&pending, &lost, generation);
+        assert!(
+            matches!(signals.as_slice(), [super::RuntimeEvent::GpuFault { generation: actual, kind: super::GpuFaultKind::Validation, .. }] if *actual == generation)
+        );
+        assert!(drain_gpu_signal_mailbox(&pending, &lost, generation).is_empty());
+    }
+
+    #[test]
+    fn confirmed_loss_is_available_before_the_winit_event_is_dispatched() {
+        let generation = crate::GpuGeneration(5);
+        let pending = Mutex::new(vec![super::RuntimeEvent::DeviceLost {
+            generation,
+            message: "driver loss".to_owned(),
+        }]);
+        let lost = AtomicBool::new(true);
+        let signals = drain_gpu_signal_mailbox(&pending, &lost, generation);
+        assert!(
+            matches!(signals.as_slice(), [super::RuntimeEvent::DeviceLost { generation: actual, message }] if *actual == generation && message == "driver loss")
+        );
+        // The exact generation remains unusable even if a prior event-loop turn drained its wake.
+        let signals = drain_gpu_signal_mailbox(&pending, &lost, generation);
+        assert!(
+            matches!(signals.as_slice(), [super::RuntimeEvent::DeviceLost { generation: actual, .. }] if *actual == generation)
+        );
+    }
 
     #[test]
     fn known_device_loss_skips_gpu_submission_drain() {

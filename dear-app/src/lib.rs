@@ -19,6 +19,8 @@ mod config;
 mod runtime;
 mod wake;
 
+#[cfg(feature = "multi-viewport")]
+pub use application::ViewportFrameContext;
 pub use application::{
     AddOns, Application, ApplicationStage, DeviceEventContext, DockingApi, EventContext,
     ExternalTextureError, ExternalTextureHandle, FrameContext, GpuApi, GpuContext, GpuGeneration,
@@ -30,6 +32,9 @@ pub use config::{
 pub use dear_imgui_rs as imgui;
 #[cfg(feature = "test-engine")]
 pub use dear_imgui_test_engine as test_engine;
+pub use dear_imgui_winit::{
+    WinitCaptureIntent, WinitEventOutcome, WinitEventTarget, WinitPlatformAction,
+};
 pub use wake::{AppWakeClosed, AppWakeHandle};
 pub use wgpu;
 pub use winit::event_loop::DeviceEvents;

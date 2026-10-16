@@ -74,7 +74,11 @@ impl LifecycleMachine {
             SurfaceEvent::Lost => LifecycleAction::RecreateSurface,
             SurfaceEvent::Outdated => LifecycleAction::ReconfigureSurface,
             SurfaceEvent::Timeout | SurfaceEvent::Occluded => LifecycleAction::SkipFrame,
-            SurfaceEvent::Validation | SurfaceEvent::OutOfMemory => {
+            // Surface rejection can be the first observable consequence of device loss. The
+            // runner checks generation-specific callback evidence before committing failure;
+            // it calls fail() when validation is independent of device loss.
+            SurfaceEvent::Validation => LifecycleAction::Exit,
+            SurfaceEvent::OutOfMemory => {
                 self.state = RuntimeState::Failed;
                 LifecycleAction::Exit
             }
@@ -177,6 +181,11 @@ mod tests {
             lifecycle.surface_event(SurfaceEvent::Validation),
             LifecycleAction::Exit
         );
+        assert_eq!(
+            lifecycle.state(),
+            RuntimeState::Running(GpuGeneration::INITIAL)
+        );
+        lifecycle.fail(RunError::SurfaceValidation);
         assert_eq!(lifecycle.state(), RuntimeState::Failed);
 
         let mut out_of_memory = LifecycleMachine::new();
