@@ -1,6 +1,274 @@
 use super::*;
 use crate::texture::request_test_device;
 
+fn draw_managed_texels(ui: &dear_imgui_rs::Ui, texture: dear_imgui_rs::ManagedTextureId) {
+    let draw = ui.get_foreground_draw_list();
+    for (x, u) in [(0.0, 0.25), (8.0, 0.75)] {
+        draw.add_image(
+            texture,
+            [x, 0.0],
+            [x + 8.0, 16.0],
+            [u, 0.5],
+            [u, 0.5],
+            dear_imgui_rs::Color::WHITE,
+        );
+    }
+}
+
+fn register_red_texels(context: &mut Context) -> dear_imgui_rs::ManagedTextureId {
+    context.io_mut().set_display_size([16.0, 16.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
+    context.register_texture(
+        dear_imgui_rs::texture::OwnedTextureData::from_pixels(
+            dear_imgui_rs::texture::TextureFormat::RGBA32,
+            2,
+            1,
+            &[255, 0, 0, 255, 255, 0, 0, 255],
+        )
+        .unwrap(),
+    )
+}
+
+fn update_first_texel(context: &mut Context, texture: dear_imgui_rs::ManagedTextureId) {
+    use dear_imgui_rs::texture::{TextureRegion, TextureSubresource};
+    context
+        .try_with_texture_mut(texture, |mut texture| {
+            texture.update_subresource(TextureSubresource::new(
+                TextureRegion::new(0, 0, 1, 1).unwrap(),
+                4,
+                &[0, 0, 255, 255],
+            ))
+        })
+        .unwrap();
+}
+
+fn record_texture_readback(
+    device: &wgpu::Device,
+    record: impl FnOnce(&mut wgpu::RenderPass<'_>) -> RendererResult<()>,
+) -> RendererResult<(wgpu::CommandBuffer, wgpu::Buffer)> {
+    use crate::wgpu::*;
+    let output = device.create_texture(&TextureDescriptor {
+        label: Some("managed texture isolation target"),
+        size: Extent3d {
+            width: 16,
+            height: 16,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = output.create_view(&TextureViewDescriptor::default());
+    let readback = device.create_buffer(&BufferDescriptor {
+        label: Some("managed texture isolation readback"),
+        size: 256 * 16,
+        usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor::default());
+    {
+        let attachments = [Some(RenderPassColorAttachment {
+            view: &view,
+            resolve_target: None,
+            depth_slice: None,
+            ops: Operations {
+                load: LoadOp::Clear(Color::BLACK),
+                store: StoreOp::Store,
+            },
+        })];
+        let mut pass = encoder.begin_render_pass(&RenderPassDescriptor {
+            color_attachments: &attachments,
+            #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
+            multiview_mask: None,
+            ..Default::default()
+        });
+        record(&mut pass)?;
+    }
+    encoder.copy_texture_to_buffer(
+        TexelCopyTextureInfo {
+            texture: &output,
+            mip_level: 0,
+            origin: Origin3d::ZERO,
+            aspect: TextureAspect::All,
+        },
+        TexelCopyBufferInfo {
+            buffer: &readback,
+            layout: TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(256),
+                rows_per_image: Some(16),
+            },
+        },
+        Extent3d {
+            width: 16,
+            height: 16,
+            depth_or_array_layers: 1,
+        },
+    );
+    Ok((encoder.finish(), readback))
+}
+
+fn read_texture_texels(device: &wgpu::Device, readback: &wgpu::Buffer) -> [[u8; 4]; 2] {
+    use crate::wgpu::*;
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    readback.slice(..).map_async(MapMode::Read, move |result| {
+        tx.send(result).unwrap();
+    });
+    device
+        .poll(PollType::Wait {
+            submission_index: None,
+            timeout: Some(std::time::Duration::from_secs(10)),
+        })
+        .unwrap();
+    rx.recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap()
+        .unwrap();
+    #[cfg(any(feature = "wgpu-27", feature = "wgpu-28", feature = "wgpu-29"))]
+    let bytes = readback.slice(..).get_mapped_range();
+    #[cfg(feature = "wgpu-30")]
+    let bytes = readback.slice(..).get_mapped_range().unwrap();
+    let pixels = [4, 12].map(|x| {
+        let offset = 8 * 256 + x * 4;
+        bytes[offset..offset + 4].try_into().unwrap()
+    });
+    drop(bytes);
+    readback.unmap();
+    pixels
+}
+
+#[test]
+fn snapshot_managed_update_preserves_unsubmitted_texture_contents() -> RendererResult<()> {
+    let (device, queue) = request_test_device().expect("managed isolation requires a WGPU adapter");
+    let mut context = Context::create();
+    let (mut owner, mut executor) = WgpuSnapshotRenderer::new(
+        WgpuInitInfo::new(
+            device.clone(),
+            queue.clone(),
+            wgpu::TextureFormat::Rgba8Unorm,
+        ),
+        &mut context,
+    )?;
+    executor.set_gamma_mode(GammaMode::Linear);
+    let texture = register_red_texels(&mut context);
+    let viewport = context.main_viewport().id();
+    let target = executor.set_target(viewport, None)?;
+    let frame = context.begin_frame();
+    draw_managed_texels(frame.ui(), texture);
+    let first = frame.render_snapshot(owner.renderer_consumer()?)?;
+    let mut prepared = executor
+        .prepare(WgpuSnapshotSubmission::new(first, [target]))
+        .unwrap();
+    let (first_commands, first_readback) = record_texture_readback(&device, |pass| {
+        prepared
+            .record(target, pass, FramebufferExtent::new(16, 16))
+            .unwrap();
+        Ok(())
+    })?;
+    prepared.finish().unwrap();
+    context.poll_snapshot_completions()?;
+    let original_id = context
+        .with_texture(texture, |texture| texture.texture_id())
+        .unwrap();
+
+    update_first_texel(&mut context, texture);
+    let frame = context.begin_frame();
+    draw_managed_texels(frame.ui(), texture);
+    let second = frame.render_snapshot(owner.renderer_consumer()?)?;
+    assert!(second.texture_requests().iter().any(|request| {
+        request.texture() == dear_imgui_rs::render::SnapshotTextureId::User(texture)
+            && request.kind() == dear_imgui_rs::render::TextureRequestKind::Update
+    }));
+    let mut prepared = executor
+        .prepare(WgpuSnapshotSubmission::new(second, [target]))
+        .unwrap();
+    let (second_commands, second_readback) = record_texture_readback(&device, |pass| {
+        prepared
+            .record(target, pass, FramebufferExtent::new(16, 16))
+            .unwrap();
+        Ok(())
+    })?;
+    prepared.finish().unwrap();
+
+    // No queue submission occurs until both content versions have been recorded.
+    queue.submit([first_commands, second_commands]);
+    assert_eq!(
+        read_texture_texels(&device, &first_readback),
+        [[255, 0, 0, 255]; 2],
+        "later uploads must not change an already recorded snapshot"
+    );
+    assert_eq!(
+        read_texture_texels(&device, &second_readback),
+        [[0, 0, 255, 255], [255, 0, 0, 255]],
+        "the updated version must preserve texels outside the patch"
+    );
+    context.poll_snapshot_completions()?;
+    assert_eq!(
+        context
+            .with_texture(texture, |texture| texture.texture_id())
+            .unwrap(),
+        original_id
+    );
+    owner.shutdown(&mut context, &mut executor)
+}
+
+#[test]
+fn live_managed_update_preserves_unsubmitted_texture_contents() -> RendererResult<()> {
+    let (device, queue) = request_test_device().expect("managed isolation requires a WGPU adapter");
+    let mut context = Context::create();
+    let mut renderer = WgpuRenderer::new(
+        WgpuInitInfo::new(
+            device.clone(),
+            queue.clone(),
+            wgpu::TextureFormat::Rgba8Unorm,
+        ),
+        &mut context,
+    )?;
+    renderer.set_gamma_mode(GammaMode::Linear);
+    let texture = register_red_texels(&mut context);
+    draw_managed_texels(context.frame(), texture);
+    let pending = context.try_render(renderer.renderer_consumer()?)?;
+    let first = renderer.reconcile_frame(pending)?;
+    let (first_commands, first_readback) = record_texture_readback(&device, |pass| {
+        renderer
+            .render_reconciled(first, pass, FramebufferExtent::new(16, 16))
+            .map(|_| ())
+    })?;
+    let original_id = context
+        .with_texture(texture, |texture| texture.texture_id())
+        .unwrap();
+
+    update_first_texel(&mut context, texture);
+    draw_managed_texels(context.frame(), texture);
+    let pending = context.try_render(renderer.renderer_consumer()?)?;
+    let second = renderer.reconcile_frame(pending)?;
+    let (second_commands, second_readback) = record_texture_readback(&device, |pass| {
+        renderer
+            .render_reconciled(second, pass, FramebufferExtent::new(16, 16))
+            .map(|_| ())
+    })?;
+
+    queue.submit([first_commands, second_commands]);
+    assert_eq!(
+        read_texture_texels(&device, &first_readback),
+        [[255, 0, 0, 255]; 2],
+        "later reconciliation must not change an already recorded live frame"
+    );
+    assert_eq!(
+        read_texture_texels(&device, &second_readback),
+        [[0, 0, 255, 255], [255, 0, 0, 255]]
+    );
+    assert_eq!(
+        context
+            .with_texture(texture, |texture| texture.texture_id())
+            .unwrap(),
+        original_id
+    );
+    renderer.shutdown(&mut context)
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn detached_thread_contracts_are_derived_from_owned_fields() {

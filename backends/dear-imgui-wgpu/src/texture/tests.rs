@@ -137,6 +137,127 @@ fn create_operation() -> TextureOp {
 }
 
 #[test]
+fn managed_content_replacements_keep_ids_and_reject_invalid_candidates_atomically()
+-> RendererResult<()> {
+    let (device, queue) =
+        request_test_device().expect("managed content versions require an adapter");
+    let mut context = Context::create();
+    let id = managed_texture_id(&mut context);
+    let mut manager = WgpuTextureManager::new();
+    let mut render_resources = RenderResources::new();
+    render_resources.initialize(&device)?;
+    let ManagedRequestOutcome::Uploaded(texture_id) = manager.apply_managed_request(
+        id,
+        &create_operation(),
+        &device,
+        &queue,
+        &mut render_resources,
+    )?
+    else {
+        panic!("create request must upload");
+    };
+    let first_view = manager.texture_view(texture_id).unwrap().clone();
+    render_resources.get_or_create_image_bind_group(&device, texture_id, &first_view)?;
+
+    let replacement = TextureOp::Create {
+        format: TextureFormat::RGBA32,
+        width: 2,
+        height: 2,
+        row_pitch: 8,
+        pixels: vec![17; 16],
+    };
+    assert_eq!(
+        manager.apply_managed_request(id, &replacement, &device, &queue, &mut render_resources)?,
+        ManagedRequestOutcome::Uploaded(texture_id)
+    );
+    let replacement_view = manager.texture_view(texture_id).unwrap().clone();
+    assert_ne!(replacement_view, first_view);
+    assert!(!render_resources.image_bind_groups.contains_key(&texture_id));
+    assert_eq!(manager.managed_textures[&id].rgba_pixels, [17; 16]);
+    let replacement_binding = render_resources
+        .get_or_create_image_bind_group(&device, texture_id, &replacement_view)?
+        .clone();
+
+    let invalid_update = TextureOp::Update {
+        format: TextureFormat::RGBA32,
+        width: 2,
+        height: 2,
+        rects: vec![
+            TextureUploadRect {
+                rect: TextureRect {
+                    x: 0,
+                    y: 0,
+                    w: 1,
+                    h: 1,
+                },
+                row_pitch: 4,
+                data: vec![1, 2, 3, 4],
+            },
+            TextureUploadRect {
+                rect: TextureRect {
+                    x: 1,
+                    y: 1,
+                    w: 1,
+                    h: 1,
+                },
+                row_pitch: 4,
+                data: vec![5; 3],
+            },
+        ],
+    };
+    let invalid_create = TextureOp::Create {
+        format: TextureFormat::RGBA32,
+        width: 2,
+        height: 2,
+        row_pitch: 8,
+        pixels: vec![0; 15],
+    };
+    for invalid in [&invalid_update, &invalid_create] {
+        assert!(matches!(
+            manager.apply_managed_request(id, invalid, &device, &queue, &mut render_resources),
+            Err(RendererError::BadTexture(_))
+        ));
+        assert_eq!(manager.managed_texture_id(id), Some(texture_id));
+        assert_eq!(manager.texture_view(texture_id), Some(&replacement_view));
+        assert_eq!(manager.managed_textures[&id].rgba_pixels, [17; 16]);
+        assert_eq!(
+            render_resources.image_bind_groups.get(&texture_id),
+            Some(&replacement_binding)
+        );
+    }
+
+    let patch = TextureOp::Update {
+        format: TextureFormat::Alpha8,
+        width: 2,
+        height: 2,
+        rects: vec![TextureUploadRect {
+            rect: TextureRect {
+                x: 1,
+                y: 1,
+                w: 1,
+                h: 1,
+            },
+            row_pitch: 1,
+            data: vec![91],
+        }],
+    };
+    assert_eq!(
+        manager.apply_managed_request(id, &patch, &device, &queue, &mut render_resources)?,
+        ManagedRequestOutcome::Uploaded(texture_id)
+    );
+    assert_ne!(manager.texture_view(texture_id), Some(&replacement_view));
+    assert_eq!(
+        manager.managed_textures[&id].rgba_pixels,
+        [
+            17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 255, 255, 255, 91
+        ]
+    );
+    assert!(!render_resources.image_bind_groups.contains_key(&texture_id));
+    assert_eq!(manager.managed_texture_count(), 1);
+    Ok(())
+}
+
+#[test]
 fn managed_requests_are_idempotent_and_retired_work_cannot_resurrect() -> RendererResult<()> {
     let Some((device, queue)) = request_test_device() else {
         eprintln!("skipping WGPU managed texture test because no headless adapter is available");

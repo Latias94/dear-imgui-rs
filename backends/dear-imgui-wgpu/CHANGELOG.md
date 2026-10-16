@@ -20,6 +20,7 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ### Fixed
 
+- Create immutable GPU content versions for managed texture updates and repeated creates while preserving logical texture IDs. Later reconciliation cannot overwrite textures sampled by older unsubmitted live or snapshot command buffers; partial updates preserve untouched pixels and failed candidates preserve the previous content and cached bindings.
 - Retain acquired frames, Surfaces, exact native windows, and owner chains through pending presentation, including retirement and Context teardown. Defer surface configuration while older work retains an acquisition; reject new submission of retired work without discarding prior stage evidence.
 
 - Preserve partial target observations alongside renderer and late platform faults when viewport preparation fails, without returning an invalid drawable capability.

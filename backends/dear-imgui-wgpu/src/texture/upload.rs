@@ -9,40 +9,25 @@ impl WgpuTextureManager {
         height: u32,
         row_pitch: usize,
         pixels: &[u8],
-    ) -> RendererResult<OwnedWgpuTexture> {
+    ) -> RendererResult<(OwnedWgpuTexture, Vec<u8>)> {
         let rgba = convert_rows_to_rgba(format, width, height, row_pitch, pixels)?;
-        let texture = device.create_texture(&TextureDescriptor {
-            label: Some("Dear ImGui managed texture"),
-            size: Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba8Unorm,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        write_rgba_region(queue, &texture, Origin3d::ZERO, width, height, &rgba)?;
-        let texture_view = texture.create_view(&TextureViewDescriptor::default());
-        Ok(OwnedWgpuTexture::new(texture, texture_view))
+        let resource = create_managed_rgba_resource(device, queue, width, height, &rgba)?;
+        Ok((resource, rgba))
     }
 
-    pub(super) fn upload_managed_texture_contents(
-        &self,
+    pub(super) fn update_managed_texture(
+        &mut self,
+        device: &Device,
         queue: &Queue,
         id: SnapshotTextureId,
         format: ImGuiTextureFormat,
         dimensions: [u32; 2],
-        row_pitch: usize,
-        pixels: &[u8],
+        rects: &[TextureUploadRect],
     ) -> RendererResult<()> {
         let [width, height] = dimensions;
         let entry = self
             .managed_textures
-            .get(&id)
+            .get_mut(&id)
             .ok_or(RendererError::ManagedTextureMissing(id))?;
         if entry.width != width || entry.height != height {
             return Err(RendererError::ManagedTextureLayoutMismatch {
@@ -52,66 +37,53 @@ impl WgpuTextureManager {
             });
         }
 
-        let rgba = convert_rows_to_rgba(format, width, height, row_pitch, pixels)?;
-        write_rgba_region(
-            queue,
-            entry.resource.texture(),
-            Origin3d::ZERO,
-            width,
-            height,
-            &rgba,
-        )
-    }
-
-    pub(super) fn update_managed_texture(
-        &self,
-        queue: &Queue,
-        id: SnapshotTextureId,
-        format: ImGuiTextureFormat,
-        width: u32,
-        height: u32,
-        rects: &[TextureUploadRect],
-    ) -> RendererResult<()> {
-        let entry = self
-            .managed_textures
-            .get(&id)
-            .ok_or(RendererError::ManagedTextureMissing(id))?;
-        if entry.width != width || entry.height != height {
-            return Err(RendererError::ManagedTextureLayoutMismatch {
-                texture: id,
-                expected: [entry.width, entry.height],
-                actual: [width, height],
-            });
+        let mut rgba_pixels = entry.rgba_pixels.clone();
+        let texture_pitch = width as usize * 4;
+        for update in rects {
+            let rect = validate_update_rect(width, height, update.rect)?;
+            let rgba =
+                convert_rows_to_rgba(format, rect.w, rect.h, update.row_pitch, &update.data)?;
+            let rect_pitch = rect.w as usize * 4;
+            for row in 0..rect.h as usize {
+                let destination = (rect.y as usize + row) * texture_pitch + rect.x as usize * 4;
+                rgba_pixels[destination..destination + rect_pitch]
+                    .copy_from_slice(&rgba[row * rect_pitch..(row + 1) * rect_pitch]);
+            }
         }
 
-        // Validate and convert every upload before mutating the GPU resource. A malformed later
-        // rectangle must not leave an otherwise rejected request half-applied.
-        let prepared = rects
-            .iter()
-            .map(|update| {
-                let rect = validate_update_rect(width, height, update.rect)?;
-                let rgba =
-                    convert_rows_to_rgba(format, rect.w, rect.h, update.row_pitch, &update.data)?;
-                Ok((rect, rgba))
-            })
-            .collect::<RendererResult<Vec<_>>>()?;
-
-        for (rect, rgba) in prepared {
-            write_rgba_region(
-                queue,
-                entry.resource.texture(),
-                Origin3d {
-                    x: rect.x,
-                    y: rect.y,
-                    z: 0,
-                },
-                rect.w,
-                rect.h,
-                &rgba,
-            )?;
-        }
+        let resource = create_managed_rgba_resource(device, queue, width, height, &rgba_pixels)?;
+        entry.resource = resource;
+        entry.rgba_pixels = rgba_pixels;
         Ok(())
     }
+}
+
+fn create_managed_rgba_resource(
+    device: &Device,
+    queue: &Queue,
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+) -> RendererResult<OwnedWgpuTexture> {
+    let texture = device.create_texture(&TextureDescriptor {
+        label: Some("Dear ImGui managed texture"),
+        size: Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let texture_view = texture.create_view(&TextureViewDescriptor::default());
+    let resource = OwnedWgpuTexture::new(texture, texture_view);
+    // Recorded commands retain the previous view; never upload into its texture again.
+    write_rgba_region(queue, resource.texture(), width, height, rgba)?;
+    Ok(resource)
 }
 
 #[derive(Copy, Clone)]
@@ -216,7 +188,6 @@ fn convert_rows_to_rgba(
 fn write_rgba_region(
     queue: &Queue,
     texture: &Texture,
-    origin: Origin3d,
     width: u32,
     height: u32,
     rgba: &[u8],
@@ -268,7 +239,7 @@ fn write_rgba_region(
         TexelCopyTextureInfo {
             texture,
             mip_level: 0,
-            origin,
+            origin: Origin3d::ZERO,
             aspect: TextureAspect::All,
         },
         upload,
