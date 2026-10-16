@@ -91,3 +91,40 @@ The corresponding local regression matrix completed serially in the existing tar
 The Linux Test Engine gate remains Linux/display-tool specific; compiling its executable on
 Windows does not establish its X11, Lavapipe, or interactive dragging assertions. Cocoa, X11,
 Wayland and the other renderer rows retain the limits stated above.
+
+## Review follow-up evidence (2026-10-17)
+
+The follow-up closes three gaps found by independent review of the editor contracts:
+
+| Scenario | Evidence |
+| --- | --- |
+| Managed content across delayed submission | Both live and detached-snapshot regressions first failed: recording red A, preparing a blue patch B, then submitting A made A sample B. After immutable GPU content replacements, A remains red and B contains the blue patch plus the untouched red region. Logical texture IDs remain stable. Both readbacks and replacement atomicity passed on WGPU 27, 28, 29 and 30. |
+| Secondary retry after main presentation | The new Wait-mode regression first failed for a secondary Timeout after main success. It now covers Timeout/Lost/Outdated, continued 16ms/32ms backoff, main occlusion, recovery reset, and non-polling Occluded/ZeroSize/Retired outcomes. |
+| Independent background wake | The native test arms no application deadline until the background Wake is delivered and produces a frame. Only then does a later deadline produce a second frame. The native run passed; the watchdog only fails the test. |
+| Application producer before UI consumer | The native test initializes a blue source, records a red producer through the real application frame entry, then reads the actual UI output. The source has no COPY_SRC usage. Explicit Vulkan and DX12 runs passed. |
+
+Both native proof tests were also challenged in an isolated source copy using the
+repository-pinned native revisions. Suppressing only the background wake failed at
+the watchdog without reaching the later deadline. Moving the real application hook
+after UI submission failed the output pixel assertion with the initial blue value.
+The mutations were removed before the final passing run; the shared checkout and
+its pre-existing native submodule changes were untouched.
+
+WGPU 30's Winit and SDL3 routes each passed 110 regular library tests. WGPU 27/28/29
+also passed the three focused managed-texture regressions on Winit and separate SDL3
+compile checks. Dear App passed 81 default and 82 multi-viewport/test-engine library
+tests. Its native recovery, background wake/deadline, and wake-coalescing regressions
+passed separately from the UI output readback.
+
+The new Dear App UI readback process exited with code 2173 under `Backends::PRIMARY`
+on this machine. Explicit Vulkan and DX12 pass, but the matching exit code alone does
+not establish that it has the same cause as the pending-frame teardown failure above.
+Production backend selection is unchanged. To reproduce the separate readback runs,
+set `DEAR_IMGUI_TEST_WGPU_BACKEND` to `vulkan`, `dx12`, or `primary`, then run:
+
+```text
+cargo nextest run -p dear-app --features multi-viewport,test-engine --lib --run-ignored ignored-only -E 'test(native_record_render_precedes_ui_texture_consumption)' --test-threads 1
+```
+
+These checks establish sampled content and application-stage ordering. They do not
+establish physical pixel visibility or extend Windows evidence to other desktops.

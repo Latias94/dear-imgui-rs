@@ -21,6 +21,7 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ### Fixed
 
+- Preserve managed texture contents for already recorded WGPU commands when later frames update the same logical texture before submission. Dear App retains bounded retries for transient secondary-surface skips even when the main window presents successfully.
 - Release single-window touch ownership after focus loss and invalidate Wait-mode rendering for native input. Keep acquired-frame, Surface, native-window, and owner-chain leases through pending presentation; release configured Surfaces before their Device during recovery and shutdown.
 
 ## [0.20.0] - 2026-10-12

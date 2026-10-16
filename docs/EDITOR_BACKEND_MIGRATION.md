@@ -82,6 +82,14 @@ main surface and call `record_main` with the returned `WgpuPreparedMainFrame`. A
 failure does not undo completed secondary work. Preparation/work errors carry partial reports
 alongside their faults; retain both.
 
+Managed textures keep stable logical IDs while each content replacement creates a new GPU
+allocation. Partial updates are assembled from the renderer's current complete RGBA CPU image;
+already recorded commands retain the previous allocation. This fixes the deferred-submission
+gap also present in v0.20.0's application-owned live command buffers. It adds one current CPU
+image per managed texture and a full upload on content changes, without implicit submissions or
+CPU waits. No historical GPU-version list is maintained. External texture contents remain owned
+and synchronized by the engine; an external binding revision does not freeze that texture's pixels.
+
 ## Interpret observations precisely
 
 For every drawable external image, observations associate a captured native target with the UI
@@ -125,6 +133,10 @@ Use `AppWakeHandle` for coalesced background invalidation or one-shot deadlines 
 `device_event` exposes raw device input independently of windows. On GPU loss, rebuild engine
 resources in `gpu_recreated`; the runtime preserves Context/application state and main allocation
 identity, while retiring and recreating secondary allocations with new IDs.
+
+Main-window presentation and secondary retry demand are independent outcomes. In Wait mode,
+transient secondary skips retain the existing bounded redraw backoff even if the main window
+presented successfully; occlusion, zero size, and retirement wait for events or cleanup.
 
 ## Desktop services and texture inspection
 
