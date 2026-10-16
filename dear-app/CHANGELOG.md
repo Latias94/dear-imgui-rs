@@ -11,5 +11,6 @@
 
 ### Fixed
 
+- Keep bounded redraw retries for transient secondary-surface timeouts and recovered lost/outdated surfaces, independently of successful main-window presentation. Occluded, zero-sized, and retired targets do not start polling.
 - GPU recovery and shutdown release all configured Surfaces before their Device, and create a new main Surface for each replacement GPU generation. Context, main native registration, and application state survive recovery; recreated secondary windows receive new native instance IDs.
 - Redraws observe confirmed device loss before its queued event is delivered, while unrelated validation errors remain terminal. GPU submission draining has a bounded wait.

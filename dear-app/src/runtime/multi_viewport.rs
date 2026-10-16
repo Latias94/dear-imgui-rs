@@ -322,8 +322,126 @@ pub(super) fn render_frame<A: Application>(
         return Err(primary);
     }
     observed?;
-    match driver.skip {
-        Some(reason) if !exit_requested => Ok(SurfaceDispatch::Skipped(reason)),
-        _ => Ok(SurfaceDispatch::Presented(exit_requested)),
+    Ok(settle_frame_dispatch(
+        driver.skip,
+        exit_requested,
+        driver.secondary.observations(),
+    ))
+}
+
+fn settle_frame_dispatch(
+    main_skip: Option<SurfaceSkipReason>,
+    exit_requested: bool,
+    secondary: &[WgpuViewportObservation],
+) -> SurfaceDispatch<bool> {
+    let mut dispatch = match main_skip {
+        Some(reason) if !exit_requested => SurfaceDispatch::skipped(reason),
+        _ => SurfaceDispatch::presented(exit_requested),
+    };
+    dispatch.retry_needed = dispatch.retry_needed
+        || secondary.iter().any(|observation| {
+            matches!(
+                observation.outcome,
+                dear_imgui_wgpu::WgpuFrameOutcome::Skipped(
+                    dear_imgui_wgpu::WgpuFrameSkipReason::Timeout
+                        | dear_imgui_wgpu::WgpuFrameSkipReason::Lost
+                        | dear_imgui_wgpu::WgpuFrameSkipReason::Outdated
+                )
+            )
+        });
+    dispatch
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dear_imgui_rs::{Context, NativeWindowInstanceId, NativeWindowTarget};
+    use dear_imgui_wgpu::{WgpuFrameOutcome, WgpuFrameScope, WgpuFrameSkipReason};
+    use std::time::{Duration, Instant};
+
+    use crate::runtime::admission::{SurfacePresentation, SurfaceRedrawRetry};
+    use crate::runtime::runner::earliest_deadline;
+
+    #[test]
+    fn wait_retries_secondary_transient_skips_after_main_presentation() {
+        let _guard = crate::runtime::imgui_test_guard();
+        let mut context = Context::create();
+        let target = NativeWindowTarget {
+            instance_id: NativeWindowInstanceId::allocate(context.id()).unwrap(),
+            viewport_id: context.main_viewport().id(),
+            is_main: false,
+        };
+        for reason in [
+            WgpuFrameSkipReason::Timeout,
+            WgpuFrameSkipReason::Lost,
+            WgpuFrameSkipReason::Outdated,
+        ] {
+            let secondary = [WgpuViewportObservation {
+                target,
+                scope: WgpuFrameScope {
+                    context_id: context.id(),
+                    epoch: None,
+                    frame_count: 1,
+                },
+                dependencies: Default::default(),
+                stage: WgpuFrameStage::Unrecorded,
+                outcome: WgpuFrameOutcome::Skipped(reason),
+            }];
+            let dispatch = settle_frame_dispatch(None, false, &secondary);
+            assert_eq!(dispatch.main, SurfacePresentation::Presented(false));
+            assert!(
+                dispatch.retry_needed,
+                "secondary {reason:?} needs another frame"
+            );
+
+            let now = Instant::now();
+            let mut retry = SurfaceRedrawRetry::default();
+            retry.settle(dispatch.retry_needed, now);
+            let deadline = earliest_deadline(retry.deadline(), None)
+                .expect("Wait must retain a wake without application deadlines or new input");
+            assert_eq!(deadline, now + Duration::from_millis(16));
+            assert!(!retry.take_due(now));
+            assert!(retry.take_due(deadline));
+
+            retry.settle(dispatch.retry_needed, deadline);
+            assert_eq!(retry.deadline(), Some(deadline + Duration::from_millis(32)));
+
+            let main_occluded =
+                settle_frame_dispatch(Some(SurfaceSkipReason::Occluded), false, &secondary);
+            assert_eq!(
+                main_occluded.main,
+                SurfacePresentation::Skipped(SurfaceSkipReason::Occluded)
+            );
+            assert!(main_occluded.retry_needed);
+
+            let recovered = settle_frame_dispatch(None, false, &[]);
+            assert_eq!(recovered.main, SurfacePresentation::Presented(false));
+            retry.settle(recovered.retry_needed, deadline);
+            assert!(retry.deadline().is_none());
+        }
+
+        for reason in [
+            WgpuFrameSkipReason::Occluded,
+            WgpuFrameSkipReason::ZeroSize,
+            WgpuFrameSkipReason::RetiredTarget,
+        ] {
+            let secondary = [WgpuViewportObservation {
+                target,
+                scope: WgpuFrameScope {
+                    context_id: context.id(),
+                    epoch: None,
+                    frame_count: 1,
+                },
+                dependencies: Default::default(),
+                stage: WgpuFrameStage::Unrecorded,
+                outcome: WgpuFrameOutcome::Skipped(reason),
+            }];
+            let dispatch = settle_frame_dispatch(None, false, &secondary);
+            assert_eq!(dispatch.main, SurfacePresentation::Presented(false));
+            assert!(
+                !dispatch.retry_needed,
+                "secondary {reason:?} waits for events or cleanup"
+            );
+        }
     }
 }

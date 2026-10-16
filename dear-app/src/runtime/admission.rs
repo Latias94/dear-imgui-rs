@@ -42,9 +42,31 @@ pub(crate) enum SurfaceAdmission<Frame> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SurfaceDispatch<Output> {
+pub(crate) enum SurfacePresentation<Output> {
     Presented(Output),
     Skipped(SurfaceSkipReason),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SurfaceDispatch<Output> {
+    pub(crate) main: SurfacePresentation<Output>,
+    pub(crate) retry_needed: bool,
+}
+
+impl<Output> SurfaceDispatch<Output> {
+    pub(crate) fn presented(output: Output) -> Self {
+        Self {
+            main: SurfacePresentation::Presented(output),
+            retry_needed: false,
+        }
+    }
+
+    pub(crate) fn skipped(reason: SurfaceSkipReason) -> Self {
+        Self {
+            main: SurfacePresentation::Skipped(reason),
+            retry_needed: reason.should_retry(),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -60,6 +82,14 @@ impl SurfaceSkipReason {
 }
 
 impl SurfaceRedrawRetry {
+    pub(crate) fn settle(&mut self, retry_needed: bool, now: Instant) {
+        if retry_needed {
+            self.schedule(now);
+        } else {
+            self.reset();
+        }
+    }
+
     pub(crate) fn schedule(&mut self, now: Instant) {
         let delay = self.delay.map_or(INITIAL_REDRAW_RETRY_DELAY, |delay| {
             delay.saturating_mul(2).min(MAX_REDRAW_RETRY_DELAY)
@@ -165,7 +195,7 @@ pub(crate) fn dispatch_surface_frame<Frame, Output>(
 ) -> Result<SurfaceDispatch<Output>, RunError> {
     let admitted = match admission {
         SurfaceAdmission::Admitted(admitted) => admitted,
-        SurfaceAdmission::Skipped(reason) => return Ok(SurfaceDispatch::Skipped(reason)),
+        SurfaceAdmission::Skipped(reason) => return Ok(SurfaceDispatch::skipped(reason)),
     };
     let frame_index = admitted_frame_count
         .checked_add(1)
@@ -173,7 +203,7 @@ pub(crate) fn dispatch_surface_frame<Frame, Output>(
             message: "admitted frame counter exhausted".to_owned(),
         })?;
     *admitted_frame_count = frame_index;
-    drive(admitted, frame_index).map(SurfaceDispatch::Presented)
+    drive(admitted, frame_index).map(SurfaceDispatch::presented)
 }
 
 pub(crate) fn settle_surface_presentation<Output>(
@@ -392,7 +422,7 @@ mod tests {
                 },
             )
             .expect("skip dispatch");
-            assert_eq!(dispatch, SurfaceDispatch::Skipped(reason));
+            assert_eq!(dispatch, SurfaceDispatch::skipped(reason));
             assert!(!invoked, "skipped surface entered per-frame work");
             assert_eq!(admitted_frame_count, 17);
         }
@@ -414,7 +444,7 @@ mod tests {
                 Ok(index)
             })
             .expect("admitted dispatch");
-        assert_eq!(dispatch, SurfaceDispatch::Presented(5));
+        assert_eq!(dispatch, SurfaceDispatch::presented(5));
         assert_eq!(admitted_frame_count, 5);
         assert_eq!(
             backend.events,

@@ -9,7 +9,7 @@ use winit::{
 };
 
 use super::{
-    admission::{SurfaceDispatch, SurfaceRedrawRetry},
+    admission::{SurfaceDispatch, SurfacePresentation, SurfaceRedrawRetry},
     ownership::{OrderedRuntimeOwner, RuntimeOwnership},
     recovery::{
         GenerationRelease, RecoveryEffects, RecoveryOutcome, RuntimeFactory, RuntimeGenerations,
@@ -738,21 +738,13 @@ impl<A: Application + 'static> ApplicationHandler<RuntimeEvent> for Runner<A> {
             let render_result =
                 runtime.render(event_loop, &mut self.ownership.application, &self.config);
             match render_result {
-                Ok(SurfaceDispatch::Presented(true)) => self.exit_normally(event_loop),
-                Ok(SurfaceDispatch::Presented(false)) => {
-                    self.surface_redraw_retry.reset();
-                    if matches!(self.config.redraw, RedrawMode::Poll)
-                        && let Some(runtime) = self.ownership.runtime.as_ref()
-                    {
-                        runtime.window().window.request_redraw();
-                    }
-                }
-                Ok(SurfaceDispatch::Skipped(reason)) => {
-                    if reason.should_retry() {
-                        self.surface_redraw_retry.schedule(Instant::now());
-                    } else {
-                        self.surface_redraw_retry.reset();
-                    }
+                Ok(SurfaceDispatch {
+                    main: SurfacePresentation::Presented(true),
+                    ..
+                }) => self.exit_normally(event_loop),
+                Ok(dispatch) => {
+                    self.surface_redraw_retry
+                        .settle(dispatch.retry_needed, Instant::now());
                     if matches!(self.config.redraw, RedrawMode::Poll)
                         && let Some(runtime) = self.ownership.runtime.as_ref()
                     {

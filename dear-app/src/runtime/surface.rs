@@ -6,8 +6,8 @@ use dear_imgui_rs::{DockNodeFlags, FrameToken, WindowFlags};
 use dear_imgui_test_engine::{FrameDriveOutcome, MainRenderOutcome, TestFrameDriver};
 
 use super::admission::{
-    SurfaceAcquisition, SurfaceAdmissionBackend, SurfaceDispatch, admit_surface_frame,
-    dispatch_surface_frame, settle_surface_presentation,
+    AdmittedSurfaceFrame, SurfaceAcquisition, SurfaceAdmissionBackend, SurfaceDispatch,
+    admit_surface_frame, dispatch_surface_frame, settle_surface_presentation,
 };
 use super::lifecycle::{LifecycleAction, SurfaceEvent};
 use super::ownership::RuntimeOwnership;
@@ -70,10 +70,42 @@ impl SurfaceAdmissionBackend for RuntimeSurfaceAdmission<'_> {
     }
 }
 
+pub(super) enum MainFrameTarget {
+    Surface(AdmittedSurfaceFrame<wgpu::SurfaceTexture>),
+    #[cfg(test)]
+    Offscreen(wgpu::Texture),
+}
+
+impl MainFrameTarget {
+    fn texture(&self) -> &wgpu::Texture {
+        match self {
+            Self::Surface(admitted) => &admitted.frame.texture,
+            #[cfg(test)]
+            Self::Offscreen(texture) => texture,
+        }
+    }
+
+    fn present(self, queue: &wgpu::Queue) {
+        match self {
+            Self::Surface(admitted) => queue.present(admitted.frame),
+            #[cfg(test)]
+            Self::Offscreen(_) => {}
+        }
+    }
+
+    fn reconfigure_after_present(&self) -> bool {
+        match self {
+            Self::Surface(admitted) => admitted.reconfigure_after_present,
+            #[cfg(test)]
+            Self::Offscreen(_) => false,
+        }
+    }
+}
+
 struct AdmittedWgpuFrameDriver<'a> {
     renderer: &'a mut dear_imgui_wgpu::WgpuRenderer,
     queue: &'a wgpu::Queue,
-    surface_frame: Option<wgpu::SurfaceTexture>,
+    target: Option<MainFrameTarget>,
     clear_color: wgpu::Color,
     encoder: Option<wgpu::CommandEncoder>,
     rendered: bool,
@@ -84,14 +116,14 @@ impl<'a> AdmittedWgpuFrameDriver<'a> {
     fn new(
         renderer: &'a mut dear_imgui_wgpu::WgpuRenderer,
         queue: &'a wgpu::Queue,
-        surface_frame: wgpu::SurfaceTexture,
+        target: MainFrameTarget,
         clear_color: wgpu::Color,
         encoder: wgpu::CommandEncoder,
     ) -> Self {
         Self {
             renderer,
             queue,
-            surface_frame: Some(surface_frame),
+            target: Some(target),
             clear_color,
             encoder: Some(encoder),
             rendered: false,
@@ -119,16 +151,12 @@ impl<'a> AdmittedWgpuFrameDriver<'a> {
                 message: "admitted surface frame was rendered more than once".to_owned(),
             });
         }
-        let surface_frame = self
-            .surface_frame
-            .as_ref()
-            .ok_or_else(|| RunError::Recovery {
-                message: "admitted surface frame was consumed before rendering".to_owned(),
-            })?;
-        let framebuffer_extent =
-            dear_imgui_wgpu::FramebufferExtent::from_texture(&surface_frame.texture);
-        let view = surface_frame
-            .texture
+        let target = self.target.as_ref().ok_or_else(|| RunError::Recovery {
+            message: "admitted surface frame was consumed before rendering".to_owned(),
+        })?;
+        let framebuffer_extent = dear_imgui_wgpu::FramebufferExtent::from_texture(target.texture());
+        let view = target
+            .texture()
             .create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self.encoder.take().ok_or_else(|| RunError::Recovery {
             message: "admitted frame encoder was already consumed".to_owned(),
@@ -165,13 +193,10 @@ impl<'a> AdmittedWgpuFrameDriver<'a> {
                 message: "admitted surface frame was presented before rendering".to_owned(),
             });
         }
-        let surface_frame = self
-            .surface_frame
-            .take()
-            .ok_or_else(|| RunError::Recovery {
-                message: "admitted surface frame was presented more than once".to_owned(),
-            })?;
-        self.queue.present(surface_frame);
+        let target = self.target.take().ok_or_else(|| RunError::Recovery {
+            message: "admitted surface frame was presented more than once".to_owned(),
+        })?;
+        target.present(self.queue);
         self.presented = true;
         Ok(())
     }
@@ -281,68 +306,71 @@ pub(super) fn render_surface_frame<A: Application>(
         };
         admit_surface_frame(&mut backend)?
     };
-    let dispatch =
-        dispatch_surface_frame(admitted, admitted_frame_count, |admitted, frame_index| {
-            let RuntimeOwnership {
-                window,
-                ui,
-                generations,
-            } = ownership;
-            let generation = generations
-                .current_mut()
-                .ok_or_else(|| RunError::Recovery {
-                    message: "render requested without an active GPU generation".to_owned(),
-                })?;
-            let (frame, exit_requested) =
-                build_application_frame(ui, generation, window, application, config, wake)?;
+    dispatch_surface_frame(admitted, admitted_frame_count, |admitted, frame_index| {
+        render_application_frame(
+            ownership,
+            MainFrameTarget::Surface(admitted),
+            clear_color,
+            frame_index,
+            application,
+            config,
+            wake,
+        )
+    })
+}
 
-            let generation = generations
-                .current_mut()
-                .ok_or_else(|| RunError::Recovery {
-                    message: "render submission requested without an active GPU generation"
-                        .to_owned(),
-                })?;
-            let reconfigure_after_present = admitted.reconfigure_after_present;
-            let gpu_generation = generation.id;
-            let gpu = &mut generation.gpu;
-            let mut encoder = gpu
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Dear App engine and UI encoder"),
-                });
-            let mut render_context = crate::RenderContext {
-                device: &gpu.device,
-                queue: &gpu.queue,
-                encoder: &mut encoder,
-                window: &window.window,
-                generation: gpu_generation,
-                frame_index,
-                framebuffer_extent: dear_imgui_wgpu::FramebufferExtent::from_texture(
-                    &admitted.frame.texture,
-                ),
-                surface_format: admitted.frame.texture.format(),
-                wake,
-            };
-            application
-                .record_render(&mut render_context)
-                .map_err(|error| error.during_application_stage(ApplicationStage::RecordRender))?;
-            let renderer = gpu.renderer.single_mut()?;
-            let mut driver = AdmittedWgpuFrameDriver::new(
-                renderer,
-                &gpu.queue,
-                admitted.frame,
-                clear_color,
-                encoder,
-            );
-            let result = drive_admitted_frame(application, frame, frame_index, &mut driver);
-            let was_presented = driver.was_presented();
-            drop(driver);
-            settle_surface_presentation(result, was_presented, reconfigure_after_present, || {
-                window.reconfigure(&generation.gpu.device)
-            })?;
-            Ok(exit_requested)
+pub(super) fn render_application_frame<A: Application>(
+    ownership: &mut RuntimeOwnership,
+    target: MainFrameTarget,
+    clear_color: wgpu::Color,
+    frame_index: u64,
+    application: &mut A,
+    config: &AppConfig,
+    wake: &crate::AppWakeHandle,
+) -> Result<bool, RunError> {
+    let RuntimeOwnership {
+        window,
+        ui,
+        generations,
+    } = ownership;
+    let generation = generations
+        .current_mut()
+        .ok_or_else(|| RunError::Recovery {
+            message: "render requested without an active GPU generation".to_owned(),
         })?;
-    Ok(dispatch)
+    let (frame, exit_requested) =
+        build_application_frame(ui, generation, window, application, config, wake)?;
+    let gpu = &mut generation.gpu;
+    let mut encoder = gpu
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Dear App engine and UI encoder"),
+        });
+    let mut render_context = crate::RenderContext {
+        device: &gpu.device,
+        queue: &gpu.queue,
+        encoder: &mut encoder,
+        window: &window.window,
+        generation: generation.id,
+        frame_index,
+        framebuffer_extent: dear_imgui_wgpu::FramebufferExtent::from_texture(target.texture()),
+        surface_format: target.texture().format(),
+        wake,
+    };
+    application
+        .record_render(&mut render_context)
+        .map_err(|error| error.during_application_stage(ApplicationStage::RecordRender))?;
+    let renderer = gpu.renderer.single_mut()?;
+    let reconfigure_after_present = target.reconfigure_after_present();
+    let mut driver =
+        AdmittedWgpuFrameDriver::new(renderer, &gpu.queue, target, clear_color, encoder);
+    let result = drive_admitted_frame(application, frame, frame_index, &mut driver);
+    let was_presented = driver.was_presented();
+    drop(driver);
+    settle_surface_presentation(result, was_presented, reconfigure_after_present, || {
+        window.reconfigure(&generation.gpu.device)
+    })?;
+    Ok(exit_requested)
 }
 
 pub(super) fn build_application_frame<'ctx, A: Application>(

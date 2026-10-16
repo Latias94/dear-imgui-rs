@@ -8,64 +8,19 @@ use winit::platform::pump_events::EventLoopExtPumpEvents;
 use super::*;
 use crate::{ExternalTextureHandle, FrameContext, GpuContext, RenderContext};
 
+#[derive(Default)]
 struct NativeApplication {
     frames: usize,
     recordings: usize,
     inputs: usize,
     background_ready: Arc<AtomicBool>,
-    deadline: Instant,
-    texture: Option<wgpu::Texture>,
-    external: Option<ExternalTextureHandle>,
-    readback: Option<wgpu::Buffer>,
-    verified: bool,
+    background_wake_received: bool,
+    background_frame: Option<usize>,
+    deadline: Option<Instant>,
+    deadline_frame: Option<usize>,
 }
 
 impl Application for NativeApplication {
-    fn initialized(
-        &mut self,
-        context: &mut InitializedContext<'_>,
-        gpu: &mut GpuContext<'_>,
-    ) -> Result<(), RunError> {
-        self.deadline = Instant::now() + Duration::from_millis(300);
-        let device = gpu.gpu().device();
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("native dear-app producer"),
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        self.readback = Some(device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("native dear-app producer readback"),
-            size: 256,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        }));
-        self.external = Some(
-            gpu.gpu()
-                .register_external_texture(&texture.create_view(&Default::default()))
-                .unwrap(),
-        );
-        self.texture = Some(texture);
-        let ready = Arc::clone(&self.background_ready);
-        let wake = context.wake_handle();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(40));
-            ready.store(true, Ordering::Release);
-            let _ = wake.request_redraw();
-        });
-        Ok(())
-    }
-
     fn device_event(
         &mut self,
         context: &mut crate::DeviceEventContext<'_>,
@@ -75,146 +30,95 @@ impl Application for NativeApplication {
             DeviceEvent::MouseMotion { delta: (1.0, 2.0) }
         ));
         self.inputs += 1;
-        context.wake_handle().request_redraw().unwrap();
         Ok(())
     }
 
     fn frame(&mut self, context: &mut FrameContext<'_>) -> Result<(), RunError> {
         self.frames += 1;
-        if self.recordings > 0 && !self.verified {
-            let buffer = self.readback.as_ref().unwrap();
-            let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-            buffer
-                .slice(..)
-                .map_async(wgpu::MapMode::Read, move |result| {
-                    let _ = sender.send(result);
-                });
-            context
-                .gpu()
-                .device()
-                .poll(wgpu::PollType::Wait {
-                    submission_index: None,
-                    timeout: Some(Duration::from_secs(3)),
-                })
-                .unwrap();
-            receiver
-                .recv_timeout(Duration::from_secs(3))
-                .unwrap()
-                .unwrap();
-            {
-                let bytes = buffer.slice(..).get_mapped_range().unwrap();
-                assert_eq!(
-                    &bytes[..4],
-                    &[255, 0, 0, 255],
-                    "engine commands must reach the submitted encoder"
-                );
+        if self.background_frame.is_none() {
+            assert!(context.wake_handle().deadline().is_none());
+            // A native redraw alone cannot stand in for delivery of the background wake event.
+            if self.background_wake_received && self.background_ready.load(Ordering::Acquire) {
+                self.background_frame = Some(self.frames);
+                let deadline = Instant::now() + Duration::from_millis(100);
+                self.deadline = Some(deadline);
+                context.wake_handle().request_redraw_at(deadline).unwrap();
             }
-            buffer.unmap();
-            self.verified = true;
-        }
-        let texture = context
-            .gpu()
-            .resolve_external_texture(self.external.unwrap())
-            .unwrap();
-        context.ui().get_foreground_draw_list().add_image(
-            texture,
-            [0.0, 0.0],
-            [32.0, 32.0],
-            [0.0, 0.0],
-            [1.0, 1.0],
-            dear_imgui_rs::Color::WHITE,
-        );
-        if self.verified
-            && self.background_ready.load(Ordering::Acquire)
-            && Instant::now() >= self.deadline
-        {
-            context.request_exit();
-        } else {
-            context
-                .wake_handle()
-                .request_redraw_at(self.deadline)
-                .unwrap();
+        } else if let Some(deadline) = self.deadline {
+            if Instant::now() < deadline {
+                assert_eq!(context.wake_handle().deadline(), Some(deadline));
+            } else if context.wake_handle().deadline().is_none() {
+                self.deadline_frame = Some(self.frames);
+                context.request_exit();
+            }
         }
         Ok(())
     }
 
-    fn record_render(&mut self, context: &mut RenderContext<'_>) -> Result<(), RunError> {
-        if self.recordings == 0 {
-            let texture = self.texture.as_ref().unwrap();
-            let view = texture.create_view(&Default::default());
-            {
-                let _pass = context
-                    .encoder()
-                    .begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("native dear-app scene producer"),
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: &view,
-                            resolve_target: None,
-                            depth_slice: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color::RED),
-                                store: wgpu::StoreOp::Store,
-                            },
-                        })],
-                        ..Default::default()
-                    });
-            }
-            context.encoder().copy_texture_to_buffer(
-                wgpu::TexelCopyTextureInfo {
-                    texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                wgpu::TexelCopyBufferInfo {
-                    buffer: self.readback.as_ref().unwrap(),
-                    layout: wgpu::TexelCopyBufferLayout {
-                        offset: 0,
-                        bytes_per_row: Some(256),
-                        rows_per_image: Some(1),
-                    },
-                },
-                wgpu::Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 1,
-                },
-            );
-        }
+    fn record_render(&mut self, _: &mut RenderContext<'_>) -> Result<(), RunError> {
         self.recordings += 1;
         Ok(())
     }
 }
 
-struct NativeProbe(Runner<NativeApplication>);
+struct NativeProbe {
+    runner: Runner<NativeApplication>,
+    background: Option<std::thread::JoinHandle<()>>,
+    last_frames: usize,
+}
 
 impl ApplicationHandler<RuntimeEvent> for NativeProbe {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        self.0.resumed(event_loop);
-        self.0.device_event(
+        self.runner.resumed(event_loop);
+        self.runner.device_event(
             event_loop,
             DeviceId::dummy(),
             DeviceEvent::MouseMotion { delta: (1.0, 2.0) },
         );
     }
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: RuntimeEvent) {
-        self.0.user_event(event_loop, event);
+        if matches!(event, RuntimeEvent::Wake)
+            && self.background.is_some()
+            && self
+                .runner
+                .ownership
+                .application
+                .background_ready
+                .load(Ordering::Acquire)
+        {
+            self.runner.ownership.application.background_wake_received = true;
+        }
+        self.runner.user_event(event_loop, event);
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
-        self.0.window_event(event_loop, id, event);
+        self.runner.window_event(event_loop, id, event);
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        self.0.about_to_wait(event_loop);
+        self.runner.about_to_wait(event_loop);
+        let application = &self.runner.ownership.application;
+        if self.background.is_none()
+            && application.frames > 0
+            && application.frames == self.last_frames
+        {
+            assert!(self.runner.wake.deadline().is_none());
+            assert!(self.runner.surface_redraw_retry.deadline().is_none());
+            assert_eq!(event_loop.control_flow(), ControlFlow::Wait);
+            let ready = Arc::clone(&application.background_ready);
+            let wake = self.runner.wake.clone();
+            self.background = Some(std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(40));
+                ready.store(true, Ordering::Release);
+                wake.request_redraw().unwrap();
+            }));
+        }
+        self.last_frames = application.frames;
     }
     fn exiting(&mut self, event_loop: &ActiveEventLoop) {
-        self.0.exiting(event_loop);
+        self.runner.exiting(event_loop);
     }
 }
 
-#[test]
-#[ignore = "requires a native desktop and GPU surface"]
-fn native_wait_wakes_raw_input_and_engine_recording() {
-    let _guard = crate::runtime::imgui_test_guard();
+fn native_event_loop() -> EventLoop<RuntimeEvent> {
     let mut builder = EventLoop::<RuntimeEvent>::with_user_event();
     #[cfg(target_os = "windows")]
     {
@@ -226,8 +130,16 @@ fn native_wait_wakes_raw_input_and_engine_recording() {
         use winit::platform::x11::EventLoopBuilderExtX11;
         builder.with_x11().with_any_thread(true);
     }
-    let mut event_loop = builder.build().unwrap();
+    let event_loop = builder.build().unwrap();
     event_loop.set_control_flow(ControlFlow::Wait);
+    event_loop
+}
+
+#[test]
+#[ignore = "requires a native desktop and GPU surface"]
+fn native_wait_wakes_raw_input_and_engine_recording() {
+    let _guard = crate::runtime::imgui_test_guard();
+    let mut event_loop = native_event_loop();
     let config = AppConfig {
         window_title: "dear-app bounded native contract".to_owned(),
         window_size: (320.0, 240.0),
@@ -235,36 +147,315 @@ fn native_wait_wakes_raw_input_and_engine_recording() {
         restore_previous_geometry: false,
         ..Default::default()
     };
-    let application = NativeApplication {
-        frames: 0,
-        recordings: 0,
-        inputs: 0,
-        background_ready: Arc::new(AtomicBool::new(false)),
-        deadline: Instant::now() + Duration::from_millis(300),
-        texture: None,
-        external: None,
-        readback: None,
-        verified: false,
+    let mut probe = NativeProbe {
+        runner: Runner::new(
+            config,
+            NativeApplication::default(),
+            event_loop.create_proxy(),
+        ),
+        background: None,
+        last_frames: 0,
     };
-    let mut probe = NativeProbe(Runner::new(config, application, event_loop.create_proxy()));
+    // The pump limit is only a failure watchdog; it never requests an application frame.
     let timeout = Instant::now() + Duration::from_secs(10);
-    while !probe.0.shutdown.started() && Instant::now() < timeout {
+    while !probe.runner.shutdown.started() && Instant::now() < timeout {
         event_loop.pump_app_events(Some(Duration::from_millis(50)), &mut probe);
     }
-    let exited_normally = probe.0.shutdown.started();
-    probe.0.shutdown_once();
+    let exited_normally = probe.runner.shutdown.started();
+    probe.runner.shutdown_once();
+    if let Some(background) = probe.background.take() {
+        background.join().unwrap();
+    }
     assert!(
         exited_normally,
-        "Wait-mode invalidation must finish before the native smoke timeout"
+        "independent background wake or deadline timed out"
     );
-    assert!(probe.0.take_terminal_error().is_none());
-    assert!(probe.0.take_shutdown_error().is_none());
-    let application = &probe.0.ownership.application;
-    assert!(application.verified);
-    assert!(application.frames >= 2);
+    assert!(probe.runner.take_terminal_error().is_none());
+    assert!(probe.runner.take_shutdown_error().is_none());
+    let application = &probe.runner.ownership.application;
+    let background_frame = application
+        .background_frame
+        .expect("background wake must draw before any deadline is armed");
+    let deadline_frame = application
+        .deadline_frame
+        .expect("the later deadline must draw another frame");
+    assert!(deadline_frame > background_frame);
     assert_eq!(application.frames, application.recordings);
     assert_eq!(application.inputs, 1);
-    assert!(application.background_ready.load(Ordering::Acquire));
+    assert!(application.background_wake_received);
+}
+
+#[derive(Default)]
+struct NativeGpuApplication {
+    frames: usize,
+    recordings: usize,
+    texture: Option<wgpu::Texture>,
+    external: Option<ExternalTextureHandle>,
+}
+
+impl Application for NativeGpuApplication {
+    fn initialized(
+        &mut self,
+        _: &mut InitializedContext<'_>,
+        gpu: &mut GpuContext<'_>,
+    ) -> Result<(), RunError> {
+        let texture = gpu.gpu().device().create_texture(&wgpu::TextureDescriptor {
+            label: Some("native dear-app producer initially blue"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        gpu.gpu().queue().write_texture(
+            texture.as_image_copy(),
+            &[0, 0, 255, 255],
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            texture.size(),
+        );
+        self.external = Some(
+            gpu.gpu()
+                .register_external_texture(&texture.create_view(&Default::default()))
+                .unwrap(),
+        );
+        self.texture = Some(texture);
+        Ok(())
+    }
+
+    fn frame(&mut self, context: &mut FrameContext<'_>) -> Result<(), RunError> {
+        self.frames += 1;
+        let texture = context
+            .gpu()
+            .resolve_external_texture(self.external.unwrap())
+            .unwrap();
+        let pos = context.ui().main_viewport().pos();
+        context.ui().get_foreground_draw_list().add_image(
+            texture,
+            pos,
+            [pos[0] + 32.0, pos[1] + 32.0],
+            [0.0, 0.0],
+            [1.0, 1.0],
+            dear_imgui_rs::Color::WHITE,
+        );
+        Ok(())
+    }
+
+    fn record_render(&mut self, context: &mut RenderContext<'_>) -> Result<(), RunError> {
+        let view = self
+            .texture
+            .as_ref()
+            .unwrap()
+            .create_view(&Default::default());
+        {
+            let _pass = context
+                .encoder()
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("native dear-app scene producer red"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::RED),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                });
+        }
+        self.recordings += 1;
+        Ok(())
+    }
+}
+
+struct NativeGpuProbe {
+    runner: Runner<NativeGpuApplication>,
+    verified: bool,
+}
+
+impl ApplicationHandler<RuntimeEvent> for NativeGpuProbe {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        use crate::runtime::surface::{MainFrameTarget, render_application_frame};
+
+        self.runner.resumed(event_loop);
+        let owned = self
+            .runner
+            .ownership
+            .runtime
+            .as_mut()
+            .unwrap()
+            .ownership
+            .get_mut();
+        let generation = owned.generations.current().unwrap();
+        let device = &generation.gpu.device;
+        let format = owned.window.surface_config().unwrap().format;
+        let size = owned.window.window.inner_size();
+        let target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("native dear-app actual UI output"),
+            size: wgpu::Extent3d {
+                width: size.width,
+                height: size.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("native dear-app UI consumer readback"),
+            size: 256,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        // This is the same frame-building, application-hook, overlay and submission entry used
+        // by Runner's admitted surface path. Only the final target is copyable and offscreen.
+        assert!(
+            !render_application_frame(
+                owned,
+                MainFrameTarget::Offscreen(target.clone()),
+                wgpu::Color::BLACK,
+                1,
+                &mut self.runner.ownership.application,
+                &self.runner.config,
+                &self.runner.wake,
+            )
+            .unwrap()
+        );
+        let generation = owned.generations.current().unwrap();
+        let mut encoder = generation
+            .gpu
+            .device
+            .create_command_encoder(&Default::default());
+        let scale = owned.ui.context.io().display_framebuffer_scale();
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &target,
+                mip_level: 0,
+                origin: wgpu::Origin3d {
+                    x: (16.0 * scale[0]) as u32,
+                    y: (16.0 * scale[1]) as u32,
+                    z: 0,
+                },
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        generation.gpu.queue.submit([encoder.finish()]);
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        readback
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                let _ = sender.send(result);
+            });
+        generation
+            .gpu
+            .device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: Some(Duration::from_secs(3)),
+            })
+            .unwrap();
+        receiver
+            .recv_timeout(Duration::from_secs(3))
+            .unwrap()
+            .unwrap();
+        {
+            let bytes = readback.slice(..).get_mapped_range().unwrap();
+            let expected = match format {
+                wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb => {
+                    [255, 0, 0, 255]
+                }
+                wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb => {
+                    [0, 0, 255, 255]
+                }
+                other => panic!("unsupported native smoke-test output format: {other:?}"),
+            };
+            assert_eq!(
+                &bytes[..4],
+                &expected,
+                "Dear App UI must sample this frame's red producer, not the initial blue texture"
+            );
+        }
+        readback.unmap();
+        self.verified = true;
+        self.runner.exit_normally(event_loop);
+    }
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        self.runner.window_event(event_loop, id, event);
+    }
+    fn exiting(&mut self, event_loop: &ActiveEventLoop) {
+        self.runner.exiting(event_loop);
+    }
+}
+
+#[test]
+#[ignore = "requires a native desktop and GPU"]
+fn native_record_render_precedes_ui_texture_consumption() {
+    let _guard = crate::runtime::imgui_test_guard();
+    let mut event_loop = native_event_loop();
+    let mut config = AppConfig {
+        window_title: "dear-app producer before UI consumer".to_owned(),
+        window_size: (320.0, 240.0),
+        redraw: RedrawMode::Wait,
+        restore_previous_geometry: false,
+        ..Default::default()
+    };
+    config.wgpu.backends = match std::env::var("DEAR_IMGUI_TEST_WGPU_BACKEND") {
+        Ok(selected) => match selected.as_str() {
+            "vulkan" => wgpu::Backends::VULKAN,
+            "dx12" => wgpu::Backends::DX12,
+            "primary" => wgpu::Backends::PRIMARY,
+            value => panic!("unsupported DEAR_IMGUI_TEST_WGPU_BACKEND for this fixture: {value}"),
+        },
+        Err(std::env::VarError::NotPresent) => wgpu::Backends::PRIMARY,
+        Err(error) => panic!("invalid DEAR_IMGUI_TEST_WGPU_BACKEND: {error}"),
+    };
+    eprintln!(
+        "[native-dear-app] requested backends {:?}",
+        config.wgpu.backends
+    );
+    let mut probe = NativeGpuProbe {
+        runner: Runner::new(
+            config,
+            NativeGpuApplication::default(),
+            event_loop.create_proxy(),
+        ),
+        verified: false,
+    };
+    event_loop.pump_app_events(Some(Duration::from_secs(1)), &mut probe);
+    probe.runner.shutdown_once();
+    assert!(probe.verified);
+    assert!(probe.runner.take_terminal_error().is_none());
+    assert!(probe.runner.take_shutdown_error().is_none());
+    assert_eq!(probe.runner.ownership.application.frames, 1);
+    assert_eq!(probe.runner.ownership.application.recordings, 1);
 }
 
 #[cfg(feature = "multi-viewport")]
