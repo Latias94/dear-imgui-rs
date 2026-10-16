@@ -205,14 +205,15 @@ impl Runtime {
         match event {
             WindowEvent::Resized(size) => {
                 window.resize(*size, &generation.gpu.device);
-                window.window.request_redraw();
             }
             WindowEvent::ScaleFactorChanged { .. } => {
                 let size = window.window.inner_size();
                 window.resize(size, &generation.gpu.device);
-                window.window.request_redraw();
             }
             _ => {}
+        }
+        if window_event_requests_redraw(event) {
+            window.window.request_redraw();
         }
         Ok(exit_requested)
     }
@@ -475,6 +476,13 @@ pub(super) fn dispatch_live_window_event<T>(
     dispatch: impl FnOnce() -> T,
 ) -> Option<T> {
     (live_window_id == event_window_id).then(dispatch)
+}
+
+pub(super) fn window_event_requests_redraw(event: &WindowEvent) -> bool {
+    !matches!(
+        event,
+        WindowEvent::RedrawRequested | WindowEvent::CloseRequested | WindowEvent::Destroyed
+    )
 }
 
 impl<A: Application + 'static> ApplicationHandler<RuntimeEvent> for Runner<A> {

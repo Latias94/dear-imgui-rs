@@ -28,6 +28,15 @@ impl WinitPlatformControl {
         action
     }
 
+    fn handle_single_window_focus(&self, focused: bool, context: &mut Context) -> bool {
+        if !focused {
+            context
+                .binding()
+                .with_bound_context(|| self.release_single_touch_in_current_context());
+        }
+        events::handle_focused(focused, context)
+    }
+
     pub(super) fn release_single_touch_in_current_context(&self) {
         if self.active_touch.take().is_none() {
             return;
@@ -428,7 +437,7 @@ impl WinitPlatform {
                 {
                     return false;
                 }
-                events::handle_focused(*focused, imgui_ctx)
+                self.control.handle_single_window_focus(*focused, imgui_ctx)
             }
             _ => false,
         }
@@ -457,4 +466,45 @@ pub(super) fn rescale_mouse_pos_for_hidpi_change(
     let old_hidpi = sanitize::positive_finite_or(old_hidpi, 1.0);
     let scale = sanitize::positive_finite_or(new_hidpi / old_hidpi, 1.0);
     sanitize::finite_vec2_f32([mouse[0] * scale as f32, mouse[1] * scale as f32])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_util::test_sync::lock_context;
+    use winit::{
+        dpi::PhysicalPosition,
+        event::{DeviceId, Touch, TouchPhase},
+    };
+
+    #[test]
+    fn single_window_focus_loss_releases_touch_ownership() {
+        let _guard = lock_context();
+        let mut context = Context::create();
+        let mut platform = WinitPlatform::new(&mut context).unwrap();
+        let touch = |id| Touch {
+            device_id: DeviceId::dummy(),
+            phase: TouchPhase::Started,
+            location: PhysicalPosition::new(40.0, 60.0),
+            force: None,
+            id,
+        };
+
+        assert_eq!(
+            platform.control.note_single_touch(&touch(7)),
+            Some(events::TouchAction::Press)
+        );
+        platform
+            .control
+            .handle_single_window_focus(false, &mut context);
+        platform
+            .control
+            .handle_single_window_focus(true, &mut context);
+        assert_eq!(
+            platform.control.note_single_touch(&touch(8)),
+            Some(events::TouchAction::Press),
+            "a missing touch end before focus loss must not block a new finger"
+        );
+        platform.shutdown(&mut context).unwrap();
+    }
 }

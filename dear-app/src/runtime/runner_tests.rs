@@ -14,7 +14,7 @@ mod tests {
     use crate::runtime::runner::{
         GpuFaultDisposition, RunnerOwnership, classify_uncaptured_gpu_fault,
         dispatch_live_window_event, initialize_runtime_once, should_process_runtime_event,
-        uncaptured_gpu_fault, validate_config,
+        uncaptured_gpu_fault, validate_config, window_event_requests_redraw,
     };
     use crate::runtime::shutdown::{
         RuntimeShutdownErrors, ShutdownCoordinator, finish_runtime_shutdown, resolve_run_result,
@@ -27,6 +27,42 @@ mod tests {
     struct DropProbe {
         event: &'static str,
         events: Rc<RefCell<Vec<&'static str>>>,
+    }
+
+    #[test]
+    fn ordinary_input_invalidates_a_waiting_window() {
+        use winit::event::{DeviceId, ElementState, Ime, MouseButton, WindowEvent};
+
+        let events = [
+            WindowEvent::CursorMoved {
+                device_id: DeviceId::dummy(),
+                position: winit::dpi::PhysicalPosition::new(40.0, 60.0),
+            },
+            WindowEvent::MouseInput {
+                device_id: DeviceId::dummy(),
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+            },
+            WindowEvent::Ime(Ime::Commit("editor".to_owned())),
+            WindowEvent::Focused(true),
+            WindowEvent::ModifiersChanged(Default::default()),
+        ];
+        for event in events {
+            assert!(window_event_requests_redraw(&event), "{event:?}");
+        }
+    }
+
+    #[test]
+    fn redraw_and_terminal_events_do_not_invalidate_again() {
+        use winit::event::WindowEvent;
+
+        for event in [
+            WindowEvent::RedrawRequested,
+            WindowEvent::CloseRequested,
+            WindowEvent::Destroyed,
+        ] {
+            assert!(!window_event_requests_redraw(&event), "{event:?}");
+        }
     }
 
     #[test]

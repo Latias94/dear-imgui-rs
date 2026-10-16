@@ -114,9 +114,8 @@ coordinates ImGui uses:
   is present on key press, characters are injected via `io.add_input_character`.
   Coverage includes letters/digits, punctuation (',.-/;=[]\\`), function and lock keys,
   and numpad (0-9, decimal/divide/multiply/subtract/add/equal/enter).
-- Mouse: buttons, position, wheel. `PixelDelta` wheel is mapped to ±1.0 steps
-  (consistent with most ImGui backends); `LineDelta` uses the provided values.
-- Modifiers: tracked via `ModifiersChanged` and mirrored into left/right variants.
+- Mouse: buttons, position, wheel. `PixelDelta` retains fractional movement after scaling to logical scroll units; `LineDelta` uses the provided values.
+- Modifiers: `ModifiersChanged` updates aggregate modifier state; physical key events preserve left/right identity.
 - IME: preedit is ignored (no transient injection); committed text is appended.
 
 ### Touch
@@ -124,6 +123,7 @@ coordinates ImGui uses:
 Basic touch-to-mouse translation is provided:
 - First active finger controls the pointer and Left mouse button.
 - Started -> set position + press LMB; Moved -> update position; End/Cancelled -> release LMB.
+- Losing window focus releases the active touch, so a missing End/Cancelled event cannot block a later finger.
 
 ### IME integration
 
