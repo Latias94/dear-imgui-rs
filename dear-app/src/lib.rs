@@ -17,11 +17,12 @@ use std::{convert::Infallible, error::Error, marker::PhantomData};
 mod application;
 mod config;
 mod runtime;
+mod wake;
 
 pub use application::{
-    AddOns, Application, ApplicationStage, DockingApi, EventContext, ExternalTextureError,
-    ExternalTextureHandle, FrameContext, GpuApi, GpuContext, GpuGeneration, InitContext,
-    InitializedContext, PrepareFrameContext, RunError, ShutdownContext,
+    AddOns, Application, ApplicationStage, DeviceEventContext, DockingApi, EventContext,
+    ExternalTextureError, ExternalTextureHandle, FrameContext, GpuApi, GpuContext, GpuGeneration,
+    InitContext, InitializedContext, PrepareFrameContext, RenderContext, RunError, ShutdownContext,
 };
 pub use config::{
     AddOnsConfig, AppConfig, DockingConfig, RedrawMode, Theme, WgpuConfig, WgpuPreset,
@@ -29,7 +30,9 @@ pub use config::{
 pub use dear_imgui_rs as imgui;
 #[cfg(feature = "test-engine")]
 pub use dear_imgui_test_engine as test_engine;
+pub use wake::{AppWakeClosed, AppWakeHandle};
 pub use wgpu;
+pub use winit::event_loop::DeviceEvents;
 
 /// Runs one persistent application until the event loop exits.
 pub fn run<A: Application + 'static>(config: AppConfig, application: A) -> Result<(), RunError> {

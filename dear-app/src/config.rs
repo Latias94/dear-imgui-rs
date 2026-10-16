@@ -34,6 +34,8 @@ pub struct AppConfig {
     pub ini_filename: Option<PathBuf>,
     pub restore_previous_geometry: bool,
     pub redraw: RedrawMode,
+    /// Native raw device-event policy. Platform support follows Winit.
+    pub device_events: winit::event_loop::DeviceEvents,
     pub io_config_flags: Option<ConfigFlags>,
     pub theme: Option<Theme>,
 }
@@ -51,6 +53,7 @@ impl Default for AppConfig {
             ini_filename: None,
             restore_previous_geometry: true,
             redraw: RedrawMode::Poll,
+            device_events: winit::event_loop::DeviceEvents::WhenFocused,
             io_config_flags: None,
             theme: None,
         }

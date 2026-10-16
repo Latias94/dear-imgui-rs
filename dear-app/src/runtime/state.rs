@@ -205,6 +205,7 @@ pub(crate) enum GpuFaultKind {
 
 #[derive(Debug)]
 pub(crate) enum RuntimeEvent {
+    Wake,
     DeviceLost {
         generation: GpuGeneration,
         message: String,

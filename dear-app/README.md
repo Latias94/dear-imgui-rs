@@ -90,6 +90,39 @@ cargo run -p dear-imgui-examples --bin fallible_frame
 
 ## Application Lifecycle
 
+With `RedrawMode::Wait`, ordinary input redraws the live window. Background work and timers can
+request frames through a thread-safe, coalescing handle obtained during `Application::initialized`:
+
+```rust
+use std::time::{Duration, Instant};
+use dear_app::InitializedContext;
+
+fn schedule_work(context: &InitializedContext<'_>) {
+    let wake = context.wake_handle();
+    wake.request_redraw_at(Instant::now() + Duration::from_millis(100)).unwrap();
+    std::thread::spawn(move || {
+        // Publish loaded assets to application-owned synchronized storage first.
+        let _ = wake.request_redraw();
+    });
+}
+```
+
+Requests queue at most one wake event and retain the earliest deadline. Deadlines are one-shot;
+schedule the next deadline after consuming the associated work. Handles survive GPU recreation
+and return `AppWakeClosed` after runtime shutdown.
+
+`Application::device_event` receives unmodified Winit raw input. Set `AppConfig::device_events` to
+`DeviceEvents::WhenFocused` (the default), `Always`, or `Never`. Raw motion has no native window
+target: use application focus and pointer ownership to choose a Scene/Game recipient, then request
+a redraw through `DeviceEventContext::wake_handle()` when that input changes visible state.
+
+Use `Application::record_render` for engine render-to-texture work. The hook runs after UI
+construction on admitted frames and lends `RenderContext::encoder()`. Commands recorded there
+precede Dear ImGui consumers in the same submission. The context also exposes the active device,
+queue, GPU generation, admitted frame index, main framebuffer extent and surface format. The
+runtime finishes the encoder and presents the surface; the application retains its scene targets.
+`FrameContext::wake_handle()` can schedule an animation's next one-shot deadline from `run_frame`.
+
 Move from `run_frame` to `Application` only when the program needs context initialization, raw
 window events, GPU resources, device-loss recovery, or deterministic teardown. The frame body can
 move unchanged into `Application::frame`:

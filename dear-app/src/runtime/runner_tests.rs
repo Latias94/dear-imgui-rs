@@ -13,8 +13,9 @@ mod tests {
     use crate::runtime::ownership::{OrderedRuntimeOwner, RuntimeOwnershipLifecycle};
     use crate::runtime::runner::{
         GpuFaultDisposition, RunnerOwnership, classify_uncaptured_gpu_fault,
-        dispatch_live_window_event, initialize_runtime_once, should_process_runtime_event,
-        uncaptured_gpu_fault, validate_config, window_event_requests_redraw,
+        dispatch_live_window_event, earliest_deadline, initialize_runtime_once,
+        should_process_runtime_event, uncaptured_gpu_fault, validate_config,
+        window_event_requests_redraw,
     };
     use crate::runtime::shutdown::{
         RuntimeShutdownErrors, ShutdownCoordinator, finish_runtime_shutdown, resolve_run_result,
@@ -27,6 +28,18 @@ mod tests {
     struct DropProbe {
         event: &'static str,
         events: Rc<RefCell<Vec<&'static str>>>,
+    }
+
+    #[test]
+    fn application_deadlines_do_not_delay_surface_retries() {
+        let now = std::time::Instant::now();
+        let earlier = now + std::time::Duration::from_millis(10);
+        let later = now + std::time::Duration::from_secs(1);
+        assert_eq!(earliest_deadline(Some(later), Some(earlier)), Some(earlier));
+        assert_eq!(earliest_deadline(Some(earlier), Some(later)), Some(earlier));
+        assert_eq!(earliest_deadline(None, Some(later)), Some(later));
+        assert_eq!(earliest_deadline(Some(earlier), None), Some(earlier));
+        assert_eq!(earliest_deadline(None, None), None);
     }
 
     #[test]

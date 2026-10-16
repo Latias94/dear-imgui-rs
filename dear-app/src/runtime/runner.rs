@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 use winit::{
     application::ApplicationHandler,
-    event::{Event, WindowEvent},
+    event::{DeviceEvent, DeviceId, Event, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
     window::WindowId,
 };
@@ -34,6 +34,7 @@ pub(crate) fn run<A: Application + 'static>(
 ) -> Result<(), RunError> {
     validate_config(&config)?;
     let event_loop = EventLoop::<RuntimeEvent>::with_user_event().build()?;
+    event_loop.listen_device_events(config.device_events);
     set_initial_control_flow(&event_loop, config.redraw);
     let event_proxy = event_loop.create_proxy();
     let mut runner = Runner::new(config, application, event_proxy);
@@ -75,6 +76,7 @@ struct Runtime {
     ownership: OrderedRuntimeOwner<RuntimeOwnership>,
     clear_color: wgpu::Color,
     admitted_frame_count: u64,
+    wake: crate::AppWakeHandle,
 }
 
 impl Runtime {
@@ -85,6 +87,7 @@ impl Runtime {
     fn new<A: Application>(
         event_loop: &ActiveEventLoop,
         event_proxy: EventLoopProxy<RuntimeEvent>,
+        wake: crate::AppWakeHandle,
         config: &AppConfig,
         application: &mut A,
     ) -> Result<Self, RunError> {
@@ -121,9 +124,10 @@ impl Runtime {
                 a: config.clear_color[3] as f64,
             },
             admitted_frame_count: 0,
+            wake: wake.clone(),
         };
 
-        if let Err(error) = runtime.notify_initialized(application, config) {
+        if let Err(error) = runtime.notify_initialized(application, config, wake) {
             return Err(super::state::preserve_initialization_error(error, || {
                 let application_error = runtime.shutdown_application(application);
                 let teardown_error = runtime.teardown();
@@ -137,6 +141,7 @@ impl Runtime {
         &mut self,
         application: &mut A,
         config: &AppConfig,
+        wake: crate::AppWakeHandle,
     ) -> Result<(), RunError> {
         let RuntimeOwnership {
             window,
@@ -156,6 +161,7 @@ impl Runtime {
                     imgui: context,
                     window: &window.window,
                     config,
+                    wake,
                 };
                 let mut gpu = generation.context(window)?;
                 application.initialized(&mut initialized, &mut gpu)
@@ -193,6 +199,7 @@ impl Runtime {
                     imgui,
                     window: &window.window,
                     exit_requested: &mut exit_requested,
+                    wake: &self.wake,
                 };
                 application.event(&mut context)
             },
@@ -229,6 +236,7 @@ impl Runtime {
             &mut self.admitted_frame_count,
             application,
             config,
+            &self.wake,
         )
     }
 
@@ -363,6 +371,7 @@ struct Runner<A> {
     ownership: RunnerOwnership<Runtime, A>,
     shutdown: ShutdownCoordinator,
     event_proxy: EventLoopProxy<RuntimeEvent>,
+    wake: crate::AppWakeHandle,
     last_wake: Instant,
     surface_redraw_retry: SurfaceRedrawRetry,
 }
@@ -375,6 +384,7 @@ pub(super) struct RunnerOwnership<R, A> {
 
 impl<A: Application> Runner<A> {
     fn new(config: AppConfig, application: A, event_proxy: EventLoopProxy<RuntimeEvent>) -> Self {
+        let wake = crate::AppWakeHandle::new(event_proxy.clone());
         Self {
             config,
             ownership: RunnerOwnership {
@@ -383,6 +393,7 @@ impl<A: Application> Runner<A> {
             },
             shutdown: ShutdownCoordinator::default(),
             event_proxy,
+            wake,
             last_wake: Instant::now(),
             surface_redraw_retry: SurfaceRedrawRetry::default(),
         }
@@ -405,6 +416,7 @@ impl<A: Application> Runner<A> {
     }
 
     fn shutdown_once(&mut self) {
+        self.wake.close();
         self.shutdown.shutdown_once(
             &mut self.ownership.runtime,
             &mut self.ownership.application,
@@ -489,10 +501,12 @@ impl<A: Application + 'static> ApplicationHandler<RuntimeEvent> for Runner<A> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let shutdown_started = self.shutdown.started();
         let event_proxy = self.event_proxy.clone();
+        let wake = self.wake.clone();
         match initialize_runtime_once(&mut self.ownership.runtime, shutdown_started, || {
             Runtime::new(
                 event_loop,
                 event_proxy,
+                wake,
                 &self.config,
                 &mut self.ownership.application,
             )
@@ -513,9 +527,14 @@ impl<A: Application + 'static> ApplicationHandler<RuntimeEvent> for Runner<A> {
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: RuntimeEvent) {
+        if matches!(event, RuntimeEvent::Wake) {
+            self.wake.acknowledge();
+            return;
+        }
         let generation = match &event {
             RuntimeEvent::DeviceLost { generation, .. }
             | RuntimeEvent::GpuFault { generation, .. } => *generation,
+            RuntimeEvent::Wake => return,
         };
 
         if !should_process_runtime_event(self.shutdown.started(), event_loop.exiting()) {
@@ -552,6 +571,7 @@ impl<A: Application + 'static> ApplicationHandler<RuntimeEvent> for Runner<A> {
                 }
                 return;
             }
+            RuntimeEvent::Wake => return,
         };
 
         let Some(runtime) = self.ownership.runtime.as_mut() else {
@@ -651,9 +671,50 @@ impl<A: Application + 'static> ApplicationHandler<RuntimeEvent> for Runner<A> {
         }
     }
 
+    fn device_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        device_id: DeviceId,
+        event: DeviceEvent,
+    ) {
+        if !should_process_runtime_event(self.shutdown.started(), event_loop.exiting()) {
+            return;
+        }
+        let Some(runtime) = self.ownership.runtime.as_mut() else {
+            return;
+        };
+        let mut exit_requested = false;
+        let ownership = runtime.ownership.get_mut();
+        let mut context = crate::DeviceEventContext {
+            device_id,
+            event: &event,
+            window: &ownership.window.window,
+            wake: &self.wake,
+            exit_requested: &mut exit_requested,
+        };
+        let result = super::state::run_application_frame_boundary(
+            &mut ownership.ui.context,
+            ApplicationStage::DeviceEvent,
+            |_| self.ownership.application.device_event(&mut context),
+        );
+        if let Err(error) = result {
+            self.terminate(event_loop, error);
+        } else if exit_requested {
+            self.exit_normally(event_loop);
+        }
+    }
+
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if !should_process_runtime_event(self.shutdown.started(), event_loop.exiting()) {
+            return;
+        }
         let now = Instant::now();
         let retry_due = self.surface_redraw_retry.take_due(now);
+        let application_due = self.wake.take_due(now);
+        if application_due && let Some(runtime) = self.ownership.runtime.as_ref() {
+            runtime.window().window.request_redraw();
+        }
+        let application_deadline = self.wake.deadline();
         match self.config.redraw {
             RedrawMode::Poll => {
                 event_loop.set_control_flow(ControlFlow::Poll);
@@ -665,7 +726,8 @@ impl<A: Application + 'static> ApplicationHandler<RuntimeEvent> for Runner<A> {
                 if retry_due && let Some(runtime) = self.ownership.runtime.as_ref() {
                     runtime.window().window.request_redraw();
                 }
-                match self.surface_redraw_retry.deadline() {
+                match earliest_deadline(self.surface_redraw_retry.deadline(), application_deadline)
+                {
                     Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
                     None => event_loop.set_control_flow(ControlFlow::Wait),
                 }
@@ -686,6 +748,9 @@ impl<A: Application + 'static> ApplicationHandler<RuntimeEvent> for Runner<A> {
                 if let Some(retry_deadline) = self.surface_redraw_retry.deadline() {
                     next_wake = next_wake.min(retry_deadline);
                 }
+                if let Some(deadline) = application_deadline {
+                    next_wake = next_wake.min(deadline);
+                }
                 event_loop.set_control_flow(ControlFlow::WaitUntil(next_wake));
             }
         }
@@ -695,3 +760,14 @@ impl<A: Application + 'static> ApplicationHandler<RuntimeEvent> for Runner<A> {
         self.shutdown_once();
     }
 }
+
+pub(super) fn earliest_deadline(left: Option<Instant>, right: Option<Instant>) -> Option<Instant> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (left, right) => left.or(right),
+    }
+}
+
+#[cfg(all(test, any(target_os = "windows", target_os = "linux")))]
+#[path = "native_tests.rs"]
+mod native_tests;

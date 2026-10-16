@@ -69,10 +69,10 @@ impl SurfaceAdmissionBackend for RuntimeSurfaceAdmission<'_> {
 
 struct AdmittedWgpuFrameDriver<'a> {
     renderer: &'a mut dear_imgui_wgpu::WgpuRenderer,
-    device: &'a wgpu::Device,
     queue: &'a wgpu::Queue,
     surface_frame: Option<wgpu::SurfaceTexture>,
     clear_color: wgpu::Color,
+    encoder: Option<wgpu::CommandEncoder>,
     rendered: bool,
     presented: bool,
 }
@@ -80,17 +80,17 @@ struct AdmittedWgpuFrameDriver<'a> {
 impl<'a> AdmittedWgpuFrameDriver<'a> {
     fn new(
         renderer: &'a mut dear_imgui_wgpu::WgpuRenderer,
-        device: &'a wgpu::Device,
         queue: &'a wgpu::Queue,
         surface_frame: wgpu::SurfaceTexture,
         clear_color: wgpu::Color,
+        encoder: wgpu::CommandEncoder,
     ) -> Self {
         Self {
             renderer,
-            device,
             queue,
             surface_frame: Some(surface_frame),
             clear_color,
+            encoder: Some(encoder),
             rendered: false,
             presented: false,
         }
@@ -127,11 +127,9 @@ impl<'a> AdmittedWgpuFrameDriver<'a> {
         let view = surface_frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Dear App render encoder"),
-            });
+        let mut encoder = self.encoder.take().ok_or_else(|| RunError::Recovery {
+            message: "admitted frame encoder was already consumed".to_owned(),
+        })?;
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Dear App render pass"),
@@ -250,6 +248,7 @@ pub(super) fn render_surface_frame<A: Application>(
     admitted_frame_count: &mut u64,
     application: &mut A,
     config: &AppConfig,
+    wake: &crate::AppWakeHandle,
 ) -> Result<SurfaceDispatch<bool>, RunError> {
     let admitted = {
         let RuntimeOwnership {
@@ -322,6 +321,7 @@ pub(super) fn render_surface_frame<A: Application>(
                     addons,
                     gpu: generation.api(),
                     exit_requested: &mut exit_requested,
+                    wake,
                 };
                 application
                     .frame(&mut frame)
@@ -341,13 +341,35 @@ pub(super) fn render_surface_frame<A: Application>(
                         .to_owned(),
                 })?;
             let reconfigure_after_present = admitted.reconfigure_after_present;
+            let gpu_generation = generation.id;
             let gpu = &mut generation.gpu;
+            let mut encoder = gpu
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Dear App engine and UI encoder"),
+                });
+            let mut render_context = crate::RenderContext {
+                device: &gpu.device,
+                queue: &gpu.queue,
+                encoder: &mut encoder,
+                window: &window.window,
+                generation: gpu_generation,
+                frame_index,
+                framebuffer_extent: dear_imgui_wgpu::FramebufferExtent::from_texture(
+                    &admitted.frame.texture,
+                ),
+                surface_format: admitted.frame.texture.format(),
+                wake,
+            };
+            application
+                .record_render(&mut render_context)
+                .map_err(|error| error.during_application_stage(ApplicationStage::RecordRender))?;
             let mut driver = AdmittedWgpuFrameDriver::new(
                 &mut gpu.renderer,
-                &gpu.device,
                 &gpu.queue,
                 admitted.frame,
                 clear_color,
+                encoder,
             );
             let result = drive_admitted_frame(application, frame, frame_index, &mut driver);
             let was_presented = driver.was_presented();

@@ -10,6 +10,7 @@ mod state;
 mod surface;
 
 pub(crate) use runner::run;
+pub(crate) use state::RuntimeEvent;
 
 #[cfg(test)]
 pub(crate) fn imgui_test_guard() -> std::sync::MutexGuard<'static, ()> {
