@@ -8,6 +8,21 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
+### Breaking Changes and Migration
+
+- Winit event entry points now route by `WindowId` and return structured ownership, forwarding, capture, and invalidation facts. WGPU viewport routes separate preparation, recording, submission, and presentation; migrate combined frame loops to `complete_secondary` and `record_main`, or use the explicit work capabilities. See [the editor backend migration guide](docs/EDITOR_BACKEND_MIGRATION.md).
+
+### Added
+
+- Track exact native window registrations, configure supported secondary-window policy before creation, and observe native creation and retirement. Engine pointer control coordinates cursor grabs with Dear ImGui and reports automatic release and native failures.
+- Inspect which native target recorded or submitted draws using each external texture binding revision, including skipped windows and partially failed frames. A separate WGPU executor consumes existing core snapshots on a render thread with target-generation checks and complete managed-texture feedback.
+- Enable optional native multi-viewport in Dear App, record engine commands before UI consumers, handle raw device input, and wake Wait-mode applications from background work or frame deadlines. GPU recovery preserves application and Context state while replacing GPU resources and retired secondary windows.
+- Preserve SDL callback file-drop payloads and observed native identities, and optionally install a desktop text clipboard through the existing core clipboard contract. New GPU examples cover bounded threaded rendering and explicit depth, object-ID, HDR, layer, and mip previews.
+
+### Fixed
+
+- Release single-window touch ownership after focus loss and invalidate Wait-mode rendering for native input. Keep acquired-frame, Surface, native-window, and owner-chain leases through pending presentation; release configured Surfaces before their Device during recovery and shutdown.
+
 ## [0.20.0] - 2026-10-12
 
 This release expands native backend integration and improves the examples used to build applications. It also updates the Bevy, SDL3, and glam integrations; review the migration notes before upgrading all workspace crates together.
