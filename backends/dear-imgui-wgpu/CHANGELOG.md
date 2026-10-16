@@ -6,6 +6,18 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+### Breaking
+
+- Return `WgpuDrawRecording` from `render` and `render_reconciled`, and a native-target observation from a viewport route's `render_main`. Replace secondary report ID lists with `observations()` containing the captured native allocation, UI scope, texture bindings, stage, and skip/failure outcome.
+
+### Added
+
+- Add checked external view-binding revisions and `external_texture_binding` queries on renderers and viewport routes. Draw dependencies exclude empty/clipped commands and explicitly mark unknown raw-callback resources.
+
+### Fixed
+
+- Preserve partial target observations alongside renderer and late platform faults when viewport preparation fails, without returning an invalid drawable capability.
+
 ## [0.16.0] - 2026-08-14
 
 ### Breaking

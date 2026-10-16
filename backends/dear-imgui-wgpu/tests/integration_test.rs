@@ -499,7 +499,9 @@ fn render_pending_frame(
         multiview_mask: None,
         timestamp_writes: None,
     });
-    renderer.render(frame, &mut render_pass, FramebufferExtent::new(1, 1))
+    renderer
+        .render(frame, &mut render_pass, FramebufferExtent::new(1, 1))
+        .map(|_| ())
 }
 
 #[test]
@@ -727,4 +729,204 @@ fn texture_id_api_boundaries_are_typed() {
     ) -> RendererResult<()> = WgpuRenderer::update_external_texture;
     let _: fn(&mut WgpuRenderer, ExternalTextureId) -> RendererResult<()> =
         WgpuRenderer::unregister_external_texture;
+}
+
+/// The frozen dependency metadata must agree with pixels produced by the actual command buffer.
+#[test]
+fn recording_dependencies_match_distinct_texture_pixels_and_keep_replaced_revisions()
+-> RendererResult<()> {
+    let Some((device, queue)) = request_test_device() else {
+        assert!(
+            std::env::var_os("DEAR_IMGUI_REQUIRE_WGPU_ADAPTER").is_none(),
+            "the texture-observation readback gate requires a working adapter"
+        );
+        return Ok(());
+    };
+    let mut context = Context::create();
+    let mut renderer = WgpuRenderer::new(
+        WgpuInitInfo::new(device.clone(), queue.clone(), TextureFormat::Rgba8Unorm),
+        &mut context,
+    )?;
+    renderer.set_gamma_mode(dear_imgui_wgpu::GammaMode::Linear);
+    let (red_texture, red_view) = external_test_texture(&device, "observation red");
+    let (green_texture, green_view) = external_test_texture(&device, "observation green");
+    let (blue_texture, blue_view) = external_test_texture(&device, "observation blue");
+    for (texture, pixel) in [
+        (&red_texture, [255, 0, 0, 255]),
+        (&green_texture, [0, 255, 0, 255]),
+        (&blue_texture, [0, 0, 255, 255]),
+    ] {
+        queue.write_texture(
+            TexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: Origin3d::ZERO,
+                aspect: TextureAspect::All,
+            },
+            &pixel,
+            TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+    let red = renderer.register_external_texture(&red_view)?;
+    let green = renderer.register_external_texture(&green_view)?;
+    let clipped_blue = renderer.register_external_texture(&blue_view)?;
+    let original_red = renderer.external_texture_binding(red)?;
+    let original_green = renderer.external_texture_binding(green)?;
+    context.io_mut().set_display_size([64.0, 32.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
+    {
+        let ui = context.frame();
+        let draw_list = ui.get_foreground_draw_list();
+        draw_list.add_image(
+            red.texture_id(),
+            [0.0, 0.0],
+            [32.0, 32.0],
+            [0.0, 0.0],
+            [1.0, 1.0],
+            dear_imgui_rs::Color::WHITE,
+        );
+        draw_list.add_image(
+            green.texture_id(),
+            [32.0, 0.0],
+            [64.0, 32.0],
+            [0.0, 0.0],
+            [1.0, 1.0],
+            dear_imgui_rs::Color::WHITE,
+        );
+        draw_list.with_clip_rect([80.0, 80.0], [96.0, 96.0], || {
+            draw_list.add_image(
+                clipped_blue.texture_id(),
+                [0.0, 0.0],
+                [64.0, 32.0],
+                [0.0, 0.0],
+                [1.0, 1.0],
+                dear_imgui_rs::Color::WHITE,
+            );
+        });
+    }
+    let target = device.create_texture(&TextureDescriptor {
+        label: Some("texture-observation readback target"),
+        size: Extent3d {
+            width: 64,
+            height: 32,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = target.create_view(&TextureViewDescriptor::default());
+    let readback = device.create_buffer(&BufferDescriptor {
+        label: Some("texture-observation readback buffer"),
+        size: 256 * 32,
+        usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor::default());
+    let recording = {
+        let attachments = [Some(RenderPassColorAttachment {
+            view: &view,
+            resolve_target: None,
+            depth_slice: None,
+            ops: Operations {
+                load: LoadOp::Clear(Color::BLACK),
+                store: StoreOp::Store,
+            },
+        })];
+        let mut pass = encoder.begin_render_pass(&RenderPassDescriptor {
+            color_attachments: &attachments,
+            #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
+            multiview_mask: None,
+            ..Default::default()
+        });
+        let pending = context.try_render(renderer.renderer_consumer()?)?;
+        renderer.render(pending, &mut pass, FramebufferExtent::new(64, 32))?
+    };
+    assert!(recording.recorded);
+    assert!(recording.skip_reason.is_none());
+    assert!(recording.scope.epoch.is_some());
+    assert_eq!(
+        recording.dependencies.external_bindings,
+        [original_red, original_green]
+    );
+    assert!(
+        !recording
+            .dependencies
+            .contains_unknown_callback_dependencies
+    );
+
+    // A replacement between recording and submission must not relabel the old commands.
+    renderer.update_external_texture(red, &blue_view)?;
+    assert_eq!(renderer.external_texture_binding(red)?.revision.get(), 2);
+    assert_eq!(
+        recording.dependencies.external_bindings[0].revision.get(),
+        1
+    );
+    encoder.copy_texture_to_buffer(
+        TexelCopyTextureInfo {
+            texture: &target,
+            mip_level: 0,
+            origin: Origin3d::ZERO,
+            aspect: TextureAspect::All,
+        },
+        TexelCopyBufferInfo {
+            buffer: &readback,
+            layout: TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(256),
+                rows_per_image: Some(32),
+            },
+        },
+        Extent3d {
+            width: 64,
+            height: 32,
+            depth_or_array_layers: 1,
+        },
+    );
+    let submission = queue.submit([encoder.finish()]);
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    readback.slice(..).map_async(MapMode::Read, move |result| {
+        let _ = sender.send(result);
+    });
+    device
+        .poll(PollType::Wait {
+            submission_index: Some(submission),
+            timeout: Some(std::time::Duration::from_secs(10)),
+        })
+        .expect("GPU readback poll must complete");
+    receiver
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("map callback must run")
+        .expect("readback mapping must succeed");
+    {
+        #[cfg(any(feature = "wgpu-27", feature = "wgpu-28", feature = "wgpu-29"))]
+        let bytes = readback.slice(..).get_mapped_range();
+        #[cfg(feature = "wgpu-30")]
+        let bytes = readback
+            .slice(..)
+            .get_mapped_range()
+            .expect("readback range must remain mapped");
+        assert_eq!(
+            &bytes[16 * 256 + 8 * 4..16 * 256 + 8 * 4 + 4],
+            &[255, 0, 0, 255]
+        );
+        assert_eq!(
+            &bytes[16 * 256 + 40 * 4..16 * 256 + 40 * 4 + 4],
+            &[0, 255, 0, 255]
+        );
+    }
+    readback.unmap();
+    renderer.shutdown(&mut context)
 }

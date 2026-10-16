@@ -136,14 +136,18 @@ pub(crate) struct SecondarySubmissionEvidence {
 impl SecondarySubmissionEvidence {
     fn from_report(report: &wgpu_mvp::WgpuViewportFrameReport) -> Option<Self> {
         let render_submitted_viewport_ids = report
-            .render_submitted_viewport_ids()
+            .observations()
             .iter()
-            .map(|id| id.raw())
+            .filter(|observation| observation.stage >= dear_imgui_wgpu::WgpuFrameStage::Submitted)
+            .map(|observation| observation.target.viewport_id.raw())
             .collect::<Vec<_>>();
         let present_submitted_viewport_ids = report
-            .present_submitted_viewport_ids()
+            .observations()
             .iter()
-            .map(|id| id.raw())
+            .filter(|observation| {
+                observation.stage >= dear_imgui_wgpu::WgpuFrameStage::PresentationRequested
+            })
+            .map(|observation| observation.target.viewport_id.raw())
             .collect::<Vec<_>>();
 
         render_submitted_viewport_ids
@@ -181,10 +185,10 @@ impl AppRenderer {
     ) -> Result<(), Box<dyn std::error::Error>> {
         match (self, frame) {
             (Self::Single(renderer), AppPreparedFrame::Single(frame)) => {
-                renderer.render_reconciled(frame, render_pass, framebuffer_extent)?
+                renderer.render_reconciled(frame, render_pass, framebuffer_extent)?;
             }
             (Self::Multi(route), AppPreparedFrame::Multi(frame)) => {
-                route.render_main(frame, render_pass, framebuffer_extent)?
+                route.render_main(frame, render_pass, framebuffer_extent)?;
             }
             _ => return Err("prepared frame does not belong to the active renderer route".into()),
         }

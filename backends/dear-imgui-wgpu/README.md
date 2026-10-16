@@ -50,6 +50,22 @@ replacement. Call `unregister_external_texture(texture)` only after recording th
 that uses the handle; unregistering immediately after `ui.image` leaves that frame without a
 texture mapping.
 
+Each registration starts at binding revision one. `renderer.external_texture_binding(texture)`
+returns an owned `ExternalTextureBinding`; every successful `update_external_texture` advances
+that revision, even when passed the same view. Exhaustion and invalid handles return typed errors
+without changing the mapping or cached bind group. The revision identifies a view mapping, not
+the engine's content frame. Keep engine resource IDs and content revisions alongside this value.
+
+`render` and `render_reconciled` return `WgpuDrawRecording`. Its `dependencies.external_bindings`
+contains each external mapping once, in first drawable-use order, after validation and framebuffer
+clipping. Zero-count and fully clipped images are excluded. A non-standard raw callback sets
+`contains_unknown_callback_dependencies`; the backend cannot infer resources used inside arbitrary
+callbacks. Standard reset and sampler callbacks do not make the dependency list incomplete.
+
+The recording contains the Context, renderer epoch and native UI frame count. Save it directly in
+editor history; it retains no Context, native window or GPU lease. For an application-owned render
+pass it proves recording only: the caller controls the attachment, `Queue::submit`, and presentation.
+
 Sampling is renderer state rather than texture ownership. The renderer owns the standard linear and nearest samplers; enqueue an explicit draw-list command around images that need nearest sampling:
 
 ```rust,no_run
@@ -155,6 +171,43 @@ acquiring the main surface, consume that capability with `route.render_main(prep
 acquisition is temporarily unavailable, dropping the prepared capability does not undo the
 secondary work that already completed. There is no public manual trace or partially reconciled
 multi-viewport path.
+
+### Inspect native target observations
+
+`prepared.secondary_report().observations()` returns one `WgpuViewportObservation` per attempted
+target. Each entry freezes `NativeWindowTarget`, `WgpuFrameScope`, external binding revisions,
+the highest completed API stage, and an independent skip/failure outcome. Use
+`target.instance_id` to correlate the exact native registration across docking changes. The stored
+`target.viewport_id` is the routing ID at observation time; resolving that old ID against a newer
+platform registry can identify a different window.
+
+```rust,no_run
+# use dear_imgui_wgpu::multi_viewport::WgpuViewportFrameReport;
+# fn inspect(report: &WgpuViewportFrameReport) {
+for observation in report.observations() {
+    for binding in &observation.dependencies.external_bindings {
+        println!("native {:?}, UI {:?}, texture {:?}, revision {}, stage {:?}",
+            observation.target.instance_id, observation.scope.epoch,
+            binding.texture, binding.revision, observation.stage);
+    }
+}
+# }
+```
+
+Stages are `Unrecorded`, `Recorded`, `Submitted`, and `PresentationRequested`. The last stage means
+the backend invoked WGPU's presentation API; it does not prove GPU completion, compositor
+acceptance, scanout, or visible pixels. A submitted clear-only pass can have empty image
+dependencies and a `NoDrawCommands` outcome. Zero-size, missing draw data, timeout, outdated/lost
+surface recovery, occlusion, and retired targets have distinct skip reasons. Failures retain any
+earlier completed stage; a preparation or recording failure never claims successful recording.
+
+On failure, `route.prepare(...)` returns a route error whose `report()` retains all earlier
+observations. `error.into_parts()` returns the partial report together with every ordered renderer
+and platform fault. No drawable prepared capability escapes a failed transaction. On success,
+clone `secondary_report()` for history, or consume `into_secondary_report()` when main-surface
+acquisition is unavailable. `route.render_main(...)` returns the main recording observation; the
+caller must supply the main target's actual attachment and remains responsible for its submission
+and presentation.
 
 For SDL3, initialize `Sdl3PlatformBackend` first and then call
 `dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRoute::attach(imgui, &platform, renderer)`.

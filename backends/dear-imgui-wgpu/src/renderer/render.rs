@@ -6,7 +6,10 @@ use super::{
     map_renderer_render_state_error,
 };
 use crate::wgpu;
-use crate::{GammaMode, RendererError, RendererResult, Uniforms};
+use crate::{
+    GammaMode, RendererError, RendererResult, Uniforms, WgpuDrawRecording, WgpuFrameScope,
+    WgpuFrameSkipReason,
+};
 use dear_imgui_rs::{
     ContextBinding,
     render::{DrawData, PendingFrame, ReconciledFrame},
@@ -75,7 +78,7 @@ impl WgpuRenderer {
         frame: PendingFrame<'_>,
         render_pass: &mut RenderPass<'_>,
         framebuffer_extent: FramebufferExtent,
-    ) -> RendererResult<()> {
+    ) -> RendererResult<WgpuDrawRecording> {
         let frame = self.reconcile_frame(frame)?;
         self.render_reconciled(frame, render_pass, framebuffer_extent)
     }
@@ -83,16 +86,23 @@ impl WgpuRenderer {
     /// Renders an already reconciled frame into an explicit framebuffer extent.
     ///
     /// Recording consumes the reconciled capability. Command submission and presentation remain
-    /// the application's responsibility.
+    /// the application's responsibility. The returned metadata identifies external view revisions
+    /// actually recorded after clipping; it cannot identify the supplied pass's native window,
+    /// prove a subsequent queue submission, or prove GPU completion.
     pub fn render_reconciled(
         &mut self,
         frame: ReconciledFrame<'_>,
         render_pass: &mut RenderPass<'_>,
         framebuffer_extent: FramebufferExtent,
-    ) -> RendererResult<()> {
+    ) -> RendererResult<WgpuDrawRecording> {
         self.ensure_renderer_contract()?;
         self.ensure_reconciled_frame_matches(&frame)?;
         let binding = self.bound_context()?;
+        let scope = WgpuFrameScope {
+            context_id: frame.context_id(),
+            epoch: frame.epoch(),
+            frame_count: frame.draw_data().frame_count(),
+        };
         with_bound_context(&binding, || {
             let platform_io = platform_io_for_current_context()?;
             self.render_read_only_draw_data_with_fb_size(
@@ -102,6 +112,7 @@ impl WgpuRenderer {
                 framebuffer_extent.height(),
                 true,
                 platform_io,
+                scope,
             )
         })
     }
@@ -154,14 +165,18 @@ impl WgpuRenderer {
         fb_height: u32,
         main_viewport: bool,
         platform_io: *mut sys::ImGuiPlatformIO,
-    ) -> RendererResult<()> {
+        scope: WgpuFrameScope,
+    ) -> RendererResult<WgpuDrawRecording> {
         self.ensure_frame_prepared()?;
         self.log_framebuffer_mismatch(draw_data, fb_width, fb_height, main_viewport);
         let extent = FramebufferExtent::new(fb_width, fb_height);
         if extent.is_empty() {
-            return Ok(());
+            return Ok(WgpuDrawRecording::skipped(
+                scope,
+                WgpuFrameSkipReason::ZeroSize,
+            ));
         }
-        self.render_draw_data_at_extent(draw_data, render_pass, extent, platform_io)
+        self.render_draw_data_at_extent(draw_data, render_pass, extent, platform_io, scope)
     }
 
     fn render_draw_data_at_extent(
@@ -170,10 +185,14 @@ impl WgpuRenderer {
         render_pass: &mut RenderPass<'_>,
         extent: FramebufferExtent,
         platform_io: *mut sys::ImGuiPlatformIO,
-    ) -> RendererResult<()> {
+        scope: WgpuFrameScope,
+    ) -> RendererResult<WgpuDrawRecording> {
         self.ensure_renderer_contract()?;
         if !draw_data.valid() {
-            return Ok(());
+            return Ok(WgpuDrawRecording::skipped(
+                scope,
+                WgpuFrameSkipReason::NoDrawData,
+            ));
         }
         Self::preflight_draw_callback_support(draw_data.requirements())?;
         unsafe {
@@ -192,7 +211,10 @@ impl WgpuRenderer {
             backend_data,
         )?;
         if prepared.is_empty() {
-            return Ok(());
+            return Ok(WgpuDrawRecording::skipped(
+                scope,
+                WgpuFrameSkipReason::NoDrawCommands,
+            ));
         }
 
         let gamma = match self.gamma_mode {
@@ -207,6 +229,7 @@ impl WgpuRenderer {
             prepared.has_elements(),
         )?;
         let device = backend_data.device.clone();
+        let dependencies = prepared.dependencies().clone();
         Self::execute_prepared_draw_data(
             prepared,
             &state,
@@ -214,7 +237,13 @@ impl WgpuRenderer {
             render_pass,
             platform_io,
             &device,
-        )
+        )?;
+        Ok(WgpuDrawRecording {
+            scope,
+            dependencies,
+            recorded: true,
+            skip_reason: None,
+        })
     }
 
     #[cfg(feature = "mv-log")]

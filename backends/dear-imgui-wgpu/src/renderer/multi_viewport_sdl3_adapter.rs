@@ -65,3 +65,22 @@ pub(super) fn framebuffer_size(
             operation: "resolve the registered SDL3 viewport framebuffer",
         })
 }
+
+/// Captures metadata through the exact platform owner, without returning a native lease.
+pub(super) fn target_for_viewport(
+    platform: &PlatformOwner,
+    viewport: dear_imgui_rs::Id,
+) -> Result<Option<NativeWindowTarget>, WgpuViewportError> {
+    Ok(platform
+        .window_snapshot_for_viewport(viewport)?
+        .map(|snapshot| snapshot.target))
+}
+
+pub(super) fn target_for_instance(
+    platform: &PlatformOwner,
+    instance: NativeWindowInstanceId,
+) -> Result<Option<NativeWindowTarget>, WgpuViewportError> {
+    Ok(platform
+        .window_snapshot_for_instance(instance)?
+        .map(|snapshot| snapshot.target))
+}

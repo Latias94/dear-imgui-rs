@@ -10,7 +10,8 @@ mod trace;
 mod tests;
 
 pub(crate) use runtime::{
-    OwningViewportRuntime, finish_route_preparation, prepare_route_for_context,
+    OwningViewportRuntime, PreparationAttempt, PreparedMainFrame, finish_route_preparation,
+    prepare_route_for_context,
 };
 pub use runtime::{
     WgpuPreparedViewportFrame, WgpuViewportAttachError, WgpuViewportError, WgpuViewportRouteError,

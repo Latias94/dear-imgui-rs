@@ -1,3 +1,4 @@
+use super::manager::ExternalTextureView;
 use super::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -28,7 +29,13 @@ impl WgpuTextureManager {
         view: &TextureView,
     ) -> RendererResult<ExternalTextureId> {
         let id = allocate_texture_id()?;
-        self.external_views.insert(id, view.clone());
+        self.external_views.insert(
+            id,
+            ExternalTextureView {
+                view: view.clone(),
+                revision: NonZeroU64::MIN,
+            },
+        );
         Ok(ExternalTextureId::new(id))
     }
 
@@ -42,7 +49,12 @@ impl WgpuTextureManager {
             .external_views
             .get_mut(&texture_id)
             .ok_or(RendererError::ExternalTextureNotFound(texture_id))?;
-        *registered = view.clone();
+        let revision = registered
+            .revision
+            .checked_add(1)
+            .ok_or(RendererError::ExternalTextureRevisionExhausted(texture_id))?;
+        registered.view = view.clone();
+        registered.revision = revision;
         Ok(())
     }
 
@@ -62,12 +74,24 @@ impl WgpuTextureManager {
     }
 
     pub(crate) fn texture_view(&self, id: TextureId) -> Option<&TextureView> {
-        self.external_views.get(&id).or_else(|| {
-            let managed = self.managed_by_texture_id.get(&id)?;
-            self.managed_textures
-                .get(managed)
-                .map(|entry| entry.resource.view())
-        })
+        self.external_views
+            .get(&id)
+            .map(|entry| &entry.view)
+            .or_else(|| {
+                let managed = self.managed_by_texture_id.get(&id)?;
+                self.managed_textures
+                    .get(managed)
+                    .map(|entry| entry.resource.view())
+            })
+    }
+
+    pub(crate) fn external_binding(&self, id: TextureId) -> Option<ExternalTextureBinding> {
+        self.external_views
+            .get(&id)
+            .map(|entry| ExternalTextureBinding {
+                texture: ExternalTextureId::new(id),
+                revision: entry.revision,
+            })
     }
 
     #[cfg(test)]

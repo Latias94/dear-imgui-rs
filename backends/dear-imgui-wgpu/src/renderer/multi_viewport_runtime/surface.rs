@@ -16,6 +16,7 @@ pub(super) struct ViewportWgpuData {
     pub(super) size: [u32; 2],
     pub(super) pending_frame: Option<wgpu::SurfaceTexture>,
     pub(super) pending_reconfigure: bool,
+    pub(super) pending_observation: Option<super::trace::ObservationKey>,
 }
 
 pub(super) struct ViewportRenderTargets {
@@ -48,6 +49,7 @@ impl ViewportWgpuData {
         );
         self.size = [0, 0];
         self.pending_reconfigure = false;
+        self.pending_observation = None;
     }
 }
 
@@ -240,6 +242,7 @@ pub(super) unsafe fn create_viewport_data(
         size,
         pending_frame: None,
         pending_reconfigure: false,
+        pending_observation: None,
     })
 }
 

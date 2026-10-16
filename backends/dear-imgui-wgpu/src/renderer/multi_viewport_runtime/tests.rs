@@ -23,8 +23,8 @@ use super::registry::{
     unregister_viewport_data, viewport_data_count,
 };
 use super::runtime::{
-    RuntimeControl, RuntimeState, WgpuViewportRouteError, WgpuViewportRouteFault,
-    finish_route_preparation, prepare_route_for_context,
+    PreparationAttempt, RuntimeControl, RuntimeState, WgpuViewportRouteError,
+    WgpuViewportRouteFault, finish_route_preparation, prepare_route_for_context,
 };
 #[cfg(feature = "wgpu-30")]
 use super::surface::supports_surface_format;
@@ -33,8 +33,12 @@ use super::surface::{
     request_close_after_surface_creation_failure, resolve_alpha_mode, resolve_present_mode,
     should_clear_viewport, surface_action, surface_config_from_capabilities,
 };
+use super::trace::{FrameTraceState, WgpuViewportFrameReport};
 use super::{OwningViewportRuntime, WgpuPreparedViewportFrame, WgpuViewportError};
-use crate::{WgpuViewportSurfaceConfig, renderer::WgpuRenderer};
+use crate::{
+    WgpuFrameOutcome, WgpuFrameScope, WgpuFrameSkipReason, WgpuFrameStage,
+    WgpuViewportSurfaceConfig, renderer::WgpuRenderer,
+};
 
 assert_not_impl_any!(WgpuPreparedViewportFrame<'static>: Send, Sync);
 
@@ -936,10 +940,8 @@ fn prepare_frame_consumes_a_frame_token_without_reborrowing_context() {
 
     let frame = context.begin_frame();
     assert!(matches!(
-        runtime.prepare_frame(frame),
-        Err(WgpuViewportError::Renderer(
-            crate::RendererError::InvalidRenderState(_)
-        ))
+        runtime.prepare_frame(frame).result,
+        Err(errors) if matches!(errors.as_slice(), [WgpuViewportError::Renderer(crate::RendererError::InvalidRenderState(_))])
     ));
 }
 
@@ -979,10 +981,13 @@ fn public_route_context_gate_preserves_renderer_and_platform_fault_queues() {
             .borrow_mut()
             .pop_front()
             .expect("platform fault must be queued");
-        Err::<(), _>(WgpuViewportRouteError::new(vec![
-            WgpuViewportRouteFault::Renderer(renderer),
-            WgpuViewportRouteFault::Platform(platform),
-        ]))
+        Err::<(), _>(WgpuViewportRouteError::new(
+            vec![
+                WgpuViewportRouteFault::Renderer(renderer),
+                WgpuViewportRouteFault::Platform(platform),
+            ],
+            WgpuViewportFrameReport::default(),
+        ))
     });
 
     assert!(matches!(
@@ -1023,11 +1028,10 @@ fn prepare_frame_rejects_foreign_context_before_renderer_faults_are_consumed() {
     let frame = context_b.begin_frame();
 
     assert!(matches!(
-        runtime_a.prepare_frame(frame),
-        Err(WgpuViewportError::ContextMismatch {
-            expected: error_expected,
-            actual: error_actual,
-        }) if error_expected == expected && error_actual == actual
+        runtime_a.prepare_frame(frame).result,
+        Err(errors) if matches!(errors.as_slice(), [WgpuViewportError::ContextMismatch {
+            expected: error_expected, actual: error_actual,
+        }] if *error_expected == expected && *error_actual == actual)
     ));
     assert!(matches!(
         runtime_a.poll_fault(),
@@ -2061,48 +2065,50 @@ fn callback_match_helpers_do_not_confuse_foreign_functions() {
 }
 
 #[test]
-fn internal_frame_trace_scope_rejects_nesting_and_normalizes_its_report() {
+fn internal_frame_trace_scope_rejects_nesting_and_retains_observations() {
     let _guard = lock_context();
     let mut context = Context::create();
     let _platform = attach_test_platform(&mut context);
     let (mut runtime, _) = attach_configured_test_runtime(&mut context);
-
-    let trace = runtime.begin_frame_trace().unwrap();
+    let scope = WgpuFrameScope {
+        context_id: context.id(),
+        epoch: None,
+        frame_count: 1,
+    };
+    let trace = runtime.begin_frame_trace(scope).unwrap();
     assert!(matches!(
-        runtime.begin_frame_trace(),
+        runtime.begin_frame_trace(scope),
         Err(WgpuViewportError::FrameTraceAlreadyActive)
     ));
     drop(trace);
-
-    let trace = runtime.begin_frame_trace().unwrap();
-    let viewport_id = dear_imgui_rs::Id::from(17_u32);
-    let earlier_viewport_id = dear_imgui_rs::Id::from(5_u32);
+    let trace = runtime.begin_frame_trace(scope).unwrap();
+    let target = dear_imgui_rs::NativeWindowTarget {
+        instance_id: dear_imgui_rs::NativeWindowInstanceId::allocate(context.id()).unwrap(),
+        viewport_id: dear_imgui_rs::Id::from(17),
+        is_main: false,
+    };
     let control = runtime.control_for_test();
-    control.record_viewport_render_submitted(viewport_id);
-    control.record_viewport_render_submitted(earlier_viewport_id);
-    control.record_viewport_render_submitted(viewport_id);
-    control.record_viewport_present_submitted(viewport_id);
-    control.record_viewport_present_submitted(earlier_viewport_id);
-    control.record_viewport_present_submitted(earlier_viewport_id);
+    let key = control.start_observation(target);
+    control.observe_stage(key, WgpuFrameStage::Submitted);
+    control.observe_stage(key, WgpuFrameStage::PresentationRequested);
     let report = trace.finish();
+    assert_eq!(report.observations()[0].target, target);
     assert_eq!(
-        report.render_submitted_viewport_ids(),
-        &[earlier_viewport_id, viewport_id]
+        report.observations()[0].stage,
+        WgpuFrameStage::PresentationRequested
     );
-    assert_eq!(
-        report.present_submitted_viewport_ids(),
-        &[earlier_viewport_id, viewport_id]
-    );
-
     runtime.shutdown(&mut context).unwrap();
 }
 
 #[test]
 fn route_preparation_retains_renderer_and_platform_faults_in_source_order() {
-    let result: Result<(), _> = finish_route_preparation(
-        Some(Err(WgpuViewportError::SurfaceOperationFailed {
-            operation: "preparation failure",
-        })),
+    let result: Result<((), WgpuViewportFrameReport), _> = finish_route_preparation(
+        Some(PreparationAttempt {
+            result: Err(vec![WgpuViewportError::SurfaceOperationFailed {
+                operation: "preparation failure",
+            }]),
+            report: WgpuViewportFrameReport::default(),
+        }),
         vec![
             WgpuViewportError::SurfaceOperationFailed {
                 operation: "first deferred renderer failure",
@@ -2113,7 +2119,6 @@ fn route_preparation_retains_renderer_and_platform_faults_in_source_order() {
         ],
         vec!["first platform failure", "second platform failure"],
     );
-
     let faults = result.unwrap_err().into_faults();
     assert_eq!(faults.len(), 5);
     assert!(matches!(
@@ -2134,14 +2139,76 @@ fn route_preparation_retains_renderer_and_platform_faults_in_source_order() {
             operation: "second deferred renderer failure"
         })
     ));
+    assert!(
+        matches!(&faults[3], WgpuViewportRouteFault::Platform(error) if *error == "first platform failure")
+    );
+    assert!(
+        matches!(&faults[4], WgpuViewportRouteFault::Platform(error) if *error == "second platform failure")
+    );
+}
+
+#[test]
+fn late_platform_failure_preserves_earlier_submissions_without_a_prepared_capability() {
+    let _guard = lock_context();
+    let context = Context::create();
+    let scope = WgpuFrameScope {
+        context_id: context.id(),
+        epoch: None,
+        frame_count: 41,
+    };
+    let target = dear_imgui_rs::NativeWindowTarget {
+        instance_id: dear_imgui_rs::NativeWindowInstanceId::allocate(context.id()).unwrap(),
+        viewport_id: dear_imgui_rs::Id::from(7),
+        is_main: false,
+    };
+    let mut trace = FrameTraceState::default();
+    assert!(trace.begin(scope));
+    let earlier = trace.start(target);
+    trace.stage(earlier, WgpuFrameStage::PresentationRequested);
+    let later = trace.start(dear_imgui_rs::NativeWindowTarget {
+        viewport_id: dear_imgui_rs::Id::from(9),
+        instance_id: dear_imgui_rs::NativeWindowInstanceId::allocate(context.id()).unwrap(),
+        ..target
+    });
+    trace.skip(later, WgpuFrameSkipReason::Timeout);
+    let report = trace.finish();
+    let attempt = PreparationAttempt {
+        result: Ok(()),
+        report: report.clone(),
+    };
+    let error = finish_route_preparation(
+        Some(attempt),
+        Vec::new(),
+        vec!["late native platform failure"],
+    )
+    .unwrap_err();
+    assert_eq!(error.report(), &report);
+    assert_eq!(
+        error.report().observations()[0].stage,
+        WgpuFrameStage::PresentationRequested
+    );
+    assert_eq!(
+        error.report().observations()[1].outcome,
+        WgpuFrameOutcome::Skipped(WgpuFrameSkipReason::Timeout)
+    );
+    let (retained, faults) = error.into_parts();
+    assert_eq!(retained, report);
     assert!(matches!(
-        &faults[3],
-        WgpuViewportRouteFault::Platform(error) if *error == "first platform failure"
+        faults.as_slice(),
+        [WgpuViewportRouteFault::Platform(
+            "late native platform failure"
+        )]
     ));
-    assert!(matches!(
-        &faults[4],
-        WgpuViewportRouteFault::Platform(error) if *error == "second platform failure"
-    ));
+
+    let failed_attempt: PreparationAttempt<()> = PreparationAttempt {
+        result: Err(vec![WgpuViewportError::SurfaceOperationFailed {
+            operation: "later renderer callback",
+        }]),
+        report: retained.clone(),
+    };
+    let error =
+        finish_route_preparation(Some(failed_attempt), Vec::new(), Vec::<&str>::new()).unwrap_err();
+    assert_eq!(error.report(), &retained);
 }
 
 #[test]

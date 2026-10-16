@@ -109,6 +109,10 @@ pub enum RendererError {
     #[error("external WGPU texture is not registered: {0:?}")]
     ExternalTextureNotFound(dear_imgui_rs::TextureId),
 
+    /// An external view mapping cannot advance its revision without reusing an old revision.
+    #[error("external WGPU texture binding revision space is exhausted: {0:?}")]
+    ExternalTextureRevisionExhausted(dear_imgui_rs::TextureId),
+
     /// A managed update arrived after the renderer lost its matching GPU resource.
     #[error(
         "managed texture {0:?} has no WGPU resource; reset renderer bindings to request a full create"

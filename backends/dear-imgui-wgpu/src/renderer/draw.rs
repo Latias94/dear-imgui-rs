@@ -1,9 +1,9 @@
 // Renderer draw helpers: preflight, resource preparation, and one command executor.
 
-use std::ops::Range;
+use std::{collections::HashSet, ops::Range};
 
 use super::*;
-use crate::{FrameResources, wgpu};
+use crate::{FrameResources, WgpuDrawDependencies, wgpu};
 use dear_imgui_rs::{
     TextureId,
     render::{DrawData, DrawIdx, DrawRequirements, RawCallbackCommand},
@@ -123,6 +123,7 @@ pub(super) enum PreparedSampler {
 pub(super) struct PreparedDrawData<'draw> {
     commands: Vec<PreparedDrawCommand<'draw>>,
     has_elements: bool,
+    dependencies: WgpuDrawDependencies,
 }
 
 impl PreparedDrawData<'_> {
@@ -132,6 +133,10 @@ impl PreparedDrawData<'_> {
 
     pub(super) fn has_elements(&self) -> bool {
         self.has_elements
+    }
+
+    pub(crate) fn dependencies(&self) -> &WgpuDrawDependencies {
+        &self.dependencies
     }
 }
 
@@ -212,6 +217,8 @@ impl WgpuRenderer {
         let clip_off = draw_data.display_pos();
         let clip_scale = draw_data.framebuffer_scale();
         let mut has_elements = false;
+        let mut dependencies = WgpuDrawDependencies::default();
+        let mut external_bindings_seen = HashSet::new();
 
         for draw_list in draw_data.draw_lists() {
             let vertices = draw_list.vtx_buffer();
@@ -321,6 +328,12 @@ impl WgpuRenderer {
                             )?
                             .clone();
 
+                        if let Some(binding) = texture_manager.external_binding(texture_id) {
+                            if external_bindings_seen.insert(binding) {
+                                dependencies.external_bindings.push(binding);
+                            }
+                        }
+
                         commands.push(PreparedDrawCommand::Elements {
                             image_bind_group,
                             scissor,
@@ -339,6 +352,7 @@ impl WgpuRenderer {
                         commands.push(PreparedDrawCommand::SetSampler(PreparedSampler::Nearest));
                     }
                     dear_imgui_rs::render::DrawCmd::RawCallback(callback) => {
+                        dependencies.contains_unknown_callback_dependencies = true;
                         commands.push(PreparedDrawCommand::RawCallback(callback));
                     }
                 }
@@ -359,6 +373,7 @@ impl WgpuRenderer {
         Ok(PreparedDrawData {
             commands,
             has_elements,
+            dependencies,
         })
     }
 
@@ -474,7 +489,221 @@ impl WgpuRenderer {
 
 #[cfg(test)]
 mod tests {
-    use super::{FramebufferExtent, project_scissor_rect};
+    use super::*;
+    use crate::{
+        WgpuInitInfo,
+        texture::{external_test_texture, request_test_device},
+    };
+    use dear_imgui_rs::{Context, internal::RawCast, sys};
+
+    fn element_command(texture: TextureId, count: u32, clip: [f32; 4]) -> sys::ImDrawCmd {
+        let mut command = sys::ImDrawCmd::default();
+        command.TexRef._TexID = texture.id();
+        command.ElemCount = count;
+        command.ClipRect = sys::ImVec4 {
+            x: clip[0],
+            y: clip[1],
+            z: clip[2],
+            w: clip[3],
+        };
+        command
+    }
+
+    fn with_draw_commands<R>(
+        commands: &mut [sys::ImDrawCmd],
+        callback: impl FnOnce(&DrawData) -> R,
+    ) -> R {
+        let mut indices: [DrawIdx; 3] = [0, 1, 2];
+        let mut vertices = [sys::ImDrawVert::default(); 3];
+        let mut list = sys::ImDrawList::default();
+        list.CmdBuffer.Size = i32::try_from(commands.len()).unwrap();
+        list.CmdBuffer.Capacity = list.CmdBuffer.Size;
+        list.CmdBuffer.Data = commands.as_mut_ptr();
+        list.IdxBuffer.Size = 3;
+        list.IdxBuffer.Capacity = 3;
+        list.IdxBuffer.Data = indices.as_mut_ptr();
+        list.VtxBuffer.Size = 3;
+        list.VtxBuffer.Capacity = 3;
+        list.VtxBuffer.Data = vertices.as_mut_ptr();
+        let mut lists = [&mut list as *mut sys::ImDrawList];
+        let mut raw = sys::ImDrawData::default();
+        raw.Valid = true;
+        raw.TotalIdxCount = 3;
+        raw.TotalVtxCount = 3;
+        raw.CmdLists.Size = 1;
+        raw.CmdLists.Capacity = 1;
+        raw.CmdLists.Data = lists.as_mut_ptr();
+        raw.DisplaySize = sys::ImVec2 { x: 64.0, y: 64.0 };
+        raw.FramebufferScale = sys::ImVec2 { x: 1.0, y: 1.0 };
+        // SAFETY: every native vector borrows live, initialized arrays for the closure duration.
+        // DrawData has the same layout as ImDrawData, and no native destructor owns these arrays.
+        callback(unsafe { DrawData::from_raw(&raw) })
+    }
+
+    #[test]
+    fn prepared_dependencies_include_only_unique_drawable_external_bindings() -> RendererResult<()>
+    {
+        let Some((device, queue)) = request_test_device() else {
+            return Ok(());
+        };
+        let (_texture, view) = external_test_texture(&device);
+        let mut manager = WgpuTextureManager::new();
+        let first = manager.register_external_view(&view)?;
+        let clipped = manager.register_external_view(&view)?;
+        let zero_count = manager.register_external_view(&view)?;
+        let second = manager.register_external_view(&view)?;
+        let mut backend = WgpuBackendData::new(WgpuInitInfo::new(
+            device.clone(),
+            queue,
+            wgpu::TextureFormat::Rgba8Unorm,
+        ));
+        backend.render_resources.initialize(&device)?;
+        let visible = [0.0, 0.0, 32.0, 32.0];
+        let mut commands = [
+            element_command(second.texture_id(), 3, visible),
+            element_command(clipped.texture_id(), 3, [80.0, 80.0, 96.0, 96.0]),
+            element_command(zero_count.texture_id(), 0, visible),
+            element_command(first.texture_id(), 3, visible),
+            element_command(first.texture_id(), 3, visible),
+        ];
+        let captured = with_draw_commands(&mut commands, |draw_data| {
+            let prepared = WgpuRenderer::prepare_draw_data(
+                &manager,
+                &None,
+                draw_data,
+                FramebufferExtent::new(64, 64),
+                &mut backend,
+            )?;
+            assert_eq!(prepared.commands.len(), 3);
+            Ok::<_, RendererError>(prepared.dependencies().clone())
+        })?;
+        assert_eq!(
+            captured.external_bindings,
+            [
+                manager.external_binding(second.texture_id()).unwrap(),
+                manager.external_binding(first.texture_id()).unwrap(),
+            ]
+        );
+        assert!(!captured.contains_unknown_callback_dependencies);
+        assert!(
+            !backend
+                .render_resources
+                .image_bind_groups
+                .contains_key(&clipped.texture_id())
+        );
+        assert!(
+            !backend
+                .render_resources
+                .image_bind_groups
+                .contains_key(&zero_count.texture_id())
+        );
+
+        manager.update_external_view(first, &view)?;
+        assert_eq!(captured.external_bindings[1].revision.get(), 1);
+        assert_eq!(
+            manager
+                .external_binding(first.texture_id())
+                .unwrap()
+                .revision
+                .get(),
+            2
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn visible_unregistered_texture_rejects_draw_preparation() -> RendererResult<()> {
+        let Some((device, queue)) = request_test_device() else {
+            return Ok(());
+        };
+        let manager = WgpuTextureManager::new();
+        let invalid = TextureId::new(u64::MAX);
+        let mut backend = WgpuBackendData::new(WgpuInitInfo::new(
+            device,
+            queue,
+            wgpu::TextureFormat::Rgba8Unorm,
+        ));
+        let mut commands = [element_command(invalid, 3, [0.0, 0.0, 32.0, 32.0])];
+        with_draw_commands(&mut commands, |draw_data| {
+            assert!(matches!(
+                WgpuRenderer::prepare_draw_data(
+                    &manager, &None, draw_data, FramebufferExtent::new(64, 64), &mut backend,
+                ),
+                Err(RendererError::InvalidTextureId(id)) if id == invalid
+            ));
+        });
+        assert!(backend.render_resources.image_bind_groups.is_empty());
+        Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn only_non_standard_callbacks_make_draw_dependencies_incomplete() -> RendererResult<()> {
+        let Some((device, queue)) = request_test_device() else {
+            return Ok(());
+        };
+        let mut context = Context::create();
+        let platform_io = context.platform_io_mut();
+        let reset = super::super::callbacks::draw_callback_reset_render_state;
+        let linear = super::super::callbacks::draw_callback_set_sampler_linear;
+        let nearest = super::super::callbacks::draw_callback_set_sampler_nearest;
+        // SAFETY: the callbacks have the backend ABI and remain live for both preparations.
+        unsafe {
+            platform_io.set_draw_callback_reset_render_state_raw(Some(reset));
+            platform_io.set_draw_callback_set_sampler_linear_raw(Some(linear));
+            platform_io.set_draw_callback_set_sampler_nearest_raw(Some(nearest));
+        }
+        unsafe extern "C" fn unknown(
+            _list: *const sys::ImDrawList,
+            _command: *const sys::ImDrawCmd,
+        ) {
+        }
+        let mut commands = [
+            sys::ImDrawCmd {
+                UserCallback: Some(reset),
+                ..Default::default()
+            },
+            sys::ImDrawCmd {
+                UserCallback: Some(linear),
+                ..Default::default()
+            },
+            sys::ImDrawCmd {
+                UserCallback: Some(nearest),
+                ..Default::default()
+            },
+            sys::ImDrawCmd {
+                UserCallback: Some(unknown),
+                ..Default::default()
+            },
+        ];
+        let manager = WgpuTextureManager::new();
+        let mut backend = WgpuBackendData::new(WgpuInitInfo::new(
+            device,
+            queue,
+            wgpu::TextureFormat::Rgba8Unorm,
+        ));
+        for (count, expected_unknown) in [(3, false), (4, true)] {
+            with_draw_commands(&mut commands[..count], |draw_data| {
+                let prepared = WgpuRenderer::prepare_draw_data(
+                    &manager,
+                    &None,
+                    draw_data,
+                    FramebufferExtent::new(64, 64),
+                    &mut backend,
+                )?;
+                assert!(prepared.dependencies().external_bindings.is_empty());
+                assert_eq!(prepared.commands.len(), count);
+                assert_eq!(
+                    prepared
+                        .dependencies()
+                        .contains_unknown_callback_dependencies,
+                    expected_unknown
+                );
+                Ok::<_, RendererError>(())
+            })?;
+        }
+        Ok(())
+    }
 
     #[test]
     fn scissor_projection_rejects_non_finite_values_before_clamping() {

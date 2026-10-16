@@ -100,13 +100,17 @@ use dear_imgui_rs::{Context, FrameToken};
 
 use super::WgpuRenderer;
 use super::multi_viewport_runtime::{
-    OwningViewportRuntime, finish_route_preparation, prepare_route_for_context,
+    OwningViewportRuntime, PreparationAttempt, PreparedMainFrame, finish_route_preparation,
+    prepare_route_for_context,
 };
 pub use super::multi_viewport_runtime::{
     WgpuPreparedViewportFrame, WgpuViewportAttachError, WgpuViewportError, WgpuViewportFrameReport,
 };
 use super::multi_viewport_runtime::{WgpuViewportRouteError, WgpuViewportRouteFault};
-use crate::{ExternalTextureId, FramebufferExtent, GammaMode};
+use crate::{
+    ExternalTextureBinding, ExternalTextureId, FramebufferExtent, GammaMode,
+    WgpuViewportObservation,
+};
 use dear_imgui_sdl3::{Sdl3BackendError, Sdl3PlatformBackend, Sdl3ViewportRendererAdapter};
 
 /// One failure observed while preparing an SDL3/WGPU multi-viewport route.
@@ -182,19 +186,20 @@ impl Sdl3ViewportRoute {
         frame: WgpuPreparedViewportFrame<'_>,
         render_pass: &mut wgpu::RenderPass<'_>,
         framebuffer_extent: FramebufferExtent,
-    ) -> Result<(), WgpuViewportError> {
+    ) -> Result<WgpuViewportObservation, WgpuViewportError> {
         self.inner
             .render_main(frame, render_pass, framebuffer_extent)
     }
 
     fn prepare_with_platform<'frame>(
         &self,
-        prepare: impl FnOnce() -> Result<WgpuPreparedViewportFrame<'frame>, WgpuViewportError>,
+        prepare: impl FnOnce() -> PreparationAttempt<PreparedMainFrame<'frame>>,
     ) -> Result<WgpuPreparedViewportFrame<'frame>, Sdl3ViewportRouteError> {
         debug_assert_eq!(self.platform.context_id(), self.inner.context_id());
 
         let (renderer_result, platform_faults) = self.platform.run(prepare).into_parts();
         finish_route_preparation(renderer_result, self.inner.drain_faults(), platform_faults)
+            .map(|(prepared, report)| WgpuPreparedViewportFrame::new(prepared, report))
     }
 
     /// Invalidates renderer-owned device objects while preserving external texture handles.
@@ -213,6 +218,14 @@ impl Sdl3ViewportRoute {
     /// Sets the clear color used by secondary viewport surfaces.
     pub fn set_viewport_clear_color(&self, color: wgpu::Color) -> Result<(), WgpuViewportError> {
         self.inner.set_viewport_clear_color(color)
+    }
+
+    /// Captures the current external view-mapping revision without borrowing the renderer.
+    pub fn external_texture_binding(
+        &self,
+        texture: ExternalTextureId,
+    ) -> Result<ExternalTextureBinding, WgpuViewportError> {
+        self.inner.external_texture_binding(texture)
     }
 
     /// Registers an application-owned external WGPU texture.

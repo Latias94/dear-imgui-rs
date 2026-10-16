@@ -6,7 +6,7 @@ use dear_imgui_rs::{
     texture::{OwnedTextureData, TextureFormat},
 };
 
-fn request_test_device() -> Option<(Device, Queue)> {
+pub(crate) fn request_test_device() -> Option<(Device, Queue)> {
     #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
     let instance = Instance::new(&InstanceDescriptor::default());
     #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
@@ -20,8 +20,105 @@ fn request_test_device() -> Option<(Device, Queue)> {
     };
     let adapter = request_adapter(true)
         .or_else(|_| request_adapter(false))
-        .ok()?;
-    pollster::block_on(adapter.request_device(&DeviceDescriptor::default())).ok()
+        .ok();
+    let result = adapter.and_then(|adapter| {
+        pollster::block_on(adapter.request_device(&DeviceDescriptor::default())).ok()
+    });
+    assert!(
+        result.is_some() || std::env::var_os("DEAR_IMGUI_REQUIRE_WGPU_ADAPTER").is_none(),
+        "the WGPU texture and dependency gates require a working headless adapter"
+    );
+    result
+}
+
+pub(crate) fn external_test_texture(device: &Device) -> (Texture, TextureView) {
+    let texture = device.create_texture(&TextureDescriptor {
+        label: Some("external texture binding test"),
+        size: Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&TextureViewDescriptor::default());
+    (texture, view)
+}
+
+#[test]
+fn external_texture_binding_revisions_track_view_replacements() -> RendererResult<()> {
+    let Some((device, _queue)) = request_test_device() else {
+        return Ok(());
+    };
+    let (_first_texture, first_view) = external_test_texture(&device);
+    let (_second_texture, second_view) = external_test_texture(&device);
+    let mut manager = WgpuTextureManager::new();
+    let texture = manager.register_external_view(&first_view)?;
+    let original = manager.external_binding(texture.texture_id()).unwrap();
+    assert_eq!(original.revision, NonZeroU64::MIN);
+
+    manager.update_external_view(texture, &second_view)?;
+    let replacement = manager.external_binding(texture.texture_id()).unwrap();
+    assert_eq!(replacement.texture, original.texture);
+    assert_eq!(replacement.revision.get(), 2);
+    assert_eq!(
+        manager.texture_view(texture.texture_id()),
+        Some(&second_view)
+    );
+    assert_eq!(
+        original.revision.get(),
+        1,
+        "captured metadata must remain frozen"
+    );
+
+    manager.update_external_view(texture, &second_view)?;
+    assert_eq!(
+        manager
+            .external_binding(texture.texture_id())
+            .unwrap()
+            .revision
+            .get(),
+        3
+    );
+    manager.remove_external_view(texture)?;
+    assert!(manager.external_binding(texture.texture_id()).is_none());
+    Ok(())
+}
+
+#[test]
+fn exhausted_external_binding_revision_preserves_the_previous_view() -> RendererResult<()> {
+    let Some((device, _queue)) = request_test_device() else {
+        return Ok(());
+    };
+    let (_first_texture, first_view) = external_test_texture(&device);
+    let (_second_texture, second_view) = external_test_texture(&device);
+    let mut manager = WgpuTextureManager::new();
+    let texture = manager.register_external_view(&first_view)?;
+    manager
+        .external_views
+        .get_mut(&texture.texture_id())
+        .unwrap()
+        .revision = NonZeroU64::MAX;
+    let previous = manager.external_binding(texture.texture_id()).unwrap();
+
+    assert!(matches!(
+        manager.update_external_view(texture, &second_view),
+        Err(RendererError::ExternalTextureRevisionExhausted(id)) if id == texture.texture_id()
+    ));
+    assert_eq!(
+        manager.external_binding(texture.texture_id()),
+        Some(previous)
+    );
+    assert_eq!(
+        manager.texture_view(texture.texture_id()),
+        Some(&first_view)
+    );
+    Ok(())
 }
 
 fn managed_texture_id(context: &mut Context) -> SnapshotTextureId {
