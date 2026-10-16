@@ -11,7 +11,8 @@ impl WgpuRenderer {
         texture: ExternalTextureId,
     ) -> RendererResult<ExternalTextureBinding> {
         self.ensure_renderer_contract()?;
-        self.texture_manager
+        self.gpu
+            .texture_manager
             .external_binding(texture.texture_id())
             .ok_or(RendererError::ExternalTextureNotFound(texture.texture_id()))
     }
@@ -27,7 +28,7 @@ impl WgpuRenderer {
         view: &wgpu::TextureView,
     ) -> RendererResult<ExternalTextureId> {
         self.ensure_renderer_contract()?;
-        self.texture_manager.register_external_view(view)
+        self.gpu.texture_manager.register_external_view(view)
     }
 
     /// Replaces the WGPU view associated with an external texture handle.
@@ -41,10 +42,12 @@ impl WgpuRenderer {
         view: &wgpu::TextureView,
     ) -> RendererResult<()> {
         self.ensure_renderer_contract()?;
-        let backend = self.backend_data.as_mut().ok_or_else(|| {
+        let backend = self.gpu.backend_data.as_mut().ok_or_else(|| {
             RendererError::InvalidRenderState("WGPU renderer is not initialized".to_owned())
         })?;
-        self.texture_manager.update_external_view(texture, view)?;
+        self.gpu
+            .texture_manager
+            .update_external_view(texture, view)?;
         backend
             .render_resources
             .remove_image_bind_group(texture.texture_id());
@@ -62,10 +65,10 @@ impl WgpuRenderer {
         texture: ExternalTextureId,
     ) -> RendererResult<()> {
         self.ensure_renderer_contract()?;
-        let backend = self.backend_data.as_mut().ok_or_else(|| {
+        let backend = self.gpu.backend_data.as_mut().ok_or_else(|| {
             RendererError::InvalidRenderState("WGPU renderer is not initialized".to_owned())
         })?;
-        self.texture_manager.remove_external_view(texture)?;
+        self.gpu.texture_manager.remove_external_view(texture)?;
         backend
             .render_resources
             .remove_image_bind_group(texture.texture_id());
@@ -97,7 +100,7 @@ mod tests {
         let (_second_texture, second_view) = external_test_texture(&device);
         let texture = renderer.register_external_texture(&first_view)?;
         let previous = renderer.external_texture_binding(texture)?;
-        let backend = renderer.backend_data.as_mut().unwrap();
+        let backend = renderer.gpu.backend_data.as_mut().unwrap();
         let cached = backend
             .render_resources
             .get_or_create_image_bind_group(&device, texture.texture_id(), &first_view)?
@@ -115,11 +118,15 @@ mod tests {
         ));
         assert_eq!(renderer.external_texture_binding(texture)?, previous);
         assert_eq!(
-            renderer.texture_manager.texture_view(texture.texture_id()),
+            renderer
+                .gpu
+                .texture_manager
+                .texture_view(texture.texture_id()),
             Some(&first_view)
         );
         assert_eq!(
             renderer
+                .gpu
                 .backend_data
                 .as_ref()
                 .unwrap()
@@ -136,6 +143,7 @@ mod tests {
         );
         assert!(
             !renderer
+                .gpu
                 .backend_data
                 .as_ref()
                 .unwrap()

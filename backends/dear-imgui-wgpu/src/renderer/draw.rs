@@ -2,11 +2,12 @@
 
 use std::{collections::HashSet, ops::Range};
 
+use super::draw_source::{DrawCommand, DrawSource};
 use super::*;
 use crate::{FrameResources, WgpuDrawDependencies, wgpu};
 use dear_imgui_rs::{
     TextureId,
-    render::{DrawData, DrawIdx, DrawRequirements, RawCallbackCommand},
+    render::{DrawData, DrawIdx, DrawRequirements, RawCallbackCommand, TextureBinding},
 };
 
 // ImGui index type is currently u16 in dear-imgui-rs, but keep this derived so
@@ -165,19 +166,19 @@ impl WgpuRenderer {
 
     /// Uploads the frame's vertex and index buffers after command preflight succeeds.
     pub(super) fn prepare_frame_resources_static(
-        draw_data: &DrawData,
+        draw_data: DrawSource<'_>,
         frame_resources: &mut FrameResources,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> RendererResult<()> {
         let mut total_vtx_count = 0usize;
         let mut total_idx_count = 0usize;
-        for draw_list in draw_data.draw_lists() {
+        for draw_list in draw_data.lists() {
             total_vtx_count = total_vtx_count
-                .checked_add(draw_list.vtx_buffer().len())
+                .checked_add(draw_list.vertices().len())
                 .ok_or(RendererError::DrawBufferOffsetOverflow { buffer: "vertex" })?;
             total_idx_count = total_idx_count
-                .checked_add(draw_list.idx_buffer().len())
+                .checked_add(draw_list.indices().len())
                 .ok_or(RendererError::DrawBufferOffsetOverflow { buffer: "index" })?;
         }
 
@@ -186,9 +187,9 @@ impl WgpuRenderer {
         }
         let mut vertices = Vec::with_capacity(total_vtx_count);
         let mut indices = Vec::with_capacity(total_idx_count);
-        for draw_list in draw_data.draw_lists() {
-            vertices.extend_from_slice(draw_list.vtx_buffer());
-            indices.extend_from_slice(draw_list.idx_buffer());
+        for draw_list in draw_data.lists() {
+            vertices.extend_from_slice(draw_list.vertices());
+            indices.extend_from_slice(draw_list.indices());
         }
 
         if total_vtx_count != 0 {
@@ -210,7 +211,22 @@ impl WgpuRenderer {
         backend_data: &mut WgpuBackendData,
     ) -> RendererResult<PreparedDrawData<'draw>> {
         Self::preflight_draw_callback_support(draw_data.requirements())?;
+        Self::prepare_draw_source(
+            texture_manager,
+            default_texture,
+            DrawSource::Live(draw_data),
+            extent,
+            backend_data,
+        )
+    }
 
+    pub(super) fn prepare_draw_source<'draw>(
+        texture_manager: &WgpuTextureManager,
+        default_texture: &Option<wgpu::TextureView>,
+        draw_data: DrawSource<'draw>,
+        extent: FramebufferExtent,
+        backend_data: &mut WgpuBackendData,
+    ) -> RendererResult<PreparedDrawData<'draw>> {
         let mut commands = Vec::new();
         let mut global_idx_offset = 0u32;
         let mut global_vtx_offset = 0i32;
@@ -220,39 +236,44 @@ impl WgpuRenderer {
         let mut dependencies = WgpuDrawDependencies::default();
         let mut external_bindings_seen = HashSet::new();
 
-        for draw_list in draw_data.draw_lists() {
-            let vertices = draw_list.vtx_buffer();
-            let indices = draw_list.idx_buffer();
+        for draw_list in draw_data.lists() {
+            let vertices = draw_list.vertices();
+            let indices = draw_list.indices();
             for command in draw_list.commands() {
                 match command {
-                    dear_imgui_rs::render::DrawCmd::Elements { count, cmd_params } => {
+                    DrawCommand::Elements {
+                        count,
+                        clip_rect,
+                        texture,
+                        vtx_offset,
+                        idx_offset,
+                    } => {
                         if count == 0 {
                             continue;
                         }
 
-                        let local_end = cmd_params.idx_offset.checked_add(count).ok_or(
+                        let local_end = idx_offset.checked_add(count).ok_or(
                             RendererError::DrawBufferOffsetOverflow {
                                 buffer: "command index",
                             },
                         )?;
                         if local_end > indices.len() {
                             return Err(RendererError::DrawCommandIndexRangeOutOfBounds {
-                                start: cmd_params.idx_offset,
+                                start: idx_offset,
                                 end: local_end,
                                 len: indices.len(),
                             });
                         }
-                        let max_index = indices[cmd_params.idx_offset..local_end]
+                        let max_index = indices[idx_offset..local_end]
                             .iter()
                             .map(|index| *index as usize)
                             .max()
                             .unwrap_or(0);
-                        let referenced_vertex = cmd_params
-                            .vtx_offset
-                            .checked_add(max_index)
-                            .ok_or(RendererError::DrawBufferOffsetOverflow {
+                        let referenced_vertex = vtx_offset.checked_add(max_index).ok_or(
+                            RendererError::DrawBufferOffsetOverflow {
                                 buffer: "command vertex",
-                            })?;
+                            },
+                        )?;
                         if referenced_vertex >= vertices.len() {
                             return Err(RendererError::DrawCommandVertexOutOfBounds {
                                 index: referenced_vertex,
@@ -265,7 +286,7 @@ impl WgpuRenderer {
                                 buffer: "command index",
                             }
                         })?;
-                        let local_index = u32::try_from(cmd_params.idx_offset).map_err(|_| {
+                        let local_index = u32::try_from(idx_offset).map_err(|_| {
                             RendererError::DrawBufferTooLarge {
                                 buffer: "command index",
                             }
@@ -280,7 +301,7 @@ impl WgpuRenderer {
                                 buffer: "command index",
                             },
                         )?;
-                        let local_vertex = i32::try_from(cmd_params.vtx_offset).map_err(|_| {
+                        let local_vertex = i32::try_from(vtx_offset).map_err(|_| {
                             RendererError::DrawBufferTooLarge {
                                 buffer: "command vertex",
                             }
@@ -291,17 +312,19 @@ impl WgpuRenderer {
                             },
                         )?;
 
-                        let Some(scissor) = project_scissor_rect(
-                            cmd_params.clip_rect,
-                            clip_off,
-                            clip_scale,
-                            extent,
-                        )?
+                        let Some(scissor) =
+                            project_scissor_rect(clip_rect, clip_off, clip_scale, extent)?
                         else {
                             continue;
                         };
 
-                        let texture_id = cmd_params.texture_id;
+                        let texture_id =
+                            match texture {
+                                TextureBinding::Legacy(id) => id,
+                                TextureBinding::Managed(id) => texture_manager
+                                    .managed_texture_id(id)
+                                    .ok_or(RendererError::ManagedTextureMissing(id))?,
+                            };
                         let (cache_id, texture_view) = if texture_id.is_null() {
                             (
                                 TextureId::null(),
@@ -342,16 +365,16 @@ impl WgpuRenderer {
                         });
                         has_elements = true;
                     }
-                    dear_imgui_rs::render::DrawCmd::ResetRenderState => {
+                    DrawCommand::ResetRenderState => {
                         commands.push(PreparedDrawCommand::ResetRenderState);
                     }
-                    dear_imgui_rs::render::DrawCmd::SetSamplerLinear => {
+                    DrawCommand::SetSamplerLinear => {
                         commands.push(PreparedDrawCommand::SetSampler(PreparedSampler::Linear));
                     }
-                    dear_imgui_rs::render::DrawCmd::SetSamplerNearest => {
+                    DrawCommand::SetSamplerNearest => {
                         commands.push(PreparedDrawCommand::SetSampler(PreparedSampler::Nearest));
                     }
-                    dear_imgui_rs::render::DrawCmd::RawCallback(callback) => {
+                    DrawCommand::RawCallback(callback) => {
                         dependencies.contains_unknown_callback_dependencies = true;
                         commands.push(PreparedDrawCommand::RawCallback(callback));
                     }
@@ -379,6 +402,20 @@ impl WgpuRenderer {
 
     pub(super) fn prepare_render_state_static(
         draw_data: &DrawData,
+        backend_data: &mut WgpuBackendData,
+        gamma: f32,
+        has_elements: bool,
+    ) -> RendererResult<PreparedRenderState> {
+        Self::prepare_render_state_source(
+            DrawSource::Live(draw_data),
+            backend_data,
+            gamma,
+            has_elements,
+        )
+    }
+
+    pub(super) fn prepare_render_state_source(
+        draw_data: DrawSource<'_>,
         backend_data: &mut WgpuBackendData,
         gamma: f32,
         has_elements: bool,
@@ -444,12 +481,29 @@ impl WgpuRenderer {
             RendererRenderStateGuard::<crate::WgpuRenderStateStorage>::preflight(platform_io)
         }
         .map_err(super::map_renderer_render_state_error)?;
-        Self::setup_prepared_render_state(render_pass, extent, state);
-
         let mut callback_state = crate::WgpuRenderStateStorage::new(device, render_pass);
         let guard = unsafe { RendererRenderStateGuard::install(platform_io, &mut callback_state) }
             .map_err(super::map_renderer_render_state_error)?;
 
+        Self::execute_prepared_commands(prepared, state, extent, render_pass, |callback| {
+            unsafe { callback.invoke() };
+            guard
+                .validate()
+                .map_err(super::map_renderer_render_state_error)
+        })?;
+
+        guard
+            .finish()
+            .map_err(super::map_renderer_render_state_error)
+    }
+    pub(super) fn execute_prepared_commands<'draw>(
+        prepared: PreparedDrawData<'draw>,
+        state: &PreparedRenderState,
+        extent: FramebufferExtent,
+        render_pass: &mut wgpu::RenderPass<'_>,
+        mut raw_callback: impl FnMut(RawCallbackCommand<'draw>) -> RendererResult<()>,
+    ) -> RendererResult<()> {
+        Self::setup_prepared_render_state(render_pass, extent, state);
         for command in prepared.commands {
             match command {
                 PreparedDrawCommand::Elements {
@@ -473,17 +527,12 @@ impl WgpuRenderer {
                     render_pass.set_bind_group(0, bind_group, &[]);
                 }
                 PreparedDrawCommand::RawCallback(callback) => {
-                    unsafe { callback.invoke() };
-                    guard
-                        .validate()
-                        .map_err(super::map_renderer_render_state_error)?;
+                    raw_callback(callback)?;
                 }
             }
         }
 
-        guard
-            .finish()
-            .map_err(super::map_renderer_render_state_error)
+        Ok(())
     }
 }
 

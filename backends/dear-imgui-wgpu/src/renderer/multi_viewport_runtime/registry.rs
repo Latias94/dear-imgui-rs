@@ -149,6 +149,7 @@ pub(super) fn renderer_globals(
     #[cfg(not(target_arch = "wasm32"))]
     {
         let backend = renderer
+            .gpu
             .backend_data
             .as_ref()
             .ok_or(WgpuViewportError::RendererNotInitialized)?;

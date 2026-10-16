@@ -31,6 +31,18 @@ pub enum RendererError {
     #[error("WGPU frame epoch {received} is older than active epoch {active}")]
     FrameEpochOutOfOrder { active: u64, received: u64 },
 
+    /// Detached work belongs to another consumer incarnation of its Context.
+    #[error("snapshot consumer generation {actual} does not match executor generation {expected}")]
+    SnapshotConsumerGeneration { expected: u64, actual: u64 },
+
+    /// A target was replaced, retired, or belongs to another executor.
+    #[error("detached WGPU target for viewport {viewport:?} is stale or foreign")]
+    StaleSnapshotTarget { viewport: dear_imgui_rs::Id },
+
+    /// Exhausted target identities cannot be reused by queued snapshots.
+    #[error("detached WGPU target resource generation space is exhausted")]
+    SnapshotTargetGenerationExhausted,
+
     /// The renderer has not been attached to a Dear ImGui context.
     #[error("WGPU renderer is not bound to a Dear ImGui context")]
     ContextNotBound,

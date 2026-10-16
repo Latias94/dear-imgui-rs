@@ -184,7 +184,7 @@ impl WgpuRenderer {
         epoch: u64,
         native_frame_count: i32,
     ) -> RendererResult<()> {
-        let needs_recreation = match &self.backend_data {
+        let needs_recreation = match &self.gpu.backend_data {
             Some(backend_data) => {
                 self.ensure_context_alive()?;
                 self.ensure_renderer_contract()?;
@@ -199,14 +199,16 @@ impl WgpuRenderer {
 
         if needs_recreation {
             let mut backend_data = self
+                .gpu
                 .backend_data
                 .take()
                 .expect("prepare_frame_epoch() already verified backend data");
             let result = self.create_device_objects(&mut backend_data);
-            self.backend_data = Some(backend_data);
+            self.gpu.backend_data = Some(backend_data);
             result?;
         }
-        self.backend_data
+        self.gpu
+            .backend_data
             .as_mut()
             .expect("prepare_frame_epoch() already verified backend data")
             .begin_frame(epoch, native_frame_count)
@@ -236,14 +238,14 @@ impl WgpuRenderer {
 
         self.invalidate_device_objects_only();
         reset.commit();
-        self.texture_manager.clear_destroyed_managed_textures();
+        self.gpu.texture_manager.clear_destroyed_managed_textures();
         self.renderer_consumer = Some(consumer);
 
         Ok(())
     }
 
     pub(super) fn invalidate_device_objects_only(&mut self) {
-        if let Some(ref mut backend_data) = self.backend_data {
+        if let Some(ref mut backend_data) = self.gpu.backend_data {
             backend_data.pipeline_state = None;
             backend_data.render_resources = RenderResources::new();
 
@@ -252,14 +254,14 @@ impl WgpuRenderer {
             backend_data.frame_cursor = Default::default();
         }
 
-        self.texture_manager.clear_managed_textures();
-        self.default_texture = None;
-        self.shader_manager = ShaderManager::new();
+        self.gpu.texture_manager.clear_managed_textures();
+        self.gpu.default_texture = None;
+        self.gpu.shader_manager = ShaderManager::new();
     }
 
     fn release_all_device_objects_only(&mut self) {
         self.invalidate_device_objects_only();
-        self.texture_manager.clear_external_views();
+        self.gpu.texture_manager.clear_external_views();
     }
 
     /// Shutdown the renderer and detach its Dear ImGui state.
@@ -288,8 +290,8 @@ impl WgpuRenderer {
 
         self.release_all_device_objects_only();
         reset.commit();
-        self.texture_manager.clear_destroyed_managed_textures();
-        self.backend_data = None;
+        self.gpu.texture_manager.clear_destroyed_managed_textures();
+        self.gpu.backend_data = None;
         drop(consumer);
         self.clear_bound_imgui_context(imgui_context);
         Ok(())
@@ -385,12 +387,12 @@ impl WgpuRenderer {
         let result = context.with_renderer_texture_reset(&consumer, || {
             release_viewports()?;
             self.release_all_device_objects_only();
-            self.backend_data = None;
+            self.gpu.backend_data = None;
             Ok(())
         });
         match result {
             Ok(()) => {
-                self.texture_manager.clear_destroyed_managed_textures();
+                self.gpu.texture_manager.clear_destroyed_managed_textures();
                 drop(consumer);
                 self.clear_context_state();
                 Ok(())
@@ -405,7 +407,7 @@ impl WgpuRenderer {
     #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     pub(super) fn shutdown_after_context_destroyed(&mut self) {
         self.release_all_device_objects_only();
-        self.backend_data = None;
+        self.gpu.backend_data = None;
         self.renderer_consumer = None;
         self.clear_context_state();
     }
@@ -423,10 +425,10 @@ impl WgpuRenderer {
         });
         let resources = DeferredRendererResources {
             context_state,
-            backend_data: self.backend_data.take(),
-            shader_manager: Some(std::mem::take(&mut self.shader_manager)),
-            texture_manager: Some(std::mem::take(&mut self.texture_manager)),
-            default_texture: self.default_texture.take(),
+            backend_data: self.gpu.backend_data.take(),
+            shader_manager: Some(std::mem::take(&mut self.gpu.shader_manager)),
+            texture_manager: Some(std::mem::take(&mut self.gpu.texture_manager)),
+            default_texture: self.gpu.default_texture.take(),
             renderer_consumer: self.renderer_consumer.take(),
         };
         deferral.defer_to_context(resources);

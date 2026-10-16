@@ -26,6 +26,51 @@ renderer.render(frame, &mut render_pass, framebuffer_extent)?;
 
 Each `WgpuRenderer` is fully initialized and bound to the `Context` passed to `new`; there is no public empty or two-phase state. Create one renderer per context in multi-context applications. After `shutdown`, create a replacement renderer instead of reinitializing the old value. `render()` is the normal path: it consumes a `PendingFrame`, processes pointer-free managed texture requests, reconciles feedback, and only then reads draw commands. Integrations that must reconcile before acquiring the main surface can split that work into `reconcile_frame()` followed by `render_reconciled()`. Both render methods require the physical extent of the actual color attachment; when rendering to a surface, derive it from the acquired `SurfaceTexture` instead of assuming the configured size still matches.
 
+## Render-thread snapshots
+
+`WgpuSnapshotRenderer::new(init, &mut context)` returns two owners: keep the UI publication and
+`DetachedRendererConsumer` in `WgpuSnapshotRenderer` on the Context thread, and move the separate
+`WgpuSnapshotExecutor` to the render thread. The executor contains GPU resources and owned
+identities, with no live Context binding, native pointer, or `unsafe Send/Sync` implementation.
+Both renderer paths share command validation, clipping, texture lookup, buffer preparation,
+sampler/reset handling, and draw execution.
+
+Register each host render target with `executor.set_target(viewport_id, native_target)`. Send its
+returned `WgpuSnapshotTarget` back to the UI thread and freeze it with the owned core snapshot:
+
+```rust,no_run
+# use dear_imgui_wgpu::{WgpuSnapshotSubmission, WgpuSnapshotTarget};
+# fn publish(snapshot: dear_imgui_rs::render::FrameSnapshot, target: WgpuSnapshotTarget) {
+let submission = WgpuSnapshotSubmission::new(snapshot, [target]);
+// Send `submission` through an application-owned bounded channel to the render worker.
+# let _ = submission;
+# }
+```
+
+On the worker, call `executor.prepare(submission)`, `prepared.record(target, pass, extent)` for
+each desired captured viewport, then `prepared.finish()`. Preparation applies managed requests but
+does not submit commands. Record the engine's producers into the same encoder before UI, or pass
+their command buffers before UI buffers in `Queue::submit`. The runnable
+`threaded_snapshot_wgpu` example uses a channel with capacity one and explicit producer-before-UI
+submission to an offscreen target.
+
+Call `set_target` again whenever the host replaces an allocation or native registration. Earlier
+queued capabilities fail before managed texture mutation. Context and consumer generations and
+strictly increasing epochs are also validated. A failed request retains acknowledgements for
+earlier successful uploads and requests retry for the failed and remaining requests; stale epochs
+commit superseded feedback. `WgpuSnapshotError` retains the owned partial report and any completion
+delivery failure. Dropping a prepared scope still commits its already-applied texture feedback.
+The core rejects arbitrary raw callbacks during snapshot capture.
+
+Targets and reports are metadata: they retain no Surface, native window, or resource lease. The
+host owns acquisition and presentation, retains resources used by recorded or submitted commands,
+and supplies the actual pass extent. A native association is the exact registration captured by
+the integration, not a later lookup of the viewport ID. `recorded = true` proves only successful
+command recording. Core snapshot completion proves CPU-side processing; neither proves queue
+submission, presentation, GPU completion, compositor acceptance, or visible pixels. Poll
+`context.poll_snapshot_completions()` on the UI thread, join the worker, then call
+`owner.shutdown(&mut context, &mut executor)` before replacing a live renderer.
+
 ## External texture views
 
 Register an application-owned texture view and retain the returned handle in application state.

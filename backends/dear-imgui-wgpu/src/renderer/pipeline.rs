@@ -4,7 +4,7 @@ use super::*;
 use crate::wgpu;
 use wgpu::*;
 
-impl WgpuRenderer {
+impl super::gpu::GpuState {
     /// Create the render pipeline from initialized device resources.
     ///
     /// This corresponds to ImGui_ImplWGPU_CreateDeviceObjects in the C++ implementation

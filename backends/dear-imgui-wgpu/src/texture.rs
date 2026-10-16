@@ -21,6 +21,7 @@ use dear_imgui_rs::{
 use std::{collections::HashMap, num::NonZeroU64};
 use wgpu::*;
 
+pub(crate) use cleanup::ManagedRequestOutcome;
 pub(crate) use manager::WgpuTextureManager;
 pub(crate) use resource::OwnedWgpuTexture;
 #[cfg(test)]

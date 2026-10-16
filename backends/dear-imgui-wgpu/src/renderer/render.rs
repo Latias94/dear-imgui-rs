@@ -48,7 +48,7 @@ fn platform_io_for_current_context() -> RendererResult<*mut sys::ImGuiPlatformIO
 impl WgpuRenderer {
     fn ensure_frame_prepared(&self) -> RendererResult<()> {
         let native_frame_count = unsafe { sys::igGetFrameCount() };
-        match self.backend_data.as_ref() {
+        match self.gpu.backend_data.as_ref() {
             Some(backend_data)
                 if backend_data
                     .frame_cursor
@@ -156,10 +156,10 @@ impl WgpuRenderer {
         frame: PendingFrame<'frame>,
     ) -> RendererResult<ReconciledFrame<'frame>> {
         let request_epoch = frame.epoch().sequence();
-        let backend_data = self.backend_data.as_mut().ok_or_else(|| {
+        let backend_data = self.gpu.backend_data.as_mut().ok_or_else(|| {
             RendererError::InvalidRenderState("Renderer not initialized".to_owned())
         })?;
-        let feedback = self.texture_manager.handle_texture_requests(
+        let feedback = self.gpu.texture_manager.handle_texture_requests(
             frame.texture_requests(),
             request_epoch,
             &backend_data.device,
@@ -167,7 +167,8 @@ impl WgpuRenderer {
             &mut backend_data.render_resources,
         )?;
         let frame = frame.reconcile_texture_feedback(feedback)?;
-        self.texture_manager
+        self.gpu
+            .texture_manager
             .prune_destroyed_managed_textures(frame.completion_progress().watermark());
         Ok(frame)
     }
@@ -225,12 +226,12 @@ impl WgpuRenderer {
         }
         .map_err(map_renderer_render_state_error)?;
 
-        let backend_data = self.backend_data.as_mut().ok_or_else(|| {
+        let backend_data = self.gpu.backend_data.as_mut().ok_or_else(|| {
             RendererError::InvalidRenderState("Renderer not initialized".to_owned())
         })?;
         let prepared = Self::prepare_draw_data(
-            &self.texture_manager,
-            &self.default_texture,
+            &self.gpu.texture_manager,
+            &self.gpu.default_texture,
             draw_data,
             extent,
             backend_data,
@@ -243,7 +244,7 @@ impl WgpuRenderer {
             ));
         }
 
-        let gamma = match self.gamma_mode {
+        let gamma = match self.gpu.gamma_mode {
             GammaMode::Auto => Uniforms::gamma_for_format(backend_data.render_target_format),
             GammaMode::Linear => 1.0,
             GammaMode::Gamma22 => 2.2,

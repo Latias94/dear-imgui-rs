@@ -2,7 +2,7 @@ use super::resource::ManagedWgpuTexture;
 use super::*;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub(super) enum ManagedRequestOutcome {
+pub(crate) enum ManagedRequestOutcome {
     Uploaded(TextureId),
     Destroyed,
     Superseded,
@@ -37,7 +37,7 @@ impl WgpuTextureManager {
         Ok(feedback)
     }
 
-    pub(super) fn apply_managed_request_at_epoch(
+    pub(crate) fn apply_managed_request_at_epoch(
         &mut self,
         id: SnapshotTextureId,
         operation: &TextureOp,

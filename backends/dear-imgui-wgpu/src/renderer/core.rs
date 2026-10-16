@@ -1,6 +1,4 @@
-use crate::{
-    GammaMode, RendererError, RendererResult, ShaderManager, WgpuBackendData, WgpuTextureManager,
-};
+use crate::{RendererError, RendererResult};
 use dear_imgui_rs::{
     BackendFlags, Context, ContextBinding,
     render::{PendingFrame, ReconciledFrame, SynchronousRendererConsumer},
@@ -10,7 +8,6 @@ use std::{
     cell::Cell,
     ffi::{c_char, c_void},
 };
-use wgpu::TextureView;
 
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
 use wgpu::Color;
@@ -321,16 +318,7 @@ impl Drop for RendererContextState {
 pub struct WgpuRenderer {
     /// Dear ImGui context whose renderer state this instance owns.
     pub(super) context_state: Option<RendererContextState>,
-    /// Backend data
-    pub(super) backend_data: Option<WgpuBackendData>,
-    /// Shader manager
-    pub(super) shader_manager: ShaderManager,
-    /// Texture manager
-    pub(super) texture_manager: WgpuTextureManager,
-    /// Default texture for fallback
-    pub(super) default_texture: Option<TextureView>,
-    /// Gamma mode: automatic (by format), force linear (1.0), or force 2.2
-    pub(super) gamma_mode: GammaMode,
+    pub(super) gpu: super::gpu::GpuState,
     /// Clear color used for secondary viewports (multi-viewport mode)
     #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     pub(super) viewport_clear_color: Color,

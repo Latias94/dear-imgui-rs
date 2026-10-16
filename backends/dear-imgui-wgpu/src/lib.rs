@@ -315,6 +315,10 @@ pub use observation::{
     WgpuViewportObservation,
 };
 pub use renderer::{FramebufferExtent, WgpuRenderer};
+pub use renderer::{
+    WgpuPreparedSnapshot, WgpuSnapshotError, WgpuSnapshotExecutor, WgpuSnapshotRenderer,
+    WgpuSnapshotReport, WgpuSnapshotSubmission, WgpuSnapshotTarget, WgpuSnapshotTargetRecording,
+};
 pub use texture::{ExternalTextureBinding, ExternalTextureId, WgpuDrawDependencies};
 
 pub(crate) use data::{WgpuBackendData, WgpuRenderStateStorage};

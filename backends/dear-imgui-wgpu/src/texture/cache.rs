@@ -108,7 +108,7 @@ impl WgpuTextureManager {
         self.managed_by_texture_id.clear();
     }
 
-    pub(super) fn managed_texture_id(&self, id: SnapshotTextureId) -> Option<TextureId> {
+    pub(crate) fn managed_texture_id(&self, id: SnapshotTextureId) -> Option<TextureId> {
         self.managed_textures.get(&id).map(|entry| entry.texture_id)
     }
 
@@ -132,7 +132,7 @@ impl WgpuTextureManager {
     }
 
     #[cfg(test)]
-    pub(super) fn destroyed_managed_texture_count(&self) -> usize {
+    pub(crate) fn destroyed_managed_texture_count(&self) -> usize {
         self.destroyed_managed_textures.len()
     }
 }

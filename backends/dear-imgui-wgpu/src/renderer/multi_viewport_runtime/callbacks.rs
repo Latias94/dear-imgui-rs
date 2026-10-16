@@ -525,6 +525,7 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
     let result = catch_unwind(AssertUnwindSafe(|| {
         control.with_renderer_callback("Renderer_RenderWindow", |renderer, globals| {
             let backend = renderer
+                .gpu
                 .backend_data
                 .as_ref()
                 .ok_or(WgpuViewportError::RendererNotInitialized)?;

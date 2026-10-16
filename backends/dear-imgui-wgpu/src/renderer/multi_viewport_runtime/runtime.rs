@@ -1470,6 +1470,7 @@ impl OwningViewportRuntime {
         };
         let queue = match self.control.with_renderer_mut(|renderer| {
             Ok(renderer
+                .gpu
                 .backend_data
                 .as_ref()
                 .ok_or(WgpuViewportError::RendererNotInitialized)?
