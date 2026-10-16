@@ -297,6 +297,7 @@ fn main() {
         redraw: RedrawMode::Poll,
         io_config_flags: None,
         theme: Some(dear_app::Theme::Dark),
+        ..Default::default()
     };
 
     run(config, DockDemoState::default()).unwrap();
