@@ -39,6 +39,15 @@ pub(super) unsafe extern "C" fn sdl3_create_window(viewport: *mut sys::ImGuiView
             let Some(callback) = callbacks.create_window() else {
                 return;
             };
+            let instance_id =
+                match dear_imgui_rs::NativeWindowInstanceId::allocate(control.binding().id()) {
+                    Ok(instance_id) => instance_id,
+                    Err(_) => {
+                        control.record_native_window_identity_exhausted();
+                        control.mark_viewport_failed(viewport);
+                        return;
+                    }
+                };
             let Some(transaction) =
                 NativeTransaction::begin(control, NativePhase::Create, viewport)
             else {
@@ -56,7 +65,7 @@ pub(super) unsafe extern "C" fn sdl3_create_window(viewport: *mut sys::ImGuiView
                 return;
             };
             if !state.user_data.is_null() {
-                control.remember_owned_viewport(viewport, state);
+                control.remember_owned_viewport_with_instance(viewport, state, instance_id);
             }
             if state.user_data.is_null() || state.handle.is_null() || native_faults != 0 {
                 control.record_viewport_creation_failed();

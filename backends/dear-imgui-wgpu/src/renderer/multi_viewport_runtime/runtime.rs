@@ -1118,6 +1118,7 @@ impl OwningViewportRuntime {
     pub(crate) fn attach(
         context: &mut Context,
         renderer: WgpuRenderer,
+        platform: super::platform_adapter::PlatformOwner,
     ) -> Result<Self, WgpuViewportAttachError> {
         // The Context-owned attachment is the first ownership gate. In particular, a wrapper
         // that was dropped without explicit shutdown leaves this runtime alive for Context
@@ -1137,7 +1138,7 @@ impl OwningViewportRuntime {
         if let Err(error) = renderer.ensure_renderer_contract() {
             return Err(WgpuViewportAttachError::new(error.into(), renderer));
         }
-        let globals = match renderer_globals(&renderer) {
+        let globals = match renderer_globals(&renderer, platform) {
             Ok(globals) => globals,
             Err(error) => return Err(WgpuViewportAttachError::new(error, renderer)),
         };

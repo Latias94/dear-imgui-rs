@@ -13,7 +13,7 @@ use dear_imgui_rs::ContextPlatformWindowTeardown;
 use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentHandle, ContextAttachmentLease,
     ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding, ContextDestroyed,
-    ContextId, ContextTeardown,
+    ContextId, ContextTeardown, NativeWindowInstanceId,
 };
 use winit::window::Window;
 
@@ -113,6 +113,7 @@ pub(crate) struct WinitPlatformControl {
     pub(super) baseline_ime_callback: Cell<Option<SetImeDataCallback>>,
     pub(super) baseline_ime_user_data: Cell<*mut c_void>,
     pub(super) attached_window: RefCell<Option<Arc<Window>>>,
+    pub(super) attached_window_instance: Cell<Option<NativeWindowInstanceId>>,
     pub(super) ime_allowed: Cell<bool>,
     pub(super) active_touch: Cell<Option<u64>>,
     pub(super) terminal_fault: RefCell<Option<WinitPlatformError>>,
@@ -175,6 +176,7 @@ impl WinitPlatformControl {
             baseline_ime_callback: Cell::new(baseline_ime_callback),
             baseline_ime_user_data: Cell::new(baseline_ime_user_data),
             attached_window: RefCell::new(None),
+            attached_window_instance: Cell::new(None),
             ime_allowed: Cell::new(false),
             active_touch: Cell::new(None),
             terminal_fault: RefCell::new(None),
@@ -526,6 +528,7 @@ impl WinitPlatformControl {
         if let Some(window) = self.attached_window.borrow_mut().take() {
             window.set_ime_allowed(false);
         }
+        self.attached_window_instance.set(None);
         replaced.map_or(Ok(()), |field| {
             Err(WinitPlatformError::PlatformStateReplaced { field })
         })
@@ -611,6 +614,7 @@ impl ContextAttachment for WinitPlatformControl {
             runtime.context_destroyed_from_platform(_context);
         }
         self.attached_window.borrow_mut().take();
+        self.attached_window_instance.set(None);
         self.active_touch.set(None);
         unregister_platform_control(self.binding.id());
         self.attachment_handle.borrow_mut().take();

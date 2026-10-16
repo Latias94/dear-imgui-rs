@@ -2,14 +2,14 @@ use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
-use dear_imgui_rs::{ContextId, ContextLifecycle};
+use dear_imgui_rs::{ContextId, ContextLifecycle, Id, NativeWindowInstanceId, NativeWindowTarget};
 use winit::window::{Window, WindowId};
 
 use super::WinitPlatformError;
 use super::coordinates::{
     observe_client_geometry, request_client_geometry, viewport_target_dpi_scale,
 };
-use super::runtime::RuntimeControl;
+use super::runtime::{RuntimeControl, RuntimeState};
 use super::viewport_data::{ClientGeometryReconciliationAction, ViewportData};
 
 struct RegisteredRuntime {
@@ -101,6 +101,18 @@ impl FailedViewport {
 }
 
 impl ViewportEntry {
+    fn window_target(&self) -> Option<NativeWindowTarget> {
+        let viewport = unsafe { self.resolve_viewport()? };
+        if unsafe { self.native_ownership_loss(viewport).is_some() } {
+            return None;
+        }
+        Some(NativeWindowTarget {
+            instance_id: self.data.instance_id(),
+            viewport_id: Id::from(unsafe { (*viewport).ID }),
+            is_main: self.data.is_main(),
+        })
+    }
+
     fn data_ptr(&self) -> *mut ViewportData {
         std::ptr::from_ref::<ViewportData>(&self.data).cast_mut()
     }
@@ -156,6 +168,58 @@ impl ViewportEntry {
                 viewport.PlatformHandle = std::ptr::null_mut();
             }
         }
+    }
+}
+
+impl RuntimeControl {
+    pub(crate) fn window_snapshots_in_current_context(
+        &self,
+    ) -> Result<Vec<crate::WinitWindowSnapshot>, WinitPlatformError> {
+        if self.state() != RuntimeState::Attached {
+            return Err(WinitPlatformError::RuntimeDetached);
+        }
+        let mut snapshots: Vec<_> = self
+            .viewports
+            .borrow()
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .window_target()
+                    .map(|target| crate::WinitWindowSnapshot::capture(target, entry.data.window()))
+            })
+            .collect();
+        snapshots.sort_unstable_by_key(|snapshot| snapshot.target.instance_id.get());
+        Ok(snapshots)
+    }
+
+    pub(crate) fn window_lease_in_current_context(
+        &self,
+        instance_id: NativeWindowInstanceId,
+    ) -> Result<Option<Arc<Window>>, WinitPlatformError> {
+        if self.state() != RuntimeState::Attached {
+            return Err(WinitPlatformError::RuntimeDetached);
+        }
+        if instance_id.context_id() != self.binding().id() {
+            return Ok(None);
+        }
+        Ok(self
+            .viewports
+            .borrow()
+            .iter()
+            .find(|entry| {
+                entry.data.instance_id() == instance_id && entry.window_target().is_some()
+            })
+            .map(|entry| Arc::clone(entry.data.window())))
+    }
+
+    pub(crate) fn with_window_in_current_context<R>(
+        &self,
+        instance_id: NativeWindowInstanceId,
+        callback: impl for<'window> FnOnce(&'window Window) -> R,
+    ) -> Result<Option<R>, WinitPlatformError> {
+        Ok(self
+            .window_lease_in_current_context(instance_id)?
+            .map(|window| callback(&window)))
     }
 }
 
@@ -234,11 +298,16 @@ pub(super) fn insert_viewport_data(
     if viewport.is_null() {
         return Err(WinitPlatformError::ForeignPlatformUserData);
     }
+    if data.instance_id().context_id() != control.binding().id() {
+        return Err(WinitPlatformError::ContextMismatch);
+    }
 
     let mut viewports = control.viewports.borrow_mut();
     if viewports
         .iter()
-        .any(|entry| entry.matches_viewport(viewport))
+        .any(|entry| {
+            entry.matches_viewport(viewport) || entry.data.instance_id() == data.instance_id()
+        })
     {
         return Err(WinitPlatformError::ForeignPlatformUserData);
     }

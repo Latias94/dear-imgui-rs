@@ -8,6 +8,7 @@ use dear_imgui_rs::ViewportFlags;
 use dear_imgui_rs::platform_io::Viewport;
 
 pub(super) struct ViewportWgpuData {
+    pub(super) native_target: dear_imgui_rs::NativeWindowTarget,
     #[cfg(feature = "wgpu-30")]
     pub(super) queue: wgpu::Queue,
     pub(super) surface: Option<wgpu::Surface<'static>>,
@@ -228,9 +229,10 @@ pub(super) unsafe fn create_viewport_data(
     viewport: &Viewport,
     globals: &GlobalHandles,
 ) -> Result<ViewportWgpuData, WgpuViewportError> {
-    let (surface, size) = unsafe { platform_adapter::create_surface(&globals.instance, viewport) }?;
+    let (surface, size, native_target) = create_native_surface(globals, viewport, None)?;
     let targets = configure_surface(globals, &surface, size)?;
     Ok(ViewportWgpuData {
+        native_target,
         #[cfg(feature = "wgpu-30")]
         queue: globals.queue.clone(),
         surface: Some(surface),
@@ -239,6 +241,33 @@ pub(super) unsafe fn create_viewport_data(
         pending_frame: None,
         pending_reconfigure: false,
     })
+}
+
+fn create_native_surface(
+    globals: &GlobalHandles,
+    viewport: &Viewport,
+    expected: Option<dear_imgui_rs::NativeWindowInstanceId>,
+) -> Result<
+    (
+        wgpu::Surface<'static>,
+        [u32; 2],
+        dear_imgui_rs::NativeWindowTarget,
+    ),
+    WgpuViewportError,
+> {
+    #[cfg(feature = "multi-viewport-winit")]
+    return platform_adapter::create_surface(
+        &globals.instance,
+        &globals.platform,
+        viewport,
+        expected,
+    );
+    #[cfg(all(not(feature = "multi-viewport-winit"), feature = "multi-viewport-sdl3"))]
+    // SAFETY: renderer resources are released before SDL platform-window teardown. The exact
+    // captured owner validates the registration before lending the native pointer.
+    unsafe {
+        platform_adapter::create_surface(&globals.instance, &globals.platform, viewport, expected)
+    }
 }
 
 pub(super) fn reconfigure_surface(
@@ -272,13 +301,15 @@ unsafe fn recreate_surface(
     globals: &GlobalHandles,
 ) -> Result<(), WgpuViewportError> {
     data.release_surface_bundle();
-    let (surface, size) = unsafe { platform_adapter::create_surface(&globals.instance, viewport) }?;
+    let (surface, size, native_target) =
+        create_native_surface(globals, viewport, Some(data.native_target.instance_id))?;
     let targets = configure_surface(globals, &surface, size)?;
     #[cfg(feature = "wgpu-30")]
     {
         data.queue = globals.queue.clone();
     }
     data.surface = Some(surface);
+    data.native_target = native_target;
     data.targets = targets;
     data.size = size;
     Ok(())
@@ -355,7 +386,10 @@ pub(super) unsafe fn handle_non_renderable_surface_event(
 ) -> Result<(), WgpuViewportError> {
     match surface_action(event) {
         SurfaceAction::Reconfigure => {
-            let size = unsafe { platform_adapter::framebuffer_size(viewport) }?;
+            let size = platform_adapter::framebuffer_size(
+                &globals.platform,
+                data.native_target.instance_id,
+            )?;
             reconfigure_surface(data, globals, size)
         }
         SurfaceAction::Recreate => {

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use dear_imgui_rs::{ConfigFlags, Context};
+use dear_imgui_rs::{ConfigFlags, Context, NativeWindowInstanceId};
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::window::Window;
 
@@ -187,12 +187,17 @@ impl WinitPlatformControl {
             {
                 return Err(WinitPlatformError::WindowMismatch);
             }
+            let instance_id = match self.attached_window_instance.get() {
+                Some(instance_id) => instance_id,
+                None => NativeWindowInstanceId::allocate(self.binding.id())?,
+            };
             unsafe {
                 let platform_io = dear_imgui_rs::sys::igGetPlatformIO_Nil();
                 (*platform_io).Platform_SetImeDataFn = Some(imgui_winit_set_ime_data);
                 (*platform_io).Platform_ImeUserData = Arc::as_ptr(&window).cast_mut().cast();
             }
             self.attached_window.borrow_mut().replace(window);
+            self.attached_window_instance.set(Some(instance_id));
             Ok(())
         })?
     }
@@ -216,6 +221,7 @@ impl WinitPlatformControl {
                 (*platform_io).Platform_ImeUserData = self.baseline_ime_user_data.get();
             }
             self.attached_window.borrow_mut().take();
+            self.attached_window_instance.set(None);
             Ok(())
         })?
     }

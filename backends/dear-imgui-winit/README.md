@@ -16,6 +16,35 @@ See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob
 
 ## Quick Start
 
+### Native window registration queries
+
+`window_snapshots()` observes the main window and every live secondary registration, including
+hidden viewports. `window_snapshot(window_id)` resolves Winit event routing, while
+`window_snapshot_for_instance(instance_id)` resolves one exact native registration.
+
+```rust,no_run
+# use dear_imgui_winit::{WinitPlatform, WinitPlatformError};
+# fn inspect_windows(platform: &WinitPlatform) -> Result<(), WinitPlatformError> {
+for snapshot in platform.window_snapshots()? {
+    let registration = snapshot.target.instance_id;
+    let current_viewport = snapshot.target.viewport_id;
+    platform.with_window(registration, |window| {
+        window.request_redraw();
+    })?;
+    // Store snapshot in history without retaining the native Window.
+    let _ = (snapshot, current_viewport);
+}
+# Ok(())
+# }
+```
+
+The registration identity survives viewport routing-ID changes and main-window multi-viewport
+enable/disable cycles. Detach/reattach creates a new identity, even for the same host window.
+Logical editor viewports may survive native-window replacement, so keep their identity separate.
+Snapshots own only metadata and do not extend window or Context lifetimes. `with_window` validates
+the current owner and lends the native window for one closure; its borrow cannot escape.
+Queries never drain deferred callback faults.
+
 Minimal flow with winit 0.30 ApplicationHandler-style loops:
 
 ```rust,no_run

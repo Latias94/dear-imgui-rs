@@ -158,7 +158,9 @@ pub use self::input::{GamepadMode, MouseCaptureMode};
 use self::input::{set_gamepad_mode, set_gamepad_mode_manual, set_mouse_capture_mode};
 #[cfg(feature = "multi-viewport")]
 pub use self::runtime::Sdl3VulkanSurfaceProvider;
-pub use self::runtime::{Sdl3ViewportAttempt, Sdl3ViewportRendererAdapter};
+pub use self::runtime::{
+    Sdl3ViewportAttempt, Sdl3ViewportRendererAdapter, Sdl3WindowRef, Sdl3WindowSnapshot,
+};
 #[cfg(feature = "sdlgpu3-renderer")]
 pub use self::viewport::SdlGpu3InitInfo;
 pub use self::viewport::enable_native_ime_ui;

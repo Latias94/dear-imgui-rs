@@ -477,19 +477,21 @@ pub(super) unsafe fn renderer_set_window_size(
             return;
         }
     };
-    let pixels = match unsafe { platform_adapter::framebuffer_size(viewport) } {
-        Ok(pixels) => pixels,
-        Err(error) => {
-            control.record_fault(error);
-            return;
-        }
+    let Some(globals) = control.globals() else {
+        control.record_fault(WgpuViewportError::RuntimeDetached);
+        return;
     };
     let data = unsafe { &mut *pointer };
-    if data.size != pixels {
-        let Some(globals) = control.globals() else {
-            control.record_fault(WgpuViewportError::RuntimeDetached);
-            return;
+    let pixels =
+        match platform_adapter::framebuffer_size(&globals.platform, data.native_target.instance_id)
+        {
+            Ok(pixels) => pixels,
+            Err(error) => {
+                control.record_fault(error);
+                return;
+            }
         };
+    if data.size != pixels {
         if let Err(error) = reconfigure_surface(data, &globals, pixels) {
             control.record_fault(error);
         }
@@ -523,7 +525,8 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
         let device = backend.device.clone();
         let queue = backend.queue.clone();
         let data = unsafe { &mut *data_pointer };
-        let framebuffer_size = unsafe { platform_adapter::framebuffer_size(viewport) }?;
+        let framebuffer_size =
+            platform_adapter::framebuffer_size(&globals.platform, data.native_target.instance_id)?;
         if framebuffer_size != data.size {
             reconfigure_surface(data, globals, framebuffer_size)?;
         }
@@ -778,8 +781,11 @@ pub(super) unsafe fn renderer_swap_buffers(control: &RuntimeControl, viewport: *
     #[cfg(not(feature = "wgpu-30"))]
     frame.present();
     control.record_viewport_present_submitted(viewport.id());
-    let refreshed_size = framebuffer_size_for_reconfigure(data.pending_reconfigure, || unsafe {
-        platform_adapter::framebuffer_size(viewport)
+    let refreshed_size = framebuffer_size_for_reconfigure(data.pending_reconfigure, || {
+        let globals = control
+            .globals()
+            .ok_or(WgpuViewportError::RuntimeDetached)?;
+        platform_adapter::framebuffer_size(&globals.platform, data.native_target.instance_id)
     });
     if data.pending_reconfigure {
         let size = match refreshed_size {

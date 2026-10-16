@@ -36,7 +36,7 @@ use dear_imgui_rs::render::{SnapshotTextureId, TextureRequest};
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
     ContextAttachmentTeardownError, ContextBinding, ContextDestroyed, ContextId, ContextLifecycle,
-    ContextTeardown, TextureData, sys,
+    ContextTeardown, NativeWindowInstanceId, TextureData, sys,
 };
 
 struct Sdl3PlatformAttachmentMarker;
@@ -197,6 +197,7 @@ pub(super) enum NativeRendererKind {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RuntimeFault {
+    NativeWindowIdentityExhausted,
     CallbackReplaced(&'static str),
     PlatformStateReplaced(&'static str),
     RendererCallbackReplaced(&'static str),
@@ -224,6 +225,9 @@ enum RuntimeFault {
 impl RuntimeFault {
     fn into_error(self) -> Sdl3BackendError {
         match self {
+            Self::NativeWindowIdentityExhausted => {
+                dear_imgui_rs::NativeWindowIdentityExhausted.into()
+            }
             Self::CallbackReplaced(callback) => {
                 Sdl3BackendError::PlatformCallbackReplaced { callback }
             }
@@ -452,6 +456,7 @@ impl<R> Sdl3ViewportAttempt<R> {
 /// Applications continue to own and use [`crate::Sdl3PlatformBackend`]; this adapter exists only
 /// so renderer crates can make native dispatch and fault collection one transaction.
 #[doc(hidden)]
+#[derive(Clone)]
 pub struct Sdl3ViewportRendererAdapter {
     control: Rc<RuntimeControl>,
 }
@@ -491,6 +496,8 @@ impl ViewportLeaseKey {
 pub(super) struct OwnedViewportLease {
     key: ViewportLeaseKey,
     state: ViewportPlatformState,
+    instance_id: NativeWindowInstanceId,
+    window_address: usize,
 }
 
 pub(super) struct PlatformDispatchGuard<'a> {
@@ -545,5 +552,8 @@ impl fmt::Debug for RuntimeControl {
 }
 
 mod control;
+mod windows;
+
+pub use windows::{Sdl3WindowRef, Sdl3WindowSnapshot};
 
 pub(super) use control::{RuntimeRegistration, register_runtime, with_current_runtime};

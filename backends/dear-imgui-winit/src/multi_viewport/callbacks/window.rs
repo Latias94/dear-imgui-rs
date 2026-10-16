@@ -160,7 +160,16 @@ pub(in super::super) unsafe extern "C" fn winit_create_window(
                     window.set_outer_position(window_position_from_desktop(outer_target));
 
                     let window = Arc::new(window);
-                    let data = match ViewportData::new(Arc::clone(&window), false) {
+                    let instance_id = match dear_imgui_rs::NativeWindowInstanceId::allocate(
+                        control.binding().id(),
+                    ) {
+                        Ok(instance_id) => instance_id,
+                        Err(error) => {
+                            record_viewport_failure(control, vp, error.into());
+                            return;
+                        }
+                    };
+                    let data = match ViewportData::new(Arc::clone(&window), false, instance_id) {
                         Ok(data) => data,
                         Err(error) => {
                             record_viewport_failure(control, vp, error);

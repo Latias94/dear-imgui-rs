@@ -213,6 +213,8 @@ pub enum Sdl3BackendError {
     },
     #[error("another SDL3 platform runtime already owns the process-wide SDL session")]
     PlatformSessionOccupied,
+    #[error(transparent)]
+    NativeWindowIdentityExhausted(#[from] dear_imgui_rs::NativeWindowIdentityExhausted),
     #[error("SDL3 text input contains an interior NUL byte")]
     TextInputContainsNul,
     #[error(transparent)]

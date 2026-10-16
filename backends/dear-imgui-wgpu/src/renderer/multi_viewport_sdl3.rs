@@ -156,7 +156,8 @@ impl Sdl3ViewportRoute {
                 ));
             }
         };
-        OwningViewportRuntime::attach(context, renderer).map(|inner| Self { inner, platform })
+        OwningViewportRuntime::attach(context, renderer, platform.clone())
+            .map(|inner| Self { inner, platform })
     }
 
     /// Consumes an open frame, reconciles textures, and completes secondary viewports.

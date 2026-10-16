@@ -180,6 +180,31 @@ Retina backing density twice. See the runnable
 [`SDL3 + OpenGL3 example](../../examples/02-docking/sdl3_opengl_multi_viewport.rs) for complete
 window, DPI, frame, and shutdown handling.
 
+## Native window registrations
+
+Every platform or official renderer owner exposes `window_snapshots()`, `window_snapshot(window_id)`,
+`window_snapshot_for_viewport(viewport_id)`, and `window_snapshot_for_instance(instance_id)`. The main
+window is available even without `multi-viewport`. Queries validate the existing platform owner and
+complete live viewport registry, including hidden viewports, and do not consume deferred faults.
+
+```rust,ignore
+let observed = backend.window_snapshot(window.id())?.unwrap();
+let instance = observed.target.instance_id;
+let viewport = observed.target.viewport_id;
+```
+
+`NativeWindowInstanceId` identifies one registration independently of SDL's reusable window ID and
+Dear ImGui's mutable viewport ID. Docking ID changes preserve it; native recreation and backend
+reattachment allocate a new identity. `Sdl3WindowSnapshot` is owned metadata suitable for historical
+frame reports and retains no native resource. Its client size is in framebuffer pixels; desktop
+position uses SDL window coordinates, which need not be physical pixels on high-DPI systems.
+
+`with_window(instance, |window_ref| ...)` resolves an exact live registration and exposes a scoped
+`Sdl3WindowRef`. Its `as_ptr()` is an unsafe-FFI escape hatch, not an owning `sdl3::video::Window` or
+a lifetime lease for a retained GPU surface. Native integrations must preserve the window lifetime
+independently, avoid reentrant teardown while using the pointer, and release surfaces before SDL
+platform teardown. A retired or foreign instance never enters the callback.
+
 APIs of interest (see `src/lib.rs` for full docs):
 
 - `Sdl3OpenGl3Backend` and `SdlRenderer3Backend`:

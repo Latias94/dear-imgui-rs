@@ -597,6 +597,62 @@ macro_rules! impl_sdl3_input_controls {
     };
 }
 
+macro_rules! impl_sdl3_window_queries {
+    ($owner:ty) => {
+        impl $owner {
+            /// Returns detached metadata for every currently owned live SDL3 window.
+            ///
+            /// This includes the main window in single-window mode and never consumes callback
+            /// faults. The snapshots do not retain native resources.
+            pub fn window_snapshots(
+                &self,
+            ) -> Result<Vec<crate::Sdl3WindowSnapshot>, Sdl3BackendError> {
+                self.runtime.control().window_snapshots()
+            }
+
+            /// Resolves an SDL window identifier against the current platform owner.
+            pub fn window_snapshot(
+                &self,
+                window_id: u32,
+            ) -> Result<Option<crate::Sdl3WindowSnapshot>, Sdl3BackendError> {
+                self.runtime.control().window_snapshot(window_id)
+            }
+
+            /// Resolves an exact native registration, rejecting retired or foreign instances.
+            pub fn window_snapshot_for_instance(
+                &self,
+                instance_id: dear_imgui_rs::NativeWindowInstanceId,
+            ) -> Result<Option<crate::Sdl3WindowSnapshot>, Sdl3BackendError> {
+                self.runtime
+                    .control()
+                    .window_snapshot_for_instance(instance_id)
+            }
+
+            /// Resolves the current native registration associated with a Dear ImGui viewport.
+            pub fn window_snapshot_for_viewport(
+                &self,
+                viewport_id: dear_imgui_rs::Id,
+            ) -> Result<Option<crate::Sdl3WindowSnapshot>, Sdl3BackendError> {
+                self.runtime
+                    .control()
+                    .window_snapshot_for_viewport(viewport_id)
+            }
+
+            /// Visits one exact live window without creating an additional native owner.
+            ///
+            /// Native FFI callers must respect [`crate::Sdl3WindowRef::as_ptr`]'s lifetime
+            /// requirements. This scope does not lease a window for a retained GPU surface.
+            pub fn with_window<R>(
+                &self,
+                instance_id: dear_imgui_rs::NativeWindowInstanceId,
+                callback: impl for<'window> FnOnce(crate::Sdl3WindowRef<'window>) -> R,
+            ) -> Result<Option<R>, Sdl3BackendError> {
+                self.runtime.control().with_window(instance_id, callback)
+            }
+        }
+    };
+}
+
 macro_rules! impl_sdl3_event_controls {
     ($backend:ty) => {
         impl $backend {
@@ -796,6 +852,7 @@ pub struct Sdl3PlatformBackend {
 
 impl_sdl3_input_controls!(Sdl3PlatformBackend);
 impl_sdl3_event_controls!(Sdl3PlatformBackend);
+impl_sdl3_window_queries!(Sdl3PlatformBackend);
 
 impl Sdl3PlatformBackend {
     /// Returns the Dear ImGui Context identity owned by this SDL3 platform backend.
@@ -1049,6 +1106,8 @@ pub struct Sdl3OpenGl3Backend {
 
 #[cfg(feature = "opengl3-renderer")]
 impl_sdl3_input_controls!(Sdl3OpenGl3Backend);
+#[cfg(feature = "opengl3-renderer")]
+impl_sdl3_window_queries!(Sdl3OpenGl3Backend);
 #[cfg(feature = "opengl3-renderer")]
 impl_sdl3_event_controls!(Sdl3OpenGl3Backend);
 
@@ -1367,6 +1426,8 @@ pub struct SdlGpu3RendererBackend {
 #[cfg(feature = "sdlgpu3-renderer")]
 impl_sdl3_input_controls!(SdlGpu3RendererBackend);
 #[cfg(feature = "sdlgpu3-renderer")]
+impl_sdl3_window_queries!(SdlGpu3RendererBackend);
+#[cfg(feature = "sdlgpu3-renderer")]
 impl_sdl3_event_controls!(SdlGpu3RendererBackend);
 
 #[cfg(feature = "sdlgpu3-renderer")]
@@ -1673,6 +1734,8 @@ pub struct SdlRenderer3Backend {
 
 #[cfg(feature = "sdlrenderer3-renderer")]
 impl_sdl3_input_controls!(SdlRenderer3Backend);
+#[cfg(feature = "sdlrenderer3-renderer")]
+impl_sdl3_window_queries!(SdlRenderer3Backend);
 #[cfg(feature = "sdlrenderer3-renderer")]
 impl_sdl3_event_controls!(SdlRenderer3Backend);
 

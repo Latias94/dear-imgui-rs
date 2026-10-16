@@ -195,6 +195,7 @@ impl<R> WinitViewportAttempt<R> {
 /// This is implementation plumbing between published backend crates, not a second platform
 /// lifecycle owner. Applications continue to own and use [`crate::WinitPlatform`].
 #[doc(hidden)]
+#[derive(Clone)]
 pub struct WinitViewportRendererAdapter {
     control: Rc<RuntimeControl>,
     platform: Rc<WinitPlatformControl>,

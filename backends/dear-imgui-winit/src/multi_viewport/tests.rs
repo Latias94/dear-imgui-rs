@@ -1490,6 +1490,78 @@ fn public_platform_owner_drives_the_installed_viewport_runtime() {
 }
 
 #[test]
+fn window_registry_reads_preserve_callback_faults_and_reject_retired_adapters() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let mut platform = crate::WinitPlatform::new(&mut context).unwrap();
+    let runtime = WinitPlatformRuntime::new_for_test_with_platform(&mut context, &platform)
+        .expect("test runtime should attach to the platform owner");
+    let adapter = platform.viewport_renderer_adapter(&context).unwrap();
+    let retained_adapter = adapter.clone();
+    let unrelated = dear_imgui_rs::NativeWindowInstanceId::allocate(context.id()).unwrap();
+    let fault = WinitPlatformError::CallbackPanicked {
+        callback: "queued before registry reads",
+    };
+    runtime.control().record_fault(fault.clone());
+
+    assert!(platform.window_snapshots().unwrap().is_empty());
+    assert!(adapter.window_snapshots().unwrap().is_empty());
+    assert_eq!(adapter.window_snapshot(WindowId::dummy()), Ok(None));
+    assert_eq!(adapter.window_snapshot_for_instance(unrelated), Ok(None));
+    assert_eq!(adapter.with_window(unrelated, |_| ()), Ok(None));
+    assert!(adapter.window_lease(unrelated).unwrap().is_none());
+    assert_eq!(runtime.poll_fault(), Err(fault));
+
+    platform.disable_viewports(&mut context).unwrap();
+    drop(runtime);
+    let replacement = WinitPlatformRuntime::new_for_test_with_platform(&mut context, &platform)
+        .expect("the same base owner may enable a new native viewport generation");
+    assert!(platform.window_snapshots().unwrap().is_empty());
+    assert_eq!(
+        retained_adapter.window_snapshots(),
+        Err(WinitPlatformError::RuntimeDetached)
+    );
+    assert_eq!(
+        retained_adapter.with_window(unrelated, |_| ()),
+        Err(WinitPlatformError::RuntimeDetached)
+    );
+    assert!(matches!(
+        retained_adapter.window_lease(unrelated),
+        Err(WinitPlatformError::RuntimeDetached)
+    ));
+    platform.disable_viewports(&mut context).unwrap();
+    platform.shutdown(&mut context).unwrap();
+    drop(replacement);
+}
+
+#[test]
+fn window_registry_rejects_foreign_native_viewport_publication_without_consuming_faults() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let mut platform = crate::WinitPlatform::new(&mut context).unwrap();
+    let runtime = WinitPlatformRuntime::new_for_test_with_platform(&mut context, &platform)
+        .expect("test runtime should attach to the platform owner");
+    let adapter = platform.viewport_renderer_adapter(&context).unwrap();
+    let fault = WinitPlatformError::CallbackPanicked {
+        callback: "queued before foreign native publication",
+    };
+    runtime.control().record_fault(fault.clone());
+    let viewport = unsafe { dear_imgui_rs::sys::igGetMainViewport() };
+    let expected = WinitPlatformError::ViewportOwnershipLost {
+        viewport_id: unsafe { (*viewport).ID },
+        field: "PlatformHandle",
+    };
+    unsafe { (*viewport).PlatformHandle = std::ptr::dangling_mut::<u8>().cast() };
+    assert_eq!(platform.window_snapshots(), Err(expected.clone()));
+    assert_eq!(adapter.window_snapshots(), Err(expected));
+    unsafe { (*viewport).PlatformHandle = std::ptr::null_mut() };
+    assert_eq!(runtime.poll_fault(), Err(fault));
+    platform.disable_viewports(&mut context).unwrap();
+    platform.shutdown(&mut context).unwrap();
+    drop(runtime);
+}
+
+#[test]
 fn public_platform_shutdown_returns_retryable_faults_before_detaching() {
     let _guard = lock_context();
     let mut context = Context::create();

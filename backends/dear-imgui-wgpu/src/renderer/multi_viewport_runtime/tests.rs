@@ -1850,7 +1850,7 @@ fn dropping_wrapper_defers_to_context_and_rejects_replacement() {
         renderer_destroy_window_sys
     ));
     assert!(matches!(
-        OwningViewportRuntime::attach(&mut context, WgpuRenderer::empty()),
+        OwningViewportRuntime::attach_for_test(&mut context, WgpuRenderer::empty()),
         Err(error) if matches!(error.error(), WgpuViewportError::RuntimeAlreadyAttached)
     ));
     assert!(matches!(

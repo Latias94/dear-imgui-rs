@@ -6,6 +6,7 @@
 mod frame;
 mod input_events;
 mod ownership;
+mod window_registry;
 mod window_state;
 
 use dear_imgui_rs::{
@@ -18,6 +19,7 @@ pub use frame::HiDpiMode;
 pub use ownership::WinitPlatform;
 #[cfg(feature = "multi-viewport")]
 pub(crate) use ownership::{WINIT_VIEWPORT_FLAGS, WinitPlatformControl};
+pub use window_registry::WinitWindowSnapshot;
 
 /// Failure to attach or operate the Winit platform backend.
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
@@ -26,6 +28,9 @@ pub enum WinitPlatformError {
     /// The Dear ImGui Context rejected the platform attachment.
     #[error(transparent)]
     Attachment(#[from] ContextAttachmentError),
+    /// The process-wide native window registration identity space was exhausted.
+    #[error(transparent)]
+    NativeWindowIdentity(#[from] dear_imgui_rs::NativeWindowIdentityExhausted),
     /// The Context rejected release of the active platform attachment generation.
     #[error(transparent)]
     PlatformAttachmentRelease(#[from] ContextPlatformAttachmentReleaseError),

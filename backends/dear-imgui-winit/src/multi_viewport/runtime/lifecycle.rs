@@ -398,10 +398,89 @@ impl WinitPlatformRuntime {
 }
 
 impl WinitViewportRendererAdapter {
+    fn with_window_registry<R>(
+        &self,
+        callback: impl FnOnce(&RuntimeControl) -> Result<R, WinitPlatformError>,
+    ) -> Result<R, WinitPlatformError> {
+        self.control.binding().try_with_bound_context(|| {
+            if self.control.state() != RuntimeState::Attached {
+                return Err(WinitPlatformError::RuntimeDetached);
+            }
+            let installed = self.platform.runtime_control()?;
+            if !Rc::ptr_eq(&installed, &self.control) {
+                return Err(WinitPlatformError::RuntimeDetached);
+            }
+            self.platform
+                .validate_complete_contract_in_current_context()?;
+            callback(&self.control)
+        })?
+    }
+
     /// Returns the Context identity of this exact platform generation.
     #[must_use]
     pub fn context_id(&self) -> dear_imgui_rs::ContextId {
         self.control.binding().id()
+    }
+
+    /// Observes registrations owned by this exact platform generation, without draining faults.
+    pub fn window_snapshots(&self) -> Result<Vec<crate::WinitWindowSnapshot>, WinitPlatformError> {
+        self.with_window_registry(RuntimeControl::window_snapshots_in_current_context)
+    }
+
+    /// Observes a live window through this exact platform generation's native event identifier.
+    pub fn window_snapshot(
+        &self,
+        window_id: WindowId,
+    ) -> Result<Option<crate::WinitWindowSnapshot>, WinitPlatformError> {
+        Ok(self
+            .window_snapshots()?
+            .into_iter()
+            .find(|snapshot| snapshot.window_id == window_id))
+    }
+
+    /// Observes a live viewport routing association in this exact platform generation.
+    pub fn window_snapshot_for_viewport(
+        &self,
+        viewport_id: dear_imgui_rs::Id,
+    ) -> Result<Option<crate::WinitWindowSnapshot>, WinitPlatformError> {
+        Ok(self
+            .window_snapshots()?
+            .into_iter()
+            .find(|snapshot| snapshot.target.viewport_id == viewport_id))
+    }
+
+    /// Observes one exact registration, returning `None` after its native window is retired.
+    pub fn window_snapshot_for_instance(
+        &self,
+        instance_id: dear_imgui_rs::NativeWindowInstanceId,
+    ) -> Result<Option<crate::WinitWindowSnapshot>, WinitPlatformError> {
+        Ok(self
+            .window_snapshots()?
+            .into_iter()
+            .find(|snapshot| snapshot.target.instance_id == instance_id))
+    }
+
+    /// Borrows one exact live window without allowing its native owner to escape the scope.
+    pub fn with_window<R>(
+        &self,
+        instance_id: dear_imgui_rs::NativeWindowInstanceId,
+        callback: impl for<'window> FnOnce(&'window Window) -> R,
+    ) -> Result<Option<R>, WinitPlatformError> {
+        self.with_window_registry(|control| {
+            control.with_window_in_current_context(instance_id, callback)
+        })
+    }
+
+    /// Retains the exact native allocation for actual renderer work such as surface creation.
+    ///
+    /// This lease may outlive native registration retirement. Release it after recorded work and
+    /// pending presentation finish. Historical reports must retain detached snapshots instead.
+    #[doc(hidden)]
+    pub fn window_lease(
+        &self,
+        instance_id: dear_imgui_rs::NativeWindowInstanceId,
+    ) -> Result<Option<Arc<Window>>, WinitPlatformError> {
+        self.with_window_registry(|control| control.window_lease_in_current_context(instance_id))
     }
 
     /// Runs one renderer route attempt with the active event-loop capability.

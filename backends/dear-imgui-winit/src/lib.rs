@@ -44,4 +44,4 @@ mod sanitize;
 mod test_util;
 
 // Re-export main types
-pub use platform::{HiDpiMode, WinitPlatform, WinitPlatformError};
+pub use platform::{HiDpiMode, WinitPlatform, WinitPlatformError, WinitWindowSnapshot};

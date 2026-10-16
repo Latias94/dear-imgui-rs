@@ -17,6 +17,7 @@
 compile_error!("The `multi-viewport` feature is not supported on wasm32 targets yet.");
 
 mod core;
+mod identity;
 #[cfg(feature = "multi-viewport")]
 mod trampolines;
 mod viewport;
@@ -34,6 +35,7 @@ mod renderer_callbacks;
 mod tests;
 
 pub use core::PlatformIo;
+pub use identity::{NativeWindowIdentityExhausted, NativeWindowInstanceId, NativeWindowTarget};
 pub use viewport::Viewport;
 
 #[cfg(feature = "multi-viewport")]

@@ -199,7 +199,10 @@ impl RuntimeControl {
         (live == viewport && !live.is_null()).then_some(live)
     }
 
-    fn viewport_key(&self, viewport: *mut sys::ImGuiViewport) -> Option<ViewportLeaseKey> {
+    pub(super) fn viewport_key(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+    ) -> Option<ViewportLeaseKey> {
         let generation = self.platform_session_generation()?;
         let live = self.resolve_live_viewport(viewport)?;
         Some(ViewportLeaseKey {
@@ -973,10 +976,21 @@ impl RuntimeControl {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn remember_owned_viewport(
         &self,
         viewport: *mut sys::ImGuiViewport,
         state: ViewportPlatformState,
+    ) {
+        let instance_id = NativeWindowInstanceId::allocate(self.binding.id()).unwrap();
+        self.remember_owned_viewport_with_instance(viewport, state, instance_id);
+    }
+
+    pub(crate) fn remember_owned_viewport_with_instance(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+        state: ViewportPlatformState,
+        instance_id: NativeWindowInstanceId,
     ) {
         let Some(key) = self.viewport_key(viewport).or_else(|| {
             #[cfg(test)]
@@ -990,9 +1004,21 @@ impl RuntimeControl {
         }) else {
             return;
         };
-        self.owned_viewports
-            .borrow_mut()
-            .insert(viewport as usize, OwnedViewportLease { key, state });
+        let window_address = state
+            .sdl_window_id()
+            .map(|id| unsafe {
+                sdl3_sys::video::SDL_GetWindowFromID(sdl3_sys::video::SDL_WindowID(id))
+            } as usize)
+            .unwrap_or(0);
+        self.owned_viewports.borrow_mut().insert(
+            viewport as usize,
+            OwnedViewportLease {
+                key,
+                state,
+                instance_id,
+                window_address,
+            },
+        );
     }
 
     pub(crate) fn take_owned_viewport(
@@ -1332,6 +1358,10 @@ impl RuntimeControl {
 
     pub(crate) fn record_viewport_creation_failed(&self) {
         self.record_fault(RuntimeFault::ViewportCreationFailed);
+    }
+
+    pub(crate) fn record_native_window_identity_exhausted(&self) {
+        self.record_fault(RuntimeFault::NativeWindowIdentityExhausted);
     }
 
     pub(crate) fn record_native_faults(&self, faults: u64, first_fault: u64) {
