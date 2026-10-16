@@ -64,3 +64,31 @@ extern "C" bool dear_imgui_sdl3_mouse_leave_due_for_test(
 ) {
     return dear_imgui_sdl3_mouse_leave_due(pending_frame, current_frame, buttons_down);
 }
+
+extern "C" bool dear_imgui_sdl3_is_native_destroy_callback(void (*callback)(ImGuiViewport*)) {
+    return callback == ImGui_ImplSDL3_DestroyWindow;
+}
+
+extern "C" bool dear_imgui_sdl3_detach_leased_window(
+    ImGuiViewport* viewport, SDL_Window* expected_window, SDL_GLContext* retained_context
+) {
+    if (viewport == nullptr || retained_context == nullptr)
+        return false;
+    auto* data = static_cast<ImGui_ImplSDL3_ViewportData*>(viewport->PlatformUserData);
+    if (data == nullptr || !data->WindowOwned || data->Window != expected_window)
+        return false;
+    *retained_context = data->GLContext;
+    // Release ImGui-allocated sidecar memory while its Context/allocator contract is still live.
+    // Native resources transfer to the exact Rust allocation pin and no longer need a Context.
+    data->WindowOwned = false;
+    ImGui_ImplSDL3_DestroyWindow(viewport);
+    viewport->PlatformHandleRaw = nullptr;
+    return true;
+}
+
+extern "C" void dear_imgui_sdl3_destroy_leased_window(SDL_Window* window, SDL_GLContext context) {
+    if (context != nullptr)
+        SDL_GL_DestroyContext(context);
+    if (window != nullptr)
+        SDL_DestroyWindow(window);
+}

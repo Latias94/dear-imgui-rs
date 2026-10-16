@@ -48,9 +48,13 @@ impl RuntimeControl {
             ))]
             renderer_textures: RefCell::new(RendererTextureStore::default()),
             owned_viewports: RefCell::new(HashMap::new()),
+            host_window: RefCell::new(None),
             secondary_window_config: RefCell::new(Sdl3WindowConfig::default()),
             secondary_window_configurator: RefCell::new(None),
             window_lifecycle_events: RefCell::new(Vec::new()),
+            callback_window_targets: std::sync::Arc::new(
+                crate::callback_events::CallbackWindowTargets::default(),
+            ),
             owned_renderer_viewports: RefCell::new(HashMap::new()),
             deferred_platform_viewports: RefCell::new(HashMap::new()),
             deferred_renderer_viewports: RefCell::new(HashMap::new()),
@@ -503,6 +507,7 @@ impl RuntimeControl {
         unregister_runtime(self.platform_io_key.replace(0));
         self.callbacks.borrow_mut().take();
         self.retire_all_windows(Sdl3WindowRetirementReason::BackendShutdown);
+        self.host_window.borrow_mut().take();
         self.failed_viewports.borrow_mut().clear();
         if let Some(renderer_restore) = renderer_restore {
             self.renderer_shutdown_restore
@@ -1013,6 +1018,13 @@ impl RuntimeControl {
                 sdl3_sys::video::SDL_GetWindowFromID(sdl3_sys::video::SDL_WindowID(id))
             } as usize)
             .unwrap_or(0);
+        let native_allocation = self.host_window.borrow().as_ref().map(|host| {
+            Rc::new(NativeWindowAllocation::new(
+                window_address as *mut sdl3_sys::video::SDL_Window,
+                host.clone(),
+                viewport == unsafe { sys::igGetMainViewport() },
+            ))
+        });
         let replaced = self.owned_viewports.borrow_mut().insert(
             viewport as usize,
             OwnedViewportLease {
@@ -1021,6 +1033,7 @@ impl RuntimeControl {
                 instance_id,
                 window_address,
                 last_snapshot: None,
+                native_allocation,
             },
         );
         if let Some(replaced) = replaced {
@@ -1036,7 +1049,7 @@ impl RuntimeControl {
         let actual = unsafe { self.capture_viewport_platform_state(viewport) }?;
         let address = viewport as usize;
         let mut owned = self.owned_viewports.borrow_mut();
-        let lease = owned.get(&address).copied()?;
+        let lease = owned.get(&address).cloned()?;
         if !lease.key.same_identity(key) {
             owned.remove(&address);
             drop(owned);
@@ -1055,8 +1068,9 @@ impl RuntimeControl {
         let mut lease = owned.remove(&address)?;
         lease.key.id = key.id;
         drop(owned);
+        let state = lease.state;
         self.retire_window_lease(lease, Sdl3WindowRetirementReason::WindowCallback);
-        Some(lease.state)
+        Some(state)
     }
 
     pub(crate) fn inspect_owned_viewport(
@@ -1486,6 +1500,7 @@ impl RuntimeControl {
         self.renderer_consumer.borrow_mut().take();
         self.release_platform_session();
         self.retire_all_windows(Sdl3WindowRetirementReason::ContextDestroyed);
+        self.host_window.borrow_mut().take();
         self.owned_renderer_viewports.borrow_mut().clear();
         self.deferred_platform_viewports.borrow_mut().clear();
         self.deferred_renderer_viewports.borrow_mut().clear();

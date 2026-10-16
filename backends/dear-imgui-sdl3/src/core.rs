@@ -98,6 +98,18 @@ pub(super) mod ffi {
         ) -> u64;
         pub fn dear_imgui_sdl3_native_end(first_fault: *mut u64) -> u64;
         pub fn dear_imgui_sdl3_native_set_window_transparent(transparent: bool) -> bool;
+        pub fn dear_imgui_sdl3_is_native_destroy_callback(
+            callback: Option<unsafe extern "C" fn(*mut dear_imgui_rs::sys::ImGuiViewport)>,
+        ) -> bool;
+        pub fn dear_imgui_sdl3_detach_leased_window(
+            viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+            expected_window: *mut sdl3_sys::video::SDL_Window,
+            retained_context: *mut *mut c_void,
+        ) -> bool;
+        pub fn dear_imgui_sdl3_destroy_leased_window(
+            window: *mut sdl3_sys::video::SDL_Window,
+            context: *mut c_void,
+        );
         #[cfg(test)]
         pub fn dear_imgui_sdl3_hook_create_window(
             title: *const std::ffi::c_char,
@@ -242,6 +254,14 @@ pub enum Sdl3BackendError {
     },
     #[error("SDL3 secondary-window configurator panicked")]
     WindowConfigurationPanicked,
+    #[error("the SDL3 native window registration cannot issue a resource lifetime lease")]
+    NativeWindowLeaseUnavailable,
+    #[error("the SDL3 window's native owner chain contains an unregistered owner or a cycle")]
+    NativeWindowOwnerChainUnavailable,
+    #[error(
+        "SDL3 native owner changes are blocked while the window or its descendants have native work leases"
+    )]
+    NativeWindowOwnerLeased,
     #[error("SDL3 text input contains an interior NUL byte")]
     TextInputContainsNul,
     #[error(transparent)]

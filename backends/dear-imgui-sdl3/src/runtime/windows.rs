@@ -107,7 +107,7 @@ impl RuntimeControl {
         // dereference a historical address until the native registry has proved it is live.
         let key = self.viewport_key(viewport)?;
         let actual = unsafe { ViewportPlatformState::capture(viewport) };
-        let lease = self.owned_viewports.borrow().get(&address).copied()?;
+        let lease = self.owned_viewports.borrow().get(&address).cloned()?;
         if !lease.key.same_identity(key) || lease.state != actual {
             return None;
         }
@@ -143,6 +143,8 @@ impl RuntimeControl {
             lease.key.id = key.id;
             if lease.last_snapshot.is_some() {
                 lease.last_snapshot = Some(snapshot);
+                self.callback_window_targets
+                    .publish(snapshot.window_id, snapshot.target);
             }
         }
         Some((snapshot, pointer))
@@ -223,6 +225,20 @@ impl RuntimeControl {
 }
 
 impl Sdl3ViewportRendererAdapter {
+    /// Creates a callback-safe payload handoff bound to this exact runtime's metadata publisher.
+    pub fn callback_event_handoff(&self) -> crate::Sdl3CallbackEventHandoff {
+        crate::Sdl3CallbackEventHandoff::for_window_targets(std::sync::Arc::clone(
+            &self.control.callback_window_targets,
+        ))
+    }
+
+    /// Checks whether a drop's observed registration is still current without following reused IDs.
+    pub fn resolve_drop_target(
+        &self,
+        event: &crate::Sdl3DropEvent,
+    ) -> Result<crate::Sdl3DropTarget, Sdl3BackendError> {
+        self.control.resolve_drop_target(event)
+    }
     /// Returns and clears owned lifecycle observations, including after platform teardown.
     pub fn drain_window_lifecycle_events(&self) -> Vec<Sdl3WindowLifecycleEvent> {
         self.control.drain_window_lifecycle_events()

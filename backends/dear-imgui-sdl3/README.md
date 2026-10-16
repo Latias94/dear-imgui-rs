@@ -205,6 +205,46 @@ a lifetime lease for a retained GPU surface. Native integrations must preserve t
 independently, avoid reentrant teardown while using the pointer, and release surfaces before SDL
 platform teardown. A retired or foreign instance never enters the callback.
 
+First-party renderer adapters can instead acquire `Sdl3NativeWindowLease` for work that retains a
+surface beyond a callback. A lease keeps the exact native allocation and its validated native owner
+chain alive independently of routing, the Context, and the original host-window variable. Native
+children also retain their registered owner while live because SDL destroys owned children
+recursively. Retirement immediately removes routing and makes the lease's `is_retired()` true for
+the target or any captured owner. Reject unsubmitted work when that happens; already submitted
+work can finish present/discard while retaining its lease.
+
+The backend frees each ImGui sidecar during Context-bound retirement and defers only pure SDL
+window/GL-context destruction until the last native pin is released. Owner changes are rejected
+while the affected window or a descendant has pending native work. Leases are `Clone` but are
+neither `Send` nor `Sync`; release acquired frames before surfaces and surfaces before native
+leases, on SDL's owning thread. An external unregistered SDL owner or a cyclic owner chain cannot
+issue a lease. Safe native lifetime retention does not authorize destroying or reparenting the
+window through raw SDL pointers.
+
+## Owned desktop drops
+
+Create callback handoffs with `backend.callback_event_handoff()` when target identity matters.
+Unlike a standalone `Sdl3CallbackEventHandoff::default()`, the owner-bound handoff observes the
+runtime's published registration metadata without calling SDL video APIs or borrowing a Context
+on the callback thread. `event.drop_event()` retains file/text data, source application, SDL target
+ID, timestamp, and client coordinates supplied by SDL after the original pointer storage expires.
+Drops remain application events and are never replayed through the ImGui input backend.
+
+Use `backend.resolve_drop_target(drop)` while consuming a batch. `Current` validates the exact
+observed instance against the live owner, `Retired` preserves its historical target, and `Unowned`
+means no registration could be observed safely. A reused SDL ID never redirects an already
+observed drop to a new registration. Timestamp zero or an event older than a registration's
+publication remains unowned. Timestamps narrow observations; they do not prove OS event provenance.
+Begin/position/complete events preserve sequence order, including multiple files or an abandoned
+hover with no file payload. SDL's safe pump `Event` omits source and coordinates, so those values
+remain unknown when a summary is built from an already converted pump event.
+
+SDL installs system clipboard callbacks by default. For an explicit portable replacement, enable
+`dear-imgui-rs/system-clipboard` and install `SystemClipboard::new()?` after SDL backend initialization.
+Initialization failure is returned to the application; the optional adapter adds no default service
+dependency. Native Wayland support additionally requires `system-clipboard-wayland` and a compositor
+supporting arboard's data-control protocol.
+
 ## Secondary-window policy and lifecycle
 
 Configure future allocations through the owning backend, before the platform-window update:

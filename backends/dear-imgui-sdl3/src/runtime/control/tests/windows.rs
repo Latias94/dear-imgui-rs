@@ -1,10 +1,10 @@
 use super::*;
 
-fn with_native_window(callback: impl FnOnce(&sdl3::video::Window)) {
-    with_video_driver("dummy", callback);
+fn with_native_window<R>(callback: impl FnOnce(&sdl3::video::Window) -> R) -> R {
+    with_video_driver("dummy", callback)
 }
 
-fn with_video_driver(driver: &str, callback: impl FnOnce(&sdl3::video::Window)) {
+fn with_video_driver<R>(driver: &str, callback: impl FnOnce(&sdl3::video::Window) -> R) -> R {
     struct DriverHintRestore(Option<String>);
     impl Drop for DriverHintRestore {
         fn drop(&mut self) {
@@ -33,7 +33,236 @@ fn with_video_driver(driver: &str, callback: impl FnOnce(&sdl3::video::Window)) 
         .hidden()
         .build()
         .unwrap();
-    callback(&window);
+    callback(&window)
+}
+
+#[test]
+fn main_native_lease_outlives_context_backend_and_original_sdl_window() {
+    let _guard = crate::tests::test_guard();
+    let lease = with_native_window(|window| {
+        let mut context = Context::create();
+        let backend =
+            unsafe { crate::Sdl3PlatformBackend::init_for_other(&mut context, window) }.unwrap();
+        let adapter = backend.viewport_renderer_adapter(&context).unwrap();
+        let target = backend
+            .window_snapshot(window.id())
+            .unwrap()
+            .unwrap()
+            .target;
+        let lease = adapter
+            .acquire_native_window_lease(target.instance_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(lease.target(), target);
+        assert!(!lease.is_retired());
+        drop(context);
+        drop(backend);
+        assert!(lease.is_retired());
+        lease
+    });
+    let id = sdl3_sys::video::SDL_WindowID(lease.snapshot().window_id);
+    assert_eq!(
+        unsafe { sdl3_sys::video::SDL_GetWindowFromID(id) },
+        lease.as_ptr()
+    );
+    let retained = lease.clone();
+    drop(lease);
+    assert_eq!(
+        unsafe { sdl3_sys::video::SDL_GetWindowFromID(id) },
+        retained.as_ptr()
+    );
+    drop(retained);
+    assert!(unsafe { sdl3_sys::video::SDL_GetWindowFromID(id) }.is_null());
+}
+
+#[test]
+fn callback_drop_keeps_observed_registration_after_retirement_without_aliasing_reattachment() {
+    let _guard = crate::tests::test_guard();
+    with_native_window(|window| {
+        let mut context = Context::create();
+        let mut backend =
+            unsafe { crate::Sdl3PlatformBackend::init_for_other(&mut context, window) }.unwrap();
+        let handoff = backend.callback_event_handoff();
+        let original = backend.window_snapshot(window.id()).unwrap().unwrap();
+        let path = std::ffi::CString::new("queued-asset.png").unwrap();
+        let source = std::ffi::CString::new("asset browser").unwrap();
+        let raw = sdl3_sys::events::SDL_Event {
+            drop: sdl3_sys::events::SDL_DropEvent {
+                r#type: sdl3_sys::events::SDL_EVENT_DROP_FILE,
+                timestamp: unsafe { sdl3_sys::timer::SDL_GetTicksNS() },
+                windowID: sdl3_sys::video::SDL_WindowID(window.id()),
+                x: 13.0,
+                y: 24.0,
+                source: source.as_ptr(),
+                data: path.as_ptr(),
+                ..Default::default()
+            },
+        };
+        unsafe { handoff.push_from_callback(&raw) };
+        drop((path, source));
+        let event = handoff.drain().pop().unwrap();
+        let drop = event.drop_event().unwrap();
+        assert_eq!(drop.observed_target, Some(original.target));
+        assert_eq!(
+            backend.resolve_drop_target(drop).unwrap(),
+            crate::Sdl3DropTarget::Current(original.target)
+        );
+        backend.shutdown(&mut context).unwrap();
+        assert_eq!(
+            backend.resolve_drop_target(drop).unwrap(),
+            crate::Sdl3DropTarget::Retired(original.target)
+        );
+        let mut replacement =
+            unsafe { crate::Sdl3PlatformBackend::init_for_other(&mut context, window) }.unwrap();
+        assert_eq!(
+            replacement.resolve_drop_target(drop).unwrap(),
+            crate::Sdl3DropTarget::Retired(original.target)
+        );
+        assert_eq!(
+            drop.payload,
+            crate::Sdl3DropPayload::File("queued-asset.png".into())
+        );
+        assert_eq!(drop.source.as_deref(), Some("asset browser"));
+        replacement.shutdown(&mut context).unwrap();
+    });
+}
+
+#[cfg(all(target_os = "windows", debug_assertions))]
+#[test]
+fn native_lease_freezes_owner_changes_and_parent_retirement_does_not_destroy_child() {
+    let _guard = crate::tests::test_guard();
+    with_video_driver("windows", |window| {
+        struct LiveViewport(*mut sys::ImGuiViewport);
+        impl Drop for LiveViewport {
+            fn drop(&mut self) {
+                unsafe { crate::core::ffi::dear_imgui_sdl3_delete_live_viewport_for_test(self.0) };
+            }
+        }
+        let mut context = Context::create();
+        let mut backend =
+            unsafe { crate::Sdl3PlatformBackend::init_for_other(&mut context, window) }.unwrap();
+        let adapter = backend.viewport_renderer_adapter(&context).unwrap();
+        let parent = LiveViewport(context.binding().with_bound_context(|| unsafe {
+            crate::core::ffi::dear_imgui_sdl3_create_live_viewport_for_test(0x610001)
+        }));
+        context
+            .binding()
+            .with_bound_context(|| unsafe { create_window_callback_for_test(parent.0) });
+        let child = LiveViewport(context.binding().with_bound_context(|| unsafe {
+            crate::core::ffi::dear_imgui_sdl3_create_live_viewport_for_test(0x610002)
+        }));
+        context.binding().with_bound_context(|| unsafe {
+            (*child.0).ParentViewport = parent.0;
+            create_window_callback_for_test(child.0)
+        });
+        let parent_snapshot = backend
+            .window_snapshot_for_viewport(dear_imgui_rs::Id::from(0x610001))
+            .unwrap()
+            .unwrap();
+        let child_snapshot = backend
+            .window_snapshot_for_viewport(dear_imgui_rs::Id::from(0x610002))
+            .unwrap()
+            .unwrap();
+        let lease = adapter
+            .acquire_native_window_lease(child_snapshot.target.instance_id)
+            .unwrap()
+            .unwrap();
+        let parent_id = sdl3_sys::video::SDL_WindowID(parent_snapshot.window_id);
+        let child_id = sdl3_sys::video::SDL_WindowID(child_snapshot.window_id);
+        let parent_pointer = unsafe { sdl3_sys::video::SDL_GetWindowFromID(parent_id) };
+        drop(parent);
+        assert!(
+            lease.is_retired(),
+            "retiring any captured owner retires the pre-submit capability"
+        );
+        assert!(
+            backend
+                .window_snapshot_for_instance(parent_snapshot.target.instance_id)
+                .unwrap()
+                .is_none()
+        );
+        assert!(!unsafe { sdl3_sys::video::SDL_GetWindowFromID(parent_id) }.is_null());
+        context.binding().with_bound_context(|| unsafe {
+            (*child.0).ParentViewport = sys::igGetMainViewport();
+            (*sys::igGetPlatformIO_Nil()).Platform_UpdateWindow.unwrap()(child.0);
+        });
+        assert_eq!(
+            unsafe { sdl3_sys::video::SDL_GetWindowParent(lease.as_ptr()) },
+            parent_pointer
+        );
+        assert!(matches!(
+            backend.drain_faults().as_slice(),
+            [Sdl3BackendError::NativeWindowOwnerLeased]
+        ));
+        drop(lease);
+        // Persistent native ownership still keeps the retired parent alive until the live child
+        // has actually moved to its new owner, even with no outstanding renderer work.
+        assert!(!unsafe { sdl3_sys::video::SDL_GetWindowFromID(parent_id) }.is_null());
+        context.binding().with_bound_context(|| unsafe {
+            (*sys::igGetPlatformIO_Nil()).Platform_UpdateWindow.unwrap()(child.0)
+        });
+        assert!(unsafe { sdl3_sys::video::SDL_GetWindowFromID(parent_id) }.is_null());
+        assert!(!unsafe { sdl3_sys::video::SDL_GetWindowFromID(child_id) }.is_null());
+        drop(child);
+        assert!(unsafe { sdl3_sys::video::SDL_GetWindowFromID(child_id) }.is_null());
+        backend.shutdown(&mut context).unwrap();
+    });
+}
+
+#[cfg(all(target_os = "windows", debug_assertions))]
+#[test]
+fn retired_secondary_native_lease_releases_child_before_owner_after_context_teardown() {
+    let _guard = crate::tests::test_guard();
+    let (lease, parent_id) = with_video_driver("windows", |window| {
+        let mut context = Context::create();
+        let backend =
+            unsafe { crate::Sdl3PlatformBackend::init_for_other(&mut context, window) }.unwrap();
+        let adapter = backend.viewport_renderer_adapter(&context).unwrap();
+        let (parent, child) = context.binding().with_bound_context(|| unsafe {
+            let parent = crate::core::ffi::dear_imgui_sdl3_create_live_viewport_for_test(0x620001);
+            create_window_callback_for_test(parent);
+            let child = crate::core::ffi::dear_imgui_sdl3_create_live_viewport_for_test(0x620002);
+            (*child).ParentViewport = parent;
+            create_window_callback_for_test(child);
+            (parent, child)
+        });
+        let child_snapshot = backend
+            .window_snapshot_for_viewport(dear_imgui_rs::Id::from(0x620002))
+            .unwrap()
+            .unwrap();
+        let parent_id = sdl3_sys::video::SDL_WindowID(
+            backend
+                .window_snapshot_for_viewport(dear_imgui_rs::Id::from(0x620001))
+                .unwrap()
+                .unwrap()
+                .window_id,
+        );
+        let lease = adapter
+            .acquire_native_window_lease(child_snapshot.target.instance_id)
+            .unwrap()
+            .unwrap();
+        // Retire the native sidecars while their allocator still belongs to this live Context.
+        context.binding().with_bound_context(|| unsafe {
+            crate::core::ffi::dear_imgui_sdl3_delete_live_viewport_for_test(child);
+            crate::core::ffi::dear_imgui_sdl3_delete_live_viewport_for_test(parent);
+        });
+        drop(context);
+        drop(backend);
+        (lease, parent_id)
+    });
+    let child_id = sdl3_sys::video::SDL_WindowID(lease.snapshot().window_id);
+    assert!(lease.is_retired());
+    assert_eq!(
+        unsafe { sdl3_sys::video::SDL_GetWindowFromID(child_id) },
+        lease.as_ptr()
+    );
+    assert!(!unsafe { sdl3_sys::video::SDL_GetWindowFromID(parent_id) }.is_null());
+    let pending = lease.clone();
+    drop(lease);
+    assert!(!unsafe { sdl3_sys::video::SDL_GetWindowFromID(child_id) }.is_null());
+    drop(pending);
+    assert!(unsafe { sdl3_sys::video::SDL_GetWindowFromID(child_id) }.is_null());
+    assert!(unsafe { sdl3_sys::video::SDL_GetWindowFromID(parent_id) }.is_null());
 }
 
 #[test]

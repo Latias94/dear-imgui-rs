@@ -202,6 +202,8 @@ enum RuntimeFault {
     UnsupportedWindowPolicy(&'static str),
     WindowConfigurationFailed,
     WindowConfigurationPanicked,
+    NativeWindowOwnerLeased,
+    NativeWindowLeaseUnavailable,
     CallbackReplaced(&'static str),
     PlatformStateReplaced(&'static str),
     RendererCallbackReplaced(&'static str),
@@ -240,6 +242,8 @@ impl RuntimeFault {
                 message: "native policy or hidden-window invariant failed".into(),
             },
             Self::WindowConfigurationPanicked => Sdl3BackendError::WindowConfigurationPanicked,
+            Self::NativeWindowOwnerLeased => Sdl3BackendError::NativeWindowOwnerLeased,
+            Self::NativeWindowLeaseUnavailable => Sdl3BackendError::NativeWindowLeaseUnavailable,
             Self::NativeWindowIdentityExhausted => {
                 dear_imgui_rs::NativeWindowIdentityExhausted.into()
             }
@@ -421,9 +425,11 @@ pub(super) struct RuntimeControl {
     ))]
     renderer_textures: RefCell<RendererTextureStore>,
     owned_viewports: RefCell<HashMap<usize, OwnedViewportLease>>,
+    host_window: RefCell<Option<sdl3::video::Window>>,
     secondary_window_config: RefCell<Sdl3WindowConfig>,
     secondary_window_configurator: RefCell<Option<Rc<WindowConfigurator>>>,
     window_lifecycle_events: RefCell<Vec<Sdl3WindowLifecycleEvent>>,
+    callback_window_targets: std::sync::Arc<crate::callback_events::CallbackWindowTargets>,
     owned_renderer_viewports: RefCell<HashMap<usize, OwnedRendererViewportLease>>,
     deferred_platform_viewports: RefCell<HashMap<usize, DeferredPlatformViewportState>>,
     deferred_renderer_viewports: RefCell<HashMap<usize, DeferredRendererViewportState>>,
@@ -510,13 +516,14 @@ impl ViewportLeaseKey {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub(super) struct OwnedViewportLease {
     key: ViewportLeaseKey,
     state: ViewportPlatformState,
     instance_id: NativeWindowInstanceId,
     window_address: usize,
     last_snapshot: Option<Sdl3WindowSnapshot>,
+    native_allocation: Option<Rc<NativeWindowAllocation>>,
 }
 
 pub(super) struct PlatformDispatchGuard<'a> {
@@ -571,7 +578,11 @@ impl fmt::Debug for RuntimeControl {
 }
 
 mod control;
+mod drop_events;
+mod native_leases;
 mod windows;
+use native_leases::NativeWindowAllocation;
+pub use native_leases::Sdl3NativeWindowLease;
 
 pub use windows::{Sdl3WindowRef, Sdl3WindowSnapshot};
 pub(crate) mod window_policy;

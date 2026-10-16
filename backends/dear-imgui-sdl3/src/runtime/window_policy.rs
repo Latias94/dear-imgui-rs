@@ -362,7 +362,7 @@ impl RuntimeControl {
                         .find_map(|(address, lease)| {
                             (lease.window_address == parent as usize
                                 && lease.last_snapshot.is_some())
-                            .then_some((*address, *lease))
+                            .then_some((*address, lease.clone()))
                         });
                 let instance_id = candidate.and_then(|(address, lease)| {
                     let viewport = address as *mut sys::ImGuiViewport;
@@ -442,6 +442,9 @@ impl RuntimeControl {
     }
 
     pub(crate) fn publish_owned_window(&self, viewport: *mut sys::ImGuiViewport) {
+        // A host window may have a foreign SDL owner. Keep ordinary routing/observations usable;
+        // issuing a native work lease separately requires the complete owner chain to be owned.
+        self.refresh_native_window_owner(viewport);
         let address = viewport as usize;
         let Some((snapshot, _)) = self.window_registration_bound(address) else {
             return;
@@ -450,6 +453,8 @@ impl RuntimeControl {
         if let Some(lease) = registry.get_mut(&address) {
             if lease.last_snapshot.is_none() {
                 lease.last_snapshot = Some(snapshot);
+                self.callback_window_targets
+                    .publish(snapshot.window_id, snapshot.target);
                 self.window_lifecycle_events
                     .borrow_mut()
                     .push(Sdl3WindowLifecycleEvent::Created(snapshot));
@@ -462,8 +467,13 @@ impl RuntimeControl {
         mut lease: OwnedViewportLease,
         reason: Sdl3WindowRetirementReason,
     ) {
+        if let Some(allocation) = &lease.native_allocation {
+            allocation.mark_retired();
+        }
         if let Some(mut window) = lease.last_snapshot.take() {
             window.target.viewport_id = Id::from(lease.key.id);
+            self.callback_window_targets
+                .retire(window.window_id, window.target);
             self.window_lifecycle_events
                 .borrow_mut()
                 .push(Sdl3WindowLifecycleEvent::Retired { window, reason });

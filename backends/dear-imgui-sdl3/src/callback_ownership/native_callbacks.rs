@@ -136,6 +136,7 @@ pub(super) unsafe extern "C" fn sdl3_destroy_window(viewport: *mut sys::ImGuiVie
             let Some(callback) = callbacks.destroy_window() else {
                 return false;
             };
+            let native_allocation = control.native_allocation_for_viewport(viewport);
             let Some(expected) = control.take_owned_viewport(viewport) else {
                 record_viewport_replacements(control, None, actual);
                 control.defer_platform_viewport_restore(viewport, actual);
@@ -144,7 +145,9 @@ pub(super) unsafe extern "C" fn sdl3_destroy_window(viewport: *mut sys::ImGuiVie
             };
 
             if viewport_platform_state_eq(actual, expected) {
-                callback(viewport);
+                if !control.defer_native_window_destruction(viewport, native_allocation.as_ref()) {
+                    callback(viewport);
+                }
                 control.clear_viewport_platform_state(viewport);
                 return true;
             }
@@ -154,7 +157,9 @@ pub(super) unsafe extern "C" fn sdl3_destroy_window(viewport: *mut sys::ImGuiVie
                 control.record_platform_state_replaced("Viewport liveness");
                 return false;
             }
-            callback(viewport);
+            if !control.defer_native_window_destruction(viewport, native_allocation.as_ref()) {
+                callback(viewport);
+            }
             control.clear_viewport_platform_state(viewport);
             control.defer_platform_viewport_restore(viewport, actual);
             true
@@ -180,9 +185,15 @@ pub(super) unsafe extern "C" fn sdl3_update_window(viewport: *mut sys::ImGuiView
         PlatformCallbackSlot::UpdateWindow,
         viewport,
         (),
-        |_, callbacks| unsafe {
+        |control, callbacks| unsafe {
+            if control.native_window_owner_change_blocked(viewport) {
+                return;
+            }
             if let Some(callback) = callbacks.update_window() {
                 callback(viewport);
+                if !control.refresh_native_window_owner(viewport) {
+                    control.record_native_window_owner_unavailable();
+                }
             }
         },
     );

@@ -8,6 +8,14 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ### Added
 
+- Preserve owned callback drop payloads, source and supplied client coordinates. Owner-bound
+  handoffs record observed native registrations, and consumers distinguish current, retired and
+  unowned targets without following reused SDL window IDs.
+
+- Retain exact SDL native windows and their owner chains through renderer work leases, including
+  after routing retirement and Context teardown. Retired sidecars are freed immediately; native
+  destruction waits for the last pin, and pending work blocks native owner changes.
+
 - Configure secondary windows before allocation with bounded size, icon, resizability, focus and
   transparent-backing policy. Query optional native state and policy support, update supported
   mutable attributes, and drain owned creation/retirement observations after platform shutdown.

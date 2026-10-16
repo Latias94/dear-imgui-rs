@@ -600,6 +600,20 @@ macro_rules! impl_sdl3_input_controls {
 macro_rules! impl_sdl3_window_queries {
     ($owner:ty) => {
         impl $owner {
+            /// Creates an owned callback handoff that observes this runtime's native registrations.
+            ///
+            /// Keep it for SDL_AppEvent; the metadata mirror contains no native pointers or Context.
+            pub fn callback_event_handoff(&self) -> crate::Sdl3CallbackEventHandoff {
+                self.runtime.control().callback_event_handoff()
+            }
+
+            /// Resolves an already observed drop registration without following a reused SDL ID.
+            pub fn resolve_drop_target(
+                &self,
+                event: &crate::Sdl3DropEvent,
+            ) -> Result<crate::Sdl3DropTarget, Sdl3BackendError> {
+                self.runtime.control().resolve_drop_target(event)
+            }
             /// Returns the active driver's supported native policy transitions.
             pub fn window_capabilities(
                 &self,
@@ -942,6 +956,7 @@ impl Sdl3PlatformBackend {
 
     fn initialize(
         imgui: &mut Context,
+        window: &Window,
         platform_graphics: PlatformGraphicsKind,
         gl_viewport_swap_interval: Sdl3OpenGlViewportSwapInterval,
         initialize_native: impl FnOnce(&mut Context) -> Result<(), Sdl3BackendError>,
@@ -961,7 +976,7 @@ impl Sdl3PlatformBackend {
             runtime.native_initialization_failed();
             return Err(error);
         }
-        runtime.finish_native_initialization(imgui)?;
+        runtime.finish_native_initialization(imgui, window)?;
         Ok(Self { runtime })
     }
 
@@ -978,6 +993,7 @@ impl Sdl3PlatformBackend {
     ) -> Result<Self, Sdl3BackendError> {
         Self::initialize(
             imgui,
+            window,
             PlatformGraphicsKind::Other,
             Sdl3OpenGlViewportSwapInterval::Immediate,
             |imgui| init_for_other(imgui, window),
@@ -1027,6 +1043,7 @@ impl Sdl3PlatformBackend {
     ) -> Result<Self, Sdl3BackendError> {
         Self::initialize(
             imgui,
+            window,
             PlatformGraphicsKind::OpenGl,
             viewport_swap_interval,
             |imgui| init_platform_for_opengl(imgui, window, gl_context),
@@ -1045,6 +1062,7 @@ impl Sdl3PlatformBackend {
     ) -> Result<Self, Sdl3BackendError> {
         Self::initialize(
             imgui,
+            window,
             PlatformGraphicsKind::Vulkan,
             Sdl3OpenGlViewportSwapInterval::Immediate,
             |imgui| init_for_vulkan(imgui, window),
@@ -1064,6 +1082,7 @@ impl Sdl3PlatformBackend {
     ) -> Result<Self, Sdl3BackendError> {
         Self::initialize(
             imgui,
+            window,
             PlatformGraphicsKind::Other,
             Sdl3OpenGlViewportSwapInterval::Immediate,
             |imgui| init_for_d3d(imgui, window),
@@ -1082,6 +1101,7 @@ impl Sdl3PlatformBackend {
     ) -> Result<Self, Sdl3BackendError> {
         Self::initialize(
             imgui,
+            window,
             PlatformGraphicsKind::Other,
             Sdl3OpenGlViewportSwapInterval::Immediate,
             |imgui| init_for_metal(imgui, window),
@@ -1102,6 +1122,7 @@ impl Sdl3PlatformBackend {
     ) -> Result<Self, Sdl3BackendError> {
         Self::initialize(
             imgui,
+            window,
             PlatformGraphicsKind::Other,
             Sdl3OpenGlViewportSwapInterval::Immediate,
             |imgui| unsafe { init_for_sdl_renderer(imgui, window, renderer) },
@@ -1120,6 +1141,7 @@ impl Sdl3PlatformBackend {
     ) -> Result<Self, Sdl3BackendError> {
         Self::initialize(
             imgui,
+            window,
             PlatformGraphicsKind::Other,
             Sdl3OpenGlViewportSwapInterval::Immediate,
             |imgui| init_for_sdl_gpu(imgui, window),
@@ -1222,7 +1244,7 @@ impl Sdl3OpenGl3Backend {
             runtime.native_initialization_failed();
             return Err(error);
         }
-        runtime.finish_native_initialization(imgui)?;
+        runtime.finish_native_initialization(imgui, window)?;
         Ok(Self::from_initialized_context(runtime))
     }
 
@@ -1279,7 +1301,7 @@ impl Sdl3OpenGl3Backend {
             runtime.native_initialization_failed();
             return Err(error);
         }
-        runtime.finish_native_initialization(imgui)?;
+        runtime.finish_native_initialization(imgui, window)?;
         Ok(Self::from_initialized_context(runtime))
     }
 
@@ -1509,7 +1531,7 @@ impl SdlGpu3RendererBackend {
             runtime.native_initialization_failed();
             return Err(error);
         }
-        runtime.finish_native_initialization(imgui)?;
+        runtime.finish_native_initialization(imgui, window)?;
         Ok(Self::from_initialized_context(runtime))
     }
 
@@ -1832,7 +1854,7 @@ impl SdlRenderer3Backend {
             runtime.native_initialization_failed();
             return Err(error);
         }
-        runtime.finish_native_initialization(imgui)?;
+        runtime.finish_native_initialization(imgui, canvas.window())?;
         Ok(Self::from_initialized_context(runtime, canvas.raw()))
     }
 
