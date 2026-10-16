@@ -1,5 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use dear_imgui_rs::{NativeWindowInstanceId, NativeWindowTarget};
@@ -355,6 +356,7 @@ pub(super) struct ViewportData {
     window: Arc<Window>,
     main: bool,
     instance_id: NativeWindowInstanceId,
+    render_state: Rc<crate::platform::window_render_lease::WindowRenderState>,
     native_owner: RefCell<Option<(NativeWindowTarget, Arc<Window>)>>,
     pub(super) window_policy: Cell<ViewportWindowPolicy>,
     pub(super) last_log_fb_scale: Cell<f32>,
@@ -375,6 +377,7 @@ impl ViewportData {
             window,
             main,
             instance_id,
+            render_state: crate::platform::window_render_lease::WindowRenderState::new(),
             native_owner: RefCell::new(None),
             window_policy: Cell::new(ViewportWindowPolicy::default()),
             last_log_fb_scale: Cell::new(0.0),
@@ -390,6 +393,19 @@ impl ViewportData {
 
     pub(super) fn instance_id(&self) -> NativeWindowInstanceId {
         self.instance_id
+    }
+
+    pub(super) fn render_state(
+        &self,
+    ) -> &Rc<crate::platform::window_render_lease::WindowRenderState> {
+        &self.render_state
+    }
+
+    pub(super) fn set_render_state(
+        &mut self,
+        state: Rc<crate::platform::window_render_lease::WindowRenderState>,
+    ) {
+        self.render_state = state;
     }
 
     pub(super) fn set_native_owner(&self, owner: Option<(NativeWindowTarget, Arc<Window>)>) {
@@ -549,15 +565,14 @@ pub(super) fn init_main_viewport(
             return Err(WinitPlatformError::ForeignPlatformUserData);
         }
 
-        let data = insert_viewport_data(
-            control,
-            viewport,
-            ViewportData::new(
-                Arc::clone(&main_window),
-                true,
-                control.platform_control()?.main_window_instance_id()?,
-            )?,
+        let platform = control.platform_control()?;
+        let mut data = ViewportData::new(
+            Arc::clone(&main_window),
+            true,
+            platform.main_window_instance_id()?,
         )?;
+        data.set_render_state(platform.main_window_render_state()?);
+        let data = insert_viewport_data(control, viewport, data)?;
         (*viewport).PlatformUserData = data.cast::<c_void>();
         (*viewport).PlatformHandle = Arc::as_ptr(&main_window).cast_mut().cast();
         Ok(())

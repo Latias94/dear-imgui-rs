@@ -405,7 +405,7 @@ impl ApplicationHandler<UserEvent> for App {
         if let Err(error) =
             w.imgui
                 .platform
-                .handle_window_event(&mut w.imgui.context, &w.window, &event)
+                .handle_window_event(&mut w.imgui.context, window_id, &event)
         {
             eprintln!("Winit platform error: {error}");
             event_loop.exit();

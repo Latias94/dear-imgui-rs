@@ -8,6 +8,15 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Route `handle_event` and `handle_window_event` by native `WindowId` without a caller-supplied window borrow. Both return `WinitEventOutcome`, separating registration ownership, actual input forwarding, recent UI capture intent, invalidation, and native platform actions.
+
+### Added
+
+- Add exact-registration pointer control with explicit grab attempts, fallback failures, and release observations for escape, focus loss, close, retirement, and shutdown. Engine ownership suspends Dear ImGui cursor updates for that window.
+- Retain exact native allocations and their owner chains through renderer work leases. Routing retirement rejects new work while submitted frames retain the resources required to present or discard; pending work freezes native owner changes.
+
 ## [0.16.0] - 2026-08-14
 
 ### Breaking Changes

@@ -977,7 +977,7 @@ impl ApplicationHandler for App {
             };
             imgui
                 .platform
-                .handle_window_event(&mut imgui.context, &window.window, &event)
+                .handle_window_event(&mut imgui.context, window_id, &event)
         };
         if let Err(error) = platform_result {
             eprintln!("Winit platform event failed: {error}");

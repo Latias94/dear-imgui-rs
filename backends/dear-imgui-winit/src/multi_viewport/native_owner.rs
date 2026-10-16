@@ -84,6 +84,14 @@ pub(super) fn sync_owner(
             .transpose()?
             .unwrap_or(std::ptr::null_mut());
         if unsafe { GetWindowLongPtrW(hwnd, GWLP_HWNDPARENT) } != parent as isize {
+            if data.render_state().is_pinned() {
+                return Err(WinitPlatformError::WindowOperation {
+                    operation: "set_native_owner",
+                    message:
+                        "native owner changes are deferred while recorded work retains this window"
+                            .to_owned(),
+                });
+            }
             unsafe { SetLastError(0) };
             let previous = unsafe { SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, parent as isize) };
             if previous == 0 && unsafe { GetLastError() } != 0 {

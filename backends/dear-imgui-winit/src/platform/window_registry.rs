@@ -46,6 +46,17 @@ impl WinitWindowSnapshot {
 
 impl WinitPlatformControl {
     #[cfg(feature = "multi-viewport")]
+    pub(crate) fn main_window_render_state(
+        &self,
+    ) -> Result<std::rc::Rc<super::window_render_lease::WindowRenderState>, WinitPlatformError>
+    {
+        self.attached_window_render_state
+            .borrow()
+            .clone()
+            .ok_or(WinitPlatformError::WindowNotAttached)
+    }
+
+    #[cfg(feature = "multi-viewport")]
     pub(crate) fn main_window_instance_id(
         &self,
     ) -> Result<NativeWindowInstanceId, WinitPlatformError> {

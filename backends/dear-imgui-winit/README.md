@@ -112,7 +112,7 @@ impl winit::application::ApplicationHandler for App {
         // 1) forward the window-local event to ImGui
         self.imgui
             .platform
-            .handle_window_event(&mut self.imgui.context, &window, &event)
+            .handle_window_event(&mut self.imgui.context, window.id(), &event)
             .expect("Winit platform contract changed");
 
         match event {
@@ -157,10 +157,48 @@ APIs of interest:
 - `WinitPlatform::new(&mut Context) -> Result<WinitPlatform, WinitPlatformError>`
 - `WinitPlatform::attach_window(Arc<Window>, HiDpiMode, &mut Context) -> Result<(), WinitPlatformError>` — the platform retains the exact shared window allocation until detach or Context teardown, so IME callbacks cannot outlive it
 - `WinitPlatform::set_hidpi_mode(HiDpiMode) -> Result<(), WinitPlatformError>` — configure primary-window scaling before attaching multi-viewport support
-- `WinitPlatform::handle_window_event(&mut Context, &Window, &WindowEvent) -> Result<bool, WinitPlatformError>` — for `ApplicationHandler::window_event`
-- `WinitPlatform::handle_event(&mut Context, &Window, &Event<T>) -> Result<bool, WinitPlatformError>` — for closure-style `EventLoop::run`; events for another `WindowId` return `Ok(false)` without being dispatched
+- `WinitPlatform::handle_window_event(&mut Context, WindowId, &WindowEvent) -> Result<WinitEventOutcome, WinitPlatformError>` — routes `ApplicationHandler::window_event` directly by its native identifier
+- `WinitPlatform::handle_event(&mut Context, &Event<T>) -> Result<WinitEventOutcome, WinitPlatformError>` — routes full events; foreign identifiers and raw device events return an unowned outcome
 - `WinitPlatform::prepare_frame(&mut Context, &Window) -> Result<(), WinitPlatformError>` — updates timing and native platform state before `Context::frame`
 - `WinitPlatform::prepare_render(&Ui, &Window) -> Result<(), WinitPlatformError>` — updates OS cursor and IME state after UI construction
+
+### Engine event routing and pointer ownership
+
+`WinitEventOutcome` separates the exact native `target`, input streams actually `forwarded`,
+the previous UI frame's `capture` intent, `needs_frame`, and native `platform_action`.
+Secondary close is an explicit `ViewportCloseRequested` action; main close remains a host
+decision. Text without a mapped Dear ImGui key still reports text forwarding. Capture intent
+never means that a particular event was consumed.
+
+An engine should select a key/button recipient on press, retain it across capture-intent
+changes, and send the matching release to that recipient. Focus loss should clear engine-held
+inputs. The `wgpu_rtt_gameview` example demonstrates this policy for its embedded image and
+routes raw `DeviceEvent::MouseMotion` only while its camera owns the pointer.
+
+```rust,no_run
+# use dear_imgui_winit::{WinitPlatform, WinitPlatformError, WinitPointerRequest};
+# use dear_imgui_rs::NativeWindowInstanceId;
+# fn capture(platform: &mut WinitPlatform, instance: NativeWindowInstanceId) -> Result<(), WinitPlatformError> {
+let report = platform.request_pointer_control(instance, WinitPointerRequest::default())?;
+if let Some(mode) = report.granted {
+    println!("Native pointer mode: {mode:?}");
+} else {
+    eprintln!("Grab attempts failed: {:?}; reset: {:?}", report.failures, report.cleanup_error);
+}
+platform.cancel_pointer_control();
+# Ok(())
+# }
+```
+
+Requests name an exact native registration. The report preserves every failed preferred mode
+before a successful fallback. A failed request attempts to reset native grabbing, reports any
+reset error, and leaves backend cursor control enabled. While granted, backend cursor shape/visibility and single-window cursor warping
+skip that window; other viewports retain normal cursor behavior. The existing
+`NO_MOUSE_CURSOR_CHANGE` setting is preserved. Escape, focus loss, close, native destruction,
+retirement and platform shutdown end ownership and restore the latest backend cursor settings.
+When native cursor visibility was host-managed, `fallback_restore_visible` explicitly chooses
+the restore value because Winit cannot query that previous state. Release reports, including
+unconfirmed native ungrab errors, are available through `drain_pointer_release_events()`.
 - `WinitPlatform::detach_window(&mut Context) -> Result<Arc<Window>, WinitPlatformError>` — clears winit-owned IME hooks before a window is destroyed while the context remains alive
 
 ## DPI / HiDPI

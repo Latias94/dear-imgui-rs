@@ -1138,7 +1138,7 @@ impl ApplicationHandler for App {
         let ImguiState {
             platform, context, ..
         } = &mut *window.imgui;
-        if let Err(error) = platform.handle_window_event(context, &window.window, &event) {
+        if let Err(error) = platform.handle_window_event(context, _window_id, &event) {
             error!("Winit platform event error: {error}");
             event_loop.exit();
             return;

@@ -798,7 +798,6 @@ impl ApplicationHandler for App {
         };
         if let Err(error) = window.imgui.platform.handle_event(
             &mut window.imgui.context,
-            &window.window,
             &full_event,
         ) {
             web_sys::console::error_1(&JsValue::from_str(&format!(

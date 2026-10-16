@@ -5,36 +5,55 @@
 
 use dear_imgui_rs::Context;
 use dear_imgui_rs::input::MouseSource;
-use winit::event::{DeviceEvent, ElementState, Ime, KeyEvent, MouseScrollDelta, TouchPhase};
+use winit::event::{ElementState, Ime, KeyEvent, MouseScrollDelta, TouchPhase};
 
 use winit::window::Window;
 
+use crate::WinitEventForwarding;
 use crate::input::{to_imgui_mouse_button, winit_key_to_imgui_key};
 use crate::sanitize;
 
 /// Handle keyboard input events
-pub fn handle_keyboard_input(event: &KeyEvent, imgui_ctx: &mut Context) -> bool {
+pub fn handle_keyboard_input(event: &KeyEvent, imgui_ctx: &mut Context) -> WinitEventForwarding {
+    handle_keyboard_parts(
+        &event.logical_key,
+        event.physical_key,
+        event.state,
+        event.text.as_deref(),
+        imgui_ctx,
+    )
+}
+
+pub(crate) fn handle_keyboard_parts(
+    logical_key: &winit::keyboard::Key,
+    physical_key: winit::keyboard::PhysicalKey,
+    state: ElementState,
+    text: Option<&str>,
+    imgui_ctx: &mut Context,
+) -> WinitEventForwarding {
     let io = imgui_ctx.io_mut();
+    let mut forwarded = WinitEventForwarding::default();
 
     // Inject text for character input on key press (matches upstream imgui-winit behavior)
-    if event.state.is_pressed()
-        && let Some(txt) = &event.text
+    if state.is_pressed()
+        && let Some(txt) = text
     {
         for ch in txt.chars() {
             // Filter out DEL control code as upstream does
             if ch != '\u{7f}' {
                 io.add_input_character(ch);
+                forwarded.text = true;
             }
         }
     }
 
-    if let Some(imgui_key) = winit_key_to_imgui_key(&event.logical_key, event.physical_key) {
-        let pressed = event.state == ElementState::Pressed;
+    if let Some(imgui_key) = winit_key_to_imgui_key(logical_key, physical_key) {
+        let pressed = state == ElementState::Pressed;
         io.add_key_event(imgui_key, pressed);
-        return io.want_capture_keyboard();
+        forwarded.keyboard = true;
     }
 
-    false
+    forwarded
 }
 
 /// Handle mouse wheel scrolling
@@ -43,9 +62,9 @@ pub fn handle_mouse_wheel(
     phase: TouchPhase,
     scale_factor: f64,
     imgui_ctx: &mut Context,
-) -> bool {
+) -> WinitEventForwarding {
     if phase == TouchPhase::Cancelled {
-        return imgui_ctx.io().want_capture_mouse();
+        return WinitEventForwarding::default();
     }
 
     let io = imgui_ctx.io_mut();
@@ -55,7 +74,10 @@ pub fn handle_mouse_wheel(
 
     io.add_mouse_wheel_event(normalize_mouse_wheel_delta(delta, scale_factor));
 
-    io.want_capture_mouse()
+    WinitEventForwarding {
+        pointer: true,
+        ..Default::default()
+    }
 }
 
 /// Handle mouse button events
@@ -63,7 +85,7 @@ pub fn handle_mouse_button(
     button: winit::event::MouseButton,
     state: ElementState,
     imgui_ctx: &mut Context,
-) -> bool {
+) -> WinitEventForwarding {
     if let Some(imgui_button) = to_imgui_mouse_button(button) {
         let pressed = state == ElementState::Pressed;
         {
@@ -72,15 +94,18 @@ pub fn handle_mouse_button(
             io.add_mouse_source_event(MouseSource::Mouse);
             io.add_mouse_button_event(imgui_button, pressed);
         }
-        return imgui_ctx.io().want_capture_mouse();
+        return WinitEventForwarding {
+            pointer: true,
+            ..Default::default()
+        };
     }
-    false
+    WinitEventForwarding::default()
 }
 
 /// Handle cursor movement events
-pub fn handle_cursor_moved(position: [f64; 2], imgui_ctx: &mut Context) -> bool {
+pub fn handle_cursor_moved(position: [f64; 2], imgui_ctx: &mut Context) -> WinitEventForwarding {
     let Some(position) = sanitize::finite_vec2_f64_to_f32(position) else {
-        return imgui_ctx.io().want_capture_mouse();
+        return WinitEventForwarding::default();
     };
 
     {
@@ -89,7 +114,10 @@ pub fn handle_cursor_moved(position: [f64; 2], imgui_ctx: &mut Context) -> bool 
         io.add_mouse_source_event(MouseSource::Mouse);
         io.add_mouse_pos_event(position);
     }
-    imgui_ctx.io().want_capture_mouse()
+    WinitEventForwarding {
+        pointer: true,
+        ..Default::default()
+    }
 }
 
 /// Handle modifier key state changes
@@ -124,7 +152,10 @@ fn normalize_mouse_wheel_delta(delta: MouseScrollDelta, scale_factor: f64) -> [f
 }
 
 /// Handle modifier key state changes
-pub fn handle_modifiers_changed(modifiers: &winit::event::Modifiers, imgui_ctx: &mut Context) {
+pub fn handle_modifiers_changed(
+    modifiers: &winit::event::Modifiers,
+    imgui_ctx: &mut Context,
+) -> WinitEventForwarding {
     let io = imgui_ctx.io_mut();
 
     // Update modifier key states.
@@ -137,10 +168,15 @@ pub fn handle_modifiers_changed(modifiers: &winit::event::Modifiers, imgui_ctx: 
     for (key, pressed) in modifier_key_events(modifiers) {
         io.add_key_event(key, pressed);
     }
+    WinitEventForwarding {
+        keyboard: true,
+        ..Default::default()
+    }
 }
 
 /// Handle IME (Input Method Editor) events for international text input
-pub fn handle_ime_event(ime: &Ime, imgui_ctx: &mut Context) {
+pub fn handle_ime_event(ime: &Ime, imgui_ctx: &mut Context) -> WinitEventForwarding {
+    let mut forwarded = WinitEventForwarding::default();
     match ime {
         Ime::Preedit(_text, _cursor_range) => {
             // Do not inject preedit text into Dear ImGui; composition should be handled by the OS/IME.
@@ -150,6 +186,7 @@ pub fn handle_ime_event(ime: &Ime, imgui_ctx: &mut Context) {
             for ch in text.chars() {
                 if !ch.is_control() {
                     imgui_ctx.io_mut().add_input_character(ch);
+                    forwarded.text = true;
                 }
             }
         }
@@ -160,6 +197,7 @@ pub fn handle_ime_event(ime: &Ime, imgui_ctx: &mut Context) {
             // IME was disabled - we could clear a flag here if needed
         }
     }
+    forwarded
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -199,7 +237,7 @@ pub(crate) fn handle_touch_event_at(
     position: Option<[f32; 2]>,
     viewport: Option<dear_imgui_rs::Id>,
     imgui_ctx: &mut Context,
-) -> bool {
+) -> WinitEventForwarding {
     let io = imgui_ctx.io_mut();
     io.add_mouse_source_event(MouseSource::TouchScreen);
     if let Some(viewport) = viewport {
@@ -217,20 +255,20 @@ pub(crate) fn handle_touch_event_at(
             io.add_mouse_button_event(dear_imgui_rs::input::MouseButton::Left, false);
         }
     }
-    true
-}
-
-/// Handle device events (raw input events)
-pub fn handle_device_event(_event: &DeviceEvent) {
-    // Handle device-specific events if needed
-    // Currently no specific handling required
+    WinitEventForwarding {
+        pointer: true,
+        ..Default::default()
+    }
 }
 
 /// Handle window focus events
-pub fn handle_focused(focused: bool, imgui_ctx: &mut Context) -> bool {
+pub fn handle_focused(focused: bool, imgui_ctx: &mut Context) -> WinitEventForwarding {
     // Tell Dear ImGui about host window focus change
     imgui_ctx.io_mut().add_focus_event(focused);
-    false
+    WinitEventForwarding {
+        focus: true,
+        ..Default::default()
+    }
 }
 
 #[cfg(test)]
@@ -242,38 +280,50 @@ mod tests {
     use winit::keyboard::ModifiersState;
 
     #[test]
-    fn test_keyboard_input_handling() {
-        // We can't construct KeyEvent directly due to private fields
-        // So we'll just test that the function exists and can be called
-        // In a real scenario, KeyEvent would be provided by winit
-
-        // Test that the function exists and can be called
-        // We'll use a dummy test that doesn't require constructing KeyEvent
-        // This is a placeholder test - in a real implementation we would test actual key handling
+    fn unmapped_keys_still_report_forwarded_text() {
+        let _guard = lock_context();
+        let mut ctx = Context::create();
+        let logical = winit::keyboard::Key::Unidentified(winit::keyboard::NativeKey::Unidentified);
+        let physical = winit::keyboard::PhysicalKey::Unidentified(
+            winit::keyboard::NativeKeyCode::Unidentified,
+        );
+        let forwarded = handle_keyboard_parts(
+            &logical,
+            physical,
+            ElementState::Pressed,
+            Some("雪"),
+            &mut ctx,
+        );
+        assert_eq!(
+            forwarded,
+            WinitEventForwarding {
+                text: true,
+                ..Default::default()
+            }
+        );
+        let release = handle_keyboard_parts(
+            &logical,
+            physical,
+            ElementState::Released,
+            Some("雪"),
+            &mut ctx,
+        );
+        assert_eq!(release, WinitEventForwarding::default());
     }
 
     #[test]
-    fn test_mouse_button_handling() {
+    fn forwarding_is_independent_of_capture_intent() {
         let _guard = lock_context();
         let mut ctx = Context::create();
-
-        let handled = handle_mouse_button(MouseButton::Left, ElementState::Pressed, &mut ctx);
-        // The result depends on whether imgui wants to capture mouse
-        // We just test that it doesn't panic
-        // Test that the function returns a boolean value (always true)
-        let _ = handled; // Just verify it's a boolean
-    }
-
-    #[test]
-    fn test_cursor_moved() {
-        let _guard = lock_context();
-        let mut ctx = Context::create();
-
-        let handled = handle_cursor_moved([100.0, 200.0], &mut ctx);
-        // The result depends on whether imgui wants to capture mouse
-        // We just test that it doesn't panic
-        // Test that the function returns a boolean value (always true)
-        let _ = handled; // Just verify it's a boolean
+        let forwarded = handle_mouse_button(MouseButton::Left, ElementState::Pressed, &mut ctx);
+        assert!(forwarded.pointer);
+        assert!(!ctx.io().want_capture_mouse());
+        assert!(
+            !handle_mouse_button(MouseButton::Other(127), ElementState::Pressed, &mut ctx).pointer
+        );
+        assert!(!handle_cursor_moved([f64::NAN, 1.0], &mut ctx).pointer);
+        assert!(handle_cursor_moved([100.0, 200.0], &mut ctx).pointer);
+        assert!(handle_modifiers_changed(&winit::event::Modifiers::default(), &mut ctx).keyboard);
     }
 
     #[test]

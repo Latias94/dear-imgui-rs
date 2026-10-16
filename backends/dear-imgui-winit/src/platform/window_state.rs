@@ -127,18 +127,27 @@ impl WinitPlatformControl {
         }
     }
 
-    #[cfg(feature = "multi-viewport")]
-    #[cfg(feature = "multi-viewport")]
     pub(crate) fn set_cursor_settings(&self, settings: Option<CursorSettings>) {
         self.cursor_settings.set(settings);
         let Some(settings) = settings else {
             return;
         };
         if let Some(window) = self.attached_window.borrow().as_ref() {
-            settings.apply(window);
+            self.apply_cursor_settings_to_window(settings, window);
         }
+        #[cfg(feature = "multi-viewport")]
         if let Some(runtime) = self.runtime.borrow().as_ref() {
             runtime.apply_cursor_settings(settings);
+        }
+    }
+
+    pub(crate) fn apply_cursor_settings_to_window(
+        &self,
+        settings: CursorSettings,
+        window: &Window,
+    ) {
+        if !self.pointer_controls_window(window.id()) {
+            settings.apply(window);
         }
     }
 
@@ -146,7 +155,7 @@ impl WinitPlatformControl {
     pub(crate) fn apply_current_window_state(&self, window: &Window) {
         window.set_ime_allowed(self.ime_allowed.get());
         if let Some(settings) = self.cursor_settings.get() {
-            settings.apply(window);
+            self.apply_cursor_settings_to_window(settings, window);
         }
     }
 
@@ -207,6 +216,9 @@ impl WinitPlatformControl {
                 (*platform_io).Platform_ImeUserData = Arc::as_ptr(&window).cast_mut().cast();
             }
             if new_registration {
+                #[cfg(feature = "multi-viewport")]
+                self.attached_window_render_state
+                    .replace(Some(super::window_render_lease::WindowRenderState::new()));
                 self.record_window_created(super::WinitWindowSnapshot::capture(target, &window));
             }
             self.attached_window.borrow_mut().replace(window);
@@ -325,15 +337,11 @@ impl WinitPlatform {
                 draw_cursor: ui.io().mouse_draw_cursor(),
             };
             if self.cursor_cache != Some(cursor) {
-                #[cfg(feature = "multi-viewport")]
                 self.control.set_cursor_settings(Some(cursor));
-                #[cfg(not(feature = "multi-viewport"))]
-                cursor.apply(window);
                 self.cursor_cache = Some(cursor);
             }
         } else {
             self.cursor_cache = None;
-            #[cfg(feature = "multi-viewport")]
             self.control.set_cursor_settings(None);
         }
         Ok(())

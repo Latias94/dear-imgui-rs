@@ -1293,6 +1293,86 @@ fn run_native_secondary_fixture(event_loop: &ActiveEventLoop) {
         panic!("one successful registration must emit one Created event: {created:?}");
     };
     let instance = frozen.target.instance_id;
+    let main_modifiers = platform
+        .handle_window_event(
+            &mut context,
+            main_window.id(),
+            &WindowEvent::ModifiersChanged(Default::default()),
+        )
+        .unwrap();
+    let secondary_modifiers = platform
+        .handle_window_event(
+            &mut context,
+            frozen.window_id,
+            &WindowEvent::ModifiersChanged(Default::default()),
+        )
+        .unwrap();
+    assert!(main_modifiers.forwarded.keyboard && secondary_modifiers.forwarded.keyboard);
+    assert_eq!(main_modifiers.capture, secondary_modifiers.capture);
+    assert_eq!(
+        secondary_modifiers.target.unwrap().native.instance_id,
+        instance
+    );
+    let foreign = platform
+        .handle_window_event(
+            &mut context,
+            WindowId::dummy(),
+            &WindowEvent::CloseRequested,
+        )
+        .unwrap();
+    assert!(!foreign.is_owned());
+    assert_eq!(foreign.platform_action, crate::WinitPlatformAction::None);
+    let text = platform
+        .handle_window_event(
+            &mut context,
+            frozen.window_id,
+            &WindowEvent::Ime(winit::event::Ime::Commit("editor".to_owned())),
+        )
+        .unwrap();
+    assert!(text.forwarded.text && !text.forwarded.keyboard);
+    let closed = platform
+        .handle_window_event(&mut context, frozen.window_id, &WindowEvent::CloseRequested)
+        .unwrap();
+    assert_eq!(
+        closed.platform_action,
+        crate::WinitPlatformAction::ViewportCloseRequested
+    );
+    assert!(closed.needs_frame && !closed.forwarded.pointer);
+    assert!(unsafe { (*viewport).PlatformRequestClose });
+    unsafe { (*viewport).PlatformRequestClose = false };
+    let grab = crate::WinitPointerRequest {
+        grab: crate::WinitPointerGrabPreference::Confined,
+        ..Default::default()
+    };
+    let capture = platform.request_pointer_control(instance, grab).unwrap();
+    assert!(
+        capture.granted.is_some(),
+        "native capture failed: {capture:?}"
+    );
+    assert!(platform.control().pointer_controls_window(frozen.window_id));
+    let focus_lost = platform
+        .handle_window_event(&mut context, frozen.window_id, &WindowEvent::Focused(false))
+        .unwrap();
+    assert_eq!(
+        focus_lost.pointer_release.unwrap().reason,
+        crate::WinitPointerReleaseReason::FocusLost
+    );
+    assert!(platform.pointer_control_target().is_none());
+    assert_eq!(platform.drain_pointer_release_events().len(), 1);
+    assert!(
+        platform
+            .request_pointer_control(instance, grab)
+            .unwrap()
+            .granted
+            .is_some()
+    );
+    let cancelled = platform.cancel_pointer_control().unwrap();
+    assert_eq!(
+        cancelled.reason,
+        crate::WinitPointerReleaseReason::ExplicitCancel
+    );
+    assert!(platform.pointer_control_target().is_none());
+    platform.drain_pointer_release_events();
     assert_eq!(frozen.native_state.visible, Some(false));
     assert_eq!(frozen.native_state.resizable, Some(false));
     assert_eq!(frozen.native_state.theme, Some(Theme::Dark));
@@ -1316,6 +1396,41 @@ fn run_native_secondary_fixture(event_loop: &ActiveEventLoop) {
         .unwrap()
         .unwrap();
     assert_eq!(adapter.window_owner_leases(instance).unwrap().len(), 1);
+
+    assert!(
+        platform
+            .request_pointer_control(instance, grab)
+            .unwrap()
+            .granted
+            .is_some()
+    );
+    let pin = adapter
+        .acquire_native_window_lease(instance)
+        .unwrap()
+        .unwrap();
+    assert!(!pin.is_retired());
+    assert_eq!(pin.target().instance_id, instance);
+    unsafe { (*viewport).ParentViewportId = 0 };
+    let data = unsafe {
+        &*((*viewport)
+            .PlatformUserData
+            .cast::<super::viewport_data::ViewportData>())
+    };
+    assert!(matches!(
+        super::native_owner::sync_owner(
+            super::registry::runtime_for_context(context.as_raw())
+                .unwrap()
+                .as_ref(),
+            data,
+            viewport,
+        ),
+        Err(WinitPlatformError::WindowOperation {
+            operation: "set_native_owner",
+            ..
+        })
+    ));
+    unsafe { (*viewport).ParentViewportId = main_target.viewport_id.raw() };
+    drop(pin);
 
     let (_, faults) = platform
         .with_event_loop(event_loop, |_| unsafe { winit_create_window(viewport) })
@@ -1362,10 +1477,32 @@ fn run_native_secondary_fixture(event_loop: &ActiveEventLoop) {
         super::callbacks::winit_update_window(viewport);
     }
     assert_eq!(adapter.window_owner_leases(instance).unwrap().len(), 1);
+    let pin = adapter
+        .acquire_native_window_lease(instance)
+        .unwrap()
+        .unwrap();
+    let held_hwnd = match pin.window().window_handle().unwrap().as_raw() {
+        RawWindowHandle::Win32(handle) => handle.hwnd.get() as windows_sys::Win32::Foundation::HWND,
+        _ => unreachable!(),
+    };
+    let held_window = Arc::downgrade(&pin.window_arc());
     unsafe {
         winit_destroy_window(viewport);
         winit_destroy_window(viewport);
     }
+    assert!(platform.pointer_control_target().is_none());
+    assert!(
+        matches!(platform.drain_pointer_release_events().as_slice(), [report] if report.reason == crate::WinitPointerReleaseReason::Retired)
+    );
+    assert!(pin.is_retired());
+    assert_ne!(
+        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindow(held_hwnd) },
+        0
+    );
+    drop(pin);
+    // Winit posts native destruction to its event loop even on the owning thread. The last
+    // allocation owner must disappear now; HWND destruction occurs when that message is handled.
+    assert!(held_window.upgrade().is_none());
     assert_eq!(
         platform.drain_window_lifecycle_events(),
         vec![crate::WinitWindowLifecycleEvent::Retired(remapped.target)]
@@ -2251,7 +2388,7 @@ fn runtime_ignores_foreign_callbacks_it_does_not_claim_after_they_change() {
 
     assert_eq!(
         runtime.route_secondary_event(&mut context, &Event::<()>::AboutToWait),
-        Ok(false)
+        Ok(crate::WinitEventForwarding::default())
     );
     assert_eq!(runtime.poll_fault(), Ok(()));
     assert_eq!(runtime.shutdown(&mut context), Ok(()));

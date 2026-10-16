@@ -182,6 +182,9 @@ impl ViewportEntry {
 
 impl Drop for ViewportEntry {
     fn drop(&mut self) {
+        if !self.data.is_main() {
+            self.data.render_state().retire();
+        }
         if self.published.get()
             && !self.data.is_main()
             && let Some(platform) = self.platform.upgrade()
@@ -192,6 +195,60 @@ impl Drop for ViewportEntry {
 }
 
 impl RuntimeControl {
+    pub(crate) fn acquire_native_window_lease_in_current_context(
+        &self,
+        instance_id: NativeWindowInstanceId,
+    ) -> Result<Option<crate::WinitWindowRenderLease>, WinitPlatformError> {
+        if self.state() != RuntimeState::Attached {
+            return Err(WinitPlatformError::RuntimeDetached);
+        }
+        let entries = self.viewports.borrow();
+        let Some(entry) = entries
+            .iter()
+            .find(|entry| entry.data.instance_id() == instance_id)
+        else {
+            return Ok(None);
+        };
+        let Some(target) = entry.window_target() else {
+            return Ok(None);
+        };
+        let window = Arc::clone(entry.data.window());
+        let state = Rc::clone(entry.data.render_state());
+        let mut owners = Vec::new();
+        let mut next = entry
+            .data
+            .native_owner()
+            .map(|(target, _)| target.instance_id);
+        for _ in 0..entries.len() {
+            let Some(instance) = next else {
+                return Ok(crate::WinitWindowRenderLease::new(
+                    target, window, state, owners,
+                ));
+            };
+            let Some(owner) = entries
+                .iter()
+                .find(|entry| entry.data.instance_id() == instance)
+            else {
+                return Ok(None);
+            };
+            if owner.window_target().is_none() {
+                return Ok(None);
+            }
+            owners.push((
+                Arc::clone(owner.data.window()),
+                Rc::clone(owner.data.render_state()),
+            ));
+            next = owner
+                .data
+                .native_owner()
+                .map(|(target, _)| target.instance_id);
+        }
+        Err(WinitPlatformError::InvalidWindowConfiguration {
+            field: "ParentViewportId",
+            reason: "native owner relationships cannot contain a cycle",
+        })
+    }
+
     #[cfg(target_os = "windows")]
     pub(super) fn validate_native_owner_chain(
         &self,

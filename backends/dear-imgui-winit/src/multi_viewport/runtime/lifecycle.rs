@@ -313,7 +313,7 @@ impl WinitPlatformRuntime {
         &self,
         context: &mut Context,
         event: &Event<T>,
-    ) -> Result<bool, WinitPlatformError> {
+    ) -> Result<crate::WinitEventForwarding, WinitPlatformError> {
         self.ensure_context(context)?;
         self.poll_fault()?;
         self.ensure_attached()?;
@@ -485,6 +485,17 @@ impl WinitViewportRendererAdapter {
 
     /// Retains native owner allocations required by work using an owned child window.
     #[doc(hidden)]
+    pub fn acquire_native_window_lease(
+        &self,
+        instance_id: dear_imgui_rs::NativeWindowInstanceId,
+    ) -> Result<Option<crate::WinitWindowRenderLease>, WinitPlatformError> {
+        self.with_window_registry(|control| {
+            control.acquire_native_window_lease_in_current_context(instance_id)
+        })
+    }
+
+    /// Retains native owner allocations required by work using an owned child window.
+    #[doc(hidden)]
     pub fn window_owner_leases(
         &self,
         instance_id: dear_imgui_rs::NativeWindowInstanceId,
@@ -492,6 +503,25 @@ impl WinitViewportRendererAdapter {
         self.with_window_registry(|control| {
             control.window_owner_leases_in_current_context(instance_id)
         })
+    }
+
+    /// Runs renderer work in the owning Context without lending an event-loop capability.
+    ///
+    /// Pending platform faults skip the callback. Faults raised by native callbacks during the
+    /// operation remain parallel to its output, including when that output is itself an error.
+    pub fn run<R>(&self, callback: impl FnOnce() -> R) -> WinitViewportAttempt<R> {
+        let faults = self.control.drain_faults();
+        if !faults.is_empty() {
+            return WinitViewportAttempt::skipped(faults);
+        }
+        match self.with_window_registry(|_| Ok(callback())) {
+            Ok(output) => WinitViewportAttempt::completed(output, self.control.drain_faults()),
+            Err(error) => {
+                let mut faults = vec![error];
+                faults.extend(self.control.drain_faults());
+                WinitViewportAttempt::skipped(faults)
+            }
+        }
     }
 
     /// Runs one renderer route attempt with the active event-loop capability.

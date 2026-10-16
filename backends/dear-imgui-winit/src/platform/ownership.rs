@@ -116,6 +116,9 @@ pub(crate) struct WinitPlatformControl {
     pub(super) baseline_ime_user_data: Cell<*mut c_void>,
     pub(super) attached_window: RefCell<Option<Arc<Window>>>,
     pub(super) attached_window_target: Cell<Option<NativeWindowTarget>>,
+    #[cfg(feature = "multi-viewport")]
+    pub(super) attached_window_render_state:
+        RefCell<Option<Rc<super::window_render_lease::WindowRenderState>>>,
     pub(super) window_lifecycle_events: RefCell<VecDeque<super::WinitWindowLifecycleEvent>>,
     #[cfg(feature = "multi-viewport")]
     pub(super) viewport_window_config: RefCell<super::WinitViewportWindowConfig>,
@@ -124,11 +127,12 @@ pub(crate) struct WinitPlatformControl {
         RefCell<Option<Rc<super::window_config::WindowConfigurator>>>,
     pub(super) ime_allowed: Cell<bool>,
     pub(super) active_touch: Cell<Option<u64>>,
+    pub(super) pointer_control: RefCell<Option<super::pointer_control::ActivePointerControl>>,
+    pub(super) pointer_release_events: RefCell<VecDeque<super::WinitPointerReleaseReport>>,
     pub(super) terminal_fault: RefCell<Option<WinitPlatformError>>,
     pub(super) attachment_handle: RefCell<Option<ContextAttachmentHandle>>,
     #[cfg(feature = "multi-viewport")]
     pub(super) runtime: RefCell<Option<Rc<crate::multi_viewport::RuntimeControl>>>,
-    #[cfg(feature = "multi-viewport")]
     pub(super) cursor_settings: Cell<Option<CursorSettings>>,
 }
 
@@ -185,6 +189,8 @@ impl WinitPlatformControl {
             baseline_ime_user_data: Cell::new(baseline_ime_user_data),
             attached_window: RefCell::new(None),
             attached_window_target: Cell::new(None),
+            #[cfg(feature = "multi-viewport")]
+            attached_window_render_state: RefCell::new(None),
             window_lifecycle_events: RefCell::new(VecDeque::new()),
             #[cfg(feature = "multi-viewport")]
             viewport_window_config: RefCell::new(super::WinitViewportWindowConfig::default()),
@@ -192,11 +198,12 @@ impl WinitPlatformControl {
             viewport_window_configurator: RefCell::new(None),
             ime_allowed: Cell::new(false),
             active_touch: Cell::new(None),
+            pointer_control: RefCell::new(None),
+            pointer_release_events: RefCell::new(VecDeque::new()),
             terminal_fault: RefCell::new(None),
             attachment_handle: RefCell::new(None),
             #[cfg(feature = "multi-viewport")]
             runtime: RefCell::new(None),
-            #[cfg(feature = "multi-viewport")]
             cursor_settings: Cell::new(None),
         });
         let attachment = context.register_attachment::<WinitPlatformAttachmentMarker>(
@@ -471,6 +478,7 @@ impl WinitPlatformControl {
     }
 
     fn release_base_in_current_context(&self) -> Result<(), WinitPlatformError> {
+        self.release_pointer_control(super::WinitPointerReleaseReason::PlatformShutdown, None);
         let mut replaced = None;
         let owns_base_publication = self.owns_base_publication_in_current_context();
         unsafe {

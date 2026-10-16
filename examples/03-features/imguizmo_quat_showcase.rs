@@ -1355,7 +1355,6 @@ impl ApplicationHandler for App {
         };
         if let Err(error) = window.imgui.platform.handle_event(
             &mut window.imgui.context,
-            &window.window,
             &full_event,
         ) {
             eprintln!("Winit platform error: {error}");

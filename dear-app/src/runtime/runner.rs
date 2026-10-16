@@ -186,7 +186,7 @@ impl Runtime {
             event: event.clone(),
         };
         ui.platform
-            .handle_event(&mut ui.context, &window.window, &full_event)
+            .handle_event(&mut ui.context, &full_event)
             .map_err(|error| super::state::platform_error("Winit event handling", error))?;
 
         let mut exit_requested = matches!(event, WindowEvent::CloseRequested);

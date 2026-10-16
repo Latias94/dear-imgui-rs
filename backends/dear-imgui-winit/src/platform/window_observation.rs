@@ -143,6 +143,16 @@ impl WinitPlatformControl {
     }
 
     pub(crate) fn record_window_retired(&self, target: NativeWindowTarget) {
+        self.release_pointer_control(
+            super::WinitPointerReleaseReason::Retired,
+            Some(target.instance_id),
+        );
+        #[cfg(feature = "multi-viewport")]
+        if target.is_main
+            && let Some(state) = self.attached_window_render_state.borrow_mut().take()
+        {
+            state.retire();
+        }
         self.window_lifecycle_events
             .borrow_mut()
             .push_back(WinitWindowLifecycleEvent::Retired(target));

@@ -902,8 +902,11 @@ impl RuntimeControl {
     }
 
     pub(crate) fn apply_cursor_settings(&self, settings: CursorSettings) {
+        let Ok(platform) = self.platform_control() else {
+            return;
+        };
         for window in secondary_viewport_windows(self) {
-            settings.apply(&window);
+            platform.apply_cursor_settings_to_window(settings, &window);
         }
     }
 
