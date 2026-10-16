@@ -5,6 +5,7 @@ mod registry;
 mod runtime;
 mod surface;
 mod trace;
+mod work;
 
 #[cfg(test)]
 mod tests;
@@ -14,10 +15,11 @@ pub(crate) use runtime::{
     prepare_route_for_context,
 };
 pub use runtime::{
-    WgpuPreparedViewportFrame, WgpuViewportAttachError, WgpuViewportError, WgpuViewportRouteError,
-    WgpuViewportRouteFault,
+    WgpuPreparedMainFrame, WgpuPreparedViewportFrame, WgpuRecordedViewportFrame,
+    WgpuViewportAttachError, WgpuViewportError, WgpuViewportRouteError, WgpuViewportRouteFault,
 };
 pub use trace::WgpuViewportFrameReport;
+pub use work::{WgpuPendingPresentations, WgpuRecordedViewportWork, WgpuViewportWorkError};
 
 #[cfg(all(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
 compile_error!(

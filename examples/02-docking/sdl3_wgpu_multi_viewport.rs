@@ -240,6 +240,9 @@ impl WgpuMultiViewportApp {
         // Route preparation finishes secondary native windows before main-surface acquisition, so
         // temporary main-surface failures do not stall the other viewports.
         let prepared = main.renderer.prepare(frame)?;
+        let prepared = main
+            .renderer
+            .complete_secondary(prepared, std::iter::empty())?;
 
         let (frame, reconfigure_after_present) = match main.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
@@ -287,7 +290,7 @@ impl WgpuMultiViewportApp {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            main.renderer.render_main(
+            main.renderer.record_main(
                 prepared,
                 &mut render_pass,
                 FramebufferExtent::from_texture(&frame.texture),

@@ -22,11 +22,11 @@ mod removed_free_api_contracts {
     ///
     /// ```
     /// use dear_imgui_wgpu::multi_viewport_sdl3::{
-    ///     WgpuPreparedViewportFrame, WgpuViewportFrameReport,
+    ///     WgpuPreparedMainFrame, WgpuViewportFrameReport,
     /// };
     ///
     /// fn secondary_report<'a>(
-    ///     frame: &'a WgpuPreparedViewportFrame<'_>,
+    ///     frame: &'a WgpuPreparedMainFrame<'_>,
     /// ) -> &'a WgpuViewportFrameReport {
     ///     frame.secondary_report()
     /// }
@@ -83,7 +83,7 @@ mod removed_free_api_contracts {
     ///     render_pass: &mut wgpu::RenderPass<'_>,
     ///     extent: FramebufferExtent,
     /// ) {
-    ///     route.render_main(frame, render_pass, extent).unwrap();
+    ///     route.record_main(frame, render_pass, extent).unwrap();
     /// }
     /// ```
     struct PreparedTransaction;
@@ -104,7 +104,9 @@ use super::multi_viewport_runtime::{
     prepare_route_for_context,
 };
 pub use super::multi_viewport_runtime::{
-    WgpuPreparedViewportFrame, WgpuViewportAttachError, WgpuViewportError, WgpuViewportFrameReport,
+    WgpuPendingPresentations, WgpuPreparedMainFrame, WgpuPreparedViewportFrame,
+    WgpuRecordedViewportFrame, WgpuRecordedViewportWork, WgpuViewportAttachError,
+    WgpuViewportError, WgpuViewportFrameReport, WgpuViewportWorkError,
 };
 use super::multi_viewport_runtime::{WgpuViewportRouteError, WgpuViewportRouteFault};
 use crate::{
@@ -164,12 +166,11 @@ impl Sdl3ViewportRoute {
             .map(|inner| Self { inner, platform })
     }
 
-    /// Consumes an open frame, reconciles textures, and completes secondary viewports.
+    /// Reconciles an open UI frame and updates native windows without recording, submitting, or presenting.
     ///
-    /// Call this before acquiring the application's main surface. A temporary main-surface
-    /// failure may discard the returned capability without losing secondary completion. A frame
+    /// No surface is acquired and no GPU work is recorded, submitted, or presented here. A frame
     /// from another Context is rejected before the SDL3 adapter or either deferred-fault queue is
-    /// entered.
+    /// entered. Continue with `record` or the `complete_secondary` convenience driver.
     pub fn prepare<'frame>(
         &self,
         frame: FrameToken<'frame>,
@@ -180,15 +181,45 @@ impl Sdl3ViewportRoute {
         })
     }
 
-    /// Renders the main viewport after secondary work completed during preparation.
-    pub fn render_main(
+    /// Acquires and records secondary targets without submitting or presenting them.
+    pub fn record<'frame>(
         &self,
-        frame: WgpuPreparedViewportFrame<'_>,
+        frame: WgpuPreparedViewportFrame<'frame>,
+    ) -> Result<WgpuRecordedViewportFrame<'frame>, WgpuViewportWorkError> {
+        if frame.context_id() != self.inner.context_id() {
+            // Preserve the same side-effect-free foreign-Context gate used by prepare.
+            return self.inner.record(frame);
+        }
+        let (attempt, faults) = self.platform.run(|| self.inner.record(frame)).into_parts();
+        self.inner.finish_recording_attempt(
+            attempt,
+            faults
+                .into_iter()
+                .map(WgpuViewportError::Sdl3PlatformOwner)
+                .collect(),
+        )
+    }
+
+    /// Runs the explicit record/submit/present pipeline and retains its secondary report.
+    ///
+    /// Engine producer buffers are submitted before UI consumer buffers on the renderer queue.
+    pub fn complete_secondary<'frame>(
+        &self,
+        frame: WgpuPreparedViewportFrame<'frame>,
+        producer_commands: impl IntoIterator<Item = wgpu::CommandBuffer>,
+    ) -> Result<WgpuPreparedMainFrame<'frame>, WgpuViewportWorkError> {
+        self.record(frame)?.complete_secondary(producer_commands)
+    }
+
+    /// Records the main viewport into an application-owned pass without claiming submission.
+    pub fn record_main(
+        &self,
+        frame: WgpuPreparedMainFrame<'_>,
         render_pass: &mut wgpu::RenderPass<'_>,
         framebuffer_extent: FramebufferExtent,
-    ) -> Result<WgpuViewportObservation, WgpuViewportError> {
+    ) -> Result<WgpuViewportObservation, WgpuViewportWorkError> {
         self.inner
-            .render_main(frame, render_pass, framebuffer_extent)
+            .record_main(frame, render_pass, framebuffer_extent)
     }
 
     fn prepare_with_platform<'frame>(

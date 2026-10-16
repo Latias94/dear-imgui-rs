@@ -163,23 +163,56 @@ does not recycle upload buffers across epochs because submission of the applicat
 is not observable.
 
 Finish UI construction with a `FrameToken`, then call `route.prepare(event_loop, frame)` on Winit
-or `route.prepare(frame)` on SDL3 before acquiring the main surface. Preparation reconciles
-managed textures, renders and presents every secondary viewport, and returns one move-only
-`WgpuPreparedViewportFrame` containing the same-scope `secondary_report()`. After successfully
-acquiring the main surface, consume that capability with `route.render_main(prepared,
-&mut render_pass, FramebufferExtent::from_texture(&surface_frame.texture))`. If main-surface
-acquisition is temporarily unavailable, dropping the prepared capability does not undo the
-secondary work that already completed. There is no public manual trace or partially reconciled
-multi-viewport path.
+or `route.prepare(frame)` on SDL3. Preparation reconciles managed textures and updates native
+windows. It does not acquire surface frames, record commands, submit commands, or present.
+
+For an engine render graph, continue explicitly:
+
+```rust,no_run
+# use dear_imgui_wgpu::{multi_viewport::{WinitViewportRoute, WgpuPreparedViewportFrame}, wgpu};
+# fn submit_secondaries<'frame>(route: &WinitViewportRoute, prepared: WgpuPreparedViewportFrame<'frame>, producer_commands: Vec<wgpu::CommandBuffer>) -> Result<(), Box<dyn std::error::Error>> {
+let recorded = route.record(prepared)?;
+let (main, secondary_work) = recorded.split();
+// SceneColor producers execute before every secondary UI consumer in one Queue::submit.
+let pending = secondary_work.submit(producer_commands)?;
+// Keep pending until presentation is desired. Its acquired frame, Surface, exact native window,
+// and owner chain remain alive even if platform registrations retire in the meantime.
+let secondary_report = pending.present()?;
+// The host independently acquires its main surface and calls route.record_main(main, pass, extent).
+// If acquisition is unavailable, dropping main does not undo the completed secondary work.
+drop(main);
+# let _ = secondary_report;
+# Ok(())
+# }
+```
+
+`route.record` returns `WgpuRecordedViewportFrame`. Its move-only work owns GPU command buffers,
+acquired frames and native target leases. `submit` rejects retired targets before producer
+iteration and submits producer commands before UI commands on the renderer's queue. Successful
+submission transfers acquired frames and leases into `WgpuPendingPresentations`. `present`
+requests presentation exactly once; `discard` and Drop discard without requesting presentation.
+Both recorded and pending work release an acquired frame before its retained Surface and native
+window/owner-chain lease. Submission does not end this lifetime and does not wait for GPU completion.
+
+Native owner changes are rejected only while work leases pin the affected allocations. Idle
+baseline Surfaces follow renderer-before-platform teardown and do not permanently freeze native
+owner policy. Surface configuration is deferred while an older recorded or submitted frame still
+retains the acquisition. The next recording captures current geometry and the current owner chain.
+
+For a conventional application loop, `route.complete_secondary(prepared, producer_commands)` runs
+the same record/submit/present pipeline and returns `WgpuPreparedMainFrame`. Pass an empty iterator
+when producers were already submitted. After acquiring the main surface, call
+`route.record_main(main, &mut render_pass, FramebufferExtent::from_texture(&surface_frame.texture))`.
+Main submission and presentation remain host-owned. There is one transaction model; the convenience
+driver does not bypass lease or observation checks.
 
 ### Inspect native target observations
 
-`prepared.secondary_report().observations()` returns one `WgpuViewportObservation` per attempted
-target. Each entry freezes `NativeWindowTarget`, `WgpuFrameScope`, external binding revisions,
-the highest completed API stage, and an independent skip/failure outcome. Use
-`target.instance_id` to correlate the exact native registration across docking changes. The stored
-`target.viewport_id` is the routing ID at observation time; resolving that old ID against a newer
-platform registry can identify a different window.
+Prepared, recorded, pending, and error values expose owned reports. Entries freeze
+`NativeWindowTarget`, `WgpuFrameScope`, external binding revisions, the highest completed API stage,
+and an independent skip/failure/discard outcome. Use `target.instance_id` for the exact native
+registration across docking changes. The stored `target.viewport_id` is the routing ID at observation
+time; resolving an old ID against a newer registry can identify a different window.
 
 ```rust,no_run
 # use dear_imgui_wgpu::multi_viewport::WgpuViewportFrameReport;
@@ -195,19 +228,18 @@ for observation in report.observations() {
 ```
 
 Stages are `Unrecorded`, `Recorded`, `Submitted`, and `PresentationRequested`. The last stage means
-the backend invoked WGPU's presentation API; it does not prove GPU completion, compositor
-acceptance, scanout, or visible pixels. A submitted clear-only pass can have empty image
-dependencies and a `NoDrawCommands` outcome. Zero-size, missing draw data, timeout, outdated/lost
-surface recovery, occlusion, and retired targets have distinct skip reasons. Failures retain any
-earlier completed stage; a preparation or recording failure never claims successful recording.
+the backend invoked WGPU's presentation API. It does not prove GPU completion, compositor
+acceptance, scanout, or visible pixels. `submission_index()` supports application-owned completion
+tracking. A submitted clear-only pass can have empty dependencies and a `NoDrawCommands` outcome.
+Zero-size, missing draw data, timeout, outdated/lost recovery, occlusion, retired targets, and a
+surface still leased by earlier work have distinct skip reasons.
 
-On failure, `route.prepare(...)` returns a route error whose `report()` retains all earlier
-observations. `error.into_parts()` returns the partial report together with every ordered renderer
-and platform fault. No drawable prepared capability escapes a failed transaction. On success,
-clone `secondary_report()` for history, or consume `into_secondary_report()` when main-surface
-acquisition is unavailable. `route.render_main(...)` returns the main recording observation; the
-caller must supply the main target's actual attachment and remains responsible for its submission
-and presentation.
+Preparation errors and `WgpuViewportWorkError` expose `report()` and `into_parts()` so late failures
+retain earlier observations. Recording failures retain successfully prepared dependencies,
+including unknown callback resources, without claiming successful recording. Dropping a failed
+transaction discards earlier unsubmitted commands. `WgpuPreparedMainFrame::secondary_report()` is a
+frozen snapshot from split/completion; an explicit split returns later submission/presentation
+observations through its separate work value. No global last-report state is updated implicitly.
 
 For SDL3, initialize `Sdl3PlatformBackend` first and then call
 `dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRoute::attach(imgui, &platform, renderer)`.

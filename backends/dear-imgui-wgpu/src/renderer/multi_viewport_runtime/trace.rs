@@ -1,3 +1,4 @@
+use super::work::RecordedTarget;
 use dear_imgui_rs::NativeWindowTarget;
 
 use crate::{
@@ -33,15 +34,61 @@ impl WgpuViewportFrameReport {
     }
 }
 
+impl WgpuViewportFrameReport {
+    fn observation_mut(
+        &mut self,
+        key: Option<ObservationKey>,
+    ) -> Option<&mut WgpuViewportObservation> {
+        let key = key?;
+        if self.scope != Some(key.scope) {
+            return None;
+        }
+        self.observations.get_mut(key.index)
+    }
+    pub(super) fn stage(&mut self, key: Option<ObservationKey>, stage: WgpuFrameStage) {
+        if let Some(observation) = self.observation_mut(key) {
+            observation.stage = observation.stage.max(stage);
+        }
+    }
+    pub(super) fn fail(
+        &mut self,
+        key: Option<ObservationKey>,
+        operation: &'static str,
+        error: &impl std::fmt::Display,
+    ) {
+        if let Some(observation) = self.observation_mut(key) {
+            observation.outcome = WgpuFrameOutcome::Failed {
+                operation,
+                message: error.to_string(),
+            };
+        }
+    }
+    pub(super) fn discard(&mut self, key: Option<ObservationKey>) {
+        if let Some(observation) = self.observation_mut(key) {
+            observation.outcome = WgpuFrameOutcome::Discarded;
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct ObservationKey {
     scope: WgpuFrameScope,
     index: usize,
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub(super) struct FrameTraceState {
     active: Option<WgpuViewportFrameReport>,
+    recorded: Vec<RecordedTarget>,
+}
+
+impl std::fmt::Debug for FrameTraceState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FrameTraceState")
+            .field("active", &self.active)
+            .field("recorded_count", &self.recorded.len())
+            .finish()
+    }
 }
 
 impl FrameTraceState {
@@ -49,6 +96,7 @@ impl FrameTraceState {
         if self.active.is_some() {
             return false;
         }
+        self.recorded.clear();
         self.active = Some(WgpuViewportFrameReport {
             scope: Some(scope),
             observations: Vec::new(),
@@ -96,6 +144,7 @@ impl FrameTraceState {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn stage(&mut self, key: Option<ObservationKey>, stage: WgpuFrameStage) {
         if let Some(observation) = self.observation_mut(key) {
             observation.stage = observation.stage.max(stage);
@@ -126,6 +175,27 @@ impl FrameTraceState {
         self.active.as_ref()?.scope
     }
 
+    pub(super) fn finish_recording(&mut self) -> (WgpuViewportFrameReport, Vec<RecordedTarget>) {
+        let report = self.finish();
+        (report, std::mem::take(&mut self.recorded))
+    }
+
+    pub(super) fn push_recorded(&mut self, target: RecordedTarget) {
+        if self.active.is_some() {
+            self.recorded.push(target);
+        }
+    }
+
+    pub(super) fn dependencies(
+        &mut self,
+        key: Option<ObservationKey>,
+        dependencies: WgpuDrawDependencies,
+    ) {
+        if let Some(observation) = self.observation_mut(key) {
+            observation.dependencies = dependencies;
+        }
+    }
+
     pub(super) fn finish(&mut self) -> WgpuViewportFrameReport {
         self.active
             .take()
@@ -134,6 +204,7 @@ impl FrameTraceState {
 
     pub(super) fn abort(&mut self) {
         self.active = None;
+        self.recorded.clear();
     }
 }
 

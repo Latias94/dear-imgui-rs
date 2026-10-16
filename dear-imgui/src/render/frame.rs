@@ -184,7 +184,26 @@ impl<'ctx> ReconciledFrame<'ctx> {
     /// the installed platform/renderer callback contract is incomplete.
     #[cfg(feature = "multi-viewport")]
     pub fn update_and_render_platform_windows_default(&mut self) {
+        self.update_platform_windows();
+        self.render_platform_windows_default();
+    }
+
+    /// Updates native platform windows without invoking renderer draw or swap callbacks.
+    ///
+    /// Uses the Context's normal frame-phase guards. Call at most once for this frame, before
+    /// [`Self::render_platform_windows_default`]. This allows renderer backends to defer recording,
+    /// submission, and presentation independently of native-window creation and geometry updates.
+    #[cfg(feature = "multi-viewport")]
+    pub fn update_platform_windows(&mut self) {
         self.context.update_platform_windows();
+    }
+
+    /// Invokes platform renderer callbacks after native-window updates completed.
+    ///
+    /// Uses the Context's normal frame-phase guards and may be called at most once for this frame.
+    /// The installed renderer controls whether these callbacks record, submit, or present work.
+    #[cfg(feature = "multi-viewport")]
+    pub fn render_platform_windows_default(&mut self) {
         self.context.render_platform_windows_default();
     }
 }

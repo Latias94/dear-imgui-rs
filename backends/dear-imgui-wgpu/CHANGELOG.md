@@ -8,6 +8,8 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ### Breaking
 
+- Split viewport execution into `prepare` (textures and native windows), `record` (owned command buffers and acquisitions), `submit` (producer buffers before UI consumers), and pending `present`/`discard`. Use `complete_secondary` for the convenience driver and `record_main` with `WgpuPreparedMainFrame` for host-owned main passes. Preparation no longer submits or presents secondary windows.
+
 - Return `WgpuDrawRecording` from `render` and `render_reconciled`, and a native-target observation from a viewport route's `render_main`. Replace secondary report ID lists with `observations()` containing the captured native allocation, UI scope, texture bindings, stage, and skip/failure outcome.
 
 ### Added
@@ -15,6 +17,8 @@ The format follows Keep a Changelog and Semantic Versioning.
 - Add checked external view-binding revisions and `external_texture_binding` queries on renderers and viewport routes. Draw dependencies exclude empty/clipped commands and explicitly mark unknown raw-callback resources.
 
 ### Fixed
+
+- Retain acquired frames, Surfaces, exact native windows, and owner chains through pending presentation, including retirement and Context teardown. Defer surface configuration while older work retains an acquisition; reject new submission of retired work without discarding prior stage evidence.
 
 - Preserve partial target observations alongside renderer and late platform faults when viewport preparation fails, without returning an invalid drawable capability.
 

@@ -19,7 +19,9 @@ use super::surface::{
     reconfigure_surface, request_close_after_surface_creation_failure, should_clear_viewport,
     surface_action,
 };
-use crate::{WgpuFrameScope, WgpuFrameSkipReason, WgpuFrameStage};
+use super::work::{AcquiredTarget, RecordedTarget};
+use crate::{WgpuFrameScope, WgpuFrameSkipReason};
+use std::rc::Rc;
 
 pub(super) fn unary_callback_matches(
     actual: Option<unsafe extern "C" fn(*mut dear_imgui_rs::sys::ImGuiViewport)>,
@@ -527,7 +529,6 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
                 .as_ref()
                 .ok_or(WgpuViewportError::RendererNotInitialized)?;
             let device = backend.device.clone();
-            let queue = backend.queue.clone();
             let data = unsafe { &mut *data_pointer };
             let Some(target) = platform_adapter::target_for_instance(
                 &globals.platform,
@@ -552,6 +553,30 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
                 control.observe_skip(observation, WgpuFrameSkipReason::ZeroSize);
                 return Ok(());
             }
+            if data
+                .surface
+                .as_ref()
+                .is_some_and(|surface| Rc::strong_count(surface) > 1)
+            {
+                control.observe_skip(observation, WgpuFrameSkipReason::TargetBusy);
+                return Ok(());
+            }
+            if data.pending_reconfigure {
+                reconfigure_surface(data, globals, framebuffer_size)?;
+            }
+            let Some(native_window) = platform_adapter::native_window_lease(
+                &globals.platform,
+                data.native_target.instance_id,
+            )?
+            else {
+                control.observe_skip(observation, WgpuFrameSkipReason::RetiredTarget);
+                return Ok(());
+            };
+            let surface = Rc::clone(data.surface.as_ref().ok_or(
+                WgpuViewportError::SurfaceOperationFailed {
+                    operation: "retain viewport surface for recording",
+                },
+            )?);
             let raw_draw_data = viewport.draw_data();
             if raw_draw_data.is_null() {
                 control.observe_skip(observation, WgpuFrameSkipReason::NoDrawData);
@@ -725,7 +750,15 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
                     operation: "use released viewport render attachments",
                 });
             };
-            let view = frame
+            let acquired = AcquiredTarget {
+                frame: Some(frame),
+                surface: Some(surface),
+                native_window: Some(native_window),
+            };
+            let view = acquired
+                .frame
+                .as_ref()
+                .expect("the acquired target owns its frame")
                 .texture
                 .create_view(&wgpu::TextureViewDescriptor::default());
             let (color_view, resolve_target) = targets
@@ -777,26 +810,37 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
                     multiview_mask: None,
                     timestamp_writes: None,
                 });
-                let recording = renderer.render_read_only_draw_data_with_fb_size(
-                    draw_data,
-                    &mut render_pass,
-                    targets.config.width,
-                    targets.config.height,
-                    false,
-                    unsafe { dear_imgui_rs::sys::igGetPlatformIO_Nil() },
-                    control.observation_scope().unwrap_or(WgpuFrameScope {
-                        context_id: control.binding().id(),
-                        epoch: None,
-                        frame_count: draw_data.frame_count(),
-                    }),
-                )?;
+                let mut dependencies = crate::WgpuDrawDependencies::default();
+                let recording_result = catch_unwind(AssertUnwindSafe(|| {
+                    renderer.render_read_only_draw_data_with_fb_size(
+                        draw_data,
+                        &mut render_pass,
+                        targets.config.width,
+                        targets.config.height,
+                        false,
+                        unsafe { dear_imgui_rs::sys::igGetPlatformIO_Nil() },
+                        control.observation_scope().unwrap_or(WgpuFrameScope {
+                            context_id: control.binding().id(),
+                            epoch: None,
+                            frame_count: draw_data.frame_count(),
+                        }),
+                        &mut dependencies,
+                    )
+                }));
+                control.observe_dependencies(observation, dependencies);
+                let recording =
+                    recording_result.map_err(|_| WgpuViewportError::CallbackPanicked {
+                        callback: "record secondary viewport commands",
+                    })??;
                 control.observe_recording(observation, recording);
             }
-            queue.submit(std::iter::once(encoder.finish()));
-            data.pending_frame = Some(frame);
+            let command_buffer = encoder.finish();
             data.pending_reconfigure = reconfigure_after_present;
-            data.pending_observation = observation;
-            control.observe_stage(observation, WgpuFrameStage::Submitted);
+            control.push_recorded(RecordedTarget {
+                command_buffer: Some(command_buffer),
+                acquired,
+                observation,
+            });
             Ok(())
         })
     }));
@@ -819,76 +863,14 @@ pub(super) unsafe fn renderer_swap_buffers(control: &RuntimeControl, viewport: *
         });
         return;
     }
+    // Dear ImGui's callback pump includes a swap phase. Presentation is deliberately deferred to
+    // WgpuPendingPresentations; this callback only validates the sidecar ownership contract.
     let viewport = unsafe { &mut *viewport };
-    let pointer = match viewport_data_lookup(viewport) {
-        ViewportDataLookup::Owned(pointer) => pointer,
-        ViewportDataLookup::Absent => return,
-        ViewportDataLookup::OwnershipLost => {
-            record_renderer_user_data_drift(control, "Renderer_SwapBuffers");
-            return;
-        }
-    };
-    let data = unsafe { &mut *pointer };
-    let Some(frame) = data.pending_frame.take() else {
-        return;
-    };
-    let observation = data.pending_observation.take();
-    let presented = catch_unwind(AssertUnwindSafe(|| {
-        #[cfg(feature = "wgpu-30")]
-        data.queue.present(frame);
-        #[cfg(not(feature = "wgpu-30"))]
-        frame.present();
-    }));
-    if presented.is_err() {
-        let error = WgpuViewportError::CallbackPanicked {
-            callback: "Renderer_SwapBuffers",
-        };
-        control.observe_failure(observation, "request viewport presentation", &error);
-        control.record_entry_fault(error);
-        return;
-    }
-    control.observe_stage(observation, WgpuFrameStage::PresentationRequested);
-    let refreshed_size = framebuffer_size_for_reconfigure(data.pending_reconfigure, || {
-        let globals = control
-            .globals()
-            .ok_or(WgpuViewportError::RuntimeDetached)?;
-        platform_adapter::framebuffer_size(&globals.platform, data.native_target.instance_id)
-    });
-    if data.pending_reconfigure {
-        let size = match refreshed_size {
-            Ok(Some(size)) => size,
-            Ok(None) => return,
-            Err(error) => {
-                control.observe_failure(
-                    observation,
-                    "refresh presented viewport framebuffer",
-                    &error,
-                );
-                control.record_fault(error);
-                return;
-            }
-        };
-        let Some(globals) = control.globals() else {
-            control.record_fault(WgpuViewportError::RuntimeDetached);
-            return;
-        };
-        if let Err(error) = reconfigure_surface(data, &globals, size) {
-            control.observe_failure(observation, "reconfigure presented viewport", &error);
-            control.record_fault(error);
-            return;
-        }
-        data.pending_reconfigure = false;
-    }
-}
-
-pub(super) fn framebuffer_size_for_reconfigure<E>(
-    pending_reconfigure: bool,
-    query: impl FnOnce() -> Result<[u32; 2], E>,
-) -> Result<Option<[u32; 2]>, E> {
-    if pending_reconfigure {
-        query().map(Some)
-    } else {
-        Ok(None)
+    if matches!(
+        viewport_data_lookup(viewport),
+        ViewportDataLookup::OwnershipLost
+    ) {
+        record_renderer_user_data_drift(control, "Renderer_SwapBuffers");
     }
 }
 

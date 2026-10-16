@@ -95,6 +95,21 @@ impl WgpuRenderer {
         render_pass: &mut RenderPass<'_>,
         framebuffer_extent: FramebufferExtent,
     ) -> RendererResult<WgpuDrawRecording> {
+        self.render_reconciled_observed(
+            frame,
+            render_pass,
+            framebuffer_extent,
+            &mut crate::WgpuDrawDependencies::default(),
+        )
+    }
+
+    pub(super) fn render_reconciled_observed(
+        &mut self,
+        frame: ReconciledFrame<'_>,
+        render_pass: &mut RenderPass<'_>,
+        framebuffer_extent: FramebufferExtent,
+        prepared_dependencies: &mut crate::WgpuDrawDependencies,
+    ) -> RendererResult<WgpuDrawRecording> {
         self.ensure_renderer_contract()?;
         self.ensure_reconciled_frame_matches(&frame)?;
         let binding = self.bound_context()?;
@@ -113,6 +128,7 @@ impl WgpuRenderer {
                 true,
                 platform_io,
                 scope,
+                prepared_dependencies,
             )
         })
     }
@@ -166,6 +182,7 @@ impl WgpuRenderer {
         main_viewport: bool,
         platform_io: *mut sys::ImGuiPlatformIO,
         scope: WgpuFrameScope,
+        prepared_dependencies: &mut crate::WgpuDrawDependencies,
     ) -> RendererResult<WgpuDrawRecording> {
         self.ensure_frame_prepared()?;
         self.log_framebuffer_mismatch(draw_data, fb_width, fb_height, main_viewport);
@@ -176,7 +193,14 @@ impl WgpuRenderer {
                 WgpuFrameSkipReason::ZeroSize,
             ));
         }
-        self.render_draw_data_at_extent(draw_data, render_pass, extent, platform_io, scope)
+        self.render_draw_data_at_extent(
+            draw_data,
+            render_pass,
+            extent,
+            platform_io,
+            scope,
+            prepared_dependencies,
+        )
     }
 
     fn render_draw_data_at_extent(
@@ -186,6 +210,7 @@ impl WgpuRenderer {
         extent: FramebufferExtent,
         platform_io: *mut sys::ImGuiPlatformIO,
         scope: WgpuFrameScope,
+        prepared_dependencies: &mut crate::WgpuDrawDependencies,
     ) -> RendererResult<WgpuDrawRecording> {
         self.ensure_renderer_contract()?;
         if !draw_data.valid() {
@@ -210,6 +235,7 @@ impl WgpuRenderer {
             extent,
             backend_data,
         )?;
+        *prepared_dependencies = prepared.dependencies().clone();
         if prepared.is_empty() {
             return Ok(WgpuDrawRecording::skipped(
                 scope,

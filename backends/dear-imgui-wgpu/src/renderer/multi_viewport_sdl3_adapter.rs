@@ -3,6 +3,7 @@ use dear_imgui_rs::{NativeWindowInstanceId, NativeWindowTarget, platform_io::Vie
 use super::multi_viewport_runtime::WgpuViewportError;
 use super::sdl3_raw_window_handle::Sdl3SurfaceTarget;
 
+pub(super) use dear_imgui_sdl3::Sdl3NativeWindowLease as NativeWindowLease;
 pub(super) use dear_imgui_sdl3::Sdl3ViewportRendererAdapter as PlatformOwner;
 
 /// Creates a surface only after the captured SDL owner validates the exact native registration.
@@ -29,28 +30,28 @@ pub(super) unsafe fn create_surface(
         .ok_or(WgpuViewportError::SurfaceOperationFailed {
             operation: "query SDL3 viewport framebuffer size",
         })?;
-    let surface = platform
-        .with_window(snapshot.target.instance_id, |window| {
-            // SAFETY: the scoped owner lookup validated this exact live SDL allocation. The renderer
-            // callback teardown contract keeps it alive until the returned surface is destroyed.
-            let target = unsafe { Sdl3SurfaceTarget::new(window.as_ptr()) };
-            #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
-            let target_result =
-                unsafe { wgpu::SurfaceTargetUnsafe::from_display_and_window(&target, &target) };
-            #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
-            let target_result = unsafe { wgpu::SurfaceTargetUnsafe::from_window(&target) };
-            let target = target_result.map_err(|_| WgpuViewportError::SurfaceOperationFailed {
-                operation: "read SDL3 surface handles",
-            })?;
-            unsafe { instance.create_surface_unsafe(target) }.map_err(|_| {
-                WgpuViewportError::SurfaceOperationFailed {
-                    operation: "create SDL3 viewport surface",
-                }
-            })
-        })?
-        .ok_or(WgpuViewportError::SurfaceOperationFailed {
-            operation: "borrow the registered SDL3 viewport window",
-        })??;
+    let lease = native_window_lease(platform, snapshot.target.instance_id)?.ok_or(
+        WgpuViewportError::SurfaceOperationFailed {
+            operation: "lease the registered SDL3 viewport window",
+        },
+    )?;
+    // SAFETY: the exact allocation is pinned while handles are read and surface creation runs.
+    // The baseline surface is destroyed in the renderer-before-platform phase. Any escaping
+    // recorded work retains its own NativeWindowLease until frame and surface release.
+    let target = unsafe { Sdl3SurfaceTarget::new(lease.as_ptr()) };
+    #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
+    let target_result =
+        unsafe { wgpu::SurfaceTargetUnsafe::from_display_and_window(&target, &target) };
+    #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
+    let target_result = unsafe { wgpu::SurfaceTargetUnsafe::from_window(&target) };
+    let target = target_result.map_err(|_| WgpuViewportError::SurfaceOperationFailed {
+        operation: "read SDL3 surface handles",
+    })?;
+    let surface = unsafe { instance.create_surface_unsafe(target) }.map_err(|_| {
+        WgpuViewportError::SurfaceOperationFailed {
+            operation: "create SDL3 viewport surface",
+        }
+    })?;
     Ok((surface, size, snapshot.target))
 }
 
@@ -83,4 +84,13 @@ pub(super) fn target_for_instance(
     Ok(platform
         .window_snapshot_for_instance(instance)?
         .map(|snapshot| snapshot.target))
+}
+
+pub(super) fn native_window_lease(
+    platform: &PlatformOwner,
+    instance: NativeWindowInstanceId,
+) -> Result<Option<NativeWindowLease>, WgpuViewportError> {
+    platform
+        .acquire_native_window_lease(instance)
+        .map_err(Into::into)
 }

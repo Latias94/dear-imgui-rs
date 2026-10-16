@@ -35,6 +35,8 @@ pub enum WgpuFrameSkipReason {
     Occluded,
     /// The native allocation was no longer owned by the captured platform owner.
     RetiredTarget,
+    /// A previous recorded or pending frame still owns this surface acquisition.
+    TargetBusy,
 }
 
 /// Successful recording metadata returned for an application-owned render pass.
@@ -89,6 +91,8 @@ pub enum WgpuFrameOutcome {
     Observed,
     /// Drawing or acquisition was skipped for a stated reason.
     Skipped(WgpuFrameSkipReason),
+    /// Recorded or submitted work was explicitly abandoned without requesting presentation.
+    Discarded,
     /// An operation failed; earlier recorded/submitted stages remain valid evidence.
     Failed {
         /// Operation being attempted when the error was observed.

@@ -2,6 +2,7 @@ use dear_imgui_rs::{NativeWindowInstanceId, NativeWindowTarget, platform_io::Vie
 
 use super::multi_viewport_runtime::WgpuViewportError;
 
+pub(super) use dear_imgui_winit::WinitWindowRenderLease as NativeWindowLease;
 pub(super) use dear_imgui_winit::multi_viewport::WinitViewportRendererAdapter as PlatformOwner;
 
 /// Creates a surface retaining the exact validated native window allocation.
@@ -18,11 +19,12 @@ pub(super) fn create_surface(
     .ok_or(WgpuViewportError::SurfaceOperationFailed {
         operation: "resolve the registered Winit viewport window",
     })?;
-    let window = platform.window_lease(snapshot.target.instance_id)?.ok_or(
+    let lease = native_window_lease(platform, snapshot.target.instance_id)?.ok_or(
         WgpuViewportError::SurfaceOperationFailed {
             operation: "lease the registered Winit viewport window",
         },
     )?;
+    let window = lease.window_arc();
     let size = snapshot.physical_client_size;
     let surface =
         instance
@@ -63,4 +65,13 @@ pub(super) fn target_for_instance(
     Ok(platform
         .window_snapshot_for_instance(instance)?
         .map(|snapshot| snapshot.target))
+}
+
+pub(super) fn native_window_lease(
+    platform: &PlatformOwner,
+    instance: NativeWindowInstanceId,
+) -> Result<Option<NativeWindowLease>, WgpuViewportError> {
+    platform
+        .acquire_native_window_lease(instance)
+        .map_err(Into::into)
 }
