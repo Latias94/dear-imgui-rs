@@ -22,8 +22,15 @@ parking_lot.workspace = true
 thiserror.workspace = true
 serde = { workspace = true, optional = true }
 
+[target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
+arboard = { version = "3.6.1", default-features = false, optional = true }
+
 [features]
 default = []
+# Optional desktop text clipboard through the existing ClipboardBackend contract.
+system-clipboard = ["dep:arboard"]
+# Native Wayland data-control support; requires a compositor exposing that protocol.
+system-clipboard-wayland = ["system-clipboard", "arboard/wayland-data-control"]
 # Docking is always enabled; feature removed.
 # Enable multi-viewport support (define feature to satisfy cfg checks; opt-in)
 multi-viewport = []
