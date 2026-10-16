@@ -483,6 +483,17 @@ impl WinitViewportRendererAdapter {
         self.with_window_registry(|control| control.window_lease_in_current_context(instance_id))
     }
 
+    /// Retains native owner allocations required by work using an owned child window.
+    #[doc(hidden)]
+    pub fn window_owner_leases(
+        &self,
+        instance_id: dear_imgui_rs::NativeWindowInstanceId,
+    ) -> Result<Vec<Arc<Window>>, WinitPlatformError> {
+        self.with_window_registry(|control| {
+            control.window_owner_leases_in_current_context(instance_id)
+        })
+    }
+
     /// Runs one renderer route attempt with the active event-loop capability.
     pub fn with_event_loop<R>(
         &self,

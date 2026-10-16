@@ -45,6 +45,10 @@ std::uint64_t dear_imgui_sdl3_native_begin(
 );
 
 std::uint64_t dear_imgui_sdl3_native_end(std::uint64_t* first_fault);
+bool dear_imgui_sdl3_native_set_window_transparent(bool transparent);
+SDL_Window* SDLCALL dear_imgui_sdl3_hook_create_window(
+    const char* title, int width, int height, SDL_WindowFlags flags
+);
 
 bool SDLCALL dear_imgui_sdl3_hook_gl_set_attribute(SDL_GLAttr attribute, int value);
 SDL_GLContext SDLCALL dear_imgui_sdl3_hook_gl_create_context(SDL_Window* window);

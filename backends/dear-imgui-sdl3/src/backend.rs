@@ -600,6 +600,55 @@ macro_rules! impl_sdl3_input_controls {
 macro_rules! impl_sdl3_window_queries {
     ($owner:ty) => {
         impl $owner {
+            /// Returns the active driver's supported native policy transitions.
+            pub fn window_capabilities(
+                &self,
+            ) -> Result<crate::Sdl3WindowCapabilities, Sdl3BackendError> {
+                self.runtime.control().window_capabilities()
+            }
+
+            /// Sets defaults for secondary windows allocated after this call.
+            pub fn set_secondary_window_config(
+                &mut self,
+                config: crate::Sdl3WindowConfig,
+            ) -> Result<(), Sdl3BackendError> {
+                self.runtime.control().set_secondary_window_config(config)
+            }
+
+            /// Installs a bounded per-viewport configuration callback run before native allocation.
+            ///
+            /// Panics are contained and reject that creation attempt. Existing windows are unchanged.
+            pub fn set_secondary_window_configurator(
+                &mut self,
+                callback: impl Fn(&crate::Sdl3WindowCreationRequest, &mut crate::Sdl3WindowConfig)
+                + 'static,
+            ) -> Result<(), Sdl3BackendError> {
+                self.runtime
+                    .control()
+                    .set_secondary_window_configurator(Some(std::rc::Rc::new(callback)))
+            }
+
+            /// Removes the per-viewport configurator while keeping the configured defaults.
+            pub fn clear_secondary_window_configurator(&mut self) -> Result<(), Sdl3BackendError> {
+                self.runtime
+                    .control()
+                    .set_secondary_window_configurator(None)
+            }
+
+            /// Applies supported mutable attributes to one exact live window registration.
+            pub fn update_window(
+                &mut self,
+                instance_id: dear_imgui_rs::NativeWindowInstanceId,
+                update: crate::Sdl3WindowUpdate,
+            ) -> Result<Option<()>, Sdl3BackendError> {
+                self.runtime.control().update_window(instance_id, update)
+            }
+
+            /// Returns and clears owned creation/retirement observations, including after shutdown.
+            pub fn drain_window_lifecycle_events(&self) -> Vec<crate::Sdl3WindowLifecycleEvent> {
+                self.runtime.control().drain_window_lifecycle_events()
+            }
+
             /// Returns detached metadata for every currently owned live SDL3 window.
             ///
             /// This includes the main window in single-window mode and never consumes callback

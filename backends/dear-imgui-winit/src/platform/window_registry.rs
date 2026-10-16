@@ -26,6 +26,8 @@ pub struct WinitWindowSnapshot {
     pub physical_client_origin: Option<PhysicalPosition<i32>>,
     /// Native Winit scale factor at observation time.
     pub scale_factor: f64,
+    pub native_state: super::WinitWindowNativeState,
+    pub capabilities: super::WinitWindowCapabilities,
 }
 
 impl WinitWindowSnapshot {
@@ -36,6 +38,8 @@ impl WinitWindowSnapshot {
             physical_client_size: window.inner_size(),
             physical_client_origin: window.inner_position().ok(),
             scale_factor: window.scale_factor(),
+            native_state: super::WinitWindowNativeState::capture(window),
+            capabilities: super::WinitWindowCapabilities::capture(window),
         }
     }
 }
@@ -45,8 +49,9 @@ impl WinitPlatformControl {
     pub(crate) fn main_window_instance_id(
         &self,
     ) -> Result<NativeWindowInstanceId, WinitPlatformError> {
-        self.attached_window_instance
+        self.attached_window_target
             .get()
+            .map(|target| target.instance_id)
             .ok_or(WinitPlatformError::WindowNotAttached)
     }
 
@@ -64,18 +69,15 @@ impl WinitPlatformControl {
             let Some(window) = attached.as_ref() else {
                 return Ok(Vec::new());
             };
-            let Some(instance_id) = self.attached_window_instance.get() else {
+            let Some(mut target) = self.attached_window_target.get() else {
                 return Err(WinitPlatformError::WindowNotAttached);
             };
             let viewport = unsafe { dear_imgui_rs::sys::igGetMainViewport() };
             if viewport.is_null() {
                 return Err(WinitPlatformError::ContextMismatch);
             }
-            let target = NativeWindowTarget {
-                instance_id,
-                viewport_id: Id::from(unsafe { (*viewport).ID }),
-                is_main: true,
-            };
+            target.viewport_id = Id::from(unsafe { (*viewport).ID });
+            self.attached_window_target.set(Some(target));
             Ok(vec![WinitWindowSnapshot::capture(target, window)])
         })?
     }
@@ -97,7 +99,12 @@ impl WinitPlatformControl {
                     return runtime.with_window_in_current_context(instance_id, callback);
                 }
             }
-            if self.attached_window_instance.get() != Some(instance_id) {
+            if self
+                .attached_window_target
+                .get()
+                .map(|target| target.instance_id)
+                != Some(instance_id)
+            {
                 return Ok(None);
             }
             // Release the registry borrow before user code, while retaining the exact allocation
@@ -245,6 +252,10 @@ mod tests {
         let frozen = platform.window_snapshot(window.id()).unwrap().unwrap();
         assert_eq!(Arc::strong_count(&window), retained_windows);
         let instance = frozen.target.instance_id;
+        let created = platform.drain_window_lifecycle_events();
+        assert!(
+            matches!(created.as_slice(), [super::super::WinitWindowLifecycleEvent::Created(snapshot)] if snapshot.target == frozen.target)
+        );
         assert_eq!(instance.context_id(), context.id());
         assert!(frozen.target.is_main);
         assert_eq!(frozen.physical_client_size, window.inner_size());
@@ -265,6 +276,7 @@ mod tests {
                 .instance_id,
             instance
         );
+        assert!(platform.drain_window_lifecycle_events().is_empty());
 
         #[cfg(feature = "multi-viewport")]
         {
@@ -329,17 +341,35 @@ mod tests {
                 instance
             );
             platform.disable_viewports(&mut context).unwrap();
+            assert!(platform.drain_window_lifecycle_events().is_empty());
         }
 
         drop(platform.detach_window(&mut context).unwrap());
+        assert_eq!(
+            platform.drain_window_lifecycle_events(),
+            vec![super::super::WinitWindowLifecycleEvent::Retired(
+                frozen.target
+            )]
+        );
         assert_eq!(platform.with_window(instance, |_| ()), Ok(None));
         platform
             .attach_window(Arc::clone(&window), crate::HiDpiMode::Default, &mut context)
             .unwrap();
         let replacement = platform.window_snapshot(window.id()).unwrap().unwrap();
+        assert!(
+            matches!(platform.drain_window_lifecycle_events().as_slice(), [super::super::WinitWindowLifecycleEvent::Created(snapshot)] if snapshot.target == replacement.target)
+        );
         assert_ne!(replacement.target.instance_id, instance);
         assert_eq!(platform.window_snapshot_for_instance(instance), Ok(None));
         platform.shutdown(&mut context).unwrap();
+        assert_eq!(
+            platform.drain_window_lifecycle_events(),
+            vec![super::super::WinitWindowLifecycleEvent::Retired(
+                replacement.target
+            )]
+        );
+        platform.shutdown(&mut context).unwrap();
+        assert!(platform.drain_window_lifecycle_events().is_empty());
 
         let mut new_owner = WinitPlatform::new(&mut context).unwrap();
         new_owner

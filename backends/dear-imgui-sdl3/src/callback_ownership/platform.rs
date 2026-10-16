@@ -32,6 +32,11 @@ impl PlatformCallbackOwnership {
         if platform_io.is_null() || io.is_null() || main_viewport.is_null() {
             return Err(Sdl3BackendError::PlatformStateUnavailable);
         }
+        // The native adapter intentionally skips SDL parenting on Cocoa. Do not advertise the
+        // upstream whitelist's broader HasParentViewport claim for a route we cannot honor.
+        if crate::runtime::window_policy::current_driver().as_deref() == Some("cocoa") {
+            unsafe { (*io).BackendFlags &= !sys::ImGuiBackendFlags_HasParentViewport };
+        }
         let main_instance_id =
             dear_imgui_rs::NativeWindowInstanceId::allocate(control.binding().id())?;
 
@@ -117,6 +122,7 @@ impl PlatformCallbackOwnership {
                 installed_main_viewport,
                 main_instance_id,
             );
+            control.publish_owned_window(main_viewport);
         }
 
         Ok(Self {

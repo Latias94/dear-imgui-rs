@@ -48,6 +48,9 @@ impl RuntimeControl {
             ))]
             renderer_textures: RefCell::new(RendererTextureStore::default()),
             owned_viewports: RefCell::new(HashMap::new()),
+            secondary_window_config: RefCell::new(Sdl3WindowConfig::default()),
+            secondary_window_configurator: RefCell::new(None),
+            window_lifecycle_events: RefCell::new(Vec::new()),
             owned_renderer_viewports: RefCell::new(HashMap::new()),
             deferred_platform_viewports: RefCell::new(HashMap::new()),
             deferred_renderer_viewports: RefCell::new(HashMap::new()),
@@ -499,7 +502,7 @@ impl RuntimeControl {
         };
         unregister_runtime(self.platform_io_key.replace(0));
         self.callbacks.borrow_mut().take();
-        self.owned_viewports.borrow_mut().clear();
+        self.retire_all_windows(Sdl3WindowRetirementReason::BackendShutdown);
         self.failed_viewports.borrow_mut().clear();
         if let Some(renderer_restore) = renderer_restore {
             self.renderer_shutdown_restore
@@ -1010,15 +1013,19 @@ impl RuntimeControl {
                 sdl3_sys::video::SDL_GetWindowFromID(sdl3_sys::video::SDL_WindowID(id))
             } as usize)
             .unwrap_or(0);
-        self.owned_viewports.borrow_mut().insert(
+        let replaced = self.owned_viewports.borrow_mut().insert(
             viewport as usize,
             OwnedViewportLease {
                 key,
                 state,
                 instance_id,
                 window_address,
+                last_snapshot: None,
             },
         );
+        if let Some(replaced) = replaced {
+            self.retire_window_lease(replaced, Sdl3WindowRetirementReason::OwnershipLost);
+        }
     }
 
     pub(crate) fn take_owned_viewport(
@@ -1032,6 +1039,8 @@ impl RuntimeControl {
         let lease = owned.get(&address).copied()?;
         if !lease.key.same_identity(key) {
             owned.remove(&address);
+            drop(owned);
+            self.retire_window_lease(lease, Sdl3WindowRetirementReason::OwnershipLost);
             return None;
         }
         if lease.key.id != key.id && lease.state != actual {
@@ -1039,9 +1048,15 @@ impl RuntimeControl {
             // numeric ID. Docking may mutate an ID in place, but only an exact sidecar match proves
             // that the lease still belongs to that live viewport rather than a reused allocation.
             owned.remove(&address);
+            drop(owned);
+            self.retire_window_lease(lease, Sdl3WindowRetirementReason::OwnershipLost);
             return None;
         }
-        owned.remove(&address).map(|lease| lease.state)
+        let mut lease = owned.remove(&address)?;
+        lease.key.id = key.id;
+        drop(owned);
+        self.retire_window_lease(lease, Sdl3WindowRetirementReason::WindowCallback);
+        Some(lease.state)
     }
 
     pub(crate) fn inspect_owned_viewport(
@@ -1053,7 +1068,9 @@ impl RuntimeControl {
         let mut owned = self.owned_viewports.borrow_mut();
         let lease = owned.get_mut(&address)?;
         if !lease.key.same_identity(key) {
-            owned.remove(&address);
+            let lease = owned.remove(&address)?;
+            drop(owned);
+            self.retire_window_lease(lease, Sdl3WindowRetirementReason::OwnershipLost);
             return None;
         }
         let expected = lease.state;
@@ -1247,7 +1264,7 @@ impl RuntimeControl {
         });
     }
 
-    fn record_fault(&self, fault: RuntimeFault) {
+    pub(super) fn record_fault(&self, fault: RuntimeFault) {
         self.faults.borrow_mut().push_back(fault);
     }
 
@@ -1468,7 +1485,7 @@ impl RuntimeControl {
         self.renderer_shutdown_restore.borrow_mut().take();
         self.renderer_consumer.borrow_mut().take();
         self.release_platform_session();
-        self.owned_viewports.borrow_mut().clear();
+        self.retire_all_windows(Sdl3WindowRetirementReason::ContextDestroyed);
         self.owned_renderer_viewports.borrow_mut().clear();
         self.deferred_platform_viewports.borrow_mut().clear();
         self.deferred_renderer_viewports.borrow_mut().clear();

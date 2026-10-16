@@ -1,8 +1,8 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::sync::Arc;
 
-use dear_imgui_rs::NativeWindowInstanceId;
+use dear_imgui_rs::{NativeWindowInstanceId, NativeWindowTarget};
 use winit::window::Window;
 
 use super::WinitPlatformError;
@@ -355,6 +355,7 @@ pub(super) struct ViewportData {
     window: Arc<Window>,
     main: bool,
     instance_id: NativeWindowInstanceId,
+    native_owner: RefCell<Option<(NativeWindowTarget, Arc<Window>)>>,
     pub(super) window_policy: Cell<ViewportWindowPolicy>,
     pub(super) last_log_fb_scale: Cell<f32>,
     pending_geometry_refresh: Cell<GeometryRefresh>,
@@ -374,6 +375,7 @@ impl ViewportData {
             window,
             main,
             instance_id,
+            native_owner: RefCell::new(None),
             window_policy: Cell::new(ViewportWindowPolicy::default()),
             last_log_fb_scale: Cell::new(0.0),
             pending_geometry_refresh: Cell::new(GeometryRefresh::default()),
@@ -388,6 +390,14 @@ impl ViewportData {
 
     pub(super) fn instance_id(&self) -> NativeWindowInstanceId {
         self.instance_id
+    }
+
+    pub(super) fn set_native_owner(&self, owner: Option<(NativeWindowTarget, Arc<Window>)>) {
+        self.native_owner.replace(owner);
+    }
+
+    pub(super) fn native_owner(&self) -> Option<(NativeWindowTarget, Arc<Window>)> {
+        self.native_owner.borrow().clone()
     }
 
     pub(super) fn set_cursor_hittest(&self, enabled: bool) -> Result<(), WinitPlatformError> {

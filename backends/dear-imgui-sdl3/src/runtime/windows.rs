@@ -23,6 +23,10 @@ pub struct Sdl3WindowSnapshot {
     ///
     /// These are SDL window coordinates, which need not be physical pixels on high-DPI systems.
     pub desktop_position: Option<[i32; 2]>,
+    /// SDL state observed with this exact native registration.
+    pub state: Sdl3WindowState,
+    /// Policy transitions offered by the active video driver at observation time.
+    pub capabilities: Sdl3WindowCapabilities,
 }
 
 /// Scoped, non-owning access to an exact SDL3 window registration.
@@ -74,7 +78,10 @@ impl Sdl3WindowRef<'_> {
 }
 
 impl RuntimeControl {
-    fn with_window_query<R>(&self, callback: impl FnOnce() -> R) -> Result<R, Sdl3BackendError> {
+    pub(super) fn with_window_query<R>(
+        &self,
+        callback: impl FnOnce() -> R,
+    ) -> Result<R, Sdl3BackendError> {
         // Inspection must not consume callback faults or request closes as a side effect of entry.
         // Exact owner validation may add a newly observed drift fault to the existing queue.
         if self.state.get() != RuntimeState::Attached
@@ -91,7 +98,7 @@ impl RuntimeControl {
         })?
     }
 
-    fn window_registration_bound(
+    pub(super) fn window_registration_bound(
         &self,
         address: usize,
     ) -> Option<(Sdl3WindowSnapshot, *mut SDL_Window)> {
@@ -100,12 +107,10 @@ impl RuntimeControl {
         // dereference a historical address until the native registry has proved it is live.
         let key = self.viewport_key(viewport)?;
         let actual = unsafe { ViewportPlatformState::capture(viewport) };
-        let mut registry = self.owned_viewports.borrow_mut();
-        let lease = registry.get_mut(&address)?;
+        let lease = self.owned_viewports.borrow().get(&address).copied()?;
         if !lease.key.same_identity(key) || lease.state != actual {
             return None;
         }
-        lease.key.id = key.id;
         let window_id = actual.sdl_window_id()?;
         let pointer = unsafe { SDL_GetWindowFromID(sdl3_sys::video::SDL_WindowID(window_id)) };
         if pointer.is_null() || pointer as usize != lease.window_address {
@@ -126,20 +131,31 @@ impl RuntimeControl {
         let mut y = 0;
         let desktop_position =
             unsafe { SDL_GetWindowPosition(pointer, &mut x, &mut y) }.then_some([x, y]);
-        Some((
-            Sdl3WindowSnapshot {
-                target,
-                window_id,
-                physical_client_size,
-                desktop_position,
-            },
-            pointer,
-        ))
+        let snapshot = Sdl3WindowSnapshot {
+            target,
+            window_id,
+            physical_client_size,
+            desktop_position,
+            state: self.capture_window_state(pointer),
+            capabilities: self.window_capabilities_bound(),
+        };
+        if let Some(lease) = self.owned_viewports.borrow_mut().get_mut(&address) {
+            lease.key.id = key.id;
+            if lease.last_snapshot.is_some() {
+                lease.last_snapshot = Some(snapshot);
+            }
+        }
+        Some((snapshot, pointer))
     }
 
     pub(crate) fn window_snapshots(&self) -> Result<Vec<Sdl3WindowSnapshot>, Sdl3BackendError> {
         self.with_window_query(|| {
-            let addresses: Vec<_> = self.owned_viewports.borrow().keys().copied().collect();
+            let addresses: Vec<_> = self
+                .owned_viewports
+                .borrow()
+                .iter()
+                .filter_map(|(address, lease)| lease.last_snapshot.is_some().then_some(*address))
+                .collect();
             let mut snapshots: Vec<_> = addresses
                 .into_iter()
                 .filter_map(|address| {
@@ -193,7 +209,8 @@ impl RuntimeControl {
                 .borrow()
                 .iter()
                 .find_map(|(address, lease)| {
-                    (lease.instance_id == instance_id).then_some(*address)
+                    (lease.instance_id == instance_id && lease.last_snapshot.is_some())
+                        .then_some(*address)
                 })?;
             let (snapshot, pointer) = self.window_registration_bound(address)?;
             Some(callback(Sdl3WindowRef {
@@ -206,6 +223,15 @@ impl RuntimeControl {
 }
 
 impl Sdl3ViewportRendererAdapter {
+    /// Returns and clears owned lifecycle observations, including after platform teardown.
+    pub fn drain_window_lifecycle_events(&self) -> Vec<Sdl3WindowLifecycleEvent> {
+        self.control.drain_window_lifecycle_events()
+    }
+
+    /// Returns native policy transitions without consuming pending callback faults.
+    pub fn window_capabilities(&self) -> Result<Sdl3WindowCapabilities, Sdl3BackendError> {
+        self.control.window_capabilities()
+    }
     /// Returns detached metadata for every currently owned live native window.
     pub fn window_snapshots(&self) -> Result<Vec<Sdl3WindowSnapshot>, Sdl3BackendError> {
         self.control.window_snapshots()

@@ -45,6 +45,56 @@ Snapshots own only metadata and do not extend window or Context lifetimes. `with
 the current owner and lends the native window for one closure; its borrow cannot escape.
 Queries never drain deferred callback faults.
 
+### Secondary creation policy and native observations
+
+With `multi-viewport`, install `WinitViewportWindowConfig` before creating secondary windows:
+
+```rust,no_run
+# use dear_imgui_winit::{WinitPlatform, WinitPlatformError, WinitViewportWindowConfig};
+# use winit::{dpi::PhysicalSize, window::Theme};
+# fn configure(platform: &mut WinitPlatform) -> Result<(), WinitPlatformError> {
+platform.set_viewport_window_config(WinitViewportWindowConfig {
+    min_inner_size: Some(PhysicalSize::new(320, 180)),
+    max_inner_size: Some(PhysicalSize::new(3840, 2160)),
+    theme: Some(Theme::Dark),
+    ..Default::default()
+})?;
+platform.set_viewport_window_configurator(|info, config| {
+    // Tailor a future registration using detached viewport and native-owner metadata.
+    let _ = info.target;
+    config.resizable = true;
+    Ok(())
+})?;
+# Ok(())
+# }
+```
+
+The bounded policy supports icon, physical client-size limits, theme, resizability and native
+transparency. It cannot replace backend geometry, hidden initial visibility, native sidecars or
+owner pointers. Policy changes affect future windows. Invalid limits and configurator errors
+reject creation before native allocation; configurator panics are contained at the callback
+boundary. A reserved instance identity is never reused after failure.
+
+`drain_window_lifecycle_events()` returns `Created(snapshot)` after publication and
+`Retired(target)` once when registry access ends. Main-window MV toggles and routing-ID remaps
+emit no additional registration events. Retirement does not imply that GPU work or a retained
+renderer window lease has finished. Drain this metadata queue regularly; callback faults have a
+separate queue.
+
+Snapshots include `native_state` and `capabilities`. Optional native state stays `None` when
+Winit cannot query it; requested transparency and icon settings are never presented as observed
+native facts. Policy support distinguishes `Dynamic`, `CreationOnly`, and `Unsupported`.
+X11 transparency is creation-only, and its visibility/theme/resizability observations remain
+unknown where Winit lacks native queries. Wayland desktop positioning and secondary viewports
+remain unsupported.
+
+Windows applies Dear ImGui `ParentViewportId` using top-level native ownership, including
+dynamic owner changes, and advertises `HAS_PARENT_VIEWPORT`. Owner cycles and unavailable
+registrations are rejected. Renderer work using an owned window must retain its owner chain
+until presentation/discard. macOS/X11 report native owner policy as unsupported and leave the
+default main-parent hint unapplied; explicit secondary-parent requests return a typed error.
+Per-window icons are unsupported on macOS.
+
 Minimal flow with winit 0.30 ApplicationHandler-style loops:
 
 ```rust,no_run

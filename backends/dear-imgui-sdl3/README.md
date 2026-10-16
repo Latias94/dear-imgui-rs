@@ -205,6 +205,51 @@ a lifetime lease for a retained GPU surface. Native integrations must preserve t
 independently, avoid reentrant teardown while using the pointer, and release surfaces before SDL
 platform teardown. A retired or foreign instance never enters the callback.
 
+## Secondary-window policy and lifecycle
+
+Configure future allocations through the owning backend, before the platform-window update:
+
+```rust,ignore
+use dear_imgui_sdl3::Sdl3WindowConfig;
+
+backend.set_secondary_window_config(Sdl3WindowConfig {
+    min_client_size: Some([64, 48]),
+    max_client_size: Some([3840, 2160]),
+    ..Default::default()
+})?;
+backend.set_secondary_window_configurator(|request, config| {
+    // Select policy using owned viewport metadata; no mutable native handle is exposed here.
+    if request.parent_viewport_id.is_some() {
+        config.resizable = Some(true);
+    }
+})?;
+```
+
+`Sdl3WindowConfig` supports client-size limits, resizable/focusable state, validated RGBA8 icons
+(up to 512 x 512), and transparent backing selected before native creation. Limits use SDL client
+coordinates. A newly allocated window remains hidden until policy succeeds; limits that would
+change its initial geometry reject creation. The backend retains control of graphics API, DPI,
+geometry, decoration, taskbar policy and native ownership. Configurator panics and invalid or
+unsupported policies reject the attempt without publishing it; failed native allocations are
+rolled back once. `Sdl3WindowUpdate` requests supported mutable attributes on an exact live instance.
+SDL may reject an update after earlier attributes applied, so inspect the resulting snapshot on error.
+
+`window_capabilities()` and each snapshot distinguish `Dynamic`, `CreationOnly`, and `Unsupported`.
+Support describes an available request; a window manager can still reject it. Transparency is
+creation-only and does not prove final pixel visibility. SDL3 has no portable per-window theme
+selection API, so theme policy is unsupported. Icon updates are exposed on Windows/X11; Cocoa
+and other drivers report unsupported. Native ImGui owner relationships use the existing SDL
+parenting implementation on Windows/X11. Cocoa deliberately skips parenting to preserve movement
+between monitors and no longer advertises `HasParentViewport`; Wayland remains a single-window route.
+
+Snapshots include optional native state. In particular, `state.native_owner == None` means owner
+information is unavailable, while `Some(None)` means a known absence of a native owner.
+`drain_window_lifecycle_events()` returns owned `Created`/`Retired` records, including after shutdown
+through an already captured renderer adapter. Numeric docking-ID changes produce no new creation.
+Retirement records the end of a backend registration and retains its last observed state; it does
+not assert when an operating system removed visible pixels. Unpublished failed attempts emit no
+creation or retirement observation.
+
 APIs of interest (see `src/lib.rs` for full docs):
 
 - `Sdl3OpenGl3Backend` and `SdlRenderer3Backend`:

@@ -6,6 +6,9 @@
 mod frame;
 mod input_events;
 mod ownership;
+#[cfg(feature = "multi-viewport")]
+mod window_config;
+mod window_observation;
 mod window_registry;
 mod window_state;
 
@@ -19,6 +22,12 @@ pub use frame::HiDpiMode;
 pub use ownership::WinitPlatform;
 #[cfg(feature = "multi-viewport")]
 pub(crate) use ownership::{WINIT_VIEWPORT_FLAGS, WinitPlatformControl};
+#[cfg(feature = "multi-viewport")]
+pub use window_config::{WinitViewportCreateInfo, WinitViewportWindowConfig};
+pub use window_observation::{
+    WinitWindowCapabilities, WinitWindowLifecycleEvent, WinitWindowNativeState,
+    WinitWindowPolicySupport,
+};
 pub use window_registry::WinitWindowSnapshot;
 
 /// Failure to attach or operate the Winit platform backend.
@@ -31,6 +40,21 @@ pub enum WinitPlatformError {
     /// The process-wide native window registration identity space was exhausted.
     #[error(transparent)]
     NativeWindowIdentity(#[from] dear_imgui_rs::NativeWindowIdentityExhausted),
+    /// The application supplied invalid bounded native creation settings.
+    #[error("invalid Winit window configuration `{field}`: {reason}")]
+    InvalidWindowConfiguration {
+        field: &'static str,
+        reason: &'static str,
+    },
+    /// The native window system cannot honor the requested policy.
+    #[error("Winit cannot honor window policy `{policy}` during {operation}")]
+    WindowPolicyUnsupported {
+        policy: &'static str,
+        operation: &'static str,
+    },
+    /// A requested native owner is not registered by this platform.
+    #[error("Winit native owner viewport {viewport_id} is unavailable")]
+    NativeOwnerUnavailable { viewport_id: u32 },
     /// The Context rejected release of the active platform attachment generation.
     #[error(transparent)]
     PlatformAttachmentRelease(#[from] ContextPlatformAttachmentReleaseError),

@@ -9,7 +9,8 @@ use super::native_cursor_hittest::{
 };
 use super::registry::{
     clear_failed_viewport, insert_viewport_data, preflight_viewport_ownership,
-    record_failed_viewport, remove_viewport_data, with_current_runtime, with_viewport_data,
+    publish_viewport_created, record_failed_viewport, remove_viewport_data, with_current_runtime,
+    with_viewport_data,
 };
 use super::runtime::RuntimeControl;
 use super::viewport_data::{ViewportData, ViewportWindowPolicy};
@@ -243,6 +244,7 @@ fn sync_window_policy(
     let client_geometry = requires_client_geometry_reconciliation(current, next)
         .then(|| viewport_client_geometry(viewport))
         .transpose()?;
+    super::native_owner::sync_owner(control, data, viewport)?;
 
     let window = data.window();
     let decoration_offset_before_policy_change = client_geometry

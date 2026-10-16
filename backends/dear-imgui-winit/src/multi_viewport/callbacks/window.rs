@@ -116,12 +116,55 @@ pub(in super::super) unsafe extern "C" fn winit_create_window(
             if size[1] <= 0.0 {
                 size[1] = 128.0;
             }
+            let instance_id =
+                match dear_imgui_rs::NativeWindowInstanceId::allocate(control.binding().id()) {
+                    Ok(instance_id) => instance_id,
+                    Err(error) => {
+                        record_viewport_failure(control, vp, error.into());
+                        return;
+                    }
+                };
+            let owner = match super::super::native_owner::resolve_owner(control, vp) {
+                Ok(owner) => owner,
+                Err(error) => {
+                    record_viewport_failure(control, vp, error);
+                    return;
+                }
+            };
+            let config = match control.platform_control().and_then(|platform| {
+                platform.configure_viewport_window(crate::WinitViewportCreateInfo {
+                    target: dear_imgui_rs::NativeWindowTarget {
+                        instance_id,
+                        viewport_id: dear_imgui_rs::Id::from(vp_ref.ID),
+                        is_main: false,
+                    },
+                    desktop_position: position,
+                    desktop_size: size,
+                    parent: owner.as_ref().map(|(target, _)| *target),
+                })
+            }) {
+                Ok(config) => config,
+                Err(error) => {
+                    record_viewport_failure(control, vp, error);
+                    return;
+                }
+            };
             let mut window_attrs = WindowAttributes::default()
                 .with_title("ImGui Viewport")
                 .with_inner_size(window_size_from_desktop(size))
                 .with_position(window_position_from_desktop(position))
                 .with_visible(false)
                 .with_decorations(window_policy.decorations);
+            window_attrs = config.apply(window_attrs);
+            window_attrs =
+                match super::super::native_owner::creation_attributes(window_attrs, owner.as_ref())
+                {
+                    Ok(attributes) => attributes,
+                    Err(error) => {
+                        record_viewport_failure(control, vp, error);
+                        return;
+                    }
+                };
 
             // Inactive creation is guaranteed only on the platforms where Winit exposes that
             // contract. Other window managers control focus themselves, but the advisory flag
@@ -160,15 +203,6 @@ pub(in super::super) unsafe extern "C" fn winit_create_window(
                     window.set_outer_position(window_position_from_desktop(outer_target));
 
                     let window = Arc::new(window);
-                    let instance_id = match dear_imgui_rs::NativeWindowInstanceId::allocate(
-                        control.binding().id(),
-                    ) {
-                        Ok(instance_id) => instance_id,
-                        Err(error) => {
-                            record_viewport_failure(control, vp, error.into());
-                            return;
-                        }
-                    };
                     let data = match ViewportData::new(Arc::clone(&window), false, instance_id) {
                         Ok(data) => data,
                         Err(error) => {
@@ -176,6 +210,7 @@ pub(in super::super) unsafe extern "C" fn winit_create_window(
                             return;
                         }
                     };
+                    data.set_native_owner(owner);
                     if let Err(error) = data.set_cursor_hittest(window_policy.cursor_hittest) {
                         record_viewport_failure(control, vp, error);
                         return;
@@ -206,6 +241,7 @@ pub(in super::super) unsafe extern "C" fn winit_create_window(
                     let framebuffer_scale = framebuffer_scale_for_dpi_scale(f64::from(scale));
                     vp_ref.FramebufferScale.x = framebuffer_scale[0];
                     vp_ref.FramebufferScale.y = framebuffer_scale[1];
+                    publish_viewport_created(control, vp);
 
                     // Note: winit does not allow registering per-window event callbacks here.
                     // The application forwards events through `WinitPlatform::handle_event`.

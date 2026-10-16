@@ -6,6 +6,17 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Configure secondary windows before allocation with bounded size, icon, resizability, focus and
+  transparent-backing policy. Query optional native state and policy support, update supported
+  mutable attributes, and drain owned creation/retirement observations after platform shutdown.
+
+### Fixed
+
+- Cocoa no longer advertises native viewport parenting, which the upstream SDL adapter deliberately
+  skips to allow detached windows to move between monitors.
+
 ## [0.20.0] - 2026-10-12
 
 ### Changed

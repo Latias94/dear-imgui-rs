@@ -26,6 +26,7 @@ int DearImguiSdl3FrameCountForBackend() {
 #define SDL_GL_MakeCurrent dear_imgui_sdl3_hook_gl_make_current
 #define SDL_GL_SetSwapInterval dear_imgui_sdl3_hook_gl_set_swap_interval
 #define SDL_GL_SwapWindow dear_imgui_sdl3_hook_gl_swap_window
+#define SDL_CreateWindow dear_imgui_sdl3_hook_create_window
 #define ImGui_ImplSDL3_NewFrame ImGui_ImplSDL3_NewFrame_Upstream
 #define GetFrameCount() DearImguiSdl3FrameCountForBackend()
 
@@ -33,6 +34,7 @@ int DearImguiSdl3FrameCountForBackend() {
 
 #undef GetFrameCount
 #undef ImGui_ImplSDL3_NewFrame
+#undef SDL_CreateWindow
 #undef SDL_GL_SwapWindow
 #undef SDL_GL_SetSwapInterval
 #undef SDL_GL_MakeCurrent
