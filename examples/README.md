@@ -65,18 +65,37 @@ These examples combine UI with application-owned state, GPU resources, threads, 
 | `dockspace_minimal` | Application dockspace | Default | `cargo run -p dear-imgui-examples --bin dockspace_minimal` | Desktop GPU | `game_engine_showcase` |
 | `game_engine_showcase` | Engine-style application | Default; optional `imguizmo` | `cargo run -p dear-imgui-examples --bin game_engine_showcase` | Desktop GPU | Re-run with `--features imguizmo` |
 | `dear_app_external_texture` | Application-owned WGPU texture | Default | `cargo run -p dear-imgui-examples --bin dear_app_external_texture` | Desktop GPU | `wgpu_rtt_gameview` |
-| `wgpu_rtt_gameview` | Render to texture | Default | `cargo run -p dear-imgui-examples --bin wgpu_rtt_gameview` | Desktop GPU | `game_engine_showcase` |
+| `wgpu_rtt_gameview` | Render to texture, editor input and camera pointer ownership | Default | `cargo run -p dear-imgui-examples --bin wgpu_rtt_gameview` | Desktop GPU; hold right mouse over the image | `game_engine_showcase` |
+| `wgpu_texture_inspector` | Depth, object-ID and HDR GPU previews; layers/mips and stable registration replacement | Optional `texture-inspector-multi-viewport` | `cargo run -p dear-imgui-examples --bin wgpu_texture_inspector` | WGPU adapter with compute support | Run the readback and native checks below |
 | `console_log` | Filterable console | Default | `cargo run -p dear-imgui-examples --bin console_log` | Desktop GPU | `game_engine_showcase` |
 | `asset_browser_grid` | Asset grid | Default | `cargo run -p dear-imgui-examples --bin asset_browser_grid` | OpenGL driver; bundled image assets | `game_engine_showcase` |
 | `file_dialog_native` | Native file dialog | `file-browser` | `cargo run -p dear-imgui-examples --bin file_dialog_native --features file-browser` | OpenGL driver; OS file dialogs | `file_browser_imgui` |
 | `file_browser_imgui` | In-UI file browser | `file-browser` | `cargo run -p dear-imgui-examples --bin file_browser_imgui --features file-browser` | OpenGL driver; desktop file system | File Browser crate README |
 | `ime_debug` | IME diagnostics | Default | `cargo run -p dear-imgui-examples --bin ime_debug` | OS input method; optional CJK font below | Winit backend README |
 | `threaded_snapshot_minimal` | Render-thread handoff | Default | `cargo run -p dear-imgui-examples --bin threaded_snapshot_minimal` | Terminal; completes without a window or GPU | Custom renderer contract |
+| `threaded_snapshot_wgpu` | Bounded render-thread WGPU executor | Default | `cargo run -p dear-imgui-examples --bin threaded_snapshot_wgpu` | Terminal; three offscreen GPU frames, no window | Producer-before-UI command submission |
 | `multi_context_switch` | Multiple Contexts | Default | `cargo run -p dear-imgui-examples --bin multi_context_switch` | Terminal; completes without a window or GPU | Context activation docs |
 | `test_engine_integration` | Automated UI tests | `test-engine` | `cargo run -p dear-imgui-examples --bin test_engine_integration --features test-engine` | Native source build; not WASM | Test Engine crate README |
 
-`dear-app` supports docking in its main window but does not own native platform multi-viewport.
-Choose a Level 4 owning runtime when Dear ImGui must create secondary OS windows.
+`wgpu_texture_inspector` produces real `Depth32Float`, `R32Uint`, and `Rgba16Float` two-layer,
+three-mip sources on the GPU. Explicit passes convert selected subresources to UI-compatible
+`Rgba8Unorm`: depth-range mapping, an ID palette, and exposure plus Reinhard HDR mapping. Source
+production, conversion, and UI consumption are ordered through `dear-app::Application::record_render`.
+Resize replaces the three views under stable external registrations; the HDR mirror shares the
+same registration as the HDR panel. Host content-frame numbers remain separate from binding revisions.
+
+```sh
+# Mandatory GPU checks: missing adapters and failed readbacks are errors, never skipped tests.
+cargo nextest run -p dear-imgui-examples --bin wgpu_texture_inspector
+cargo run -p dear-imgui-examples --bin wgpu_texture_inspector -- --readback-test
+# Bounded native scenario resizes resources and changes layer/mip/exposure.
+cargo run -p dear-imgui-examples --bin wgpu_texture_inspector --features texture-inspector-multi-viewport -- --smoke-frames 16
+```
+
+With `texture-inspector-multi-viewport`, preview panels can detach into native windows and the
+inspector displays captured native instance/viewport IDs, external binding revisions, and observed
+stages. A presentation request does not prove GPU completion or visible pixels. Without that feature
+the same conversion example runs in a single native window.
 
 ## Level 4: Integrate Backends
 
@@ -99,6 +118,14 @@ examples.
 | `sdl3_wgpu_multi_viewport` | SDL3 + WGPU multi-viewport | `sdl3-wgpu-multi-viewport` | `cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport` | Native SDL3 and WGPU driver | WGPU backend README |
 | `sdl3_ash_multi_viewport` | SDL3 + Ash multi-viewport | `sdl3-ash-multi-viewport` | `cargo run -p dear-imgui-examples --bin sdl3_ash_multi_viewport --features sdl3-ash-multi-viewport` | Native SDL3 and Vulkan | Ash backend README |
 | `sdl3_sdlgpu_multi_viewport` | Official SDL3 + SDLGPU3 multi-viewport | `sdl3-gpu-multi-viewport` | `cargo run -p dear-imgui-examples --bin sdl3_sdlgpu_multi_viewport --features sdl3-gpu-multi-viewport` | Native SDL3 with SDLGPU support | SDL3 backend README |
+
+Run the real SDL3/WGPU route with `-- --smoke-frames 120` to bound its native editor scenario.
+It submits deterministic red/blue SceneColor producers before two secondary UI consumers, replaces
+one registered view with green under revision two, and switches both windows to that shared
+registration. Reports must match the platform's exact native instances in the same UI epoch at
+`PresentationRequested`. The scenario then merges Scene A into the main window, closes Scene B,
+checks retirement of both old native registrations, and releases the renderer before the platform.
+A missing stage fails within the frame/30-second budget; reports make no visible-pixel claim.
 
 Winit native multi-viewport is disabled on Wayland because Winit does not expose programmatic
 top-level window positioning there. Use X11 (`WINIT_UNIX_BACKEND=x11`) or an SDL3 route when native

@@ -201,6 +201,30 @@ WGPU exposes Device loss separately through an application-owned, single-slot ca
 callback fires, recreate the Device, Queue, renderer, and all GPU resources before reattaching the
 viewport route.
 
+### Native discard teardown validation
+
+The ignored native pending-frame tests require an explicit `DEAR_IMGUI_TEST_WGPU_BACKEND=vulkan`
+or `dx12` selection. On Windows 11 with WGPU 30.0.1, an NVIDIA RTX 4090 and driver 617.14, creating
+an Instance with `Backends::PRIMARY` and discarding a submitted surface frame intermittently
+terminated the process with exit code 2173 during GPU teardown. The pure WGPU diagnostic reproduced
+the failure without a Dear ImGui Context, platform adapter, or backend window lease. Explicit
+Vulkan-only and DX12-only instances passed the separate present, discard, Drop, and pure WGPU cases.
+The precise driver or WGPU cause remains unresolved; successful retries do not erase this failure.
+
+Run native cases in separate processes with a selected backend. The pure diagnostic also accepts
+`DEAR_IMGUI_TEST_WGPU_BACKEND=primary` to retain the multi-backend reproducer:
+
+```powershell
+$env:DEAR_IMGUI_TEST_WGPU_BACKEND = 'vulkan' # or 'dx12' on Windows
+cargo test -p dear-imgui-wgpu --features multi-viewport-winit native_pending_discard_survives_context_retirement -- --ignored --nocapture
+
+$env:DEAR_IMGUI_TEST_WGPU_BACKEND = 'primary' # known failing diagnostic path on the system above
+cargo test -p dear-imgui-wgpu --features multi-viewport-winit native_pure_wgpu_submit_discard_teardown_without_imgui_context -- --ignored --nocapture
+```
+
+Production code keeps the application's Instance/backend policy. It does not force a backend,
+present discarded frames implicitly, or insert a CPU wait into the pending-frame release path.
+
 The renderer opens a fresh upload-resource arena for each `PendingFrame` epoch. Every viewport
 draw then uses a separate pass slot with its own vertex, index, uniform, and sampler bindings, so
 command buffers cannot observe data uploaded for another viewport or a later epoch. The renderer
@@ -318,9 +342,9 @@ python3 tools/ci/run_contract.py multi-viewport-smoke
 Linux CI supplies Xvfb and Mesa/Lavapipe. Missing display or software-GPU infrastructure is an
 infrastructure failure, not a skipped success.
 
-The current route evidence is intentionally asymmetric: Winit + WGPU has a route-level native
-smoke (`A`), while the SDL3 route has the intended example and shared-runtime coverage but no
-dedicated native smoke (`B`). Consult the
+Winit + WGPU has a route-level native smoke (`A`). The bounded SDL3/WGPU example also establishes
+native target/binding attribution, merge/close retirement, and ordered shutdown on Windows (`A`);
+surface-retry injection and other desktop targets remain unverified for that route. Consult the
 [`renderer route evidence matrix`](../../docs/renderer-route-evidence.md) for the exact claim
 boundary and follow-up gaps.
 

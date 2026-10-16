@@ -7,26 +7,274 @@
 //!
 //! Run with:
 //! `cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport`
+//! Add `-- --smoke-frames 120` for a bounded native target/texture attribution check.
 //!
 //! This is experimental and intended for native desktop targets. WebGPU/WASM multi-viewport is
 //! not supported.
 
 use std::cell::RefCell;
 use std::error::Error;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use dear_imgui_examples::sdl3_callbacks::{
     Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
 };
 use dear_imgui_examples::sdl3_dpi::DpiStyle;
-use dear_imgui_rs::{Condition, ConfigFlags, Context};
+use dear_imgui_rs::{Condition, ConfigFlags, Context, Id, NativeWindowTarget};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
-use dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRoute;
-use dear_imgui_wgpu::{FramebufferExtent, GammaMode, WgpuInitInfo, WgpuRenderer};
+use dear_imgui_wgpu::multi_viewport_sdl3::{Sdl3ViewportRoute, WgpuViewportFrameReport};
+use dear_imgui_wgpu::{
+    ExternalTextureBinding, ExternalTextureId, FramebufferExtent, GammaMode, WgpuFrameStage,
+    WgpuInitInfo, WgpuRenderer,
+};
 use sdl3::video::{SwapInterval, WindowPos};
 use sdl3_main::{AppResult, AppResultWithState, MainThreadData, app_impl};
 
 const ENABLE_VIEWPORTS: bool = true;
+
+struct SmokeScene {
+    _texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    registration: ExternalTextureId,
+}
+
+impl SmokeScene {
+    fn resource(device: &wgpu::Device) -> (wgpu::Texture, wgpu::TextureView) {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("SDL3 smoke SceneColor"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 64,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&Default::default());
+        (texture, view)
+    }
+}
+
+/// One bounded scenario in the existing native driver, without a parallel platform registry.
+struct Smoke {
+    frames: u64,
+    limit: u64,
+    started: Instant,
+    phase: u8,
+    scenes: [SmokeScene; 2],
+    original: Option<[NativeWindowTarget; 2]>,
+    replaced: bool,
+    done: bool,
+}
+
+impl Smoke {
+    fn new(
+        device: &wgpu::Device,
+        renderer: &Sdl3ViewportRoute,
+        limit: u64,
+    ) -> Result<Self, Box<dyn Error>> {
+        let mut scenes = Vec::with_capacity(2);
+        for _ in 0..2 {
+            let (texture, view) = SmokeScene::resource(device);
+            let registration = renderer.register_external_texture(&view)?;
+            scenes.push(SmokeScene {
+                _texture: texture,
+                view,
+                registration,
+            });
+        }
+        Ok(Self {
+            frames: 0,
+            limit,
+            started: Instant::now(),
+            phase: 0,
+            scenes: scenes.try_into().ok().expect("two scene textures"),
+            original: None,
+            replaced: false,
+            done: false,
+        })
+    }
+
+    fn begin(
+        &mut self,
+        device: &wgpu::Device,
+        renderer: &Sdl3ViewportRoute,
+    ) -> Result<wgpu::CommandBuffer, Box<dyn Error>> {
+        self.frames += 1;
+        if self.frames > self.limit || self.started.elapsed() > Duration::from_secs(30) {
+            return Err(format!(
+                "SDL3 WGPU smoke timed out in phase {} after {} frames",
+                self.phase, self.frames
+            )
+            .into());
+        }
+        if self.phase == 1 && !self.replaced {
+            let (texture, view) = SmokeScene::resource(device);
+            renderer.update_external_texture(self.scenes[0].registration, &view)?;
+            self.scenes[0]._texture = texture;
+            self.scenes[0].view = view;
+            self.replaced = true;
+        }
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("SDL3 smoke scene producers before UI consumers"),
+        });
+        let first = if self.replaced {
+            wgpu::Color::GREEN
+        } else {
+            wgpu::Color::RED
+        };
+        for (scene, color) in self.scenes.iter().zip([first, wgpu::Color::BLUE]) {
+            let attachments = [Some(wgpu::RenderPassColorAttachment {
+                view: &scene.view,
+                resolve_target: None,
+                depth_slice: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(color),
+                    store: wgpu::StoreOp::Store,
+                },
+            })];
+            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("SDL3 smoke deterministic SceneColor"),
+                color_attachments: &attachments,
+                ..Default::default()
+            });
+        }
+        Ok(encoder.finish())
+    }
+
+    fn draw(&self, ui: &dear_imgui_rs::Ui) -> [Option<Id>; 2] {
+        let main = ui.main_viewport();
+        let origin = main.pos();
+        let size = main.size();
+        let mut viewports = [None; 2];
+        for (index, name) in ["SDL3 smoke Scene A", "SDL3 smoke Scene B"]
+            .into_iter()
+            .enumerate()
+        {
+            if self.phase >= 2 && index == 1 {
+                continue;
+            }
+            let position = if self.phase >= 2 {
+                ui.set_next_window_viewport(main.id());
+                [origin[0] + 30.0, origin[1] + 300.0]
+            } else {
+                [
+                    origin[0] + size[0] + 30.0,
+                    origin[1] + 30.0 + index as f32 * 220.0,
+                ]
+            };
+            let source = if self.phase == 0 { index } else { 0 };
+            ui.window(name)
+                .position(position, Condition::Always)
+                .size([230.0, 200.0], Condition::Always)
+                .build(|| {
+                    viewports[index] = Some(ui.window_viewport().id());
+                    ui.image(
+                        self.scenes[source].registration.texture_id(),
+                        [150.0, 125.0],
+                    );
+                    ui.text(format!(
+                        "SceneColor {} / host frame {}",
+                        source, self.frames
+                    ));
+                });
+        }
+        viewports
+    }
+
+    fn observe(
+        &mut self,
+        report: &WgpuViewportFrameReport,
+        platform: &Sdl3PlatformBackend,
+        viewports: [Option<Id>; 2],
+        bindings: [ExternalTextureBinding; 2],
+    ) -> Result<(), Box<dyn Error>> {
+        if self.phase >= 2 {
+            return Ok(());
+        }
+        let mut targets = Vec::with_capacity(2);
+        for (index, viewport) in viewports.into_iter().enumerate() {
+            let binding = bindings[if self.phase == 0 { index } else { 0 }];
+            let Some(observation) = report.observations().iter().find(|observation| {
+                Some(observation.target.viewport_id) == viewport
+                    && !observation.target.is_main
+                    && observation.stage == WgpuFrameStage::PresentationRequested
+                    && observation.dependencies.external_bindings == [binding]
+            }) else {
+                return Ok(());
+            };
+            let live = platform
+                .window_snapshot_for_instance(observation.target.instance_id)?
+                .ok_or("reported SDL3 smoke target is no longer registered")?;
+            if live.target != observation.target {
+                return Err(
+                    "SDL3 native target report disagrees with its exact registration".into(),
+                );
+            }
+            targets.push(observation);
+        }
+        if targets[0].target.instance_id == targets[1].target.instance_id
+            || targets[0].scope != targets[1].scope
+        {
+            return Err("SDL3 smoke needs two distinct native targets in the same UI epoch".into());
+        }
+        let captured = [targets[0].target, targets[1].target];
+        if self.phase == 0 {
+            if bindings[0].texture == bindings[1].texture
+                || bindings.iter().any(|binding| binding.revision.get() != 1)
+            {
+                return Err(
+                    "SDL3 distinct scenes must start with independent revision-one registrations"
+                        .into(),
+                );
+            }
+            self.original = Some(captured);
+        } else {
+            if self.original != Some(captured) || bindings[0].revision.get() != 2 {
+                return Err("SDL3 shared scene must retain the exact native registrations and advance its binding revision".into());
+            }
+        }
+        println!(
+            "sdl3-wgpu-smoke phase={} host_frame={} targets={captured:?} bindings={:?} stage=PresentationRequested",
+            self.phase,
+            self.frames,
+            targets
+                .iter()
+                .map(|observation| &observation.dependencies.external_bindings)
+                .collect::<Vec<_>>()
+        );
+        self.phase += 1;
+        Ok(())
+    }
+
+    fn finish_frame(
+        &mut self,
+        platform: &Sdl3PlatformBackend,
+        merged_viewport: Option<Id>,
+        main: NativeWindowTarget,
+    ) -> Result<(), Box<dyn Error>> {
+        if self.phase != 2 || merged_viewport != Some(main.viewport_id) {
+            return Ok(());
+        }
+        for target in self.original.expect("distinct phase captured targets") {
+            if platform
+                .window_snapshot_for_instance(target.instance_id)?
+                .is_some()
+            {
+                return Ok(());
+            }
+        }
+        self.done = true;
+        println!(
+            "sdl3-wgpu-smoke PASS: distinct scenes -> shared revision 2; Scene A merged into {main:?}, Scene B closed; old native registrations retired; producer submitted before UI; presentation requests only"
+        );
+        Ok(())
+    }
+}
 
 struct WgpuMultiViewportApp {
     events: Sdl3CallbackEventHandoff,
@@ -49,10 +297,29 @@ struct MainData {
     _sdl: sdl3::Sdl,
     last_frame: Instant,
     show_demo: bool,
+    smoke: Option<Smoke>,
+    shutdown_complete: bool,
 }
 
 impl WgpuMultiViewportApp {
     fn new() -> Result<Self, Box<dyn Error>> {
+        let mut arguments = std::env::args().skip(1);
+        let mut smoke_frames = None;
+        while let Some(argument) = arguments.next() {
+            match argument.as_str() {
+                "--smoke-frames" => {
+                    let count: u64 = arguments
+                        .next()
+                        .ok_or("--smoke-frames requires a count")?
+                        .parse()?;
+                    if !(8..=600).contains(&count) {
+                        return Err("smoke frame count must be 8..=600".into());
+                    }
+                    smoke_frames = Some(count);
+                }
+                _ => return Err(format!("unknown argument: {argument}").into()),
+            }
+        }
         configure_main_callback_rate();
         imgui_sdl3_backend::enable_native_ime_ui();
 
@@ -137,6 +404,9 @@ impl WgpuMultiViewportApp {
         if ENABLE_VIEWPORTS {
             imgui.enable_multi_viewport();
         }
+        if smoke_frames.is_some() {
+            imgui.io_mut().set_config_viewports_no_auto_merge(true);
+        }
         // SAFETY: the retained window outlives explicit platform shutdown.
         let mut sdl3_backend = unsafe { Sdl3PlatformBackend::init_for_other(&mut imgui, &window)? };
         sdl3_backend.set_gamepad_mode(&mut imgui, GamepadMode::AutoAll)?;
@@ -149,6 +419,9 @@ impl WgpuMultiViewportApp {
         )?;
         renderer.set_gamma_mode(GammaMode::Auto);
         let renderer = Sdl3ViewportRoute::attach(&mut imgui, &sdl3_backend, renderer)?;
+        let smoke = smoke_frames
+            .map(|limit| Smoke::new(&device, &renderer, limit))
+            .transpose()?;
 
         Ok(Self {
             events: Sdl3CallbackEventHandoff::default(),
@@ -167,7 +440,9 @@ impl WgpuMultiViewportApp {
                 _video: video,
                 _sdl: sdl,
                 last_frame: Instant::now(),
-                show_demo: true,
+                show_demo: smoke.is_none(),
+                smoke,
+                shutdown_complete: false,
             })),
         })
     }
@@ -189,6 +464,10 @@ impl WgpuMultiViewportApp {
                 return AppResult::Failure;
             }
             if requests_exit(&event, main.window.id()) {
+                if main.smoke.as_ref().is_some_and(|smoke| !smoke.done) {
+                    eprintln!("SDL3 WGPU smoke interrupted before its native evidence completed");
+                    return AppResult::Failure;
+                }
                 return AppResult::Success;
             }
             if event.is_pixel_size_changed_for(main.window.id()) {
@@ -207,7 +486,7 @@ impl WgpuMultiViewportApp {
         }
     }
 
-    fn render(&self) -> Result<(), Box<dyn Error>> {
+    fn render(&self) -> Result<bool, Box<dyn Error>> {
         let mut main_guard = self.main.assert_get().borrow_mut();
         let main = &mut *main_guard;
         let now = Instant::now();
@@ -218,6 +497,23 @@ impl WgpuMultiViewportApp {
         main.sdl3_backend.new_frame(&mut main.imgui)?;
         main.dpi_style.update(&mut main.imgui, &main.window);
         let scale = main.dpi_style.scale();
+        let producer = main
+            .smoke
+            .as_mut()
+            .map(|smoke| smoke.begin(&main.device, &main.renderer))
+            .transpose()?;
+        let bindings = main
+            .smoke
+            .as_ref()
+            .map(|smoke| {
+                Ok::<_, Box<dyn Error>>([
+                    main.renderer
+                        .external_texture_binding(smoke.scenes[0].registration)?,
+                    main.renderer
+                        .external_texture_binding(smoke.scenes[1].registration)?,
+                ])
+            })
+            .transpose()?;
         let frame = main.imgui.begin_frame();
         let ui = frame.ui();
         ui.dockspace().build()?;
@@ -237,12 +533,23 @@ impl WgpuMultiViewportApp {
         if main.show_demo {
             ui.show_demo_window(&mut main.show_demo);
         }
+        let scene_viewports = main
+            .smoke
+            .as_ref()
+            .map(|smoke| smoke.draw(ui))
+            .unwrap_or([None; 2]);
         // Route preparation finishes secondary native windows before main-surface acquisition, so
         // temporary main-surface failures do not stall the other viewports.
         let prepared = main.renderer.prepare(frame)?;
-        let prepared = main
-            .renderer
-            .complete_secondary(prepared, std::iter::empty())?;
+        let prepared = main.renderer.complete_secondary(prepared, producer)?;
+        if let (Some(smoke), Some(bindings)) = (&mut main.smoke, bindings) {
+            smoke.observe(
+                prepared.secondary_report(),
+                &main.sdl3_backend,
+                scene_viewports,
+                bindings,
+            )?;
+        }
 
         let (frame, reconfigure_after_present) = match main.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
@@ -250,11 +557,11 @@ impl WgpuMultiViewportApp {
             wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
                 drop(prepared);
                 Self::reconfigure_surface(main);
-                return Ok(());
+                return Ok(false);
             }
             wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
                 drop(prepared);
-                return Ok(());
+                return Ok(false);
             }
             wgpu::CurrentSurfaceTexture::Validation => {
                 return Err("surface acquisition failed with a WGPU validation error".into());
@@ -268,7 +575,7 @@ impl WgpuMultiViewportApp {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("sdl3_wgpu_mv_encoder"),
             });
-        {
+        let mut main_observation = {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("sdl3_wgpu_mv_render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -294,25 +601,41 @@ impl WgpuMultiViewportApp {
                 prepared,
                 &mut render_pass,
                 FramebufferExtent::from_texture(&frame.texture),
-            )?;
-        }
+            )?
+        };
         main.queue.submit(std::iter::once(encoder.finish()));
+        main_observation.stage = main_observation.stage.max(WgpuFrameStage::Submitted);
         main.queue.present(frame);
+        main_observation.stage = main_observation
+            .stage
+            .max(WgpuFrameStage::PresentationRequested);
         if reconfigure_after_present {
             Self::reconfigure_surface(main);
         }
-        Ok(())
+        if let Some(smoke) = &mut main.smoke {
+            smoke.finish_frame(
+                &main.sdl3_backend,
+                scene_viewports[0],
+                main_observation.target,
+            )?;
+            return Ok(smoke.done);
+        }
+        Ok(false)
     }
 
-    fn shutdown(&self) {
+    fn shutdown(&self) -> Result<(), Box<dyn Error>> {
         let mut main_guard = self.main.assert_get().borrow_mut();
         let main = &mut *main_guard;
-        if let Err(error) = main.renderer.shutdown(&mut main.imgui) {
-            eprintln!("WGPU multi-viewport renderer shutdown failed: {error}");
+        if main.shutdown_complete {
+            return Ok(());
         }
-        if let Err(error) = main.sdl3_backend.shutdown(&mut main.imgui) {
-            eprintln!("SDL3 platform backend shutdown failed: {error}");
+        main.renderer.shutdown(&mut main.imgui)?;
+        main.sdl3_backend.shutdown(&mut main.imgui)?;
+        main.shutdown_complete = true;
+        if main.smoke.is_some() {
+            println!("sdl3-wgpu-smoke teardown=renderer-before-platform complete");
         }
+        Ok(())
     }
 }
 
@@ -334,7 +657,14 @@ impl WgpuMultiViewportApp {
             return event_result;
         }
         match self.render() {
-            Ok(()) => AppResult::Continue,
+            Ok(true) => match self.shutdown() {
+                Ok(()) => AppResult::Success,
+                Err(error) => {
+                    eprintln!("SDL3 WGPU smoke teardown failed: {error}");
+                    AppResult::Failure
+                }
+            },
+            Ok(false) => AppResult::Continue,
             Err(error) => {
                 eprintln!("SDL3 WGPU multi-viewport frame failed: {error}");
                 AppResult::Failure
@@ -349,8 +679,10 @@ impl WgpuMultiViewportApp {
     }
 
     fn app_quit(state: Option<&Self>) {
-        if let Some(app) = state {
-            app.shutdown();
+        if let Some(app) = state
+            && let Err(error) = app.shutdown()
+        {
+            eprintln!("SDL3 WGPU multi-viewport shutdown failed: {error}");
         }
     }
 }

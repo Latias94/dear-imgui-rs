@@ -567,16 +567,17 @@ mod tests {
         feature = "multi-viewport-winit",
         any(target_os = "windows", target_os = "linux")
     ))]
-    fn native_test_instance() -> wgpu::Instance {
-        let backends = match std::env::var("DEAR_IMGUI_TEST_WGPU_BACKEND")
-            .ok()
-            .as_deref()
-        {
-            Some("dx12") => wgpu::Backends::DX12,
-            Some("vulkan") => wgpu::Backends::VULKAN,
-            None => wgpu::Backends::PRIMARY,
-            Some(value) => panic!("unsupported DEAR_IMGUI_TEST_WGPU_BACKEND: {value}"),
+    fn native_test_instance(allow_primary_reproducer: bool) -> wgpu::Instance {
+        let selected = std::env::var("DEAR_IMGUI_TEST_WGPU_BACKEND").expect(
+            "set DEAR_IMGUI_TEST_WGPU_BACKEND=vulkan or dx12 explicitly; the pure WGPU diagnostic also accepts primary to reproduce multi-backend teardown failures",
+        );
+        let backends = match selected.as_str() {
+            "dx12" => wgpu::Backends::DX12,
+            "vulkan" => wgpu::Backends::VULKAN,
+            "primary" if allow_primary_reproducer => wgpu::Backends::PRIMARY,
+            value => panic!("unsupported DEAR_IMGUI_TEST_WGPU_BACKEND for this fixture: {value}"),
         };
+        eprintln!("[native-wgpu] requested backends {backends:?}");
         #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
         {
             wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -672,7 +673,7 @@ mod tests {
                 .acquire_native_window_lease(snapshot.target.instance_id)
                 .unwrap()
                 .unwrap();
-            let instance = native_test_instance();
+            let instance = native_test_instance(false);
             let surface = Rc::new(instance.create_surface(lease.window_arc()).unwrap());
             let adapter = pollster::block_on(instance.request_adapter(&RequestAdapterOptions {
                 compatible_surface: Some(&surface),
@@ -833,7 +834,7 @@ mod tests {
                 )
                 .unwrap(),
         );
-        let instance = native_test_instance();
+        let instance = native_test_instance(true);
         let surface = instance
             .create_surface(std::sync::Arc::clone(&window))
             .unwrap();
