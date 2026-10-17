@@ -2917,6 +2917,7 @@ name = "dear-imgui-rs"
 version = "0.20.0"
 dependencies = [
  "approx",
+ "arboard",
  "bitflags 2.13.2",
  "dear-imgui-sys",
  "glam 0.34.1",

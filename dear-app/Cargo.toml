@@ -33,3 +33,8 @@ implot = ["dep:dear-implot"]
 imnodes = ["dep:dear-imnodes"]
 implot3d = ["dep:dear-implot3d"]
 test-engine = ["dep:dear-imgui-test-engine"]
+multi-viewport = ["dear-imgui-winit/multi-viewport", "dear-imgui-wgpu/multi-viewport-winit"]
+
+[[example]]
+name = "multi_viewport"
+required-features = ["multi-viewport"]

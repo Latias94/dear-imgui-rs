@@ -2,7 +2,7 @@ use super::resource::ManagedWgpuTexture;
 use super::*;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub(super) enum ManagedRequestOutcome {
+pub(crate) enum ManagedRequestOutcome {
     Uploaded(TextureId),
     Destroyed,
     Superseded,
@@ -37,7 +37,7 @@ impl WgpuTextureManager {
         Ok(feedback)
     }
 
-    pub(super) fn apply_managed_request_at_epoch(
+    pub(crate) fn apply_managed_request_at_epoch(
         &mut self,
         id: SnapshotTextureId,
         operation: &TextureOp,
@@ -58,21 +58,23 @@ impl WgpuTextureManager {
                     // A delayed create must not resurrect a resource after its destroy request.
                     return Ok(ManagedRequestOutcome::Superseded);
                 }
-                let texture_id = if let Some(existing) = self.managed_textures.get(&id) {
-                    let texture_id = existing.texture_id;
-                    self.upload_managed_texture_contents(
-                        queue,
-                        id,
-                        *format,
-                        [*width, *height],
-                        *row_pitch,
-                        pixels,
-                    )?;
-                    texture_id
+                if let Some(existing) = self.managed_textures.get(&id)
+                    && (existing.width != *width || existing.height != *height)
+                {
+                    return Err(RendererError::ManagedTextureLayoutMismatch {
+                        texture: id,
+                        expected: [existing.width, existing.height],
+                        actual: [*width, *height],
+                    });
+                }
+                let (resource, rgba_pixels) = Self::create_managed_texture_resource(
+                    device, queue, *format, *width, *height, *row_pitch, pixels,
+                )?;
+                let texture_id = if let Some(existing) = self.managed_textures.get_mut(&id) {
+                    existing.resource = resource;
+                    existing.rgba_pixels = rgba_pixels;
+                    existing.texture_id
                 } else {
-                    let resource = Self::create_managed_texture_resource(
-                        device, queue, *format, *width, *height, *row_pitch, pixels,
-                    )?;
                     let texture_id = self.allocate_managed_texture_id()?;
                     self.managed_textures.insert(
                         id,
@@ -81,11 +83,13 @@ impl WgpuTextureManager {
                             width: *width,
                             height: *height,
                             resource,
+                            rgba_pixels,
                         },
                     );
                     self.managed_by_texture_id.insert(texture_id, id);
                     texture_id
                 };
+                render_resources.remove_image_bind_group(texture_id);
                 Ok(ManagedRequestOutcome::Uploaded(texture_id))
             }
             TextureOp::Update {
@@ -97,10 +101,11 @@ impl WgpuTextureManager {
                 if self.destroyed_managed_textures.contains_key(&id) {
                     return Ok(ManagedRequestOutcome::Superseded);
                 }
-                self.update_managed_texture(queue, id, *format, *width, *height, rects)?;
+                self.update_managed_texture(device, queue, id, *format, [*width, *height], rects)?;
                 let texture_id = self
                     .managed_texture_id(id)
                     .ok_or(RendererError::ManagedTextureMissing(id))?;
+                render_resources.remove_image_bind_group(texture_id);
                 Ok(ManagedRequestOutcome::Uploaded(texture_id))
             }
             TextureOp::Destroy => {

@@ -4,6 +4,7 @@
 use dear_imgui_rs::*;
 use dear_imgui_wgpu::{FramebufferExtent, WgpuRenderer};
 use dear_imgui_winit::WinitPlatform;
+use dear_imgui_winit::{WinitEventOutcome, WinitPointerRequest};
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Instant;
@@ -11,14 +12,17 @@ use wgpu::TextureUsages;
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
-    event::{ElementState, WindowEvent},
+    event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    keyboard::{Key, NamedKey},
+    keyboard::Key,
     window::{Window, WindowId},
 };
 
+#[path = "../support/editor_input.rs"]
+mod editor_input;
 #[path = "../support/wgpu_init.rs"]
 mod wgpu_init;
+use editor_input::{EditorInput, Recipient};
 
 struct ImguiState {
     context: Context,
@@ -211,6 +215,10 @@ struct AppWindow {
     rtt: OffscreenRtt,
     offscreen_pipeline: wgpu::RenderPipeline,
     use_nearest_sampler: bool,
+    game_view_hovered: bool,
+    input: EditorInput,
+    last_outcome: Option<WinitEventOutcome>,
+    grab_status: String,
 }
 
 #[derive(Default)]
@@ -275,6 +283,10 @@ impl AppWindow {
             rtt,
             offscreen_pipeline,
             use_nearest_sampler,
+            game_view_hovered: false,
+            input: EditorInput::default(),
+            last_outcome: None,
+            grab_status: "Hold right mouse over the image to control the camera".to_owned(),
         })
     }
 
@@ -384,6 +396,23 @@ impl AppWindow {
             .size([640.0, 400.0], Condition::FirstUseEver)
             .build(|| {
                 ui.text(format!("Sampling: {} (press 'F' to toggle)", sampler_label));
+                ui.text(&self.grab_status);
+                ui.text(format!(
+                    "Camera yaw/pitch: {:.2}/{:.2}; engine keys: {}",
+                    self.input.camera_angles[0],
+                    self.input.camera_angles[1],
+                    self.input.engine_keys.len()
+                ));
+                if let Some(outcome) = &self.last_outcome {
+                    ui.text(format!("Native target: {:?}", outcome.target));
+                    ui.text(format!(
+                        "Forwarded: {:?}; capture snapshot: {:?}",
+                        outcome.forwarded, outcome.capture
+                    ));
+                }
+                ui.text(
+                    "Escape or focus loss releases camera control. Raw motion stays host-owned.",
+                );
                 if ui.button("Toggle Sampler") {
                     want_toggle_sampler = true;
                 }
@@ -424,6 +453,7 @@ impl AppWindow {
                     draw_list.set_sampler_linear();
                 }
                 ui.image(self.rtt.texture_id.texture_id(), [disp_w, disp_h]);
+                self.game_view_hovered = ui.is_item_hovered();
                 draw_list.set_sampler_linear();
             });
 
@@ -509,19 +539,25 @@ impl ApplicationHandler for App {
             None => return,
         };
 
-        let full_event: winit::event::Event<()> = winit::event::Event::WindowEvent {
-            window_id,
-            event: event.clone(),
-        };
-        if let Err(error) = window.imgui.platform.handle_event(
+        let camera_was_owned = window.imgui.platform.pointer_control_target().is_some();
+        let outcome = match window.imgui.platform.handle_window_event(
             &mut window.imgui.context,
-            &window.window,
-            &full_event,
+            window_id,
+            &event,
         ) {
-            eprintln!("Winit platform error: {error}");
-            event_loop.exit();
+            Ok(outcome) => outcome,
+            Err(error) => {
+                eprintln!("Winit platform error: {error}");
+                event_loop.exit();
+                return;
+            }
+        };
+        if !outcome.is_owned() {
             return;
         }
+        let capture = outcome.capture.unwrap_or_default();
+        let target = outcome.target.unwrap().native;
+        window.last_outcome = Some(outcome);
 
         match event {
             WindowEvent::Resized(physical_size) => {
@@ -532,11 +568,17 @@ impl ApplicationHandler for App {
                 event_loop.exit();
             }
             WindowEvent::KeyboardInput { event, .. } => {
-                if event.state == ElementState::Pressed && !event.repeat {
+                let recipient = window.input.key(
+                    event.physical_key,
+                    event.state,
+                    capture.keyboard,
+                    camera_was_owned,
+                );
+                if recipient == Recipient::Engine
+                    && event.state == ElementState::Pressed
+                    && !event.repeat
+                {
                     match &event.logical_key {
-                        Key::Named(NamedKey::Escape) => {
-                            event_loop.exit();
-                        }
                         Key::Character(s) if s.as_str().eq_ignore_ascii_case("f") => {
                             window.use_nearest_sampler = !window.use_nearest_sampler;
                             window.window.request_redraw();
@@ -545,6 +587,28 @@ impl ApplicationHandler for App {
                     }
                 }
             }
+            WindowEvent::MouseInput { button, state, .. } => {
+                let recipient = window.input.button(button, state, window.game_view_hovered);
+                if button == MouseButton::Right && recipient == Recipient::Engine {
+                    if state.is_pressed() {
+                        match window.imgui.platform.request_pointer_control(
+                            target.instance_id,
+                            WinitPointerRequest::default(),
+                        ) {
+                            Ok(report) => {
+                                window.grab_status = format!(
+                                    "Grab {:?}; attempts {:?}; cleanup {:?}",
+                                    report.granted, report.failures, report.cleanup_error
+                                )
+                            }
+                            Err(error) => window.grab_status = error.to_string(),
+                        }
+                    } else {
+                        window.imgui.platform.cancel_pointer_control();
+                    }
+                }
+            }
+            WindowEvent::Focused(false) => window.input.focus_lost(),
             WindowEvent::RedrawRequested => {
                 if let Err(e) = window.render() {
                     eprintln!("Render error: {e}");
@@ -552,6 +616,17 @@ impl ApplicationHandler for App {
                 window.window.request_redraw();
             }
             _ => {}
+        }
+    }
+
+    fn device_event(&mut self, _: &ActiveEventLoop, _: DeviceId, event: DeviceEvent) {
+        if let Some(window) = self.window.as_mut()
+            && window.imgui.platform.pointer_control_target().is_some()
+            && let DeviceEvent::MouseMotion { delta } = event
+        {
+            // Raw events have no WindowId. The host deliberately chooses its active camera.
+            window.input.raw_motion(delta);
+            window.window.request_redraw();
         }
     }
 

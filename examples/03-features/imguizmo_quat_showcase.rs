@@ -1353,11 +1353,11 @@ impl ApplicationHandler for App {
             window_id,
             event: event.clone(),
         };
-        if let Err(error) = window.imgui.platform.handle_event(
-            &mut window.imgui.context,
-            &window.window,
-            &full_event,
-        ) {
+        if let Err(error) = window
+            .imgui
+            .platform
+            .handle_event(&mut window.imgui.context, &full_event)
+        {
             eprintln!("Winit platform error: {error}");
             event_loop.exit();
             return;

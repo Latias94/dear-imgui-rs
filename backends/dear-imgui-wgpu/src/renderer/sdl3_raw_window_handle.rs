@@ -1,8 +1,7 @@
 //! SDL3 raw-window-handle adapters for WGPU multi-viewport.
 //!
-//! The SDL3 platform backend stores `ImGuiViewport::PlatformHandle` as an SDL_WindowID.
-//! This module converts that ID back into an `SDL_Window*` and exposes window/display
-//! handles compatible with `wgpu::Instance::create_surface`.
+//! The captured SDL3 platform owner validates the exact native registration before lending its
+//! `SDL_Window*`. This module exposes the corresponding window/display handles for surface creation.
 
 #[cfg(all(
     unix,
@@ -59,24 +58,6 @@ impl Sdl3SurfaceTarget {
     /// created from this target are in use.
     pub const unsafe fn new(window: *mut sdl3_sys::video::SDL_Window) -> Self {
         Self { window }
-    }
-
-    /// Create a target from an SDL3 window id.
-    ///
-    /// # Safety
-    ///
-    /// `id` must refer to a live SDL3 window.
-    pub unsafe fn from_window_id(id: sdl3_sys::video::SDL_WindowID) -> Option<Self> {
-        let window = unsafe { sdl3_sys::video::SDL_GetWindowFromID(id) };
-        if window.is_null() {
-            None
-        } else {
-            Some(unsafe { Self::new(window) })
-        }
-    }
-
-    pub fn raw_window(&self) -> *mut sdl3_sys::video::SDL_Window {
-        self.window
     }
 }
 

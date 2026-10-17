@@ -47,6 +47,9 @@ ash-dynamic-rendering = ["dear-imgui-ash/dynamic-rendering"]
 # Compile the private Ash Vulkan validation policy and evidence adapter.
 ash-validation-smoke = []
 
+# Enable dear-app's owning Winit/WGPU route for the texture inspector only.
+texture-inspector-multi-viewport = ["dear-app/multi-viewport"]
+
 # Enable the SDL3 platform and Glow renderer multi-viewport route without
 # activating the unrelated Winit/WGPU/Ash multi-viewport routes.
 sdl3-glow-multi-viewport = [
@@ -325,6 +328,10 @@ name = "wgpu_rtt_gameview"
 path = "04-integration/wgpu_rtt_gameview.rs"
 
 [[bin]]
+name = "wgpu_texture_inspector"
+path = "04-integration/wgpu_texture_inspector.rs"
+
+[[bin]]
 name = "console_log"
 path = "04-integration/console_log.rs"
 
@@ -349,6 +356,10 @@ path = "04-integration/ime_debug.rs"
 [[bin]]
 name = "threaded_snapshot_minimal"
 path = "04-integration/threaded_snapshot_minimal.rs"
+
+[[bin]]
+name = "threaded_snapshot_wgpu"
+path = "04-integration/threaded_snapshot_wgpu.rs"
 
 [[bin]]
 name = "multi_context_switch"

@@ -1,5 +1,7 @@
 //! Per-viewport WGPU surface state and recovery policy.
 
+use std::rc::Rc;
+
 use super::platform_adapter;
 use super::registry::GlobalHandles;
 use super::runtime::WgpuViewportError;
@@ -8,12 +10,10 @@ use dear_imgui_rs::ViewportFlags;
 use dear_imgui_rs::platform_io::Viewport;
 
 pub(super) struct ViewportWgpuData {
-    #[cfg(feature = "wgpu-30")]
-    pub(super) queue: wgpu::Queue,
-    pub(super) surface: Option<wgpu::Surface<'static>>,
+    pub(super) native_target: dear_imgui_rs::NativeWindowTarget,
+    pub(super) surface: Option<Rc<wgpu::Surface<'static>>>,
     pub(super) targets: Option<ViewportRenderTargets>,
     pub(super) size: [u32; 2],
-    pub(super) pending_frame: Option<wgpu::SurfaceTexture>,
     pub(super) pending_reconfigure: bool,
 }
 
@@ -28,23 +28,17 @@ pub(super) struct OwnedAttachment {
     pub(super) view: wgpu::TextureView,
 }
 
-pub(super) fn release_surface_bundle_parts<Frame, Targets, Surface>(
-    pending_frame: &mut Option<Frame>,
+pub(super) fn release_surface_bundle_parts<Targets, Surface>(
     targets: &mut Option<Targets>,
     surface: &mut Option<Surface>,
 ) {
-    drop(pending_frame.take());
     drop(targets.take());
     drop(surface.take());
 }
 
 impl ViewportWgpuData {
     pub(super) fn release_surface_bundle(&mut self) {
-        release_surface_bundle_parts(
-            &mut self.pending_frame,
-            &mut self.targets,
-            &mut self.surface,
-        );
+        release_surface_bundle_parts(&mut self.targets, &mut self.surface);
         self.size = [0, 0];
         self.pending_reconfigure = false;
     }
@@ -52,7 +46,7 @@ impl ViewportWgpuData {
 
 impl Drop for ViewportWgpuData {
     fn drop(&mut self) {
-        // SurfaceTexture discard needs the Surface registration to remain alive.
+        // Acquired work has its own Surface Rc and native lease; retire only the baseline here.
         self.release_surface_bundle();
     }
 }
@@ -228,17 +222,42 @@ pub(super) unsafe fn create_viewport_data(
     viewport: &Viewport,
     globals: &GlobalHandles,
 ) -> Result<ViewportWgpuData, WgpuViewportError> {
-    let (surface, size) = unsafe { platform_adapter::create_surface(&globals.instance, viewport) }?;
+    let (surface, size, native_target) = create_native_surface(globals, viewport, None)?;
     let targets = configure_surface(globals, &surface, size)?;
     Ok(ViewportWgpuData {
-        #[cfg(feature = "wgpu-30")]
-        queue: globals.queue.clone(),
-        surface: Some(surface),
+        native_target,
+        surface: Some(Rc::new(surface)),
         targets,
         size,
-        pending_frame: None,
         pending_reconfigure: false,
     })
+}
+
+fn create_native_surface(
+    globals: &GlobalHandles,
+    viewport: &Viewport,
+    expected: Option<dear_imgui_rs::NativeWindowInstanceId>,
+) -> Result<
+    (
+        wgpu::Surface<'static>,
+        [u32; 2],
+        dear_imgui_rs::NativeWindowTarget,
+    ),
+    WgpuViewportError,
+> {
+    #[cfg(feature = "multi-viewport-winit")]
+    return platform_adapter::create_surface(
+        &globals.instance,
+        &globals.platform,
+        viewport,
+        expected,
+    );
+    #[cfg(all(not(feature = "multi-viewport-winit"), feature = "multi-viewport-sdl3"))]
+    // SAFETY: renderer resources are released before SDL platform-window teardown. The exact
+    // captured owner validates the registration before lending the native pointer.
+    unsafe {
+        platform_adapter::create_surface(&globals.instance, &globals.platform, viewport, expected)
+    }
 }
 
 pub(super) fn reconfigure_surface(
@@ -246,7 +265,16 @@ pub(super) fn reconfigure_surface(
     globals: &GlobalHandles,
     size: [u32; 2],
 ) -> Result<(), WgpuViewportError> {
-    drop(data.pending_frame.take());
+    if data
+        .surface
+        .as_ref()
+        .is_some_and(|surface| Rc::strong_count(surface) > 1)
+    {
+        // Configuring while an acquired frame is retained is invalid. Preserve the current
+        // bundle and refresh authoritative geometry after all pending work releases it.
+        data.pending_reconfigure = true;
+        return Ok(());
+    }
     if size[0] == 0 || size[1] == 0 {
         drop(data.targets.take());
         data.size = size;
@@ -272,13 +300,11 @@ unsafe fn recreate_surface(
     globals: &GlobalHandles,
 ) -> Result<(), WgpuViewportError> {
     data.release_surface_bundle();
-    let (surface, size) = unsafe { platform_adapter::create_surface(&globals.instance, viewport) }?;
+    let (surface, size, native_target) =
+        create_native_surface(globals, viewport, Some(data.native_target.instance_id))?;
     let targets = configure_surface(globals, &surface, size)?;
-    #[cfg(feature = "wgpu-30")]
-    {
-        data.queue = globals.queue.clone();
-    }
-    data.surface = Some(surface);
+    data.surface = Some(Rc::new(surface));
+    data.native_target = native_target;
     data.targets = targets;
     data.size = size;
     Ok(())
@@ -355,7 +381,10 @@ pub(super) unsafe fn handle_non_renderable_surface_event(
 ) -> Result<(), WgpuViewportError> {
     match surface_action(event) {
         SurfaceAction::Reconfigure => {
-            let size = unsafe { platform_adapter::framebuffer_size(viewport) }?;
+            let size = platform_adapter::framebuffer_size(
+                &globals.platform,
+                data.native_target.instance_id,
+            )?;
             reconfigure_surface(data, globals, size)
         }
         SurfaceAction::Recreate => {

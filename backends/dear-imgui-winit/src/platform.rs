@@ -3,9 +3,17 @@
 //! This module contains the core `WinitPlatform` struct and its implementation
 //! for integrating Dear ImGui with winit windowing.
 
+mod event_outcome;
 mod frame;
 mod input_events;
 mod ownership;
+mod pointer_control;
+#[cfg(feature = "multi-viewport")]
+mod window_config;
+mod window_observation;
+mod window_registry;
+#[cfg(feature = "multi-viewport")]
+pub(crate) mod window_render_lease;
 mod window_state;
 
 use dear_imgui_rs::{
@@ -14,10 +22,28 @@ use dear_imgui_rs::{
 };
 use thiserror::Error;
 
+pub use event_outcome::{
+    WinitCaptureIntent, WinitEventForwarding, WinitEventOutcome, WinitEventTarget,
+    WinitPlatformAction,
+};
 pub use frame::HiDpiMode;
 pub use ownership::WinitPlatform;
 #[cfg(feature = "multi-viewport")]
 pub(crate) use ownership::{WINIT_VIEWPORT_FLAGS, WinitPlatformControl};
+pub use pointer_control::{
+    WinitPointerCaptureReport, WinitPointerGrabFailure, WinitPointerGrabMode,
+    WinitPointerGrabPreference, WinitPointerReleaseReason, WinitPointerReleaseReport,
+    WinitPointerRequest,
+};
+#[cfg(feature = "multi-viewport")]
+pub use window_config::{WinitViewportCreateInfo, WinitViewportWindowConfig};
+pub use window_observation::{
+    WinitWindowCapabilities, WinitWindowLifecycleEvent, WinitWindowNativeState,
+    WinitWindowPolicySupport,
+};
+pub use window_registry::WinitWindowSnapshot;
+#[cfg(feature = "multi-viewport")]
+pub use window_render_lease::WinitWindowRenderLease;
 
 /// Failure to attach or operate the Winit platform backend.
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
@@ -26,6 +52,30 @@ pub enum WinitPlatformError {
     /// The Dear ImGui Context rejected the platform attachment.
     #[error(transparent)]
     Attachment(#[from] ContextAttachmentError),
+    /// The process-wide native window registration identity space was exhausted.
+    #[error(transparent)]
+    NativeWindowIdentity(#[from] dear_imgui_rs::NativeWindowIdentityExhausted),
+    /// The application supplied invalid bounded native creation settings.
+    #[error("invalid Winit window configuration `{field}`: {reason}")]
+    InvalidWindowConfiguration {
+        field: &'static str,
+        reason: &'static str,
+    },
+    /// The native window system cannot honor the requested policy.
+    #[error("Winit cannot honor window policy `{policy}` during {operation}")]
+    WindowPolicyUnsupported {
+        policy: &'static str,
+        operation: &'static str,
+    },
+    /// A requested native owner is not registered by this platform.
+    #[error("Winit native owner viewport {viewport_id} is unavailable")]
+    NativeOwnerUnavailable { viewport_id: u32 },
+    #[error("native Winit window registration {instance_id:?} is unavailable")]
+    WindowRegistrationUnavailable {
+        instance_id: dear_imgui_rs::NativeWindowInstanceId,
+    },
+    #[error("engine pointer control is already active; cancel it before requesting another grab")]
+    PointerControlAlreadyOwned,
     /// The Context rejected release of the active platform attachment generation.
     #[error(transparent)]
     PlatformAttachmentRelease(#[from] ContextPlatformAttachmentReleaseError),
@@ -160,7 +210,7 @@ mod tests {
     };
     use winit::event::{Event, WindowEvent};
 
-    use super::input_events::{event_targets_window, rescale_mouse_pos_for_hidpi_change};
+    use super::input_events::rescale_mouse_pos_for_hidpi_change;
     use super::ownership::{
         PlatformOwnerToken, PlatformState, WINIT_BASE_FLAGS, WINIT_RESERVED_FLAGS,
         winit_backend_name_ptr,
@@ -575,21 +625,31 @@ mod tests {
     }
 
     #[test]
-    fn full_window_events_are_filtered_by_window_id_before_dispatch() {
-        let target = winit::window::WindowId::from(41_u64);
-        let foreign = winit::window::WindowId::from(42_u64);
-        let foreign_event = Event::<()>::WindowEvent {
-            window_id: foreign,
+    fn foreign_window_and_raw_device_events_are_not_forwarded() {
+        let _guard = lock_context();
+        let mut context = Context::create();
+        let mut platform = WinitPlatform::new(&mut context).unwrap();
+        let foreign = Event::<()>::WindowEvent {
+            window_id: winit::window::WindowId::dummy(),
             event: WindowEvent::Focused(true),
         };
-        let target_event = Event::<()>::WindowEvent {
-            window_id: target,
-            event: WindowEvent::Focused(true),
+        assert_eq!(
+            platform.handle_event(&mut context, &foreign),
+            Ok(super::WinitEventOutcome::default())
+        );
+        let raw = Event::<()>::DeviceEvent {
+            device_id: winit::event::DeviceId::dummy(),
+            event: winit::event::DeviceEvent::MouseMotion {
+                delta: (17.0, 29.0),
+            },
         };
-
-        assert!(!event_targets_window(target, &foreign_event));
-        assert!(event_targets_window(target, &target_event));
-        assert!(event_targets_window(target, &Event::<()>::AboutToWait));
+        let position = context.io().mouse_pos();
+        assert_eq!(
+            platform.handle_event(&mut context, &raw),
+            Ok(super::WinitEventOutcome::default())
+        );
+        assert_eq!(context.io().mouse_pos(), position);
+        platform.shutdown(&mut context).unwrap();
     }
 
     #[test]

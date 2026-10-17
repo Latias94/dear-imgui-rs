@@ -6,6 +6,20 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+### Breaking
+
+- Viewport `prepare` no longer submits or presents secondary windows. Use `complete_secondary` and `record_main`, or control recording, submission, and presentation separately. See the [migration guide](../../docs/EDITOR_BACKEND_MIGRATION.md). [PR #93](https://github.com/Latias94/dear-imgui-rs/pull/93)
+- `render` and `render_reconciled` return `WgpuDrawRecording`; viewport reports use `observations()` instead of ID lists.
+
+### Added
+
+- Track native targets and external texture binding revisions through recording, submission, presentation requests, and partial failures.
+- Render detached snapshots on a worker thread with `WgpuSnapshotRenderer` and `WgpuSnapshotExecutor`; stale target generations are rejected.
+
+### Fixed
+
+- Preserve managed texture contents for older unsubmitted live and snapshot frames while keeping texture IDs stable. Updates retain one CPU image and upload a new GPU texture.
+
 ## [0.16.0] - 2026-08-14
 
 ### Breaking

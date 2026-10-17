@@ -32,6 +32,13 @@ impl PlatformCallbackOwnership {
         if platform_io.is_null() || io.is_null() || main_viewport.is_null() {
             return Err(Sdl3BackendError::PlatformStateUnavailable);
         }
+        // The native adapter intentionally skips SDL parenting on Cocoa. Do not advertise the
+        // upstream whitelist's broader HasParentViewport claim for a route we cannot honor.
+        if crate::runtime::window_policy::current_driver().as_deref() == Some("cocoa") {
+            unsafe { (*io).BackendFlags &= !sys::ImGuiBackendFlags_HasParentViewport };
+        }
+        let main_instance_id =
+            dear_imgui_rs::NativeWindowInstanceId::allocate(control.binding().id())?;
 
         let original = unsafe { PlatformCallbacks::capture(platform_io) };
         register_runtime(control);
@@ -107,8 +114,15 @@ impl PlatformCallbackOwnership {
         let installed_backend = unsafe { BackendState::capture(io) };
         let installed_main_viewport = unsafe { ViewportPlatformState::capture(main_viewport) };
         let owned_monitors = Cell::new(unsafe { MonitorState::capture(platform_io) });
-        if !installed_main_viewport.user_data.is_null() {
-            control.remember_owned_viewport(main_viewport, installed_main_viewport);
+        // Drivers without native viewport support still publish the main SDL window handle,
+        // even though they do not allocate a multi-viewport PlatformUserData sidecar.
+        if !installed_main_viewport.handle.is_null() {
+            control.remember_owned_viewport_with_instance(
+                main_viewport,
+                installed_main_viewport,
+                main_instance_id,
+            );
+            control.publish_owned_window(main_viewport);
         }
 
         Ok(Self {

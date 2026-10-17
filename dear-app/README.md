@@ -90,6 +90,39 @@ cargo run -p dear-imgui-examples --bin fallible_frame
 
 ## Application Lifecycle
 
+With `RedrawMode::Wait`, ordinary input redraws the live window. Background work and timers can
+request frames through a thread-safe, coalescing handle obtained during `Application::initialized`:
+
+```rust
+use std::time::{Duration, Instant};
+use dear_app::InitializedContext;
+
+fn schedule_work(context: &InitializedContext<'_>) {
+    let wake = context.wake_handle();
+    wake.request_redraw_at(Instant::now() + Duration::from_millis(100)).unwrap();
+    std::thread::spawn(move || {
+        // Publish loaded assets to application-owned synchronized storage first.
+        let _ = wake.request_redraw();
+    });
+}
+```
+
+Requests queue at most one wake event and retain the earliest deadline. Deadlines are one-shot;
+schedule the next deadline after consuming the associated work. Handles survive GPU recreation
+and return `AppWakeClosed` after runtime shutdown.
+
+`Application::device_event` receives unmodified Winit raw input. Set `AppConfig::device_events` to
+`DeviceEvents::WhenFocused` (the default), `Always`, or `Never`. Raw motion has no native window
+target: use application focus and pointer ownership to choose a Scene/Game recipient, then request
+a redraw through `DeviceEventContext::wake_handle()` when that input changes visible state.
+
+Use `Application::record_render` for engine render-to-texture work. The hook runs after UI
+construction on admitted frames and lends `RenderContext::encoder()`. Commands recorded there
+precede Dear ImGui consumers on the renderer queue. The context also exposes the active device,
+queue, GPU generation, admitted frame index, main framebuffer extent and surface format. The
+runtime finishes the encoder and presents the surface; the application retains its scene targets.
+`FrameContext::wake_handle()` can schedule an animation's next one-shot deadline from `run_frame`.
+
 Move from `run_frame` to `Application` only when the program needs context initialization, raw
 window events, GPU resources, device-loss recovery, or deterministic teardown. The frame body can
 move unchanged into `Application::frame`:
@@ -121,7 +154,10 @@ fn main() -> Result<(), RunError> {
 
 - `configure_imgui` runs once before renderer initialization.
 - `initialized` runs once after the first GPU generation is ready.
-- `event` receives events only for the live main window.
+- `event` receives events for every registered native window. `EventContext::outcome()` identifies
+  the exact native instance, actual forwarding, capture intent, and platform action. `window()` is
+  the event's native window; `main_window()` is the stable host window. Closing a secondary does
+  not exit the application.
 - `prepare_frame` mutates Context-owned resources before the next frame opens.
 - `frame` is the only per-frame UI callback.
 - `gpu_lost` runs before old GPU resources are invalidated.
@@ -146,7 +182,7 @@ The feature-free lifecycle example implements every hook and displays real hook 
 cargo run -p dear-imgui-examples --bin application_lifecycle
 ```
 
-Surface loss and resize do not recreate the application or Dear ImGui context. `dear-app` acquires and, when necessary, recovers the main surface before calling any per-frame application hook. Timeout and occlusion skip the frame without advancing application or test state. Only WGPU device loss starts GPU recovery, and that callback communicates with the UI thread through the Winit event loop.
+Surface loss and resize do not recreate the application or Dear ImGui context. In the default single-window mode, `dear-app` acquires and, when necessary, recovers the main surface before calling any per-frame application hook. Timeout and occlusion skip that frame without advancing application or test state. Native multi-viewport mode completes secondary work first, as described below. Only WGPU device loss starts GPU recovery, and that callback communicates with the UI thread through the Winit event loop.
 
 ## Test Engine
 
@@ -171,7 +207,39 @@ let config = AppConfig {
 };
 ```
 
-`DockingConfig` configures docking in the main window; it does not enable Dear ImGui platform multi-viewport. `dear-app` rejects `ConfigFlags::VIEWPORTS_ENABLE` in 0.20 because its single-window recovery model does not own secondary platform windows. Use the Winit or SDL3 owning runtime examples when an application needs native secondary windows.
+`DockingConfig` enables docking independently of native secondary windows. To enable native
+multi-viewport, compile the `multi-viewport` Cargo feature and set `AppConfig::multi_viewport = true`.
+The default remains a single native window. Setting `VIEWPORTS_ENABLE` manually without this opt-in
+is rejected; application callbacks cannot change the runtime's configured viewport mode.
+
+```text
+cargo run -p dear-app --example multi_viewport --features multi-viewport
+```
+
+The runtime composes `WinitPlatform` and `WinitViewportRoute`, using their single native registry
+and secondary-surface owner. `Application::record_render` commands execute before every UI consumer,
+including undocked windows. Secondary work completes before main-surface acquisition, so timeout,
+occlusion, or main-surface recovery does not suppress those windows' updates. In multi-viewport mode,
+the UI and recording hooks therefore run even when main presentation is skipped.
+
+`Application::viewport_frame` receives `ViewportFrameContext` with secondary reports and an optional
+main observation. Clone observations into editor history to preserve native instance IDs, external
+texture revisions, and observed recording/submission/presentation stages. The hook still receives
+earlier secondary evidence if main acquisition or recording fails. These stages do not prove GPU
+completion or visible pixels, and history retains no native windows or GPU objects.
+
+GPU recovery preserves the Context, main native registration, docking/application state, and add-ons.
+It releases the old renderer and every configured Surface before destroying that generation's
+Device. The replacement generation creates a fresh main Surface for the same main native window;
+it never reconfigures an old generation's Surface with a new Device. It retires secondary windows
+and rebuilds the platform runtime before attaching the new GPU route. Undocked UI creates replacement native windows
+with new `NativeWindowInstanceId` values. Logical window names and mutable viewport routing IDs do
+not stand in for those allocation identities. Rebuild engine GPU resources in `gpu_recreated`, just
+as in single-window mode.
+
+GPU callbacks publish generation-specific loss/fault signals before waking the event loop. A
+redraw can therefore recover confirmed device loss even when its user event has not been dispatched.
+Surface rejection alone does not imply device loss; independent validation faults remain errors.
 
 ## GPU Resources
 

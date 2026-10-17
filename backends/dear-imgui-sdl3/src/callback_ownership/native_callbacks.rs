@@ -39,12 +39,40 @@ pub(super) unsafe extern "C" fn sdl3_create_window(viewport: *mut sys::ImGuiView
             let Some(callback) = callbacks.create_window() else {
                 return;
             };
+            let instance_id =
+                match dear_imgui_rs::NativeWindowInstanceId::allocate(control.binding().id()) {
+                    Ok(instance_id) => instance_id,
+                    Err(_) => {
+                        control.record_native_window_identity_exhausted();
+                        control.mark_viewport_failed(viewport);
+                        return;
+                    }
+                };
+            let Some(config) = control.configure_secondary_window(viewport, instance_id) else {
+                control.mark_viewport_failed(viewport);
+                return;
+            };
+            // The bounded configurator receives owned inputs only. Revalidate after application
+            // code returns so reentrant teardown or unsafe sidecar replacement cannot publish a
+            // window under a stale owner or viewport address.
+            if !control.validate_platform_ownership_bound()
+                || control.live_viewport(viewport) != Some(live)
+                || control.capture_viewport_platform_state(live) != Some(initial_state)
+            {
+                control.mark_viewport_failed(viewport);
+                return;
+            }
             let Some(transaction) =
                 NativeTransaction::begin(control, NativePhase::Create, viewport)
             else {
                 control.mark_viewport_failed(viewport);
                 return;
             };
+            if !ffi::dear_imgui_sdl3_native_set_window_transparent(config.transparent) {
+                control.record_native_faults(1 << 13, 1 << 13);
+                control.mark_viewport_failed(viewport);
+                return;
+            }
             callback(viewport);
             let native_faults = transaction.finish();
             let Some(live) = control.live_viewport(viewport) else {
@@ -56,12 +84,34 @@ pub(super) unsafe extern "C" fn sdl3_create_window(viewport: *mut sys::ImGuiView
                 return;
             };
             if !state.user_data.is_null() {
-                control.remember_owned_viewport(viewport, state);
+                control.remember_owned_viewport_with_instance(viewport, state, instance_id);
             }
-            if state.user_data.is_null() || state.handle.is_null() || native_faults != 0 {
+            if state.user_data.is_null()
+                || state.handle.is_null()
+                || native_faults != 0
+                || !control.apply_secondary_window_config(viewport, &config)
+            {
                 control.record_viewport_creation_failed();
+                if native_faults == 0 && !state.user_data.is_null() && !state.handle.is_null() {
+                    control.record_window_configuration_failed();
+                }
+                // Allocation happened, but it was never published. Release the exact sidecar
+                // once now; a later core destroy pass sees empty fields and cannot destroy it again.
+                if !state.user_data.is_null() {
+                    if let (Some(expected), Some(destroy)) = (
+                        control.take_owned_viewport(viewport),
+                        callbacks.destroy_window(),
+                    ) {
+                        if control.capture_viewport_platform_state(viewport) == Some(expected) {
+                            destroy(viewport);
+                            control.clear_viewport_platform_state(viewport);
+                        }
+                    }
+                }
                 control.mark_viewport_failed(viewport);
+                return;
             }
+            control.publish_owned_window(viewport);
         },
     );
 }
@@ -86,6 +136,7 @@ pub(super) unsafe extern "C" fn sdl3_destroy_window(viewport: *mut sys::ImGuiVie
             let Some(callback) = callbacks.destroy_window() else {
                 return false;
             };
+            let native_allocation = control.native_allocation_for_viewport(viewport);
             let Some(expected) = control.take_owned_viewport(viewport) else {
                 record_viewport_replacements(control, None, actual);
                 control.defer_platform_viewport_restore(viewport, actual);
@@ -94,7 +145,9 @@ pub(super) unsafe extern "C" fn sdl3_destroy_window(viewport: *mut sys::ImGuiVie
             };
 
             if viewport_platform_state_eq(actual, expected) {
-                callback(viewport);
+                if !control.defer_native_window_destruction(viewport, native_allocation.as_ref()) {
+                    callback(viewport);
+                }
                 control.clear_viewport_platform_state(viewport);
                 return true;
             }
@@ -104,7 +157,9 @@ pub(super) unsafe extern "C" fn sdl3_destroy_window(viewport: *mut sys::ImGuiVie
                 control.record_platform_state_replaced("Viewport liveness");
                 return false;
             }
-            callback(viewport);
+            if !control.defer_native_window_destruction(viewport, native_allocation.as_ref()) {
+                callback(viewport);
+            }
             control.clear_viewport_platform_state(viewport);
             control.defer_platform_viewport_restore(viewport, actual);
             true
@@ -130,9 +185,15 @@ pub(super) unsafe extern "C" fn sdl3_update_window(viewport: *mut sys::ImGuiView
         PlatformCallbackSlot::UpdateWindow,
         viewport,
         (),
-        |_, callbacks| unsafe {
+        |control, callbacks| unsafe {
+            if control.native_window_owner_change_blocked(viewport) {
+                return;
+            }
             if let Some(callback) = callbacks.update_window() {
                 callback(viewport);
+                if !control.refresh_native_window_owner(viewport) {
+                    control.record_native_window_owner_unavailable();
+                }
             }
         },
     );

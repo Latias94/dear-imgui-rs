@@ -113,7 +113,10 @@ impl WinitPlatform {
 
         // If backend supports setting mouse pos and ImGui requests it, honor it. Winit cannot set
         // a global desktop pointer, so a live multi-viewport runtime intentionally skips this.
-        if imgui_ctx.io().want_set_mouse_pos() && !runtime_owns_desktop_cursor {
+        if imgui_ctx.io().want_set_mouse_pos()
+            && !runtime_owns_desktop_cursor
+            && !self.control.pointer_controls_window(window.id())
+        {
             let pos = imgui_ctx.io().mouse_pos();
             let logical_pos = self
                 .scale_pos_for_winit(window, LogicalPosition::new(pos[0] as f64, pos[1] as f64));

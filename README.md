@@ -490,6 +490,21 @@ Native extension crates have adjacent low-level `*-sys` companions, and release
 tooling lives under `tools/`; see the workspace manifest for the complete member
 list.
 
+## Optional system clipboard
+
+Winit applications can install a desktop text clipboard through the existing `ClipboardBackend`
+contract. Enable `dear-imgui-rs/system-clipboard`, initialize `SystemClipboard::new()?`, and call
+`context.set_clipboard_backend(clipboard)` after platform initialization. SDL already installs
+native clipboard callbacks; the same adapter can explicitly replace them when desired.
+
+This optional feature adds no default dependency or service initialization. It supports Windows,
+macOS and Linux and returns initialization errors instead of silently falling back to an internal
+clipboard. `system-clipboard-wayland` additionally enables arboard's Wayland data-control support;
+the compositor must expose that protocol. The text-only adapter disables arboard's default image
+dependencies. See [arboard's platform notes](https://github.com/1Password/arboard#linux) for ownership
+and compositor limitations. Direct `get_text`/`set_text` methods return operation errors; the
+`ClipboardBackend` bridge follows its existing optional-read and infallible-write contract.
+
 ## WebAssembly (WASM) support
 
 The supported Rust target is exactly `wasm32-unknown-unknown`. Every dependency path to the core crate must explicitly enable `wasm`; the target alone no longer selects browser bindings:

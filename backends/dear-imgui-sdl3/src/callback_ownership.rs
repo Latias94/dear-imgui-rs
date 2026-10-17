@@ -864,6 +864,12 @@ pub(super) struct ViewportPlatformState {
 }
 
 impl ViewportPlatformState {
+    pub(super) fn sdl_window_id(self) -> Option<u32> {
+        u32::try_from(self.handle as usize)
+            .ok()
+            .filter(|id| *id != 0)
+    }
+
     pub(super) unsafe fn capture(viewport: *const sys::ImGuiViewport) -> Self {
         let viewport = unsafe { &*viewport };
         Self {

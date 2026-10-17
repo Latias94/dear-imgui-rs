@@ -1130,6 +1130,86 @@ fn unsupported_viewport_policy_fault_requests_close() {
     assert_eq!(runtime.poll_fault(), Err(error));
 }
 
+#[test]
+fn unresolved_parent_viewport_hint_does_not_require_a_native_owner() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let mut runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
+    let mut viewport = dear_imgui_rs::sys::ImGuiViewport {
+        ID: 0x1234,
+        ParentViewportId: 0x12345678,
+        ..Default::default()
+    };
+    assert!(unsafe { dear_imgui_rs::sys::igFindViewportByID(viewport.ParentViewportId) }.is_null());
+
+    let owner = super::native_owner::resolve_owner(runtime.control(), &mut viewport)
+        .expect("an unresolved Dear ImGui parent hint must allow an independent native window");
+
+    assert!(owner.is_none());
+    assert_eq!(viewport.ParentViewportId, 0x12345678);
+    assert!(!viewport.PlatformRequestClose);
+    assert!(runtime.poll_fault().is_ok());
+    runtime.shutdown(&mut context).unwrap();
+}
+
+#[cfg(not(target_os = "windows"))]
+#[test]
+fn unsupported_native_owner_keeps_all_parent_hints_advisory() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let mut runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
+    assert!(
+        !context
+            .io()
+            .backend_flags()
+            .contains(BackendFlags::HAS_PARENT_VIEWPORT)
+    );
+    let main_id = context.main_viewport().id().raw();
+    let mut viewport = dear_imgui_rs::sys::ImGuiViewport {
+        ID: 0x1234,
+        ..Default::default()
+    };
+    for parent_id in [0, main_id, 0x5678, 0x12345678, viewport.ID] {
+        viewport.ParentViewportId = parent_id;
+        assert!(
+            super::native_owner::resolve_owner(runtime.control(), &mut viewport)
+                .expect("unsupported native ownership must not reject core parent metadata")
+                .is_none()
+        );
+        assert_eq!(viewport.ParentViewportId, parent_id);
+        assert!(!viewport.PlatformRequestClose);
+    }
+    assert!(runtime.poll_fault().is_ok());
+    runtime.shutdown(&mut context).unwrap();
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn native_owner_hints_still_reject_self_and_live_unregistered_parents() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let mut runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
+    let main_id = context.main_viewport().id().raw();
+    let mut viewport = dear_imgui_rs::sys::ImGuiViewport {
+        ID: 0x1234,
+        ParentViewportId: main_id,
+        ..Default::default()
+    };
+    assert!(matches!(
+        super::native_owner::resolve_owner(runtime.control(), &mut viewport),
+        Err(WinitPlatformError::NativeOwnerUnavailable { viewport_id }) if viewport_id == main_id
+    ));
+    viewport.ParentViewportId = viewport.ID;
+    assert!(matches!(
+        super::native_owner::resolve_owner(runtime.control(), &mut viewport),
+        Err(WinitPlatformError::InvalidWindowConfiguration {
+            field: "ParentViewportId",
+            ..
+        })
+    ));
+    runtime.shutdown(&mut context).unwrap();
+}
+
 fn create_headless_secondary_viewport(
     context: &mut Context,
 ) -> *mut dear_imgui_rs::sys::ImGuiViewport {
@@ -1185,6 +1265,383 @@ fn create_headless_secondary_viewport(
             .find(|viewport| *viewport != main_viewport)
             .expect("the off-screen window should own a secondary viewport")
     }
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+#[ignore = "requires a native Windows desktop; exercises configured secondary creation and ownership"]
+fn native_secondary_configuration_owner_and_lifecycle() {
+    use winit::application::ApplicationHandler;
+    use winit::event_loop::EventLoop;
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+
+    struct Fixture {
+        completed: bool,
+    }
+    impl ApplicationHandler for Fixture {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            if self.completed {
+                return;
+            }
+            run_native_secondary_fixture(event_loop);
+            self.completed = true;
+            event_loop.exit();
+        }
+        fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+    }
+    let _guard = lock_context();
+    let event_loop = EventLoop::builder().with_any_thread(true).build().unwrap();
+    let mut fixture = Fixture { completed: false };
+    event_loop.run_app(&mut fixture).unwrap();
+    assert!(fixture.completed);
+}
+
+#[cfg(target_os = "windows")]
+fn run_native_secondary_fixture(event_loop: &ActiveEventLoop) {
+    use std::sync::Arc;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GW_OWNER, GetWindow};
+    use winit::dpi::PhysicalSize;
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use winit::window::{Icon, Theme, Window};
+
+    let mut context = Context::create();
+    // Current Dear ImGui defaults to independent top-level viewports. This fixture explicitly
+    // exercises native ownership, so request the main viewport as the default owner before the
+    // frame creates its secondary viewport.
+    context
+        .io_mut()
+        .set_config_viewports_no_default_parent(false);
+    let viewport = create_headless_secondary_viewport(&mut context);
+    let main_window = Arc::new(
+        event_loop
+            .create_window(Window::default_attributes().with_visible(false))
+            .unwrap(),
+    );
+    let mut platform = crate::WinitPlatform::new(&mut context).unwrap();
+    platform
+        .attach_window(
+            Arc::clone(&main_window),
+            crate::HiDpiMode::Default,
+            &mut context,
+        )
+        .unwrap();
+    let main_target = platform
+        .window_snapshot(main_window.id())
+        .unwrap()
+        .unwrap()
+        .target;
+    assert_eq!(
+        unsafe { (*viewport).ParentViewportId },
+        main_target.viewport_id.raw()
+    );
+    assert_eq!(platform.drain_window_lifecycle_events().len(), 1);
+    platform
+        .set_viewport_window_config(crate::WinitViewportWindowConfig {
+            icon: Some(Icon::from_rgba(vec![255, 0, 0, 255], 1, 1).unwrap()),
+            min_inner_size: Some(PhysicalSize::new(200, 150)),
+            max_inner_size: Some(PhysicalSize::new(400, 300)),
+            theme: Some(Theme::Dark),
+            resizable: false,
+            ..Default::default()
+        })
+        .unwrap();
+    let configurations = Rc::new(Cell::new(0));
+    let count = Rc::clone(&configurations);
+    platform
+        .set_viewport_window_configurator(move |info, _| {
+            assert_eq!(info.parent.unwrap().instance_id, main_target.instance_id);
+            count.set(count.get() + 1);
+            Ok(())
+        })
+        .unwrap();
+    platform.enable_viewports(&mut context).unwrap();
+    assert!(platform.drain_window_lifecycle_events().is_empty());
+    assert!(
+        context
+            .io()
+            .backend_flags()
+            .contains(BackendFlags::HAS_PARENT_VIEWPORT)
+    );
+    let adapter = platform.viewport_renderer_adapter(&context).unwrap();
+    let (output, faults) = platform
+        .with_event_loop(event_loop, |_| unsafe { winit_create_window(viewport) })
+        .into_parts();
+    assert_eq!(output, Some(()));
+    assert!(faults.is_empty(), "{faults:?}");
+    let created = platform.drain_window_lifecycle_events();
+    let [crate::WinitWindowLifecycleEvent::Created(frozen)] = created.as_slice() else {
+        panic!("one successful registration must emit one Created event: {created:?}");
+    };
+    let instance = frozen.target.instance_id;
+    let main_modifiers = platform
+        .handle_window_event(
+            &mut context,
+            main_window.id(),
+            &WindowEvent::ModifiersChanged(Default::default()),
+        )
+        .unwrap();
+    let secondary_modifiers = platform
+        .handle_window_event(
+            &mut context,
+            frozen.window_id,
+            &WindowEvent::ModifiersChanged(Default::default()),
+        )
+        .unwrap();
+    assert!(main_modifiers.forwarded.keyboard && secondary_modifiers.forwarded.keyboard);
+    assert_eq!(main_modifiers.capture, secondary_modifiers.capture);
+    assert_eq!(
+        secondary_modifiers.target.unwrap().native.instance_id,
+        instance
+    );
+    let foreign = platform
+        .handle_window_event(
+            &mut context,
+            WindowId::dummy(),
+            &WindowEvent::CloseRequested,
+        )
+        .unwrap();
+    assert!(!foreign.is_owned());
+    assert_eq!(foreign.platform_action, crate::WinitPlatformAction::None);
+    let text = platform
+        .handle_window_event(
+            &mut context,
+            frozen.window_id,
+            &WindowEvent::Ime(winit::event::Ime::Commit("editor".to_owned())),
+        )
+        .unwrap();
+    assert!(text.forwarded.text && !text.forwarded.keyboard);
+    let closed = platform
+        .handle_window_event(&mut context, frozen.window_id, &WindowEvent::CloseRequested)
+        .unwrap();
+    assert_eq!(
+        closed.platform_action,
+        crate::WinitPlatformAction::ViewportCloseRequested
+    );
+    assert!(closed.needs_frame && !closed.forwarded.pointer);
+    assert!(unsafe { (*viewport).PlatformRequestClose });
+    unsafe { (*viewport).PlatformRequestClose = false };
+    let grab = crate::WinitPointerRequest {
+        grab: crate::WinitPointerGrabPreference::Confined,
+        ..Default::default()
+    };
+    let capture = platform.request_pointer_control(instance, grab).unwrap();
+    assert!(
+        capture.granted.is_some(),
+        "native capture failed: {capture:?}"
+    );
+    assert!(platform.control().pointer_controls_window(frozen.window_id));
+    let focus_lost = platform
+        .handle_window_event(&mut context, frozen.window_id, &WindowEvent::Focused(false))
+        .unwrap();
+    assert_eq!(
+        focus_lost.pointer_release.unwrap().reason,
+        crate::WinitPointerReleaseReason::FocusLost
+    );
+    assert!(platform.pointer_control_target().is_none());
+    assert_eq!(platform.drain_pointer_release_events().len(), 1);
+    assert!(
+        platform
+            .request_pointer_control(instance, grab)
+            .unwrap()
+            .granted
+            .is_some()
+    );
+    let cancelled = platform.cancel_pointer_control().unwrap();
+    assert_eq!(
+        cancelled.reason,
+        crate::WinitPointerReleaseReason::ExplicitCancel
+    );
+    assert!(platform.pointer_control_target().is_none());
+    platform.drain_pointer_release_events();
+    assert_eq!(frozen.native_state.visible, Some(false));
+    assert_eq!(frozen.native_state.resizable, Some(false));
+    assert_eq!(frozen.native_state.theme, Some(Theme::Dark));
+    assert_eq!(frozen.native_state.transparent, None);
+    assert!(frozen.physical_client_size.width >= 200 && frozen.physical_client_size.width <= 400);
+    assert!(frozen.physical_client_size.height >= 150 && frozen.physical_client_size.height <= 300);
+    let main_handle = match main_window.window_handle().unwrap().as_raw() {
+        RawWindowHandle::Win32(handle) => handle.hwnd.get(),
+        _ => unreachable!(),
+    };
+    adapter
+        .with_window(instance, |window| {
+            let RawWindowHandle::Win32(handle) = window.window_handle().unwrap().as_raw() else {
+                unreachable!()
+            };
+            assert_eq!(
+                unsafe { GetWindow(handle.hwnd.get() as _, GW_OWNER) } as isize,
+                main_handle
+            );
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(adapter.window_owner_leases(instance).unwrap().len(), 1);
+
+    assert!(
+        platform
+            .request_pointer_control(instance, grab)
+            .unwrap()
+            .granted
+            .is_some()
+    );
+    let pin = adapter
+        .acquire_native_window_lease(instance)
+        .unwrap()
+        .unwrap();
+    assert!(!pin.is_retired());
+    assert_eq!(pin.target().instance_id, instance);
+    unsafe { (*viewport).ParentViewportId = 0 };
+    let data = unsafe {
+        &*((*viewport)
+            .PlatformUserData
+            .cast::<super::viewport_data::ViewportData>())
+    };
+    assert!(matches!(
+        super::native_owner::sync_owner(
+            super::registry::runtime_for_context(context.as_raw())
+                .unwrap()
+                .as_ref(),
+            data,
+            viewport,
+        ),
+        Err(WinitPlatformError::WindowOperation {
+            operation: "set_native_owner",
+            ..
+        })
+    ));
+    unsafe { (*viewport).ParentViewportId = main_target.viewport_id.raw() };
+    drop(pin);
+
+    let (_, faults) = platform
+        .with_event_loop(event_loop, |_| unsafe { winit_create_window(viewport) })
+        .into_parts();
+    assert!(faults.is_empty());
+    assert_eq!(configurations.get(), 1);
+    assert!(platform.drain_window_lifecycle_events().is_empty());
+    let original_id = unsafe { (*viewport).ID };
+    unsafe { (*viewport).ID = original_id.wrapping_add(1) };
+    let remapped = adapter
+        .window_snapshot_for_instance(instance)
+        .unwrap()
+        .unwrap();
+    assert_ne!(remapped.target.viewport_id, frozen.target.viewport_id);
+    assert_eq!(remapped.target.instance_id, instance);
+    let raw_platform_io = unsafe { dear_imgui_rs::sys::igGetPlatformIO_Nil() };
+    let original_visible_count = unsafe { (*raw_platform_io).Viewports.Size };
+    unsafe { (*raw_platform_io).Viewports.Size = 1 };
+    assert!(
+        adapter
+            .window_snapshot_for_instance(instance)
+            .unwrap()
+            .is_some()
+    );
+    unsafe { (*raw_platform_io).Viewports.Size = original_visible_count };
+    assert!(platform.drain_window_lifecycle_events().is_empty());
+
+    unsafe {
+        (*viewport).ParentViewportId = 0;
+        super::callbacks::winit_update_window(viewport);
+    }
+    assert!(adapter.window_owner_leases(instance).unwrap().is_empty());
+    adapter
+        .with_window(instance, |window| {
+            let RawWindowHandle::Win32(handle) = window.window_handle().unwrap().as_raw() else {
+                unreachable!()
+            };
+            assert!(unsafe { GetWindow(handle.hwnd.get() as _, GW_OWNER) }.is_null());
+        })
+        .unwrap()
+        .unwrap();
+    unsafe {
+        (*viewport).ParentViewportId = main_target.viewport_id.raw();
+        super::callbacks::winit_update_window(viewport);
+    }
+    assert_eq!(adapter.window_owner_leases(instance).unwrap().len(), 1);
+    let pin = adapter
+        .acquire_native_window_lease(instance)
+        .unwrap()
+        .unwrap();
+    let held_hwnd = match pin.window().window_handle().unwrap().as_raw() {
+        RawWindowHandle::Win32(handle) => handle.hwnd.get() as windows_sys::Win32::Foundation::HWND,
+        _ => unreachable!(),
+    };
+    let held_window = Arc::downgrade(&pin.window_arc());
+    unsafe {
+        winit_destroy_window(viewport);
+        winit_destroy_window(viewport);
+    }
+    assert!(platform.pointer_control_target().is_none());
+    assert!(
+        matches!(platform.drain_pointer_release_events().as_slice(), [report] if report.reason == crate::WinitPointerReleaseReason::Retired)
+    );
+    assert!(pin.is_retired());
+    assert_ne!(
+        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsWindow(held_hwnd) },
+        0
+    );
+    drop(pin);
+    // Winit posts native destruction to its event loop even on the owning thread. The last
+    // allocation owner must disappear now; HWND destruction occurs when that message is handled.
+    assert!(held_window.upgrade().is_none());
+    assert_eq!(
+        platform.drain_window_lifecycle_events(),
+        vec![crate::WinitWindowLifecycleEvent::Retired(remapped.target)]
+    );
+    assert!(
+        adapter
+            .window_snapshot_for_instance(instance)
+            .unwrap()
+            .is_none()
+    );
+    unsafe { (*viewport).ID = original_id };
+    platform.disable_viewports(&mut context).unwrap();
+    assert!(platform.drain_window_lifecycle_events().is_empty());
+
+    platform.enable_viewports(&mut context).unwrap();
+    platform
+        .set_viewport_window_configurator(|_, _| {
+            Err(WinitPlatformError::InvalidWindowConfiguration {
+                field: "injected",
+                reason: "reject before allocating a native window",
+            })
+        })
+        .unwrap();
+    let (_, faults) = platform
+        .with_event_loop(event_loop, |_| unsafe { winit_create_window(viewport) })
+        .into_parts();
+    assert!(matches!(
+        faults.as_slice(),
+        [WinitPlatformError::InvalidWindowConfiguration {
+            field: "injected",
+            ..
+        }]
+    ));
+    assert!(unsafe {
+        (*viewport).PlatformUserData.is_null() && (*viewport).PlatformHandle.is_null()
+    });
+    assert!(platform.drain_window_lifecycle_events().is_empty());
+    platform
+        .set_viewport_window_configurator(|_, _| panic!("injected configurator panic"))
+        .unwrap();
+    let (_, faults) = platform
+        .with_event_loop(event_loop, |_| unsafe { winit_create_window(viewport) })
+        .into_parts();
+    assert!(matches!(
+        faults.as_slice(),
+        [WinitPlatformError::CallbackPanicked {
+            callback: "Platform_CreateWindow"
+        }]
+    ));
+    assert!(unsafe {
+        (*viewport).PlatformUserData.is_null() && (*viewport).PlatformHandle.is_null()
+    });
+    assert!(platform.drain_window_lifecycle_events().is_empty());
+    let _ = platform.shutdown(&mut context);
+    let retired = platform.drain_window_lifecycle_events();
+    assert_eq!(
+        retired,
+        vec![crate::WinitWindowLifecycleEvent::Retired(main_target)]
+    );
 }
 
 #[test]
@@ -1487,6 +1944,105 @@ fn public_platform_owner_drives_the_installed_viewport_runtime() {
     platform.disable_viewports(&mut context).unwrap();
     assert!(!platform.viewports_enabled());
     platform.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn platform_shutdown_releases_the_runtime_slot_after_ordinary_or_terminal_callbacks() {
+    let _guard = lock_context();
+    for faulted in [false, true] {
+        let mut context = Context::create();
+        let mut platform = crate::WinitPlatform::new(&mut context).unwrap();
+        let runtime = WinitPlatformRuntime::new_for_test_with_platform(&mut context, &platform)
+            .expect("test runtime should attach to the platform owner");
+        let adapter = platform.viewport_renderer_adapter(&context).unwrap();
+        let fault = WinitPlatformError::CallbackPanicked {
+            callback: "injected before platform shutdown",
+        };
+        if faulted {
+            runtime.control().record_terminal_fault(fault.clone());
+        }
+        let expected = if faulted { Err(fault) } else { Ok(()) };
+        assert_eq!(platform.shutdown(&mut context), expected);
+        assert!(!platform.viewports_enabled());
+        assert_eq!(
+            adapter.window_snapshots(),
+            Err(WinitPlatformError::RuntimeDetached)
+        );
+        assert_eq!(platform.shutdown(&mut context), Ok(()));
+        drop(runtime);
+    }
+}
+
+#[test]
+fn window_registry_reads_preserve_callback_faults_and_reject_retired_adapters() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let mut platform = crate::WinitPlatform::new(&mut context).unwrap();
+    let runtime = WinitPlatformRuntime::new_for_test_with_platform(&mut context, &platform)
+        .expect("test runtime should attach to the platform owner");
+    let adapter = platform.viewport_renderer_adapter(&context).unwrap();
+    let retained_adapter = adapter.clone();
+    let unrelated = dear_imgui_rs::NativeWindowInstanceId::allocate(context.id()).unwrap();
+    let fault = WinitPlatformError::CallbackPanicked {
+        callback: "queued before registry reads",
+    };
+    runtime.control().record_fault(fault.clone());
+
+    assert!(platform.window_snapshots().unwrap().is_empty());
+    assert!(adapter.window_snapshots().unwrap().is_empty());
+    assert_eq!(adapter.window_snapshot(WindowId::dummy()), Ok(None));
+    assert_eq!(adapter.window_snapshot_for_instance(unrelated), Ok(None));
+    assert_eq!(adapter.with_window(unrelated, |_| ()), Ok(None));
+    assert!(adapter.window_lease(unrelated).unwrap().is_none());
+    assert_eq!(runtime.poll_fault(), Err(fault));
+
+    platform.disable_viewports(&mut context).unwrap();
+    drop(runtime);
+    let replacement = WinitPlatformRuntime::new_for_test_with_platform(&mut context, &platform)
+        .expect("the same base owner may enable a new native viewport generation");
+    assert!(platform.window_snapshots().unwrap().is_empty());
+    assert_eq!(
+        retained_adapter.window_snapshots(),
+        Err(WinitPlatformError::RuntimeDetached)
+    );
+    assert_eq!(
+        retained_adapter.with_window(unrelated, |_| ()),
+        Err(WinitPlatformError::RuntimeDetached)
+    );
+    assert!(matches!(
+        retained_adapter.window_lease(unrelated),
+        Err(WinitPlatformError::RuntimeDetached)
+    ));
+    platform.disable_viewports(&mut context).unwrap();
+    platform.shutdown(&mut context).unwrap();
+    drop(replacement);
+}
+
+#[test]
+fn window_registry_rejects_foreign_native_viewport_publication_without_consuming_faults() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let mut platform = crate::WinitPlatform::new(&mut context).unwrap();
+    let runtime = WinitPlatformRuntime::new_for_test_with_platform(&mut context, &platform)
+        .expect("test runtime should attach to the platform owner");
+    let adapter = platform.viewport_renderer_adapter(&context).unwrap();
+    let fault = WinitPlatformError::CallbackPanicked {
+        callback: "queued before foreign native publication",
+    };
+    runtime.control().record_fault(fault.clone());
+    let viewport = unsafe { dear_imgui_rs::sys::igGetMainViewport() };
+    let expected = WinitPlatformError::ViewportOwnershipLost {
+        viewport_id: unsafe { (*viewport).ID },
+        field: "PlatformHandle",
+    };
+    unsafe { (*viewport).PlatformHandle = std::ptr::dangling_mut::<u8>().cast() };
+    assert_eq!(platform.window_snapshots(), Err(expected.clone()));
+    assert_eq!(adapter.window_snapshots(), Err(expected));
+    unsafe { (*viewport).PlatformHandle = std::ptr::null_mut() };
+    assert_eq!(runtime.poll_fault(), Err(fault));
+    platform.disable_viewports(&mut context).unwrap();
+    platform.shutdown(&mut context).unwrap();
+    drop(runtime);
 }
 
 #[test]
@@ -1912,7 +2468,7 @@ fn runtime_ignores_foreign_callbacks_it_does_not_claim_after_they_change() {
 
     assert_eq!(
         runtime.route_secondary_event(&mut context, &Event::<()>::AboutToWait),
-        Ok(false)
+        Ok(crate::WinitEventForwarding::default())
     );
     assert_eq!(runtime.poll_fault(), Ok(()));
     assert_eq!(runtime.shutdown(&mut context), Ok(()));
@@ -1979,6 +2535,7 @@ fn platform_owner_rejects_reserved_foreign_flags_transactionally() {
     for flag in [
         BackendFlags::PLATFORM_HAS_VIEWPORTS,
         BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT,
+        BackendFlags::HAS_PARENT_VIEWPORT,
     ]
     .into_iter()
     .filter(|flag| crate::platform::WINIT_VIEWPORT_FLAGS.contains(*flag))

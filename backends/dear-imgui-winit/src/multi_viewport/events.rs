@@ -1,9 +1,15 @@
+use crate::WinitEventForwarding;
 use dear_imgui_rs::Context;
-use winit::event::{Event, WindowEvent};
+#[cfg(test)]
+use winit::event::Event;
+use winit::event::WindowEvent;
 
 use super::registry::with_viewport_data_for_window;
-use super::runtime::{RuntimeControl, RuntimeState};
+use super::runtime::RuntimeControl;
+#[cfg(test)]
+use super::runtime::RuntimeState;
 
+#[cfg(test)]
 fn validate_runtime(
     control: &RuntimeControl,
     context: &Context,
@@ -47,11 +53,11 @@ pub(crate) fn route_secondary_window_event(
     context: &mut Context,
     window_id: winit::window::WindowId,
     event: &WindowEvent,
-) -> Result<bool, super::WinitPlatformError> {
+) -> Result<WinitEventForwarding, super::WinitPlatformError> {
     control.ensure_context(context)?;
     let binding = context.binding();
     let mut request_main_redraw = false;
-    let consumed = binding.with_bound_context(|| {
+    let forwarded = binding.with_bound_context(|| {
         with_viewport_data_for_window(control, window_id, |viewport, data| {
             let window = data.window();
             let has_client_geometry_reconciliation = data.has_client_geometry_reconciliation();
@@ -108,8 +114,7 @@ pub(crate) fn route_secondary_window_event(
                     for (key, pressed) in crate::events::modifier_key_events(modifiers) {
                         control.note_key(window_id, key, pressed);
                     }
-                    crate::events::handle_modifiers_changed(modifiers, context);
-                    context.io().want_capture_keyboard()
+                    crate::events::handle_modifiers_changed(modifiers, context)
                 }
                 WindowEvent::MouseWheel { delta, phase, .. } => crate::events::handle_mouse_wheel(
                     *delta,
@@ -128,7 +133,7 @@ pub(crate) fn route_secondary_window_event(
                     let Some(position) =
                         super::client_physical_to_screen_pos(window, [position.x, position.y])
                     else {
-                        return context.io().want_capture_mouse();
+                        return WinitEventForwarding::default();
                     };
                     crate::events::handle_cursor_moved(
                         [position[0] as f64, position[1] as f64],
@@ -137,21 +142,19 @@ pub(crate) fn route_secondary_window_event(
                 }
                 WindowEvent::CursorLeft { .. } => {
                     control.note_cursor_left();
-                    false
+                    WinitEventForwarding::default()
                 }
                 WindowEvent::CursorEntered { .. } => {
                     control.note_cursor_available();
-                    false
+                    WinitEventForwarding::default()
                 }
-                WindowEvent::Focused(focused) => {
-                    control.note_window_focus(window_id, *focused, context);
-                    false
-                }
-                WindowEvent::Ime(ime) => {
-                    crate::events::handle_ime_event(ime, context);
-                    context.io().want_capture_keyboard()
-                }
+                WindowEvent::Focused(focused) => WinitEventForwarding {
+                    focus: control.note_window_focus(window_id, *focused, context),
+                    ..Default::default()
+                },
+                WindowEvent::Ime(ime) => crate::events::handle_ime_event(ime, context),
                 WindowEvent::Touch(touch) => {
+                    let mut forwarded = WinitEventForwarding::default();
                     let position = super::client_physical_to_screen_pos(
                         window,
                         [touch.location.x, touch.location.y],
@@ -163,64 +166,52 @@ pub(crate) fn route_secondary_window_event(
                         ))
                         && let Some(action) = control.note_touch(window_id, touch.id, touch.phase)
                     {
-                        let _ = crate::events::handle_touch_event_at(
+                        forwarded = crate::events::handle_touch_event_at(
                             action,
                             position,
                             Some(dear_imgui_rs::Id::from(unsafe { (*viewport).ID })),
                             context,
                         );
                     }
-                    context.io().want_capture_mouse()
+                    forwarded
                 }
-                _ => false,
+                _ => WinitEventForwarding::default(),
             }
         })
-        .unwrap_or(false)
+        .unwrap_or_default()
     });
     if request_main_redraw {
         control.request_main_window_redraw();
     }
-    Ok(consumed)
+    Ok(forwarded)
 }
 
+#[cfg(test)]
 pub(super) fn route_secondary_event<T>(
     control: &RuntimeControl,
     context: &mut Context,
     event: &Event<T>,
-) -> Result<bool, super::WinitPlatformError> {
+) -> Result<WinitEventForwarding, super::WinitPlatformError> {
     match event {
         Event::WindowEvent { window_id, event } => {
             route_secondary_window_event(control, context, *window_id, event)
         }
         _ => {
             control.ensure_context(context)?;
-            Ok(false)
+            Ok(WinitEventForwarding::default())
         }
     }
 }
 
+#[cfg(test)]
 pub(crate) fn handle_event<T>(
     control: &RuntimeControl,
     platform: &mut crate::WinitPlatform,
     context: &mut Context,
     event: &Event<T>,
-) -> Result<bool, super::WinitPlatformError> {
+) -> Result<crate::WinitEventOutcome, super::WinitPlatformError> {
     validate_runtime(control, context)?;
-    let mut consumed = false;
-    let Some(main_window) = control.main_window() else {
-        return Ok(false);
-    };
-    match event {
-        Event::WindowEvent { window_id, .. } if *window_id == main_window.id() => {
-            consumed = platform.handle_main_event(context, &main_window, event)?;
-        }
-        Event::WindowEvent { .. } => {}
-        _ => consumed = platform.handle_main_event(context, &main_window, event)?,
-    }
-
-    let consumed = route_secondary_event(control, context, event)? || consumed;
-    control.poll_fault()?;
-    Ok(consumed)
+    platform.handle_event(context, event)
 }
 
 #[cfg(test)]

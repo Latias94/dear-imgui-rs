@@ -26,6 +26,8 @@ struct ImguiState {
     total_frame_time: f32,
     renderer_shutdown_complete: bool,
     platform_shutdown_complete: bool,
+    hovered_asset: Option<PathBuf>,
+    last_asset_drop: Option<(PathBuf, NativeWindowTarget)>,
     // Context must outlive every attachment, including fallback field drops after a failed shutdown.
     context: Context,
 }
@@ -166,6 +168,8 @@ impl AppWindow {
             total_frame_time: 0.0,
             renderer_shutdown_complete: false,
             platform_shutdown_complete: false,
+            hovered_asset: None,
+            last_asset_drop: None,
             context,
         };
 
@@ -262,6 +266,16 @@ impl AppWindow {
             .build(|| {
                 ui.text("Welcome to Dear ImGui Rust bindings!");
                 ui.separator();
+                if let Some(path) = &self.imgui.hovered_asset {
+                    ui.text(format!("Asset hover: {}", path.display()));
+                }
+                if let Some((path, target)) = &self.imgui.last_asset_drop {
+                    ui.text(format!(
+                        "Dropped: {} into native {:?}",
+                        path.display(),
+                        target.instance_id
+                    ));
+                }
 
                 ui.text(format!(
                     "Application average {:.3} ms/frame ({:.1} FPS)",
@@ -436,11 +450,12 @@ impl ApplicationHandler for App {
         };
 
         // Handle the event with ImGui first (window-local path)
-        if let Err(error) = window.imgui.platform.handle_window_event(
-            &mut window.imgui.context,
-            &window.window,
-            &event,
-        ) {
+        if let Err(error) =
+            window
+                .imgui
+                .platform
+                .handle_window_event(&mut window.imgui.context, _window_id, &event)
+        {
             error!("Winit platform event error: {error}");
             event_loop.exit();
             return;
@@ -449,6 +464,21 @@ impl ApplicationHandler for App {
         match event {
             WindowEvent::Resized(physical_size) => {
                 window.resize(physical_size);
+                window.window.request_redraw();
+            }
+            WindowEvent::HoveredFile(path) => {
+                window.imgui.hovered_asset = Some(path);
+                window.window.request_redraw();
+            }
+            WindowEvent::HoveredFileCancelled => {
+                window.imgui.hovered_asset = None;
+                window.window.request_redraw();
+            }
+            WindowEvent::DroppedFile(path) => {
+                window.imgui.hovered_asset = None;
+                if let Ok(Some(target)) = window.imgui.platform.window_snapshot(_window_id) {
+                    window.imgui.last_asset_drop = Some((path, target.target));
+                }
                 window.window.request_redraw();
             }
             WindowEvent::ScaleFactorChanged { .. } => {

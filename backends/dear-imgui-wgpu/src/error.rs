@@ -31,6 +31,18 @@ pub enum RendererError {
     #[error("WGPU frame epoch {received} is older than active epoch {active}")]
     FrameEpochOutOfOrder { active: u64, received: u64 },
 
+    /// Detached work belongs to another consumer incarnation of its Context.
+    #[error("snapshot consumer generation {actual} does not match executor generation {expected}")]
+    SnapshotConsumerGeneration { expected: u64, actual: u64 },
+
+    /// A target was replaced, retired, or belongs to another executor.
+    #[error("detached WGPU target for viewport {viewport:?} is stale or foreign")]
+    StaleSnapshotTarget { viewport: dear_imgui_rs::Id },
+
+    /// Exhausted target identities cannot be reused by queued snapshots.
+    #[error("detached WGPU target resource generation space is exhausted")]
+    SnapshotTargetGenerationExhausted,
+
     /// The renderer has not been attached to a Dear ImGui context.
     #[error("WGPU renderer is not bound to a Dear ImGui context")]
     ContextNotBound,
@@ -108,6 +120,10 @@ pub enum RendererError {
     /// An external texture handle does not belong to this renderer or was already removed.
     #[error("external WGPU texture is not registered: {0:?}")]
     ExternalTextureNotFound(dear_imgui_rs::TextureId),
+
+    /// An external view mapping cannot advance its revision without reusing an old revision.
+    #[error("external WGPU texture binding revision space is exhausted: {0:?}")]
+    ExternalTextureRevisionExhausted(dear_imgui_rs::TextureId),
 
     /// A managed update arrived after the renderer lost its matching GPU resource.
     #[error(

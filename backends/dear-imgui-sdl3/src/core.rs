@@ -65,6 +65,14 @@ pub(super) mod ffi {
             current_frame: i32,
             buttons_down: i32,
         ) -> bool;
+        #[cfg(all(test, debug_assertions))]
+        pub fn dear_imgui_sdl3_create_live_viewport_for_test(
+            id: u32,
+        ) -> *mut dear_imgui_rs::sys::ImGuiViewport;
+        #[cfg(all(test, debug_assertions))]
+        pub fn dear_imgui_sdl3_delete_live_viewport_for_test(
+            viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+        );
         pub fn ImGui_ImplSDL3_InitForOpenGL_Rust(
             window: *mut sdl3_sys::video::SDL_Window,
             sdl_gl_context: *mut c_void,
@@ -89,6 +97,26 @@ pub(super) mod ffi {
             viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
         ) -> u64;
         pub fn dear_imgui_sdl3_native_end(first_fault: *mut u64) -> u64;
+        pub fn dear_imgui_sdl3_native_set_window_transparent(transparent: bool) -> bool;
+        pub fn dear_imgui_sdl3_is_native_destroy_callback(
+            callback: Option<unsafe extern "C" fn(*mut dear_imgui_rs::sys::ImGuiViewport)>,
+        ) -> bool;
+        pub fn dear_imgui_sdl3_detach_leased_window(
+            viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+            expected_window: *mut sdl3_sys::video::SDL_Window,
+            retained_context: *mut *mut c_void,
+        ) -> bool;
+        pub fn dear_imgui_sdl3_destroy_leased_window(
+            window: *mut sdl3_sys::video::SDL_Window,
+            context: *mut c_void,
+        );
+        #[cfg(test)]
+        pub fn dear_imgui_sdl3_hook_create_window(
+            title: *const std::ffi::c_char,
+            width: i32,
+            height: i32,
+            flags: sdl3_sys::video::SDL_WindowFlags,
+        ) -> *mut sdl3_sys::video::SDL_Window;
         pub fn dear_imgui_sdl3_backend_clear_platform_monitors();
         #[cfg(any(
             feature = "opengl3-renderer",
@@ -213,6 +241,27 @@ pub enum Sdl3BackendError {
     },
     #[error("another SDL3 platform runtime already owns the process-wide SDL session")]
     PlatformSessionOccupied,
+    #[error(transparent)]
+    NativeWindowIdentityExhausted(#[from] dear_imgui_rs::NativeWindowIdentityExhausted),
+    #[error("SDL3 window policy is invalid: {reason}")]
+    InvalidWindowConfiguration { reason: &'static str },
+    #[error("SDL3 window policy `{attribute}` is unsupported by the active video driver")]
+    UnsupportedWindowPolicy { attribute: &'static str },
+    #[error("SDL3 failed to apply window policy `{attribute}`: {message}")]
+    WindowPolicyFailed {
+        attribute: &'static str,
+        message: String,
+    },
+    #[error("SDL3 secondary-window configurator panicked")]
+    WindowConfigurationPanicked,
+    #[error("the SDL3 native window registration cannot issue a resource lifetime lease")]
+    NativeWindowLeaseUnavailable,
+    #[error("the SDL3 window's native owner chain contains an unregistered owner or a cycle")]
+    NativeWindowOwnerChainUnavailable,
+    #[error(
+        "SDL3 native owner changes are blocked while the window or its descendants have native work leases"
+    )]
+    NativeWindowOwnerLeased,
     #[error("SDL3 text input contains an interior NUL byte")]
     TextInputContainsNul,
     #[error(transparent)]

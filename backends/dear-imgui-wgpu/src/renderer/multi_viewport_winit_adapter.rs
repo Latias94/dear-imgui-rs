@@ -1,78 +1,77 @@
-use dear_imgui_rs::platform_io::Viewport;
+use dear_imgui_rs::{NativeWindowInstanceId, NativeWindowTarget, platform_io::Viewport};
 
 use super::multi_viewport_runtime::WgpuViewportError;
 
-/// Creates a surface whose native window lifetime is owned by the Winit platform backend.
-///
-/// # Safety
-///
-/// The viewport platform handle must point to the live `winit::Window` associated with `viewport`.
-/// Dear ImGui must invoke the renderer destroy callback before the platform destroys that window.
-#[cfg(not(target_arch = "wasm32"))]
-pub(super) unsafe fn create_surface(
+pub(super) use dear_imgui_winit::WinitWindowRenderLease as NativeWindowLease;
+pub(super) use dear_imgui_winit::multi_viewport::WinitViewportRendererAdapter as PlatformOwner;
+
+/// Creates a surface retaining the exact validated native window allocation.
+pub(super) fn create_surface(
     instance: &wgpu::Instance,
+    platform: &PlatformOwner,
     viewport: &Viewport,
-) -> Result<(wgpu::Surface<'static>, [u32; 2]), WgpuViewportError> {
-    let window_ptr = viewport.platform_handle();
-    if window_ptr.is_null() {
-        return Err(WgpuViewportError::SurfaceOperationFailed {
-            operation: "read Winit viewport window handle",
-        });
+    expected: Option<NativeWindowInstanceId>,
+) -> Result<(wgpu::Surface<'static>, [u32; 2], NativeWindowTarget), WgpuViewportError> {
+    let snapshot = match expected {
+        Some(instance) => platform.window_snapshot_for_instance(instance)?,
+        None => platform.window_snapshot_for_viewport(viewport.id())?,
     }
-
-    let window = unsafe { &*(window_ptr.cast::<winit::window::Window>()) };
-    #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
-    let target_result =
-        unsafe { wgpu::SurfaceTargetUnsafe::from_display_and_window(window, window) };
-    #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
-    let target_result = unsafe { wgpu::SurfaceTargetUnsafe::from_window(window) };
-    let target = target_result.map_err(|_| WgpuViewportError::SurfaceOperationFailed {
-        operation: "read Winit surface handles",
+    .ok_or(WgpuViewportError::SurfaceOperationFailed {
+        operation: "resolve the registered Winit viewport window",
     })?;
-    let surface = unsafe { instance.create_surface_unsafe(target) }.map_err(|_| {
+    let lease = native_window_lease(platform, snapshot.target.instance_id)?.ok_or(
         WgpuViewportError::SurfaceOperationFailed {
-            operation: "create Winit viewport surface",
-        }
-    })?;
-    let size = window.inner_size();
-    Ok((surface, [size.width, size.height]))
+            operation: "lease the registered Winit viewport window",
+        },
+    )?;
+    let window = lease.window_arc();
+    let size = snapshot.physical_client_size;
+    let surface =
+        instance
+            .create_surface(window)
+            .map_err(|_| WgpuViewportError::SurfaceOperationFailed {
+                operation: "create Winit viewport surface",
+            })?;
+    Ok((surface, [size.width, size.height], snapshot.target))
 }
 
-#[cfg(target_arch = "wasm32")]
-pub(super) unsafe fn create_surface(
-    _instance: &wgpu::Instance,
-    _viewport: &Viewport,
-) -> Result<(wgpu::Surface<'static>, [u32; 2]), WgpuViewportError> {
-    Err(WgpuViewportError::UnsupportedTarget)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub(super) unsafe fn framebuffer_size(viewport: &Viewport) -> Result<[u32; 2], WgpuViewportError> {
-    let window_ptr = viewport.platform_handle();
-    if window_ptr.is_null() {
-        return Err(WgpuViewportError::SurfaceOperationFailed {
-            operation: "read Winit viewport window handle",
-        });
-    }
-    let window = unsafe { &*(window_ptr.cast::<winit::window::Window>()) };
-    let size = window.inner_size();
+pub(super) fn framebuffer_size(
+    platform: &PlatformOwner,
+    instance: NativeWindowInstanceId,
+) -> Result<[u32; 2], WgpuViewportError> {
+    let snapshot = platform.window_snapshot_for_instance(instance)?.ok_or(
+        WgpuViewportError::SurfaceOperationFailed {
+            operation: "resolve the registered Winit viewport framebuffer",
+        },
+    )?;
+    let size = snapshot.physical_client_size;
     Ok([size.width, size.height])
 }
 
-#[cfg(target_arch = "wasm32")]
-pub(super) unsafe fn framebuffer_size(_viewport: &Viewport) -> Result<[u32; 2], WgpuViewportError> {
-    Err(WgpuViewportError::UnsupportedTarget)
+/// Captures metadata through the exact platform owner, without returning a native lease.
+pub(super) fn target_for_viewport(
+    platform: &PlatformOwner,
+    viewport: dear_imgui_rs::Id,
+) -> Result<Option<NativeWindowTarget>, WgpuViewportError> {
+    Ok(platform
+        .window_snapshot_for_viewport(viewport)?
+        .map(|snapshot| snapshot.target))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::framebuffer_size;
+pub(super) fn target_for_instance(
+    platform: &PlatformOwner,
+    instance: NativeWindowInstanceId,
+) -> Result<Option<NativeWindowTarget>, WgpuViewportError> {
+    Ok(platform
+        .window_snapshot_for_instance(instance)?
+        .map(|snapshot| snapshot.target))
+}
 
-    #[test]
-    fn rejects_null_platform_handle() {
-        let mut raw_viewport = dear_imgui_rs::sys::ImGuiViewport::default();
-        let viewport =
-            unsafe { dear_imgui_rs::platform_io::Viewport::from_raw_mut(&mut raw_viewport) };
-        assert!(unsafe { framebuffer_size(viewport) }.is_err());
-    }
+pub(super) fn native_window_lease(
+    platform: &PlatformOwner,
+    instance: NativeWindowInstanceId,
+) -> Result<Option<NativeWindowLease>, WgpuViewportError> {
+    platform
+        .acquire_native_window_lease(instance)
+        .map_err(Into::into)
 }

@@ -90,8 +90,13 @@ impl RuntimeRegistration {
     pub(crate) fn finish_native_initialization(
         &mut self,
         context: &Context,
+        window: &sdl3::video::Window,
     ) -> Result<(), Sdl3BackendError> {
         self.control.ensure_context(context)?;
+        self.control
+            .host_window
+            .borrow_mut()
+            .replace(window.clone());
         let baseline = self
             .baseline
             .as_ref()
@@ -154,6 +159,7 @@ impl RuntimeRegistration {
         self.control.platform_initialized.set(false);
         self.control.renderer_initialized.set(false);
         self.control.release_platform_session();
+        self.control.host_window.borrow_mut().take();
         self.control.take_renderer_consumer();
         self.renderer_consumer.take();
         self.control.renderer_release.set(ReleaseState::Released);

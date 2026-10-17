@@ -349,6 +349,8 @@ pub enum Condition {
 
 // Core modules
 pub use self::clipboard::{ClipboardBackend, DummyClipboardBackend};
+#[cfg(feature = "system-clipboard")]
+pub use self::clipboard::{SystemClipboard, SystemClipboardError};
 pub use self::context::*;
 // Note: draw types are now in render module
 pub use self::fonts::*;

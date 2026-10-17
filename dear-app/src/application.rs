@@ -3,7 +3,10 @@ use std::{error::Error as StdError, fmt};
 use dear_imgui_rs as imgui;
 use dear_imgui_rs::{DockNodeFlags, TextureId};
 use thiserror::Error;
-use winit::{event::WindowEvent, window::Window};
+use winit::{
+    event::{DeviceEvent, DeviceId, WindowEvent},
+    window::Window,
+};
 
 use crate::AppConfig;
 
@@ -79,6 +82,9 @@ pub enum ExternalTextureError {
     },
     #[error(transparent)]
     Renderer(#[from] dear_imgui_wgpu::RendererError),
+    #[cfg(feature = "multi-viewport")]
+    #[error(transparent)]
+    Viewport(#[from] dear_imgui_wgpu::multi_viewport::WgpuViewportError),
 }
 
 /// Lifecycle hook that produced an [`Application`] error.
@@ -91,8 +97,12 @@ pub enum ApplicationStage {
     ConfigureImgui,
     Initialized,
     Event,
+    DeviceEvent,
     PrepareFrame,
     Frame,
+    RecordRender,
+    #[cfg(feature = "multi-viewport")]
+    ViewportFrame,
     GpuLost,
     GpuRecreated,
     Shutdown,
@@ -105,8 +115,12 @@ impl ApplicationStage {
             Self::ConfigureImgui => "configure_imgui",
             Self::Initialized => "initialized",
             Self::Event => "event",
+            Self::DeviceEvent => "device_event",
             Self::PrepareFrame => "prepare_frame",
             Self::Frame => "frame",
+            Self::RecordRender => "record_render",
+            #[cfg(feature = "multi-viewport")]
+            Self::ViewportFrame => "viewport_frame",
             Self::GpuLost => "gpu_lost",
             Self::GpuRecreated => "gpu_recreated",
             Self::Shutdown => "shutdown",
@@ -176,9 +190,18 @@ pub enum RunError {
         source: dear_imgui_winit::WinitPlatformError,
     },
     #[error(
-        "dear-app does not support Dear ImGui platform viewports; remove ConfigFlags::VIEWPORTS_ENABLE"
+        "native viewports require the multi-viewport Cargo feature and AppConfig::multi_viewport"
     )]
     MultiViewportUnsupported,
+    #[cfg(feature = "multi-viewport")]
+    #[error("native viewport operation failed: {0}")]
+    Viewport(#[source] dear_imgui_wgpu::multi_viewport::WgpuViewportError),
+    #[cfg(feature = "multi-viewport")]
+    #[error("native viewport preparation failed: {0}")]
+    ViewportPreparation(#[source] dear_imgui_wgpu::multi_viewport::WinitViewportRouteError),
+    #[cfg(feature = "multi-viewport")]
+    #[error("native viewport work failed: {0}")]
+    ViewportWork(#[source] dear_imgui_wgpu::multi_viewport::WgpuViewportWorkError),
     #[error("WGPU surface validation failed while acquiring the next frame")]
     SurfaceValidation,
     #[error("WGPU exhausted GPU memory: {message}")]
@@ -272,8 +295,16 @@ pub trait Application {
         Ok(())
     }
 
-    /// Receives events for the live main window only.
+    /// Receives events for each registered native window, with its exact platform outcome.
     fn event(&mut self, _context: &mut EventContext<'_>) -> Result<(), RunError> {
+        Ok(())
+    }
+
+    /// Receives raw device input while the application is active.
+    ///
+    /// Device motion has no native window target. The application must use its focus and pointer
+    /// ownership policy to choose an engine recipient; it is not translated into ImGui coordinates.
+    fn device_event(&mut self, _context: &mut DeviceEventContext<'_>) -> Result<(), RunError> {
         Ok(())
     }
 
@@ -285,9 +316,24 @@ pub trait Application {
     /// Builds one Dear ImGui frame.
     fn frame(&mut self, context: &mut FrameContext<'_>) -> Result<(), RunError>;
 
+    /// Records engine GPU commands after UI construction and before UI consumers are recorded.
+    ///
+    /// Commands recorded into this encoder precede every Dear ImGui consumer on the renderer queue.
+    /// The runtime owns encoder finishing, surface presentation, and frame admission.
+    fn record_render(&mut self, _context: &mut RenderContext<'_>) -> Result<(), RunError> {
+        Ok(())
+    }
+
+    /// Receives owned-data observations after secondary work and the optional main presentation.
+    /// Reports may be cloned into editor history; they contain no native or GPU resource leases.
+    #[cfg(feature = "multi-viewport")]
+    fn viewport_frame(&mut self, _context: &ViewportFrameContext<'_>) -> Result<(), RunError> {
+        Ok(())
+    }
+
     /// Returns the Test Engine attached to this application's Context, when enabled.
     ///
-    /// The runtime drives this engine only for admitted surface frames and owns the complete
+    /// The runtime drives this engine for UI frames and owns the complete
     /// `render -> pre-swap -> present -> post-swap` protocol. Applications may use the engine from
     /// [`Self::frame`] for UI and queue controls, but must not drive presentation independently.
     #[cfg(feature = "test-engine")]
@@ -341,9 +387,14 @@ pub struct InitializedContext<'a> {
     pub(crate) imgui: &'a mut imgui::Context,
     pub(crate) window: &'a Window,
     pub(crate) config: &'a AppConfig,
+    pub(crate) wake: crate::AppWakeHandle,
 }
 
 impl InitializedContext<'_> {
+    /// Returns thread-safe invalidation that survives GPU recreation.
+    pub fn wake_handle(&self) -> crate::AppWakeHandle {
+        self.wake.clone()
+    }
     #[must_use]
     pub fn window(&self) -> &Window {
         self.window
@@ -352,6 +403,38 @@ impl InitializedContext<'_> {
     #[must_use]
     pub fn config(&self) -> &AppConfig {
         self.config
+    }
+}
+
+/// Raw device input and the current main window, without Dear ImGui frame authority.
+pub struct DeviceEventContext<'a> {
+    pub(crate) device_id: DeviceId,
+    pub(crate) event: &'a DeviceEvent,
+    pub(crate) window: &'a Window,
+    pub(crate) wake: &'a crate::AppWakeHandle,
+    pub(crate) exit_requested: &'a mut bool,
+}
+
+impl DeviceEventContext<'_> {
+    /// Identifies the native input device, independently of any window.
+    pub fn device_id(&self) -> DeviceId {
+        self.device_id
+    }
+    /// Returns unmodified Winit raw device input.
+    pub fn event(&self) -> &DeviceEvent {
+        self.event
+    }
+    /// Returns the live main window; it is not necessarily the recipient of raw motion.
+    pub fn window(&self) -> &Window {
+        self.window
+    }
+    /// Returns the application's coalescing invalidation handle.
+    pub fn wake_handle(&self) -> crate::AppWakeHandle {
+        self.wake.clone()
+    }
+    /// Requests normal exit after this device callback returns.
+    pub fn request_exit(&mut self) {
+        *self.exit_requested = true;
     }
 }
 
@@ -370,10 +453,27 @@ pub struct EventContext<'a> {
     pub(crate) event: &'a WindowEvent,
     pub(crate) imgui: &'a mut imgui::Context,
     pub(crate) window: &'a Window,
+    pub(crate) main_window: &'a Window,
+    pub(crate) outcome: dear_imgui_winit::WinitEventOutcome,
     pub(crate) exit_requested: &'a mut bool,
+    pub(crate) wake: &'a crate::AppWakeHandle,
 }
 
 impl EventContext<'_> {
+    /// Exact native event target, forwarding result, capture intent, and platform action.
+    pub fn outcome(&self) -> &dear_imgui_winit::WinitEventOutcome {
+        &self.outcome
+    }
+
+    /// Native WindowId supplied by Winit, including secondary targets.
+    pub fn window_id(&self) -> winit::window::WindowId {
+        self.window.id()
+    }
+
+    /// Returns thread-safe invalidation for background tasks and scheduled frames.
+    pub fn wake_handle(&self) -> crate::AppWakeHandle {
+        self.wake.clone()
+    }
     #[must_use]
     pub fn event(&self) -> &WindowEvent {
         self.event
@@ -382,6 +482,11 @@ impl EventContext<'_> {
     #[must_use]
     pub fn window(&self) -> &Window {
         self.window
+    }
+
+    /// Main host window, which can differ from this event's native window.
+    pub fn main_window(&self) -> &Window {
+        self.main_window
     }
 
     /// Requests normal event-loop exit after the current event callback completes.
@@ -581,7 +686,7 @@ impl<'a> AddOns<'a> {
 pub struct GpuApi<'a> {
     pub(crate) device: &'a wgpu::Device,
     pub(crate) queue: &'a wgpu::Queue,
-    pub(crate) renderer: &'a mut dear_imgui_wgpu::WgpuRenderer,
+    pub(crate) renderer: &'a mut crate::runtime::renderer::AppRenderer,
     pub(crate) generation: GpuGeneration,
 }
 
@@ -672,9 +777,91 @@ pub struct FrameContext<'a> {
     pub(crate) addons: AddOns<'a>,
     pub(crate) gpu: GpuApi<'a>,
     pub(crate) exit_requested: &'a mut bool,
+    pub(crate) wake: &'a crate::AppWakeHandle,
+}
+
+/// Native viewport observations for one UI frame, independent of live window/GPU ownership.
+#[cfg(feature = "multi-viewport")]
+pub struct ViewportFrameContext<'a> {
+    pub(crate) secondary: &'a dear_imgui_wgpu::multi_viewport::WgpuViewportFrameReport,
+    pub(crate) main: Option<&'a dear_imgui_wgpu::WgpuViewportObservation>,
+    pub(crate) generation: GpuGeneration,
+    pub(crate) frame_index: u64,
+}
+
+#[cfg(feature = "multi-viewport")]
+impl ViewportFrameContext<'_> {
+    pub fn secondary(&self) -> &dear_imgui_wgpu::multi_viewport::WgpuViewportFrameReport {
+        self.secondary
+    }
+    pub fn main(&self) -> Option<&dear_imgui_wgpu::WgpuViewportObservation> {
+        self.main
+    }
+    pub fn generation(&self) -> GpuGeneration {
+        self.generation
+    }
+    pub fn frame_index(&self) -> u64 {
+        self.frame_index
+    }
+}
+
+/// GPU recording capabilities for one UI frame, without surface or Context ownership.
+pub struct RenderContext<'a> {
+    pub(crate) device: &'a wgpu::Device,
+    pub(crate) queue: &'a wgpu::Queue,
+    pub(crate) encoder: &'a mut wgpu::CommandEncoder,
+    pub(crate) window: &'a Window,
+    pub(crate) generation: GpuGeneration,
+    pub(crate) frame_index: u64,
+    pub(crate) framebuffer_extent: dear_imgui_wgpu::FramebufferExtent,
+    pub(crate) surface_format: wgpu::TextureFormat,
+    pub(crate) wake: &'a crate::AppWakeHandle,
+}
+
+impl RenderContext<'_> {
+    /// Returns invalidation suitable for background readback or GPU-completion callbacks.
+    pub fn wake_handle(&self) -> crate::AppWakeHandle {
+        self.wake.clone()
+    }
+    /// Returns the active GPU generation's device.
+    pub fn device(&self) -> &wgpu::Device {
+        self.device
+    }
+    /// Returns the active GPU generation's queue, for uploads and host-managed dependencies.
+    pub fn queue(&self) -> &wgpu::Queue {
+        self.queue
+    }
+    /// Borrows the encoder whose commands are submitted before the frame's UI consumers.
+    pub fn encoder(&mut self) -> &mut wgpu::CommandEncoder {
+        self.encoder
+    }
+    /// Returns the current main window.
+    pub fn window(&self) -> &Window {
+        self.window
+    }
+    /// Returns the GPU generation to validate application-owned render targets against.
+    pub fn generation(&self) -> GpuGeneration {
+        self.generation
+    }
+    /// Returns the monotonically increasing UI frame index.
+    pub fn frame_index(&self) -> u64 {
+        self.frame_index
+    }
+    /// Returns the current main framebuffer dimensions, even when its presentation is skipped.
+    pub fn framebuffer_extent(&self) -> dear_imgui_wgpu::FramebufferExtent {
+        self.framebuffer_extent
+    }
+    /// Returns the configured main surface format.
+    pub fn surface_format(&self) -> wgpu::TextureFormat {
+        self.surface_format
+    }
 }
 
 impl<'a> FrameContext<'a> {
+    /// Returns invalidation for animation deadlines or application-owned background work.
+    pub fn wake_handle(&self) -> crate::AppWakeHandle {
+        self.wake.clone()
+    }
     #[must_use]
     pub fn ui(&self) -> &'a imgui::Ui {
         self.ui

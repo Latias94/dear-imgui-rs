@@ -1,12 +1,15 @@
 use dear_imgui_rs::Context;
 use winit::event::{Event, WindowEvent};
-use winit::window::Window;
+use winit::window::{Window, WindowId};
 
 use crate::events;
 use crate::sanitize;
 
-use super::WinitPlatformError;
 use super::ownership::{WinitPlatform, WinitPlatformControl};
+use super::{
+    WinitCaptureIntent, WinitEventForwarding, WinitEventOutcome, WinitEventTarget,
+    WinitPlatformAction, WinitPlatformError,
+};
 
 impl WinitPlatformControl {
     #[cfg(feature = "multi-viewport")]
@@ -28,13 +31,30 @@ impl WinitPlatformControl {
         action
     }
 
-    pub(super) fn release_single_touch_in_current_context(&self) {
+    fn handle_single_window_focus(
+        &self,
+        focused: bool,
+        context: &mut Context,
+    ) -> WinitEventForwarding {
+        let released_touch = if !focused {
+            context
+                .binding()
+                .with_bound_context(|| self.release_single_touch_in_current_context())
+        } else {
+            false
+        };
+        let mut forwarded = events::handle_focused(focused, context);
+        forwarded.pointer |= released_touch;
+        forwarded
+    }
+
+    pub(super) fn release_single_touch_in_current_context(&self) -> bool {
         if self.active_touch.take().is_none() {
-            return;
+            return false;
         }
         let io = unsafe { dear_imgui_rs::sys::igGetIO_Nil() };
         if io.is_null() {
-            return;
+            return false;
         }
         unsafe {
             dear_imgui_rs::sys::ImGuiIO_AddMouseSourceEvent(
@@ -47,6 +67,7 @@ impl WinitPlatformControl {
                 false,
             );
         }
+        true
     }
 
     #[cfg(feature = "multi-viewport")]
@@ -109,7 +130,7 @@ impl WinitPlatformControl {
         window_id: winit::window::WindowId,
         focused: bool,
         context: &mut Context,
-    ) -> bool {
+    ) -> Option<bool> {
         let runtime = self
             .runtime
             .borrow()
@@ -117,10 +138,9 @@ impl WinitPlatformControl {
             .filter(|runtime| !runtime.is_released())
             .cloned();
         let Some(runtime) = runtime else {
-            return false;
+            return None;
         };
-        runtime.note_window_focus(window_id, focused, context);
-        true
+        Some(runtime.note_window_focus(window_id, focused, context))
     }
 
     #[cfg(feature = "multi-viewport")]
@@ -137,87 +157,103 @@ impl WinitPlatformControl {
 }
 
 impl WinitPlatform {
-    /// Handle a winit event.
-    ///
-    /// This is the most general entry point: pass the full `Event<T>` from
-    /// your event loop and the backend will dispatch to the appropriate
-    /// handlers. For `ApplicationHandler::window_event`, where you already
-    /// receive a `WindowEvent` for a specific window, you can use
-    /// `handle_window_event` instead and avoid constructing a synthetic
-    /// `Event::WindowEvent`.
+    /// Routes a full event by its native WindowId. Raw device events remain host-owned.
     pub fn handle_event<T>(
         &mut self,
         imgui_ctx: &mut Context,
-        window: &Window,
         event: &Event<T>,
-    ) -> Result<bool, WinitPlatformError> {
-        #[cfg(feature = "multi-viewport")]
-        if self.control.has_live_runtime() {
-            self.control.ensure_context(imgui_ctx)?;
-            let control = self.control.runtime_control()?;
-            return crate::multi_viewport::events::handle_event(&control, self, imgui_ctx, event);
+    ) -> Result<WinitEventOutcome, WinitPlatformError> {
+        match event {
+            Event::WindowEvent { window_id, event } => {
+                self.handle_window_event(imgui_ctx, *window_id, event)
+            }
+            _ => {
+                self.control.ensure_context(imgui_ctx)?;
+                self.control.validate_operational_contract()?;
+                Ok(WinitEventOutcome::default())
+            }
         }
-        self.handle_main_event(imgui_ctx, window, event)
     }
 
-    pub(crate) fn handle_main_event<T>(
-        &mut self,
-        imgui_ctx: &mut Context,
-        window: &Window,
-        event: &Event<T>,
-    ) -> Result<bool, WinitPlatformError> {
-        if !event_targets_window(window.id(), event) {
-            return Ok(false);
-        }
-        self.control.validate_entry(imgui_ctx, window)?;
-        Ok(match event {
-            Event::WindowEvent { event, .. } => {
-                self.handle_window_event_internal(imgui_ctx, window, event)
-            }
-            Event::DeviceEvent { event, .. } => {
-                events::handle_device_event(event);
-                false
-            }
-            _ => false,
-        })
-    }
-
-    /// Handle a single window event for a given window.
+    /// Routes an ApplicationHandler event without requiring a Window borrow or synthetic event.
     ///
-    /// This is a convenience wrapper for frameworks that already route
-    /// window-local events, such as winit's `ApplicationHandler::window_event`,
-    /// and don't need to build a full `Event::WindowEvent` value.
+    /// Foreign window identifiers return an unowned outcome. Capture intent describes the most
+    /// recent UI frame and never means that this individual event was consumed.
     pub fn handle_window_event(
         &mut self,
         imgui_ctx: &mut Context,
-        window: &Window,
+        window_id: WindowId,
         event: &WindowEvent,
-    ) -> Result<bool, WinitPlatformError> {
+    ) -> Result<WinitEventOutcome, WinitPlatformError> {
+        self.control.ensure_context(imgui_ctx)?;
+        let Some(snapshot) = self.window_snapshot(window_id)? else {
+            return Ok(WinitEventOutcome::default());
+        };
         #[cfg(feature = "multi-viewport")]
-        if self.control.has_live_runtime() {
-            self.control.ensure_context(imgui_ctx)?;
-            let control = self.control.runtime_control()?;
-            control.poll_fault()?;
-            if control
-                .main_window()
-                .is_some_and(|main| main.id() == window.id())
+        let runtime = if self.control.has_live_runtime() {
+            let runtime = self.control.runtime_control()?;
+            runtime.poll_fault()?;
+            Some(runtime)
+        } else {
+            None
+        };
+        let capture = WinitCaptureIntent::snapshot(imgui_ctx);
+        let pointer_release = super::pointer_control::release_reason(event).and_then(|reason| {
+            self.control
+                .release_pointer_control(reason, Some(snapshot.target.instance_id))
+        });
+        let forwarded = if snapshot.target.is_main {
+            let window = self.control.attached_window()?;
+            self.control.validate_entry(imgui_ctx, &window)?;
+            self.handle_window_event_internal(imgui_ctx, &window, event)
+        } else {
+            #[cfg(feature = "multi-viewport")]
             {
-                self.control.validate_entry(imgui_ctx, window)?;
-                let consumed = self.handle_window_event_internal(imgui_ctx, window, event);
-                control.poll_fault()?;
-                return Ok(consumed);
+                let runtime = runtime
+                    .as_ref()
+                    .ok_or(WinitPlatformError::RuntimeDetached)?;
+                crate::multi_viewport::events::route_secondary_window_event(
+                    runtime, imgui_ctx, window_id, event,
+                )?
             }
-            let consumed = crate::multi_viewport::events::route_secondary_window_event(
-                &control,
-                imgui_ctx,
-                window.id(),
-                event,
-            )?;
-            control.poll_fault()?;
-            return Ok(consumed);
+            #[cfg(not(feature = "multi-viewport"))]
+            {
+                WinitEventForwarding::default()
+            }
+        };
+        let needs_frame = !matches!(event, WindowEvent::Destroyed)
+            && (!matches!(event, WindowEvent::RedrawRequested) || !snapshot.target.is_main);
+        if needs_frame {
+            if let Ok(main) = self.control.attached_window() {
+                main.request_redraw();
+            }
         }
-        self.control.validate_entry(imgui_ctx, window)?;
-        Ok(self.handle_window_event_internal(imgui_ctx, window, event))
+        let platform_action = match event {
+            WindowEvent::CloseRequested if snapshot.target.is_main => {
+                WinitPlatformAction::MainCloseRequested
+            }
+            WindowEvent::CloseRequested => WinitPlatformAction::ViewportCloseRequested,
+            WindowEvent::Resized(_)
+            | WindowEvent::Moved(_)
+            | WindowEvent::ScaleFactorChanged { .. } => WinitPlatformAction::GeometryChanged,
+            WindowEvent::Destroyed => WinitPlatformAction::NativeDestroyed,
+            _ => WinitPlatformAction::None,
+        };
+        #[cfg(feature = "multi-viewport")]
+        if let Some(runtime) = runtime {
+            runtime.poll_fault()?;
+        }
+        Ok(WinitEventOutcome {
+            target: Some(WinitEventTarget {
+                window_id,
+                native: snapshot.target,
+            }),
+            forwarded,
+            capture: Some(capture),
+            needs_frame,
+            platform_action,
+            pointer_release,
+        })
     }
 
     /// Internal implementation for window event handling.
@@ -226,7 +262,7 @@ impl WinitPlatform {
         imgui_ctx: &mut Context,
         window: &Window,
         event: &WindowEvent,
-    ) -> bool {
+    ) -> WinitEventForwarding {
         match event {
             WindowEvent::Resized(physical_size) => {
                 #[cfg(feature = "multi-viewport")]
@@ -238,7 +274,7 @@ impl WinitPlatform {
                     io.set_display_framebuffer_scale(
                         crate::multi_viewport::framebuffer_scale_for_window(window),
                     );
-                    return false;
+                    return WinitEventForwarding::default();
                 }
                 let logical_size = physical_size
                     .to_logical(sanitize::positive_finite_or(window.scale_factor(), 1.0));
@@ -246,7 +282,7 @@ impl WinitPlatform {
                 imgui_ctx
                     .io_mut()
                     .set_display_size(sanitize::finite_non_negative_size(logical_size));
-                false
+                WinitEventForwarding::default()
             }
             WindowEvent::ScaleFactorChanged {
                 scale_factor,
@@ -274,7 +310,7 @@ impl WinitPlatform {
                     io.set_display_framebuffer_scale(
                         crate::multi_viewport::framebuffer_scale_for_window(window),
                     );
-                    return false;
+                    return WinitEventForwarding::default();
                 }
                 // Adjust mouse position proportionally when DPI factor changes
                 {
@@ -298,7 +334,7 @@ impl WinitPlatform {
                     self.hidpi_factor,
                     1.0,
                 ));
-                false
+                WinitEventForwarding::default()
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 #[cfg(feature = "multi-viewport")]
@@ -316,7 +352,7 @@ impl WinitPlatform {
                             window,
                             [position.x, position.y],
                         ) else {
-                            return imgui_ctx.io().want_capture_mouse();
+                            return WinitEventForwarding::default();
                         };
                         return events::handle_cursor_moved(
                             [f64::from(position[0]), f64::from(position[1])],
@@ -347,42 +383,45 @@ impl WinitPlatform {
                 #[cfg(feature = "multi-viewport")]
                 if self.control.has_live_runtime() {
                     self.control.note_runtime_cursor_left();
-                    return false;
+                    return WinitEventForwarding::default();
                 }
                 {
                     let io = imgui_ctx.io_mut();
                     io.add_mouse_pos_event([-f32::MAX, -f32::MAX]);
                 }
-                false
+                WinitEventForwarding {
+                    pointer: true,
+                    ..Default::default()
+                }
             }
             #[cfg(feature = "multi-viewport")]
             WindowEvent::Moved(_) if self.control.has_live_runtime() => {
                 self.control
                     .note_runtime_window_geometry(window.id(), true, false);
-                false
+                WinitEventForwarding::default()
             }
             WindowEvent::CursorEntered { .. } => {
                 #[cfg(feature = "multi-viewport")]
                 if self.control.has_live_runtime() {
                     self.control.note_runtime_cursor_available();
                 }
-                false
+                WinitEventForwarding::default()
             }
             WindowEvent::ModifiersChanged(modifiers) => {
                 #[cfg(feature = "multi-viewport")]
                 if self.control.has_live_runtime() {
                     self.control.note_runtime_modifiers(window.id(), modifiers);
                 }
-                events::handle_modifiers_changed(modifiers, imgui_ctx);
-                false
+                events::handle_modifiers_changed(modifiers, imgui_ctx)
             }
             WindowEvent::Ime(ime) => {
-                events::handle_ime_event(ime, imgui_ctx);
+                let forwarded = events::handle_ime_event(ime, imgui_ctx);
                 // Track IME enabled/disabled state based on winit notifications.
                 self.ime_enabled = !matches!(ime, winit::event::Ime::Disabled);
-                imgui_ctx.io().want_capture_keyboard()
+                forwarded
             }
             WindowEvent::Touch(touch) => {
+                let mut forwarded = WinitEventForwarding::default();
                 #[cfg(feature = "multi-viewport")]
                 if self.control.has_live_runtime() {
                     let position = crate::multi_viewport::client_physical_to_screen_pos(
@@ -397,7 +436,7 @@ impl WinitPlatform {
                     {
                         let action = self.control.note_runtime_touch(window.id(), touch);
                         if let Some(action) = action {
-                            let _ = events::handle_touch_event_at(
+                            forwarded = events::handle_touch_event_at(
                                 action,
                                 position,
                                 Some(imgui_ctx.main_viewport().id()),
@@ -405,7 +444,7 @@ impl WinitPlatform {
                             );
                         }
                     }
-                    return imgui_ctx.io().want_capture_mouse();
+                    return forwarded;
                 }
                 let position = events::touch_logical_position(touch, window);
                 if position.is_some()
@@ -415,37 +454,28 @@ impl WinitPlatform {
                     )
                 {
                     if let Some(action) = self.control.note_single_touch(touch) {
-                        let _ = events::handle_touch_event_at(action, position, None, imgui_ctx);
+                        forwarded =
+                            events::handle_touch_event_at(action, position, None, imgui_ctx);
                     }
                 }
-                imgui_ctx.io().want_capture_mouse()
+                forwarded
             }
             WindowEvent::Focused(focused) => {
                 #[cfg(feature = "multi-viewport")]
-                if self
-                    .control
-                    .note_runtime_window_focus(window.id(), *focused, imgui_ctx)
+                if let Some(forwarded) =
+                    self.control
+                        .note_runtime_window_focus(window.id(), *focused, imgui_ctx)
                 {
-                    return false;
+                    return WinitEventForwarding {
+                        focus: forwarded,
+                        ..Default::default()
+                    };
                 }
-                events::handle_focused(*focused, imgui_ctx)
+                self.control.handle_single_window_focus(*focused, imgui_ctx)
             }
-            _ => false,
+            _ => WinitEventForwarding::default(),
         }
     }
-}
-
-pub(super) fn event_targets_window<T>(
-    window_id: winit::window::WindowId,
-    event: &Event<T>,
-) -> bool {
-    !matches!(
-        event,
-        Event::WindowEvent {
-            window_id: event_window_id,
-            ..
-        } if *event_window_id != window_id
-    )
 }
 
 pub(super) fn rescale_mouse_pos_for_hidpi_change(
@@ -457,4 +487,50 @@ pub(super) fn rescale_mouse_pos_for_hidpi_change(
     let old_hidpi = sanitize::positive_finite_or(old_hidpi, 1.0);
     let scale = sanitize::positive_finite_or(new_hidpi / old_hidpi, 1.0);
     sanitize::finite_vec2_f32([mouse[0] * scale as f32, mouse[1] * scale as f32])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_util::test_sync::lock_context;
+    use winit::{
+        dpi::PhysicalPosition,
+        event::{DeviceId, Touch, TouchPhase},
+    };
+
+    #[test]
+    fn single_window_focus_loss_releases_touch_ownership() {
+        let _guard = lock_context();
+        let mut context = Context::create();
+        let mut platform = WinitPlatform::new(&mut context).unwrap();
+        let touch = |id| Touch {
+            device_id: DeviceId::dummy(),
+            phase: TouchPhase::Started,
+            location: PhysicalPosition::new(40.0, 60.0),
+            force: None,
+            id,
+        };
+
+        assert_eq!(
+            platform.control.note_single_touch(&touch(7)),
+            Some(events::TouchAction::Press)
+        );
+        let released = platform
+            .control
+            .handle_single_window_focus(false, &mut context);
+        assert!(released.focus && released.pointer);
+        let repeated = platform
+            .control
+            .handle_single_window_focus(false, &mut context);
+        assert!(!repeated.pointer);
+        platform
+            .control
+            .handle_single_window_focus(true, &mut context);
+        assert_eq!(
+            platform.control.note_single_touch(&touch(8)),
+            Some(events::TouchAction::Press),
+            "a missing touch end before focus loss must not block a new finger"
+        );
+        platform.shutdown(&mut context).unwrap();
+    }
 }

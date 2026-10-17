@@ -6,8 +6,8 @@ use dear_imgui_rs::{DockNodeFlags, FrameToken, WindowFlags};
 use dear_imgui_test_engine::{FrameDriveOutcome, MainRenderOutcome, TestFrameDriver};
 
 use super::admission::{
-    SurfaceAcquisition, SurfaceAdmissionBackend, SurfaceDispatch, admit_surface_frame,
-    dispatch_surface_frame, settle_surface_presentation,
+    AdmittedSurfaceFrame, SurfaceAcquisition, SurfaceAdmissionBackend, SurfaceDispatch,
+    admit_surface_frame, dispatch_surface_frame, settle_surface_presentation,
 };
 use super::lifecycle::{LifecycleAction, SurfaceEvent};
 use super::ownership::RuntimeOwnership;
@@ -28,7 +28,10 @@ impl SurfaceAdmissionBackend for RuntimeSurfaceAdmission<'_> {
     type Frame = wgpu::SurfaceTexture;
 
     fn acquire(&mut self) -> SurfaceAcquisition<Self::Frame> {
-        match self.window.surface.get_current_texture() {
+        let Some(surface) = self.window.surface.as_ref() else {
+            return SurfaceAcquisition::Validation;
+        };
+        match surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => SurfaceAcquisition::Success(frame),
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => SurfaceAcquisition::Suboptimal(frame),
             wgpu::CurrentSurfaceTexture::Lost => SurfaceAcquisition::Lost,
@@ -67,12 +70,44 @@ impl SurfaceAdmissionBackend for RuntimeSurfaceAdmission<'_> {
     }
 }
 
+pub(super) enum MainFrameTarget {
+    Surface(AdmittedSurfaceFrame<wgpu::SurfaceTexture>),
+    #[cfg(test)]
+    Offscreen(wgpu::Texture),
+}
+
+impl MainFrameTarget {
+    fn texture(&self) -> &wgpu::Texture {
+        match self {
+            Self::Surface(admitted) => &admitted.frame.texture,
+            #[cfg(test)]
+            Self::Offscreen(texture) => texture,
+        }
+    }
+
+    fn present(self, queue: &wgpu::Queue) {
+        match self {
+            Self::Surface(admitted) => queue.present(admitted.frame),
+            #[cfg(test)]
+            Self::Offscreen(_) => {}
+        }
+    }
+
+    fn reconfigure_after_present(&self) -> bool {
+        match self {
+            Self::Surface(admitted) => admitted.reconfigure_after_present,
+            #[cfg(test)]
+            Self::Offscreen(_) => false,
+        }
+    }
+}
+
 struct AdmittedWgpuFrameDriver<'a> {
     renderer: &'a mut dear_imgui_wgpu::WgpuRenderer,
-    device: &'a wgpu::Device,
     queue: &'a wgpu::Queue,
-    surface_frame: Option<wgpu::SurfaceTexture>,
+    target: Option<MainFrameTarget>,
     clear_color: wgpu::Color,
+    encoder: Option<wgpu::CommandEncoder>,
     rendered: bool,
     presented: bool,
 }
@@ -80,17 +115,17 @@ struct AdmittedWgpuFrameDriver<'a> {
 impl<'a> AdmittedWgpuFrameDriver<'a> {
     fn new(
         renderer: &'a mut dear_imgui_wgpu::WgpuRenderer,
-        device: &'a wgpu::Device,
         queue: &'a wgpu::Queue,
-        surface_frame: wgpu::SurfaceTexture,
+        target: MainFrameTarget,
         clear_color: wgpu::Color,
+        encoder: wgpu::CommandEncoder,
     ) -> Self {
         Self {
             renderer,
-            device,
             queue,
-            surface_frame: Some(surface_frame),
+            target: Some(target),
             clear_color,
+            encoder: Some(encoder),
             rendered: false,
             presented: false,
         }
@@ -116,22 +151,16 @@ impl<'a> AdmittedWgpuFrameDriver<'a> {
                 message: "admitted surface frame was rendered more than once".to_owned(),
             });
         }
-        let surface_frame = self
-            .surface_frame
-            .as_ref()
-            .ok_or_else(|| RunError::Recovery {
-                message: "admitted surface frame was consumed before rendering".to_owned(),
-            })?;
-        let framebuffer_extent =
-            dear_imgui_wgpu::FramebufferExtent::from_texture(&surface_frame.texture);
-        let view = surface_frame
-            .texture
+        let target = self.target.as_ref().ok_or_else(|| RunError::Recovery {
+            message: "admitted surface frame was consumed before rendering".to_owned(),
+        })?;
+        let framebuffer_extent = dear_imgui_wgpu::FramebufferExtent::from_texture(target.texture());
+        let view = target
+            .texture()
             .create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Dear App render encoder"),
-            });
+        let mut encoder = self.encoder.take().ok_or_else(|| RunError::Recovery {
+            message: "admitted frame encoder was already consumed".to_owned(),
+        })?;
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Dear App render pass"),
@@ -164,13 +193,10 @@ impl<'a> AdmittedWgpuFrameDriver<'a> {
                 message: "admitted surface frame was presented before rendering".to_owned(),
             });
         }
-        let surface_frame = self
-            .surface_frame
-            .take()
-            .ok_or_else(|| RunError::Recovery {
-                message: "admitted surface frame was presented more than once".to_owned(),
-            })?;
-        self.queue.present(surface_frame);
+        let target = self.target.take().ok_or_else(|| RunError::Recovery {
+            message: "admitted surface frame was presented more than once".to_owned(),
+        })?;
+        target.present(self.queue);
         self.presented = true;
         Ok(())
     }
@@ -250,7 +276,23 @@ pub(super) fn render_surface_frame<A: Application>(
     admitted_frame_count: &mut u64,
     application: &mut A,
     config: &AppConfig,
+    wake: &crate::AppWakeHandle,
+    event_loop: &winit::event_loop::ActiveEventLoop,
 ) -> Result<SurfaceDispatch<bool>, RunError> {
+    #[cfg(feature = "multi-viewport")]
+    if config.multi_viewport {
+        return super::multi_viewport::render_frame(
+            ownership,
+            clear_color,
+            admitted_frame_count,
+            application,
+            config,
+            wake,
+            event_loop,
+        );
+    }
+    #[cfg(not(feature = "multi-viewport"))]
+    let _ = event_loop;
     let admitted = {
         let RuntimeOwnership {
             window,
@@ -264,100 +306,139 @@ pub(super) fn render_surface_frame<A: Application>(
         };
         admit_surface_frame(&mut backend)?
     };
-    let dispatch =
-        dispatch_surface_frame(admitted, admitted_frame_count, |admitted, frame_index| {
-            let RuntimeOwnership {
-                window,
-                ui,
-                generations,
-            } = ownership;
-            let generation = generations
-                .current_mut()
-                .ok_or_else(|| RunError::Recovery {
-                    message: "render requested without an active GPU generation".to_owned(),
-                })?;
-            let UiState {
-                context,
-                platform,
-                #[cfg(feature = "implot")]
-                implot,
-                #[cfg(feature = "imnodes")]
-                imnodes,
-                #[cfg(feature = "implot3d")]
-                implot3d,
-                docking,
-            } = ui;
+    dispatch_surface_frame(admitted, admitted_frame_count, |admitted, frame_index| {
+        render_application_frame(
+            ownership,
+            MainFrameTarget::Surface(admitted),
+            clear_color,
+            frame_index,
+            application,
+            config,
+            wake,
+        )
+    })
+}
 
-            super::state::run_application_frame_boundary(
-                context,
-                ApplicationStage::PrepareFrame,
-                |context| {
-                    let mut prepare_frame = PrepareFrameContext {
-                        imgui: context,
-                        window: &window.window,
-                    };
-                    application.prepare_frame(&mut prepare_frame)
-                },
-            )?;
-            super::state::validate_supported_imgui_config(context)?;
-            platform
-                .prepare_frame(context, &window.window)
-                .map_err(|error| super::state::platform_error("Winit frame preparation", error))?;
-            let mut exit_requested = false;
-            let frame = build_frame(context, |ui| {
-                draw_dockspace(ui, docking.flags, config)?;
-                let addons = AddOns {
-                    #[cfg(feature = "implot")]
-                    implot: implot.as_ref(),
-                    #[cfg(feature = "imnodes")]
-                    imnodes: imnodes.as_ref(),
-                    #[cfg(feature = "implot3d")]
-                    implot3d: implot3d.as_ref(),
-                    docking: DockingApi {
-                        controller: docking,
-                    },
-                };
-                let mut frame = FrameContext {
-                    ui,
-                    addons,
-                    gpu: generation.api(),
-                    exit_requested: &mut exit_requested,
-                };
-                application
-                    .frame(&mut frame)
-                    .map_err(|error| error.during_application_stage(ApplicationStage::Frame))?;
-                platform
-                    .prepare_render(ui, &window.window)
-                    .map_err(|error| {
-                        super::state::platform_error("Winit render preparation", error)
-                    })?;
-                Ok(())
-            })?;
-
-            let generation = generations
-                .current_mut()
-                .ok_or_else(|| RunError::Recovery {
-                    message: "render submission requested without an active GPU generation"
-                        .to_owned(),
-                })?;
-            let reconfigure_after_present = admitted.reconfigure_after_present;
-            let gpu = &mut generation.gpu;
-            let mut driver = AdmittedWgpuFrameDriver::new(
-                &mut gpu.renderer,
-                &gpu.device,
-                &gpu.queue,
-                admitted.frame,
-                clear_color,
-            );
-            let result = drive_admitted_frame(application, frame, frame_index, &mut driver);
-            let was_presented = driver.was_presented();
-            drop(driver);
-            settle_surface_presentation(result, was_presented, reconfigure_after_present, || {
-                window.reconfigure(&generation.gpu.device)
-            })?;
-            Ok(exit_requested)
+pub(super) fn render_application_frame<A: Application>(
+    ownership: &mut RuntimeOwnership,
+    target: MainFrameTarget,
+    clear_color: wgpu::Color,
+    frame_index: u64,
+    application: &mut A,
+    config: &AppConfig,
+    wake: &crate::AppWakeHandle,
+) -> Result<bool, RunError> {
+    let RuntimeOwnership {
+        window,
+        ui,
+        generations,
+    } = ownership;
+    let generation = generations
+        .current_mut()
+        .ok_or_else(|| RunError::Recovery {
+            message: "render requested without an active GPU generation".to_owned(),
         })?;
-    Ok(dispatch)
+    let (frame, exit_requested) =
+        build_application_frame(ui, generation, window, application, config, wake)?;
+    let gpu = &mut generation.gpu;
+    let mut encoder = gpu
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Dear App engine and UI encoder"),
+        });
+    let mut render_context = crate::RenderContext {
+        device: &gpu.device,
+        queue: &gpu.queue,
+        encoder: &mut encoder,
+        window: &window.window,
+        generation: generation.id,
+        frame_index,
+        framebuffer_extent: dear_imgui_wgpu::FramebufferExtent::from_texture(target.texture()),
+        surface_format: target.texture().format(),
+        wake,
+    };
+    application
+        .record_render(&mut render_context)
+        .map_err(|error| error.during_application_stage(ApplicationStage::RecordRender))?;
+    let renderer = gpu.renderer.single_mut()?;
+    let reconfigure_after_present = target.reconfigure_after_present();
+    let mut driver =
+        AdmittedWgpuFrameDriver::new(renderer, &gpu.queue, target, clear_color, encoder);
+    let result = drive_admitted_frame(application, frame, frame_index, &mut driver);
+    let was_presented = driver.was_presented();
+    drop(driver);
+    settle_surface_presentation(result, was_presented, reconfigure_after_present, || {
+        window.reconfigure(&generation.gpu.device)
+    })?;
+    Ok(exit_requested)
+}
+
+pub(super) fn build_application_frame<'ctx, A: Application>(
+    ui: &'ctx mut UiState,
+    generation: &mut RuntimeGeneration,
+    window: &WindowState,
+    application: &mut A,
+    config: &AppConfig,
+    wake: &crate::AppWakeHandle,
+) -> Result<(FrameToken<'ctx>, bool), RunError> {
+    let UiState {
+        context,
+        platform,
+        #[cfg(feature = "implot")]
+        implot,
+        #[cfg(feature = "imnodes")]
+        imnodes,
+        #[cfg(feature = "implot3d")]
+        implot3d,
+        docking,
+        multi_viewport,
+    } = ui;
+
+    super::state::run_application_frame_boundary(
+        context,
+        ApplicationStage::PrepareFrame,
+        |context| {
+            let mut prepare_frame = PrepareFrameContext {
+                imgui: context,
+                window: &window.window,
+            };
+            application.prepare_frame(&mut prepare_frame)
+        },
+    )?;
+    super::state::validate_supported_imgui_config(context, *multi_viewport)?;
+    platform
+        .prepare_frame(context, &window.window)
+        .map_err(|error| super::state::platform_error("Winit frame preparation", error))?;
+    let mut exit_requested = false;
+    let frame = build_frame(context, |ui| {
+        draw_dockspace(ui, docking.flags, config)?;
+        let addons = AddOns {
+            #[cfg(feature = "implot")]
+            implot: implot.as_ref(),
+            #[cfg(feature = "imnodes")]
+            imnodes: imnodes.as_ref(),
+            #[cfg(feature = "implot3d")]
+            implot3d: implot3d.as_ref(),
+            docking: DockingApi {
+                controller: docking,
+            },
+        };
+        let mut frame = FrameContext {
+            ui,
+            addons,
+            gpu: generation.api(),
+            exit_requested: &mut exit_requested,
+            wake,
+        };
+        application
+            .frame(&mut frame)
+            .map_err(|error| error.during_application_stage(ApplicationStage::Frame))?;
+        platform
+            .prepare_render(ui, &window.window)
+            .map_err(|error| super::state::platform_error("Winit render preparation", error))?;
+        Ok(())
+    })?;
+    Ok((frame, exit_requested))
 }
 
 pub(super) fn build_frame<'ctx>(

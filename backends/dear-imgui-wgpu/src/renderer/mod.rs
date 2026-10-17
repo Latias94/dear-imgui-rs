@@ -16,7 +16,9 @@ mod lifecycle;
 mod render;
 
 mod draw;
+mod draw_source;
 mod external_textures;
+mod gpu;
 #[cfg(feature = "multi-viewport-winit")]
 pub mod multi_viewport;
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
@@ -30,11 +32,16 @@ mod multi_viewport_winit_adapter;
 mod pipeline;
 #[cfg(feature = "multi-viewport-sdl3")]
 mod sdl3_raw_window_handle;
+mod snapshot;
 
 use crate::{RendererError, RendererResult, Uniforms, WgpuBackendData, WgpuTextureManager};
 pub use core::WgpuRenderer;
 use dear_imgui_rs::render::{RendererRenderStateGuard, RendererRenderStateGuardError};
 pub use draw::FramebufferExtent;
+pub use snapshot::{
+    WgpuPreparedSnapshot, WgpuSnapshotError, WgpuSnapshotExecutor, WgpuSnapshotRenderer,
+    WgpuSnapshotReport, WgpuSnapshotSubmission, WgpuSnapshotTarget, WgpuSnapshotTargetRecording,
+};
 
 pub(super) fn map_renderer_render_state_error(
     error: RendererRenderStateGuardError,

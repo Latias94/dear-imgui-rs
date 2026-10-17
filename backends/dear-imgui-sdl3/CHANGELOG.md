@@ -6,6 +6,16 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Receive owned file-drop payloads with available coordinates and native target identity. [PR #93](https://github.com/Latias94/dear-imgui-rs/pull/93)
+- Configure secondary windows and query their state, supported policies, and lifecycle events.
+- Keep native windows and their owners alive while renderer work still needs them.
+
+### Fixed
+
+- Stop advertising native viewport parenting on Cocoa, where the upstream SDL adapter leaves it disabled so detached windows can move between monitors.
+
 ## [0.20.0] - 2026-10-12
 
 ### Changed

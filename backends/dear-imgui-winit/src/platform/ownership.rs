@@ -1,4 +1,5 @@
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::ffi::{c_char, c_void};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -13,7 +14,7 @@ use dear_imgui_rs::ContextPlatformWindowTeardown;
 use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentHandle, ContextAttachmentLease,
     ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding, ContextDestroyed,
-    ContextId, ContextTeardown,
+    ContextId, ContextTeardown, NativeWindowTarget,
 };
 use winit::window::Window;
 
@@ -36,8 +37,9 @@ pub(super) enum PlatformState {
 
 pub(super) const WINIT_BASE_FLAGS: BackendFlags = BackendFlags::HAS_MOUSE_CURSORS;
 #[cfg(all(feature = "multi-viewport", target_os = "windows"))]
-pub(crate) const WINIT_VIEWPORT_FLAGS: BackendFlags =
-    BackendFlags::PLATFORM_HAS_VIEWPORTS.union(BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT);
+pub(crate) const WINIT_VIEWPORT_FLAGS: BackendFlags = BackendFlags::PLATFORM_HAS_VIEWPORTS
+    .union(BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT)
+    .union(BackendFlags::HAS_PARENT_VIEWPORT);
 #[cfg(all(feature = "multi-viewport", not(target_os = "windows")))]
 pub(crate) const WINIT_VIEWPORT_FLAGS: BackendFlags = BackendFlags::PLATFORM_HAS_VIEWPORTS;
 #[cfg(not(feature = "multi-viewport"))]
@@ -113,13 +115,24 @@ pub(crate) struct WinitPlatformControl {
     pub(super) baseline_ime_callback: Cell<Option<SetImeDataCallback>>,
     pub(super) baseline_ime_user_data: Cell<*mut c_void>,
     pub(super) attached_window: RefCell<Option<Arc<Window>>>,
+    pub(super) attached_window_target: Cell<Option<NativeWindowTarget>>,
+    #[cfg(feature = "multi-viewport")]
+    pub(super) attached_window_render_state:
+        RefCell<Option<Rc<super::window_render_lease::WindowRenderState>>>,
+    pub(super) window_lifecycle_events: RefCell<VecDeque<super::WinitWindowLifecycleEvent>>,
+    #[cfg(feature = "multi-viewport")]
+    pub(super) viewport_window_config: RefCell<super::WinitViewportWindowConfig>,
+    #[cfg(feature = "multi-viewport")]
+    pub(super) viewport_window_configurator:
+        RefCell<Option<Rc<super::window_config::WindowConfigurator>>>,
     pub(super) ime_allowed: Cell<bool>,
     pub(super) active_touch: Cell<Option<u64>>,
+    pub(super) pointer_control: RefCell<Option<super::pointer_control::ActivePointerControl>>,
+    pub(super) pointer_release_events: RefCell<VecDeque<super::WinitPointerReleaseReport>>,
     pub(super) terminal_fault: RefCell<Option<WinitPlatformError>>,
     pub(super) attachment_handle: RefCell<Option<ContextAttachmentHandle>>,
     #[cfg(feature = "multi-viewport")]
     pub(super) runtime: RefCell<Option<Rc<crate::multi_viewport::RuntimeControl>>>,
-    #[cfg(feature = "multi-viewport")]
     pub(super) cursor_settings: Cell<Option<CursorSettings>>,
 }
 
@@ -175,13 +188,22 @@ impl WinitPlatformControl {
             baseline_ime_callback: Cell::new(baseline_ime_callback),
             baseline_ime_user_data: Cell::new(baseline_ime_user_data),
             attached_window: RefCell::new(None),
+            attached_window_target: Cell::new(None),
+            #[cfg(feature = "multi-viewport")]
+            attached_window_render_state: RefCell::new(None),
+            window_lifecycle_events: RefCell::new(VecDeque::new()),
+            #[cfg(feature = "multi-viewport")]
+            viewport_window_config: RefCell::new(super::WinitViewportWindowConfig::default()),
+            #[cfg(feature = "multi-viewport")]
+            viewport_window_configurator: RefCell::new(None),
             ime_allowed: Cell::new(false),
             active_touch: Cell::new(None),
+            pointer_control: RefCell::new(None),
+            pointer_release_events: RefCell::new(VecDeque::new()),
             terminal_fault: RefCell::new(None),
             attachment_handle: RefCell::new(None),
             #[cfg(feature = "multi-viewport")]
             runtime: RefCell::new(None),
-            #[cfg(feature = "multi-viewport")]
             cursor_settings: Cell::new(None),
         });
         let attachment = context.register_attachment::<WinitPlatformAttachmentMarker>(
@@ -456,6 +478,7 @@ impl WinitPlatformControl {
     }
 
     fn release_base_in_current_context(&self) -> Result<(), WinitPlatformError> {
+        self.release_pointer_control(super::WinitPointerReleaseReason::PlatformShutdown, None);
         let mut replaced = None;
         let owns_base_publication = self.owns_base_publication_in_current_context();
         unsafe {
@@ -526,6 +549,7 @@ impl WinitPlatformControl {
         if let Some(window) = self.attached_window.borrow_mut().take() {
             window.set_ime_allowed(false);
         }
+        self.retire_main_window_registration();
         replaced.map_or(Ok(()), |field| {
             Err(WinitPlatformError::PlatformStateReplaced { field })
         })
@@ -586,8 +610,11 @@ impl ContextAttachment for WinitPlatformControl {
     ) -> Result<(), ContextAttachmentTeardownError> {
         self.state.set(PlatformState::ShuttingDown);
         #[cfg(feature = "multi-viewport")]
-        if let Some(runtime) = self.runtime.borrow().as_ref() {
-            runtime.quiesce_from_platform();
+        {
+            let runtime = self.runtime.borrow().clone();
+            if let Some(runtime) = runtime {
+                runtime.quiesce_from_platform();
+            }
         }
         Ok(())
     }
@@ -597,8 +624,11 @@ impl ContextAttachment for WinitPlatformControl {
         context: &ContextTeardown<'_>,
     ) -> Result<(), ContextAttachmentTeardownError> {
         #[cfg(feature = "multi-viewport")]
-        if let Some(runtime) = self.runtime.borrow().as_ref() {
-            runtime.release_from_platform_teardown(context)?;
+        {
+            let runtime = self.runtime.borrow().clone();
+            if let Some(runtime) = runtime {
+                runtime.release_from_platform_teardown(context)?;
+            }
         }
         context
             .with_bound_context(|| self.release_base_in_current_context())
@@ -607,10 +637,14 @@ impl ContextAttachment for WinitPlatformControl {
 
     fn context_destroyed(&self, _context: ContextDestroyed) {
         #[cfg(feature = "multi-viewport")]
-        if let Some(runtime) = self.runtime.borrow_mut().take() {
-            runtime.context_destroyed_from_platform(_context);
+        {
+            let runtime = self.runtime.borrow_mut().take();
+            if let Some(runtime) = runtime {
+                runtime.context_destroyed_from_platform(_context);
+            }
         }
         self.attached_window.borrow_mut().take();
+        self.retire_main_window_registration();
         self.active_touch.set(None);
         unregister_platform_control(self.binding.id());
         self.attachment_handle.borrow_mut().take();
@@ -736,7 +770,10 @@ impl WinitPlatform {
         #[cfg(feature = "multi-viewport")]
         let pending_error = {
             let mut pending_error = None;
-            if let Some(runtime) = self.control.runtime.borrow().clone() {
+            // Native teardown may reenter the platform attachment and clear the installed
+            // generation. Retain the Rc, not the RefCell borrow, across that transaction.
+            let runtime = self.control.runtime.borrow().clone();
+            if let Some(runtime) = runtime {
                 if let Err(error) = runtime.shutdown_from_platform(_imgui_ctx) {
                     if !runtime.is_released() {
                         return Err(error);

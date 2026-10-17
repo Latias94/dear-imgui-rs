@@ -30,4 +30,5 @@ pub(super) struct ManagedWgpuTexture {
     pub(super) width: u32,
     pub(super) height: u32,
     pub(super) resource: OwnedWgpuTexture,
+    pub(super) rgba_pixels: Vec<u8>,
 }

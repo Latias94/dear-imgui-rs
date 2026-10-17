@@ -8,6 +8,22 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
+### Breaking Changes and Migration
+
+- Winit events now route by `WindowId` and return structured outcomes. WGPU viewport rendering separates recording, submission, and presentation; migrate combined loops to `complete_secondary` and `record_main`. See the [migration guide](docs/EDITOR_BACKEND_MIGRATION.md). [PR #93](https://github.com/Latias94/dear-imgui-rs/pull/93)
+
+### Added
+
+- Track native window lifetimes, configure secondary windows, and hand cursor control to engine tools.
+- Report which native windows recorded draws using each engine texture binding, alongside skipped windows and partial failures. Render detached snapshots on a worker thread.
+- Enable Dear App multi-viewport, background wakeups, frame deadlines, raw device input, and engine rendering before UI draws.
+- Receive owned SDL file drops, optionally use the system text clipboard, and preview depth, object-ID, HDR, layer, and mip textures in the new examples.
+
+### Fixed
+
+- Keep older recorded WGPU frames' managed texture contents intact when later frames update the same texture before submission.
+- Release touch input after focus loss, redraw Wait-mode applications after input, and release Surfaces before their Device during recovery and shutdown.
+
 ## [0.20.0] - 2026-10-12
 
 This release expands native backend integration and improves the examples used to build applications. It also updates the Bevy, SDL3, and glam integrations; review the migration notes before upgrading all workspace crates together.

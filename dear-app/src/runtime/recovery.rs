@@ -67,6 +67,11 @@ impl<G: OwnedGpuGeneration> RuntimeGenerations<G> {
         self.current.as_mut()
     }
 
+    #[cfg(feature = "multi-viewport")]
+    pub(crate) fn render_parts(&mut self) -> Option<(&mut G, &mut LifecycleMachine)> {
+        Some((self.current.as_mut()?, &mut self.lifecycle))
+    }
+
     pub(crate) fn current_generation(&self) -> Option<GpuGeneration> {
         self.current.as_ref().map(OwnedGpuGeneration::generation)
     }
@@ -227,7 +232,7 @@ mod tests {
         GenerationRelease, OwnedGpuGeneration, RecoveryEffects, RecoveryOutcome, RuntimeFactory,
         RuntimeGenerations,
     };
-    use crate::runtime::lifecycle::RuntimeState;
+    use crate::runtime::lifecycle::{LifecycleAction, RuntimeState, SurfaceEvent};
     use crate::{GpuGeneration, RunError};
 
     #[derive(Default)]
@@ -411,6 +416,67 @@ mod tests {
             fail_on: factory_failure,
         };
         (state, generations, environment, factory)
+    }
+
+    fn reject_main_surface(generations: &mut RuntimeGenerations<ProbeGeneration>) -> RunError {
+        use crate::runtime::admission::{
+            SurfaceAcquisition, SurfaceAdmissionBackend, admit_surface_frame,
+        };
+
+        struct ValidationAdmission<'a>(&'a mut RuntimeGenerations<ProbeGeneration>);
+        impl SurfaceAdmissionBackend for ValidationAdmission<'_> {
+            type Frame = ();
+            fn acquire(&mut self) -> SurfaceAcquisition<()> {
+                SurfaceAcquisition::Validation
+            }
+            fn record_event(&mut self, event: SurfaceEvent) -> LifecycleAction {
+                self.0.surface_event(event)
+            }
+            fn recover(&mut self, _: LifecycleAction) -> Result<(), RunError> {
+                panic!("surface validation must await GPU callback evidence before recovery")
+            }
+        }
+        admit_surface_frame(&mut ValidationAdmission(generations)).unwrap_err()
+    }
+
+    #[test]
+    fn main_surface_validation_can_recover_after_confirmed_device_loss() {
+        let (_, mut generations, mut environment, mut factory) = fixture(None, None);
+        assert!(matches!(
+            reject_main_surface(&mut generations),
+            RunError::SurfaceValidation
+        ));
+        assert_eq!(
+            generations.state(),
+            RuntimeState::Running(GpuGeneration::INITIAL)
+        );
+        assert_eq!(
+            generations.recover(GpuGeneration::INITIAL, &mut environment, &mut factory),
+            RecoveryOutcome::Recovered(GpuGeneration(1)),
+        );
+        assert_eq!(generations.state(), RuntimeState::Running(GpuGeneration(1)));
+        assert!(generations.terminal_error().is_none());
+        generations.shutdown(&mut environment).unwrap();
+    }
+
+    #[test]
+    fn main_surface_validation_without_loss_commits_terminal_failure() {
+        let (state, mut generations, mut environment, mut factory) = fixture(None, None);
+        let error = reject_main_surface(&mut generations);
+        // This is the runner's no-loss branch after polling the exact generation's callbacks.
+        generations.fail(error);
+        assert_eq!(generations.state(), RuntimeState::Failed);
+        assert!(matches!(
+            generations.terminal_error(),
+            Some(RunError::SurfaceValidation)
+        ));
+        assert_eq!(
+            generations.recover(GpuGeneration::INITIAL, &mut environment, &mut factory),
+            RecoveryOutcome::Ignored,
+        );
+        assert_eq!(state.borrow().alive_generations, BTreeSet::from([0]));
+        assert!(state.borrow().events.is_empty());
+        generations.shutdown(&mut environment).unwrap();
     }
 
     #[test]

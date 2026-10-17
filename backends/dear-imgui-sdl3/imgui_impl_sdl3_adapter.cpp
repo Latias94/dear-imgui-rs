@@ -26,6 +26,7 @@ int DearImguiSdl3FrameCountForBackend() {
 #define SDL_GL_MakeCurrent dear_imgui_sdl3_hook_gl_make_current
 #define SDL_GL_SetSwapInterval dear_imgui_sdl3_hook_gl_set_swap_interval
 #define SDL_GL_SwapWindow dear_imgui_sdl3_hook_gl_swap_window
+#define SDL_CreateWindow dear_imgui_sdl3_hook_create_window
 #define ImGui_ImplSDL3_NewFrame ImGui_ImplSDL3_NewFrame_Upstream
 #define GetFrameCount() DearImguiSdl3FrameCountForBackend()
 
@@ -33,6 +34,7 @@ int DearImguiSdl3FrameCountForBackend() {
 
 #undef GetFrameCount
 #undef ImGui_ImplSDL3_NewFrame
+#undef SDL_CreateWindow
 #undef SDL_GL_SwapWindow
 #undef SDL_GL_SetSwapInterval
 #undef SDL_GL_MakeCurrent
@@ -61,4 +63,32 @@ extern "C" bool dear_imgui_sdl3_mouse_leave_due_for_test(
     int buttons_down
 ) {
     return dear_imgui_sdl3_mouse_leave_due(pending_frame, current_frame, buttons_down);
+}
+
+extern "C" bool dear_imgui_sdl3_is_native_destroy_callback(void (*callback)(ImGuiViewport*)) {
+    return callback == ImGui_ImplSDL3_DestroyWindow;
+}
+
+extern "C" bool dear_imgui_sdl3_detach_leased_window(
+    ImGuiViewport* viewport, SDL_Window* expected_window, SDL_GLContext* retained_context
+) {
+    if (viewport == nullptr || retained_context == nullptr)
+        return false;
+    auto* data = static_cast<ImGui_ImplSDL3_ViewportData*>(viewport->PlatformUserData);
+    if (data == nullptr || !data->WindowOwned || data->Window != expected_window)
+        return false;
+    *retained_context = data->GLContext;
+    // Release ImGui-allocated sidecar memory while its Context/allocator contract is still live.
+    // Native resources transfer to the exact Rust allocation pin and no longer need a Context.
+    data->WindowOwned = false;
+    ImGui_ImplSDL3_DestroyWindow(viewport);
+    viewport->PlatformHandleRaw = nullptr;
+    return true;
+}
+
+extern "C" void dear_imgui_sdl3_destroy_leased_window(SDL_Window* window, SDL_GLContext context) {
+    if (context != nullptr)
+        SDL_GL_DestroyContext(context);
+    if (window != nullptr)
+        SDL_DestroyWindow(window);
 }

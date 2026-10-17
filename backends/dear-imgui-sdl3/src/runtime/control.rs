@@ -48,6 +48,13 @@ impl RuntimeControl {
             ))]
             renderer_textures: RefCell::new(RendererTextureStore::default()),
             owned_viewports: RefCell::new(HashMap::new()),
+            host_window: RefCell::new(None),
+            secondary_window_config: RefCell::new(Sdl3WindowConfig::default()),
+            secondary_window_configurator: RefCell::new(None),
+            window_lifecycle_events: RefCell::new(Vec::new()),
+            callback_window_targets: std::sync::Arc::new(
+                crate::callback_events::CallbackWindowTargets::default(),
+            ),
             owned_renderer_viewports: RefCell::new(HashMap::new()),
             deferred_platform_viewports: RefCell::new(HashMap::new()),
             deferred_renderer_viewports: RefCell::new(HashMap::new()),
@@ -199,7 +206,10 @@ impl RuntimeControl {
         (live == viewport && !live.is_null()).then_some(live)
     }
 
-    fn viewport_key(&self, viewport: *mut sys::ImGuiViewport) -> Option<ViewportLeaseKey> {
+    pub(super) fn viewport_key(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+    ) -> Option<ViewportLeaseKey> {
         let generation = self.platform_session_generation()?;
         let live = self.resolve_live_viewport(viewport)?;
         Some(ViewportLeaseKey {
@@ -496,7 +506,8 @@ impl RuntimeControl {
         };
         unregister_runtime(self.platform_io_key.replace(0));
         self.callbacks.borrow_mut().take();
-        self.owned_viewports.borrow_mut().clear();
+        self.retire_all_windows(Sdl3WindowRetirementReason::BackendShutdown);
+        self.host_window.borrow_mut().take();
         self.failed_viewports.borrow_mut().clear();
         if let Some(renderer_restore) = renderer_restore {
             self.renderer_shutdown_restore
@@ -973,10 +984,21 @@ impl RuntimeControl {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn remember_owned_viewport(
         &self,
         viewport: *mut sys::ImGuiViewport,
         state: ViewportPlatformState,
+    ) {
+        let instance_id = NativeWindowInstanceId::allocate(self.binding.id()).unwrap();
+        self.remember_owned_viewport_with_instance(viewport, state, instance_id);
+    }
+
+    pub(crate) fn remember_owned_viewport_with_instance(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+        state: ViewportPlatformState,
+        instance_id: NativeWindowInstanceId,
     ) {
         let Some(key) = self.viewport_key(viewport).or_else(|| {
             #[cfg(test)]
@@ -990,9 +1012,33 @@ impl RuntimeControl {
         }) else {
             return;
         };
-        self.owned_viewports
-            .borrow_mut()
-            .insert(viewport as usize, OwnedViewportLease { key, state });
+        let window_address = state
+            .sdl_window_id()
+            .map(|id| unsafe {
+                sdl3_sys::video::SDL_GetWindowFromID(sdl3_sys::video::SDL_WindowID(id))
+            } as usize)
+            .unwrap_or(0);
+        let native_allocation = self.host_window.borrow().as_ref().map(|host| {
+            Rc::new(NativeWindowAllocation::new(
+                window_address as *mut sdl3_sys::video::SDL_Window,
+                host.clone(),
+                viewport == unsafe { sys::igGetMainViewport() },
+            ))
+        });
+        let replaced = self.owned_viewports.borrow_mut().insert(
+            viewport as usize,
+            OwnedViewportLease {
+                key,
+                state,
+                instance_id,
+                window_address,
+                last_snapshot: None,
+                native_allocation,
+            },
+        );
+        if let Some(replaced) = replaced {
+            self.retire_window_lease(replaced, Sdl3WindowRetirementReason::OwnershipLost);
+        }
     }
 
     pub(crate) fn take_owned_viewport(
@@ -1003,9 +1049,11 @@ impl RuntimeControl {
         let actual = unsafe { self.capture_viewport_platform_state(viewport) }?;
         let address = viewport as usize;
         let mut owned = self.owned_viewports.borrow_mut();
-        let lease = owned.get(&address).copied()?;
+        let lease = owned.get(&address).cloned()?;
         if !lease.key.same_identity(key) {
             owned.remove(&address);
+            drop(owned);
+            self.retire_window_lease(lease, Sdl3WindowRetirementReason::OwnershipLost);
             return None;
         }
         if lease.key.id != key.id && lease.state != actual {
@@ -1013,9 +1061,16 @@ impl RuntimeControl {
             // numeric ID. Docking may mutate an ID in place, but only an exact sidecar match proves
             // that the lease still belongs to that live viewport rather than a reused allocation.
             owned.remove(&address);
+            drop(owned);
+            self.retire_window_lease(lease, Sdl3WindowRetirementReason::OwnershipLost);
             return None;
         }
-        owned.remove(&address).map(|lease| lease.state)
+        let mut lease = owned.remove(&address)?;
+        lease.key.id = key.id;
+        drop(owned);
+        let state = lease.state;
+        self.retire_window_lease(lease, Sdl3WindowRetirementReason::WindowCallback);
+        Some(state)
     }
 
     pub(crate) fn inspect_owned_viewport(
@@ -1027,7 +1082,9 @@ impl RuntimeControl {
         let mut owned = self.owned_viewports.borrow_mut();
         let lease = owned.get_mut(&address)?;
         if !lease.key.same_identity(key) {
-            owned.remove(&address);
+            let lease = owned.remove(&address)?;
+            drop(owned);
+            self.retire_window_lease(lease, Sdl3WindowRetirementReason::OwnershipLost);
             return None;
         }
         let expected = lease.state;
@@ -1221,7 +1278,7 @@ impl RuntimeControl {
         });
     }
 
-    fn record_fault(&self, fault: RuntimeFault) {
+    pub(super) fn record_fault(&self, fault: RuntimeFault) {
         self.faults.borrow_mut().push_back(fault);
     }
 
@@ -1334,6 +1391,10 @@ impl RuntimeControl {
         self.record_fault(RuntimeFault::ViewportCreationFailed);
     }
 
+    pub(crate) fn record_native_window_identity_exhausted(&self) {
+        self.record_fault(RuntimeFault::NativeWindowIdentityExhausted);
+    }
+
     pub(crate) fn record_native_faults(&self, faults: u64, first_fault: u64) {
         const GL_SHARE_CAPTURE: u64 = 1 << 0;
         const GL_SHARE_SET: u64 = 1 << 1;
@@ -1438,7 +1499,8 @@ impl RuntimeControl {
         self.renderer_shutdown_restore.borrow_mut().take();
         self.renderer_consumer.borrow_mut().take();
         self.release_platform_session();
-        self.owned_viewports.borrow_mut().clear();
+        self.retire_all_windows(Sdl3WindowRetirementReason::ContextDestroyed);
+        self.host_window.borrow_mut().take();
         self.owned_renderer_viewports.borrow_mut().clear();
         self.deferred_platform_viewports.borrow_mut().clear();
         self.deferred_renderer_viewports.borrow_mut().clear();

@@ -16,6 +16,86 @@ See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob
 
 ## Quick Start
 
+### Native window registration queries
+
+`window_snapshots()` observes the main window and every live secondary registration, including
+hidden viewports. `window_snapshot(window_id)` resolves Winit event routing, while
+`window_snapshot_for_instance(instance_id)` resolves one exact native registration.
+
+```rust,no_run
+# use dear_imgui_winit::{WinitPlatform, WinitPlatformError};
+# fn inspect_windows(platform: &WinitPlatform) -> Result<(), WinitPlatformError> {
+for snapshot in platform.window_snapshots()? {
+    let registration = snapshot.target.instance_id;
+    let current_viewport = snapshot.target.viewport_id;
+    platform.with_window(registration, |window| {
+        window.request_redraw();
+    })?;
+    // Store snapshot in history without retaining the native Window.
+    let _ = (snapshot, current_viewport);
+}
+# Ok(())
+# }
+```
+
+The registration identity survives viewport routing-ID changes and main-window multi-viewport
+enable/disable cycles. Detach/reattach creates a new identity, even for the same host window.
+Logical editor viewports may survive native-window replacement, so keep their identity separate.
+Snapshots own only metadata and do not extend window or Context lifetimes. `with_window` validates
+the current owner and lends the native window for one closure; its borrow cannot escape.
+Queries never drain deferred callback faults.
+
+### Secondary creation policy and native observations
+
+With `multi-viewport`, install `WinitViewportWindowConfig` before creating secondary windows:
+
+```rust,no_run
+# use dear_imgui_winit::{WinitPlatform, WinitPlatformError, WinitViewportWindowConfig};
+# use winit::{dpi::PhysicalSize, window::Theme};
+# fn configure(platform: &mut WinitPlatform) -> Result<(), WinitPlatformError> {
+platform.set_viewport_window_config(WinitViewportWindowConfig {
+    min_inner_size: Some(PhysicalSize::new(320, 180)),
+    max_inner_size: Some(PhysicalSize::new(3840, 2160)),
+    theme: Some(Theme::Dark),
+    ..Default::default()
+})?;
+platform.set_viewport_window_configurator(|info, config| {
+    // Tailor a future registration using detached viewport and native-owner metadata.
+    let _ = info.target;
+    config.resizable = true;
+    Ok(())
+})?;
+# Ok(())
+# }
+```
+
+The bounded policy supports icon, physical client-size limits, theme, resizability and native
+transparency. It cannot replace backend geometry, hidden initial visibility, native sidecars or
+owner pointers. Policy changes affect future windows. Invalid limits and configurator errors
+reject creation before native allocation; configurator panics are contained at the callback
+boundary. A reserved instance identity is never reused after failure.
+
+`drain_window_lifecycle_events()` returns `Created(snapshot)` after publication and
+`Retired(target)` once when registry access ends. Main-window MV toggles and routing-ID remaps
+emit no additional registration events. Retirement does not imply that GPU work or a retained
+renderer window lease has finished. Drain this metadata queue regularly; callback faults have a
+separate queue.
+
+Snapshots include `native_state` and `capabilities`. Optional native state stays `None` when
+Winit cannot query it; requested transparency and icon settings are never presented as observed
+native facts. Policy support distinguishes `Dynamic`, `CreationOnly`, and `Unsupported`.
+X11 transparency is creation-only, and its visibility/theme/resizability observations remain
+unknown where Winit lacks native queries. Wayland desktop positioning and secondary viewports
+remain unsupported.
+
+Windows applies Dear ImGui `ParentViewportId` using top-level native ownership, including
+dynamic owner changes, and advertises `HAS_PARENT_VIEWPORT`. An unresolved parent viewport hint
+means no native owner; live parents require valid registrations, and owner cycles are rejected.
+Renderer work using an owned window must retain its owner chain until presentation/discard.
+macOS/X11 report native owner policy as unsupported and leave all `ParentViewportId` hints
+unapplied, including explicit WindowClass hints and popup parent chains.
+Per-window icons are unsupported on macOS.
+
 Minimal flow with winit 0.30 ApplicationHandler-style loops:
 
 ```rust,no_run
@@ -33,7 +113,7 @@ impl winit::application::ApplicationHandler for App {
         // 1) forward the window-local event to ImGui
         self.imgui
             .platform
-            .handle_window_event(&mut self.imgui.context, &window, &event)
+            .handle_window_event(&mut self.imgui.context, window.id(), &event)
             .expect("Winit platform contract changed");
 
         match event {
@@ -78,10 +158,48 @@ APIs of interest:
 - `WinitPlatform::new(&mut Context) -> Result<WinitPlatform, WinitPlatformError>`
 - `WinitPlatform::attach_window(Arc<Window>, HiDpiMode, &mut Context) -> Result<(), WinitPlatformError>` — the platform retains the exact shared window allocation until detach or Context teardown, so IME callbacks cannot outlive it
 - `WinitPlatform::set_hidpi_mode(HiDpiMode) -> Result<(), WinitPlatformError>` — configure primary-window scaling before attaching multi-viewport support
-- `WinitPlatform::handle_window_event(&mut Context, &Window, &WindowEvent) -> Result<bool, WinitPlatformError>` — for `ApplicationHandler::window_event`
-- `WinitPlatform::handle_event(&mut Context, &Window, &Event<T>) -> Result<bool, WinitPlatformError>` — for closure-style `EventLoop::run`; events for another `WindowId` return `Ok(false)` without being dispatched
+- `WinitPlatform::handle_window_event(&mut Context, WindowId, &WindowEvent) -> Result<WinitEventOutcome, WinitPlatformError>` — routes `ApplicationHandler::window_event` directly by its native identifier
+- `WinitPlatform::handle_event(&mut Context, &Event<T>) -> Result<WinitEventOutcome, WinitPlatformError>` — routes full events; foreign identifiers and raw device events return an unowned outcome
 - `WinitPlatform::prepare_frame(&mut Context, &Window) -> Result<(), WinitPlatformError>` — updates timing and native platform state before `Context::frame`
 - `WinitPlatform::prepare_render(&Ui, &Window) -> Result<(), WinitPlatformError>` — updates OS cursor and IME state after UI construction
+
+### Engine event routing and pointer ownership
+
+`WinitEventOutcome` separates the exact native `target`, input streams actually `forwarded`,
+the previous UI frame's `capture` intent, `needs_frame`, and native `platform_action`.
+Secondary close is an explicit `ViewportCloseRequested` action; main close remains a host
+decision. Text without a mapped Dear ImGui key still reports text forwarding. Capture intent
+never means that a particular event was consumed.
+
+An engine should select a key/button recipient on press, retain it across capture-intent
+changes, and send the matching release to that recipient. Focus loss should clear engine-held
+inputs. The `wgpu_rtt_gameview` example demonstrates this policy for its embedded image and
+routes raw `DeviceEvent::MouseMotion` only while its camera owns the pointer.
+
+```rust,no_run
+# use dear_imgui_winit::{WinitPlatform, WinitPlatformError, WinitPointerRequest};
+# use dear_imgui_rs::NativeWindowInstanceId;
+# fn capture(platform: &mut WinitPlatform, instance: NativeWindowInstanceId) -> Result<(), WinitPlatformError> {
+let report = platform.request_pointer_control(instance, WinitPointerRequest::default())?;
+if let Some(mode) = report.granted {
+    println!("Native pointer mode: {mode:?}");
+} else {
+    eprintln!("Grab attempts failed: {:?}; reset: {:?}", report.failures, report.cleanup_error);
+}
+platform.cancel_pointer_control();
+# Ok(())
+# }
+```
+
+Requests name an exact native registration. The report preserves every failed preferred mode
+before a successful fallback. A failed request attempts to reset native grabbing, reports any
+reset error, and leaves backend cursor control enabled. While granted, backend cursor shape/visibility and single-window cursor warping
+skip that window; other viewports retain normal cursor behavior. The existing
+`NO_MOUSE_CURSOR_CHANGE` setting is preserved. Escape, focus loss, close, native destruction,
+retirement and platform shutdown end ownership and restore the latest backend cursor settings.
+When native cursor visibility was host-managed, `fallback_restore_visible` explicitly chooses
+the restore value because Winit cannot query that previous state. Release reports, including
+unconfirmed native ungrab errors, are available through `drain_pointer_release_events()`.
 - `WinitPlatform::detach_window(&mut Context) -> Result<Arc<Window>, WinitPlatformError>` — clears winit-owned IME hooks before a window is destroyed while the context remains alive
 
 ## DPI / HiDPI
@@ -114,9 +232,8 @@ coordinates ImGui uses:
   is present on key press, characters are injected via `io.add_input_character`.
   Coverage includes letters/digits, punctuation (',.-/;=[]\\`), function and lock keys,
   and numpad (0-9, decimal/divide/multiply/subtract/add/equal/enter).
-- Mouse: buttons, position, wheel. `PixelDelta` wheel is mapped to ±1.0 steps
-  (consistent with most ImGui backends); `LineDelta` uses the provided values.
-- Modifiers: tracked via `ModifiersChanged` and mirrored into left/right variants.
+- Mouse: buttons, position, wheel. `PixelDelta` retains fractional movement after scaling to logical scroll units; `LineDelta` uses the provided values.
+- Modifiers: `ModifiersChanged` updates aggregate modifier state; physical key events preserve left/right identity.
 - IME: preedit is ignored (no transient injection); committed text is appended.
 
 ### Touch
@@ -124,6 +241,7 @@ coordinates ImGui uses:
 Basic touch-to-mouse translation is provided:
 - First active finger controls the pointer and Left mouse button.
 - Started -> set position + press LMB; Moved -> update position; End/Cancelled -> release LMB.
+- Losing window focus releases the active touch, so a missing End/Cancelled event cannot block a later finger.
 
 ### IME integration
 

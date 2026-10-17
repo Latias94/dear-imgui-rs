@@ -195,6 +195,7 @@ impl<R> WinitViewportAttempt<R> {
 /// This is implementation plumbing between published backend crates, not a second platform
 /// lifecycle owner. Applications continue to own and use [`crate::WinitPlatform`].
 #[doc(hidden)]
+#[derive(Clone)]
 pub struct WinitViewportRendererAdapter {
     control: Rc<RuntimeControl>,
     platform: Rc<WinitPlatformControl>,
@@ -820,7 +821,7 @@ impl RuntimeControl {
         window_id: WindowId,
         focused: bool,
         context: &mut Context,
-    ) {
+    ) -> bool {
         let mut platform_focus = self.platform_focus.get();
         platform_focus.note_native_event(focused);
         self.platform_focus.set(platform_focus);
@@ -830,6 +831,9 @@ impl RuntimeControl {
             .note_window_focus(window_id, focused)
         {
             context.io_mut().add_focus_event(true);
+            true
+        } else {
+            false
         }
     }
 
@@ -901,8 +905,11 @@ impl RuntimeControl {
     }
 
     pub(crate) fn apply_cursor_settings(&self, settings: CursorSettings) {
+        let Ok(platform) = self.platform_control() else {
+            return;
+        };
         for window in secondary_viewport_windows(self) {
-            settings.apply(&window);
+            platform.apply_cursor_settings_to_window(settings, &window);
         }
     }
 

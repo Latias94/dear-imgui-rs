@@ -2040,7 +2040,7 @@ impl<S: RuntimeScenario> ApplicationHandler for App<S> {
         let ImguiState {
             platform, context, ..
         } = &mut *app.imgui;
-        if let Err(error) = platform.handle_event(context, &app.window, &full) {
+        if let Err(error) = platform.handle_event(context, &full) {
             error!("Winit platform event error: {error}");
             self.error = Some(error.to_string());
             event_loop.exit();

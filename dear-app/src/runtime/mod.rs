@@ -1,7 +1,10 @@
 mod admission;
 mod lifecycle;
+#[cfg(feature = "multi-viewport")]
+mod multi_viewport;
 mod ownership;
 mod recovery;
+pub(crate) mod renderer;
 mod runner;
 #[cfg(test)]
 mod runner_tests;
@@ -10,6 +13,7 @@ mod state;
 mod surface;
 
 pub(crate) use runner::run;
+pub(crate) use state::RuntimeEvent;
 
 #[cfg(test)]
 pub(crate) fn imgui_test_guard() -> std::sync::MutexGuard<'static, ()> {

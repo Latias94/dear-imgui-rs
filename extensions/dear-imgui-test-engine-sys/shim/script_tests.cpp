@@ -399,11 +399,17 @@ static void script_test_func_impl(ImGuiTestContext* ctx) {
                     report_script_error("item_make_visible", "item or its window was not found");
                     return;
                 }
-                ctx->ItemMakeVisible(item.ID, ImGuiTestOpFlags_NoAutoOpenFullPath);
+                ctx->ScrollToItem(item.ID, ImGuiAxis_X);
+                ctx->ScrollToItem(item.ID, ImGuiAxis_Y);
                 break;
             }
             case ImGuiTestEngineScript::CmdKind::ItemDragToPos:
-                ctx->ItemDragToPos(cmd.A.c_str(), ImVec2(cmd.F, cmd.G));
+                ctx->MouseMove(cmd.A.c_str());
+                ctx->SleepStandard();
+                ctx->MouseDown(ImGuiMouseButton_Left);
+                ctx->MouseMoveToPos(ImVec2(cmd.F, cmd.G));
+                ctx->SleepStandard();
+                ctx->MouseUp(ImGuiMouseButton_Left);
                 break;
             case ImGuiTestEngineScript::CmdKind::ScrollToX:
                 ctx->ScrollToX(cmd.A.c_str(), cmd.F);

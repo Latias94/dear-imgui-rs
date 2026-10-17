@@ -61,6 +61,7 @@ struct DearImguiSdl3NativeTransaction {
     bool active = false;
     DearImguiSdl3NativePhase phase = DEAR_IMGUI_SDL3_PHASE_PLATFORM_CREATE;
     bool expects_opengl = false;
+    bool transparent_window = false;
     bool match_main_swap_interval = false;
     int explicit_swap_interval = 0;
     int resolved_swap_interval = 0;
@@ -291,6 +292,29 @@ void dear_imgui_sdl3_backend_clear_platform_monitors() {
 }
 
 #if defined(DEAR_IMGUI_SDL3_NATIVE_SELF_TEST)
+ImGuiViewport* dear_imgui_sdl3_create_live_viewport_for_test(unsigned int id) {
+    ImGuiViewportP* viewport = IM_NEW(ImGuiViewportP)();
+    viewport->ID = id;
+    viewport->Pos = ImVec2(24.0f, 24.0f);
+    viewport->Size = ImVec2(80.0f, 60.0f);
+    viewport->ParentViewport = ImGui::GetMainViewport();
+    viewport->Idx = GImGui->Viewports.Size;
+    GImGui->Viewports.push_back(viewport);
+    return viewport;
+}
+
+void dear_imgui_sdl3_delete_live_viewport_for_test(ImGuiViewport* viewport) {
+    if (viewport->PlatformUserData != nullptr && ImGui::GetPlatformIO().Platform_DestroyWindow)
+        ImGui::GetPlatformIO().Platform_DestroyWindow(viewport);
+    for (int index = 1; index < GImGui->Viewports.Size; ++index) {
+        if (GImGui->Viewports[index] == viewport) {
+            GImGui->Viewports.erase(GImGui->Viewports.Data + index);
+            break;
+        }
+    }
+    IM_DELETE(static_cast<ImGuiViewportP*>(viewport));
+}
+
 void dear_imgui_sdl3_destroy_platform_windows_for_test(ImGuiViewportP* viewport) {
     IM_ASSERT(viewport != nullptr);
     ImGuiContext& context = *GImGui;
@@ -368,6 +392,26 @@ std::uint64_t dear_imgui_sdl3_native_end(std::uint64_t* first_fault) {
         *first_fault = state.first_fault;
     state = {};
     return faults;
+}
+
+bool dear_imgui_sdl3_native_set_window_transparent(bool transparent) {
+    if (!native_transaction.active
+        || native_transaction.phase != DEAR_IMGUI_SDL3_PHASE_PLATFORM_CREATE)
+        return false;
+    native_transaction.transparent_window = transparent;
+    return true;
+}
+
+SDL_Window* SDLCALL dear_imgui_sdl3_hook_create_window(
+    const char* title, int width, int height, SDL_WindowFlags flags
+) {
+    // Applications can only add transparent backing. Geometry, initial hidden state, graphics
+    // API, DPI, decoration and taskbar flags stay under the backend's ownership.
+    if (native_transaction.active
+        && native_transaction.phase == DEAR_IMGUI_SDL3_PHASE_PLATFORM_CREATE
+        && native_transaction.transparent_window)
+        flags |= SDL_WINDOW_TRANSPARENT;
+    return SDL_CreateWindow(title, width, height, flags);
 }
 
 #if defined(DEAR_IMGUI_SDL3_NATIVE_SELF_TEST)

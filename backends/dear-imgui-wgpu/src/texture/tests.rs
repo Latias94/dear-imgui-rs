@@ -6,7 +6,7 @@ use dear_imgui_rs::{
     texture::{OwnedTextureData, TextureFormat},
 };
 
-fn request_test_device() -> Option<(Device, Queue)> {
+pub(crate) fn request_test_device() -> Option<(Device, Queue)> {
     #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
     let instance = Instance::new(&InstanceDescriptor::default());
     #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
@@ -20,8 +20,105 @@ fn request_test_device() -> Option<(Device, Queue)> {
     };
     let adapter = request_adapter(true)
         .or_else(|_| request_adapter(false))
-        .ok()?;
-    pollster::block_on(adapter.request_device(&DeviceDescriptor::default())).ok()
+        .ok();
+    let result = adapter.and_then(|adapter| {
+        pollster::block_on(adapter.request_device(&DeviceDescriptor::default())).ok()
+    });
+    assert!(
+        result.is_some() || std::env::var_os("DEAR_IMGUI_REQUIRE_WGPU_ADAPTER").is_none(),
+        "the WGPU texture and dependency gates require a working headless adapter"
+    );
+    result
+}
+
+pub(crate) fn external_test_texture(device: &Device) -> (Texture, TextureView) {
+    let texture = device.create_texture(&TextureDescriptor {
+        label: Some("external texture binding test"),
+        size: Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&TextureViewDescriptor::default());
+    (texture, view)
+}
+
+#[test]
+fn external_texture_binding_revisions_track_view_replacements() -> RendererResult<()> {
+    let Some((device, _queue)) = request_test_device() else {
+        return Ok(());
+    };
+    let (_first_texture, first_view) = external_test_texture(&device);
+    let (_second_texture, second_view) = external_test_texture(&device);
+    let mut manager = WgpuTextureManager::new();
+    let texture = manager.register_external_view(&first_view)?;
+    let original = manager.external_binding(texture.texture_id()).unwrap();
+    assert_eq!(original.revision, NonZeroU64::MIN);
+
+    manager.update_external_view(texture, &second_view)?;
+    let replacement = manager.external_binding(texture.texture_id()).unwrap();
+    assert_eq!(replacement.texture, original.texture);
+    assert_eq!(replacement.revision.get(), 2);
+    assert_eq!(
+        manager.texture_view(texture.texture_id()),
+        Some(&second_view)
+    );
+    assert_eq!(
+        original.revision.get(),
+        1,
+        "captured metadata must remain frozen"
+    );
+
+    manager.update_external_view(texture, &second_view)?;
+    assert_eq!(
+        manager
+            .external_binding(texture.texture_id())
+            .unwrap()
+            .revision
+            .get(),
+        3
+    );
+    manager.remove_external_view(texture)?;
+    assert!(manager.external_binding(texture.texture_id()).is_none());
+    Ok(())
+}
+
+#[test]
+fn exhausted_external_binding_revision_preserves_the_previous_view() -> RendererResult<()> {
+    let Some((device, _queue)) = request_test_device() else {
+        return Ok(());
+    };
+    let (_first_texture, first_view) = external_test_texture(&device);
+    let (_second_texture, second_view) = external_test_texture(&device);
+    let mut manager = WgpuTextureManager::new();
+    let texture = manager.register_external_view(&first_view)?;
+    manager
+        .external_views
+        .get_mut(&texture.texture_id())
+        .unwrap()
+        .revision = NonZeroU64::MAX;
+    let previous = manager.external_binding(texture.texture_id()).unwrap();
+
+    assert!(matches!(
+        manager.update_external_view(texture, &second_view),
+        Err(RendererError::ExternalTextureRevisionExhausted(id)) if id == texture.texture_id()
+    ));
+    assert_eq!(
+        manager.external_binding(texture.texture_id()),
+        Some(previous)
+    );
+    assert_eq!(
+        manager.texture_view(texture.texture_id()),
+        Some(&first_view)
+    );
+    Ok(())
 }
 
 fn managed_texture_id(context: &mut Context) -> SnapshotTextureId {
@@ -37,6 +134,127 @@ fn create_operation() -> TextureOp {
         row_pitch: 8,
         pixels: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
     }
+}
+
+#[test]
+fn managed_content_replacements_keep_ids_and_reject_invalid_candidates_atomically()
+-> RendererResult<()> {
+    let (device, queue) =
+        request_test_device().expect("managed content versions require an adapter");
+    let mut context = Context::create();
+    let id = managed_texture_id(&mut context);
+    let mut manager = WgpuTextureManager::new();
+    let mut render_resources = RenderResources::new();
+    render_resources.initialize(&device)?;
+    let ManagedRequestOutcome::Uploaded(texture_id) = manager.apply_managed_request(
+        id,
+        &create_operation(),
+        &device,
+        &queue,
+        &mut render_resources,
+    )?
+    else {
+        panic!("create request must upload");
+    };
+    let first_view = manager.texture_view(texture_id).unwrap().clone();
+    render_resources.get_or_create_image_bind_group(&device, texture_id, &first_view)?;
+
+    let replacement = TextureOp::Create {
+        format: TextureFormat::RGBA32,
+        width: 2,
+        height: 2,
+        row_pitch: 8,
+        pixels: vec![17; 16],
+    };
+    assert_eq!(
+        manager.apply_managed_request(id, &replacement, &device, &queue, &mut render_resources)?,
+        ManagedRequestOutcome::Uploaded(texture_id)
+    );
+    let replacement_view = manager.texture_view(texture_id).unwrap().clone();
+    assert_ne!(replacement_view, first_view);
+    assert!(!render_resources.image_bind_groups.contains_key(&texture_id));
+    assert_eq!(manager.managed_textures[&id].rgba_pixels, [17; 16]);
+    let replacement_binding = render_resources
+        .get_or_create_image_bind_group(&device, texture_id, &replacement_view)?
+        .clone();
+
+    let invalid_update = TextureOp::Update {
+        format: TextureFormat::RGBA32,
+        width: 2,
+        height: 2,
+        rects: vec![
+            TextureUploadRect {
+                rect: TextureRect {
+                    x: 0,
+                    y: 0,
+                    w: 1,
+                    h: 1,
+                },
+                row_pitch: 4,
+                data: vec![1, 2, 3, 4],
+            },
+            TextureUploadRect {
+                rect: TextureRect {
+                    x: 1,
+                    y: 1,
+                    w: 1,
+                    h: 1,
+                },
+                row_pitch: 4,
+                data: vec![5; 3],
+            },
+        ],
+    };
+    let invalid_create = TextureOp::Create {
+        format: TextureFormat::RGBA32,
+        width: 2,
+        height: 2,
+        row_pitch: 8,
+        pixels: vec![0; 15],
+    };
+    for invalid in [&invalid_update, &invalid_create] {
+        assert!(matches!(
+            manager.apply_managed_request(id, invalid, &device, &queue, &mut render_resources),
+            Err(RendererError::BadTexture(_))
+        ));
+        assert_eq!(manager.managed_texture_id(id), Some(texture_id));
+        assert_eq!(manager.texture_view(texture_id), Some(&replacement_view));
+        assert_eq!(manager.managed_textures[&id].rgba_pixels, [17; 16]);
+        assert_eq!(
+            render_resources.image_bind_groups.get(&texture_id),
+            Some(&replacement_binding)
+        );
+    }
+
+    let patch = TextureOp::Update {
+        format: TextureFormat::Alpha8,
+        width: 2,
+        height: 2,
+        rects: vec![TextureUploadRect {
+            rect: TextureRect {
+                x: 1,
+                y: 1,
+                w: 1,
+                h: 1,
+            },
+            row_pitch: 1,
+            data: vec![91],
+        }],
+    };
+    assert_eq!(
+        manager.apply_managed_request(id, &patch, &device, &queue, &mut render_resources)?,
+        ManagedRequestOutcome::Uploaded(texture_id)
+    );
+    assert_ne!(manager.texture_view(texture_id), Some(&replacement_view));
+    assert_eq!(
+        manager.managed_textures[&id].rgba_pixels,
+        [
+            17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 17, 255, 255, 255, 91
+        ]
+    );
+    assert!(!render_resources.image_bind_groups.contains_key(&texture_id));
+    assert_eq!(manager.managed_texture_count(), 1);
+    Ok(())
 }
 
 #[test]

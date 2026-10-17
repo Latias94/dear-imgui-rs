@@ -8,6 +8,16 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- `handle_event` and `handle_window_event` take `WindowId` instead of a window reference and return `WinitEventOutcome` for routing, capture, and redraw decisions. [PR #93](https://github.com/Latias94/dear-imgui-rs/pull/93)
+
+### Added
+
+- Track native window lifetimes, configure secondary windows, and observe their state and supported policies. Native parenting is supported on Windows; other platforms leave parent hints unapplied.
+- Hand cursor control to engine tools, report grab failures, and release control after focus loss or window retirement.
+- Keep native windows and their owners alive while renderer work still needs them.
+
 ## [0.16.0] - 2026-08-14
 
 ### Breaking Changes

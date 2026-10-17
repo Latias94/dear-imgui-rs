@@ -5,13 +5,19 @@ use super::*;
 #[derive(Debug)]
 pub(crate) struct WgpuTextureManager {
     /// Application-owned texture views. The application retains texture ownership.
-    pub(super) external_views: HashMap<TextureId, TextureView>,
+    pub(super) external_views: HashMap<TextureId, ExternalTextureView>,
     /// Context-owned textures addressed by the pointer-free snapshot protocol.
     pub(super) managed_textures: HashMap<SnapshotTextureId, ManagedWgpuTexture>,
     /// Renderer IDs written back to draw commands, mapped to their managed owners.
     pub(super) managed_by_texture_id: HashMap<TextureId, SnapshotTextureId>,
     /// Managed identities sealed by Destroy, paired with their latest request epoch.
     pub(super) destroyed_managed_textures: HashMap<SnapshotTextureId, u64>,
+}
+
+#[derive(Debug)]
+pub(super) struct ExternalTextureView {
+    pub(super) view: TextureView,
+    pub(super) revision: NonZeroU64,
 }
 
 impl Default for WgpuTextureManager {

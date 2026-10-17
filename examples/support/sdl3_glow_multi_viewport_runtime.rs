@@ -557,9 +557,11 @@ impl<S: ViewportScenario> GlowApp<S> {
     pub(crate) fn new(scenario: S) -> Result<Self, Box<dyn Error>> {
         imgui_sdl3_backend::enable_native_ime_ui();
         configure_main_callback_rate();
+        let main = MainData::new(scenario)?;
+        let events = main.sdl3_backend.callback_event_handoff();
         Ok(Self {
-            main: MainThreadData::assert_new(RefCell::new(Some(MainData::new(scenario)?))),
-            events: Sdl3CallbackEventHandoff::default(),
+            main: MainThreadData::assert_new(RefCell::new(Some(main))),
+            events,
         })
     }
 
@@ -573,6 +575,24 @@ impl<S: ViewportScenario> GlowApp<S> {
             .as_mut()
             .expect("SDL3 Glow state must be active while callbacks run");
         while let Some(event) = events.pop() {
+            if let Some(drop) = event.drop_event() {
+                let target = main.sdl3_backend.resolve_drop_target(drop)?;
+                match (&drop.payload, target) {
+                    (
+                        imgui_sdl3_backend::Sdl3DropPayload::File(path),
+                        imgui_sdl3_backend::Sdl3DropTarget::Current(target),
+                    ) => {
+                        println!(
+                            "Asset drop {path:?} at {:?}, native {:?}",
+                            drop.position, target.instance_id
+                        );
+                    }
+                    (imgui_sdl3_backend::Sdl3DropPayload::Complete, _) => {
+                        // A completion with no file payload also closes an abandoned hover.
+                    }
+                    _ => {}
+                }
+            }
             let _ = main
                 .sdl3_backend
                 .process_callback_event(&mut main.imgui, &event)?;

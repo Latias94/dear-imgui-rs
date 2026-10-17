@@ -44,4 +44,18 @@ mod sanitize;
 mod test_util;
 
 // Re-export main types
-pub use platform::{HiDpiMode, WinitPlatform, WinitPlatformError};
+#[cfg(feature = "multi-viewport")]
+pub use platform::WinitWindowRenderLease;
+pub use platform::{
+    HiDpiMode, WinitPlatform, WinitPlatformError, WinitWindowCapabilities,
+    WinitWindowLifecycleEvent, WinitWindowNativeState, WinitWindowPolicySupport,
+    WinitWindowSnapshot,
+};
+pub use platform::{
+    WinitCaptureIntent, WinitEventForwarding, WinitEventOutcome, WinitEventTarget,
+    WinitPlatformAction, WinitPointerCaptureReport, WinitPointerGrabFailure, WinitPointerGrabMode,
+    WinitPointerGrabPreference, WinitPointerReleaseReason, WinitPointerReleaseReport,
+    WinitPointerRequest,
+};
+#[cfg(feature = "multi-viewport")]
+pub use platform::{WinitViewportCreateInfo, WinitViewportWindowConfig};

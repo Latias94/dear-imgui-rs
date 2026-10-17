@@ -5,13 +5,10 @@ use super::{
         draw_callback_set_sampler_nearest,
     },
 };
-use crate::wgpu;
-use crate::{
-    GammaMode, RendererError, RendererResult, ShaderManager, WgpuBackendData, WgpuInitInfo,
-    WgpuTextureManager,
-};
+use crate::{GammaMode, RendererError, RendererResult, WgpuBackendData, WgpuInitInfo};
 use dear_imgui_rs::{BackendFlags, Context};
-use wgpu::*;
+#[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+use wgpu::Color;
 
 impl WgpuRenderer {
     /// Create a WGPU renderer bound to one Dear ImGui context (recommended)
@@ -45,11 +42,7 @@ impl WgpuRenderer {
     pub(super) fn empty() -> Self {
         Self {
             context_state: None,
-            backend_data: None,
-            shader_manager: ShaderManager::new(),
-            texture_manager: WgpuTextureManager::new(),
-            default_texture: None,
-            gamma_mode: GammaMode::Auto,
+            gpu: super::gpu::GpuState::empty(),
             #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
             viewport_clear_color: Color::BLACK,
             renderer_consumer: None,
@@ -64,41 +57,11 @@ impl WgpuRenderer {
     fn initialize_device(&mut self, init_info: WgpuInitInfo) -> RendererResult<()> {
         self.ensure_uninitialized()?;
 
-        // Create backend data
-        let mut backend_data = WgpuBackendData::new(init_info);
-
-        // Preflight: ensure the render target format is render-attachable and blendable.
-        // The ImGui pipeline always uses alpha blending; non-blendable formats will
-        // fail validation later with less actionable errors.
-        let fmt = backend_data.render_target_format;
-        if let Some(adapter) = backend_data.init_info.adapter.as_ref() {
-            let fmt_features = adapter.get_texture_format_features(fmt);
-            if !fmt_features
-                .allowed_usages
-                .contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
-                || !fmt_features
-                    .flags
-                    .contains(wgpu::TextureFormatFeatureFlags::BLENDABLE)
-            {
-                return Err(RendererError::InvalidRenderState(format!(
-                    "Render target format {:?} is not suitable for ImGui WGPU renderer (requires RENDER_ATTACHMENT + BLENDABLE). allowed_usages={:?} flags={:?}",
-                    fmt, fmt_features.allowed_usages, fmt_features.flags
-                )));
-            }
-        }
-
-        if let Err(error) = self.create_device_objects(&mut backend_data) {
-            self.shader_manager = ShaderManager::new();
-            self.default_texture = None;
-            return Err(error);
-        }
-
-        self.backend_data = Some(backend_data);
-        Ok(())
+        self.gpu.initialize(init_info)
     }
 
     fn ensure_uninitialized(&self) -> RendererResult<()> {
-        if self.backend_data.is_some()
+        if self.gpu.backend_data.is_some()
             || self.context_state.is_some()
             || self.renderer_consumer.is_some()
         {
@@ -121,7 +84,7 @@ impl WgpuRenderer {
 
         if let Err(error) = self.attach_context(imgui_ctx) {
             self.invalidate_device_objects_only();
-            self.backend_data = None;
+            self.gpu.backend_data = None;
             return Err(error);
         }
 
@@ -160,13 +123,13 @@ impl WgpuRenderer {
             }
         };
         reset.commit();
-        self.texture_manager.clear_destroyed_managed_textures();
+        self.gpu.texture_manager.clear_destroyed_managed_textures();
         self.renderer_consumer = Some(consumer);
 
         Ok(())
     }
 
-    fn ensure_context_available(imgui_context: &Context) -> RendererResult<()> {
+    pub(super) fn ensure_context_available(imgui_context: &Context) -> RendererResult<()> {
         if !imgui_context.io().backend_renderer_user_data().is_null() {
             return Err(RendererError::ContextAlreadyHasRenderer);
         }
@@ -211,7 +174,7 @@ impl WgpuRenderer {
 
     /// Set gamma mode
     pub fn set_gamma_mode(&mut self, mode: GammaMode) {
-        self.gamma_mode = mode;
+        self.gpu.gamma_mode = mode;
     }
 
     /// Set clear color for secondary viewports (multi-viewport mode).
@@ -277,7 +240,7 @@ impl WgpuRenderer {
         Ok((renderer_flags & !previous_flags, renderer_name_ptr))
     }
 
-    fn clear_unbound_imgui_context(
+    pub(super) fn clear_unbound_imgui_context(
         imgui_context: &mut Context,
         renderer_flags_added: BackendFlags,
         renderer_name_ptr: *const std::ffi::c_char,
@@ -303,63 +266,11 @@ impl WgpuRenderer {
         self.clear_context_state();
     }
 
-    /// Recreate every resource discarded by `invalidate_device_objects()`.
     pub(super) fn create_device_objects(
         &mut self,
-        backend_data: &mut WgpuBackendData,
+        backend: &mut WgpuBackendData,
     ) -> RendererResult<()> {
-        backend_data
-            .render_resources
-            .initialize(&backend_data.device)?;
-        self.shader_manager.initialize(&backend_data.device)?;
-        self.default_texture =
-            Some(self.create_default_texture(&backend_data.device, &backend_data.queue)?);
-        self.create_render_pipeline(backend_data)
-    }
-
-    /// Create a default 1x1 white texture
-    fn create_default_texture(
-        &self,
-        device: &Device,
-        queue: &Queue,
-    ) -> RendererResult<TextureView> {
-        let texture = device.create_texture(&TextureDescriptor {
-            label: Some("Dear ImGui Default Texture"),
-            size: Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: TextureFormat::Rgba8Unorm,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-
-        // Upload white pixel
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &[255u8, 255u8, 255u8, 255u8], // RGBA white
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(4),
-                rows_per_image: Some(1),
-            },
-            Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
-            },
-        );
-
-        Ok(texture.create_view(&TextureViewDescriptor::default()))
+        self.gpu.create_device_objects(backend)
     }
 }
 

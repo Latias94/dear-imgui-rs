@@ -96,11 +96,10 @@ pub(super) enum ViewportDataDestroy {
 
 #[derive(Clone)]
 pub(super) struct GlobalHandles {
+    pub(super) platform: super::platform_adapter::PlatformOwner,
     pub(super) instance: wgpu::Instance,
     pub(super) adapter: wgpu::Adapter,
     pub(super) device: wgpu::Device,
-    #[cfg(feature = "wgpu-30")]
-    pub(super) queue: wgpu::Queue,
     pub(super) render_target_format: wgpu::TextureFormat,
     pub(super) depth_stencil_format: Option<wgpu::TextureFormat>,
     pub(super) multisample_state: wgpu::MultisampleState,
@@ -142,6 +141,7 @@ pub(super) fn current_context() -> *mut dear_imgui_rs::sys::ImGuiContext {
 
 pub(super) fn renderer_globals(
     renderer: &WgpuRenderer,
+    platform: super::platform_adapter::PlatformOwner,
 ) -> Result<GlobalHandles, WgpuViewportError> {
     #[cfg(target_arch = "wasm32")]
     return Err(WgpuViewportError::UnsupportedTarget);
@@ -149,6 +149,7 @@ pub(super) fn renderer_globals(
     #[cfg(not(target_arch = "wasm32"))]
     {
         let backend = renderer
+            .gpu
             .backend_data
             .as_ref()
             .ok_or(WgpuViewportError::RendererNotInitialized)?;
@@ -190,11 +191,10 @@ pub(super) fn renderer_globals(
             )?;
         }
         Ok(GlobalHandles {
+            platform,
             instance,
             adapter,
             device: backend.device.clone(),
-            #[cfg(feature = "wgpu-30")]
-            queue: backend.queue.clone(),
             render_target_format: backend.render_target_format,
             depth_stencil_format: backend.depth_stencil_format,
             multisample_state,

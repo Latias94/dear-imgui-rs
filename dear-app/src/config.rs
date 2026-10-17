@@ -30,10 +30,14 @@ pub struct AppConfig {
     pub clear_color: [f32; 4],
     pub wgpu: WgpuConfig,
     pub docking: DockingConfig,
+    /// Enables native secondary windows. Requires the `multi-viewport` Cargo feature.
+    pub multi_viewport: bool,
     pub addons: AddOnsConfig,
     pub ini_filename: Option<PathBuf>,
     pub restore_previous_geometry: bool,
     pub redraw: RedrawMode,
+    /// Native raw device-event policy. Platform support follows Winit.
+    pub device_events: winit::event_loop::DeviceEvents,
     pub io_config_flags: Option<ConfigFlags>,
     pub theme: Option<Theme>,
 }
@@ -47,10 +51,12 @@ impl Default for AppConfig {
             clear_color: [0.1, 0.2, 0.3, 1.0],
             wgpu: WgpuConfig::default(),
             docking: DockingConfig::default(),
+            multi_viewport: false,
             addons: AddOnsConfig::default(),
             ini_filename: None,
             restore_previous_geometry: true,
             redraw: RedrawMode::Poll,
+            device_events: winit::event_loop::DeviceEvents::WhenFocused,
             io_config_flags: None,
             theme: None,
         }

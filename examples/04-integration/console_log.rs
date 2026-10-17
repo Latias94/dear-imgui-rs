@@ -580,11 +580,12 @@ impl ApplicationHandler for App {
         let Some(window) = self.window.as_mut() else {
             return;
         };
-        if let Err(error) = window.imgui.platform.handle_window_event(
-            &mut window.imgui.context,
-            &window.window,
-            &event,
-        ) {
+        if let Err(error) =
+            window
+                .imgui
+                .platform
+                .handle_window_event(&mut window.imgui.context, _window_id, &event)
+        {
             eprintln!("Winit platform error: {error}");
             event_loop.exit();
             return;

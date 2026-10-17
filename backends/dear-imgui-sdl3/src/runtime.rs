@@ -36,7 +36,7 @@ use dear_imgui_rs::render::{SnapshotTextureId, TextureRequest};
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole,
     ContextAttachmentTeardownError, ContextBinding, ContextDestroyed, ContextId, ContextLifecycle,
-    ContextTeardown, TextureData, sys,
+    ContextTeardown, NativeWindowInstanceId, TextureData, sys,
 };
 
 struct Sdl3PlatformAttachmentMarker;
@@ -197,6 +197,13 @@ pub(super) enum NativeRendererKind {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RuntimeFault {
+    NativeWindowIdentityExhausted,
+    InvalidWindowConfiguration(&'static str),
+    UnsupportedWindowPolicy(&'static str),
+    WindowConfigurationFailed,
+    WindowConfigurationPanicked,
+    NativeWindowOwnerLeased,
+    NativeWindowLeaseUnavailable,
     CallbackReplaced(&'static str),
     PlatformStateReplaced(&'static str),
     RendererCallbackReplaced(&'static str),
@@ -224,6 +231,22 @@ enum RuntimeFault {
 impl RuntimeFault {
     fn into_error(self) -> Sdl3BackendError {
         match self {
+            Self::InvalidWindowConfiguration(reason) => {
+                Sdl3BackendError::InvalidWindowConfiguration { reason }
+            }
+            Self::UnsupportedWindowPolicy(attribute) => {
+                Sdl3BackendError::UnsupportedWindowPolicy { attribute }
+            }
+            Self::WindowConfigurationFailed => Sdl3BackendError::WindowPolicyFailed {
+                attribute: "secondary creation",
+                message: "native policy or hidden-window invariant failed".into(),
+            },
+            Self::WindowConfigurationPanicked => Sdl3BackendError::WindowConfigurationPanicked,
+            Self::NativeWindowOwnerLeased => Sdl3BackendError::NativeWindowOwnerLeased,
+            Self::NativeWindowLeaseUnavailable => Sdl3BackendError::NativeWindowLeaseUnavailable,
+            Self::NativeWindowIdentityExhausted => {
+                dear_imgui_rs::NativeWindowIdentityExhausted.into()
+            }
             Self::CallbackReplaced(callback) => {
                 Sdl3BackendError::PlatformCallbackReplaced { callback }
             }
@@ -402,6 +425,11 @@ pub(super) struct RuntimeControl {
     ))]
     renderer_textures: RefCell<RendererTextureStore>,
     owned_viewports: RefCell<HashMap<usize, OwnedViewportLease>>,
+    host_window: RefCell<Option<sdl3::video::Window>>,
+    secondary_window_config: RefCell<Sdl3WindowConfig>,
+    secondary_window_configurator: RefCell<Option<Rc<WindowConfigurator>>>,
+    window_lifecycle_events: RefCell<Vec<Sdl3WindowLifecycleEvent>>,
+    callback_window_targets: std::sync::Arc<crate::callback_events::CallbackWindowTargets>,
     owned_renderer_viewports: RefCell<HashMap<usize, OwnedRendererViewportLease>>,
     deferred_platform_viewports: RefCell<HashMap<usize, DeferredPlatformViewportState>>,
     deferred_renderer_viewports: RefCell<HashMap<usize, DeferredRendererViewportState>>,
@@ -452,6 +480,7 @@ impl<R> Sdl3ViewportAttempt<R> {
 /// Applications continue to own and use [`crate::Sdl3PlatformBackend`]; this adapter exists only
 /// so renderer crates can make native dispatch and fault collection one transaction.
 #[doc(hidden)]
+#[derive(Clone)]
 pub struct Sdl3ViewportRendererAdapter {
     control: Rc<RuntimeControl>,
 }
@@ -487,10 +516,14 @@ impl ViewportLeaseKey {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub(super) struct OwnedViewportLease {
     key: ViewportLeaseKey,
     state: ViewportPlatformState,
+    instance_id: NativeWindowInstanceId,
+    window_address: usize,
+    last_snapshot: Option<Sdl3WindowSnapshot>,
+    native_allocation: Option<Rc<NativeWindowAllocation>>,
 }
 
 pub(super) struct PlatformDispatchGuard<'a> {
@@ -545,5 +578,19 @@ impl fmt::Debug for RuntimeControl {
 }
 
 mod control;
+mod drop_events;
+mod native_leases;
+mod windows;
+use native_leases::NativeWindowAllocation;
+pub use native_leases::Sdl3NativeWindowLease;
+
+pub use windows::{Sdl3WindowRef, Sdl3WindowSnapshot};
+pub(crate) mod window_policy;
+use window_policy::WindowConfigurator;
+pub use window_policy::{
+    Sdl3NativeOwnerState, Sdl3WindowCapabilities, Sdl3WindowConfig, Sdl3WindowCreationRequest,
+    Sdl3WindowIcon, Sdl3WindowLifecycleEvent, Sdl3WindowPolicySupport, Sdl3WindowRetirementReason,
+    Sdl3WindowState, Sdl3WindowUpdate,
+};
 
 pub(super) use control::{RuntimeRegistration, register_runtime, with_current_runtime};

@@ -22,11 +22,11 @@ mod removed_free_api_contracts {
     ///
     /// ```
     /// use dear_imgui_wgpu::multi_viewport::{
-    ///     WgpuPreparedViewportFrame, WgpuViewportFrameReport,
+    ///     WgpuPreparedMainFrame, WgpuViewportFrameReport,
     /// };
     ///
     /// fn secondary_report<'a>(
-    ///     frame: &'a WgpuPreparedViewportFrame<'_>,
+    ///     frame: &'a WgpuPreparedMainFrame<'_>,
     /// ) -> &'a WgpuViewportFrameReport {
     ///     frame.secondary_report()
     /// }
@@ -83,7 +83,7 @@ mod removed_free_api_contracts {
     ///     render_pass: &mut wgpu::RenderPass<'_>,
     ///     extent: FramebufferExtent,
     /// ) {
-    ///     route.render_main(frame, render_pass, extent).unwrap();
+    ///     route.record_main(frame, render_pass, extent).unwrap();
     /// }
     /// ```
     struct PreparedTransaction;
@@ -100,13 +100,19 @@ use dear_imgui_rs::{Context, FrameToken};
 
 use super::WgpuRenderer;
 use super::multi_viewport_runtime::{
-    OwningViewportRuntime, finish_route_preparation, prepare_route_for_context,
+    OwningViewportRuntime, PreparationAttempt, PreparedMainFrame, finish_route_preparation,
+    prepare_route_for_context,
 };
 pub use super::multi_viewport_runtime::{
-    WgpuPreparedViewportFrame, WgpuViewportAttachError, WgpuViewportError, WgpuViewportFrameReport,
+    WgpuPendingPresentations, WgpuPreparedMainFrame, WgpuPreparedViewportFrame,
+    WgpuRecordedViewportFrame, WgpuRecordedViewportWork, WgpuViewportAttachError,
+    WgpuViewportError, WgpuViewportFrameReport, WgpuViewportWorkError,
 };
 use super::multi_viewport_runtime::{WgpuViewportRouteError, WgpuViewportRouteFault};
-use crate::{ExternalTextureId, FramebufferExtent, GammaMode};
+use crate::{
+    ExternalTextureBinding, ExternalTextureId, FramebufferExtent, GammaMode,
+    WgpuViewportObservation,
+};
 use dear_imgui_winit::{
     WinitPlatform, WinitPlatformError, multi_viewport::WinitViewportRendererAdapter,
 };
@@ -159,15 +165,15 @@ impl WinitViewportRoute {
                 ));
             }
         };
-        OwningViewportRuntime::attach(context, renderer).map(|inner| Self { inner, platform })
+        OwningViewportRuntime::attach(context, renderer, platform.clone())
+            .map(|inner| Self { inner, platform })
     }
 
-    /// Consumes an open frame, reconciles textures, and completes secondary viewports.
+    /// Reconciles an open UI frame and updates native windows without recording, submitting, or presenting.
     ///
-    /// Call this before acquiring the application's main surface. A temporary main-surface
-    /// failure may discard the returned capability without losing secondary completion. The
-    /// platform owner lends the active event loop only for this transaction, and every renderer
-    /// and platform callback fault raised by the route is returned together. A frame from another
+    /// The platform owner lends the active event loop only for native-window creation and geometry
+    /// updates. No surface is acquired and no GPU work is recorded, submitted, or presented here.
+    /// Renderer and platform callback faults are returned together. A frame from another
     /// Context is rejected before the event-loop adapter or either deferred-fault queue is entered.
     pub fn prepare<'frame>(
         &self,
@@ -180,21 +186,51 @@ impl WinitViewportRoute {
         })
     }
 
-    /// Renders the main viewport after secondary work completed during preparation.
-    pub fn render_main(
+    /// Acquires and records secondary targets without submitting or presenting them.
+    pub fn record<'frame>(
         &self,
-        frame: WgpuPreparedViewportFrame<'_>,
+        frame: WgpuPreparedViewportFrame<'frame>,
+    ) -> Result<WgpuRecordedViewportFrame<'frame>, WgpuViewportWorkError> {
+        if frame.context_id() != self.inner.context_id() {
+            // Preserve the same side-effect-free foreign-Context gate used by prepare.
+            return self.inner.record(frame);
+        }
+        let (attempt, faults) = self.platform.run(|| self.inner.record(frame)).into_parts();
+        self.inner.finish_recording_attempt(
+            attempt,
+            faults
+                .into_iter()
+                .map(WgpuViewportError::WinitPlatformOwner)
+                .collect(),
+        )
+    }
+
+    /// Runs the explicit record/submit/present pipeline and retains its secondary report.
+    ///
+    /// Engine producer buffers are submitted before UI consumer buffers on the renderer queue.
+    pub fn complete_secondary<'frame>(
+        &self,
+        frame: WgpuPreparedViewportFrame<'frame>,
+        producer_commands: impl IntoIterator<Item = wgpu::CommandBuffer>,
+    ) -> Result<WgpuPreparedMainFrame<'frame>, WgpuViewportWorkError> {
+        self.record(frame)?.complete_secondary(producer_commands)
+    }
+
+    /// Records the main viewport into an application-owned pass without claiming submission.
+    pub fn record_main(
+        &self,
+        frame: WgpuPreparedMainFrame<'_>,
         render_pass: &mut wgpu::RenderPass<'_>,
         framebuffer_extent: FramebufferExtent,
-    ) -> Result<(), WgpuViewportError> {
+    ) -> Result<WgpuViewportObservation, WgpuViewportWorkError> {
         self.inner
-            .render_main(frame, render_pass, framebuffer_extent)
+            .record_main(frame, render_pass, framebuffer_extent)
     }
 
     fn prepare_with_platform<'frame>(
         &self,
         event_loop: &ActiveEventLoop,
-        prepare: impl FnOnce() -> Result<WgpuPreparedViewportFrame<'frame>, WgpuViewportError>,
+        prepare: impl FnOnce() -> PreparationAttempt<PreparedMainFrame<'frame>>,
     ) -> Result<WgpuPreparedViewportFrame<'frame>, WinitViewportRouteError> {
         debug_assert_eq!(self.platform.context_id(), self.inner.context_id());
 
@@ -203,6 +239,7 @@ impl WinitViewportRoute {
             .with_event_loop(event_loop, |_| prepare())
             .into_parts();
         finish_route_preparation(renderer_result, self.inner.drain_faults(), platform_faults)
+            .map(|(prepared, report)| WgpuPreparedViewportFrame::new(prepared, report))
     }
 
     /// Invalidates renderer-owned device objects while preserving external texture handles.
@@ -221,6 +258,14 @@ impl WinitViewportRoute {
     /// Sets the clear color used by secondary viewport surfaces.
     pub fn set_viewport_clear_color(&self, color: wgpu::Color) -> Result<(), WgpuViewportError> {
         self.inner.set_viewport_clear_color(color)
+    }
+
+    /// Captures the current external view-mapping revision without borrowing the renderer.
+    pub fn external_texture_binding(
+        &self,
+        texture: ExternalTextureId,
+    ) -> Result<ExternalTextureBinding, WgpuViewportError> {
+        self.inner.external_texture_binding(texture)
     }
 
     /// Registers an application-owned external WGPU texture.

@@ -209,6 +209,7 @@ pub extern crate wgpu30 as wgpu;
 mod data;
 mod error;
 mod frame_resources;
+mod observation;
 mod render_resources;
 mod renderer;
 mod shaders;
@@ -309,8 +310,16 @@ pub use data::{
     WgpuInitInfo, WgpuRenderState, WgpuRenderStateAccessError, WgpuViewportSurfaceConfig,
 };
 pub use error::{RendererError, RendererResult};
+pub use observation::{
+    WgpuDrawRecording, WgpuFrameOutcome, WgpuFrameScope, WgpuFrameSkipReason, WgpuFrameStage,
+    WgpuViewportObservation,
+};
 pub use renderer::{FramebufferExtent, WgpuRenderer};
-pub use texture::ExternalTextureId;
+pub use renderer::{
+    WgpuPreparedSnapshot, WgpuSnapshotError, WgpuSnapshotExecutor, WgpuSnapshotRenderer,
+    WgpuSnapshotReport, WgpuSnapshotSubmission, WgpuSnapshotTarget, WgpuSnapshotTargetRecording,
+};
+pub use texture::{ExternalTextureBinding, ExternalTextureId, WgpuDrawDependencies};
 
 pub(crate) use data::{WgpuBackendData, WgpuRenderStateStorage};
 pub(crate) use frame_resources::{FrameResourceArena, FrameResources};

@@ -8,20 +8,23 @@ use std::collections::{HashMap, VecDeque};
 use std::ffi::{CStr, CString};
 use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
+
+use dear_imgui_rs::NativeWindowTarget;
 
 use sdl3::event::{DisplayEvent, Event, WindowEvent};
 use sdl3_sys::events::{
     SDL_DisplayEvent, SDL_EVENT_DISPLAY_ADDED, SDL_EVENT_DISPLAY_CONTENT_SCALE_CHANGED,
     SDL_EVENT_DISPLAY_MOVED, SDL_EVENT_DISPLAY_ORIENTATION, SDL_EVENT_DISPLAY_REMOVED,
-    SDL_EVENT_DISPLAY_USABLE_BOUNDS_CHANGED, SDL_EVENT_GAMEPAD_ADDED, SDL_EVENT_GAMEPAD_REMOVED,
-    SDL_EVENT_KEY_DOWN, SDL_EVENT_KEY_UP, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_EVENT_MOUSE_BUTTON_UP,
-    SDL_EVENT_MOUSE_MOTION, SDL_EVENT_MOUSE_WHEEL, SDL_EVENT_QUIT, SDL_EVENT_TEXT_INPUT,
-    SDL_EVENT_WINDOW_CLOSE_REQUESTED, SDL_EVENT_WINDOW_FOCUS_GAINED, SDL_EVENT_WINDOW_FOCUS_LOST,
-    SDL_EVENT_WINDOW_MOUSE_ENTER, SDL_EVENT_WINDOW_MOUSE_LEAVE, SDL_EVENT_WINDOW_MOVED,
-    SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED, SDL_EVENT_WINDOW_RESIZED, SDL_Event,
-    SDL_GamepadDeviceEvent, SDL_KeyboardEvent, SDL_MouseButtonEvent, SDL_MouseMotionEvent,
-    SDL_MouseWheelEvent, SDL_TextInputEvent, SDL_WindowEvent,
+    SDL_EVENT_DISPLAY_USABLE_BOUNDS_CHANGED, SDL_EVENT_DROP_BEGIN, SDL_EVENT_DROP_COMPLETE,
+    SDL_EVENT_DROP_FILE, SDL_EVENT_DROP_POSITION, SDL_EVENT_DROP_TEXT, SDL_EVENT_GAMEPAD_ADDED,
+    SDL_EVENT_GAMEPAD_REMOVED, SDL_EVENT_KEY_DOWN, SDL_EVENT_KEY_UP, SDL_EVENT_MOUSE_BUTTON_DOWN,
+    SDL_EVENT_MOUSE_BUTTON_UP, SDL_EVENT_MOUSE_MOTION, SDL_EVENT_MOUSE_WHEEL, SDL_EVENT_QUIT,
+    SDL_EVENT_TEXT_INPUT, SDL_EVENT_WINDOW_CLOSE_REQUESTED, SDL_EVENT_WINDOW_FOCUS_GAINED,
+    SDL_EVENT_WINDOW_FOCUS_LOST, SDL_EVENT_WINDOW_MOUSE_ENTER, SDL_EVENT_WINDOW_MOUSE_LEAVE,
+    SDL_EVENT_WINDOW_MOVED, SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED, SDL_EVENT_WINDOW_RESIZED,
+    SDL_Event, SDL_GamepadDeviceEvent, SDL_KeyboardEvent, SDL_MouseButtonEvent,
+    SDL_MouseMotionEvent, SDL_MouseWheelEvent, SDL_TextInputEvent, SDL_WindowEvent,
 };
 use sdl3_sys::keycode::SDLK_ESCAPE;
 #[cfg(test)]
@@ -29,6 +32,92 @@ use sdl3_sys::video::SDL_DisplayID;
 use sdl3_sys::video::SDL_WindowID;
 
 const DEFAULT_CALLBACK_EVENT_CAPACITY: usize = 1024;
+
+/// Owned application payload from SDL's desktop drag-and-drop callbacks.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Sdl3DropEvent {
+    pub timestamp: u64,
+    pub window_id: u32,
+    /// SDL client coordinates when supplied; begin events and unavailable values remain `None`.
+    pub position: Option<[f32; 2]>,
+    pub source: Option<String>,
+    pub payload: Sdl3DropPayload,
+    /// Registration observed by an owner-bound handoff when the callback copied the payload.
+    /// This is historical metadata, not proof that this registration generated the OS event.
+    pub observed_target: Option<NativeWindowTarget>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Sdl3DropPayload {
+    Begin,
+    File(String),
+    Text(String),
+    Position,
+    /// SDL ends a drop sequence, including a hover that supplied no file or text payload.
+    Complete,
+}
+
+/// Current association of a previously observed drop registration.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Sdl3DropTarget {
+    Current(NativeWindowTarget),
+    Retired(NativeWindowTarget),
+    /// No registration was safely observed; numeric SDL IDs alone do not establish ownership.
+    Unowned,
+}
+
+#[derive(Clone, Copy)]
+struct PublishedWindowTarget {
+    target: NativeWindowTarget,
+    published_at: u64,
+}
+
+/// Thread-safe metadata publication only. The runtime's native registry remains authoritative.
+#[derive(Default)]
+pub(crate) struct CallbackWindowTargets(Mutex<HashMap<u32, PublishedWindowTarget>>);
+
+impl CallbackWindowTargets {
+    pub(crate) fn publish(&self, window_id: u32, target: NativeWindowTarget) {
+        let mut targets = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let published_at = targets
+            .get(&window_id)
+            .filter(|entry| entry.target.instance_id == target.instance_id)
+            .map(|entry| entry.published_at)
+            .unwrap_or_else(|| unsafe { sdl3_sys::timer::SDL_GetTicksNS() });
+        targets.insert(
+            window_id,
+            PublishedWindowTarget {
+                target,
+                published_at,
+            },
+        );
+    }
+
+    pub(crate) fn retire(&self, window_id: u32, target: NativeWindowTarget) {
+        let mut targets = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if targets
+            .get(&window_id)
+            .is_some_and(|entry| entry.target.instance_id == target.instance_id)
+        {
+            targets.remove(&window_id);
+        }
+    }
+
+    fn observe(&self, window_id: u32, timestamp: u64) -> Option<NativeWindowTarget> {
+        let targets = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let entry = targets.get(&window_id)?;
+        (timestamp != 0 && timestamp >= entry.published_at).then_some(entry.target)
+    }
+}
 
 fn dispose_panic_payload_without_unwinding(mut payload: Box<dyn std::any::Any + Send>) {
     const MAX_DROP_ATTEMPTS: usize = 8;
@@ -122,11 +211,12 @@ enum ImGuiEvent {
 
 /// An SDL callback event whose Dear ImGui payload is fully owned.
 ///
-/// Pointer-bearing event variants that the official SDL3 backend does not consume are represented
-/// only by their application summary and are never replayed through Dear ImGui.
+/// Desktop drops retain owned application payloads without replaying them through Dear ImGui.
+/// Other pointer-bearing variants the official backend does not consume remain inert summaries.
 pub struct Sdl3CallbackEvent {
     application: ApplicationEvent,
     imgui: Option<ImGuiEvent>,
+    drop: Option<Sdl3DropEvent>,
 }
 
 impl fmt::Debug for Sdl3CallbackEvent {
@@ -135,6 +225,7 @@ impl fmt::Debug for Sdl3CallbackEvent {
             .debug_struct("Sdl3CallbackEvent")
             .field("application", &self.application)
             .field("has_imgui_payload", &self.imgui.is_some())
+            .field("drop", &self.drop)
             .finish()
     }
 }
@@ -156,6 +247,7 @@ impl Sdl3CallbackEvent {
                         window_id: SDL_WindowID(*window_id),
                         text,
                     }),
+                    drop: None,
                 }))
             }
             Event::Window {
@@ -166,6 +258,54 @@ impl Sdl3CallbackEvent {
                 display_event: DisplayEvent::None,
                 ..
             } => Ok(None),
+            Event::DropFile {
+                timestamp,
+                window_id,
+                filename,
+            }
+            | Event::DropText {
+                timestamp,
+                window_id,
+                filename,
+            } => Ok(Some(Self {
+                application: ApplicationEvent::Other,
+                imgui: None,
+                drop: Some(Sdl3DropEvent {
+                    timestamp: *timestamp,
+                    window_id: *window_id,
+                    position: None,
+                    source: None,
+                    observed_target: None,
+                    payload: if matches!(event, Event::DropFile { .. }) {
+                        Sdl3DropPayload::File(filename.clone())
+                    } else {
+                        Sdl3DropPayload::Text(filename.clone())
+                    },
+                }),
+            })),
+            Event::DropBegin {
+                timestamp,
+                window_id,
+            }
+            | Event::DropComplete {
+                timestamp,
+                window_id,
+            } => Ok(Some(Self {
+                application: ApplicationEvent::Other,
+                imgui: None,
+                drop: Some(Sdl3DropEvent {
+                    timestamp: *timestamp,
+                    window_id: *window_id,
+                    position: None,
+                    source: None,
+                    observed_target: None,
+                    payload: if matches!(event, Event::DropBegin { .. }) {
+                        Sdl3DropPayload::Begin
+                    } else {
+                        Sdl3DropPayload::Complete
+                    },
+                }),
+            })),
             Event::Unknown { timestamp, type_ }
                 if *type_ == SDL_EVENT_DISPLAY_USABLE_BOUNDS_CHANGED.0 =>
             {
@@ -176,6 +316,7 @@ impl Sdl3CallbackEvent {
                         timestamp: *timestamp,
                         ..Default::default()
                     })),
+                    drop: None,
                 }))
             }
             Event::Window { .. }
@@ -234,7 +375,54 @@ impl Sdl3CallbackEvent {
             _ => None,
         };
 
-        Self { application, imgui }
+        let drop = match raw.event_type() {
+            SDL_EVENT_DROP_BEGIN
+            | SDL_EVENT_DROP_FILE
+            | SDL_EVENT_DROP_TEXT
+            | SDL_EVENT_DROP_POSITION
+            | SDL_EVENT_DROP_COMPLETE => {
+                let event = unsafe { raw.drop };
+                let copy = |pointer: *const std::ffi::c_char| {
+                    if pointer.is_null() {
+                        None
+                    } else {
+                        Some(
+                            unsafe { CStr::from_ptr(pointer) }
+                                .to_string_lossy()
+                                .into_owned(),
+                        )
+                    }
+                };
+                let payload = match event.r#type {
+                    SDL_EVENT_DROP_BEGIN => Sdl3DropPayload::Begin,
+                    SDL_EVENT_DROP_FILE => {
+                        Sdl3DropPayload::File(copy(event.data).unwrap_or_default())
+                    }
+                    SDL_EVENT_DROP_TEXT => {
+                        Sdl3DropPayload::Text(copy(event.data).unwrap_or_default())
+                    }
+                    SDL_EVENT_DROP_POSITION => Sdl3DropPayload::Position,
+                    _ => Sdl3DropPayload::Complete,
+                };
+                Some(Sdl3DropEvent {
+                    timestamp: event.timestamp,
+                    window_id: event.windowID.0,
+                    position: (event.r#type != SDL_EVENT_DROP_BEGIN
+                        && event.x.is_finite()
+                        && event.y.is_finite())
+                    .then_some([event.x, event.y]),
+                    source: copy(event.source),
+                    payload,
+                    observed_target: None,
+                })
+            }
+            _ => None,
+        };
+        Self {
+            application,
+            imgui,
+            drop,
+        }
     }
 
     fn coalescing_key(&self) -> Option<CoalescingKey> {
@@ -319,6 +507,11 @@ impl Sdl3CallbackEvent {
     /// Whether this event invalidates the main window's drawable surface size.
     pub fn is_pixel_size_changed_for(&self, window_id: u32) -> bool {
         self.application == ApplicationEvent::WindowPixelSizeChanged { window_id }
+    }
+
+    /// Returns owned file/text/source/position payloads without replaying them through ImGui.
+    pub fn drop_event(&self) -> Option<&Sdl3DropEvent> {
+        self.drop.as_ref()
     }
 }
 
@@ -747,6 +940,7 @@ pub struct Sdl3CallbackEventHandoff {
     capacity: usize,
     ordered_reserve: usize,
     state: Mutex<CallbackHandoffState>,
+    window_targets: Option<Arc<CallbackWindowTargets>>,
 }
 
 impl Default for Sdl3CallbackEventHandoff {
@@ -785,6 +979,7 @@ impl Sdl3CallbackEventHandoff {
             capacity,
             ordered_reserve,
             state: Mutex::new(CallbackHandoffState::default()),
+            window_targets: None,
         }
     }
 
@@ -802,7 +997,23 @@ impl Sdl3CallbackEventHandoff {
     /// returns, and the event must belong to the SDL runtime used by the backend that will process
     /// it.
     pub unsafe fn push_from_callback(&self, raw: &SDL_Event) {
-        self.enqueue_with(|| Some(unsafe { Sdl3CallbackEvent::from_callback_raw(raw) }));
+        self.enqueue_with(|| {
+            let mut event = unsafe { Sdl3CallbackEvent::from_callback_raw(raw) };
+            if let Some(drop) = &mut event.drop {
+                drop.observed_target = self
+                    .window_targets
+                    .as_ref()
+                    .and_then(|targets| targets.observe(drop.window_id, drop.timestamp));
+            }
+            Some(event)
+        });
+    }
+
+    pub(crate) fn for_window_targets(targets: Arc<CallbackWindowTargets>) -> Self {
+        Self {
+            window_targets: Some(targets),
+            ..Self::default()
+        }
     }
 
     fn enqueue_with(&self, make_event: impl FnOnce() -> Option<Sdl3CallbackEvent>) {
@@ -920,7 +1131,7 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_pointer_payload_is_retained_as_an_inert_application_event() {
+    fn file_drop_owns_source_and_data_before_callback_memory_is_released() {
         let source = CString::new("file manager").unwrap();
         let data = CString::new("C:/tmp/queued.txt").unwrap();
         let raw = SDL_Event {
@@ -951,6 +1162,14 @@ mod tests {
             .pop()
             .expect("unsupported event summary must be retained");
         assert!(!inert.requests_exit(7));
+        let drop = inert.drop_event().unwrap();
+        assert_eq!(drop.source.as_deref(), Some("file manager"));
+        assert_eq!(
+            drop.payload,
+            Sdl3DropPayload::File("C:/tmp/queued.txt".into())
+        );
+        assert_eq!(drop.position, Some([0.0, 0.0]));
+        assert_eq!(drop.observed_target, None);
         inert.with_raw_event(|raw| assert!(raw.is_none()));
         assert!(
             events
@@ -958,6 +1177,104 @@ mod tests {
                 .expect("quit must use the available slot")
                 .requests_exit(7)
         );
+    }
+
+    #[test]
+    fn drop_sequences_keep_multiple_files_text_and_empty_hover_completion_in_order() {
+        let handoff = Sdl3CallbackEventHandoff::default();
+        let events = [
+            (SDL_EVENT_DROP_BEGIN, None),
+            (SDL_EVENT_DROP_FILE, Some(c"first.png")),
+            (SDL_EVENT_DROP_FILE, Some(c"second.png")),
+            (SDL_EVENT_DROP_TEXT, Some(c"asset notes")),
+            (SDL_EVENT_DROP_COMPLETE, None),
+            (SDL_EVENT_DROP_BEGIN, None),
+            (SDL_EVENT_DROP_POSITION, None),
+            (SDL_EVENT_DROP_COMPLETE, None),
+        ];
+        for (index, (kind, data)) in events.iter().enumerate() {
+            let raw = SDL_Event {
+                drop: sdl3_sys::events::SDL_DropEvent {
+                    r#type: *kind,
+                    timestamp: index as u64 + 1,
+                    windowID: SDL_WindowID(7),
+                    x: 12.5,
+                    y: 18.25,
+                    data: data.map_or(std::ptr::null(), |value| value.as_ptr()),
+                    ..Default::default()
+                },
+            };
+            unsafe { handoff.push_from_callback(&raw) };
+        }
+        let drops: Vec<_> = handoff
+            .drain()
+            .map(|event| event.drop_event().unwrap().clone())
+            .collect();
+        assert_eq!(drops.len(), 8);
+        assert_eq!(drops[0].position, None);
+        assert_eq!(drops[1].payload, Sdl3DropPayload::File("first.png".into()));
+        assert_eq!(drops[2].payload, Sdl3DropPayload::File("second.png".into()));
+        assert_eq!(
+            drops[3].payload,
+            Sdl3DropPayload::Text("asset notes".into())
+        );
+        assert_eq!(drops[6].payload, Sdl3DropPayload::Position);
+        assert_eq!(drops[7].payload, Sdl3DropPayload::Complete);
+    }
+
+    #[test]
+    fn reused_numeric_ids_and_missing_timestamps_do_not_claim_new_registrations_for_old_events() {
+        let _guard = crate::tests::test_guard();
+        let context = dear_imgui_rs::Context::create();
+        let first = NativeWindowTarget {
+            instance_id: dear_imgui_rs::NativeWindowInstanceId::allocate(context.id()).unwrap(),
+            viewport_id: 1.into(),
+            is_main: true,
+        };
+        let second = NativeWindowTarget {
+            instance_id: dear_imgui_rs::NativeWindowInstanceId::allocate(context.id()).unwrap(),
+            ..first
+        };
+        let targets = Arc::new(CallbackWindowTargets::default());
+        targets.0.lock().unwrap().insert(
+            7,
+            PublishedWindowTarget {
+                target: first,
+                published_at: 100,
+            },
+        );
+        let handoff = Sdl3CallbackEventHandoff::for_window_targets(Arc::clone(&targets));
+        let raw = |timestamp| SDL_Event {
+            drop: sdl3_sys::events::SDL_DropEvent {
+                r#type: SDL_EVENT_DROP_FILE,
+                timestamp,
+                windowID: SDL_WindowID(7),
+                data: c"asset.png".as_ptr(),
+                ..Default::default()
+            },
+        };
+        unsafe { handoff.push_from_callback(&raw(110)) };
+        targets.retire(7, first);
+        targets.0.lock().unwrap().insert(
+            7,
+            PublishedWindowTarget {
+                target: second,
+                published_at: 200,
+            },
+        );
+        unsafe {
+            handoff.push_from_callback(&raw(110));
+            handoff.push_from_callback(&raw(0));
+            handoff.push_from_callback(&raw(210));
+        }
+        let drops: Vec<_> = handoff
+            .drain()
+            .map(|event| event.drop_event().unwrap().clone())
+            .collect();
+        assert_eq!(drops[0].observed_target, Some(first));
+        assert_eq!(drops[1].observed_target, None);
+        assert_eq!(drops[2].observed_target, None);
+        assert_eq!(drops[3].observed_target, Some(second));
     }
 
     #[test]
