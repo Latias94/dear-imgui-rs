@@ -21,6 +21,8 @@ bitflags::bitflags! {
         const NO_TOOLTIP = sys::ImGuiTabItemFlags_NoTooltip as i32;
         /// Disable reordering this tab or having another tab cross over this tab
         const NO_REORDER = sys::ImGuiTabItemFlags_NoReorder as i32;
+        /// Select the tab when closing and wait for the application to stop submitting it.
+        const NO_ASSUMED_CLOSURE = sys::ImGuiTabItemFlags_NoAssumedClosure as i32;
     }
 }
 

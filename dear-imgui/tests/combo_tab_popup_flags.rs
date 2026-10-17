@@ -7,6 +7,41 @@ fn test_guard() -> std::sync::MutexGuard<'static, ()> {
 }
 
 #[test]
+fn tab_items_accept_no_assumed_closure_without_unsaved_decoration() {
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    ctx.io_mut().set_display_size([800.0, 600.0]);
+    ctx.io_mut().set_delta_time(1.0 / 60.0);
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .unwrap()
+        .build();
+    let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
+    let flags = imgui::TabItemFlags::NO_ASSUMED_CLOSURE;
+    assert_eq!(flags.bits(), imgui::sys::ImGuiTabItemFlags_NoAssumedClosure);
+    assert!(!flags.intersects(imgui::TabItemFlags::UNSAVED_DOCUMENT));
+
+    let ui = ctx.frame();
+    ui.window("deferred tab closure").build(|| {
+        let _bar = ui.tab_bar("tabs").unwrap();
+        let mut opened = true;
+        let _item = ui.tab_item_with_flags(
+            "document",
+            Some(&mut opened),
+            imgui::TabItemOptions::new().flags(flags),
+        );
+        let bar = unsafe { imgui::sys::igGetCurrentTabBar() };
+        assert!(!bar.is_null());
+        let tab = unsafe { &*(*bar).Tabs.Data };
+        assert_ne!(
+            tab.Flags & imgui::sys::ImGuiTabItemFlags_NoAssumedClosure,
+            0
+        );
+        assert_eq!(tab.Flags & imgui::sys::ImGuiTabItemFlags_UnsavedDocument, 0);
+    });
+}
+
+#[test]
 fn combo_options_reject_non_independent_flag_bits_before_ffi() {
     let _guard = test_guard();
 

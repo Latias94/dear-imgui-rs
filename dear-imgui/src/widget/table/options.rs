@@ -35,15 +35,15 @@ bitflags::bitflags! {
         /// Draw vertical borders on the left and right sides
         const BORDERS_OUTER_V = sys::ImGuiTableFlags_BordersOuterV as i32;
         /// Draw horizontal borders
-        const BORDERS_H = Self::BORDERS_INNER_H.bits() | Self::BORDERS_OUTER_H.bits();
+        const BORDERS_H = sys::ImGuiTableFlags_BordersH as i32;
         /// Draw vertical borders
-        const BORDERS_V = Self::BORDERS_INNER_V.bits() | Self::BORDERS_OUTER_V.bits();
+        const BORDERS_V = sys::ImGuiTableFlags_BordersV as i32;
         /// Draw inner borders
-        const BORDERS_INNER = Self::BORDERS_INNER_V.bits() | Self::BORDERS_INNER_H.bits();
+        const BORDERS_INNER = sys::ImGuiTableFlags_BordersInner as i32;
         /// Draw outer borders
-        const BORDERS_OUTER = Self::BORDERS_OUTER_V.bits() | Self::BORDERS_OUTER_H.bits();
+        const BORDERS_OUTER = sys::ImGuiTableFlags_BordersOuter as i32;
         /// Draw all borders
-        const BORDERS = Self::BORDERS_INNER.bits() | Self::BORDERS_OUTER.bits();
+        const BORDERS = sys::ImGuiTableFlags_Borders as i32;
         /// [ALPHA] Disable vertical borders in columns Body (borders will always appears in Headers). -> May move to style
         const NO_BORDERS_IN_BODY = sys::ImGuiTableFlags_NoBordersInBody as i32;
         /// [ALPHA] Disable vertical borders in columns Body until hovered for resize (borders will always appears in Headers). -> May move to style

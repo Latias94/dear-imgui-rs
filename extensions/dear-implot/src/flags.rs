@@ -197,5 +197,11 @@ bitflags::bitflags! {
         const PAN_STRETCH    = sys::ImPlotAxisFlags_PanStretch as u32;
         const LOCK_MIN       = sys::ImPlotAxisFlags_LockMin as u32;
         const LOCK_MAX       = sys::ImPlotAxisFlags_LockMax as u32;
+        /// Lock both axis limits during panning and zooming.
+        const LOCK           = sys::ImPlotAxisFlags_Lock as u32;
+        /// Hide the axis label, grid, tick marks, and tick labels.
+        const NO_DECORATIONS = sys::ImPlotAxisFlags_NoDecorations as u32;
+        /// Default auxiliary axis styling: opposite side without grid lines.
+        const AUX_DEFAULT    = sys::ImPlotAxisFlags_AuxDefault as u32;
     }
 }

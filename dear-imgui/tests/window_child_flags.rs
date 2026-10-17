@@ -19,6 +19,31 @@ fn prepare_context(ctx: &mut imgui::Context) {
 }
 
 #[test]
+fn no_inputs_excludes_mouse_navigation_and_navigation_focus() {
+    let flags = imgui::WindowFlags::NO_INPUTS;
+    assert_eq!(flags.bits(), imgui::sys::ImGuiWindowFlags_NoInputs);
+    assert_eq!(
+        flags,
+        imgui::WindowFlags::NO_MOUSE_INPUTS
+            | imgui::WindowFlags::NO_NAV_INPUTS
+            | imgui::WindowFlags::NO_NAV_FOCUS
+    );
+
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let ui = ctx.frame();
+    ui.window("non-interactive overlay").flags(flags).build(|| {
+        let window = unsafe { imgui::sys::igGetCurrentWindow() };
+        assert!(!window.is_null());
+        assert_ne!(
+            unsafe { (*window).Flags } & imgui::sys::ImGuiWindowFlags_NoNavFocus,
+            0
+        );
+    });
+}
+
+#[test]
 fn window_flags_reject_internal_bits_before_ffi() {
     let _guard = test_guard();
 
