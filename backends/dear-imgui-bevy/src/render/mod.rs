@@ -1595,7 +1595,7 @@ mod tests {
         };
         let targets = [camera_target_for_test(camera, None)];
 
-        let (_, _, draws, _) = prepare_draw_data(&draw, &[], &targets).unwrap();
+        let draws = prepare_draw_data(&draw, &[], &targets).unwrap().draws;
 
         assert_eq!(draws.len(), 2);
         assert_eq!(draws[0].sampler, ImguiSampler::Nearest);
@@ -1648,7 +1648,7 @@ mod tests {
         };
         let targets = [camera_target_for_test(camera, None)];
 
-        let (_, _, draws, _) = prepare_draw_data(&draw, &[], &targets).unwrap();
+        let draws = prepare_draw_data(&draw, &[], &targets).unwrap().draws;
 
         assert_eq!(draws.len(), 2);
         assert_eq!(draws[0].sampler, ImguiSampler::Nearest);
@@ -1704,7 +1704,7 @@ mod tests {
         };
         let targets = [camera_target_for_test(camera, None)];
 
-        let (_, _, draws, _) = prepare_draw_data(&draw, &[], &targets).unwrap();
+        let draws = prepare_draw_data(&draw, &[], &targets).unwrap().draws;
 
         assert_eq!(draws.len(), 1);
         assert_eq!(draws[0].index_range, 0..3);
@@ -1847,7 +1847,11 @@ mod tests {
             ..camera_target_for_test(camera, None)
         };
 
-        let (_, _, draws, uniforms_by_view) = prepare_draw_data(&draw, &[], &[target]).unwrap();
+        let prepare::PreparedImguiDrawData {
+            draws,
+            uniforms_by_view,
+            ..
+        } = prepare_draw_data(&draw, &[], &[target]).unwrap();
 
         assert_eq!(draws.len(), 1);
         assert_eq!(
@@ -1904,8 +1908,11 @@ mod tests {
             camera_target_for_test(secondary_camera, Some(secondary_viewport)),
         ];
 
-        let (_, _, draws, uniforms_by_view) =
-            prepare_draw_data(&draw, &viewports, &targets).unwrap();
+        let prepare::PreparedImguiDrawData {
+            draws,
+            uniforms_by_view,
+            ..
+        } = prepare_draw_data(&draw, &viewports, &targets).unwrap();
 
         assert_eq!(draws.len(), 1);
         assert_eq!(draws[0].camera, secondary_camera);

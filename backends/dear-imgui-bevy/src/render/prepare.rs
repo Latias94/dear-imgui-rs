@@ -91,8 +91,12 @@ pub(super) fn prepare_imgui_render_frame(
             texture_request_count: snapshot.texture_requests().len(),
         };
         let result = prepare_snapshot_draw_data(snapshot, extracted.camera_targets(context_id));
-        let (context_vertices, context_indices, mut context_draws, uniforms_by_view) = match result
-        {
+        let PreparedImguiDrawData {
+            vertices: context_vertices,
+            indices: context_indices,
+            draws: mut context_draws,
+            uniforms_by_view,
+        } = match result {
             Ok(prepared) => prepared,
             Err(ImguiDrawPreparationError::TextureSamplerUnsupported) => {
                 preparation_diagnostics.push(
@@ -883,18 +887,17 @@ pub(super) enum ImguiDrawPreparationError {
     TextureSamplerUnsupported,
 }
 
+pub(super) struct PreparedImguiDrawData {
+    pub(super) vertices: Vec<ImguiGpuVertex>,
+    pub(super) indices: Vec<DrawIdx>,
+    pub(super) draws: Vec<ImguiPreparedDraw>,
+    pub(super) uniforms_by_view: HashMap<RetainedViewEntity, ImguiUniforms>,
+}
+
 fn prepare_snapshot_draw_data(
     snapshot: &imgui::render::FrameSnapshot,
     camera_targets: &[ImguiCameraTarget],
-) -> Result<
-    (
-        Vec<ImguiGpuVertex>,
-        Vec<DrawIdx>,
-        Vec<ImguiPreparedDraw>,
-        HashMap<RetainedViewEntity, ImguiUniforms>,
-    ),
-    ImguiDrawPreparationError,
-> {
+) -> Result<PreparedImguiDrawData, ImguiDrawPreparationError> {
     prepare_draw_data(snapshot.draw_data(), snapshot.viewports(), camera_targets)
 }
 
@@ -902,15 +905,7 @@ pub(super) fn prepare_draw_data(
     main_draw: &imgui::render::DrawDataSnapshot,
     viewports: &[imgui::render::ViewportDrawDataSnapshot],
     camera_targets: &[ImguiCameraTarget],
-) -> Result<
-    (
-        Vec<ImguiGpuVertex>,
-        Vec<DrawIdx>,
-        Vec<ImguiPreparedDraw>,
-        HashMap<RetainedViewEntity, ImguiUniforms>,
-    ),
-    ImguiDrawPreparationError,
-> {
+) -> Result<PreparedImguiDrawData, ImguiDrawPreparationError> {
     if main_draw
         .draw_lists
         .iter()
@@ -1065,7 +1060,12 @@ pub(super) fn prepare_draw_data(
         }
     }
 
-    Ok((vertices, indices, draws, uniforms_by_view))
+    Ok(PreparedImguiDrawData {
+        vertices,
+        indices,
+        draws,
+        uniforms_by_view,
+    })
 }
 
 fn snapshot_viewport_draws<'draw>(
