@@ -222,13 +222,14 @@ impl AppWindow {
         self.imgui
             .platform
             .prepare_frame(&mut self.imgui.context, &self.window)?;
+        let preedit = self.imgui.context.ime_preedit();
         let ui = self.imgui.context.frame();
 
         let io = ui.io();
         let mut ime_error = None;
 
         ui.window("IME Debug")
-            .size([520.0, 260.0], Condition::FirstUseEver)
+            .size([580.0, 460.0], Condition::FirstUseEver)
             .build(|| {
                 // Push a stable root ID so that even widgets with empty labels
                 // (if any) do not collide with the window ID. This also makes
@@ -243,6 +244,12 @@ impl AppWindow {
                 ui.input_text("Input", &mut self.input_text)
                     .hint("Type here...")
                     .build();
+                if let Some(preedit) = &preedit {
+                    ui.text(format!("Preedit: {}", preedit.text()));
+                    ui.text(format!("Cursor/selection (UTF-8 bytes): {:?}", preedit.cursor_range()));
+                } else {
+                    ui.text_disabled("Preedit: inactive");
+                }
 
                 ui.separator();
                 ui.text("Font merge test (runtime):");
@@ -299,7 +306,7 @@ impl AppWindow {
                 ui.separator();
                 ui.text("Notes:");
                 ui.bullet_text(
-                    "On desktop, IME candidates should follow the text caret in the input box.",
+                    "Preedit appears in a panel; desktop candidates follow its caret.",
                 );
                 ui.bullet_text(
                     "On mobile platforms, enabling IME typically shows the soft keyboard.",

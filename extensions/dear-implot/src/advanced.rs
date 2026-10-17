@@ -65,16 +65,18 @@ pub struct SubplotGrid<'a> {
 bitflags::bitflags! {
     /// Flags for subplot configuration
     pub struct SubplotFlags: u32 {
-        const NONE = 0;
-        const NO_TITLE = 1 << 0;
-        const NO_RESIZE = 1 << 1;
-        const NO_ALIGN = 1 << 2;
-        const SHARE_ITEMS = 1 << 3;
-        const LINK_ROWS = 1 << 4;
-        const LINK_COLS = 1 << 5;
-        const LINK_ALL_X = 1 << 6;
-        const LINK_ALL_Y = 1 << 7;
-        const COLUMN_MAJOR = 1 << 8;
+        const NONE = sys::ImPlotSubplotFlags_None as u32;
+        const NO_TITLE = sys::ImPlotSubplotFlags_NoTitle as u32;
+        const NO_LEGEND = sys::ImPlotSubplotFlags_NoLegend as u32;
+        const NO_MENUS = sys::ImPlotSubplotFlags_NoMenus as u32;
+        const NO_RESIZE = sys::ImPlotSubplotFlags_NoResize as u32;
+        const NO_ALIGN = sys::ImPlotSubplotFlags_NoAlign as u32;
+        const SHARE_ITEMS = sys::ImPlotSubplotFlags_ShareItems as u32;
+        const LINK_ROWS = sys::ImPlotSubplotFlags_LinkRows as u32;
+        const LINK_COLS = sys::ImPlotSubplotFlags_LinkCols as u32;
+        const LINK_ALL_X = sys::ImPlotSubplotFlags_LinkAllX as u32;
+        const LINK_ALL_Y = sys::ImPlotSubplotFlags_LinkAllY as u32;
+        const COLUMN_MAJOR = sys::ImPlotSubplotFlags_ColMajor as u32;
     }
 }
 
@@ -465,7 +467,7 @@ bitflags::bitflags! {
         const OUTSIDE           = sys::ImPlotLegendFlags_Outside as u32;
         const HORIZONTAL        = sys::ImPlotLegendFlags_Horizontal as u32;
         const SORT              = sys::ImPlotLegendFlags_Sort as u32;
-        // Note: ImPlotLegendFlags_Reverse is currently not exposed.
+        const REVERSE           = sys::ImPlotLegendFlags_Reverse as u32;
     }
 }
 
@@ -494,8 +496,8 @@ impl Drop for LegendToken<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{PlotError, SubplotGrid};
-    use crate::PlotContext;
+    use super::{PlotError, SubplotFlags, SubplotGrid};
+    use crate::{PlotContext, sys};
     use std::sync::{Mutex, OnceLock};
 
     fn test_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -531,6 +533,54 @@ mod tests {
             Err(err) => invalid_data_message(err),
             Ok(_) => panic!("expected SubplotGrid::begin() to reject invalid input"),
         }
+    }
+
+    #[test]
+    fn subplot_flags_match_the_upstream_contract() {
+        let cases = [
+            (SubplotFlags::NONE, sys::ImPlotSubplotFlags_None),
+            (SubplotFlags::NO_TITLE, sys::ImPlotSubplotFlags_NoTitle),
+            (SubplotFlags::NO_LEGEND, sys::ImPlotSubplotFlags_NoLegend),
+            (SubplotFlags::NO_MENUS, sys::ImPlotSubplotFlags_NoMenus),
+            (SubplotFlags::NO_RESIZE, sys::ImPlotSubplotFlags_NoResize),
+            (SubplotFlags::NO_ALIGN, sys::ImPlotSubplotFlags_NoAlign),
+            (
+                SubplotFlags::SHARE_ITEMS,
+                sys::ImPlotSubplotFlags_ShareItems,
+            ),
+            (SubplotFlags::LINK_ROWS, sys::ImPlotSubplotFlags_LinkRows),
+            (SubplotFlags::LINK_COLS, sys::ImPlotSubplotFlags_LinkCols),
+            (SubplotFlags::LINK_ALL_X, sys::ImPlotSubplotFlags_LinkAllX),
+            (SubplotFlags::LINK_ALL_Y, sys::ImPlotSubplotFlags_LinkAllY),
+            (SubplotFlags::COLUMN_MAJOR, sys::ImPlotSubplotFlags_ColMajor),
+        ];
+        for (flags, expected) in cases {
+            assert_eq!(flags.bits(), expected as u32);
+        }
+    }
+
+    #[test]
+    fn subplot_grid_forwards_resize_link_and_layout_flags() {
+        let _guard = test_guard();
+        let (mut imgui, plot) = setup_context();
+        let frame = imgui.begin_frame();
+        let plot_ui = plot.get_plot_ui(frame.ui());
+        let flags = SubplotFlags::NO_RESIZE | SubplotFlags::LINK_ROWS | SubplotFlags::COLUMN_MAJOR;
+        let _subplot = SubplotGrid::new("flag forwarding", 1, 1)
+            .with_size([200.0, 180.0])
+            .with_flags(flags)
+            .begin(&plot_ui)
+            .expect("subplot should be visible");
+        plot_ui.with_bound_context(|| unsafe {
+            let subplot = (*sys::ImPlot_GetCurrentContext()).CurrentSubplot;
+            assert!(!subplot.is_null());
+            assert_eq!(
+                (*subplot).Flags,
+                (sys::ImPlotSubplotFlags_NoResize
+                    | sys::ImPlotSubplotFlags_LinkRows
+                    | sys::ImPlotSubplotFlags_ColMajor) as sys::ImPlotSubplotFlags
+            );
+        });
     }
 
     #[test]

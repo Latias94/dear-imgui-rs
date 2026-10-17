@@ -31,6 +31,14 @@ pub(crate) fn handle_keyboard_parts(
     text: Option<&str>,
     imgui_ctx: &mut Context,
 ) -> WinitEventForwarding {
+    // Windows marks IME-consumed keys as Process. Do not map their physical key
+    // back to Enter/Backspace or inject text; Winit delivers unhandled shortcuts.
+    if matches!(
+        logical_key,
+        winit::keyboard::Key::Named(winit::keyboard::NamedKey::Process)
+    ) {
+        return WinitEventForwarding::default();
+    }
     let io = imgui_ctx.io_mut();
     let mut forwarded = WinitEventForwarding::default();
 
@@ -178,23 +186,28 @@ pub fn handle_modifiers_changed(
 pub fn handle_ime_event(ime: &Ime, imgui_ctx: &mut Context) -> WinitEventForwarding {
     let mut forwarded = WinitEventForwarding::default();
     match ime {
-        Ime::Preedit(_text, _cursor_range) => {
-            // Do not inject preedit text into Dear ImGui; composition should be handled by the OS/IME.
+        Ime::Preedit(text, cursor_range) => {
+            let had_preedit = imgui_ctx.has_ime_preedit();
+            if imgui_ctx.set_ime_preedit(text, *cursor_range).is_err() {
+                imgui_ctx.clear_ime_preedit();
+            }
+            let has_preedit = imgui_ctx.has_ime_preedit();
+            if !had_preedit && has_preedit {
+                // Stop Dear ImGui's own repeats for keys pressed before composition.
+                // Pending key presses are removed while modifiers and commits survive.
+                imgui_ctx.io_mut().clear_non_modifier_keys();
+            }
+            forwarded.text = had_preedit || has_preedit;
         }
         Ime::Commit(text) => {
-            // Handle committed text (final text input)
-            for ch in text.chars() {
-                if !ch.is_control() {
-                    imgui_ctx.io_mut().add_input_character(ch);
-                    forwarded.text = true;
-                }
-            }
+            forwarded.text = imgui_ctx.commit_ime_text(text);
         }
         Ime::Enabled => {
-            // IME was enabled - we could set a flag here if needed
+            imgui_ctx.notify_ime_enabled(true);
         }
         Ime::Disabled => {
-            // IME was disabled - we could clear a flag here if needed
+            forwarded.text = imgui_ctx.has_ime_preedit();
+            imgui_ctx.notify_ime_enabled(false);
         }
     }
     forwarded
@@ -263,6 +276,9 @@ pub(crate) fn handle_touch_event_at(
 
 /// Handle window focus events
 pub fn handle_focused(focused: bool, imgui_ctx: &mut Context) -> WinitEventForwarding {
+    if !focused {
+        imgui_ctx.clear_ime_preedit();
+    }
     // Tell Dear ImGui about host window focus change
     imgui_ctx.io_mut().add_focus_event(focused);
     WinitEventForwarding {
@@ -278,6 +294,213 @@ mod tests {
     use dear_imgui_rs::Context;
     use winit::event::{ElementState, MouseButton, TouchPhase};
     use winit::keyboard::ModifiersState;
+
+    fn ime_test_context() -> Context {
+        let mut context = Context::create();
+        context.io_mut().set_display_size([800.0, 600.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        context
+            .set_ini_filename::<std::path::PathBuf>(None)
+            .unwrap();
+        context
+    }
+
+    fn ime_input_frame(context: &mut Context, text: &mut String, focus: bool) {
+        let ui = context.frame();
+        ui.window("IME").build(|| {
+            if focus {
+                ui.set_keyboard_focus_here();
+            }
+            ui.input_text("text", text).build();
+        });
+        let _ = context.render_legacy();
+    }
+
+    #[test]
+    fn ime_preedit_update_cancel_and_commit_keep_transient_text_separate() {
+        let _guard = lock_context();
+        let mut context = ime_test_context();
+        let mut text = String::new();
+        ime_input_frame(&mut context, &mut text, true);
+        ime_input_frame(&mut context, &mut text, false);
+        handle_ime_event(&Ime::Enabled, &mut context);
+        assert!(handle_ime_event(&Ime::Preedit("中文".into(), Some((3, 6))), &mut context).text);
+        assert_eq!(context.ime_preedit().unwrap().cursor_range(), Some((3, 6)));
+        ime_input_frame(&mut context, &mut text, false);
+        assert!(text.is_empty());
+
+        // An IME-consumed native key must not fall back to an editing key.
+        let forwarded = handle_keyboard_parts(
+            &winit::keyboard::Key::Named(winit::keyboard::NamedKey::Process),
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Backspace),
+            ElementState::Pressed,
+            Some("\u{8}"),
+            &mut context,
+        );
+        assert_eq!(forwarded, WinitEventForwarding::default());
+        handle_ime_event(&Ime::Preedit(String::new(), None), &mut context);
+        assert!(context.ime_preedit().is_none());
+        handle_ime_event(&Ime::Commit("中文".into()), &mut context);
+        ime_input_frame(&mut context, &mut text, false);
+        assert_eq!(text, "中文");
+        handle_ime_event(&Ime::Preedit("取消".into(), None), &mut context);
+        handle_ime_event(&Ime::Disabled, &mut context);
+        assert!(context.ime_preedit().is_none());
+        ime_input_frame(&mut context, &mut text, false);
+        assert_eq!(text, "中文");
+        handle_ime_event(&Ime::Preedit("失焦".into(), Some((6, 6))), &mut context);
+        handle_focused(false, &mut context);
+        assert!(context.ime_preedit().is_none());
+    }
+
+    #[test]
+    fn ime_composition_stops_held_editing_keys_without_losing_pending_committed_text() {
+        let _guard = lock_context();
+        let mut context = ime_test_context();
+        let mut text = String::new();
+        ime_input_frame(&mut context, &mut text, true);
+        ime_input_frame(&mut context, &mut text, false);
+        context.io_mut().add_input_characters_utf8("prefix");
+        ime_input_frame(&mut context, &mut text, false);
+        handle_keyboard_parts(
+            &winit::keyboard::Key::Named(winit::keyboard::NamedKey::Backspace),
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Backspace),
+            ElementState::Pressed,
+            None,
+            &mut context,
+        );
+        ime_input_frame(&mut context, &mut text, false);
+        assert_eq!(text, "prefi");
+        handle_modifiers_changed(&ModifiersState::SHIFT.into(), &mut context);
+        ime_input_frame(&mut context, &mut text, false);
+        assert!(context.io().key_shift());
+
+        // A previously accepted commit remains queued until the next native frame.
+        context.io_mut().add_input_characters_utf8("雪");
+        assert!(handle_ime_event(&Ime::Preedit("中文".into(), Some((6, 6))), &mut context).text);
+        assert!(context.io().key_shift());
+        assert!(!context.io().key_ctrl());
+        assert!(!context.io().key_alt());
+        assert!(!context.io().key_super());
+        context.io_mut().set_delta_time(0.5);
+        for _ in 0..4 {
+            ime_input_frame(&mut context, &mut text, false);
+            assert_eq!(text, "prefi雪", "IME must stop native held-key repeats");
+        }
+
+        // A continuing composition update must not reset newly received modifiers.
+        handle_modifiers_changed(
+            &(ModifiersState::SHIFT | ModifiersState::ALT).into(),
+            &mut context,
+        );
+        ime_input_frame(&mut context, &mut text, false);
+        assert!(context.io().key_alt());
+        handle_ime_event(&Ime::Preedit("中文".into(), Some((3, 6))), &mut context);
+        assert!(context.io().key_alt());
+        let released = handle_keyboard_parts(
+            &winit::keyboard::Key::Named(winit::keyboard::NamedKey::Backspace),
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Backspace),
+            ElementState::Released,
+            None,
+            &mut context,
+        );
+        assert!(released.keyboard);
+    }
+
+    #[test]
+    fn ime_composition_discards_editing_keys_queued_in_the_same_event_batch() {
+        let _guard = lock_context();
+        let mut context = ime_test_context();
+        let mut text = String::new();
+        ime_input_frame(&mut context, &mut text, true);
+        ime_input_frame(&mut context, &mut text, false);
+        context.io_mut().add_input_characters_utf8("prefix");
+        ime_input_frame(&mut context, &mut text, false);
+        handle_keyboard_parts(
+            &winit::keyboard::Key::Named(winit::keyboard::NamedKey::Backspace),
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Backspace),
+            ElementState::Pressed,
+            None,
+            &mut context,
+        );
+        context.io_mut().add_input_characters_utf8("雪");
+        handle_ime_event(&Ime::Preedit("中文".into(), Some((6, 6))), &mut context);
+        context.io_mut().set_delta_time(0.5);
+        for _ in 0..4 {
+            ime_input_frame(&mut context, &mut text, false);
+            assert_eq!(text, "prefix雪");
+        }
+
+        // X11 may end composition with empty preedit and no Disabled/Commit.
+        handle_ime_event(&Ime::Preedit(String::new(), None), &mut context);
+        handle_keyboard_parts(
+            &winit::keyboard::Key::Named(winit::keyboard::NamedKey::Backspace),
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Backspace),
+            ElementState::Pressed,
+            None,
+            &mut context,
+        );
+        ime_input_frame(&mut context, &mut text, false);
+        assert_eq!(text, "prefix");
+        handle_ime_event(&Ime::Preedit("new".into(), Some((3, 3))), &mut context);
+        for _ in 0..4 {
+            ime_input_frame(&mut context, &mut text, false);
+            assert_eq!(
+                text, "prefix",
+                "restarted composition must stop held repeats"
+            );
+        }
+    }
+
+    #[test]
+    fn ime_composition_preserves_shortcuts_returned_to_the_application() {
+        let _guard = lock_context();
+        let mut context = ime_test_context();
+        let mut text = String::from("prefix");
+        ime_input_frame(&mut context, &mut text, true);
+        ime_input_frame(&mut context, &mut text, false);
+        handle_ime_event(&Ime::Preedit("中文".into(), Some((6, 6))), &mut context);
+        handle_modifiers_changed(&ModifiersState::CONTROL.into(), &mut context);
+        let shortcut = handle_keyboard_parts(
+            &winit::keyboard::Key::Character("c".into()),
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyC),
+            ElementState::Pressed,
+            None,
+            &mut context,
+        );
+        assert!(shortcut.keyboard);
+        assert!(!shortcut.text);
+        let tab = handle_keyboard_parts(
+            &winit::keyboard::Key::Named(winit::keyboard::NamedKey::Tab),
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Tab),
+            ElementState::Pressed,
+            None,
+            &mut context,
+        );
+        assert!(tab.keyboard);
+        assert!(!tab.text);
+    }
+
+    #[test]
+    fn rejected_preedit_does_not_clear_existing_keyboard_state() {
+        let _guard = lock_context();
+        let mut context = ime_test_context();
+        let mut text = String::new();
+        ime_input_frame(&mut context, &mut text, true);
+        ime_input_frame(&mut context, &mut text, false);
+        handle_modifiers_changed(&ModifiersState::SHIFT.into(), &mut context);
+        ime_input_frame(&mut context, &mut text, false);
+        assert!(context.io().key_shift());
+        let forwarded = handle_ime_event(&Ime::Preedit("文".into(), Some((1, 3))), &mut context);
+        assert!(!forwarded.text);
+        assert!(!context.has_ime_preedit());
+        assert!(context.io().key_shift());
+    }
 
     #[test]
     fn unmapped_keys_still_report_forwarded_text() {

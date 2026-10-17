@@ -96,7 +96,7 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
 
         validate_input_text_flags("InputTextImStr::build()", self.flags);
         let flags = self.flags.raw() | sys::ImGuiInputTextFlags_CallbackResize as i32;
-        let result = self.ui.run_with_bound_context(|| unsafe {
+        let result = self.ui.run_input_widget(label_ptr, || unsafe {
             if hint_ptr.is_null() {
                 sys::igInputText(
                     label_ptr,
@@ -262,7 +262,7 @@ where
 
         validate_input_text_flags("InputText::build()", self.flags);
         let flags = self.flags.raw() | sys::ImGuiInputTextFlags_CallbackResize as i32;
-        let result = self.ui.run_with_bound_context(|| unsafe {
+        let result = self.ui.run_input_widget(label_ptr, || unsafe {
             if hint_ptr.is_null() {
                 sys::igInputText(
                     label_ptr,

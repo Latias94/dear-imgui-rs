@@ -12,6 +12,22 @@ use super::{
 };
 
 impl WinitPlatformControl {
+    fn activate_ime_source(
+        &self,
+        context: &mut Context,
+        source: dear_imgui_rs::NativeWindowInstanceId,
+    ) {
+        if self
+            .ime_event_source
+            .replace(Some(source))
+            .is_some_and(|previous| previous != source)
+        {
+            // An already enabled second window need not emit another Enabled.
+            // Its events cannot be commits from the cancelled native source.
+            context.notify_ime_enabled(true);
+        }
+    }
+
     #[cfg(feature = "multi-viewport")]
     fn note_runtime_key(&self, window_id: winit::window::WindowId, event: &winit::event::KeyEvent) {
         let Some(key) =
@@ -202,7 +218,56 @@ impl WinitPlatform {
             self.control
                 .release_pointer_control(reason, Some(snapshot.target.instance_id))
         });
-        let forwarded = if snapshot.target.is_main {
+        let owns_text_input = imgui_ctx.text_input_viewport() == Some(snapshot.target.viewport_id);
+        let owns_ime_session =
+            imgui_ctx.ime_session_viewport() == Some(snapshot.target.viewport_id);
+        if (owns_text_input || owns_ime_session)
+            && matches!(event, WindowEvent::Focused(false) | WindowEvent::Destroyed)
+        {
+            imgui_ctx.clear_ime_preedit();
+        }
+        let forwarded = if let WindowEvent::Ime(ime) = event {
+            let accepts_ime = {
+                let mut enabled = self.control.ime_enabled_windows.borrow_mut();
+                match ime {
+                    winit::event::Ime::Enabled => {
+                        if self.control.ime_allowed.get() {
+                            enabled.insert(snapshot.target.instance_id);
+                            true
+                        } else {
+                            enabled.remove(&snapshot.target.instance_id);
+                            false
+                        }
+                    }
+                    winit::event::Ime::Disabled => {
+                        enabled.remove(&snapshot.target.instance_id);
+                        true
+                    }
+                    winit::event::Ime::Preedit(..) | winit::event::Ime::Commit(_) => {
+                        self.control.ime_allowed.get()
+                            && enabled.contains(&snapshot.target.instance_id)
+                    }
+                }
+            };
+            let session_notice = matches!(
+                ime,
+                winit::event::Ime::Enabled | winit::event::Ime::Disabled
+            );
+            let fresh_enable = matches!(ime, winit::event::Ime::Enabled)
+                && imgui_ctx.ime_session_viewport().is_none();
+            if accepts_ime
+                && (owns_text_input || session_notice && (owns_ime_session || fresh_enable))
+            {
+                if !matches!(ime, winit::event::Ime::Disabled) {
+                    self.control
+                        .activate_ime_source(imgui_ctx, snapshot.target.instance_id);
+                }
+                self.ime_enabled = !matches!(ime, winit::event::Ime::Disabled);
+                events::handle_ime_event(ime, imgui_ctx)
+            } else {
+                WinitEventForwarding::default()
+            }
+        } else if snapshot.target.is_main {
             let window = self.control.attached_window()?;
             self.control.validate_entry(imgui_ctx, &window)?;
             self.handle_window_event_internal(imgui_ctx, &window, event)
@@ -414,12 +479,6 @@ impl WinitPlatform {
                 }
                 events::handle_modifiers_changed(modifiers, imgui_ctx)
             }
-            WindowEvent::Ime(ime) => {
-                let forwarded = events::handle_ime_event(ime, imgui_ctx);
-                // Track IME enabled/disabled state based on winit notifications.
-                self.ime_enabled = !matches!(ime, winit::event::Ime::Disabled);
-                forwarded
-            }
             WindowEvent::Touch(touch) => {
                 let mut forwarded = WinitEventForwarding::default();
                 #[cfg(feature = "multi-viewport")]
@@ -497,6 +556,56 @@ mod tests {
         dpi::PhysicalPosition,
         event::{DeviceId, Touch, TouchPhase},
     };
+
+    #[test]
+    fn already_enabled_native_source_can_take_over_a_cancelled_session() {
+        let _guard = lock_context();
+        let mut context = Context::create();
+        let platform = WinitPlatform::new(&mut context).unwrap();
+        context.io_mut().set_display_size([800.0, 600.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+            .set_ini_filename::<std::path::PathBuf>(None)
+            .unwrap();
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        let first = dear_imgui_rs::NativeWindowInstanceId::allocate(context.id()).unwrap();
+        let second = dear_imgui_rs::NativeWindowInstanceId::allocate(context.id()).unwrap();
+        let mut text = String::new();
+        for activate in [true, false] {
+            let ui = context.frame();
+            ui.window("native IME sources").build(|| {
+                if activate {
+                    ui.set_keyboard_focus_here();
+                }
+                ui.input_text("text", &mut text).build();
+            });
+            let _ = context.render_legacy();
+        }
+        platform.control.activate_ime_source(&mut context, first);
+        context.set_ime_preedit("old", None).unwrap();
+        context.clear_ime_preedit();
+        platform.control.activate_ime_source(&mut context, first);
+        assert!(
+            !context.commit_ime_text("old"),
+            "the cancelled source stays blocked"
+        );
+        platform.control.activate_ime_source(&mut context, second);
+        context.set_ime_preedit("new", None).unwrap();
+        assert!(
+            context.has_ime_preedit(),
+            "another enabled source can begin composition"
+        );
+        context.notify_ime_enabled(false);
+        platform.control.activate_ime_source(&mut context, first);
+        assert!(
+            context.commit_ime_text("new"),
+            "a different source can also leave Disabled"
+        );
+    }
 
     #[test]
     fn single_window_focus_loss_releases_touch_ownership() {

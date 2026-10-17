@@ -236,6 +236,16 @@ Platform checklist:
   behavior of `dear-imgui-winit` or `dear-imgui-sdl3` before inventing new
   policy.
 
+### IME composition
+
+Forward preedit through `Context::set_ime_preedit(text, cursor_range)`, using UTF-8 byte offsets, and final text through `Context::commit_ime_text(text)`. Report native session notifications through `Context::notify_ime_enabled(bool)`. Empty preedit hides the panel but retains its input owner until commit; appending preedit to the user's buffer breaks cancellation and undo behavior.
+
+Core single-line, hint, and multiline inputs render composition in a foreground panel with the input's font and viewport. Custom/native editors must implement their own preedit display; they can continue receiving final commits when they request text input.
+
+After UI submission, consume `ContextBinding::take_ime_reset_request()` and interrupt composition on that native viewport. Also check from the native IME feedback callback, because frame completion can cancel an input. Keep cancelled events blocked until a new enabled boundary. Route events by the requesting viewport and exact native window registration, so an old window's queued commit cannot reach its replacement. A different, already enabled native source can start its own session without waiting for the cancelled window to reactivate. See [the Winit backend](../backends/dear-imgui-winit/src/platform/input_events.rs) for the source and session checks.
+
+Cancel composition when focus is lost or its platform/window retires, including deferred teardown. Use `ContextBinding::clear_ime_preedit_for_viewport` to avoid cancelling an unrelated window's input.
+
 ## Renderer Backend Reference
 
 The executable

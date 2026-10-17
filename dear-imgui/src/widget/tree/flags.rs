@@ -37,13 +37,14 @@ bitflags::bitflags! {
         const SPAN_FULL_WIDTH = sys::ImGuiTreeNodeFlags_SpanFullWidth as i32;
         /// Narrow hit box and hover highlight to the label text width.
         const SPAN_LABEL_WIDTH = sys::ImGuiTreeNodeFlags_SpanLabelWidth as i32;
+        /// Frame spans all table columns while the label stays in its current column.
+        const SPAN_ALL_COLUMNS = sys::ImGuiTreeNodeFlags_SpanAllColumns as i32;
         /// Label will span all columns of its container table.
         const LABEL_SPAN_ALL_COLUMNS = sys::ImGuiTreeNodeFlags_LabelSpanAllColumns as i32;
         /// (WIP) Nav: left direction goes to parent. Only for the tree node, not the tree push.
         const NAV_LEFT_JUMPS_BACK_HERE = sys::ImGuiTreeNodeFlags_NavLeftJumpsToParent as i32;
-        /// Combination of Leaf and NoTreePushOnOpen
-        const COLLAPSING_HEADER =
-            Self::FRAMED.bits() | Self::NO_TREE_PUSH_ON_OPEN.bits() | Self::NO_AUTO_OPEN_ON_LOG.bits();
+        /// Framed header without a tree push or automatic opening during logging.
+        const COLLAPSING_HEADER = sys::ImGuiTreeNodeFlags_CollapsingHeader as i32;
         /// No tree hierarchy guide lines are drawn.
         const DRAW_LINES_NONE = sys::ImGuiTreeNodeFlags_DrawLinesNone as i32;
         /// Draw full tree hierarchy guide lines.

@@ -40,6 +40,7 @@ pub struct Ui {
     pub(crate) ctx: *mut sys::ImGuiContext,
     pub(crate) ctx_binding: ContextBinding,
     pub(crate) texture_registry: SharedTextureRegistry,
+    pub(crate) ime: std::rc::Rc<RefCell<crate::context::ime::ImeState>>,
     pub(crate) native_scopes: RefCell<NativeScopeTracker>,
     /// Internal buffer for string operations
     buffer: UnsafeCell<UiBuffer>,

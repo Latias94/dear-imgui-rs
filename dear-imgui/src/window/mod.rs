@@ -108,11 +108,11 @@ bitflags! {
         /// Disable docking for this window (the window will not be able to dock into another and others won't be able to dock into it)
         const NO_DOCKING = sys::ImGuiWindowFlags_NoDocking as i32;
         /// Disable gamepad/keyboard navigation and focusing
-        const NO_NAV = Self::NO_NAV_INPUTS.bits() | Self::NO_NAV_FOCUS.bits();
+        const NO_NAV = sys::ImGuiWindowFlags_NoNav as i32;
         /// Disable all window decorations
-        const NO_DECORATION = Self::NO_TITLE_BAR.bits() | Self::NO_RESIZE.bits() | Self::NO_SCROLLBAR.bits() | Self::NO_COLLAPSE.bits();
+        const NO_DECORATION = sys::ImGuiWindowFlags_NoDecoration as i32;
         /// Disable all user interactions
-        const NO_INPUTS = Self::NO_MOUSE_INPUTS.bits() | Self::NO_NAV_INPUTS.bits();
+        const NO_INPUTS = sys::ImGuiWindowFlags_NoInputs as i32;
     }
 }
 

@@ -387,6 +387,10 @@ fn tree_node_flags_include_public_upstream_draw_line_bits() {
         imgui::sys::ImGuiTreeNodeFlags_LabelSpanAllColumns
     );
     assert_eq!(
+        imgui::TreeNodeFlags::SPAN_ALL_COLUMNS.bits(),
+        imgui::sys::ImGuiTreeNodeFlags_SpanAllColumns
+    );
+    assert_eq!(
         imgui::TreeNodeFlags::DRAW_LINES_NONE.bits(),
         imgui::sys::ImGuiTreeNodeFlags_DrawLinesNone
     );

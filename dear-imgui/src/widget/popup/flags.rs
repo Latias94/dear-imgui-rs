@@ -100,7 +100,7 @@ bitflags::bitflags! {
         /// matching Dear ImGui's string-id assertion.
         const ANY_POPUP_LEVEL = sys::ImGuiPopupFlags_AnyPopupLevel as i32;
         /// Test for any popup at any popup stack level.
-        const ANY_POPUP = Self::ANY_POPUP_ID.bits() | Self::ANY_POPUP_LEVEL.bits();
+        const ANY_POPUP = sys::ImGuiPopupFlags_AnyPopup as i32;
     }
 }
 

@@ -234,7 +234,7 @@ coordinates ImGui uses:
   and numpad (0-9, decimal/divide/multiply/subtract/add/equal/enter).
 - Mouse: buttons, position, wheel. `PixelDelta` retains fractional movement after scaling to logical scroll units; `LineDelta` uses the provided values.
 - Modifiers: `ModifiersChanged` updates aggregate modifier state; physical key events preserve left/right identity.
-- IME: preedit is ignored (no transient injection); committed text is appended.
+- IME: core `InputText`, hint, and multiline widgets display transient preedit text, its cursor/selection, and an underline in a foreground panel at the caret. Only `Ime::Commit` enters the text buffer; updates and cancellation preserve the buffer and undo history.
 
 ### Touch
 
@@ -244,6 +244,10 @@ Basic touch-to-mouse translation is provided:
 - Losing window focus releases the active touch, so a missing End/Cancelled event cannot block a later finger.
 
 ### IME integration
+
+Preedit cursor/selection offsets are UTF-8 byte positions; `None` hides the cursor and empty text hides the panel while retaining its owner until commit. Switching input widgets interrupts the old native session and rejects its late updates/commits until IME is enabled again. The panel uses the input widget's font, size, and rasterizer density; configure a font containing the required CJK glyphs. Password inputs mask composition. Candidate positioning follows the composition caret on the owning native window. Focus loss, disabled IME, window retirement, and platform shutdown cancel transient text.
+
+This is a composition panel, not inline insertion or paragraph reflow. Custom editors (including CTE) and direct native/raw widgets do not automatically participate. Other platform backends must forward their own composition events through `Context::set_ime_preedit`, `commit_ime_text`, and `notify_ime_enabled`, and honor `ContextBinding::take_ime_reset_request`; this Winit change does not add Bevy or SDL3 event handling. Operating-system candidate UI still depends on the platform IME.
 
 - IME is **auto-managed** by default: `prepare_render` inspects
   `ui.io().want_text_input()` and toggles `Window::set_ime_allowed(...)`

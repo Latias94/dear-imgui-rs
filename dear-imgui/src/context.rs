@@ -12,6 +12,7 @@ mod core;
 mod error;
 mod fonts;
 mod frame;
+pub(crate) mod ime;
 mod platform;
 mod settings;
 mod snapshot_hub;
@@ -39,6 +40,7 @@ pub use self::error::{
 pub use self::frame::{
     FrameLifecycleStamp, FrameLifecycleState, FramePrepareOptions, FrameResult, FrameToken,
 };
+pub use self::ime::{ImePreedit, ImePreeditError};
 pub use self::snapshot_hub::RendererTextureReset;
 pub use self::suspended::SuspendedContext;
 pub(crate) use self::texture_registry::SharedTextureRegistry;

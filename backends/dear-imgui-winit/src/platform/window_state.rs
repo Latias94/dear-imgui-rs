@@ -37,6 +37,7 @@ pub(super) unsafe extern "C" fn imgui_winit_set_ime_data(
                 control.fail_current_contract(error);
                 return;
             }
+            control.reset_ime_composition_if_requested();
             #[cfg(feature = "multi-viewport")]
             let window = crate::multi_viewport::window_for_viewport(ctx, viewport)
                 .or_else(|| control.attached_window().ok());
@@ -109,6 +110,55 @@ pub(super) fn ime_callback_eq(
 }
 
 impl WinitPlatformControl {
+    pub(crate) fn reset_ime_composition_if_requested(&self) {
+        let Some(viewport_id) = self.binding.take_ime_reset_request() else {
+            return;
+        };
+        if !self.ime_allowed.get() {
+            return;
+        }
+        let _ = self.binding.try_with_bound_context(|| {
+            #[cfg(feature = "multi-viewport")]
+            let window = unsafe {
+                let viewport = dear_imgui_rs::sys::igFindViewportByID(viewport_id.raw());
+                if viewport.is_null() {
+                    None
+                } else if !self.has_live_runtime() {
+                    let main = dear_imgui_rs::sys::igGetMainViewport();
+                    (viewport == main)
+                        .then(|| self.attached_window().ok())
+                        .flatten()
+                } else {
+                    crate::multi_viewport::window_for_viewport(self.context_raw, viewport)
+                }
+            };
+            #[cfg(not(feature = "multi-viewport"))]
+            let window = {
+                let _ = viewport_id;
+                self.attached_window().ok()
+            };
+            if let Some(window) = window {
+                if let Ok(snapshots) = self.window_snapshots()
+                    && let Some(snapshot) = snapshots
+                        .iter()
+                        .find(|entry| entry.window_id == window.id())
+                {
+                    self.ime_enabled_windows
+                        .borrow_mut()
+                        .remove(&snapshot.target.instance_id);
+                }
+                // Winit has no composition-interrupt operation. Its enabled
+                // boundary separates old queued commits from the next input.
+                window.set_ime_allowed(false);
+                window.set_ime_allowed(true);
+            } else {
+                // The old native registration is gone, so its events cannot
+                // route into this Context anymore.
+                self.binding.reset_ime_session();
+            }
+        });
+    }
+
     pub(crate) fn attached_window(&self) -> Result<Arc<Window>, WinitPlatformError> {
         self.attached_window
             .borrow()
@@ -117,6 +167,10 @@ impl WinitPlatformControl {
     }
 
     pub(crate) fn set_ime_allowed_for_owned_windows(&self, allowed: bool) {
+        if !allowed {
+            self.binding.clear_ime_preedit();
+            self.ime_enabled_windows.borrow_mut().clear();
+        }
         self.ime_allowed.set(allowed);
         if let Some(window) = self.attached_window.borrow().as_ref() {
             window.set_ime_allowed(allowed);
@@ -324,6 +378,7 @@ impl WinitPlatform {
                 self.ime_enabled = false;
             }
         }
+        self.control.reset_ime_composition_if_requested();
 
         // Only change OS cursor if not disabled by config flags
         if !ui

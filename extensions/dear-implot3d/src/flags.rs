@@ -10,6 +10,12 @@ bitflags::bitflags! {
         const NO_MOUSE_TXT= sys::ImPlot3DFlags_NoMouseText as u32;
         const NO_CLIP     = sys::ImPlot3DFlags_NoClip as u32;
         const NO_MENUS    = sys::ImPlot3DFlags_NoMenus as u32;
+        /// Constrain all axes to the same units per pixel.
+        const EQUAL       = sys::ImPlot3DFlags_Equal as u32;
+        const NO_ROTATE   = sys::ImPlot3DFlags_NoRotate as u32;
+        const NO_PAN      = sys::ImPlot3DFlags_NoPan as u32;
+        const NO_ZOOM     = sys::ImPlot3DFlags_NoZoom as u32;
+        const NO_INPUTS   = sys::ImPlot3DFlags_NoInputs as u32;
         const CANVAS_ONLY = sys::ImPlot3DFlags_CanvasOnly as u32;
     }
 }

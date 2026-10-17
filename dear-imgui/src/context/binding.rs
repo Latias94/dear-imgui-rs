@@ -171,6 +171,7 @@ pub enum ContextLifecycle {
 }
 
 pub(crate) struct ContextState {
+    pub(crate) ime: Rc<RefCell<super::ime::ImeState>>,
     id: ContextId,
     address: usize,
     main_viewport_address: usize,
@@ -221,6 +222,7 @@ impl ContextState {
         );
         let main_viewport_address = main_viewport as usize;
         let state = Rc::new(Self {
+            ime: Rc::new(RefCell::new(super::ime::ImeState::default())),
             id,
             address: raw as usize,
             main_viewport_address,
@@ -332,6 +334,43 @@ impl fmt::Debug for ContextBinding {
 }
 
 impl ContextBinding {
+    /// Cancel transient IME composition, including during platform teardown.
+    /// This only accesses Rust state; a destroyed Context is a no-op.
+    pub fn clear_ime_preedit(&self) {
+        if let Some(state) = self.state.upgrade() {
+            state.ime.borrow_mut().cancel();
+        }
+    }
+
+    /// Cancel composition owned by a retiring native window's viewport.
+    pub fn clear_ime_preedit_for_viewport(&self, viewport: crate::Id) {
+        if let Some(state) = self.state.upgrade() {
+            let mut ime = state.ime.borrow_mut();
+            if ime.session_viewport() == Some(viewport) {
+                ime.cancel();
+            }
+        }
+    }
+
+    /// Take one request to interrupt composition on its previous native viewport.
+    ///
+    /// The platform should disable and, when still allowed, re-enable native IME.
+    /// Input stays blocked until its next enabled notification.
+    pub fn take_ime_reset_request(&self) -> Option<crate::Id> {
+        self.state
+            .upgrade()
+            .and_then(|state| state.ime.borrow_mut().take_reset_request())
+    }
+
+    /// Forget an ended platform's IME session before a new platform takes ownership.
+    ///
+    /// Use this only when old native events can no longer reach the Context.
+    pub fn reset_ime_session(&self) {
+        if let Some(state) = self.state.upgrade() {
+            state.ime.borrow_mut().reset_session();
+        }
+    }
+
     pub(crate) fn new(state: &Rc<ContextState>) -> Self {
         Self {
             state: Rc::downgrade(state),
