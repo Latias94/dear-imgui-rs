@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.21.0 - 2026-10-17
+
+### Changed
+
+- Reject snapshots containing Dear ImGui 1.93's unsupported `SetSamplerFromTexture` command before texture upload. The whole affected Context epoch is abandoned while other Contexts continue; inspect `ImguiDiagnosticKind::TextureSamplerUnsupported` through `ImguiDiagnostics` with origin `RenderPreparation`. Select linear or nearest sampling explicitly. [PR #94](https://github.com/Latias94/dear-imgui-rs/pull/94)
+
+See the [workspace release notes](../../CHANGELOG.md#0210---2026-10-17) for the shared Dear ImGui 1.93 migration. The external Bevy dependency remains 0.20.0.
+
 ## 0.16.0 - 2026-08-14
 
 ### Breaking Changes

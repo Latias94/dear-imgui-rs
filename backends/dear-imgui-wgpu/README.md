@@ -384,28 +384,28 @@ replacements are preserved rather than overwritten.
 
 ## Selecting wgpu version
 
-The `0.20.0` release defaults to WGPU 30:
+The `0.21.0` release defaults to WGPU 30:
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = "0.20"
+dear-imgui-wgpu = "0.21"
 ```
 
 If your ecosystem is pinned to `wgpu` v29, v28, or v27, select it explicitly:
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "0.20", default-features = false, features = ["wgpu-29"] }
+dear-imgui-wgpu = { version = "0.21", default-features = false, features = ["wgpu-29"] }
 ```
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "0.20", default-features = false, features = ["wgpu-28"] }
+dear-imgui-wgpu = { version = "0.21", default-features = false, features = ["wgpu-28"] }
 ```
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "0.20", default-features = false, features = ["wgpu-27"] }
+dear-imgui-wgpu = { version = "0.21", default-features = false, features = ["wgpu-27"] }
 ```
 
 ## What You Get
@@ -424,6 +424,7 @@ dear-imgui-wgpu = { version = "0.20", default-features = false, features = ["wgp
 
 | Track | wgpu support |
 |-------|--------------|
+| `0.21.0` | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
 | `0.20.0` | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
 | `0.19.0` | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
 

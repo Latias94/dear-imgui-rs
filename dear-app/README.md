@@ -11,7 +11,7 @@ Create a binary crate and add the stable release:
 
 ```toml
 [dependencies]
-dear-app = "0.20"
+dear-app = "0.21"
 ```
 
 Then use `dear_app::run_ui` for applications that only need persistent UI state:

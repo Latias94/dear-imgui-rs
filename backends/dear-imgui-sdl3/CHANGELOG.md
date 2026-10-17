@@ -6,15 +6,22 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-17
+
 ### Added
 
-- Receive owned file-drop payloads with available coordinates and native target identity. [PR #93](https://github.com/Latias94/dear-imgui-rs/pull/93)
-- Configure secondary windows and query their state, supported policies, and lifecycle events.
-- Keep native windows and their owners alive while renderer work still needs them.
+- Receive owned file/text drops with available coordinates and native target identity, including through callback event handoff. [PR #93](https://github.com/Latias94/dear-imgui-rs/pull/93)
+- Configure secondary windows and query their state, supported policies, and lifecycle events. Native allocation identities remain distinct from reusable SDL window and ImGui viewport IDs. [PR #93](https://github.com/Latias94/dear-imgui-rs/pull/93)
+- Keep native windows and their owners alive while renderer work still needs them. [PR #93](https://github.com/Latias94/dear-imgui-rs/pull/93)
+- Configure the official OpenGL3 owner's clip origin with `Sdl3OpenGl3Backend::set_clip_origin`. The default is lower-left; applications using `GL_UPPER_LEFT` must select `Sdl3OpenGl3ClipOrigin::UpperLeft`, or `Auto` for driver detection. [PR #94](https://github.com/Latias94/dear-imgui-rs/pull/94)
 
 ### Fixed
 
-- Stop advertising native viewport parenting on Cocoa, where the upstream SDL adapter leaves it disabled so detached windows can move between monitors.
+- Stop advertising native viewport parenting on Cocoa, where the upstream SDL adapter leaves it disabled so detached windows can move between monitors. [PR #93](https://github.com/Latias94/dear-imgui-rs/pull/93)
+- Preserve a valid framebuffer density when a platform scale callback fails and report the platform fault before reaching Dear ImGui's geometry assertion. [PR #94](https://github.com/Latias94/dear-imgui-rs/pull/94)
+- Discover native SDL3 headers and runtime libraries with both the legacy Cargo build layout and Cargo 1.100's per-package layout. [PR #92](https://github.com/Latias94/dear-imgui-rs/pull/92)
+
+See the [workspace release notes](../../CHANGELOG.md#0210---2026-10-17) for the shared Dear ImGui 1.93 and editor backend migrations. External SDL3 dependency versions are unchanged from 0.20.0.
 
 ## [0.20.0] - 2026-10-12
 

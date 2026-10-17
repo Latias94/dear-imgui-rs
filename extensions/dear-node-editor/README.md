@@ -46,9 +46,9 @@ layout compatibility notice.
 
 | Item                 | Version |
 |----------------------|---------|
-| Crate                | 0.20.0  |
-| dear-imgui-rs        | 0.20.0  |
-| dear-node-editor-sys | 0.20.0  |
+| Crate                | 0.21.0  |
+| dear-imgui-rs        | 0.21.0  |
+| dear-node-editor-sys | 0.21.0  |
 
 ## Quick Start
 

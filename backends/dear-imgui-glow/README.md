@@ -244,8 +244,8 @@ proof; shared runtime tests remain the teardown evidence. See the
 
 | Item          | Version |
 |---------------|---------|
-| Crate         | 0.20.0  |
-| dear-imgui-rs | 0.20.0  |
+| Crate         | 0.21.0  |
+| dear-imgui-rs | 0.21.0  |
 | glow          | 0.18    |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.

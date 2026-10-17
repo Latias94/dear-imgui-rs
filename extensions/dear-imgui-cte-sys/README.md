@@ -13,7 +13,7 @@ length-aware filters, transactions, and autocomplete configuration.
 
 ## Compatibility and Provenance
 
-This crate is a Preview `-sys` crate in the `0.20` release train and must use
+This crate is a Preview `-sys` crate in the `0.21` release train and must use
 the same release train, workspace checkout, or Git revision as `dear-imgui-sys`
 and `dear-imgui-cte`. It shares the Dear ImGui and cimgui core supplied by
 `dear-imgui-sys`; upstream CMake files are not used because they compile a
@@ -48,9 +48,10 @@ The pinned upstream source owns wide-glyph column calculation and rendering;
 the old `cte-wide-glyphs-v1` overlay and its prebuilt identity marker have been removed.
 
 Native, packaged, and WebAssembly builds still apply the separate
-`cte-unicode-range-lookup-v1` correction. The current upstream retains four
+`cte-text-editor-v1` correction. The current upstream retains four
 unbounded Unicode range searches and omits U+3000, U+FF01–FF60, and U+FFE0–FFE6
-from its fullwidth table. This patch bounds the searches and restores those ranges;
+from its fullwidth table. This patch bounds the searches, restores those ranges, and aligns current-line
+backgrounds with the visible text area when a window moves or scrolls horizontally;
 its identity remains part of native artifact validation. Re-audit it when upstream
 changes these functions or tables.
 

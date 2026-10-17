@@ -8,7 +8,8 @@ paths, see [the Apple platform guide](workstreams/apple-platform-support.md).
 ## Versioning Policy
 
 - Unified release train: all published `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
-- Stable 0.20 train: unified `v0.20.0` (use `version = "0.20"`).
+- Preparing 0.21 train: unified `v0.21.0` (use `version = "0.21"` once published).
+- Published stable 0.20 train: unified `v0.20.0` (use `version = "0.20"`).
 - Previous stable train: unified `v0.19.0` (use `version = "0.19"`).
 - Previous stable train: unified `v0.18.0` (use `version = "0.18"`).
 - Previous stable train: unified `v0.17.0` (use `version = "0.17"`).
@@ -22,13 +23,31 @@ paths, see [the Apple platform guide](workstreams/apple-platform-support.md).
 - Previous train: unified `v0.10.4` (use `version = "0.10"`).
 - Previous train: unified `v0.9.0` (use `version = "0.9"`).
 - Previous train: unified `v0.8.0` (use `version = "0.8"`).
-- Internal dependency constraints use the compatible current stable minor (`0.20`); prerelease trains use exact requirements. Mixing different release trains across our crates is unsupported.
+- Internal dependency constraints use the compatible current release minor (`0.21`); prerelease trains use exact requirements. Mixing different release trains across our crates is unsupported.
 
-## Unreleased: Dear ImGui 1.93
+## 0.21 Release Train
 
-The development branch tracks the latest `cimgui/docking_inter` pin (`5d7cc7e12de9a868bbecc00ce2ed74e58d266f1c`), which embeds Dear ImGui **1.93.1 WIP** (`d88f238d1d363ef387382b2e29ad12cf96f826ac`). This includes the 1.93.0 release and subsequent upstream cleanup. All maintained extension wrappers and their nested dependencies follow their updated upstream pins.
+All 29 publishable crates move together to `0.21.0`. Use `version = "0.21"` for every workspace crate once this candidate is published. Until then, use Git dependencies for these APIs. Published 0.20.0 retains its original 1.92.9b baseline.
 
-This update breaks the custom drawing, style, text-filter, and CTE notification APIs. See the [1.93 migration guide](IMGUI_193_MIGRATION.md). Rebuild custom native archives and Emscripten providers against these pins; old ABI-compatible-looking archives are unsupported. Published 0.20.0 retains its original 1.92.9b baseline. Dependency requirements and MSRV are unchanged.
+The core uses `cimgui/docking_inter` pin `5d7cc7e12de9a868bbecc00ce2ed74e58d266f1c`, embedding Dear ImGui **1.93.1 WIP** at `d88f238d1d363ef387382b2e29ad12cf96f826ac`. This includes the 1.93.0 release and subsequent upstream cleanup. All maintained extension wrappers and their nested dependencies follow their updated upstream pins.
+
+| Integration | Required external versions |
+| --- | --- |
+| WGPU | 30 by default; select exactly one of the 30/29/28/27 feature routes |
+| Winit | 0.30.13 |
+| Glow | 0.18 |
+| Ash | 0.38 |
+| SDL3 | sdl3 0.20, sdl3-sys 0.7, SDL 3.4.18 |
+| Bevy | exactly 0.20.0; Rust 1.97.1 or newer |
+| glam interoperability | 0.34 |
+
+The core MSRV remains Rust 1.92, and development and publishing use Rust 1.99. Canonical binding generation remains fixed to Rust 1.95 and LLVM 14. External dependency requirements are unchanged from 0.20.0. `dear-app` uses WGPU 30; browser rendering remains single-window, and `dear-node-editor` remains native-only.
+
+- Upgrade custom drawing, style, text-filter, CTE notification, and node-background callers using the [Dear ImGui 1.93 migration guide](IMGUI_193_MIGRATION.md).
+- Applications owning Winit event dispatch or WGPU multi-viewport execution must follow the [editor backend migration guide](EDITOR_BACKEND_MIGRATION.md). WGPU observations distinguish recorded, submitted, and presentation-requested work; they do not prove that pixels became visible.
+- Rebuild custom native archives and Emscripten providers against the new headers and bindings. Older core and extension artifacts are unsupported and rejected by version, binding, and source-adaptation identity checks.
+- Custom source providers must replace `ProviderTransform::PatchCteUnicodeRangeLookup` with `PatchCteTextEditor`, which includes Unicode fixes and current-line highlight coordinates, and handle the new plot and ImNodes source adaptations.
+- CTE retains its bounded Unicode-range search and fullwidth-coordinate corrections. The old wide-glyph overlay remains removed because upstream owns glyph columns; the shared native/WASM overlay also aligns current-line highlights when the editor moves or scrolls.
 
 ## 0.20 Stable Release
 

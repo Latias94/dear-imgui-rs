@@ -34,7 +34,7 @@ export IMGUI_SYS_LIB_DIR=/path/to/extracted/dear-imgui-artifact/lib
 cargo build -p dear-imgui-sys
 
 # Option B: Use a package-tool-generated local archive or HTTP(S) URL.
-export IMGUI_SYS_PREBUILT_URL=/path/to/dear-imgui-prebuilt-0.20.0-<target>-static.tar.gz
+export IMGUI_SYS_PREBUILT_URL=/path/to/dear-imgui-prebuilt-0.21.0-<target>-static.tar.gz
 cargo build -p dear-imgui-sys --features prebuilt
 
 # Option C: Enable HTTP(S) downloads / auto-download from GitHub releases
@@ -190,10 +190,10 @@ Use the compatible stable requirement:
 
 ```toml
 [dependencies]
-dear-imgui-sys = "0.20"
+dear-imgui-sys = "0.21"
 
 # Alternatively, enable native FreeType (replace the preceding dependency entry).
-# dear-imgui-sys = { version = "0.20", features = ["freetype"] }
+# dear-imgui-sys = { version = "0.21", features = ["freetype"] }
 ```
 
 ### Direct FFI Usage (Advanced)
@@ -233,7 +233,7 @@ can expose optional backend shim modules behind `backend-shim-*` features:
 
 ```toml
 [dependencies]
-dear-imgui-sys = { version = "0.20", features = ["backend-shim-opengl3"] }
+dear-imgui-sys = { version = "0.21", features = ["backend-shim-opengl3"] }
 ```
 
 These features expose self-contained modules such as:
@@ -403,7 +403,7 @@ There are two first-class Android directions.
 
    ```toml
    [dependencies]
-   dear-imgui-sys = { version = "0.20", features = ["backend-shim-android", "backend-shim-opengl3"] }
+   dear-imgui-sys = { version = "0.21", features = ["backend-shim-android", "backend-shim-opengl3"] }
    ```
 
    Use the raw `dear-imgui-sys` context and frame API with

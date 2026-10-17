@@ -4,6 +4,14 @@ All notable changes to this crate will be documented in this file.
 
 ## Unreleased
 
+## 0.21.0 - 2026-10-17
+
+### Changed
+
+- Reject Dear ImGui 1.93's `SetSamplerFromTexture` during preparation with `RendererError::TextureSamplerUnsupported`, before issuing draw commands. Vulkan image views do not carry sampler state; select linear or nearest sampling explicitly. [PR #94](https://github.com/Latias94/dear-imgui-rs/pull/94)
+
+See the [workspace release notes](../../CHANGELOG.md#0210---2026-10-17) for the shared Dear ImGui 1.93 migration.
+
 ## 0.19.0 - 2026-10-10
 
 ### Breaking

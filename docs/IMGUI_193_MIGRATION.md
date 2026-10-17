@@ -1,6 +1,6 @@
 # Dear ImGui 1.93 migration
 
-The development branch uses the latest cimgui docking pin, embedding Dear ImGui **1.93.1 WIP** after the 1.93.0 release. Rebuild custom native archives and WASM providers with the updated headers and bindings.
+The `0.21.0` release train uses the updated cimgui docking pin, embedding Dear ImGui **1.93.1 WIP** after the 1.93.0 release. Upgrade all workspace crate dependencies together to `"0.21"` and rebuild custom native archives and WASM providers with the updated headers and bindings. Applications migrating from published 0.20.0 should also read the [editor backend migration guide](EDITOR_BACKEND_MIGRATION.md).
 
 ## Custom drawing
 
@@ -27,7 +27,7 @@ draw_list.with_draw_flags(DrawFlags::STROKE_LEGACY, true, || {
 });
 ```
 
-Flag scopes restore defaults during unwinding and support up to three nested scopes per draw list. Stroke positions other than legacy, joins, and caps belong on primitives. The current upstream ellipse implementation requires an explicit `STROKE_LEGACY` primitive flag even inside a legacy scope. Circle, ellipse, and ngon anti-aliasing is configured through the scope.
+Flag scopes restore defaults during unwinding and support up to three nested scopes per draw list. Stroke positions other than legacy, joins, and caps belong on primitives. The current upstream ellipse implementation requires an explicit `STROKE_LEGACY` primitive flag even inside a legacy scope. Rectangle, circle, ellipse, and ngon anti-aliasing is configured through the scope. `Rect::flags` accepts corner rounding and stroke placement; configure AA with `with_draw_flags` rather than per-rectangle flags, which upstream does not preserve on every drawing path.
 
 ## Style, atlas, and text filters
 
