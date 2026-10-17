@@ -33,10 +33,13 @@ pub mod surface_test_probe {
             weight: f32,
             pixel_density: f32,
             anti_aliased: bool,
+            alpha: f32,
             positions: *mut f32,
             uvs: *mut f32,
             expected_uvs: *mut f32,
             expected_width: *mut f32,
+            colors: *mut u32,
+            expected_color: *mut u32,
         ) -> std::ffi::c_int;
         pub fn dear_implot3d_surface_probe_reset();
         pub fn dear_implot3d_surface_probe_plot(

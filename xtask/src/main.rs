@@ -1330,7 +1330,7 @@ fn prepare_wasm_provider_inputs(
                 | ProviderTransform::PatchImguiDemo
                 | ProviderTransform::PatchImguiWidgetsNumericConversions
                 | ProviderTransform::PatchImnodes
-                | ProviderTransform::PatchCteUnicodeRangeLookup
+                | ProviderTransform::PatchCteTextEditor
                 | ProviderTransform::PatchCteTextDiffDrawFlags
                 | ProviderTransform::PatchImplot => {
                     let contents =
@@ -1352,8 +1352,8 @@ fn prepare_wasm_provider_inputs(
                         ProviderTransform::PatchImnodes => {
                             build_support::patch_imnodes_cpp_for_imgui(&contents)
                         }
-                        ProviderTransform::PatchCteUnicodeRangeLookup => {
-                            build_support::patch_cte_text_editor_unicode_range_lookup(&contents)
+                        ProviderTransform::PatchCteTextEditor => {
+                            build_support::patch_cte_text_editor(&contents)
                         }
                         ProviderTransform::PatchCteTextDiffDrawFlags => {
                             build_support::patch_cte_text_diff_draw_flags(&contents)
@@ -1813,10 +1813,8 @@ mod tests {
         assert!(inputs.source_files.contains(&patched));
         assert_eq!(
             std::fs::read_to_string(patched).unwrap(),
-            build_support::patch_cte_text_editor_unicode_range_lookup(
-                &std::fs::read_to_string(original).unwrap()
-            )
-            .unwrap()
+            build_support::patch_cte_text_editor(&std::fs::read_to_string(original).unwrap())
+                .unwrap()
         );
         let original = source_root.join("TextDiff.cpp");
         let patched = output.path().join("provider-cte-text-diff-patched.cpp");

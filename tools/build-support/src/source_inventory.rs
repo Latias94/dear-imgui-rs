@@ -69,7 +69,7 @@ pub enum ProviderTransform {
     PatchImguiDemo,
     PatchImguiWidgetsNumericConversions,
     PatchImnodes,
-    PatchCteUnicodeRangeLookup,
+    PatchCteTextEditor,
     PatchCteTextDiffDrawFlags,
     PatchImplot3dDrawFlags,
     PatchImplot,

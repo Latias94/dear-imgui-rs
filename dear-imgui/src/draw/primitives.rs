@@ -5,8 +5,8 @@ use super::color::ImColor32;
 use super::counts::{DrawFlags, DrawSegmentCount};
 use super::list::DrawListMut;
 use super::util::{
-    CORNER_FLAGS, FILL_FLAGS, STROKE_FLAGS, STROKE_POSITION, assert_draw_flags,
-    assert_non_negative_f32, assert_polyline_flags, assert_positive_f32, finite_vec2,
+    CORNER_FLAGS, STROKE_FLAGS, STROKE_POSITION, assert_draw_flags, assert_non_negative_f32,
+    assert_polyline_flags, assert_positive_f32, finite_vec2,
 };
 
 /// Represents a line about to be drawn.
@@ -138,13 +138,13 @@ impl<'ui> Rect<'ui> {
         self
     }
 
-    /// Configure corner rounding, stroke placement, and anti-aliasing
+    /// Configure corner rounding and stroke placement.
+    ///
+    /// Stroke placement has no effect on a filled rectangle. Configure
+    /// anti-aliasing with [`DrawListMut::with_draw_flags`]; native rectangle
+    /// paths do not consistently apply per-rectangle anti-aliasing flags.
     pub fn flags(mut self, flags: DrawFlags) -> Self {
-        assert_draw_flags(
-            "Rect::flags()",
-            flags,
-            CORNER_FLAGS | STROKE_FLAGS | FILL_FLAGS,
-        );
+        assert_draw_flags("Rect::flags()", flags, CORNER_FLAGS | STROKE_POSITION);
         self.flags = flags;
         self
     }

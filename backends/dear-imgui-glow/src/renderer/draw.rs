@@ -1205,3 +1205,7 @@ mod tests {
         assert_eq!(BOUND_VERTEX_ARRAY.load(Ordering::SeqCst), 44);
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "draw_tests.rs"]
+mod render_tests;

@@ -1128,11 +1128,11 @@ pub fn patch_imnodes_cpp_for_imgui(source: &str) -> Result<String, String> {
     Ok(restore_cpp_newlines(patched, newline))
 }
 
-/// Source contract for CTE's bounded Unicode range searches and fullwidth ranges.
-pub const CTE_UNICODE_RANGE_LOOKUP_PATCH_VERSION: &str = "cte-unicode-range-lookup-v1";
+/// Source contract for CTE's Unicode lookup and current-line background coordinates.
+pub const CTE_TEXT_EDITOR_PATCH_VERSION: &str = "cte-text-editor-v1";
 
-/// Correct closed Unicode range lookup without stepping outside the table.
-pub fn patch_cte_text_editor_unicode_range_lookup(source: &str) -> Result<String, String> {
+/// Correct Unicode lookup and keep the current-line background in the visible text area.
+pub fn patch_cte_text_editor(source: &str) -> Result<String, String> {
     let (mut patched, newline) = normalize_cpp_source(source);
     for (signature, found, missing) in [
         (
@@ -1177,6 +1177,18 @@ pub fn patch_cte_text_editor_unicode_range_lookup(source: &str) -> Result<String
         "{0xfe10, 0xfe19}, {0xfe30, 0xfe52}, {0xfe54, 0xfe66}, {0xfe68, 0xfe6b},\n\t{0xff01, 0xff60}, {0xffe0, 0xffe6}\n};",
         "CTE fullwidth forms",
     )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "const auto topLeft = ImVec2(textLeftOffset, cursorScreenPos.y + line.row * glyphSize.y);\n",
+            "\t\t\t\tconst auto bottomRight = topLeft + ImVec2(textRightOffset, line.rows * glyphSize.y);"
+        ),
+        concat!(
+            "const auto topLeft = ImVec2(ImGui::GetWindowPos().x + textLeftOffset, cursorScreenPos.y + line.row * glyphSize.y);\n",
+            "\t\t\t\tconst auto bottomRight = ImVec2(ImGui::GetWindowPos().x + textRightOffset, topLeft.y + line.rows * glyphSize.y);"
+        ),
+        "CTE current-line highlight screen coordinates",
+    )?;
     Ok(restore_cpp_newlines(patched, newline))
 }
 
@@ -1197,10 +1209,10 @@ pub fn patch_cte_text_diff_draw_flags(source: &str) -> Result<String, String> {
 }
 
 /// Source contract for ImPlot3D's Dear ImGui 1.93 flags and line-texture selection.
-pub const IMPLOT3D_DRAW_FLAGS_PATCH_VERSION: &str = "implot3d-draw-flags-v1";
+pub const IMPLOT3D_DRAW_FLAGS_PATCH_VERSION: &str = "implot3d-draw-flags-v2";
 
 /// Source contract for ImPlot drawing with Dear ImGui 1.93.
-pub const IMPLOT_IMGUI_PATCH_VERSION: &str = "implot-imgui-193-v1";
+pub const IMPLOT_IMGUI_PATCH_VERSION: &str = "implot-imgui-193-v2";
 
 /// Adapt ImPlot line textures, rectangle bounds, and demo coordinates to Dear ImGui 1.93.
 pub fn patch_implot_cpp_for_imgui(source: &str, file_name: &str) -> Result<String, String> {
@@ -1244,12 +1256,14 @@ pub fn patch_implot_cpp_for_imgui(source: &str, file_name: &str) -> Result<Strin
     }
 #endif
 }"#;
-    const REPLACEMENT: &str = r#"IMPLOT_INLINE void GetLineRenderProps(ImDrawList& draw_list, float& half_weight, ImVec2& tex_uv0, ImVec2& tex_uv1) {
+    const REPLACEMENT: &str = r#"IMPLOT_INLINE float GetLineRenderProps(ImDrawList& draw_list, float& half_weight, ImVec2& tex_uv0, ImVec2& tex_uv1) {
+    const float coverage = ImMin(1.0f, 2.0f * half_weight * draw_list._InvFringeScale);
     const float thickness = ImMax(2.0f * half_weight, draw_list._FringeScale);
     const float screen_thickness = ImMax(1.0f, thickness * draw_list._InvFringeScale);
     float fringe = 0.0f;
     draw_list._SelectLineTexture(screen_thickness, &tex_uv0, &tex_uv1, &fringe, draw_list.Flags);
     half_weight = (thickness + fringe) * 0.5f;
+    return coverage;
 }"#;
     let patched = replace_cpp_source_once(
         &source,
@@ -1257,6 +1271,7 @@ pub fn patch_implot_cpp_for_imgui(source: &str, file_name: &str) -> Result<Strin
         REPLACEMENT,
         "ImPlot line texture selection",
     )?;
+    let patched = patch_plot_line_coverage(&patched, false)?;
     let patched = replace_cpp_source_once(
         &patched,
         "draw_list.AddRectFilled(a, b, col);",
@@ -1336,13 +1351,15 @@ pub fn stage_implot3d_draw_flags(
         tex_uv0 = tex_uv1 = draw_list_3d._SharedData->TexUvWhitePixel;
     }
 }"#;
-        const REPLACEMENT: &str = r#"IMPLOT3D_INLINE void GetLineRenderProps(const ImDrawList3D& draw_list_3d, float& half_weight, ImVec2& tex_uv0, ImVec2& tex_uv1) {
+        const REPLACEMENT: &str = r#"IMPLOT3D_INLINE float GetLineRenderProps(const ImDrawList3D& draw_list_3d, float& half_weight, ImVec2& tex_uv0, ImVec2& tex_uv1) {
     ImDrawList* owner = ImGui::GetWindowDrawList();
+    const float coverage = ImMin(1.0f, 2.0f * half_weight * owner->_InvFringeScale);
     const float thickness = ImMax(2.0f * half_weight, owner->_FringeScale);
     const float screen_thickness = ImMax(1.0f, thickness * owner->_InvFringeScale);
     float fringe = 0.0f;
     owner->_SelectLineTexture(screen_thickness, &tex_uv0, &tex_uv1, &fringe, draw_list_3d._Flags);
     half_weight = (thickness + fringe) * 0.5f;
+    return coverage;
 }"#;
         source = replace_cpp_source_once(
             &source,
@@ -1350,6 +1367,7 @@ pub fn stage_implot3d_draw_flags(
             REPLACEMENT,
             "ImPlot3D line texture selection",
         )?;
+        source = patch_plot_line_coverage(&source, true)?;
     }
     std::fs::create_dir_all(out_dir)
         .map_err(|error| format!("create {}: {error}", out_dir.display()))?;
@@ -1360,6 +1378,91 @@ pub fn stage_implot3d_draw_flags(
     std::fs::write(&output, restore_cpp_newlines(source, newline))
         .map_err(|error| format!("write {}: {error}", output.display()))?;
     Ok(output)
+}
+
+// Every consumer must preserve the original screen-space coverage before widening the quad.
+fn patch_plot_line_coverage(source: &str, three_dimensional: bool) -> Result<String, String> {
+    // Core's alpha helper is private to imgui_draw.cpp; preserve its integer rounding here.
+    let signature = if three_dimensional {
+        "IMPLOT3D_INLINE float GetLineRenderProps("
+    } else {
+        "IMPLOT_INLINE float GetLineRenderProps("
+    };
+    let mut patched = replace_cpp_source_once(
+        source,
+        signature,
+        &format!(
+            "static ImU32 ApplyLineCoverage(ImU32 col, float coverage) {{\n    const ImU32 alpha = (ImU32)(((col & IM_COL32_A_MASK) >> IM_COL32_A_SHIFT) * coverage);\n    return (col & ~IM_COL32_A_MASK) | (alpha << IM_COL32_A_SHIFT);\n}}\n\n{signature}"
+        ),
+        "plot line coverage helper",
+    )?;
+    let replacements: &[(&str, &str, usize)] = if three_dimensional {
+        &[
+            (
+                "GetLineRenderProps(draw_list_3d, HalfWeight, UV0, UV1);",
+                "LineCoverage = GetLineRenderProps(draw_list_3d, HalfWeight, UV0, UV1);",
+                4,
+            ),
+            (
+                "mutable float HalfWeight;",
+                "mutable float HalfWeight;\n    mutable float LineCoverage;",
+                4,
+            ),
+            (
+                "HalfWeight, col, UV0",
+                "HalfWeight, ApplyLineCoverage(col, LineCoverage), UV0",
+                1,
+            ),
+            (
+                "HalfWeight, ColGetter(prim), UV0",
+                "HalfWeight, ApplyLineCoverage(ColGetter(prim), LineCoverage), UV0",
+                3,
+            ),
+        ]
+    } else {
+        &[
+            (
+                "GetLineRenderProps(draw_list, HalfWeight, UV0, UV1);",
+                "LineCoverage = GetLineRenderProps(draw_list, HalfWeight, UV0, UV1);",
+                6,
+            ),
+            (
+                "mutable ImVec2 UV0;",
+                "mutable float LineCoverage;\n    mutable ImVec2 UV0;",
+                6,
+            ),
+            (
+                "HalfWeight,col,UV0",
+                "HalfWeight,ApplyLineCoverage(col, LineCoverage),UV0",
+                4,
+            ),
+            (
+                "HalfWeight, col, UV0",
+                "HalfWeight, ApplyLineCoverage(col, LineCoverage), UV0",
+                2,
+            ),
+            (
+                "GetLineRenderProps(draw_list, half_weight, tex_uv0, tex_uv1);",
+                "const float coverage = GetLineRenderProps(draw_list, half_weight, tex_uv0, tex_uv1);",
+                1,
+            ),
+            (
+                "PrimPieSliceLine(draw_list, buffer, count, col, half_weight,",
+                "PrimPieSliceLine(draw_list, buffer, count, ApplyLineCoverage(col, coverage), half_weight,",
+                1,
+            ),
+        ]
+    };
+    for &(marker, replacement, expected) in replacements {
+        let count = patched.matches(marker).count();
+        if count != expected {
+            return Err(format!(
+                "plot line coverage: expected {expected} occurrences of {marker:?}, found {count}"
+            ));
+        }
+        patched = patched.replace(marker, replacement);
+    }
+    Ok(patched)
 }
 
 fn normalize_cpp_source(source: &str) -> (String, &'static str) {
@@ -1397,8 +1500,8 @@ fn replace_cpp_source_once(
 #[cfg(test)]
 mod tests {
     use super::{
-        patch_cte_text_diff_draw_flags, patch_cte_text_editor_unicode_range_lookup,
-        patch_imgui_cpp_for_safe_demo, patch_imgui_demo_cpp_for_safe_demo,
+        patch_cte_text_diff_draw_flags, patch_cte_text_editor, patch_imgui_cpp_for_safe_demo,
+        patch_imgui_demo_cpp_for_safe_demo,
         patch_imgui_widgets_cpp_for_defined_numeric_conversions, patch_imnodes_cpp_for_imgui,
         patch_implot_cpp_for_imgui, patch_test_engine_capture_cpp_for_defined_geometry,
         patch_test_engine_cpp_for_presentation_abort, stage_implot3d_draw_flags,
@@ -1413,6 +1516,13 @@ mod tests {
         let patched = patch_implot_cpp_for_imgui(source, "implot_items.cpp").unwrap();
         assert!(patched.contains("thickness * draw_list._InvFringeScale"));
         assert!(patched.contains("half_weight = (thickness + fringe) * 0.5f;"));
+        assert_eq!(
+            patched
+                .matches("ApplyLineCoverage(col, LineCoverage)")
+                .count(),
+            6
+        );
+        assert!(patched.contains("ApplyLineCoverage(col, coverage), half_weight"));
         assert!(!patched.contains("draw_list._SelectLineTexture(half_weight * 2.0f,"));
         assert!(patch_implot_cpp_for_imgui(&patched, "implot_items.cpp").is_err());
         let drifted = source.replacen("float fringe;", "float fringe = 0.0f;", 1);
@@ -1459,6 +1569,13 @@ mod tests {
             assert!(patched.contains("#include \"implot3d-imgui-193-internal.h\""));
             if name == "implot3d_items.cpp" {
                 assert!(patched.contains("owner->_SelectLineTexture(screen_thickness,"));
+                assert_eq!(
+                    patched
+                        .matches("ApplyLineCoverage(ColGetter(prim), LineCoverage)")
+                        .count(),
+                    3
+                );
+                assert!(patched.contains("ApplyLineCoverage(col, LineCoverage)"));
                 assert!(!patched.contains("TexUvLines[(int)(half_weight * 2)]"));
                 assert!(!patched.contains("ImDrawListFlags_"));
             }
@@ -1527,19 +1644,22 @@ mod tests {
             "../../../extensions/dear-imgui-cte-sys/third-party/cimCTE/",
             "ImGuiColorTextEdit/TextEditor.cpp"
         ));
-        let patched = patch_cte_text_editor_unicode_range_lookup(source).unwrap();
+        let patched = patch_cte_text_editor(source).unwrap();
         assert_eq!(patched.matches("auto mid = std::lower_bound(").count(), 4);
         assert!(!patched.contains("while (low <= high)"));
         assert!(patched.contains("{0x3000, 0x303e}"));
         assert!(patched.contains("{0xff01, 0xff60}, {0xffe0, 0xffe6}"));
-        assert!(patch_cte_text_editor_unicode_range_lookup(&patched).is_err());
+        assert!(patched.contains("ImVec2(ImGui::GetWindowPos().x + textLeftOffset,"));
+        assert!(patched.contains("ImVec2(ImGui::GetWindowPos().x + textRightOffset,"));
+        let drifted_highlight =
+            source.replacen("topLeft + ImVec2(textRightOffset,", "ChangedHighlight(", 1);
+        assert!(patch_cte_text_editor(&drifted_highlight).is_err());
+        assert!(patch_cte_text_editor(&patched).is_err());
         let drifted = source.replace("bool rangeFind(", "bool renamedRangeFind(");
-        assert!(patch_cte_text_editor_unicode_range_lookup(&drifted).is_err());
+        assert!(patch_cte_text_editor(&drifted).is_err());
         let crlf = source.replace("\r\n", "\n").replace('\n', "\r\n");
         assert_eq!(
-            patch_cte_text_editor_unicode_range_lookup(&crlf)
-                .unwrap()
-                .replace("\r\n", "\n"),
+            patch_cte_text_editor(&crlf).unwrap().replace("\r\n", "\n"),
             patched.replace("\r\n", "\n")
         );
     }

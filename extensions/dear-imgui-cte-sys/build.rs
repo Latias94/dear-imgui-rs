@@ -414,7 +414,7 @@ fn build_with_cc(
             });
             let (patched, output_name) = if name == Some("TextEditor.cpp") {
                 (
-                    build_support::patch_cte_text_editor_unicode_range_lookup(&contents),
+                    build_support::patch_cte_text_editor(&contents),
                     "cte-text-editor-unicode-ranges.cpp",
                 )
             } else {

@@ -135,7 +135,7 @@
       "source_root": "third-party/cimCTE",
       "files": [
         { "id": "wrapper", "canonical": "third-party/cimCTE/cimCTE.cpp", "alternates": [], "provider_transform": "direct" },
-        { "id": "text-editor", "canonical": "third-party/cimCTE/ImGuiColorTextEdit/TextEditor.cpp", "alternates": [], "provider_transform": "patch-cte-unicode-range-lookup" },
+        { "id": "text-editor", "canonical": "third-party/cimCTE/ImGuiColorTextEdit/TextEditor.cpp", "alternates": [], "provider_transform": "patch-cte-text-editor" },
         { "id": "text-diff", "canonical": "third-party/cimCTE/ImGuiColorTextEdit/TextDiff.cpp", "alternates": [], "provider_transform": "patch-cte-text-diff-draw-flags" },
         { "id": "dejavu", "canonical": "third-party/cimCTE/ImGuiColorTextEdit/example/dejavu.cpp", "alternates": [], "provider_transform": "direct" },
         { "id": "notosans", "canonical": "third-party/cimCTE/ImGuiColorTextEdit/example/notosans.cpp", "alternates": [], "provider_transform": "direct" },

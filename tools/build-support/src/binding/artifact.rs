@@ -201,9 +201,9 @@ pub fn core_source_contract_hash() -> String {
             ProviderTransform::PatchImnodes => {
                 ("patch-imnodes", crate::IMNODES_IMGUI_PATCH_VERSION)
             }
-            ProviderTransform::PatchCteUnicodeRangeLookup => (
-                "patch-cte-unicode-range-lookup",
-                crate::CTE_UNICODE_RANGE_LOOKUP_PATCH_VERSION,
+            ProviderTransform::PatchCteTextEditor => (
+                "patch-cte-text-editor",
+                crate::CTE_TEXT_EDITOR_PATCH_VERSION,
             ),
             ProviderTransform::PatchCteTextDiffDrawFlags => (
                 "patch-cte-text-diff-draw-flags",

@@ -923,10 +923,7 @@ impl ExtensionBindingIdentity {
         hash.field("extension", self.extension.artifact_spec().extension_id);
         hash.field("provenance", &self.provenance.identity_hash());
         if self.extension == ExtensionBinding::Cte {
-            hash.field(
-                "source_overlay",
-                crate::CTE_UNICODE_RANGE_LOOKUP_PATCH_VERSION,
-            );
+            hash.field("source_overlay", crate::CTE_TEXT_EDITOR_PATCH_VERSION);
             hash.field(
                 "text_diff_source_overlay",
                 crate::CTE_TEXT_DIFF_DRAW_FLAGS_PATCH_VERSION,

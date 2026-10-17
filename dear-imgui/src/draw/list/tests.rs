@@ -642,6 +642,19 @@ fn draw_flags_reject_invalid_modes_before_native_mutation() {
             .add_circle([10.0, 10.0], 4.0, ImColor32::WHITE)
             .flags(DrawFlags::AA_LINES);
     });
+    for flags in [
+        DrawFlags::AA_LINES,
+        DrawFlags::AA_LINE_ENDS,
+        DrawFlags::AA_FILL,
+        DrawFlags::JOIN_MITER,
+        DrawFlags::CAP_SQUARE,
+    ] {
+        assert_panics_without_buffer_change(&fixture, |draw_list| {
+            let _ = draw_list
+                .add_rect([10.0, 10.0], [30.0, 30.0], ImColor32::WHITE)
+                .flags(flags);
+        });
+    }
 }
 
 fn appended_vertex_bounds(draw_list: &DrawListMut<'_>, draw: impl FnOnce()) -> [f32; 4] {
@@ -745,6 +758,52 @@ fn native_stroke_geometry_uses_193_positions_and_explicit_legacy_mode() {
             [30.0, 30.0, 70.0, 70.0]
         );
     });
+}
+
+#[test]
+fn native_rectangle_antialiasing_uses_scoped_defaults_for_fill_and_outline() {
+    let mut context = crate::Context::create();
+    context.io_mut().set_display_size([256.0, 256.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
+    context.style_mut().set_anti_aliased_lines(false);
+    context.style_mut().set_anti_aliased_fill(false);
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .unwrap()
+        .build();
+    let ui = context.frame();
+    let white_uv = ui.font_tex_uv_white_pixel();
+    let draw_list = ui.get_background_draw_list();
+    for (filled, flag) in [(false, DrawFlags::AA_LINES), (true, DrawFlags::AA_FILL)] {
+        let draw = || {
+            let before = draw_list_counts(draw_list.draw_list);
+            draw_list
+                .add_rect([20.25, 20.25], [80.25, 80.25], ImColor32::WHITE)
+                .thickness(4.0)
+                .filled(filled)
+                .build();
+            let after = draw_list_counts(draw_list.draw_list);
+            let vertices = unsafe {
+                let buffer = &(*draw_list.draw_list).VtxBuffer;
+                std::slice::from_raw_parts(
+                    buffer.Data.add(before.0 as usize),
+                    (after.0 - before.0) as usize,
+                )
+            };
+            assert!(!vertices.is_empty());
+            let has_aa_fringe = vertices
+                .iter()
+                .any(|vertex| vertex.col >> 24 == 0 || [vertex.uv.x, vertex.uv.y] != white_uv);
+            ((after.0 - before.0, after.1 - before.1), has_aa_fringe)
+        };
+        let without_aa = draw();
+        assert!(!without_aa.1);
+        let with_aa = draw_list.with_draw_flags(flag, true, draw);
+        assert!(with_aa.1);
+        assert!(!draw_list.flags().contains(flag));
+        assert_eq!(draw(), without_aa);
+    }
 }
 
 #[test]

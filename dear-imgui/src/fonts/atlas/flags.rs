@@ -86,4 +86,86 @@ mod tests {
             .build();
         assert_eq!(ctx.font_atlas().flags(), FontAtlasFlags::NO_MOUSE_CURSORS);
     }
+
+    #[test]
+    fn no_baked_round_corners_tessellates_filled_and_outlined_rectangles() {
+        fn draw_rectangle(flags: FontAtlasFlags, filled: bool) -> (Vec<crate::DrawVert>, [f32; 2]) {
+            let mut ctx = crate::Context::create();
+            ctx.font_atlas().set_flags(flags);
+            ctx.font_atlas()
+                .try_claim_legacy_renderer()
+                .unwrap()
+                .build();
+            ctx.io_mut().set_display_size([128.0, 128.0]);
+            ctx.io_mut().set_delta_time(1.0 / 60.0);
+            let ui = ctx.frame();
+            let white_uv = ui.font_tex_uv_white_pixel();
+            ui.get_background_draw_list()
+                .add_rect([20.0, 20.0], [100.0, 80.0], crate::draw::ImColor32::WHITE)
+                .rounding(8.0)
+                .thickness(2.0)
+                .filled(filled)
+                .build();
+            let frame = ctx.render_legacy();
+            let draw_data = frame.draw_data();
+            assert_eq!(draw_data.draw_lists_count(), 1);
+            let draw_list = draw_data.draw_lists().next().unwrap();
+            assert!(!draw_list.idx_buffer().is_empty());
+            assert!(
+                draw_list
+                    .idx_buffer()
+                    .iter()
+                    .all(|&index| usize::from(index) < draw_list.vtx_buffer().len())
+            );
+            (draw_list.vtx_buffer().to_vec(), white_uv)
+        }
+
+        for filled in [false, true] {
+            let (baked, baked_white_uv) = draw_rectangle(FontAtlasFlags::NONE, filled);
+            let (geometry, white_uv) =
+                draw_rectangle(FontAtlasFlags::NO_BAKED_ROUND_CORNERS, filled);
+            assert!(!baked.is_empty());
+            assert!(!geometry.is_empty());
+            assert!(baked.iter().any(|vertex| vertex.uv != baked_white_uv));
+            assert!(baked.iter().any(|vertex| vertex.uv[1] != baked[0].uv[1]));
+            if filled {
+                assert!(geometry.iter().all(|vertex| vertex.uv == white_uv));
+            } else {
+                // Outlines still use the one-dimensional line AA texture.
+                assert!(
+                    geometry
+                        .iter()
+                        .all(|vertex| vertex.uv[1] == geometry[0].uv[1])
+                );
+            }
+
+            let bounds = |vertices: &[crate::DrawVert]| {
+                vertices.iter().fold(
+                    [
+                        f32::INFINITY,
+                        f32::INFINITY,
+                        f32::NEG_INFINITY,
+                        f32::NEG_INFINITY,
+                    ],
+                    |bounds, vertex| {
+                        assert!(vertex.pos.into_iter().chain(vertex.uv).all(f32::is_finite));
+                        [
+                            bounds[0].min(vertex.pos[0]),
+                            bounds[1].min(vertex.pos[1]),
+                            bounds[2].max(vertex.pos[0]),
+                            bounds[3].max(vertex.pos[1]),
+                        ]
+                    },
+                )
+            };
+            let baked_bounds = bounds(&baked);
+            let geometry_bounds = bounds(&geometry);
+            for (actual, expected) in geometry_bounds.into_iter().zip([20.0, 20.0, 100.0, 80.0]) {
+                assert!((actual - expected).abs() <= 1.0);
+            }
+            for (actual, reference) in geometry_bounds.into_iter().zip(baked_bounds) {
+                assert!((actual - reference).abs() <= 1.0);
+            }
+        }
+    }
 }

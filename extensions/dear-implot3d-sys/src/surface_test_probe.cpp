@@ -100,12 +100,16 @@ extern "C" int dear_implot3d_line_probe_plot(
     float weight,
     float pixel_density,
     bool anti_aliased,
+    float alpha,
     float* positions,
     float* uvs,
     float* expected_uvs,
-    float* expected_width) {
+    float* expected_width,
+    ImU32* colors,
+    ImU32* expected_color) {
     if (plot_context == nullptr || positions == nullptr || uvs == nullptr ||
-        expected_uvs == nullptr || expected_width == nullptr || weight <= 0.0f ||
+        expected_uvs == nullptr || expected_width == nullptr || colors == nullptr ||
+        expected_color == nullptr || weight <= 0.0f ||
         pixel_density <= 0.0f) {
         return -1;
     }
@@ -142,13 +146,14 @@ extern "C" int dear_implot3d_line_probe_plot(
     const float zs[] = {0.4f, 0.6f};
     ImPlot3DSpec spec;
     spec.LineWeight = weight;
-    spec.LineColor = ImVec4(0.13f, 0.47f, 0.79f, 1.0f);
+    spec.LineColor = ImVec4(0.13f, 0.47f, 0.79f, alpha);
     spec.Marker = ImPlot3DMarker_None;
     ImPlot3D::PlotLine("probe segment", xs, ys, zs, 2, spec);
     const int count = draw_list.VtxBuffer.Size - start;
     if (count == 4) {
         for (int index = 0; index < 4; ++index) {
             const ImDrawVert& vertex = draw_list.VtxBuffer[start + index];
+            colors[index] = vertex.col;
             positions[index * 2] = vertex.pos.x;
             positions[index * 2 + 1] = vertex.pos.y;
             uvs[index * 2] = vertex.uv.x;
@@ -168,6 +173,11 @@ extern "C" int dear_implot3d_line_probe_plot(
     expected_uvs[3] = uv1.y;
     *expected_width = thickness + fringe;
     ImPlot3D::EndPlot();
+    // Compare color coverage with the actual core primitive, including its alpha rounding.
+    const int reference_start = owner->VtxBuffer.Size;
+    owner->_AddLine(ImVec2(10, 10), ImVec2(110, 10), ImGui::ColorConvertFloat4ToU32(spec.LineColor),
+                    ImMax(1.0f, weight), ImDrawFlags_None);
+    *expected_color = owner->VtxBuffer[reference_start].col;
     return count;
 }
 

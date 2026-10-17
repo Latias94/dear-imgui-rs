@@ -1828,10 +1828,7 @@ fn cte_prebuilt_rejects_unpatched_text_diff_draw_flags() {
     unpatched.field("schema", "extension-binding-identity-v1");
     unpatched.field("extension", "cte");
     unpatched.field("provenance", &binding.provenance().identity_hash());
-    unpatched.field(
-        "source_overlay",
-        crate::CTE_UNICODE_RANGE_LOOKUP_PATCH_VERSION,
-    );
+    unpatched.field("source_overlay", crate::CTE_TEXT_EDITOR_PATCH_VERSION);
     assert_ne!(binding.deterministic_hash(), unpatched.finish());
 }
 
