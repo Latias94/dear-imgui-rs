@@ -154,6 +154,47 @@ impl Io {
         unsafe { sys::ImGuiIO_ClearInputKeys(self.inner_mut() as *mut _) }
     }
 
+    /// Release held keyboard/gamepad keys and discard their pending key events.
+    ///
+    /// Physical and aggregate modifiers retain their state and pending events.
+    /// Text, mouse, focus events, and current-frame text characters are preserved.
+    /// Platform backends can use this when an IME takes ownership of editing keys.
+    pub fn clear_non_modifier_keys(&mut self) {
+        let io = self.inner_mut();
+        for (index, data) in io.KeysData.iter_mut().enumerate() {
+            let key = sys::ImGuiKey_NamedKey_BEGIN + index as sys::ImGuiKey;
+            if is_non_modifier_key(key) {
+                data.Down = false;
+                data.DownDuration = -1.0;
+                data.DownDurationPrev = -1.0;
+                data.AnalogValue = 0.0;
+            }
+        }
+
+        // SAFETY: Io belongs to a live Context. Its input queue is an ImVector of
+        // Copy events, uniquely borrowed here; compaction keeps its allocation intact.
+        let queue = unsafe {
+            crate::internal::imvector_cast_mut::<sys::ImGuiInputEvent, _>(
+                &mut (*io.Ctx).InputEventsQueue,
+            )
+        };
+        let events = queue.as_slice_mut();
+        let mut retained = 0;
+        for index in 0..events.len() {
+            let event = events[index];
+            // SAFETY: the Key union member is initialized only for a Key event.
+            if event.Type == sys::ImGuiInputEventType_Key
+                && is_non_modifier_key(unsafe { event.__bindgen_anon_1.Key.Key })
+            {
+                continue;
+            }
+            events[retained] = event;
+            retained += 1;
+        }
+        // The retained count cannot exceed the original ImVector's i32 size.
+        queue.size = retained as i32;
+    }
+
     /// Release all mouse buttons and reset mouse position and wheel state.
     #[doc(alias = "ClearInputMouse")]
     pub fn clear_input_mouse(&mut self) {
@@ -161,9 +202,79 @@ impl Io {
     }
 }
 
+fn is_non_modifier_key(key: sys::ImGuiKey) -> bool {
+    // These native predicates exclude mouse aliases and aggregate modifier storage.
+    unsafe { (sys::igIsKeyboardKey(key) || sys::igIsGamepadKey(key)) && !sys::igIsLRModKey(key) }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::sys;
+
+    #[test]
+    fn non_modifier_key_reset_preserves_text_mouse_and_native_modifiers() {
+        let mut context = crate::Context::create();
+        context.io_mut().set_config_input_trickle_event_queue(false);
+        context.io_mut().set_display_size([128.0, 128.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        for macos_behaviors in [false, true] {
+            context
+                .io_mut()
+                .set_config_macosx_behaviors(macos_behaviors);
+            context.io_mut().add_key_event(crate::Key::ModCtrl, true);
+            context.io_mut().add_key_event(crate::Key::LeftCtrl, true);
+            context.io_mut().add_key_event(crate::Key::Backspace, true);
+            context.io_mut().add_input_characters_utf8("甲");
+            context
+                .io_mut()
+                .add_mouse_button_event(crate::input::MouseButton::Left, true);
+            let _ = context.frame();
+            assert!(context.io().inner().KeysData[key_data_index(crate::Key::Backspace)].Down);
+            let modifiers = context.io().inner().KeyMods;
+            assert_ne!(modifiers, 0);
+            let characters = context.io().inner().InputQueueCharacters.Size;
+            assert_eq!(characters, 1);
+            // macOS maps Ctrl+left-click to right-click; preserve the native result.
+            let mouse_down = context.io().inner().MouseDown;
+            assert!(mouse_down.iter().any(|&down| down));
+
+            context.io_mut().add_key_event(crate::Key::Delete, true);
+            context.io_mut().add_key_event(crate::Key::ModShift, true);
+            context.io_mut().add_input_characters_utf8("乙");
+            context.io_mut().add_mouse_wheel_event([0.0, 1.0]);
+            context.io_mut().clear_non_modifier_keys();
+            assert!(!context.io().inner().KeysData[key_data_index(crate::Key::Backspace)].Down);
+            assert_eq!(context.io().inner().KeyMods, modifiers);
+            assert_eq!(context.io().inner().InputQueueCharacters.Size, characters);
+            assert_eq!(context.io().inner().MouseDown, mouse_down);
+            let _ = context.render_legacy();
+
+            let ui = context.frame();
+            assert!(!ui.is_key_down(crate::Key::Backspace));
+            assert!(!ui.is_key_down(crate::Key::Delete));
+            assert!(ui.is_key_down(if macos_behaviors {
+                crate::Key::LeftSuper
+            } else {
+                crate::Key::LeftCtrl
+            }));
+            assert!(ui.io().key_shift());
+            assert_eq!(ui.io().key_super(), macos_behaviors);
+            assert_eq!(ui.io().key_ctrl(), !macos_behaviors);
+            assert_eq!(ui.io().inner().MouseDown, mouse_down);
+            assert_eq!(ui.io().inner().MouseWheel, 1.0);
+            let characters = &ui.io().inner().InputQueueCharacters;
+            assert_eq!(characters.Size, 1);
+            assert_eq!(unsafe { *characters.Data }, '乙' as u32);
+            let _ = context.render_legacy();
+            context.io_mut().clear_input_keys();
+            context.io_mut().clear_input_mouse();
+        }
+    }
 
     #[test]
     fn extended_input_events_update_and_clear_context_state() {

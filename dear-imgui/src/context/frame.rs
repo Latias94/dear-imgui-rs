@@ -174,6 +174,7 @@ impl Context {
         if self.raw.is_null() || !unsafe { (*self.raw).WithinFrameScope } {
             return false;
         }
+        self.clear_ime_preedit();
         unsafe {
             with_bound_context(self.raw, || {
                 let _ = crate::list_clipper::forget_context_clippers(self.raw);
@@ -372,6 +373,9 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
                     "Context::render() rejected a frame with {abandoned_clippers} list clipper token(s) still active or forgotten"
                 );
             }
+            if (*self.raw).WithinFrameScope {
+                self.render_ime_preedit();
+            }
             sys::igRender();
             let dd = sys::igGetDrawData();
             if dd.is_null() {
@@ -404,7 +408,8 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     /// With the `multi-viewport` feature enabled, Dear ImGui stores draw data on each viewport.
     /// `Context::render()` and `igGetDrawData()` only expose the main viewport draw data, so
     /// engine backends that render secondary OS windows should use this method after opening a
-    /// frame. The returned snapshot still keeps [`FrameSnapshot::draw`] as the main viewport for
+    /// frame. The returned snapshot still exposes the main viewport through
+    /// [`FrameSnapshot::draw_data`](crate::render::FrameSnapshot::draw_data) for
     /// compatibility and adds per-viewport draw data in
     /// [`FrameSnapshot::viewports`](crate::render::snapshot::FrameSnapshot::viewports).
     #[cfg(feature = "multi-viewport")]

@@ -1402,6 +1402,18 @@ fn run_native_secondary_fixture(event_loop: &ActiveEventLoop) {
         .unwrap();
     assert!(!foreign.is_owned());
     assert_eq!(foreign.platform_action, crate::WinitPlatformAction::None);
+    unsafe {
+        let ime = &mut (*context.as_raw()).PlatformImeData;
+        ime.WantTextInput = true;
+        ime.ViewportId = frozen.target.viewport_id.raw();
+    }
+    platform
+        .handle_window_event(
+            &mut context,
+            frozen.window_id,
+            &WindowEvent::Ime(winit::event::Ime::Enabled),
+        )
+        .unwrap();
     let text = platform
         .handle_window_event(
             &mut context,

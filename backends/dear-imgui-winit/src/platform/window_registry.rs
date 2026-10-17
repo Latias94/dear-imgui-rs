@@ -236,6 +236,23 @@ mod tests {
         reason = "The fixture creates hidden windows without running an app"
     )]
     fn native_window_registration_lifecycle() {
+        fn compose_text(context: &mut Context) {
+            let mut text = String::new();
+            for activate in [true, false] {
+                let ui = context.frame();
+                ui.window("native IME registration").build(|| {
+                    if activate {
+                        ui.set_keyboard_focus_here();
+                    }
+                    ui.input_text("text", &mut text).build();
+                });
+                let _ = context.render_legacy();
+            }
+            context.notify_ime_enabled(true);
+            context.set_ime_preedit("pending", Some((7, 7))).unwrap();
+            assert!(context.ime_preedit().is_some());
+        }
+
         let _guard = lock_context();
         let mut builder = winit::event_loop::EventLoop::builder();
         #[cfg(target_os = "windows")]
@@ -255,6 +272,15 @@ mod tests {
                 .unwrap(),
         );
         let mut context = Context::create();
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        context
+            .set_ini_filename::<std::path::PathBuf>(None)
+            .unwrap();
         let mut platform = WinitPlatform::new(&mut context).unwrap();
         platform
             .attach_window(Arc::clone(&window), crate::HiDpiMode::Default, &mut context)
@@ -297,6 +323,8 @@ mod tests {
             .unwrap();
         assert!(released.forwarded.focus && released.forwarded.pointer);
 
+        context.io_mut().add_focus_event(true);
+        compose_text(&mut context);
         platform
             .attach_window(Arc::clone(&window), crate::HiDpiMode::Default, &mut context)
             .unwrap();
@@ -309,6 +337,7 @@ mod tests {
                 .instance_id,
             instance
         );
+        assert!(context.ime_preedit().is_some());
         assert!(platform.drain_window_lifecycle_events().is_empty());
 
         #[cfg(feature = "multi-viewport")]
@@ -377,7 +406,9 @@ mod tests {
             assert!(platform.drain_window_lifecycle_events().is_empty());
         }
 
+        compose_text(&mut context);
         drop(platform.detach_window(&mut context).unwrap());
+        assert!(context.ime_preedit().is_none());
         assert_eq!(
             platform.drain_window_lifecycle_events(),
             vec![super::super::WinitWindowLifecycleEvent::Retired(
@@ -385,16 +416,20 @@ mod tests {
             )]
         );
         assert_eq!(platform.with_window(instance, |_| ()), Ok(None));
+        compose_text(&mut context);
         platform
             .attach_window(Arc::clone(&window), crate::HiDpiMode::Default, &mut context)
             .unwrap();
+        assert!(context.ime_preedit().is_none());
         let replacement = platform.window_snapshot(window.id()).unwrap().unwrap();
         assert!(
             matches!(platform.drain_window_lifecycle_events().as_slice(), [super::super::WinitWindowLifecycleEvent::Created(snapshot)] if snapshot.target == replacement.target)
         );
         assert_ne!(replacement.target.instance_id, instance);
         assert_eq!(platform.window_snapshot_for_instance(instance), Ok(None));
+        compose_text(&mut context);
         platform.shutdown(&mut context).unwrap();
+        assert!(context.ime_preedit().is_none());
         assert_eq!(
             platform.drain_window_lifecycle_events(),
             vec![super::super::WinitWindowLifecycleEvent::Retired(
@@ -417,6 +452,67 @@ mod tests {
         assert_eq!(
             new_owner.with_window(replacement.target.instance_id, |_| ()),
             Ok(None)
+        );
+        let late_commit = winit::event::WindowEvent::Ime(winit::event::Ime::Commit("old".into()));
+        assert!(
+            !new_owner
+                .handle_window_event(&mut context, window.id(), &late_commit)
+                .unwrap()
+                .forwarded
+                .text,
+            "a reused WindowId must not accept the previous registration's queued commit"
+        );
+        new_owner
+            .handle_window_event(
+                &mut context,
+                window.id(),
+                &winit::event::WindowEvent::Ime(winit::event::Ime::Disabled),
+            )
+            .unwrap();
+        assert!(
+            !new_owner
+                .handle_window_event(&mut context, window.id(), &late_commit)
+                .unwrap()
+                .forwarded
+                .text
+        );
+        new_owner.set_ime_allowed(false).unwrap();
+        new_owner
+            .handle_window_event(
+                &mut context,
+                window.id(),
+                &winit::event::WindowEvent::Ime(winit::event::Ime::Enabled),
+            )
+            .unwrap();
+        assert!(
+            !new_owner.ime_enabled(),
+            "a delayed Enabled cannot override an explicit disable"
+        );
+        new_owner.set_ime_allowed(true).unwrap();
+        assert!(
+            !new_owner
+                .handle_window_event(&mut context, window.id(), &late_commit)
+                .unwrap()
+                .forwarded
+                .text
+        );
+        new_owner
+            .handle_window_event(
+                &mut context,
+                window.id(),
+                &winit::event::WindowEvent::Ime(winit::event::Ime::Enabled),
+            )
+            .unwrap();
+        assert!(
+            new_owner
+                .handle_window_event(
+                    &mut context,
+                    window.id(),
+                    &winit::event::WindowEvent::Ime(winit::event::Ime::Commit("new".into())),
+                )
+                .unwrap()
+                .forwarded
+                .text
         );
         new_owner.shutdown(&mut context).unwrap();
         assert_eq!(frozen.window_id, window.id());

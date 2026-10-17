@@ -137,12 +137,22 @@ pub enum WinitWindowLifecycleEvent {
 
 impl WinitPlatformControl {
     pub(crate) fn record_window_created(&self, snapshot: WinitWindowSnapshot) {
+        self.ime_enabled_windows
+            .borrow_mut()
+            .remove(&snapshot.target.instance_id);
+        self.binding
+            .clear_ime_preedit_for_viewport(snapshot.target.viewport_id);
         self.window_lifecycle_events
             .borrow_mut()
             .push_back(WinitWindowLifecycleEvent::Created(snapshot));
     }
 
     pub(crate) fn record_window_retired(&self, target: NativeWindowTarget) {
+        self.ime_enabled_windows
+            .borrow_mut()
+            .remove(&target.instance_id);
+        self.binding
+            .clear_ime_preedit_for_viewport(target.viewport_id);
         self.release_pointer_control(
             super::WinitPointerReleaseReason::Retired,
             Some(target.instance_id),

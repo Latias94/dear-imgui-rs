@@ -1,5 +1,5 @@
 use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::ffi::{c_char, c_void};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -14,7 +14,7 @@ use dear_imgui_rs::ContextPlatformWindowTeardown;
 use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentHandle, ContextAttachmentLease,
     ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding, ContextDestroyed,
-    ContextId, ContextTeardown, NativeWindowTarget,
+    ContextId, ContextTeardown, NativeWindowInstanceId, NativeWindowTarget,
 };
 use winit::window::Window;
 
@@ -126,6 +126,8 @@ pub(crate) struct WinitPlatformControl {
     pub(super) viewport_window_configurator:
         RefCell<Option<Rc<super::window_config::WindowConfigurator>>>,
     pub(super) ime_allowed: Cell<bool>,
+    pub(super) ime_enabled_windows: RefCell<HashSet<NativeWindowInstanceId>>,
+    pub(super) ime_event_source: Cell<Option<NativeWindowInstanceId>>,
     pub(super) active_touch: Cell<Option<u64>>,
     pub(super) pointer_control: RefCell<Option<super::pointer_control::ActivePointerControl>>,
     pub(super) pointer_release_events: RefCell<VecDeque<super::WinitPointerReleaseReport>>,
@@ -197,6 +199,8 @@ impl WinitPlatformControl {
             #[cfg(feature = "multi-viewport")]
             viewport_window_configurator: RefCell::new(None),
             ime_allowed: Cell::new(false),
+            ime_enabled_windows: RefCell::new(HashSet::new()),
+            ime_event_source: Cell::new(None),
             active_touch: Cell::new(None),
             pointer_control: RefCell::new(None),
             pointer_release_events: RefCell::new(VecDeque::new()),
@@ -214,6 +218,7 @@ impl WinitPlatformControl {
             .attachment_handle
             .borrow_mut()
             .replace(attachment.handle());
+        control.binding.reset_ime_session();
 
         context.binding().with_bound_context(|| unsafe {
             let io = dear_imgui_rs::sys::igGetIO_Nil();
@@ -478,6 +483,7 @@ impl WinitPlatformControl {
     }
 
     fn release_base_in_current_context(&self) -> Result<(), WinitPlatformError> {
+        self.binding.clear_ime_preedit();
         self.release_pointer_control(super::WinitPointerReleaseReason::PlatformShutdown, None);
         let mut replaced = None;
         let owns_base_publication = self.owns_base_publication_in_current_context();
@@ -608,6 +614,7 @@ impl ContextAttachment for WinitPlatformControl {
         &self,
         _context: &ContextTeardown<'_>,
     ) -> Result<(), ContextAttachmentTeardownError> {
+        self.binding.clear_ime_preedit();
         self.state.set(PlatformState::ShuttingDown);
         #[cfg(feature = "multi-viewport")]
         {
@@ -825,6 +832,15 @@ impl WinitPlatform {
 
 impl Drop for WinitPlatform {
     fn drop(&mut self) {
+        if matches!(
+            self.control.state.get(),
+            PlatformState::Detached | PlatformState::ContextDestroyed
+        ) {
+            return;
+        }
+        // Native resources may remain leased until Context teardown, but composition
+        // must stop as soon as the platform owner leaves application control.
+        self.control.binding.clear_ime_preedit();
         #[cfg(feature = "multi-viewport")]
         let runtime_attached = self.control.runtime.borrow().is_some();
         #[cfg(not(feature = "multi-viewport"))]
@@ -853,5 +869,144 @@ impl Drop for WinitPlatform {
         if let Some(attachment) = self.attachment.take() {
             attachment.defer_to_context();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use dear_imgui_rs::{
+        Context, ContextAttachment, ContextAttachmentRole, NativeWindowInstanceId,
+    };
+
+    use super::*;
+    use crate::test_util::test_sync::lock_context;
+
+    struct RendererMarker;
+    struct RendererAttachment;
+
+    impl ContextAttachment for RendererAttachment {}
+
+    fn composing_context() -> Context {
+        let mut context = Context::create();
+        context.io_mut().set_display_size([800.0, 600.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        context
+            .set_ini_filename::<std::path::PathBuf>(None)
+            .unwrap();
+        let mut text = String::new();
+        for activate in [true, false] {
+            let ui = context.frame();
+            ui.window("IME lifecycle").build(|| {
+                if activate {
+                    ui.set_keyboard_focus_here();
+                }
+                ui.input_text("text", &mut text).build();
+            });
+            let _ = context.render_legacy();
+        }
+        context.set_ime_preedit("pending", Some((7, 7))).unwrap();
+        assert!(context.ime_preedit().is_some());
+        context
+    }
+
+    #[test]
+    fn shutdown_clears_composition_and_detached_owner_drop_preserves_its_successor() {
+        let _guard = lock_context();
+        let mut context = composing_context();
+        let mut platform = WinitPlatform::new(&mut context).unwrap();
+        context.notify_ime_enabled(true);
+        context.set_ime_preedit("pending", Some((7, 7))).unwrap();
+        platform.shutdown(&mut context).unwrap();
+        assert!(context.ime_preedit().is_none());
+
+        let successor = WinitPlatform::new(&mut context).unwrap();
+        context.set_ime_preedit("new", Some((3, 3))).unwrap();
+        drop(platform);
+        assert_eq!(context.ime_preedit().unwrap().text(), "new");
+        drop(successor);
+        assert!(context.ime_preedit().is_none());
+    }
+
+    #[test]
+    fn drop_clears_composition_while_renderer_ownership_defers_native_release() {
+        let _guard = lock_context();
+        let mut context = composing_context();
+        let platform = WinitPlatform::new(&mut context).unwrap();
+        context.notify_ime_enabled(true);
+        context.set_ime_preedit("pending", Some((7, 7))).unwrap();
+        let control = platform.control();
+        let mut renderer = context
+            .register_attachment::<RendererMarker>(
+                ContextAttachmentRole::Renderer,
+                Rc::new(RendererAttachment),
+            )
+            .unwrap();
+        drop(platform);
+        assert!(context.ime_preedit().is_none());
+        assert!(control.attachment_handle().unwrap().is_attached());
+        assert_eq!(renderer.detach(), Ok(true));
+    }
+
+    #[test]
+    fn rejected_shutdown_keeps_composition_until_the_platform_can_release() {
+        let _guard = lock_context();
+        let mut context = composing_context();
+        let mut platform = WinitPlatform::new(&mut context).unwrap();
+        context.notify_ime_enabled(true);
+        context.set_ime_preedit("pending", Some((7, 7))).unwrap();
+        let mut renderer = context
+            .register_attachment::<RendererMarker>(
+                ContextAttachmentRole::Renderer,
+                Rc::new(RendererAttachment),
+            )
+            .unwrap();
+        assert!(matches!(
+            platform.shutdown(&mut context),
+            Err(WinitPlatformError::PlatformAttachmentRelease(
+                dear_imgui_rs::ContextPlatformAttachmentReleaseError::RendererActive
+            ))
+        ));
+        assert!(context.ime_preedit().is_some());
+        assert_eq!(renderer.detach(), Ok(true));
+        platform.shutdown(&mut context).unwrap();
+        assert!(context.ime_preedit().is_none());
+    }
+
+    #[test]
+    fn only_retiring_the_composition_viewport_cancels_its_text() {
+        let _guard = lock_context();
+        let mut context = composing_context();
+        let platform = WinitPlatform::new(&mut context).unwrap();
+        context.notify_ime_enabled(true);
+        context.set_ime_preedit("pending", Some((7, 7))).unwrap();
+        let viewport_id = context.text_input_viewport().unwrap();
+        let target = NativeWindowTarget {
+            instance_id: NativeWindowInstanceId::allocate(context.id()).unwrap(),
+            viewport_id,
+            is_main: false,
+        };
+        platform.control.record_window_retired(NativeWindowTarget {
+            viewport_id: dear_imgui_rs::Id::from(viewport_id.raw().wrapping_add(1)),
+            ..target
+        });
+        assert!(context.ime_preedit().is_some());
+        platform.control.record_window_retired(target);
+        assert!(context.ime_preedit().is_none());
+    }
+
+    #[test]
+    fn disabling_ime_cancels_composition_without_waiting_for_an_os_notification() {
+        let _guard = lock_context();
+        let mut context = composing_context();
+        let platform = WinitPlatform::new(&mut context).unwrap();
+        context.notify_ime_enabled(true);
+        context.set_ime_preedit("pending", Some((7, 7))).unwrap();
+        platform.control.set_ime_allowed_for_owned_windows(false);
+        assert!(context.ime_preedit().is_none());
     }
 }

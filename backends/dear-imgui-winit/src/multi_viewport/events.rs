@@ -152,7 +152,6 @@ pub(crate) fn route_secondary_window_event(
                     focus: control.note_window_focus(window_id, *focused, context),
                     ..Default::default()
                 },
-                WindowEvent::Ime(ime) => crate::events::handle_ime_event(ime, context),
                 WindowEvent::Touch(touch) => {
                     let mut forwarded = WinitEventForwarding::default();
                     let position = super::client_physical_to_screen_pos(

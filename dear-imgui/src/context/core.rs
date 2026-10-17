@@ -244,7 +244,12 @@ impl Context {
 
         let state = ContextState::new(id, raw);
         let texture_registry = ManagedTextureRegistry::new(id);
-        let ui = crate::ui::Ui::new(raw, ContextBinding::new(&state), texture_registry.clone());
+        let ui = crate::ui::Ui::new(
+            raw,
+            ContextBinding::new(&state),
+            texture_registry.clone(),
+            state.ime.clone(),
+        );
 
         Ok(Context {
             raw,

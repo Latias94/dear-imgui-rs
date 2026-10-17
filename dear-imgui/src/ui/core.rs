@@ -19,11 +19,13 @@ impl Ui {
         ctx: *mut sys::ImGuiContext,
         ctx_binding: crate::ContextBinding,
         texture_registry: crate::context::SharedTextureRegistry,
+        ime: std::rc::Rc<std::cell::RefCell<crate::context::ime::ImeState>>,
     ) -> Self {
         Ui {
             ctx,
             ctx_binding,
             texture_registry,
+            ime,
             native_scopes: std::cell::RefCell::new(crate::scope::NativeScopeTracker::default()),
             buffer: UnsafeCell::new(UiBuffer::new(1024)),
         }
