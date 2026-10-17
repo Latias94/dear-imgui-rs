@@ -26,6 +26,41 @@ Use this file for the repository-specific parts of an ImGui-stack upgrade.
 
 Use primary sources only when determining what changed upstream.
 
+### Semantic review of version differences
+
+Start from the committed wrapper and nested native revisions, then read the release notes and
+complete native diffs through the selected target. A latest branch may contain changes beyond its
+most recent release. Read implementation hunks as well as declarations; follow changed data and
+control flow into first-party wrappers, backends, and extensions. Inspect the active version-gated
+branches of unchanged consumers when their core dependency changes.
+
+For each material contract, record `upstream behavior -> affected consumer -> adaptation or
+compatibility decision -> evidence`. Keep this as a concise review note or existing upgrade plan,
+not a second generated API snapshot or a new source-analysis framework. Resolve findings against
+the effective compiled source, including existing overlays, before reporting a raw upstream defect
+as an unfixed workspace bug.
+
+Useful review dimensions for this stack:
+
+- Rendering: coordinate spaces, reversed bounds, stroke placement, pixel density/fringe units,
+  texture UV table meaning and bounds, vertex/index offsets, and sampler/reset commands. Inspect
+  custom extension geometry that bypasses ordinary ImGui primitives.
+- Fonts and textures: codepoint versus glyph-index callbacks, source/baked-font invalidation,
+  atlas rebuild/growth, managed texture status transitions, and renderer feedback.
+- Lifetimes and state: newly enforced native assertions, Begin/End pairing, per-frame caches,
+  callback ownership, queued work, and teardown. Check handwritten enums and aggregates even
+  when bindgen succeeds.
+- Build routes: named source transforms, obsolete workaround removal, artifact identities,
+  packaged headers, and native/WASM parity. The same source pin with different adaptations is
+  a different native artifact.
+
+Test the production path whose contract changed. For example, inspect vertices/UVs from a real
+plot at fractional and large widths and multiple densities; drive an editor session through its
+native query/accept protocol; or observe callback/texture transitions across frames. Select cases
+from the implementation's actual branch boundaries. Existing compatible behavior needs reasoned
+source evidence, not a new test for every unchanged function. Report unavailable platform runtime
+checks explicitly.
+
 ## Canonical command recipes
 
 ### Refresh submodules and pregenerated bindings
@@ -94,7 +129,7 @@ Run those commands in each standalone example workspace that carries its own `Ca
 2. Backend and platform impact
    - Audit `dear-imgui-sys/src/backend_shim/**` and `dear-imgui-sys/build.rs`.
    - Re-check the stack layout patch path in `dear-imgui-sys/build.rs`, `dear-imgui-sys/src/stack_layout_shim.cpp`, and `dear-imgui-sys/src/stack_layout_imgui_*.cpp.inc`. The marker patch must still match the new upstream `imgui.cpp`, and inactive `ItemSize()` / `ItemAdd()` hot paths should remain fast.
-   - Check `dear-imgui-sdl3`, `dear-imgui-wgpu`, `dear-imgui-winit`, `dear-imgui-glow`, `dear-imgui-ash`.
+   - Check `dear-imgui-sdl3`, `dear-imgui-wgpu`, `dear-imgui-winit`, `dear-imgui-glow`, `dear-imgui-ash`, `dear-imgui-bevy`, and `dear-app`. Search all consumers of changed enums and native fields, including detached draw snapshots and custom-renderer examples.
    - If backend exposure changed, adapt public APIs and repository-local examples, including iOS / Android smoke examples when relevant.
    - When core public aggregate layouts changed, run the `abi-probe` source-build profile. Check C++ size, alignment, and field offsets against Rust; keep that compiler-dependent proof out of normal prebuilt consumer builds.
    - Build and inspect the real Emscripten provider after binding regeneration. Derive provider definitions from the canonical core/extension binding profiles, fail on conflicting definitions, and require any source adaptation to be a named inventory transform with an exact upstream-drift test.

@@ -1,6 +1,6 @@
 ---
 name: "upgrade-dear-imgui-stack"
-description: "Use when a user asks to upgrade Dear ImGui, cimgui, ImPlot, ImPlot3D, ImNodes, ImGuizmo, Dear ImGui Test Engine, or related bindings in this repository. Refresh submodules, regenerate pregenerated native/WASM bindings, audit safe Rust API and backend shim changes, update examples/docs/changelog/versioning, and validate release readiness."
+description: "Upgrade Dear ImGui/cimgui, ImPlot/ImPlot3D, ImNodes/node-editor, ImGuizmo/quat, CTE, or Test Engine in this repository. Read upstream version and implementation differences, adapt Rust and backend behavior, regenerate native/WASM bindings, and validate the integration."
 ---
 
 # Upgrade Dear ImGui Stack
@@ -27,12 +27,20 @@ Read `references/workspace-upgrade-checklist.md` before making changes.
    - Include extension sys crates whose generators embed or depend on the updated ImGui revision.
    - Include platform and renderer backends when callback, viewport, texture, or draw-data contracts
      changed.
+   - Find all workspace consumers of each changed contract, including Bevy/custom renderers,
+     detached snapshots, application integrations, and examples; do not scope by crate names alone.
 
 2. Establish the baseline.
-   - Record the current submodule SHAs and canonical binding verification result.
-   - Read primary upstream release notes and commit ranges.
-   - Note public declarations, internal lifecycle changes, callback ABI changes, and backend changes
-     that require focused review.
+   - Record committed wrapper and nested source SHAs, existing worktree differences, and canonical
+     binding verification results. Resolve the target revisions before comparing versions.
+   - Read the full release-note sections spanning that range, including breaking changes and
+     post-release/WIP changes when the selected branch is ahead of a release tag.
+   - Read the complete C/C++ header and implementation diff for each upgraded component. Follow
+     changed contracts into callers and version-gated branches, including unchanged extensions
+     that consume changed ImGui internals. Use the checklist's semantic review guidance.
+   - Account for each material change as an adaptation, compatible native behavior, intentional
+     sys-only API, or explicit deferral, with source evidence and an appropriate verification.
+     Complete this accounting before treating interface compilation as upgrade success.
 
 3. Refresh sources and bindings.
    - Prefer `tools/update_submodule_and_bindings.py` for source updates.
@@ -45,9 +53,15 @@ Read `references/workspace-upgrade-checklist.md` before making changes.
    - Check added and removed functions, enum representation, fields, defaults, callback signatures,
      aggregate parameters and returns, and source revision markers.
    - Inspect hidden queue, ownership, status, and teardown semantics even when layout is unchanged.
+   - Trace values through their producers and consumers: units, coordinate spaces, defaults,
+     texture-table contents, assertions, frame validity, and callback ordering can change while
+     function names and layouts stay compatible. Inspect handwritten mirrors independently of
+     generated bindings.
    - Never accept size/alignment alone as proof for a handwritten FFI mirror. Prefer generated or
      transparent types; otherwise add field-offset and behavior probes.
-   - Re-audit local C++ shims and source patches against their upstream markers.
+   - Re-audit local C++ shims and source patches against the actual compiled input. Remove a
+     workaround only after confirming upstream fixes its underlying behavior. Keep required
+     adaptations consistent across source, prebuilt/package, and WASM provider routes.
 
 5. Design the safe Rust response.
    - Search rustdoc aliases, Rust names, and sys call sites to find existing semantic wrappers.
@@ -55,6 +69,10 @@ Read `references/workspace-upgrade-checklist.md` before making changes.
      unsafe sys-only path, or defer it for a separate lifetime design.
    - Add compile-fail tests for lifetime/state restrictions and native/runtime tests for ABI or
      backend behavior. Symbol-name matching is discovery, not proof.
+   - For a semantic regression, exercise the production native path and observe its result
+     (geometry, pixels, state, callbacks, or ownership). Choose inputs that distinguish the old
+     and new contracts; include relevant DPI, bounds, or lifecycle cases. A copied implementation
+     in a test is not independent evidence.
 
 6. Finish the workspace change.
    - Update examples that exercise the changed user path.
@@ -62,6 +80,9 @@ Read `references/workspace-upgrade-checklist.md` before making changes.
    - Remove deprecations promised for the target breaking release.
    - Run targeted tests first, then the repository release checks. Serialize Cargo on shared
      machines and reuse the workspace target directory.
+   - Report reviewed source ranges, resolved behavioral changes, and verification limits. Mark
+     static review, compilation, and executed runtime evidence separately; retain unresolved
+     platform/runtime gaps rather than claiming coverage from regeneration or a green build.
 
 ## Bundled resource
 
