@@ -10,19 +10,19 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ### Breaking Changes and Migration
 
-- Winit event entry points now route by `WindowId` and return structured ownership, forwarding, capture, and invalidation facts. WGPU viewport routes separate preparation, recording, submission, and presentation; migrate combined frame loops to `complete_secondary` and `record_main`, or use the explicit work capabilities. See [the editor backend migration guide](docs/EDITOR_BACKEND_MIGRATION.md).
+- Winit events now route by `WindowId` and return structured outcomes. WGPU viewport rendering separates recording, submission, and presentation; migrate combined loops to `complete_secondary` and `record_main`. See the [migration guide](docs/EDITOR_BACKEND_MIGRATION.md). [PR #93](https://github.com/Latias94/dear-imgui-rs/pull/93)
 
 ### Added
 
-- Track exact native window registrations, configure supported secondary-window policy before creation, and observe native creation and retirement. Engine pointer control coordinates cursor grabs with Dear ImGui and reports automatic release and native failures.
-- Inspect which native target recorded or submitted draws using each external texture binding revision, including skipped windows and partially failed frames. A separate WGPU executor consumes existing core snapshots on a render thread with target-generation checks and complete managed-texture feedback.
-- Enable optional native multi-viewport in Dear App, record engine commands before UI consumers, handle raw device input, and wake Wait-mode applications from background work or frame deadlines. GPU recovery preserves application and Context state while replacing GPU resources and retired secondary windows.
-- Preserve SDL callback file-drop payloads and observed native identities, and optionally install a desktop text clipboard through the existing core clipboard contract. New GPU examples cover bounded threaded rendering and explicit depth, object-ID, HDR, layer, and mip previews.
+- Track native window lifetimes, configure secondary windows, and hand cursor control to engine tools.
+- Report which native windows recorded draws using each engine texture binding, alongside skipped windows and partial failures. Render detached snapshots on a worker thread.
+- Enable Dear App multi-viewport, background wakeups, frame deadlines, raw device input, and engine rendering before UI draws.
+- Receive owned SDL file drops, optionally use the system text clipboard, and preview depth, object-ID, HDR, layer, and mip textures in the new examples.
 
 ### Fixed
 
-- Preserve managed texture contents for already recorded WGPU commands when later frames update the same logical texture before submission. Dear App retains bounded retries for transient secondary-surface skips even when the main window presents successfully.
-- Release single-window touch ownership after focus loss and invalidate Wait-mode rendering for native input. Keep acquired-frame, Surface, native-window, and owner-chain leases through pending presentation; release configured Surfaces before their Device during recovery and shutdown.
+- Keep older recorded WGPU frames' managed texture contents intact when later frames update the same texture before submission.
+- Release touch input after focus loss, redraw Wait-mode applications after input, and release Surfaces before their Device during recovery and shutdown.
 
 ## [0.20.0] - 2026-10-12
 

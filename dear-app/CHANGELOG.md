@@ -2,15 +2,16 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Full `AppConfig` literals need `multi_viewport` and `device_events`, or `..Default::default()`. `EventContext::window()` now refers to the event target; use `main_window()` for the main window.
+
 ### Added
 
-- Optional native multi-viewport support through the `multi-viewport` Cargo feature and `AppConfig::multi_viewport`, using the existing Winit platform and WGPU owning route.
-- `EventContext::outcome()` and `window_id()` expose exact native routing and capture intent. `window()` refers to the event target; `main_window()` provides the stable host window. Secondary close requests keep the application running.
-- `Application::viewport_frame` provides owned-data recording, submission, and presentation observations for editor history. Engine commands recorded by `record_render` precede every UI consumer.
-- A multi-window editor example and a native undock, merge, close, and device-recovery regression.
+- Opt into native multi-viewport with the `multi-viewport` feature and `AppConfig::multi_viewport`; secondary windows recover with the GPU and retain bounded retries after transient surface failures. [PR #93](https://github.com/Latias94/dear-imgui-rs/pull/93)
+- Wake Wait-mode applications from background work or deadlines with `AppWakeHandle`, and handle raw device input.
+- Record engine commands before UI draws with `Application::record_render` and inspect per-window results through `viewport_frame`.
 
 ### Fixed
 
-- Keep bounded redraw retries for transient secondary-surface timeouts and recovered lost/outdated surfaces, independently of successful main-window presentation. Occluded, zero-sized, and retired targets do not start polling.
-- GPU recovery and shutdown release all configured Surfaces before their Device, and create a new main Surface for each replacement GPU generation. Context, main native registration, and application state survive recovery; recreated secondary windows receive new native instance IDs.
-- Redraws observe confirmed device loss before its queued event is delivered, while unrelated validation errors remain terminal. GPU submission draining has a bounded wait.
+- Redraw Wait-mode applications after input and release configured Surfaces before their Device during recovery and shutdown.

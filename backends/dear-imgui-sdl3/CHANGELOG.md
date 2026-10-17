@@ -8,22 +8,13 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ### Added
 
-- Preserve owned callback drop payloads, source and supplied client coordinates. Owner-bound
-  handoffs record observed native registrations, and consumers distinguish current, retired and
-  unowned targets without following reused SDL window IDs.
-
-- Retain exact SDL native windows and their owner chains through renderer work leases, including
-  after routing retirement and Context teardown. Retired sidecars are freed immediately; native
-  destruction waits for the last pin, and pending work blocks native owner changes.
-
-- Configure secondary windows before allocation with bounded size, icon, resizability, focus and
-  transparent-backing policy. Query optional native state and policy support, update supported
-  mutable attributes, and drain owned creation/retirement observations after platform shutdown.
+- Receive owned file-drop payloads with available coordinates and native target identity. [PR #93](https://github.com/Latias94/dear-imgui-rs/pull/93)
+- Configure secondary windows and query their state, supported policies, and lifecycle events.
+- Keep native windows and their owners alive while renderer work still needs them.
 
 ### Fixed
 
-- Cocoa no longer advertises native viewport parenting, which the upstream SDL adapter deliberately
-  skips to allow detached windows to move between monitors.
+- Stop advertising native viewport parenting on Cocoa, where the upstream SDL adapter leaves it disabled so detached windows can move between monitors.
 
 ## [0.20.0] - 2026-10-12
 
