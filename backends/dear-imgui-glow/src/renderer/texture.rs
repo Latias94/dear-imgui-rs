@@ -641,6 +641,7 @@ mod tests {
                 is_es: false,
             },
             has_clip_origin_support: false,
+            clip_origin: super::super::core::GlowClipOrigin::default(),
             has_separate_polygon_modes: false,
             has_sampler_object_support: true,
             gl_context: None,

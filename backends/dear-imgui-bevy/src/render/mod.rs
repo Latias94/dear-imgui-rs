@@ -130,12 +130,12 @@ mod tests {
         imgui_bevy_draw_callback_reset,
     };
     use super::prepare::{
-        convert_imgui_texture_pixels, convert_imgui_texture_update_rects,
-        draw_indices_reference_out_of_bounds, initialize_imgui_gpu_resources,
-        intersect_scissor_with_camera_viewport, managed_texture_extent_supported,
-        prepare_bevy_image_texture_bind_groups, prepare_draw_data,
-        retain_extracted_bevy_image_bindings, scissor_for_render_pass, scissor_from_clip_rect,
-        validate_texture_update_rect,
+        ImguiDrawPreparationError, convert_imgui_texture_pixels,
+        convert_imgui_texture_update_rects, draw_indices_reference_out_of_bounds,
+        initialize_imgui_gpu_resources, intersect_scissor_with_camera_viewport,
+        managed_texture_extent_supported, prepare_bevy_image_texture_bind_groups,
+        prepare_draw_data, retain_extracted_bevy_image_bindings, scissor_for_render_pass,
+        scissor_from_clip_rect, validate_texture_update_rect,
     };
     use super::resources::{
         BevyImageBindingSource, ImguiTextureViewCompatibility, pad_index_buffer_for_copy_alignment,
@@ -151,6 +151,13 @@ mod tests {
 
     type RawDrawCallback =
         unsafe extern "C" fn(*const imgui::sys::ImDrawList, *const imgui::sys::ImDrawCmd);
+
+    unsafe extern "C" fn texture_sampler_callback(
+        list: *const imgui::sys::ImDrawList,
+        _command: *const imgui::sys::ImDrawCmd,
+    ) {
+        std::hint::black_box(list);
+    }
 
     fn assert_fn_ptr_eq(actual: imgui::sys::ImDrawCallback, expected: RawDrawCallback) {
         assert_eq!(
@@ -1274,6 +1281,226 @@ mod tests {
                     platform_io.draw_callback_set_sampler_nearest_raw(),
                     imgui_bevy_draw_callback_nearest,
                 );
+                assert!(
+                    platform_io
+                        .draw_callback_set_sampler_from_texture_raw()
+                        .is_none()
+                );
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn unsupported_texture_sampler_slot_blocks_installation_and_preserves_foreign_ownership() {
+        let mut context = managed_context();
+        unsafe {
+            context
+                .platform_io_mut()
+                .set_draw_callback_set_sampler_from_texture_raw(Some(texture_sampler_callback));
+        }
+        assert_eq!(
+            standard_draw_callback_occupied(&context),
+            Some("DrawCallback_SetSamplerFromTex")
+        );
+        assert_eq!(
+            install_standard_draw_callbacks_for_context(&mut context),
+            Err("DrawCallback_SetSamplerFromTex")
+        );
+        assert!(
+            context
+                .platform_io()
+                .draw_callback_reset_render_state_raw()
+                .is_none()
+        );
+        clear_standard_draw_callbacks_if_owned(&mut context);
+        assert_fn_ptr_eq(
+            context
+                .platform_io()
+                .draw_callback_set_sampler_from_texture_raw(),
+            texture_sampler_callback,
+        );
+
+        unsafe {
+            context
+                .platform_io_mut()
+                .set_draw_callback_set_sampler_from_texture_raw(None);
+        }
+        install_standard_draw_callbacks_for_context(&mut context).unwrap();
+        assert_eq!(standard_draw_callback_contract(&context)[3], 0);
+        unsafe {
+            context
+                .platform_io_mut()
+                .set_draw_callback_set_sampler_from_texture_raw(Some(texture_sampler_callback));
+        }
+        assert_eq!(
+            standard_draw_callback_conflict(&context),
+            Some("DrawCallback_SetSamplerFromTex")
+        );
+        assert_ne!(standard_draw_callback_contract(&context)[3], 0);
+        clear_standard_draw_callbacks_if_owned(&mut context);
+        let platform_io = context.platform_io();
+        assert!(platform_io.draw_callback_reset_render_state_raw().is_none());
+        assert!(platform_io.draw_callback_set_sampler_linear_raw().is_none());
+        assert!(
+            platform_io
+                .draw_callback_set_sampler_nearest_raw()
+                .is_none()
+        );
+        assert_fn_ptr_eq(
+            platform_io.draw_callback_set_sampler_from_texture_raw(),
+            texture_sampler_callback,
+        );
+    }
+
+    #[test]
+    fn preparation_rejects_texture_samplers_in_unrouted_viewports_before_drawing() {
+        let mut list = draw_list_for_test();
+        list.commands.push(DrawCmdSnapshot::SetSamplerFromTexture);
+        let main = imgui::render::DrawDataSnapshot {
+            frame_count: 0,
+            display_pos: [0.0; 2],
+            display_size: [32.0; 2],
+            framebuffer_scale: [1.0; 2],
+            draw_lists: vec![draw_list_for_test()],
+        };
+        let viewports = [imgui::render::ViewportDrawDataSnapshot::new(
+            imgui::Id::from(0xBAD),
+            false,
+            imgui::render::DrawDataSnapshot {
+                frame_count: 0,
+                display_pos: [0.0; 2],
+                display_size: [32.0; 2],
+                framebuffer_scale: [1.0; 2],
+                draw_lists: vec![list],
+            },
+        )];
+        let camera = Entity::from_raw_u32(7).unwrap();
+        let targets = [camera_target_for_test(camera, None)];
+        assert!(matches!(
+            prepare_draw_data(&main, &viewports, &targets),
+            Err(ImguiDrawPreparationError::TextureSamplerUnsupported)
+        ));
+    }
+
+    #[test]
+    fn native_texture_sampler_snapshot_is_abandoned_before_upload_without_blocking_other_contexts()
+    {
+        use bevy_ecs::system::RunSystemOnce as _;
+
+        let mut context_a = managed_context();
+        install_standard_draw_callbacks_for_context(&mut context_a).unwrap();
+        let consumer_a = context_a.create_detached_renderer_consumer().unwrap();
+        let texture_a = register_test_texture(&mut context_a);
+        unsafe {
+            context_a
+                .platform_io_mut()
+                .set_draw_callback_set_sampler_from_texture_raw(Some(texture_sampler_callback));
+        }
+        let frame = context_a.begin_frame();
+        frame.ui().image(texture_a, [16.0; 2]);
+        unsafe {
+            frame.ui().get_background_draw_list().add_callback(
+                texture_sampler_callback,
+                std::ptr::null_mut(),
+                0,
+            );
+        }
+        let snapshot_a = frame.render_snapshot(&consumer_a).unwrap();
+        assert!(
+            snapshot_a
+                .draw_data()
+                .draw_lists
+                .iter()
+                .flat_map(|list| &list.commands)
+                .any(|command| matches!(command, DrawCmdSnapshot::SetSamplerFromTexture))
+        );
+        assert!(!snapshot_a.texture_requests().is_empty());
+        let context_a_id = context_a.id();
+        let mut context_a = context_a.suspend_or_panic();
+
+        let mut context_b = managed_context();
+        let consumer_b = context_b.create_detached_renderer_consumer().unwrap();
+        let texture_b = register_test_texture(&mut context_b);
+        let snapshot_b = managed_snapshot(&mut context_b, &consumer_b, Some(texture_b));
+        let feedback_b = retry_texture_feedback(&snapshot_b);
+        let context_b_id = context_b.id();
+        let mut context_b = context_b.suspend_or_panic();
+
+        let camera = Entity::from_raw_u32(7).unwrap();
+        let second_camera = Entity::from_raw_u32(8).unwrap();
+        let target = camera_target_for_test(camera, None);
+        let mut extracted = ImguiExtractedRenderFrame::default();
+        extracted.replace(context_a_id, pending_frame(1, snapshot_a), Vec::new());
+        extracted.replace_camera_targets(
+            context_a_id,
+            vec![
+                ImguiCameraTarget {
+                    context_id: context_a_id,
+                    ..target.clone()
+                },
+                ImguiCameraTarget {
+                    context_id: context_a_id,
+                    camera: second_camera,
+                    view: RetainedViewEntity::new(second_camera.into(), None, 0),
+                    ..target.clone()
+                },
+            ],
+        );
+        extracted.replace(context_b_id, pending_frame(1, snapshot_b), Vec::new());
+        extracted.replace_camera_targets(
+            context_b_id,
+            vec![ImguiCameraTarget {
+                context_id: context_b_id,
+                ..target
+            }],
+        );
+        extracted.extend_texture_feedback(context_b_id, feedback_b);
+        let diagnostics = crate::route::ImguiDiagnostics::default();
+        let mut world = World::new();
+        world.insert_resource(extracted);
+        world.insert_resource(ImguiPreparedRenderFrame::default());
+        world.insert_resource(diagnostics.clone());
+        world
+            .run_system_once(super::prepare::prepare_imgui_render_frame)
+            .unwrap();
+
+        let extracted = world.resource::<ImguiExtractedRenderFrame>();
+        assert!(extracted.snapshot(context_a_id).is_none());
+        assert!(extracted.snapshot(context_b_id).is_some());
+        let prepared = world.resource::<ImguiPreparedRenderFrame>();
+        assert!(prepared.frame_index(context_a_id).is_none());
+        assert_eq!(prepared.frame_index(context_b_id), Some(1));
+        let entries = diagnostics
+            .entries_for(crate::route::ImguiDiagnosticOrigin::RenderPreparation)
+            .collect::<Vec<_>>();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].kind(),
+            &crate::route::ImguiDiagnosticKind::TextureSamplerUnsupported
+        );
+        assert_eq!(entries[0].context_id(), Some(context_a_id));
+        assert!(
+            world
+                .resource_mut::<ImguiExtractedRenderFrame>()
+                .commit_all()
+                .is_empty()
+        );
+
+        context_a
+            .try_with_active(|context| {
+                let progress = context.poll_snapshot_completions().unwrap();
+                assert_eq!(progress.abandoned(), 1);
+                assert_eq!(progress.committed(), 0);
+                assert_eq!(progress.feedback_applied(), 0);
+                Ok::<_, std::convert::Infallible>(())
+            })
+            .unwrap();
+        context_b
+            .try_with_active(|context| {
+                let progress = context.poll_snapshot_completions().unwrap();
+                assert_eq!(progress.abandoned(), 0);
+                assert_eq!(progress.committed(), 1);
+                Ok::<_, std::convert::Infallible>(())
             })
             .unwrap();
     }
@@ -1318,6 +1545,7 @@ mod tests {
                 DrawCmdSnapshot::ResetRenderState => Some("reset"),
                 DrawCmdSnapshot::SetSamplerLinear => Some("linear"),
                 DrawCmdSnapshot::SetSamplerNearest => Some("nearest"),
+                DrawCmdSnapshot::SetSamplerFromTexture => Some("texture"),
                 DrawCmdSnapshot::Elements { .. } => None,
             })
             .collect::<Vec<_>>();
@@ -1367,7 +1595,7 @@ mod tests {
         };
         let targets = [camera_target_for_test(camera, None)];
 
-        let (_, _, draws, _) = prepare_draw_data(&draw, &[], &targets);
+        let draws = prepare_draw_data(&draw, &[], &targets).unwrap().draws;
 
         assert_eq!(draws.len(), 2);
         assert_eq!(draws[0].sampler, ImguiSampler::Nearest);
@@ -1420,7 +1648,7 @@ mod tests {
         };
         let targets = [camera_target_for_test(camera, None)];
 
-        let (_, _, draws, _) = prepare_draw_data(&draw, &[], &targets);
+        let draws = prepare_draw_data(&draw, &[], &targets).unwrap().draws;
 
         assert_eq!(draws.len(), 2);
         assert_eq!(draws[0].sampler, ImguiSampler::Nearest);
@@ -1476,7 +1704,7 @@ mod tests {
         };
         let targets = [camera_target_for_test(camera, None)];
 
-        let (_, _, draws, _) = prepare_draw_data(&draw, &[], &targets);
+        let draws = prepare_draw_data(&draw, &[], &targets).unwrap().draws;
 
         assert_eq!(draws.len(), 1);
         assert_eq!(draws[0].index_range, 0..3);
@@ -1619,7 +1847,11 @@ mod tests {
             ..camera_target_for_test(camera, None)
         };
 
-        let (_, _, draws, uniforms_by_view) = prepare_draw_data(&draw, &[], &[target]);
+        let prepare::PreparedImguiDrawData {
+            draws,
+            uniforms_by_view,
+            ..
+        } = prepare_draw_data(&draw, &[], &[target]).unwrap();
 
         assert_eq!(draws.len(), 1);
         assert_eq!(
@@ -1676,7 +1908,11 @@ mod tests {
             camera_target_for_test(secondary_camera, Some(secondary_viewport)),
         ];
 
-        let (_, _, draws, uniforms_by_view) = prepare_draw_data(&draw, &viewports, &targets);
+        let prepare::PreparedImguiDrawData {
+            draws,
+            uniforms_by_view,
+            ..
+        } = prepare_draw_data(&draw, &viewports, &targets).unwrap();
 
         assert_eq!(draws.len(), 1);
         assert_eq!(draws[0].camera, secondary_camera);

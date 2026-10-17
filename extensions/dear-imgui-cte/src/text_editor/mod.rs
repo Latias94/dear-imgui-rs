@@ -27,6 +27,7 @@ pub struct TextEditor {
     pub(crate) callbacks: CallbackRegistry,
     pub(crate) trie: Option<NonNull<sys::TrieAutoComplete>>,
     pub(crate) layout_ready: bool,
+    pub(crate) rendered_frame: Option<usize>,
     _not_send_sync: PhantomData<Rc<()>>,
 }
 
@@ -46,6 +47,7 @@ impl TextEditor {
             callbacks: CallbackRegistry::new(),
             trie: None,
             layout_ready: false,
+            rendered_frame: None,
             _not_send_sync: PhantomData,
         })
     }
@@ -242,6 +244,7 @@ impl TextEditor {
 
     pub(crate) fn invalidate_layout(&mut self) {
         self.layout_ready = false;
+        self.rendered_frame = None;
     }
 }
 

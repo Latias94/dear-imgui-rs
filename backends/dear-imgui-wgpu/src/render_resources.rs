@@ -57,8 +57,9 @@ impl RenderResources {
         }
 
         // Create linear texture sampler (matches imgui_impl_wgpu.cpp sampler setup)
-        // Bilinear sampling is required by default. Set 'io.Fonts->Flags |= ImFontAtlasFlags_NoBakedLines'
-        // or 'style.AntiAliasedLinesUseTex = false' to allow point/nearest sampling
+        // Bilinear sampling is required for baked anti-aliased lines and rounded corners.
+        // Set both NoBakedLines and NoBakedRoundCorners atlas flags before using
+        // nearest sampling for the atlas. User textures can choose either sampler separately.
         let sampler = device.create_sampler(&SamplerDescriptor {
             label: Some("Dear ImGui Texture Sampler"),
             address_mode_u: AddressMode::ClampToEdge, // matches WGPUAddressMode_ClampToEdge

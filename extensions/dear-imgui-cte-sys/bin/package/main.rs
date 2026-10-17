@@ -59,7 +59,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "TextDiff.h",
         "TextEditor.h",
         "example/dejavu.h",
-        "extras/Notifications.h",
         "extras/TrieAutoComplete.h",
     ] {
         append_file(

@@ -70,33 +70,49 @@ pub(super) fn initialize_imgui_gpu_resources(world: &mut World) {
 }
 
 pub(super) fn prepare_imgui_render_frame(
-    extracted: Res<ImguiExtractedRenderFrame>,
+    mut extracted: ResMut<ImguiExtractedRenderFrame>,
     mut prepared: ResMut<ImguiPreparedRenderFrame>,
+    diagnostics: Res<crate::route::ImguiDiagnostics>,
 ) {
     let mut context_ids = extracted.context_ids().collect::<Vec<_>>();
     context_ids.sort_by_key(|context_id| context_id.get().get());
     let frame = prepared.begin_prepare();
+    let mut preparation_diagnostics = Vec::new();
 
     for context_id in context_ids {
         let Some(snapshot) = extracted.snapshot(context_id) else {
             continue;
         };
         #[cfg(test)]
-        {
-            let frame_index = extracted
+        let metadata = PreparedContextMetadata {
+            frame_index: extracted
                 .frame_index(context_id)
-                .expect("an extracted snapshot must retain its frame index");
-            frame.contexts.insert(
-                context_id,
-                PreparedContextMetadata {
-                    frame_index,
-                    texture_request_count: snapshot.texture_requests().len(),
-                },
-            );
-        }
+                .expect("an extracted snapshot must retain its frame index"),
+            texture_request_count: snapshot.texture_requests().len(),
+        };
+        let result = prepare_snapshot_draw_data(snapshot, extracted.camera_targets(context_id));
+        let PreparedImguiDrawData {
+            vertices: context_vertices,
+            indices: context_indices,
+            draws: mut context_draws,
+            uniforms_by_view,
+        } = match result {
+            Ok(prepared) => prepared,
+            Err(ImguiDrawPreparationError::TextureSamplerUnsupported) => {
+                preparation_diagnostics.push(
+                    crate::route::ImguiDiagnostic::new(
+                        crate::route::ImguiDiagnosticKind::TextureSamplerUnsupported,
+                    )
+                    .with_context(context_id),
+                );
+                // Abandon the whole Context epoch before texture upload or completion commit.
+                extracted.remove_context(context_id);
+                continue;
+            }
+        };
+        #[cfg(test)]
+        frame.contexts.insert(context_id, metadata);
 
-        let (context_vertices, context_indices, mut context_draws, uniforms_by_view) =
-            prepare_snapshot_draw_data(snapshot, extracted.camera_targets(context_id));
         let Ok(index_base) = u32::try_from(frame.indices.len()) else {
             continue;
         };
@@ -126,6 +142,11 @@ pub(super) fn prepare_imgui_render_frame(
         frame.indices.extend(context_indices);
         frame.draws.extend(context_draws);
     }
+    diagnostics.replace(
+        crate::route::ImguiDiagnosticOrigin::RenderPreparation,
+        extracted.route_epoch(),
+        preparation_diagnostics,
+    );
 }
 
 pub(super) fn upload_imgui_buffers(
@@ -861,15 +882,22 @@ pub(super) fn write_texture_rows(
     true
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ImguiDrawPreparationError {
+    TextureSamplerUnsupported,
+}
+
+pub(super) struct PreparedImguiDrawData {
+    pub(super) vertices: Vec<ImguiGpuVertex>,
+    pub(super) indices: Vec<DrawIdx>,
+    pub(super) draws: Vec<ImguiPreparedDraw>,
+    pub(super) uniforms_by_view: HashMap<RetainedViewEntity, ImguiUniforms>,
+}
+
 fn prepare_snapshot_draw_data(
     snapshot: &imgui::render::FrameSnapshot,
     camera_targets: &[ImguiCameraTarget],
-) -> (
-    Vec<ImguiGpuVertex>,
-    Vec<DrawIdx>,
-    Vec<ImguiPreparedDraw>,
-    HashMap<RetainedViewEntity, ImguiUniforms>,
-) {
+) -> Result<PreparedImguiDrawData, ImguiDrawPreparationError> {
     prepare_draw_data(snapshot.draw_data(), snapshot.viewports(), camera_targets)
 }
 
@@ -877,12 +905,20 @@ pub(super) fn prepare_draw_data(
     main_draw: &imgui::render::DrawDataSnapshot,
     viewports: &[imgui::render::ViewportDrawDataSnapshot],
     camera_targets: &[ImguiCameraTarget],
-) -> (
-    Vec<ImguiGpuVertex>,
-    Vec<DrawIdx>,
-    Vec<ImguiPreparedDraw>,
-    HashMap<RetainedViewEntity, ImguiUniforms>,
-) {
+) -> Result<PreparedImguiDrawData, ImguiDrawPreparationError> {
+    if main_draw
+        .draw_lists
+        .iter()
+        .chain(
+            viewports
+                .iter()
+                .flat_map(|viewport| &viewport.draw.draw_lists),
+        )
+        .flat_map(|list| &list.commands)
+        .any(|command| matches!(command, DrawCmdSnapshot::SetSamplerFromTexture))
+    {
+        return Err(ImguiDrawPreparationError::TextureSamplerUnsupported);
+    }
     let viewport_draws = snapshot_viewport_draws(main_draw, viewports);
     let vertex_count = viewport_draws
         .iter()
@@ -949,6 +985,9 @@ pub(super) fn prepare_draw_data(
                     DrawCmdSnapshot::SetSamplerNearest => {
                         active_sampler = ImguiSampler::Nearest;
                         continue;
+                    }
+                    DrawCmdSnapshot::SetSamplerFromTexture => {
+                        return Err(ImguiDrawPreparationError::TextureSamplerUnsupported);
                     }
                 };
 
@@ -1021,7 +1060,12 @@ pub(super) fn prepare_draw_data(
         }
     }
 
-    (vertices, indices, draws, uniforms_by_view)
+    Ok(PreparedImguiDrawData {
+        vertices,
+        indices,
+        draws,
+        uniforms_by_view,
+    })
 }
 
 fn snapshot_viewport_draws<'draw>(

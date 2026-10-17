@@ -33,8 +33,8 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
 
 | Item          | Version |
 |---------------|---------|
-| Crate         | 0.20.0  |
-| dear-imgui-rs | 0.20.0  |
+| Crate         | 0.21.0  |
+| dear-imgui-rs | 0.21.0  |
 
 ## Features
 
@@ -570,7 +570,7 @@ Optional decoder (`thumbnails-image` feature):
 
 ```rust
 // Cargo.toml:
-// dear-file-browser = { version = "0.20", features = ["thumbnails-image"] }
+// dear-file-browser = { version = "0.21", features = ["thumbnails-image"] }
 
 use dear_file_browser::ImageThumbnailProvider;
 
@@ -585,7 +585,7 @@ let mut provider = ImageThumbnailProvider::default();
   paths. Disable default features and enable `imgui` for the in-UI route on WASM:
 
   ```toml
-  dear-file-browser = { version = "0.20", default-features = false, features = ["imgui"] }
+  dear-file-browser = { version = "0.21", default-features = false, features = ["imgui"] }
   ```
 
   For a browser file picker, use `rfd::AsyncFileDialog` directly and retain its

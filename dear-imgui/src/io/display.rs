@@ -7,8 +7,10 @@ impl Io {
         [scale.x, scale.y]
     }
 
-    /// Set the display framebuffer scale
-    /// This is important for HiDPI displays to ensure proper rendering
+    /// Set the strictly positive, finite display framebuffer scale.
+    ///
+    /// This controls HiDPI pixel density. Use a zero display size to suspend
+    /// rendering for a minimized window; its pixel density remains positive.
     pub fn set_display_framebuffer_scale(&mut self, scale: [f32; 2]) {
         assert_display_framebuffer_scale("Io::set_display_framebuffer_scale()", scale);
         self.inner_mut().DisplayFramebufferScale.x = scale[0];

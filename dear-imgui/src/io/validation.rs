@@ -30,8 +30,8 @@ pub(crate) fn assert_display_size(caller: &str, size: [f32; 2]) {
 pub(crate) fn assert_display_framebuffer_scale(caller: &str, scale: [f32; 2]) {
     assert_finite_vec2(caller, "scale", scale);
     assert!(
-        scale[0] >= 0.0 && scale[1] >= 0.0,
-        "{caller} scale must contain non-negative values"
+        scale[0] > 0.0 && scale[1] > 0.0,
+        "{caller} scale must contain positive values"
     );
 }
 

@@ -68,8 +68,11 @@ pub enum ProviderTransform {
     PatchImguiCore,
     PatchImguiDemo,
     PatchImguiWidgetsNumericConversions,
-    PatchImnodesFileIo,
-    PatchCteUnicodeRangeLookup,
+    PatchImnodes,
+    PatchCteTextEditor,
+    PatchCteTextDiffDrawFlags,
+    PatchImplot3dDrawFlags,
+    PatchImplot,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]

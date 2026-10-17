@@ -100,6 +100,14 @@ returns to texture-owned filtering; on the sampler-object path it rebinds the re
 sampler. This is an intentional backend contract: reset produces a deterministic state regardless
 of what a raw callback changed.
 
+`DrawListMut::set_sampler_from_texture` restores each texture's own filtering on both paths.
+It unbinds renderer-owned sampler objects and leaves the texture parameters unchanged.
+
+The default clip origin is lower-left, matching Dear ImGui 1.93. Engines using
+`glClipControl(GL_UPPER_LEFT, ...)` must call
+`renderer.set_clip_origin(GlowClipOrigin::UpperLeft)`. Select `GlowClipOrigin::Auto` to query
+the current GL origin instead; an explicit origin avoids that query during rendering.
+
 Raw callbacks can inspect the live renderer state through a callback-scoped borrow:
 
 ```rust
@@ -236,8 +244,8 @@ proof; shared runtime tests remain the teardown evidence. See the
 
 | Item          | Version |
 |---------------|---------|
-| Crate         | 0.20.0  |
-| dear-imgui-rs | 0.20.0  |
+| Crate         | 0.21.0  |
+| dear-imgui-rs | 0.21.0  |
 | glow          | 0.18    |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.

@@ -77,6 +77,11 @@ fn platform_io_standard_draw_callbacks_are_classified() {
         _cmd: *const sys::ImDrawCmd,
     ) {
     }
+    unsafe extern "C" fn from_texture(
+        _parent_list: *const sys::ImDrawList,
+        _cmd: *const sys::ImDrawCmd,
+    ) {
+    }
 
     let mut ctx = crate::Context::create();
     let platform_io = ctx.platform_io_mut();
@@ -84,6 +89,7 @@ fn platform_io_standard_draw_callbacks_are_classified() {
         platform_io.set_draw_callback_reset_render_state_raw(Some(reset));
         platform_io.set_draw_callback_set_sampler_linear_raw(Some(linear));
         platform_io.set_draw_callback_set_sampler_nearest_raw(Some(nearest));
+        platform_io.set_draw_callback_set_sampler_from_texture_raw(Some(from_texture));
     }
 
     assert_eq!(
@@ -97,5 +103,9 @@ fn platform_io_standard_draw_callbacks_are_classified() {
     assert_eq!(
         classify_standard_draw_callback(Some(nearest)),
         Some(StandardDrawCallback::SetSamplerNearest)
+    );
+    assert_eq!(
+        classify_standard_draw_callback(Some(from_texture)),
+        Some(StandardDrawCallback::SetSamplerFromTexture)
     );
 }

@@ -1,6 +1,6 @@
 use crate::sys;
 
-use super::counts::{DrawCornerFlags, PolylineFlags};
+use super::counts::DrawFlags;
 
 pub(super) fn assert_finite_f32(caller: &str, name: &str, value: f32) {
     assert!(value.is_finite(), "{caller} {name} must be finite");
@@ -84,19 +84,45 @@ pub(super) fn assert_arc_fast_steps(caller: &str, a_min_of_12: i32, a_max_of_12:
     );
 }
 
-pub(super) fn assert_polyline_flags(caller: &str, flags: PolylineFlags) {
+pub(super) const STROKE_POSITION: DrawFlags =
+    DrawFlags::from_bits_retain(sys::ImDrawFlags_StrokeMask_ as u32);
+
+pub(super) const STROKE_FLAGS: DrawFlags = DrawFlags::from_bits_retain(
+    STROKE_POSITION.bits()
+        | DrawFlags::JOIN_MITER.bits()
+        | DrawFlags::CAP_SQUARE.bits()
+        | DrawFlags::AA_LINES.bits()
+        | DrawFlags::AA_LINE_ENDS.bits(),
+);
+
+pub(super) const FILL_FLAGS: DrawFlags =
+    DrawFlags::from_bits_retain(DrawFlags::AA_FILL.bits() | DrawFlags::JOIN_MITER.bits());
+
+pub(super) const CORNER_FLAGS: DrawFlags =
+    DrawFlags::from_bits_retain(sys::ImDrawFlags_RoundMask_ as u32);
+
+pub(super) fn assert_draw_flags(caller: &str, flags: DrawFlags, supported: DrawFlags) {
     assert!(
-        flags.difference(PolylineFlags::CLOSED).is_empty(),
+        flags.difference(supported).is_empty(),
         "{caller} flags contain unsupported ImDrawFlags bits"
+    );
+    let stroke = flags.bits() & sys::ImDrawFlags_StrokeMask_ as u32;
+    assert!(
+        matches!(stroke >> 17, 0 | 1 | 2 | 3 | 4 | 7),
+        "{caller} flags contain an invalid stroke position"
+    );
+    assert!(
+        !flags.contains(DrawFlags::ROUND_NONE) || !flags.intersects(DrawFlags::ROUND_ALL),
+        "{caller} ROUND_NONE cannot be combined with rounded corners"
     );
 }
 
-pub(super) fn assert_corner_flags(caller: &str, flags: DrawCornerFlags) {
-    let supported = sys::ImDrawFlags_RoundCornersMask_ as u32;
-    assert!(
-        flags.bits() & !supported == 0,
-        "{caller} flags contain unsupported ImDrawFlags bits"
-    );
+pub(super) fn assert_polyline_flags(caller: &str, flags: DrawFlags) {
+    assert_draw_flags(caller, flags, STROKE_FLAGS | FILL_FLAGS | DrawFlags::CLOSED);
+}
+
+pub(super) fn assert_corner_flags(caller: &str, flags: DrawFlags) {
+    assert_draw_flags(caller, flags, CORNER_FLAGS);
 }
 
 #[cfg(test)]

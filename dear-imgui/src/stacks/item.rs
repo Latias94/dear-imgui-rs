@@ -27,6 +27,8 @@ bitflags! {
         const LIVE_EDIT_ON_INPUT_SCALAR = sys::ImGuiItemFlags_LiveEditOnInputScalar as i32;
         /// Apply text and scalar keyboard edits to backing values while typing.
         const LIVE_EDIT_ON_INPUT = sys::ImGuiItemFlags_LiveEditOnInput as i32;
+        /// Display a mixed or indeterminate value, useful for multi-object property editors.
+        const MIXED_VALUE = sys::ImGuiItemFlags_MixedValue as i32;
     }
 }
 
@@ -59,6 +61,8 @@ bitflags! {
         const LIVE_EDIT_ON_INPUT_SCALAR = sys::ImGuiItemFlags_LiveEditOnInputScalar as i32;
         /// Text and scalar keyboard edits were applied while typing.
         const LIVE_EDIT_ON_INPUT = sys::ImGuiItemFlags_LiveEditOnInput as i32;
+        /// The item represented a mixed or indeterminate value.
+        const MIXED_VALUE = sys::ImGuiItemFlags_MixedValue as i32;
         /// The last item was disabled.
         const DISABLED = sys::ImGuiItemFlags_Disabled as i32;
     }
@@ -160,7 +164,8 @@ mod tests {
             ui.with_item_flag(
                 ItemFlags::NO_NAV
                     | ItemFlags::ALLOW_DUPLICATE_ID
-                    | ItemFlags::LIVE_EDIT_ON_INPUT_SCALAR,
+                    | ItemFlags::LIVE_EDIT_ON_INPUT_SCALAR
+                    | ItemFlags::MIXED_VALUE,
                 true,
                 || {
                     ui.button("scoped");
@@ -168,6 +173,7 @@ mod tests {
                     assert!(flags.contains(ItemStateFlags::NO_NAV));
                     assert!(flags.contains(ItemStateFlags::ALLOW_DUPLICATE_ID));
                     assert!(flags.contains(ItemStateFlags::LIVE_EDIT_ON_INPUT_SCALAR));
+                    assert!(flags.contains(ItemStateFlags::MIXED_VALUE));
                 },
             );
 
@@ -176,6 +182,7 @@ mod tests {
             assert!(!flags.contains(ItemStateFlags::NO_NAV));
             assert!(!flags.contains(ItemStateFlags::ALLOW_DUPLICATE_ID));
             assert!(!flags.contains(ItemStateFlags::LIVE_EDIT_ON_INPUT_SCALAR));
+            assert!(!flags.contains(ItemStateFlags::MIXED_VALUE));
         });
     }
 

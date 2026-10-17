@@ -27,6 +27,8 @@ pub enum PaletteColor {
     MatchingBracketError,
     LineNumber,
     CurrentLineNumber,
+    CurrentLineHighlight,
+    CurrentLineHighlightBorder,
 }
 
 impl PaletteColor {
@@ -54,6 +56,8 @@ impl PaletteColor {
         Self::MatchingBracketError,
         Self::LineNumber,
         Self::CurrentLineNumber,
+        Self::CurrentLineHighlight,
+        Self::CurrentLineHighlightBorder,
     ];
 
     pub(crate) const fn into_raw(self) -> sys::Color {

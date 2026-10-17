@@ -447,8 +447,8 @@ pub use dock_layout::*;
 pub use dock_space::*;
 // Export draw-list helpers for extensions and downstream custom drawing.
 pub use draw::{
-    DrawCornerFlags, DrawListFlags, DrawListMut, DrawListTextureToken, DrawNgonSegmentCount,
-    DrawSegmentCount, PolylineFlags, RawDrawCallback,
+    DrawFlags, DrawListMut, DrawListTextureToken, DrawNgonSegmentCount, DrawSegmentCount,
+    RawDrawCallback,
 };
 pub use error::*;
 pub use ini_settings::*;

@@ -30,11 +30,15 @@ impl Style {
         self.inner_mut().AntiAliasedLines = v;
     }
 
-    pub fn anti_aliased_lines_use_tex(&self) -> bool {
-        self.inner().AntiAliasedLinesUseTex
+    /// Returns whether open line ends are anti-aliased.
+    #[doc(alias = "AntiAliasedLineEnds")]
+    pub fn anti_aliased_line_ends(&self) -> bool {
+        self.inner().AntiAliasedLineEnds
     }
-    pub fn set_anti_aliased_lines_use_tex(&mut self, v: bool) {
-        self.inner_mut().AntiAliasedLinesUseTex = v;
+    /// Sets anti-aliasing for open line ends.
+    #[doc(alias = "AntiAliasedLineEnds")]
+    pub fn set_anti_aliased_line_ends(&mut self, v: bool) {
+        self.inner_mut().AntiAliasedLineEnds = v;
     }
 
     pub fn anti_aliased_fill(&self) -> bool {
@@ -44,12 +48,18 @@ impl Style {
         self.inner_mut().AntiAliasedFill = v;
     }
 
-    pub fn curve_tessellation_tol(&self) -> f32 {
-        self.inner().CurveTessellationTol
+    /// Returns the maximum curve tessellation error in pixels.
+    #[doc(alias = "CurveTessellationMaxError")]
+    pub fn curve_tessellation_max_error(&self) -> f32 {
+        self.inner().CurveTessellationMaxError
     }
-    pub fn set_curve_tessellation_tol(&mut self, v: f32) {
-        assert_positive_f32("Style::set_curve_tessellation_tol()", "v", v);
-        self.inner_mut().CurveTessellationTol = v;
+    /// Sets the maximum curve tessellation error in pixels.
+    ///
+    /// To migrate from the former squared-pixel tolerance, pass its square root.
+    #[doc(alias = "CurveTessellationMaxError")]
+    pub fn set_curve_tessellation_max_error(&mut self, v: f32) {
+        assert_positive_f32("Style::set_curve_tessellation_max_error()", "v", v);
+        self.inner_mut().CurveTessellationMaxError = v;
     }
 
     pub fn circle_tessellation_max_error(&self) -> f32 {

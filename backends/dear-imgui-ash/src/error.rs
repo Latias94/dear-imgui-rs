@@ -64,6 +64,10 @@ pub enum RendererError {
     )]
     DrawCommandVertexOutOfBounds { index: usize, len: usize },
 
+    /// Vulkan textures do not carry sampler state; select linear or nearest explicitly.
+    #[error("texture-owned sampler commands are not supported by the Ash renderer")]
+    TextureSamplerUnsupported,
+
     /// Draw frame resources are unavailable.
     #[error("Frame resources are not initialized")]
     FrameResourcesUnavailable,

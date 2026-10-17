@@ -11,4 +11,4 @@ mod texture;
 #[cfg(feature = "multi-viewport")]
 pub mod multi_viewport;
 
-pub use core::GlowRenderer;
+pub use core::{GlowClipOrigin, GlowRenderer};

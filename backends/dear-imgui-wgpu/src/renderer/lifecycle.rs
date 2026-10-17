@@ -325,7 +325,9 @@ impl WgpuRenderer {
         ) && draw_callback_matches(
             platform_io.draw_callback_set_sampler_nearest_raw(),
             draw_callback_set_sampler_nearest,
-        )
+        ) && platform_io
+            .draw_callback_set_sampler_from_texture_raw()
+            .is_none()
     }
 
     pub(super) fn owns_any_standard_draw_callback(

@@ -75,7 +75,7 @@ class SourceInventoryTests(unittest.TestCase):
         editor_source = next(item for item in source.files if item.id == "text-editor")
         self.assertEqual(
             editor_source.provider_transform,
-            "patch-cte-unicode-range-lookup",
+            "patch-cte-text-editor",
         )
         self.assertIsNotNone(source.provider)
         self.assertIn("TextEditor_", source.provider.symbol_prefixes)

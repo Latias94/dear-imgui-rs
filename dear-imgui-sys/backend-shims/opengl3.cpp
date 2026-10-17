@@ -31,4 +31,8 @@ void dear_imgui_backend_opengl3_update_texture(ImTextureData* texture) {
     ImGui_ImplOpenGL3_UpdateTexture(texture);
 }
 
+void dear_imgui_backend_opengl3_set_clip_origin(unsigned int clip_origin) {
+    ImGui_ImplOpenGL3_SetClipOrigin(clip_origin);
+}
+
 } // extern "C"

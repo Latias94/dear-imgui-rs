@@ -31,6 +31,7 @@ thread_local! {
     static DESTROY_OBSERVED_USER_DATA: Cell<usize> = const { Cell::new(0) };
     static PLATFORM_RENDER_COUNT: Cell<usize> = const { Cell::new(0) };
     static PLATFORM_SWAP_COUNT: Cell<usize> = const { Cell::new(0) };
+    static FRAMEBUFFER_SCALE_RESULT: Cell<[f32; 2]> = const { Cell::new([1.5, 1.5]) };
     static RENDERER_RENDER_COUNT: Cell<usize> = const { Cell::new(0) };
     static RENDERER_SET_SIZE_COUNT: Cell<usize> = const { Cell::new(0) };
     static RENDERER_POINTER_SET_SIZE: Cell<(u32, u32)> = const { Cell::new((0, 0)) };
@@ -288,8 +289,10 @@ unsafe extern "C" fn synthetic_get_window_size(
 
 unsafe extern "C" fn synthetic_get_window_framebuffer_scale(
     _viewport: *mut sys::ImGuiViewport,
-) -> sys::ImVec2_c {
-    sys::ImVec2_c { x: 1.5, y: 1.5 }
+    out_scale: *mut sys::ImVec2,
+) {
+    let [x, y] = FRAMEBUFFER_SCALE_RESULT.with(Cell::get);
+    unsafe { out_scale.write(sys::ImVec2 { x, y }) };
 }
 
 unsafe extern "C" fn synthetic_set_window_focus(_viewport: *mut sys::ImGuiViewport) {}
@@ -335,8 +338,11 @@ unsafe fn install_synthetic_platform_callback_inventory(
         (*platform_io).Platform_GetWindowPos = Some(synthetic_get_window_pos);
         (*platform_io).Platform_SetWindowSize = Some(synthetic_set_window_size);
         (*platform_io).Platform_GetWindowSize = Some(synthetic_get_window_size);
-        (*platform_io).Platform_GetWindowFramebufferScale =
-            Some(synthetic_get_window_framebuffer_scale);
+        // ImVec2 has a C++ return ABI on MSVC; Rust callbacks use the pointer shim.
+        sys::ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(
+            platform_io,
+            Some(synthetic_get_window_framebuffer_scale),
+        );
         (*platform_io).Platform_SetWindowFocus = Some(synthetic_set_window_focus);
         (*platform_io).Platform_GetWindowFocus = Some(synthetic_get_window_focus);
         (*platform_io).Platform_GetWindowMinimized = Some(synthetic_get_window_minimized);

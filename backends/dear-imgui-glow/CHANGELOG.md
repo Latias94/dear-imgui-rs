@@ -6,6 +6,22 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-17
+
+### Breaking
+
+- Clip origin defaults to lower-left without querying driver state. Engines using `GL_UPPER_LEFT` must select `GlowClipOrigin::UpperLeft`; `Auto` preserves automatic GL-state queries. [PR #94](https://github.com/Latias94/dear-imgui-rs/pull/94)
+
+### Added
+
+- Use `set_sampler_from_texture` to render with each OpenGL texture's own filtering settings. The renderer releases any active sampler object or temporary filtering override when processing Dear ImGui 1.93's texture-owned sampling command. [PR #94](https://github.com/Latias94/dear-imgui-rs/pull/94)
+
+### Fixed
+
+- Round fractional physical framebuffer dimensions instead of truncating them, preserving the intended viewport extent at fractional pixel densities. [PR #94](https://github.com/Latias94/dear-imgui-rs/pull/94)
+
+See the [workspace release notes](../../CHANGELOG.md#0210---2026-10-17) for the shared Dear ImGui 1.93 migration.
+
 ## [0.16.0] - 2026-08-14
 
 ### Breaking

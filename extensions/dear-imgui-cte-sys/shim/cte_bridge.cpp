@@ -3,7 +3,6 @@
 #include "ImGuiColorTextEdit/TextEditor.h"
 #include "ImGuiColorTextEdit/TextDiff.h"
 #include "ImGuiColorTextEdit/extras/TrieAutoComplete.h"
-#include "ImGuiColorTextEdit/extras/Notifications.h"
 #include "ImGuiColorTextEdit/example/dejavu.h"
 #include "cte_bridge.h"
 
@@ -23,6 +22,9 @@ static_assert(offsetof(TextEditor::Glyph, color) == 4);
 static_assert(offsetof(TextEditor::Glyph, breakOption) == 5);
 static_assert(offsetof(TextEditor::Glyph, columns) == 6);
 static_assert(offsetof(TextEditor::Glyph, squiggle) == 8);
+static_assert(static_cast<int>(TextEditor::Color::currentLineHighlight) == 22);
+static_assert(static_cast<int>(TextEditor::Color::currentLineHighlightBorder) == 23);
+static_assert(static_cast<int>(TextEditor::Color::count) == 24);
 
 struct DearImGuiCteAutocompleteConfig {
     TextEditor::AutoCompleteConfig value;

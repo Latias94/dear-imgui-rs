@@ -23,6 +23,24 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 #[doc(hidden)]
 pub mod surface_test_probe {
     unsafe extern "C" {
+        pub fn dear_implot3d_legend_probe_frame(
+            plot_context: *mut super::ImPlot3DContext,
+            covered: bool,
+            state: *mut f32,
+        ) -> std::ffi::c_int;
+        pub fn dear_implot3d_line_probe_plot(
+            plot_context: *mut super::ImPlot3DContext,
+            weight: f32,
+            pixel_density: f32,
+            anti_aliased: bool,
+            alpha: f32,
+            positions: *mut f32,
+            uvs: *mut f32,
+            expected_uvs: *mut f32,
+            expected_width: *mut f32,
+            colors: *mut u32,
+            expected_color: *mut u32,
+        ) -> std::ffi::c_int;
         pub fn dear_implot3d_surface_probe_reset();
         pub fn dear_implot3d_surface_probe_plot(
             label_id: *const std::ffi::c_char,

@@ -531,6 +531,8 @@ pub enum ImguiDiagnosticOrigin {
     InputRouting,
     /// Main-to-render-world extraction.
     RenderExtraction,
+    /// Validation of extracted draw commands before any renderer upload.
+    RenderPreparation,
     /// Bevy image and Dear ImGui texture integration.
     Texture,
     /// Native monitor collection and work-area provenance.
@@ -636,6 +638,8 @@ pub enum ImguiDiagnosticKind {
     MissingExtractedView,
     /// The render-world view no longer matches the immutable main-world route epoch.
     StaleExtractedView,
+    /// A draw command requests a texture-owned native sampler unsupported by this renderer.
+    TextureSamplerUnsupported,
     /// Camera-derived input is available only for a window render target.
     InputCameraRequiresWindowTarget { target: ImguiRenderTargetKind },
     /// The explicit logical input host is not a live Window entity.

@@ -5,23 +5,50 @@ use crate::sys;
 
 use super::util::count_to_i32;
 
-// Removed legacy local Vec2 in favor of passing `impl Into<sys::ImVec2>` and using arrays/tuples.
 bitflags! {
-    /// Draw list flags
+    /// Options for drawing primitives and configuring draw-list scopes.
+    ///
+    /// Per-primitive flags add to the current draw-list defaults. To disable an
+    /// inherited option, use [`super::DrawListMut::with_draw_flags`]. Stroke
+    /// positions are mutually exclusive values: choose one instead of combining them.
     #[repr(transparent)]
-    pub struct DrawListFlags: i32 {
-        /// No flags
-        const NONE = sys::ImDrawListFlags_None as i32;
-        /// Enable anti-aliased lines/borders
-        const ANTI_ALIASED_LINES = sys::ImDrawListFlags_AntiAliasedLines as i32;
-        /// Enable anti-aliased lines/borders using textures where possible
-        const ANTI_ALIASED_LINES_USE_TEX = sys::ImDrawListFlags_AntiAliasedLinesUseTex as i32;
-        /// Enable anti-aliased edge around filled shapes
-        const ANTI_ALIASED_FILL = sys::ImDrawListFlags_AntiAliasedFill as i32;
-        /// Can emit 'VtxOffset > 0' to allow large meshes
-        const ALLOW_VTX_OFFSET = sys::ImDrawListFlags_AllowVtxOffset as i32;
-        /// Disable pixel-boundary snapping for text added to this draw list.
-        const TEXT_NO_PIXEL_SNAP = sys::ImDrawListFlags_TextNoPixelSnap as i32;
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+    pub struct DrawFlags: u32 {
+        const NONE = sys::ImDrawFlags_None as u32;
+        const ROUND_TOP_LEFT = sys::ImDrawFlags_RoundTopLeft as u32;
+        const ROUND_TOP_RIGHT = sys::ImDrawFlags_RoundTopRight as u32;
+        const ROUND_BOTTOM_LEFT = sys::ImDrawFlags_RoundBottomLeft as u32;
+        const ROUND_BOTTOM_RIGHT = sys::ImDrawFlags_RoundBottomRight as u32;
+        /// Disable corner rounding even when the rounding radius is positive.
+        const ROUND_NONE = sys::ImDrawFlags_RoundNone as u32;
+        /// Round every corner. This is also the default for a positive radius.
+        const ROUND_ALL = sys::ImDrawFlags_RoundAll as u32;
+        const ROUND_TOP = sys::ImDrawFlags_RoundTop as u32;
+        const ROUND_BOTTOM = sys::ImDrawFlags_RoundBottom as u32;
+        const ROUND_LEFT = sys::ImDrawFlags_RoundLeft as u32;
+        const ROUND_RIGHT = sys::ImDrawFlags_RoundRight as u32;
+        const CLOSED = sys::ImDrawFlags_Closed as u32;
+        /// Use miter joins. Avoid this for corners sharper than 90 degrees.
+        const JOIN_MITER = sys::ImDrawFlags_JoinMiter as u32;
+        const CAP_SQUARE = sys::ImDrawFlags_CapSquare as u32;
+        const AA_FILL = sys::ImDrawFlags_AAFill as u32;
+        const AA_LINES = sys::ImDrawFlags_AALines as u32;
+        /// Anti-alias line ends. Requires anti-aliased lines in the scope or primitive.
+        const AA_LINE_ENDS = sys::ImDrawFlags_AALineEnds as u32;
+        /// Place the stroke inside the outline; the default for closed shapes.
+        const STROKE_INSIDE = sys::ImDrawFlags_StrokeInside as u32;
+        /// Center the stroke on the outline; the default for lines and paths.
+        const STROKE_CENTER = sys::ImDrawFlags_StrokeCenter as u32;
+        /// Center with an integer-pixel bias, useful for axis-aligned shapes.
+        const STROKE_CENTER_BIASED = sys::ImDrawFlags_StrokeCenterBiased as u32;
+        const STROKE_OUTSIDE = sys::ImDrawFlags_StrokeOutside as u32;
+        /// Restore pre-1.93 stroke positioning and line-end behavior.
+        const STROKE_LEGACY = sys::ImDrawFlags_StrokeLegacy as u32;
+        const TEXT_NO_PIXEL_SNAP = sys::ImDrawFlags_TextNoPixelSnap as u32;
+        /// Allow baked rounded-corner textures. Configured through draw-list scopes.
+        const USE_TEX_FOR_ROUND_CORNERS = sys::ImDrawFlags_UseTexForRoundCorners as u32;
+        /// Allow vertex offsets. Enable only when the renderer supports them.
+        const USE_VTX_OFFSET = sys::ImDrawFlags_UseVtxOffset as u32;
     }
 }
 
@@ -119,49 +146,5 @@ impl TryFrom<usize> for DrawNgonSegmentCount {
     #[inline]
     fn try_from(value: usize) -> Result<Self, Self::Error> {
         Self::new(value).ok_or(())
-    }
-}
-
-bitflags! {
-    /// Flags accepted by `AddPolyline()` and `PathStroke()`.
-    #[repr(transparent)]
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-    pub struct PolylineFlags: u32 {
-        const NONE = sys::ImDrawFlags_None as u32;
-        const CLOSED = sys::ImDrawFlags_Closed as u32;
-    }
-}
-
-impl Default for PolylineFlags {
-    fn default() -> Self {
-        Self::NONE
-    }
-}
-
-bitflags! {
-    /// Corner rounding flags accepted by rectangle and rounded-image drawing APIs.
-    ///
-    /// Dear ImGui uses zero as "default to all corners" when `rounding > 0`.
-    /// Use [`DrawCornerFlags::NO_ROUNDING`] to explicitly disable rounding.
-    #[repr(transparent)]
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-    pub struct DrawCornerFlags: u32 {
-        const DEFAULT = sys::ImDrawFlags_None as u32;
-        const TOP_LEFT = sys::ImDrawFlags_RoundCornersTopLeft as u32;
-        const TOP_RIGHT = sys::ImDrawFlags_RoundCornersTopRight as u32;
-        const BOTTOM_LEFT = sys::ImDrawFlags_RoundCornersBottomLeft as u32;
-        const BOTTOM_RIGHT = sys::ImDrawFlags_RoundCornersBottomRight as u32;
-        const TOP = sys::ImDrawFlags_RoundCornersTop as u32;
-        const BOTTOM = sys::ImDrawFlags_RoundCornersBottom as u32;
-        const LEFT = sys::ImDrawFlags_RoundCornersLeft as u32;
-        const RIGHT = sys::ImDrawFlags_RoundCornersRight as u32;
-        const ALL = sys::ImDrawFlags_RoundCornersAll as u32;
-        const NO_ROUNDING = sys::ImDrawFlags_RoundCornersNone as u32;
-    }
-}
-
-impl Default for DrawCornerFlags {
-    fn default() -> Self {
-        Self::DEFAULT
     }
 }

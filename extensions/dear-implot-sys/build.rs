@@ -76,10 +76,6 @@ fn extension_artifact_profile(
     .unwrap_or_else(|error| panic!("dear-implot-sys: {error}"))
 }
 
-fn use_cmake_requested() -> bool {
-    matches!(env::var("IMPLOT_SYS_USE_CMAKE"), Ok(v) if !v.is_empty())
-}
-
 fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
     // Prefer paths exported by dear-imgui-sys build script (prefix comes from links = "dear-imgui")
     let imgui_src = env::var_os("DEP_DEAR_IMGUI_IMGUI_INCLUDE_PATH")
@@ -272,7 +268,6 @@ fn build_with_cc(
     let wrapper = sources
         .file("wrapper")
         .unwrap_or_else(|error| panic!("dear-implot-sys: {error}"));
-    let cimplot_cpp = patched_cimplot_cpp(cfg, &wrapper);
 
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
@@ -312,13 +307,29 @@ fn build_with_cc(
     build.include(cimplot_root.join("implot"));
 
     // Sources
-    build.file(cimplot_cpp);
+    build.file(wrapper);
     for file_id in ["core", "items", "demo"] {
-        build.file(
-            sources
-                .file(file_id)
-                .unwrap_or_else(|error| panic!("dear-implot-sys: {error}")),
-        );
+        let source = sources
+            .file(file_id)
+            .unwrap_or_else(|error| panic!("dear-implot-sys: {error}"));
+        if matches!(file_id, "items" | "demo") {
+            let contents = std::fs::read_to_string(&source)
+                .unwrap_or_else(|error| panic!("read {}: {error}", source.display()));
+            let patched = build_support::patch_implot_cpp_for_imgui(
+                &contents,
+                source
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .expect("ImPlot source name"),
+            )
+            .unwrap_or_else(|error| panic!("dear-implot-sys: {error}"));
+            let output = cfg.out_dir.join(format!("implot-{file_id}-imgui-193.cpp"));
+            std::fs::write(&output, patched)
+                .unwrap_or_else(|error| panic!("write {}: {error}", output.display()));
+            build.file(output);
+        } else {
+            build.file(source);
+        }
     }
 
     build_support::compile_cpp_archive(
@@ -330,52 +341,38 @@ fn build_with_cc(
     );
 }
 
-fn patched_cimplot_cpp(cfg: &BuildConfig, src: &Path) -> PathBuf {
-    // NOTE: This intentionally does not modify the git submodule on disk.
-    //
-    // cimplot's generated C++ wrapper currently contains an out-of-bounds array access:
-    // `dest.FormatSpec[16] = src.FormatSpec[16];` for `char FormatSpec[16]`.
-    // We compile a patched copy from OUT_DIR to avoid shipping C++ UB, while keeping the submodule
-    // clean for upstream updates.
-    let Ok(mut text) = std::fs::read_to_string(src) else {
-        return src.to_path_buf();
-    };
-
-    let needle = "dest.FormatSpec[16] = src.FormatSpec[16];";
-    if !text.contains(needle) {
-        return src.to_path_buf();
-    }
-
-    if !text.contains("#include <string.h>") {
-        if text.contains("#include \"cimplot.h\"") {
-            text = text.replace(
-                "#include \"cimplot.h\"\r\n",
-                "#include \"cimplot.h\"\r\n#include <string.h>\r\n",
-            );
-            text = text.replace(
-                "#include \"cimplot.h\"\n",
-                "#include \"cimplot.h\"\n#include <string.h>\n",
-            );
-        } else {
-            text = format!("#include <string.h>\n{text}");
-        }
-    }
-
-    text = text.replace(
-        needle,
-        "memcpy(dest.FormatSpec, src.FormatSpec, sizeof(dest.FormatSpec));",
+fn build_line_test_probe(
+    cfg: &BuildConfig,
+    cimplot_root: &Path,
+    imgui_src: &Path,
+    cimgui_root: &Path,
+) {
+    let mut build = cc::Build::new();
+    build.cpp(true).std("c++17");
+    build_support::configure_cpp_runtime_linkage(
+        &mut build,
+        &cfg.target_os,
+        &cfg.target_env,
+        &cfg.target_abi,
     );
-
-    let out = cfg.out_dir.join("cimplot_patched.cpp");
-    if std::fs::write(&out, text).is_ok() {
-        println!(
-            "cargo:warning=Using patched cimplot.cpp from {} (fixes known OOB FormatSpec copy; original submodule is unchanged)",
-            out.display()
-        );
-        out
-    } else {
-        src.to_path_buf()
+    if cfg.is_msvc() && cfg.is_windows() {
+        build.static_crt(cfg.use_static_crt());
     }
+    native_binding_spec().apply_extension_binding_defines(&mut build, env::vars());
+    build.define("IMGUI_DEFINE_MATH_OPERATORS", Some("1"));
+    build
+        .include(imgui_src)
+        .include(cimgui_root)
+        .include(cimplot_root)
+        .include(cimplot_root.join("implot"))
+        .file(cfg.manifest_dir.join("src/line_test_probe.cpp"));
+    build_support::compile_cpp_archive(
+        &mut build,
+        "dear_implot_line_test_probe",
+        &cfg.target_os,
+        &cfg.target_env,
+        &cfg.target_abi,
+    );
 }
 
 fn main() {
@@ -387,6 +384,7 @@ fn main() {
     // Pregenerated bindings are copied into OUT_DIR when native toolchains are disabled.
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
+    println!("cargo:rerun-if-changed=src/line_test_probe.cpp");
     println!("cargo:rerun-if-changed=third-party/cimplot/cimplot.h");
     println!("cargo:rerun-if-changed=third-party/cimplot/implot/implot.h");
     for path in sources.native_candidate_paths() {
@@ -398,7 +396,6 @@ fn main() {
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_PREBUILT_URL");
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_FORCE_BUILD");
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_CACHE_DIR");
-    println!("cargo:rerun-if-env-changed=IMPLOT_SYS_USE_CMAKE");
     println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_REGEN_BINDINGS");
     println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_CANDIDATE_SHA");
     println!("cargo:rerun-if-env-changed=DEAR_IMGUI_CORE_ARTIFACT_IDENTITY_HASH");
@@ -449,6 +446,10 @@ fn main() {
         }
         generate_bindings(&cfg, &cimplot_root, &imgui_src, &cimgui_root);
         return;
+    }
+
+    if cfg!(feature = "native-test-probe") && cfg.target_arch != "wasm32" {
+        build_line_test_probe(&cfg, &cimplot_root, &imgui_src, &cimgui_root);
     }
 
     // When explicitly skipping native compilation, also skip bindgen and rely on
@@ -516,11 +517,7 @@ fn main() {
             sources
                 .validate_native()
                 .unwrap_or_else(|error| panic!("dear-implot-sys: {error}"));
-            if use_cmake_requested() && build_with_cmake(&cfg, &cimplot_root) {
-                // built via CMake
-            } else {
-                build_with_cc(&cfg, &sources, &cimplot_root, &imgui_src, &cimgui_root);
-            }
+            build_with_cc(&cfg, &sources, &cimplot_root, &imgui_src, &cimgui_root);
         }
     } else {
         println!(
@@ -611,79 +608,6 @@ fn sanitize_bindings_string(content: &str) -> String {
         out.push('\n');
     }
     out
-}
-
-fn build_with_cmake(cfg: &BuildConfig, cimplot_root: &Path) -> bool {
-    // If the known cimplot OOB wrapper bug is present, prefer the `cc` build path where we can
-    // compile a patched copy from OUT_DIR without modifying the submodule.
-    if cimplot_needs_patch(cimplot_root) {
-        println!(
-            "cargo:warning=Skipping CMake build for cimplot because a known OOB wrapper bug was detected; falling back to cc build with a patched copy"
-        );
-        return false;
-    }
-
-    let cmake_lists = cimplot_root.join("CMakeLists.txt");
-    if !cmake_lists.exists() {
-        return false;
-    }
-    println!("cargo:warning=Building cimplot with CMake");
-    let mut c = cmake::Config::new(cimplot_root);
-    c.define("IMGUI_STATIC", "ON");
-    for define in native_binding_spec().resolved_extension_binding_defines(env::vars()) {
-        c.cxxflag(define.clang_arg());
-    }
-    let profile = env::var("PROFILE").unwrap_or_else(|_| "release".into());
-    let cmake_profile = if cfg.is_msvc() && cfg.is_windows() && profile == "debug" {
-        "RelWithDebInfo"
-    } else if profile == "debug" {
-        "Debug"
-    } else {
-        "Release"
-    };
-    c.profile(cmake_profile);
-    if cfg.is_msvc() && cfg.is_windows() {
-        let tf = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
-        let use_static = tf.split(',').any(|f| f == "crt-static");
-        let msvc_runtime = if use_static {
-            "MultiThreaded"
-        } else {
-            "MultiThreadedDLL"
-        };
-        c.define("CMAKE_MSVC_RUNTIME_LIBRARY", msvc_runtime);
-    }
-    let dst = c.build();
-    let candidates = [
-        dst.join("lib"),
-        dst.join("build"),
-        dst.clone(),
-        dst.join("build").join("Release"),
-        dst.join("build").join("RelWithDebInfo"),
-        dst.join("build").join("Debug"),
-        dst.join("Release"),
-        dst.join("RelWithDebInfo"),
-        dst.join("Debug"),
-    ];
-    let mut found = false;
-    for lib_dir in &candidates {
-        if lib_dir.exists() {
-            println!("cargo:rustc-link-search=native={}", lib_dir.display());
-            found = true;
-        }
-    }
-    if !found {
-        println!("cargo:warning=Could not locate CMake lib output dir; linking may fail");
-    }
-    println!("cargo:rustc-link-lib=static=cimplot");
-    true
-}
-
-fn cimplot_needs_patch(cimplot_root: &Path) -> bool {
-    let src = cimplot_root.join("cimplot.cpp");
-    let Ok(text) = std::fs::read_to_string(&src) else {
-        return false;
-    };
-    text.contains("dest.FormatSpec[16] = src.FormatSpec[16];")
 }
 
 fn expected_lib_name(target_env: &str) -> &'static str {

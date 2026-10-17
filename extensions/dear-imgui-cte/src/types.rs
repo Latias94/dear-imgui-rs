@@ -140,3 +140,22 @@ impl SquiggleKind {
         self.0
     }
 }
+
+/// Rendering style for a diagnostic or search-result annotation.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum SquiggleStyle {
+    /// Draw a wavy underline below the annotated glyphs.
+    #[default]
+    Wave,
+    /// Fill the background behind the annotated glyphs.
+    Background,
+}
+
+impl SquiggleStyle {
+    pub(crate) const fn into_raw(self) -> sys::SquiggleStyle {
+        match self {
+            Self::Wave => sys::SquiggleStyle_wave,
+            Self::Background => sys::SquiggleStyle_background,
+        }
+    }
+}

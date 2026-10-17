@@ -47,9 +47,7 @@ mod util;
 #[allow(unused_imports)]
 pub use channels::ChannelsSplit;
 pub use color::ImColor32;
-pub use counts::{
-    DrawCornerFlags, DrawListFlags, DrawNgonSegmentCount, DrawSegmentCount, PolylineFlags,
-};
+pub use counts::{DrawFlags, DrawNgonSegmentCount, DrawSegmentCount};
 #[allow(unused_imports)]
 pub use list::DrawListClipRectToken;
 pub use list::{DrawListMut, DrawListTextureToken, RawDrawCallback};

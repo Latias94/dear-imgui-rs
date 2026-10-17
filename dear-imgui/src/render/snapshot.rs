@@ -425,6 +425,8 @@ pub enum DrawCmdSnapshot {
     ResetRenderState,
     SetSamplerLinear,
     SetSamplerNearest,
+    /// Use the sampler settings associated with each texture.
+    SetSamplerFromTexture,
 }
 
 /// Operation kind encoded into a texture request and its feedback.
@@ -1193,6 +1195,9 @@ fn snapshot_draw_list(
                 }
                 StandardDrawCallback::SetSamplerNearest => {
                     commands.push(DrawCmdSnapshot::SetSamplerNearest)
+                }
+                StandardDrawCallback::SetSamplerFromTexture => {
+                    commands.push(DrawCmdSnapshot::SetSamplerFromTexture)
                 }
             }
             continue;

@@ -7,37 +7,32 @@ fn test_guard() -> std::sync::MutexGuard<'static, ()> {
 }
 
 #[test]
-fn draw_flag_types_match_supported_imgui_subsets() {
+fn unified_draw_flags_match_imgui() {
     assert_eq!(
-        imgui::PolylineFlags::NONE.bits(),
+        imgui::DrawFlags::NONE.bits(),
         imgui::sys::ImDrawFlags_None as u32
     );
     assert_eq!(
-        imgui::PolylineFlags::CLOSED.bits(),
+        imgui::DrawFlags::CLOSED.bits(),
         imgui::sys::ImDrawFlags_Closed as u32
     );
 
     assert_eq!(
-        imgui::DrawCornerFlags::DEFAULT.bits(),
-        imgui::sys::ImDrawFlags_None as u32
+        imgui::DrawFlags::ROUND_ALL.bits(),
+        imgui::sys::ImDrawFlags_RoundAll as u32
     );
     assert_eq!(
-        imgui::DrawCornerFlags::ALL.bits(),
-        imgui::sys::ImDrawFlags_RoundCornersAll as u32
+        imgui::DrawFlags::ROUND_NONE.bits(),
+        imgui::sys::ImDrawFlags_RoundNone as u32
     );
     assert_eq!(
-        imgui::DrawCornerFlags::NO_ROUNDING.bits(),
-        imgui::sys::ImDrawFlags_RoundCornersNone as u32
-    );
-    assert_eq!(
-        (imgui::DrawCornerFlags::TOP_LEFT | imgui::DrawCornerFlags::BOTTOM_RIGHT).bits(),
-        (imgui::sys::ImDrawFlags_RoundCornersTopLeft
-            | imgui::sys::ImDrawFlags_RoundCornersBottomRight) as u32
+        (imgui::DrawFlags::ROUND_TOP_LEFT | imgui::DrawFlags::ROUND_BOTTOM_RIGHT).bits(),
+        (imgui::sys::ImDrawFlags_RoundTopLeft | imgui::sys::ImDrawFlags_RoundBottomRight) as u32
     );
 }
 
 #[test]
-fn draw_flag_domains_can_be_used_without_crossing_streams() {
+fn unified_draw_flags_cover_shapes_and_paths() {
     let _guard = test_guard();
 
     let mut ctx = imgui::Context::create();
@@ -58,7 +53,7 @@ fn draw_flag_domains_can_be_used_without_crossing_streams() {
     draw_list
         .add_rect([8.0, 8.0], [48.0, 48.0], imgui::Color::WHITE)
         .rounding(4.0)
-        .flags(imgui::DrawCornerFlags::TOP_LEFT | imgui::DrawCornerFlags::BOTTOM_RIGHT)
+        .flags(imgui::DrawFlags::ROUND_TOP_LEFT | imgui::DrawFlags::ROUND_BOTTOM_RIGHT)
         .build();
 
     draw_list
@@ -66,20 +61,20 @@ fn draw_flag_domains_can_be_used_without_crossing_streams() {
             vec![[60.0, 8.0], [90.0, 48.0], [30.0, 48.0]],
             imgui::Color::WHITE,
         )
-        .flags(imgui::PolylineFlags::CLOSED)
+        .flags(imgui::DrawFlags::CLOSED)
         .build();
 
     draw_list.path_clear();
     draw_list.path_line_to([110.0, 8.0]);
     draw_list.path_line_to([140.0, 48.0]);
     draw_list.path_line_to([80.0, 48.0]);
-    draw_list.path_stroke(imgui::Color::WHITE, imgui::PolylineFlags::CLOSED, 1.0);
+    draw_list.path_stroke(imgui::Color::WHITE, 1.0, imgui::DrawFlags::CLOSED);
 
     draw_list.path_rect(
         [150.0, 8.0],
         [190.0, 48.0],
         4.0,
-        imgui::DrawCornerFlags::NO_ROUNDING,
+        imgui::DrawFlags::ROUND_NONE,
     );
-    draw_list.path_stroke(imgui::Color::WHITE, imgui::PolylineFlags::CLOSED, 1.0);
+    draw_list.path_stroke(imgui::Color::WHITE, 1.0, imgui::DrawFlags::CLOSED);
 }

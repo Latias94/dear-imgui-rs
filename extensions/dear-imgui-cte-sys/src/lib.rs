@@ -37,7 +37,9 @@ pub const matchingBracketLevel3: Color = 18;
 pub const matchingBracketError: Color = 19;
 pub const lineNumber: Color = 20;
 pub const currentLineNumber: Color = 21;
-pub const count: Color = 22;
+pub const currentLineHighlight: Color = 22;
+pub const currentLineHighlightBorder: Color = 23;
+pub const count: Color = 24;
 
 pub type BreakOption = ::std::os::raw::c_char;
 pub const mustBreak: BreakOption = 0;

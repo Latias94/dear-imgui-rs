@@ -89,6 +89,10 @@ pub enum RendererError {
     #[error("raw draw callbacks are not supported by the WGPU renderer on this target")]
     RawDrawCallbackUnsupported,
 
+    /// WGPU textures do not carry sampler state; select linear or nearest explicitly.
+    #[error("texture-owned sampler commands are not supported by the WGPU renderer")]
+    TextureSamplerUnsupported,
+
     /// Buffer creation failed
     #[error("Buffer creation failed: {0}")]
     BufferCreationFailed(String),

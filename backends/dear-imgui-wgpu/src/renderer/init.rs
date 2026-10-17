@@ -163,6 +163,9 @@ impl WgpuRenderer {
             || platform_io.draw_callback_set_sampler_linear_raw().is_some()
             || platform_io
                 .draw_callback_set_sampler_nearest_raw()
+                .is_some()
+            || platform_io
+                .draw_callback_set_sampler_from_texture_raw()
                 .is_some();
 
         if imgui_context.io().backend_renderer_name().is_some() || draw_callbacks_occupied {

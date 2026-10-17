@@ -7,6 +7,7 @@ use glow::{Context, HasContext};
 use std::mem::size_of;
 
 use super::GlowRenderer;
+use super::core::GlowClipOrigin;
 use super::sampler::{SamplerFilter, TextureFilterGuard};
 use crate::{
     draw_indices_as_bytes, draw_verts_as_bytes,
@@ -60,8 +61,8 @@ impl FramebufferExtent {
             }
         }
 
-        let width = f64::from(display_size[0]) * f64::from(framebuffer_scale[0]);
-        let height = f64::from(display_size[1]) * f64::from(framebuffer_scale[1]);
+        let width = (f64::from(display_size[0]) * f64::from(framebuffer_scale[0])).round();
+        let height = (f64::from(display_size[1]) * f64::from(framebuffer_scale[1])).round();
         if width <= 0.0 || height <= 0.0 {
             return Ok(None);
         }
@@ -88,6 +89,17 @@ impl FramebufferExtent {
 
     fn height_f32(self) -> f32 {
         self.height as f32
+    }
+}
+
+fn has_upper_left_clip_origin(gl: &Context, origin: GlowClipOrigin, supported: bool) -> bool {
+    match origin {
+        GlowClipOrigin::LowerLeft => false,
+        GlowClipOrigin::UpperLeft => true,
+        GlowClipOrigin::Auto => {
+            supported
+                && unsafe { gl.get_parameter_i32(glow::CLIP_ORIGIN) } == glow::UPPER_LEFT as i32
+        }
     }
 }
 
@@ -588,17 +600,9 @@ impl GlowRenderer {
             let b = display_pos[1] + display_size[1];
 
             // Support for GL 4.5 rarely used glClipControl(GL_UPPER_LEFT)
-            let (t, b) = if self.has_clip_origin_support {
-                // Check current clip origin
-                let clip_origin = gl.get_parameter_i32(glow::CLIP_ORIGIN);
-                if clip_origin == glow::UPPER_LEFT as i32 {
-                    (b, t) // Swap top and bottom if origin is upper left
-                } else {
-                    (t, b)
-                }
-            } else {
-                (t, b)
-            };
+            let upper_left =
+                has_upper_left_clip_origin(gl, self.clip_origin, self.has_clip_origin_support);
+            let (t, b) = if upper_left { (b, t) } else { (t, b) };
 
             let ortho_projection = [
                 [2.0 / (r - l), 0.0, 0.0, 0.0],
@@ -727,6 +731,12 @@ impl GlowRenderer {
                             samplers.bind(gl, SamplerFilter::Nearest);
                         }
                         sampler_binding = SamplerBinding::explicit(SamplerFilter::Nearest);
+                    }
+                    DrawCmd::SetSamplerFromTexture => {
+                        if self.samplers.is_some() {
+                            unsafe { gl.bind_sampler(0, None) };
+                        }
+                        sampler_binding = SamplerBinding::TextureOwned;
                     }
                     DrawCmd::RawCallback(callback) => {
                         unsafe { callback.invoke() };
@@ -923,11 +933,15 @@ mod tests {
 
     use glow::HasContext;
 
-    use super::{FramebufferExtent, clear_viewport_framebuffer, project_scissor_rect};
+    use super::{
+        FramebufferExtent, clear_viewport_framebuffer, has_upper_left_clip_origin,
+        project_scissor_rect,
+    };
     use super::{SamplerBinding, VertexArrayGuard};
     use crate::renderer::sampler::SamplerFilter;
 
     static CLEAR_EVENTS: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+    static CLIP_ORIGIN_QUERIES: AtomicU32 = AtomicU32::new(0);
     static BOUND_VERTEX_ARRAY: AtomicU32 = AtomicU32::new(0);
     static DELETED_VERTEX_ARRAYS: AtomicU32 = AtomicU32::new(0);
     static VERTEX_ARRAY_TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -980,7 +994,7 @@ mod tests {
         ));
 
         let raw = dear_imgui_rs::sys::ImDrawData {
-            DisplaySize: dear_imgui_rs::sys::ImVec2 { x: 0.5, y: 64.0 },
+            DisplaySize: dear_imgui_rs::sys::ImVec2 { x: 0.4, y: 64.0 },
             FramebufferScale: dear_imgui_rs::sys::ImVec2 { x: 1.0, y: 1.0 },
             ..Default::default()
         };
@@ -1013,6 +1027,25 @@ mod tests {
     }
 
     #[test]
+    fn framebuffer_extent_rounds_fractional_physical_dimensions() {
+        let raw = dear_imgui_rs::sys::ImDrawData {
+            DisplaySize: dear_imgui_rs::sys::ImVec2 { x: 64.5, y: 32.2 },
+            FramebufferScale: dear_imgui_rs::sys::ImVec2 { x: 1.5, y: 2.0 },
+            ..Default::default()
+        };
+        // SAFETY: DrawData is a transparent read-only wrapper around ImDrawData.
+        let draw_data =
+            unsafe { &*std::ptr::from_ref(&raw).cast::<dear_imgui_rs::render::DrawData>() };
+        assert_eq!(
+            FramebufferExtent::from_draw_data(draw_data).unwrap(),
+            Some(FramebufferExtent {
+                width: 97,
+                height: 64
+            })
+        );
+    }
+
+    #[test]
     fn scissor_projection_rejects_non_finite_values_and_clamps_to_framebuffer() {
         let extent = FramebufferExtent {
             width: 64,
@@ -1041,9 +1074,16 @@ mod tests {
         c"".as_ptr().cast()
     }
 
-    unsafe extern "system" fn get_integer(_name: u32, value: *mut i32) {
+    unsafe extern "system" fn get_integer(name: u32, value: *mut i32) {
         if !value.is_null() {
-            unsafe { *value = 0 };
+            unsafe {
+                *value = if name == glow::CLIP_ORIGIN {
+                    CLIP_ORIGIN_QUERIES.fetch_add(1, Ordering::SeqCst);
+                    glow::UPPER_LEFT as i32
+                } else {
+                    0
+                };
+            }
         }
     }
 
@@ -1112,6 +1152,32 @@ mod tests {
     }
 
     #[test]
+    fn explicit_clip_origins_do_not_query_gl_state() {
+        use crate::GlowClipOrigin;
+
+        let gl = fake_gl();
+        CLIP_ORIGIN_QUERIES.store(0, Ordering::SeqCst);
+        assert!(!has_upper_left_clip_origin(
+            &gl,
+            GlowClipOrigin::default(),
+            true
+        ));
+        assert!(has_upper_left_clip_origin(
+            &gl,
+            GlowClipOrigin::UpperLeft,
+            true
+        ));
+        assert!(!has_upper_left_clip_origin(
+            &gl,
+            GlowClipOrigin::Auto,
+            false
+        ));
+        assert_eq!(CLIP_ORIGIN_QUERIES.load(Ordering::SeqCst), 0);
+        assert!(has_upper_left_clip_origin(&gl, GlowClipOrigin::Auto, true));
+        assert_eq!(CLIP_ORIGIN_QUERIES.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
     fn temporary_vertex_array_is_deleted_when_rendering_panics() {
         let _guard = VERTEX_ARRAY_TEST_LOCK.lock().unwrap();
         DELETED_VERTEX_ARRAYS.store(0, Ordering::SeqCst);
@@ -1139,3 +1205,7 @@ mod tests {
         assert_eq!(BOUND_VERTEX_ARRAY.load(Ordering::SeqCst), 44);
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "draw_tests.rs"]
+mod render_tests;

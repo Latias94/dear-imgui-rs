@@ -29,6 +29,7 @@ impl<'a> Iterator for DrawCmdIterator<'a> {
                 Some(StandardDrawCallback::ResetRenderState) => DrawCmd::ResetRenderState,
                 Some(StandardDrawCallback::SetSamplerLinear) => DrawCmd::SetSamplerLinear,
                 Some(StandardDrawCallback::SetSamplerNearest) => DrawCmd::SetSamplerNearest,
+                Some(StandardDrawCallback::SetSamplerFromTexture) => DrawCmd::SetSamplerFromTexture,
                 None => match cmd.UserCallback {
                     Some(callback) => DrawCmd::RawCallback(RawCallbackCommand {
                         callback,
@@ -89,6 +90,8 @@ pub enum DrawCmd<'draw> {
     SetSamplerLinear,
     /// Switch texture sampling to nearest/point.
     SetSamplerNearest,
+    /// Use the sampler settings associated with each texture.
+    SetSamplerFromTexture,
     /// Raw callback
     RawCallback(RawCallbackCommand<'draw>),
 }

@@ -66,7 +66,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! dear-imgui-sys = { version = "0.20", features = ["backend-shim-android", "backend-shim-opengl3"] }
+//! dear-imgui-sys = { version = "0.21", features = ["backend-shim-android", "backend-shim-opengl3"] }
 //! ```
 //!
 //! Recommended split of responsibilities:
@@ -613,6 +613,12 @@ pub struct DearImguiRsPublicAggregateLayoutProbe {
     pub ImGuiPlatformIOMonitorsOffset: usize,
     pub ImGuiPlatformIOTexturesOffset: usize,
     pub ImGuiPlatformIOViewportsOffset: usize,
+    pub ImDrawListSize: usize,
+    pub ImDrawListAlign: usize,
+    pub ImDrawListFlagsStackOffset: usize,
+    pub ImGuiStyleLineEndsOffset: usize,
+    pub ImGuiStyleCurveErrorOffset: usize,
+    pub ImGuiPlatformIOTextureSamplerOffset: usize,
 }
 
 #[cfg(feature = "abi-probe")]

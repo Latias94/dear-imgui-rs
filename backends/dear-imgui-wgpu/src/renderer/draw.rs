@@ -374,6 +374,9 @@ impl WgpuRenderer {
                     DrawCommand::SetSamplerNearest => {
                         commands.push(PreparedDrawCommand::SetSampler(PreparedSampler::Nearest));
                     }
+                    DrawCommand::SetSamplerFromTexture => {
+                        return Err(RendererError::TextureSamplerUnsupported);
+                    }
                     DrawCommand::RawCallback(callback) => {
                         dependencies.contains_unknown_callback_dependencies = true;
                         commands.push(PreparedDrawCommand::RawCallback(callback));
@@ -751,6 +754,49 @@ mod tests {
                 Ok::<_, RendererError>(())
             })?;
         }
+        Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn texture_owned_sampler_is_rejected_during_preparation() -> RendererResult<()> {
+        let Some((device, queue)) = request_test_device() else {
+            return Ok(());
+        };
+        let mut context = Context::create();
+        unsafe extern "C" fn texture_sampler(
+            _list: *const sys::ImDrawList,
+            _command: *const sys::ImDrawCmd,
+        ) {
+        }
+        // SAFETY: the callback has the native ABI and remains live throughout preparation.
+        unsafe {
+            context
+                .platform_io_mut()
+                .set_draw_callback_set_sampler_from_texture_raw(Some(texture_sampler));
+        }
+        let mut commands = [sys::ImDrawCmd {
+            UserCallback: Some(texture_sampler),
+            ..Default::default()
+        }];
+        let manager = WgpuTextureManager::new();
+        let mut backend = WgpuBackendData::new(WgpuInitInfo::new(
+            device,
+            queue,
+            wgpu::TextureFormat::Rgba8Unorm,
+        ));
+        with_draw_commands(&mut commands, |draw_data| {
+            assert!(matches!(
+                WgpuRenderer::prepare_draw_data(
+                    &manager,
+                    &None,
+                    draw_data,
+                    FramebufferExtent::new(64, 64),
+                    &mut backend,
+                ),
+                Err(RendererError::TextureSamplerUnsupported)
+            ));
+        });
         Ok(())
     }
 

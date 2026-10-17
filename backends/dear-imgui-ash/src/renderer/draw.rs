@@ -638,6 +638,9 @@ fn prepare_draw_commands<'draw>(
                 dear_imgui_rs::render::DrawCmd::SetSamplerNearest => {
                     commands.push(PreparedDrawCommand::SetSampler(nearest_sampler_set));
                 }
+                dear_imgui_rs::render::DrawCmd::SetSamplerFromTexture => {
+                    return Err(RendererError::TextureSamplerUnsupported);
+                }
                 dear_imgui_rs::render::DrawCmd::RawCallback(callback) => {
                     commands.push(PreparedDrawCommand::RawCallback(callback));
                 }
@@ -662,6 +665,54 @@ fn prepare_draw_commands<'draw>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn texture_owned_sampler_is_rejected_during_preparation() {
+        use dear_imgui_rs::{internal::RawCast, sys};
+
+        let mut context = Context::create();
+        unsafe extern "C" fn texture_sampler(
+            _list: *const sys::ImDrawList,
+            _command: *const sys::ImDrawCmd,
+        ) {
+        }
+        // SAFETY: the callback has the native ABI and remains live throughout preparation.
+        unsafe {
+            context
+                .platform_io_mut()
+                .set_draw_callback_set_sampler_from_texture_raw(Some(texture_sampler));
+        }
+        let mut command = sys::ImDrawCmd {
+            UserCallback: Some(texture_sampler),
+            ..Default::default()
+        };
+        let mut list = sys::ImDrawList::default();
+        list.CmdBuffer.Size = 1;
+        list.CmdBuffer.Capacity = 1;
+        list.CmdBuffer.Data = &mut command;
+        let mut list_ptr = &mut list as *mut sys::ImDrawList;
+        let mut raw = sys::ImDrawData::default();
+        raw.Valid = true;
+        raw.CmdLists.Size = 1;
+        raw.CmdLists.Capacity = 1;
+        raw.CmdLists.Data = &mut list_ptr;
+        raw.DisplaySize = sys::ImVec2 { x: 64.0, y: 64.0 };
+        raw.FramebufferScale = sys::ImVec2 { x: 1.0, y: 1.0 };
+        // SAFETY: native vectors borrow initialized stack data until preparation returns.
+        let draw_data = unsafe { dear_imgui_rs::render::DrawData::from_raw(&raw) };
+        assert!(matches!(
+            prepare_draw_commands(
+                &TextureManager::new(),
+                0,
+                vk::DescriptorSet::null(),
+                vk::DescriptorSet::null(),
+                draw_data,
+                64,
+                64,
+            ),
+            Err(RendererError::TextureSamplerUnsupported)
+        ));
+    }
 
     #[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
     fn complete_initial_texture_requests(frame: PendingFrame<'_>) -> ReconciledFrame<'_> {

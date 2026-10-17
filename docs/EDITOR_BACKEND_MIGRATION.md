@@ -1,5 +1,7 @@
 # Editor Backend Integration
 
+This guide covers the Winit, WGPU, SDL3, and Dear App changes in the `0.21.0` release train. Upgrade all workspace crate dependencies together to `"0.21"`; applications migrating from 0.20.0 should also read the [Dear ImGui 1.93 migration guide](IMGUI_193_MIGRATION.md).
+
 An engine editor needs distinct identities for its UI, native windows, GPU bindings, and content.
 The platform owners and WGPU renderer expose those facts without introducing an engine asset model.
 

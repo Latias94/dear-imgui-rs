@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     CteError, CteResult, Position, ScrollAlignment, SearchOptions, Selection, SquiggleKind,
-    VisualPosition, error::c_string, sys, validation::validate_finite_vec2,
+    SquiggleStyle, VisualPosition, error::c_string, sys, validation::validate_finite_vec2,
 };
 
 macro_rules! editor_command {
@@ -359,6 +359,28 @@ impl TextEditor {
         })
     }
 
+    /// Returns the top-left screen position of a glyph after rendering this frame.
+    ///
+    /// Returns `None` until this editor is rendered visibly with `ui`, and after a
+    /// document or layout change. The position uses the most recent visible render;
+    /// folded or off-screen glyphs may have coordinates outside the editor's text area.
+    pub fn document_to_screen(
+        &self,
+        ui: &dear_imgui_rs::Ui,
+        position: Position,
+    ) -> CteResult<Option<[f32; 2]>> {
+        const OPERATION: &str = "TextEditor::document_to_screen";
+        self.binding.require_ui(OPERATION, ui)?;
+        self.try_with_context(OPERATION, |raw| unsafe {
+            validate_position(raw, OPERATION, position)?;
+            if self.rendered_frame != Some(ui.frame_count()) {
+                return Ok(None);
+            }
+            let screen = sys::TextEditor_DocPos2ScreenPos(raw, position.into_raw());
+            Ok(Some([screen.x, screen.y]))
+        })?
+    }
+
     pub fn is_position_visible(&self, position: Position) -> CteResult<bool> {
         if !self.layout_ready {
             return Ok(false);
@@ -549,6 +571,7 @@ impl TextEditor {
         kind: SquiggleKind,
         color: u32,
         tooltip: &str,
+        style: SquiggleStyle,
     ) -> CteResult<()> {
         let tooltip = c_string("TextEditor::add_squiggle", tooltip)?;
         self.with_context("TextEditor::add_squiggle", |raw| unsafe {
@@ -560,6 +583,7 @@ impl TextEditor {
                 kind.get(),
                 color,
                 tooltip.as_ptr(),
+                style.into_raw(),
             );
             Ok(())
         })

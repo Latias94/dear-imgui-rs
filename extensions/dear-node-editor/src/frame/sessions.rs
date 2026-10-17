@@ -1,8 +1,8 @@
-use super::core::NodeEditorFrame;
+use super::core::{BuildPhase, NodeEditorFrame};
 use super::queries::{collect_link_ids, collect_node_ids};
 use super::validation::{assert_finite_vec4, assert_non_negative_finite_f32};
 use crate::{EditorContext, LinkId, NodeId, PinId, sys, vec4};
-use std::{marker::PhantomData, rc::Rc};
+use std::{cell::Cell, marker::PhantomData, rc::Rc};
 
 impl<'ui> NodeEditorFrame<'ui> {
     pub fn begin_create<'a>(
@@ -12,41 +12,75 @@ impl<'ui> NodeEditorFrame<'ui> {
     ) -> Option<CreateSession<'a>> {
         assert_finite_vec4("NodeEditorFrame::begin_create()", "color", color);
         assert_non_negative_finite_f32("NodeEditorFrame::begin_create()", "thickness", thickness);
-        self.with_current("NodeEditorFrame::begin_create()", || unsafe {
+        assert_eq!(
+            self.phase.get(),
+            BuildPhase::Idle,
+            "begin_create() requires the current editor scope to be ended"
+        );
+        let active = self.with_current("NodeEditorFrame::begin_create()", || unsafe {
             sys::dne_begin_create(vec4(color), thickness)
-        })
-        .then_some(CreateSession {
+        });
+        // Upstream enters its create interaction even when no item is offered.
+        if !active {
+            self.with_current("NodeEditorFrame::begin_create()", || unsafe {
+                sys::dne_end_create()
+            });
+            return None;
+        }
+        self.phase.set(BuildPhase::Create);
+        Some(CreateSession {
             editor: self._editor,
+            phase: &self.phase,
             ended: false,
             _not_send_sync: PhantomData,
         })
     }
 
     pub fn begin_delete<'a>(&'a self) -> Option<DeleteSession<'a>> {
+        assert_eq!(
+            self.phase.get(),
+            BuildPhase::Idle,
+            "begin_delete() requires the current editor scope to be ended"
+        );
         self.with_current("NodeEditorFrame::begin_delete()", || unsafe {
             sys::dne_begin_delete()
         })
-        .then_some(DeleteSession {
-            editor: self._editor,
-            ended: false,
-            _not_send_sync: PhantomData,
+        .then(|| {
+            self.phase.set(BuildPhase::Delete);
+            DeleteSession {
+                editor: self._editor,
+                phase: &self.phase,
+                candidate: Cell::new(false),
+                ended: false,
+                _not_send_sync: PhantomData,
+            }
         })
     }
 
     pub fn begin_shortcut<'a>(&'a self) -> Option<ShortcutSession<'a>> {
+        assert_eq!(
+            self.phase.get(),
+            BuildPhase::Idle,
+            "begin_shortcut() requires the current editor scope to be ended"
+        );
         self.with_current("NodeEditorFrame::begin_shortcut()", || unsafe {
             sys::dne_begin_shortcut()
         })
-        .then_some(ShortcutSession {
-            editor: self._editor,
-            ended: false,
-            _not_send_sync: PhantomData,
+        .then(|| {
+            self.phase.set(BuildPhase::Shortcut);
+            ShortcutSession {
+                editor: self._editor,
+                phase: &self.phase,
+                ended: false,
+                _not_send_sync: PhantomData,
+            }
         })
     }
 }
 
 pub struct CreateSession<'a> {
     editor: &'a EditorContext,
+    phase: &'a Cell<BuildPhase>,
     ended: bool,
     _not_send_sync: PhantomData<Rc<()>>,
 }
@@ -151,6 +185,7 @@ impl CreateSession<'_> {
         if !self.ended {
             self.editor
                 .with_current("CreateSession::end()", || unsafe { sys::dne_end_create() });
+            self.phase.set(BuildPhase::Idle);
             self.ended = true;
         }
     }
@@ -164,41 +199,61 @@ impl Drop for CreateSession<'_> {
 
 pub struct DeleteSession<'a> {
     editor: &'a EditorContext,
+    phase: &'a Cell<BuildPhase>,
+    candidate: Cell<bool>,
     ended: bool,
     _not_send_sync: PhantomData<Rc<()>>,
 }
 
 impl DeleteSession<'_> {
     pub fn query_deleted_link(&self) -> Option<(LinkId, PinId, PinId)> {
-        self.editor
-            .with_current("DeleteSession::query_deleted_link()", || {
-                let mut link = 0usize;
-                let mut start = 0usize;
-                let mut end = 0usize;
-                unsafe { sys::dne_query_deleted_link(&mut link, &mut start, &mut end) }.then_some((
-                    LinkId(link),
-                    PinId(start),
-                    PinId(end),
-                ))
-            })
+        let result =
+            self.editor
+                .with_current("DeleteSession::query_deleted_link()", || {
+                    let mut link = 0usize;
+                    let mut start = 0usize;
+                    let mut end = 0usize;
+                    unsafe { sys::dne_query_deleted_link(&mut link, &mut start, &mut end) }
+                        .then_some((LinkId(link), PinId(start), PinId(end)))
+                });
+        self.candidate.set(result.is_some());
+        result
     }
 
     pub fn query_deleted_node(&self) -> Option<NodeId> {
-        self.editor
+        let result = self
+            .editor
             .with_current("DeleteSession::query_deleted_node()", || {
                 let mut node = 0usize;
                 unsafe { sys::dne_query_deleted_node(&mut node) }.then_some(NodeId(node))
-            })
+            });
+        self.candidate.set(result.is_some());
+        result
     }
 
+    /// Accepts the unconsumed candidate returned by the latest deletion query.
+    ///
+    /// Panics before FFI if no query succeeded, the query was exhausted, or that
+    /// candidate was already accepted or rejected.
     pub fn accept_deleted_item(&self, delete_dependencies: bool) -> bool {
+        assert!(
+            self.candidate.replace(false),
+            "DeleteSession::accept_deleted_item() requires an unconsumed item returned by the latest query"
+        );
         self.editor
             .with_current("DeleteSession::accept_deleted_item()", || unsafe {
                 sys::dne_accept_deleted_item(delete_dependencies)
             })
     }
 
+    /// Rejects the unconsumed candidate returned by the latest deletion query.
+    ///
+    /// Panics before FFI under the same conditions as [`Self::accept_deleted_item`].
     pub fn reject_deleted_item(&self) {
+        assert!(
+            self.candidate.replace(false),
+            "DeleteSession::reject_deleted_item() requires an unconsumed item returned by the latest query"
+        );
         self.editor
             .with_current("DeleteSession::reject_deleted_item()", || unsafe {
                 sys::dne_reject_deleted_item()
@@ -213,6 +268,7 @@ impl DeleteSession<'_> {
         if !self.ended {
             self.editor
                 .with_current("DeleteSession::end()", || unsafe { sys::dne_end_delete() });
+            self.phase.set(BuildPhase::Idle);
             self.ended = true;
         }
     }
@@ -226,6 +282,7 @@ impl Drop for DeleteSession<'_> {
 
 pub struct ShortcutSession<'a> {
     editor: &'a EditorContext,
+    phase: &'a Cell<BuildPhase>,
     ended: bool,
     _not_send_sync: PhantomData<Rc<()>>,
 }
@@ -304,6 +361,7 @@ impl ShortcutSession<'_> {
                 .with_current("ShortcutSession::end()", || unsafe {
                     sys::dne_end_shortcut()
                 });
+            self.phase.set(BuildPhase::Idle);
             self.ended = true;
         }
     }

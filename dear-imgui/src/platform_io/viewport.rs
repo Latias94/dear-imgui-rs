@@ -374,10 +374,12 @@ impl Viewport {
         ]
     }
 
-    /// Set the framebuffer scale
+    /// Set the strictly positive, finite framebuffer scale.
+    ///
+    /// A minimized viewport may have zero size, but its pixel density must remain positive.
     #[cfg(feature = "multi-viewport")]
     pub fn set_framebuffer_scale(&mut self, scale: [f32; 2]) {
-        assert_non_negative_finite_vec2("Viewport::set_framebuffer_scale()", "scale", scale);
+        crate::io::assert_display_framebuffer_scale("Viewport::set_framebuffer_scale()", scale);
         self.inner_mut().FramebufferScale.x = scale[0];
         self.inner_mut().FramebufferScale.y = scale[1];
     }
@@ -634,6 +636,16 @@ mod tests {
                 viewport.set_framebuffer_scale([2.0, 2.0]);
                 assert_eq!(viewport.dpi_scale(), 1.5);
                 assert_eq!(viewport.framebuffer_scale(), [2.0, 2.0]);
+
+                for scale in [[0.0, 1.0], [1.0, 0.0], [-1.0, 1.0]] {
+                    assert!(
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            viewport.set_framebuffer_scale(scale);
+                        }))
+                        .is_err()
+                    );
+                    assert_eq!(viewport.framebuffer_scale(), [2.0, 2.0]);
+                }
 
                 assert!(
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

@@ -22,6 +22,12 @@ regeneration is explicitly requested. `wasm` uses import bindings for the fixed
 `imgui-sys-v1` provider and skips C++ compilation in Cargo; build the provider
 separately with Emscripten.
 
+Native and WebAssembly providers share the `implot-imgui-193-v2` correction:
+line textures use physical thickness at the active viewport's framebuffer density,
+while geometry remains in local coordinates. Lines widened to one physical pixel retain
+their original alpha coverage. Artifact identity includes this correction.
+It also normalizes digital/heatmap rectangle bounds and the demo's candlestick coordinates.
+
 This crate supports three ways to obtain the native `dear_implot` static library:
 
 - Source build (default)

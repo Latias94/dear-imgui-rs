@@ -1,12 +1,12 @@
-//! ImGuiColorTextEdit editors, diagnostics, autocomplete, diff, and notifications.
+//! ImGuiColorTextEdit editors, diagnostics, autocomplete, and diff.
 
 use dear_app::{
     AppConfig, Application, ApplicationStage, FrameContext, InitContext, RunError, ShutdownContext,
     run,
 };
 use dear_imgui_cte::{
-    AutocompleteConfig, CteResult, CteUiExt, Language, NotificationType, Notifications, Palette,
-    PaletteColor, Position, Selection, SquiggleKind, TextDiff, TextEditor, dejavu_font_source,
+    AutocompleteConfig, CteResult, CteUiExt, Language, Palette, PaletteColor, Position, Selection,
+    SquiggleKind, SquiggleStyle, TextDiff, TextEditor, dejavu_font_source,
 };
 use dear_imgui_rs::Condition;
 use std::{cell::Cell, rc::Rc, time::Duration};
@@ -38,7 +38,6 @@ struct CteState {
     primary: TextEditor,
     trie: TextEditor,
     diff: TextDiff,
-    notifications: Notifications,
     transaction_count: Rc<Cell<usize>>,
     word_wrap: bool,
     side_by_side: bool,
@@ -66,6 +65,7 @@ impl CteState {
             SquiggleKind::new(1),
             0xFF_4F_7C_F7,
             "Try editing this expression",
+            SquiggleStyle::Wave,
         )?;
 
         let transaction_count: Rc<Cell<usize>> = Rc::new(Cell::new(0));
@@ -101,18 +101,10 @@ impl CteState {
         diff.set_language(Some(Language::Cpp));
         diff.set_side_by_side(true);
 
-        let mut notifications = Notifications::try_create(context)?;
-        notifications.add(
-            NotificationType::Info,
-            "CTE showcase initialized",
-            Duration::from_secs(3),
-        )?;
-
         Ok(Self {
             primary,
             trie,
             diff,
-            notifications,
             transaction_count,
             word_wrap: true,
             side_by_side: true,
@@ -158,14 +150,6 @@ impl Application for CteShowcase {
                     state.primary.redo();
                 }
                 ui.same_line();
-                if ui.button("Notify") {
-                    state.notifications.add(
-                        NotificationType::Success,
-                        "Notification emitted from Rust",
-                        Duration::from_secs(4),
-                    )?;
-                }
-                ui.same_line();
                 if ui.checkbox("Word wrap", &mut state.word_wrap) {
                     state.primary.set_word_wrap_enabled(state.word_wrap);
                 }
@@ -207,9 +191,6 @@ impl Application for CteShowcase {
         if let Some(result) = submitted {
             result.map_err(|error| RunError::application(ApplicationStage::Frame, error))?;
         }
-        ui.notifications(&mut state.notifications)
-            .build()
-            .map_err(|error| RunError::application(ApplicationStage::Frame, error))?;
         Ok(())
     }
 

@@ -405,6 +405,7 @@ mod tests {
                 is_es: false,
             },
             has_clip_origin_support: false,
+            clip_origin: super::super::core::GlowClipOrigin::default(),
             has_separate_polygon_modes: false,
             has_sampler_object_support: true,
             gl_context: None,
@@ -760,6 +761,7 @@ mod tests {
             platform_io.set_draw_callback_reset_render_state_raw(Some(foreign_draw_callback));
             platform_io.set_draw_callback_set_sampler_linear_raw(Some(foreign_draw_callback));
             platform_io.set_draw_callback_set_sampler_nearest_raw(Some(foreign_draw_callback));
+            platform_io.set_draw_callback_set_sampler_from_texture_raw(Some(foreign_draw_callback));
             let raw = &mut *platform_io.as_raw_mut();
             raw.Renderer_TextureMaxWidth = 4096;
             raw.Renderer_TextureMaxHeight = 2048;
@@ -799,6 +801,13 @@ mod tests {
                     as unsafe extern "C" fn(*const sys::ImDrawList, *const sys::ImDrawCmd),
             )
         }));
+        assert!(raw.DrawCallback_SetSamplerFromTex.is_some_and(|callback| {
+            std::ptr::fn_addr_eq(
+                callback,
+                foreign_draw_callback
+                    as unsafe extern "C" fn(*const sys::ImDrawList, *const sys::ImDrawCmd),
+            )
+        }));
         assert_eq!(raw.Renderer_TextureMaxWidth, 4096);
         assert_eq!(raw.Renderer_TextureMaxHeight, 2048);
 
@@ -812,6 +821,7 @@ mod tests {
             platform_io.set_draw_callback_reset_render_state_raw(None);
             platform_io.set_draw_callback_set_sampler_linear_raw(None);
             platform_io.set_draw_callback_set_sampler_nearest_raw(None);
+            platform_io.set_draw_callback_set_sampler_from_texture_raw(None);
             let raw = &mut *platform_io.as_raw_mut();
             raw.Renderer_TextureMaxWidth = 0;
             raw.Renderer_TextureMaxHeight = 0;

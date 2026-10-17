@@ -100,6 +100,9 @@ impl RendererContextState {
         if raw.DrawCallback_SetSamplerNearest.is_some() {
             return Err(occupied("DrawCallback_SetSamplerNearest"));
         }
+        if raw.DrawCallback_SetSamplerFromTex.is_some() {
+            return Err(occupied("DrawCallback_SetSamplerFromTex"));
+        }
         if !raw.Renderer_RenderState.is_null() {
             return Err(occupied("Renderer_RenderState"));
         }
@@ -191,6 +194,9 @@ impl RendererContextState {
             draw_callback_set_sampler_nearest,
         ) {
             return Err(replaced("DrawCallback_SetSamplerNearest"));
+        }
+        if raw.DrawCallback_SetSamplerFromTex.is_some() {
+            return Err(replaced("DrawCallback_SetSamplerFromTex"));
         }
         if !raw.Renderer_RenderState.is_null() {
             return Err(replaced("Renderer_RenderState"));

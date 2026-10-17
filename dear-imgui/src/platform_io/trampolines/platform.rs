@@ -156,13 +156,23 @@ pub unsafe extern "C" fn platform_get_window_framebuffer_scale_out(
     } else if let Some(cb) = load_cb(&PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_RAW_CB) {
         abort_if_panicked(
             "Platform_GetWindowFramebufferScale",
-            catch_unwind(AssertUnwindSafe(|| unsafe { cb(vp, &mut scale) })),
+            catch_unwind(AssertUnwindSafe(|| {
+                unsafe { cb(vp, &mut scale) };
+                crate::io::assert_display_framebuffer_scale(
+                    "Platform_GetWindowFramebufferScale",
+                    [scale.x, scale.y],
+                );
+            })),
         );
     } else if let Some(cb) = load_cb(&PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_CB) {
         abort_if_panicked(
             "Platform_GetWindowFramebufferScale",
-            catch_unwind(AssertUnwindSafe(|| unsafe {
-                cb(vp as *mut Viewport, &mut scale)
+            catch_unwind(AssertUnwindSafe(|| {
+                unsafe { cb(vp as *mut Viewport, &mut scale) };
+                crate::io::assert_display_framebuffer_scale(
+                    "Platform_GetWindowFramebufferScale",
+                    [scale.x, scale.y],
+                );
             })),
         );
     }

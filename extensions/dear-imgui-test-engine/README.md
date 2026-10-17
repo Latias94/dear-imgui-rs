@@ -25,9 +25,9 @@ For native build/link options, see `extensions/dear-imgui-test-engine-sys/README
 
 | Item                        | Version |
 |-----------------------------|---------|
-| Crate                       | 0.20.0  |
-| dear-imgui-rs               | 0.20.0  |
-| dear-imgui-test-engine-sys  | 0.20.0  |
+| Crate                       | 0.21.0  |
+| dear-imgui-rs               | 0.21.0  |
+| dear-imgui-test-engine-sys  | 0.21.0  |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md).
 
@@ -37,8 +37,8 @@ Use compatible stable requirements:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.20"
-dear-imgui-test-engine = "0.20"
+dear-imgui-rs = "0.21"
+dear-imgui-test-engine = "0.21"
 ```
 
 ```rust

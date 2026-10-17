@@ -124,7 +124,7 @@ Centralize all prebuilt download/extract/naming logic via the shared helper crat
   Use the compatible stable requirement:
   ```toml
   [build-dependencies]
-  build-support = { package = "dear-imgui-build-support", version = "0.20", features = ["binding-spec"] }
+  build-support = { package = "dear-imgui-build-support", version = "0.21", features = ["binding-spec"] }
   ```
 
   Workspace members should inherit the repository catalog instead:

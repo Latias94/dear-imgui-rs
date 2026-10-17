@@ -71,7 +71,9 @@ impl TextEditorRenderer<'_, '_> {
                 self.window_flags.bits(),
             )
         })?;
-        self.editor.layout_ready |= self.ui.is_item_visible();
+        let visible = self.ui.is_item_visible();
+        self.editor.layout_ready |= visible;
+        self.editor.rendered_frame = visible.then(|| self.ui.frame_count());
         Ok(changed)
     }
 }

@@ -1,7 +1,5 @@
 use super::super::color::ImColor32;
-use super::super::counts::{
-    DrawCornerFlags, DrawListFlags, DrawNgonSegmentCount, DrawSegmentCount, PolylineFlags,
-};
+use super::super::counts::{DrawFlags, DrawNgonSegmentCount, DrawSegmentCount};
 use super::super::util::draw_list_counts;
 use super::{DrawListMut, DrawListProvenance};
 use crate::sys;
@@ -86,10 +84,10 @@ fn direct_draw_inputs_validate_before_ffi() {
     let fixture = TestDrawList::new();
 
     assert_panics_without_buffer_change(&fixture, |draw_list| {
-        draw_list.add_line_h(f32::NAN, 1.0, 0.0, ImColor32::WHITE, 1.0);
+        draw_list.add_line_h(f32::NAN, 1.0, 0.0, ImColor32::WHITE, 1.0, DrawFlags::NONE);
     });
     assert_panics_without_buffer_change(&fixture, |draw_list| {
-        draw_list.add_line_v(0.0, 0.0, 1.0, ImColor32::WHITE, 0.0);
+        draw_list.add_line_v(0.0, 0.0, 1.0, ImColor32::WHITE, 0.0, DrawFlags::NONE);
     });
     assert_panics_without_buffer_change(&fixture, |draw_list| {
         draw_list.add_quad(
@@ -99,6 +97,7 @@ fn direct_draw_inputs_validate_before_ffi() {
             [0.0, 1.0],
             ImColor32::WHITE,
             1.0,
+            DrawFlags::NONE,
         );
     });
     assert_panics_without_buffer_change(&fixture, |draw_list| {
@@ -109,6 +108,7 @@ fn direct_draw_inputs_validate_before_ffi() {
             0.0,
             DrawSegmentCount::AUTO,
             1.0,
+            DrawFlags::NONE,
         );
     });
     assert_panics_without_buffer_change(&fixture, |draw_list| {
@@ -119,6 +119,7 @@ fn direct_draw_inputs_validate_before_ffi() {
             ImColor32::WHITE,
             1.0,
             DrawSegmentCount::count(0),
+            DrawFlags::NONE,
         );
     });
     assert_panics_without_buffer_change(&fixture, |draw_list| {
@@ -130,7 +131,7 @@ fn direct_draw_inputs_validate_before_ffi() {
             [1.0, 1.0],
             ImColor32::WHITE,
             f32::INFINITY,
-            DrawCornerFlags::ALL,
+            DrawFlags::ROUND_ALL,
         );
     });
     assert_panics_without_buffer_change(&fixture, |draw_list| {
@@ -138,7 +139,7 @@ fn direct_draw_inputs_validate_before_ffi() {
             [0.0, 0.0],
             [1.0, 1.0],
             1.0,
-            DrawCornerFlags::from_bits_retain(sys::ImDrawFlags_Closed as u32),
+            DrawFlags::from_bits_retain(sys::ImDrawFlags_Closed as u32),
         );
     });
 }
@@ -180,11 +181,7 @@ fn path_inputs_validate_before_path_mutation() {
     assert_eq!(fixture.path_size(), path_size);
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        draw_list.path_stroke(
-            ImColor32::WHITE,
-            PolylineFlags::from_bits_retain(sys::ImDrawFlags_RoundCornersTopLeft as u32),
-            1.0,
-        );
+        draw_list.path_stroke(ImColor32::WHITE, 1.0, DrawFlags::ROUND_TOP_LEFT);
     }));
     assert!(result.is_err());
     assert_eq!(fixture.path_size(), path_size);
@@ -342,6 +339,12 @@ fn standard_sampler_commands_are_safe_and_preserve_order() {
     ) {
     }
 
+    unsafe extern "C" fn from_texture(
+        _parent_list: *const sys::ImDrawList,
+        _command: *const sys::ImDrawCmd,
+    ) {
+    }
+
     let mut context = crate::Context::create();
     let binding = context.binding();
     context.io_mut().set_display_size([128.0, 128.0]);
@@ -358,6 +361,9 @@ fn standard_sampler_commands_are_safe_and_preserve_order() {
         context
             .platform_io_mut()
             .set_draw_callback_set_sampler_nearest_raw(Some(nearest));
+        context
+            .platform_io_mut()
+            .set_draw_callback_set_sampler_from_texture_raw(Some(from_texture));
     }
 
     {
@@ -372,6 +378,7 @@ fn standard_sampler_commands_are_safe_and_preserve_order() {
                     .filled(true)
                     .build();
                 draw_list.set_sampler_linear();
+                draw_list.set_sampler_from_texture();
                 draw_list
                     .add_rect([32.0, 8.0], [48.0, 24.0], ImColor32::WHITE)
                     .filled(true)
@@ -389,12 +396,13 @@ fn standard_sampler_commands_are_safe_and_preserve_order() {
                     command,
                     crate::render::DrawCmd::SetSamplerLinear
                         | crate::render::DrawCmd::SetSamplerNearest
+                        | crate::render::DrawCmd::SetSamplerFromTexture
                 )
             })
             .collect::<Vec<_>>()
     });
 
-    assert_eq!(commands.len(), 2);
+    assert_eq!(commands.len(), 3);
     assert!(matches!(
         commands[0],
         crate::render::DrawCmd::SetSamplerNearest
@@ -402,6 +410,10 @@ fn standard_sampler_commands_are_safe_and_preserve_order() {
     assert!(matches!(
         commands[1],
         crate::render::DrawCmd::SetSamplerLinear
+    ));
+    assert!(matches!(
+        commands[2],
+        crate::render::DrawCmd::SetSamplerFromTexture
     ));
 }
 
@@ -419,12 +431,26 @@ fn standard_sampler_commands_validate_backend_support_before_ffi() {
     let ui = context.frame();
     let draw_list = ui.get_window_draw_list();
     let before = draw_list_counts(draw_list.draw_list);
+    let commands_before = unsafe { (*draw_list.draw_list).CmdBuffer.Size };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         draw_list.set_sampler_nearest();
     }));
 
     assert!(result.is_err());
     assert_eq!(draw_list_counts(draw_list.draw_list), before);
+    assert_eq!(
+        unsafe { (*draw_list.draw_list).CmdBuffer.Size },
+        commands_before
+    );
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        draw_list.set_sampler_from_texture();
+    }));
+    assert!(result.is_err());
+    assert_eq!(draw_list_counts(draw_list.draw_list), before);
+    assert_eq!(
+        unsafe { (*draw_list.draw_list).CmdBuffer.Size },
+        commands_before
+    );
 }
 
 #[test]
@@ -485,27 +511,27 @@ fn raw_draw_list_clip_helper_reads_stack_without_mutation() {
 }
 
 #[test]
-fn text_no_pixel_snap_scope_restores_only_its_flag() {
+fn text_no_pixel_snap_scope_restores_previous_native_flags() {
     let fixture = TestDrawList::new();
     let draw_list = fixture.draw_list();
     unsafe {
-        (*fixture.raw).Flags = DrawListFlags::ANTI_ALIASED_FILL.bits();
+        (*fixture.raw).Flags = DrawFlags::AA_FILL.bits() as sys::ImDrawFlags;
     }
 
     draw_list.with_text_no_pixel_snap(|| {
-        let flags = DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags });
-        assert!(flags.contains(DrawListFlags::TEXT_NO_PIXEL_SNAP));
-        assert!(flags.contains(DrawListFlags::ANTI_ALIASED_FILL));
+        let flags = DrawFlags::from_bits_retain(unsafe { (*fixture.raw).Flags } as u32);
+        assert!(flags.contains(DrawFlags::TEXT_NO_PIXEL_SNAP));
+        assert!(flags.contains(DrawFlags::AA_FILL));
 
         unsafe {
-            (*fixture.raw).Flags |= DrawListFlags::ALLOW_VTX_OFFSET.bits();
+            (*fixture.raw).Flags |= DrawFlags::USE_VTX_OFFSET.bits() as sys::ImDrawFlags;
         }
     });
 
-    let flags = DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags });
-    assert!(!flags.contains(DrawListFlags::TEXT_NO_PIXEL_SNAP));
-    assert!(flags.contains(DrawListFlags::ANTI_ALIASED_FILL));
-    assert!(flags.contains(DrawListFlags::ALLOW_VTX_OFFSET));
+    let flags = DrawFlags::from_bits_retain(unsafe { (*fixture.raw).Flags } as u32);
+    assert!(!flags.contains(DrawFlags::TEXT_NO_PIXEL_SNAP));
+    assert!(flags.contains(DrawFlags::AA_FILL));
+    assert!(!flags.contains(DrawFlags::USE_VTX_OFFSET));
 }
 
 #[test]
@@ -516,13 +542,13 @@ fn text_no_pixel_snap_scope_is_nested_and_panic_safe() {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         draw_list.with_text_no_pixel_snap(|| {
             assert!(
-                DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags })
-                    .contains(DrawListFlags::TEXT_NO_PIXEL_SNAP)
+                DrawFlags::from_bits_retain(unsafe { (*fixture.raw).Flags } as u32)
+                    .contains(DrawFlags::TEXT_NO_PIXEL_SNAP)
             );
             draw_list.with_text_no_pixel_snap(|| {
                 assert!(
-                    DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags })
-                        .contains(DrawListFlags::TEXT_NO_PIXEL_SNAP)
+                    DrawFlags::from_bits_retain(unsafe { (*fixture.raw).Flags } as u32)
+                        .contains(DrawFlags::TEXT_NO_PIXEL_SNAP)
                 );
                 panic!("forced panic inside text flag scope");
             });
@@ -531,7 +557,382 @@ fn text_no_pixel_snap_scope_is_nested_and_panic_safe() {
 
     assert!(result.is_err());
     assert!(
-        !DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags })
-            .contains(DrawListFlags::TEXT_NO_PIXEL_SNAP)
+        !DrawFlags::from_bits_retain(unsafe { (*fixture.raw).Flags } as u32)
+            .contains(DrawFlags::TEXT_NO_PIXEL_SNAP)
     );
+}
+
+#[test]
+fn draw_flag_scopes_restore_nested_defaults_and_reject_overflow() {
+    let fixture = TestDrawList::new();
+    let draw_list = fixture.draw_list();
+    let initial = draw_list.flags();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        draw_list.with_draw_flags(DrawFlags::AA_LINES, true, || {
+            assert!(draw_list.flags().contains(DrawFlags::AA_LINES));
+            draw_list.with_draw_flags(DrawFlags::AA_LINES, false, || {
+                assert!(!draw_list.flags().contains(DrawFlags::AA_LINES));
+                draw_list.with_draw_flags(DrawFlags::AA_FILL, true, || {
+                    assert_eq!(unsafe { (*fixture.raw)._DrawFlagsStack.Size }, 3);
+                    draw_list.with_draw_flags(DrawFlags::TEXT_NO_PIXEL_SNAP, true, || {});
+                });
+            });
+        });
+    }));
+    assert!(result.is_err());
+    assert_eq!(draw_list.flags(), initial);
+    assert_eq!(unsafe { (*fixture.raw)._DrawFlagsStack.Size }, 0);
+}
+
+#[test]
+fn draw_flag_scopes_reject_inherited_rounding_conflicts_without_mutation() {
+    let fixture = TestDrawList::new();
+    let draw_list = fixture.draw_list();
+    let initial = draw_list.flags();
+    for (outer, inner) in [
+        (DrawFlags::ROUND_TOP, DrawFlags::ROUND_NONE),
+        (DrawFlags::ROUND_NONE, DrawFlags::ROUND_TOP),
+    ] {
+        draw_list.with_draw_flags(outer, true, || {
+            let outer_flags = draw_list.flags();
+            let stack_depth = unsafe { (*fixture.raw)._DrawFlagsStack.Size };
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                draw_list.with_draw_flags(inner, true, || {});
+            }));
+            assert!(result.is_err());
+            assert_eq!(draw_list.flags(), outer_flags);
+            assert_eq!(unsafe { (*fixture.raw)._DrawFlagsStack.Size }, stack_depth);
+
+            draw_list.with_draw_flags(outer, false, || {
+                draw_list.with_draw_flags(inner, true, || {
+                    assert!(draw_list.flags().contains(inner));
+                    assert!(!draw_list.flags().intersects(outer));
+                });
+            });
+            assert_eq!(draw_list.flags(), outer_flags);
+        });
+        assert_eq!(draw_list.flags(), initial);
+        assert_eq!(unsafe { (*fixture.raw)._DrawFlagsStack.Size }, 0);
+    }
+}
+
+#[test]
+fn draw_flags_reject_invalid_modes_before_native_mutation() {
+    let fixture = TestDrawList::new();
+    let draw_list = fixture.draw_list();
+    for flags in [
+        DrawFlags::CLOSED,
+        DrawFlags::STROKE_INSIDE,
+        DrawFlags::ROUND_NONE | DrawFlags::ROUND_TOP_LEFT,
+        DrawFlags::from_bits_retain(1),
+    ] {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            draw_list.with_draw_flags(flags, true, || {});
+        }));
+        assert!(result.is_err());
+        assert_eq!(unsafe { (*fixture.raw)._DrawFlagsStack.Size }, 0);
+    }
+    assert_panics_without_buffer_change(&fixture, |draw_list| {
+        let _ = draw_list
+            .add_line([0.0, 0.0], [1.0, 1.0], ImColor32::WHITE)
+            .flags(DrawFlags::STROKE_INSIDE | DrawFlags::STROKE_OUTSIDE);
+    });
+    assert_panics_without_buffer_change(&fixture, |draw_list| {
+        let _ = draw_list
+            .add_circle([10.0, 10.0], 4.0, ImColor32::WHITE)
+            .flags(DrawFlags::AA_LINES);
+    });
+    for flags in [
+        DrawFlags::AA_LINES,
+        DrawFlags::AA_LINE_ENDS,
+        DrawFlags::AA_FILL,
+        DrawFlags::JOIN_MITER,
+        DrawFlags::CAP_SQUARE,
+    ] {
+        assert_panics_without_buffer_change(&fixture, |draw_list| {
+            let _ = draw_list
+                .add_rect([10.0, 10.0], [30.0, 30.0], ImColor32::WHITE)
+                .flags(flags);
+        });
+    }
+}
+
+fn appended_vertex_bounds(draw_list: &DrawListMut<'_>, draw: impl FnOnce()) -> [f32; 4] {
+    let start = unsafe { (*draw_list.draw_list).VtxBuffer.Size } as usize;
+    draw();
+    let vertices = unsafe {
+        let buffer = &(*draw_list.draw_list).VtxBuffer;
+        assert!(buffer.Size as usize > start);
+        std::slice::from_raw_parts(buffer.Data.add(start), buffer.Size as usize - start)
+    };
+    vertices.iter().fold(
+        [
+            f32::INFINITY,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+        ],
+        |bounds, vertex| {
+            [
+                bounds[0].min(vertex.pos.x),
+                bounds[1].min(vertex.pos.y),
+                bounds[2].max(vertex.pos.x),
+                bounds[3].max(vertex.pos.y),
+            ]
+        },
+    )
+}
+
+#[test]
+fn native_stroke_geometry_uses_193_positions_and_explicit_legacy_mode() {
+    let mut context = crate::Context::create();
+    context.io_mut().set_display_size([256.0, 256.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .unwrap()
+        .build();
+    let ui = context.frame();
+    let draw_list = ui.get_background_draw_list();
+    draw_list.with_draw_flags(DrawFlags::AA_LINES, false, || {
+        let line_bounds = appended_vertex_bounds(&draw_list, || {
+            draw_list
+                .add_line([20.0, 20.0], [80.0, 20.0], ImColor32::WHITE)
+                .thickness(4.0)
+                .build();
+        });
+        assert_eq!(line_bounds, [20.0, 18.0, 80.0, 22.0]);
+        assert_eq!(
+            appended_vertex_bounds(&draw_list, || {
+                draw_list
+                    .add_line([20.0, 20.0], [80.0, 20.0], ImColor32::WHITE)
+                    .thickness(4.0)
+                    .flags(DrawFlags::CAP_SQUARE)
+                    .build();
+            }),
+            [18.0, 18.0, 82.0, 22.0]
+        );
+        let legacy_bounds = appended_vertex_bounds(&draw_list, || {
+            draw_list
+                .add_line([20.0, 20.0], [80.0, 20.0], ImColor32::WHITE)
+                .thickness(4.0)
+                .flags(DrawFlags::STROKE_LEGACY)
+                .build();
+        });
+        assert_eq!(
+            legacy_bounds,
+            line_bounds.map(|coordinate| coordinate + 0.5)
+        );
+
+        for (flags, bounds) in [
+            (DrawFlags::NONE, [20.0, 20.0, 80.0, 80.0]),
+            (DrawFlags::STROKE_CENTER, [18.0, 18.0, 82.0, 82.0]),
+            (DrawFlags::STROKE_OUTSIDE, [16.0, 16.0, 84.0, 84.0]),
+        ] {
+            assert_eq!(
+                appended_vertex_bounds(&draw_list, || {
+                    draw_list
+                        .add_rect([20.0, 20.0], [80.0, 80.0], ImColor32::WHITE)
+                        .thickness(4.0)
+                        .flags(flags)
+                        .build();
+                }),
+                bounds
+            );
+        }
+        assert_eq!(
+            appended_vertex_bounds(&draw_list, || {
+                draw_list.add_line_h(20.0, 80.0, 20.0, ImColor32::WHITE, 4.0, DrawFlags::NONE);
+            }),
+            [20.0, 20.0, 80.0, 24.0]
+        );
+        assert_eq!(
+            appended_vertex_bounds(&draw_list, || {
+                draw_list
+                    .add_circle([50.0, 50.0], 20.0, ImColor32::WHITE)
+                    .num_segments(DrawSegmentCount::count(4))
+                    .thickness(4.0)
+                    .build();
+            }),
+            [30.0, 30.0, 70.0, 70.0]
+        );
+    });
+}
+
+#[test]
+fn native_rectangle_antialiasing_uses_scoped_defaults_for_fill_and_outline() {
+    let mut context = crate::Context::create();
+    context.io_mut().set_display_size([256.0, 256.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
+    context.style_mut().set_anti_aliased_lines(false);
+    context.style_mut().set_anti_aliased_fill(false);
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .unwrap()
+        .build();
+    let ui = context.frame();
+    let white_uv = ui.font_tex_uv_white_pixel();
+    let draw_list = ui.get_background_draw_list();
+    for (filled, flag) in [(false, DrawFlags::AA_LINES), (true, DrawFlags::AA_FILL)] {
+        let draw = || {
+            let before = draw_list_counts(draw_list.draw_list);
+            draw_list
+                .add_rect([20.25, 20.25], [80.25, 80.25], ImColor32::WHITE)
+                .thickness(4.0)
+                .filled(filled)
+                .build();
+            let after = draw_list_counts(draw_list.draw_list);
+            let vertices = unsafe {
+                let buffer = &(*draw_list.draw_list).VtxBuffer;
+                std::slice::from_raw_parts(
+                    buffer.Data.add(before.0 as usize),
+                    (after.0 - before.0) as usize,
+                )
+            };
+            assert!(!vertices.is_empty());
+            let has_aa_fringe = vertices
+                .iter()
+                .any(|vertex| vertex.col >> 24 == 0 || [vertex.uv.x, vertex.uv.y] != white_uv);
+            ((after.0 - before.0, after.1 - before.1), has_aa_fringe)
+        };
+        let without_aa = draw();
+        assert!(!without_aa.1);
+        let with_aa = draw_list.with_draw_flags(flag, true, draw);
+        assert!(with_aa.1);
+        assert!(!draw_list.flags().contains(flag));
+        assert_eq!(draw(), without_aa);
+    }
+}
+
+#[test]
+fn native_line_end_antialiasing_adds_geometry_only_for_the_scoped_draws() {
+    let mut context = crate::Context::create();
+    context.io_mut().set_display_size([256.0, 256.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .unwrap()
+        .build();
+    let ui = context.frame();
+    let draw_list = ui.get_background_draw_list();
+    let draw = || {
+        let before = draw_list_counts(draw_list.draw_list);
+        draw_list
+            .add_line([20.0, 20.0], [80.0, 20.0], ImColor32::WHITE)
+            .thickness(4.0)
+            .build();
+        let after = draw_list_counts(draw_list.draw_list);
+        (after.0 - before.0, after.1 - before.1)
+    };
+    let without_ends = draw();
+    let with_ends = draw_list.with_draw_flags(DrawFlags::AA_LINE_ENDS, true, draw);
+    assert!(with_ends.0 > without_ends.0);
+    assert!(with_ends.1 > without_ends.1);
+    assert_eq!(draw(), without_ends);
+}
+
+#[test]
+fn draw_flag_scopes_reject_stale_window_views_before_mutation() {
+    let mut context = crate::Context::create();
+    context.io_mut().set_display_size([256.0, 256.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .unwrap()
+        .build();
+    let ui: &crate::Ui = context.frame();
+    let draw_list = ui
+        .window("draw flag stale provenance")
+        .build(|| ui.get_window_draw_list())
+        .unwrap();
+    let raw = draw_list.draw_list;
+    let initial_flags = unsafe { (*raw).Flags };
+    let initial_depth = unsafe { (*raw)._DrawFlagsStack.Size };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = draw_list.flags();
+    }));
+    assert!(result.is_err());
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        draw_list.with_draw_flags(DrawFlags::AA_LINE_ENDS, true, || {});
+    }));
+    assert!(result.is_err());
+    assert_eq!(unsafe { (*raw).Flags }, initial_flags);
+    assert_eq!(unsafe { (*raw)._DrawFlagsStack.Size }, initial_depth);
+}
+
+#[test]
+fn draw_flag_scope_window_order_violations_recover_without_double_panic() {
+    let mut context = crate::Context::create();
+    context.io_mut().set_display_size([256.0, 256.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .unwrap()
+        .build();
+    let ui = context.frame();
+
+    let tooltip = ui.begin_tooltip().unwrap();
+    let draw_list = ui.get_window_draw_list();
+    let raw = draw_list.draw_list;
+    let initial_flags = unsafe { (*raw).Flags };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        draw_list.with_draw_flags(DrawFlags::AA_LINE_ENDS, true, || drop(tooltip));
+    }));
+    assert!(result.is_err());
+    assert_eq!(unsafe { (*raw).Flags }, initial_flags);
+    assert_eq!(unsafe { (*raw)._DrawFlagsStack.Size }, 0);
+    drop(draw_list);
+    ui.text("window end recovered after the flag scope");
+
+    let draw_list = ui.get_window_draw_list();
+    let raw = draw_list.draw_list;
+    let initial_flags = unsafe { (*raw).Flags };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = draw_list.with_draw_flags(DrawFlags::AA_LINE_ENDS, true, || {
+            ui.begin_tooltip().unwrap()
+        });
+    }));
+    assert!(result.is_err());
+    assert_eq!(unsafe { (*raw).Flags }, initial_flags);
+    assert_eq!(unsafe { (*raw)._DrawFlagsStack.Size }, 0);
+    ui.text("flag scope recovered after the inner tooltip ended");
+}
+
+#[test]
+fn draw_flag_scopes_bind_the_owner_context_and_restore_the_previous_context() {
+    let mut context = crate::Context::create();
+    let owner = unsafe { sys::igGetCurrentContext() };
+    context.io_mut().set_display_size([256.0, 256.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
+    context
+        .font_atlas()
+        .try_claim_legacy_renderer()
+        .unwrap()
+        .build();
+    let ui = context.frame();
+    let draw_list = ui.get_background_draw_list();
+    let initial = draw_list.flags();
+    let foreign = unsafe { sys::igCreateContext(std::ptr::null_mut()) };
+    assert!(!foreign.is_null());
+    unsafe { sys::igSetCurrentContext(foreign) };
+
+    assert_eq!(draw_list.flags(), initial);
+    assert_eq!(unsafe { sys::igGetCurrentContext() }, foreign);
+    draw_list.with_draw_flags(DrawFlags::AA_LINE_ENDS, true, || {
+        assert!(draw_list.flags().contains(DrawFlags::AA_LINE_ENDS));
+        assert_eq!(unsafe { sys::igGetCurrentContext() }, foreign);
+    });
+    assert_eq!(draw_list.flags(), initial);
+    assert_eq!(unsafe { sys::igGetCurrentContext() }, foreign);
+    assert_eq!(unsafe { (*draw_list.draw_list)._DrawFlagsStack.Size }, 0);
+
+    unsafe {
+        sys::igSetCurrentContext(owner);
+        sys::igDestroyContext(foreign);
+    }
 }

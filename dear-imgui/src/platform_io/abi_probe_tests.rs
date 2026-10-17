@@ -117,6 +117,36 @@ fn public_aggregate_layout_mismatches(
         probe.ImGuiPlatformIOViewportsOffset,
         std::mem::offset_of!(sys::ImGuiPlatformIO, Viewports)
     );
+    require_match!(
+        "ImDrawList.size",
+        probe.ImDrawListSize,
+        std::mem::size_of::<sys::ImDrawList>()
+    );
+    require_match!(
+        "ImDrawList.align",
+        probe.ImDrawListAlign,
+        std::mem::align_of::<sys::ImDrawList>()
+    );
+    require_match!(
+        "ImDrawList._DrawFlagsStack",
+        probe.ImDrawListFlagsStackOffset,
+        std::mem::offset_of!(sys::ImDrawList, _DrawFlagsStack)
+    );
+    require_match!(
+        "ImGuiStyle.AntiAliasedLineEnds",
+        probe.ImGuiStyleLineEndsOffset,
+        std::mem::offset_of!(sys::ImGuiStyle, AntiAliasedLineEnds)
+    );
+    require_match!(
+        "ImGuiStyle.CurveTessellationMaxError",
+        probe.ImGuiStyleCurveErrorOffset,
+        std::mem::offset_of!(sys::ImGuiStyle, CurveTessellationMaxError)
+    );
+    require_match!(
+        "ImGuiPlatformIO.DrawCallback_SetSamplerFromTex",
+        probe.ImGuiPlatformIOTextureSamplerOffset,
+        std::mem::offset_of!(sys::ImGuiPlatformIO, DrawCallback_SetSamplerFromTex)
+    );
     mismatches
 }
 

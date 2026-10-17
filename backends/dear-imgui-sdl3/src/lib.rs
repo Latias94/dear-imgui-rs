@@ -134,8 +134,8 @@ pub use self::backend::Sdl3ViewportRouteError;
 pub use self::backend::SdlRenderer3Backend;
 #[cfg(feature = "opengl3-renderer")]
 pub use self::backend::{
-    Sdl3OpenGl3Backend, Sdl3OpenGl3PreparedViewportFrame, Sdl3OpenGl3ViewportRouteError,
-    Sdl3OpenGl3ViewportRouteFault,
+    Sdl3OpenGl3Backend, Sdl3OpenGl3ClipOrigin, Sdl3OpenGl3PreparedViewportFrame,
+    Sdl3OpenGl3ViewportRouteError, Sdl3OpenGl3ViewportRouteFault,
 };
 #[cfg(feature = "sdlgpu3-renderer")]
 pub use self::backend::{

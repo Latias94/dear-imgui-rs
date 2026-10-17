@@ -191,6 +191,7 @@ fn test_renderer(
             is_es: false,
         },
         has_clip_origin_support: false,
+        clip_origin: crate::GlowClipOrigin::default(),
         has_separate_polygon_modes: false,
         has_sampler_object_support: true,
         gl_context: gl,
@@ -228,6 +229,9 @@ fn publish_test_renderer_core(context: &mut Context, renderer: &mut GlowRenderer
             .set_draw_callback_set_sampler_linear_raw(Some(draw_callback_set_sampler_linear));
         platform_io
             .set_draw_callback_set_sampler_nearest_raw(Some(draw_callback_set_sampler_nearest));
+        platform_io.set_draw_callback_set_sampler_from_texture_raw(Some(
+            crate::renderer::callbacks::draw_callback_set_sampler_from_texture,
+        ));
     }
 }
 

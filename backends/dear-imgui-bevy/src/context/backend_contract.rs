@@ -26,7 +26,7 @@ pub(super) struct ImguiRendererRuntimeContract {
     texture_max_width: i32,
     texture_max_height: i32,
     viewport_callbacks: [usize; 5],
-    draw_callbacks: [usize; 3],
+    draw_callbacks: [usize; 4],
 }
 
 #[cfg(feature = "render")]
@@ -606,6 +606,7 @@ impl ImguiRendererRuntimeContract {
                 "DrawCallback_ResetRenderState",
                 "DrawCallback_SetSamplerLinear",
                 "DrawCallback_SetSamplerNearest",
+                "DrawCallback_SetSamplerFromTex",
             ])
             .find_map(|((actual, expected), field)| {
                 (actual != expected).then_some(ImguiRendererOwnershipError::FieldReplaced { field })
@@ -708,7 +709,7 @@ mod renderer_contract_tests {
             texture_max_width: 0,
             texture_max_height: 0,
             viewport_callbacks: [0; 5],
-            draw_callbacks: [0; 3],
+            draw_callbacks: [0; 4],
         }
     }
 
@@ -777,6 +778,7 @@ mod renderer_contract_tests {
             ("DrawCallback_ResetRenderState", changed_draw_callback(0)),
             ("DrawCallback_SetSamplerLinear", changed_draw_callback(1)),
             ("DrawCallback_SetSamplerNearest", changed_draw_callback(2)),
+            ("DrawCallback_SetSamplerFromTex", changed_draw_callback(3)),
         ];
 
         assert_eq!(empty_contract().first_drift(empty_contract()), None);

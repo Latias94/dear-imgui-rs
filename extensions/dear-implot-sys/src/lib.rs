@@ -43,6 +43,33 @@ pub use dear_imgui_sys::{
 // Include the generated bindings from bindgen
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
+#[cfg(all(feature = "native-test-probe", not(target_arch = "wasm32")))]
+#[doc(hidden)]
+pub mod native_test_probe {
+    unsafe extern "C" {
+        pub fn dear_implot_rectangle_probe_plot(
+            plot_context: *mut super::ImPlotContext,
+            kind: std::ffi::c_int,
+            invert_x: bool,
+            invert_y: bool,
+            bounds: *mut f32,
+        ) -> std::ffi::c_int;
+        pub fn dear_implot_line_probe_plot(
+            plot_context: *mut super::ImPlotContext,
+            weight: f32,
+            pixel_density: f32,
+            anti_aliased: bool,
+            alpha: f32,
+            positions: *mut f32,
+            uvs: *mut f32,
+            expected_uvs: *mut f32,
+            expected_width: *mut f32,
+            colors: *mut u32,
+            expected_color: *mut u32,
+        ) -> std::ffi::c_int;
+    }
+}
+
 // TODO: Platform-specific function wrappers for MSVC ABI compatibility
 // #[cfg(target_os = "windows")]
 // pub mod wrapper_functions;

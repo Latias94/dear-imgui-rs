@@ -11,7 +11,6 @@ fn representative_upstream_and_bridge_symbols_are_generated() {
     let _: unsafe extern "C" fn() -> *mut sys::TextDiff = sys::TextDiff_TextDiff;
     let _: unsafe extern "C" fn() -> *mut sys::TrieAutoComplete =
         sys::TrieAutoComplete_TrieAutoComplete;
-    let _: unsafe extern "C" fn() -> *mut sys::Notifications = sys::Notifications_Notifications;
     let _: unsafe extern "C" fn(*mut c_char, sys::ImWchar) -> usize = sys::CodePoint_write;
     let _ = sys::TextEditor_GetText_alloc;
     let _ = sys::TextEditor_GetText_free;
@@ -27,7 +26,17 @@ fn representative_upstream_and_bridge_symbols_are_generated() {
     let _ = sys::Palette_Palette;
     let _ = sys::Palette_destroy;
     let _ = sys::TrieAutoComplete_destroy;
-    let _ = sys::Notifications_destroy;
+    let _: unsafe extern "C" fn(*mut sys::TextEditor, sys::DocPos_c) -> sys::ImVec2_c =
+        sys::TextEditor_DocPos2ScreenPos;
+    let _: unsafe extern "C" fn(
+        *mut sys::TextEditor,
+        sys::DocPos_c,
+        sys::DocPos_c,
+        usize,
+        sys::ImU32,
+        *const c_char,
+        sys::SquiggleStyle,
+    ) = sys::TextEditor_AddSquiggle;
     let _ = sys::GetDejavu;
     let _ = sys::SetDejavu;
     let _: unsafe extern "C" fn() -> *mut sys::TextEditor = sys::dear_imgui_cte_text_editor_create;

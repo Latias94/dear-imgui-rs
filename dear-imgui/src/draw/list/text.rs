@@ -1,53 +1,16 @@
-use std::marker::PhantomData;
-
 use crate::sys;
 
 use super::super::color::ImColor32;
 use super::super::util::{assert_non_negative_f32, finite_vec2, finite_vec4};
 use super::DrawListMut;
 
-/// Private guard for the closure-only text pixel-snap scope.
-struct TextNoPixelSnapGuard<'draw_list> {
-    draw_list: *mut sys::ImDrawList,
-    was_enabled: bool,
-    _marker: PhantomData<&'draw_list sys::ImDrawList>,
-}
-
-impl Drop for TextNoPixelSnapGuard<'_> {
-    fn drop(&mut self) {
-        let flag = sys::ImDrawListFlags_TextNoPixelSnap as sys::ImDrawListFlags;
-        unsafe {
-            if self.was_enabled {
-                (*self.draw_list).Flags |= flag;
-            } else {
-                (*self.draw_list).Flags &= !flag;
-            }
-        }
-    }
-}
-
 impl<'ui> DrawListMut<'ui> {
-    fn text_no_pixel_snap_guard(&self) -> TextNoPixelSnapGuard<'_> {
-        let flag = sys::ImDrawListFlags_TextNoPixelSnap as sys::ImDrawListFlags;
-        let was_enabled = unsafe { (*self.draw_list).Flags & flag != 0 };
-        unsafe {
-            (*self.draw_list).Flags |= flag;
-        }
-        TextNoPixelSnapGuard {
-            draw_list: self.draw_list,
-            was_enabled,
-            _marker: PhantomData,
-        }
-    }
-
-    /// Disables text pixel snapping while `f` runs and restores the prior state afterwards.
+    /// Disable text pixel snapping while `f` runs, then restore draw-list defaults.
     ///
-    /// Restoration also occurs if `f` panics. Changes to unrelated draw-list flags are preserved.
+    /// Restoration also occurs if `f` panics. See [`Self::with_draw_flags`] for
+    /// nesting limits and other configurable drawing options.
     pub fn with_text_no_pixel_snap<R>(&self, f: impl FnOnce() -> R) -> R {
-        let text_flags = self.text_no_pixel_snap_guard();
-        let result = f();
-        drop(text_flags);
-        result
+        self.with_draw_flags(super::super::DrawFlags::TEXT_NO_PIXEL_SNAP, true, f)
     }
 
     /// Draw a text whose upper-left corner is at point `pos`.

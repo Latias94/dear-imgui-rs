@@ -13,7 +13,7 @@ length-aware filters, transactions, and autocomplete configuration.
 
 ## Compatibility and Provenance
 
-This crate is a Preview `-sys` crate in the `0.20` release train and must use
+This crate is a Preview `-sys` crate in the `0.21` release train and must use
 the same release train, workspace checkout, or Git revision as `dear-imgui-sys`
 and `dear-imgui-cte`. It shares the Dear ImGui and cimgui core supplied by
 `dear-imgui-sys`; upstream CMake files are not used because they compile a
@@ -25,7 +25,7 @@ The checked-in binding and source identity is:
 | --- | --- |
 | `cimCTE` `main_goossens` | `3cdee0b5e1d8f0a59a40fda80c4a6b894d752240` |
 | nested ImGuiColorTextEdit | `f28136480fa4091164e0b528dc9cca147c5a6ee9` |
-| Dear ImGui baseline | v1.92.9b docking through the workspace cimgui pin |
+| Dear ImGui baseline | v1.93.1 WIP docking through the workspace cimgui pin |
 
 Native and WASM snapshots are generated from one canonical C++20 specification
 covering `cimCTE.h` and `shim/cte_bridge.h`. Ordinary builds use checked-in
@@ -44,9 +44,20 @@ Maintained source builds compile exactly these translation units:
 
 ## Wide Glyphs and Callback Ownership
 
-The pinned upstream source now owns wide-glyph column calculation and rendering.
-Native, packaged, and WebAssembly builds compile that source directly; the old
-`cte-wide-glyphs-v1` overlay and its prebuilt identity marker have been removed.
+The pinned upstream source owns wide-glyph column calculation and rendering;
+the old `cte-wide-glyphs-v1` overlay and its prebuilt identity marker have been removed.
+
+Native, packaged, and WebAssembly builds still apply the separate
+`cte-text-editor-v1` correction. The current upstream retains four
+unbounded Unicode range searches and omits U+3000, U+FF01–FF60, and U+FFE0–FFE6
+from its fullwidth table. This patch bounds the searches, restores those ranges, and aligns current-line
+backgrounds with the visible text area when a window moves or scrolls horizontally;
+its identity remains part of native artifact validation. Re-audit it when upstream
+changes these functions or tables.
+
+The shared `cte-text-diff-draw-flags-v1` source transform also updates TextDiff's
+three scrollbar corner flags for Dear ImGui 1.93. It rejects upstream drift and
+is included in native artifact validation. MSVC source builds explicitly use UTF-8.
 
 The public `Glyph` mirror follows upstream's `columns: u8` and `squiggle: u32`
 layout. Rust offset assertions and C++ source-build assertions check the mirror.
@@ -94,7 +105,7 @@ obey the same C++ runtime, ABI, shared-core, and no-unwind contract.
 
 Generated native and WASM bindings cover editor/document/configuration,
 positions and selections, languages and palettes, glyph/iterator/codepoint
-helpers, TextDiff, Notifications, Trie autocomplete, bundled fonts, and every
+helpers, TextDiff, Trie autocomplete, bundled fonts, and every
 `dear_imgui_cte_*` bridge family. Required representative symbols are checked
 against both generated snapshots by the canonical binding specification. This
 is an ABI-presence check, not proof that a safe Rust wrapper is sound.
@@ -108,8 +119,7 @@ This crate exposes raw FFI. Callers must uphold the lifetime and Context
 contracts of both cimCTE and Dear ImGui.
 
 - Values returned by constructors such as `TextEditor_TextEditor`,
-  `TextDiff_TextDiff`, `TrieAutoComplete_TrieAutoComplete`,
-  `Notifications_Notifications`, and `Palette_Palette` are owned and must be
+  `TextDiff_TextDiff`, `TrieAutoComplete_TrieAutoComplete`, and `Palette_Palette` are owned and must be
   passed to their matching `*_destroy` function exactly once. Language values
   and editor-owned or static palettes are borrowed and must not be destroyed.
 - Editor ownership has two non-interchangeable families. Plain upstream editors

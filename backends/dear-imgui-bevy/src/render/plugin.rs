@@ -252,6 +252,13 @@ pub(crate) fn install_standard_draw_callbacks_for_context(
 
 pub(crate) fn standard_draw_callback_conflict(context: &imgui::Context) -> Option<&'static str> {
     let platform_io = context.platform_io();
+    // Texture-owned native samplers have no WGPU binding representation in this backend.
+    if platform_io
+        .draw_callback_set_sampler_from_texture_raw()
+        .is_some()
+    {
+        return Some("DrawCallback_SetSamplerFromTex");
+    }
     for (slot, actual, expected) in [
         (
             "DrawCallback_ResetRenderState",
@@ -303,12 +310,16 @@ pub(crate) fn standard_draw_callback_occupied(context: &imgui::Context) -> Optio
             "DrawCallback_SetSamplerNearest",
             platform_io.draw_callback_set_sampler_nearest_raw(),
         ),
+        (
+            "DrawCallback_SetSamplerFromTex",
+            platform_io.draw_callback_set_sampler_from_texture_raw(),
+        ),
     ]
     .into_iter()
     .find_map(|(slot, callback)| callback.is_some().then_some(slot))
 }
 
-pub(crate) fn standard_draw_callback_contract(context: &imgui::Context) -> [usize; 3] {
+pub(crate) fn standard_draw_callback_contract(context: &imgui::Context) -> [usize; 4] {
     let platform_io = context.platform_io();
     [
         platform_io
@@ -320,10 +331,14 @@ pub(crate) fn standard_draw_callback_contract(context: &imgui::Context) -> [usiz
         platform_io
             .draw_callback_set_sampler_nearest_raw()
             .map_or(0, |callback| callback as usize),
+        platform_io
+            .draw_callback_set_sampler_from_texture_raw()
+            .map_or(0, |callback| callback as usize),
     ]
 }
 
 pub(crate) fn clear_standard_draw_callbacks_if_owned(context: &mut imgui::Context) {
+    // SetSamplerFromTex is never published here, so a foreign replacement stays untouched.
     let platform_io = context.platform_io_mut();
     unsafe {
         if platform_io

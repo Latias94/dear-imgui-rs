@@ -6,8 +6,8 @@ use glow::{Context, HasContext};
 use super::{
     GlowRenderer,
     callbacks::{
-        draw_callback_reset_render_state, draw_callback_set_sampler_linear,
-        draw_callback_set_sampler_nearest,
+        draw_callback_reset_render_state, draw_callback_set_sampler_from_texture,
+        draw_callback_set_sampler_linear, draw_callback_set_sampler_nearest,
     },
     core::{GlowBackendUserData, RendererStateFault},
     device::PendingDeviceObjects,
@@ -169,6 +169,7 @@ impl GlowRenderer {
             samplers,
             gl_version,
             has_clip_origin_support,
+            clip_origin: super::core::GlowClipOrigin::default(),
             has_separate_polygon_modes,
             has_sampler_object_support,
             gl_context: owned_gl,
@@ -288,6 +289,13 @@ impl GlowRenderer {
                 ),
                 "DrawCallback_SetSamplerNearest",
             ),
+            (
+                draw_callback_matches(
+                    platform_io.DrawCallback_SetSamplerFromTex,
+                    draw_callback_set_sampler_from_texture,
+                ),
+                "DrawCallback_SetSamplerFromTex",
+            ),
         ] {
             if !matches {
                 return Some(RendererStateFault::Callback(callback));
@@ -353,6 +361,10 @@ impl GlowRenderer {
                 platform_io.DrawCallback_SetSamplerNearest,
                 draw_callback_set_sampler_nearest,
             ),
+            draw_callback_matches(
+                platform_io.DrawCallback_SetSamplerFromTex,
+                draw_callback_set_sampler_from_texture,
+            ),
         ]
         .into_iter()
         .any(|matches| matches);
@@ -391,6 +403,12 @@ impl GlowRenderer {
             draw_callback_set_sampler_nearest,
         ) {
             platform_io.DrawCallback_SetSamplerNearest = None;
+        }
+        if draw_callback_matches(
+            platform_io.DrawCallback_SetSamplerFromTex,
+            draw_callback_set_sampler_from_texture,
+        ) {
+            platform_io.DrawCallback_SetSamplerFromTex = None;
         }
         if owns_viewport_callback {
             platform_io.Renderer_RenderWindow = None;
@@ -467,6 +485,10 @@ fn preflight_renderer_state(imgui_context: &ImGuiContext) -> InitResult<()> {
                 "DrawCallback_SetSamplerNearest",
             ),
             (
+                platform_io.DrawCallback_SetSamplerFromTex.is_some(),
+                "DrawCallback_SetSamplerFromTex",
+            ),
+            (
                 platform_io.Renderer_CreateWindow.is_some(),
                 "Renderer_CreateWindow",
             ),
@@ -526,6 +548,9 @@ fn publish_renderer_state(
             .set_draw_callback_set_sampler_linear_raw(Some(draw_callback_set_sampler_linear));
         platform_io
             .set_draw_callback_set_sampler_nearest_raw(Some(draw_callback_set_sampler_nearest));
+        platform_io.set_draw_callback_set_sampler_from_texture_raw(Some(
+            draw_callback_set_sampler_from_texture,
+        ));
     }
     Ok(renderer_name_ptr)
 }
@@ -666,6 +691,7 @@ mod tests {
         assert!(raw.DrawCallback_ResetRenderState.is_none());
         assert!(raw.DrawCallback_SetSamplerLinear.is_none());
         assert!(raw.DrawCallback_SetSamplerNearest.is_none());
+        assert!(raw.DrawCallback_SetSamplerFromTex.is_none());
         assert_eq!(raw.Renderer_TextureMaxWidth, 0);
         assert_eq!(raw.Renderer_TextureMaxHeight, 0);
     }
@@ -698,6 +724,7 @@ mod tests {
         assert!(raw.DrawCallback_ResetRenderState.is_none());
         assert!(raw.DrawCallback_SetSamplerLinear.is_none());
         assert!(raw.DrawCallback_SetSamplerNearest.is_none());
+        assert!(raw.DrawCallback_SetSamplerFromTex.is_none());
         assert_eq!(raw.Renderer_TextureMaxWidth, 0);
         assert_eq!(raw.Renderer_TextureMaxHeight, 0);
         assert_eq!(

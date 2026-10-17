@@ -167,18 +167,18 @@ These checks generate/use bindings only and won’t build/link native code.
 Preparation and validation remain separate because preparation intentionally changes the worktree:
 
 ```bash
-python3 tools/tasks.py release-prepare 0.20.0
+python3 tools/tasks.py release-prepare 0.21.0
 git diff
 git add -p
 # Stage reviewed new files explicitly with git add -- <path>.
-git commit -m "chore(release): prepare v0.20.0"
+git commit -m "chore(release): prepare v0.21.0"
 python3 tools/tasks.py release-check
 ```
 
 After the candidate is merged to `main` and normal CI is green, run the single release entry point:
 
 ```bash
-gh workflow run release.yml --ref main -f tag=v0.20.0
+gh workflow run release.yml --ref main -f tag=v0.21.0
 ```
 
 `release.yml` binds the tag, workspace version, `main` ref, and exact candidate;

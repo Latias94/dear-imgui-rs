@@ -188,7 +188,8 @@ impl CpuRenderer {
                     }
                     DrawCmd::ResetRenderState
                     | DrawCmd::SetSamplerLinear
-                    | DrawCmd::SetSamplerNearest => stats.state_changes += 1,
+                    | DrawCmd::SetSamplerNearest
+                    | DrawCmd::SetSamplerFromTexture => stats.state_changes += 1,
                     DrawCmd::RawCallback(_) => unreachable!("raw callbacks were preflighted"),
                 }
             }

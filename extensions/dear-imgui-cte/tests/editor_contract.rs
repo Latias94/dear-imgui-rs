@@ -1,8 +1,8 @@
 use dear_imgui_cte::{
     CteUiExt, Language, Palette, PaletteColor, Position, SearchOptions, Selection, SquiggleKind,
-    TextEditor, VisualPosition,
+    SquiggleStyle, TextEditor, VisualPosition,
 };
-use dear_imgui_rs::{ChildFlags, Condition, Context, MouseButton, WindowFlags};
+use dear_imgui_rs::{ChildFlags, Condition, Context, DrawCmd, MouseButton, WindowFlags};
 
 fn render_context() -> Context {
     let mut context = Context::create();
@@ -63,6 +63,8 @@ fn editors_keep_configuration_and_document_state_independent() {
 
     let mut first_palette = Palette::dark();
     first_palette.set(PaletteColor::Keyword, 0x1122_3344);
+    first_palette.set(PaletteColor::CurrentLineHighlight, 0x5566_7788);
+    first_palette.set(PaletteColor::CurrentLineHighlightBorder, 0x99aa_bbcc);
     first.set_palette(&first_palette).unwrap();
     second.set_palette(&Palette::light()).unwrap();
 
@@ -77,6 +79,16 @@ fn editors_keep_configuration_and_document_state_independent() {
     assert!(first.is_word_wrap_enabled());
     assert!(!second.is_word_wrap_enabled());
     assert_eq!(first.palette().get(PaletteColor::Keyword), 0x1122_3344);
+    assert_eq!(
+        first.palette().get(PaletteColor::CurrentLineHighlight),
+        0x5566_7788
+    );
+    assert_eq!(
+        first
+            .palette()
+            .get(PaletteColor::CurrentLineHighlightBorder),
+        0x99aa_bbcc
+    );
     assert_ne!(first.palette(), second.palette());
 }
 
@@ -92,6 +104,13 @@ fn upstream_configuration_defaults_remain_representable() {
     assert_eq!(editor.minimap_columns(), 0);
     editor.set_tab_size(255).unwrap();
     assert_eq!(editor.tab_size(), 255);
+
+    assert!(editor.is_find_replace_enabled());
+    assert!(editor.shows_current_line_highlight());
+    editor.set_find_replace_enabled(false);
+    editor.set_show_current_line_highlight(false);
+    assert!(!editor.is_find_replace_enabled());
+    assert!(!editor.shows_current_line_highlight());
     assert!(editor.set_tab_size(256).is_err());
     assert!(editor.set_tab_size(usize::MAX).is_err());
     assert_eq!(editor.tab_size(), 255);
@@ -151,6 +170,7 @@ fn editing_navigation_diagnostics_and_undo_are_safe() {
             SquiggleKind::new(7),
             0xFF00_00FF,
             "diagnostic",
+            SquiggleStyle::Wave,
         )
         .unwrap();
     assert!(editor.has_squiggles());
@@ -252,6 +272,235 @@ fn two_editors_render_across_multiple_frames() {
     assert_eq!(second.text().unwrap(), "second");
     assert!(first.line_height().is_some_and(|value| value > 0.0));
     assert!(first.glyph_width().is_some_and(|value| value > 0.0));
+}
+
+#[test]
+fn current_line_highlight_tracks_the_visible_text_area_when_moved_and_scrolled() {
+    const HIGHLIGHT: u32 = 0xff63_21a9;
+
+    fn render_highlight(
+        context: &mut Context,
+        editor: &mut TextEditor,
+        host_x: f32,
+    ) -> ([f32; 4], [f32; 4], [f32; 2], f32) {
+        let ui = context.frame();
+        let (text_origin, right_edge) = ui
+            .window("Highlight host")
+            .position([host_x, 40.0], Condition::Always)
+            .size([420.0, 240.0], Condition::Always)
+            .flags(WindowFlags::NO_SAVED_SETTINGS)
+            .build(|| {
+                ui.text_editor(editor, "Source")
+                    .size([380.0, 180.0])
+                    .build()
+                    .unwrap();
+                (
+                    editor
+                        .document_to_screen(ui, Position::default())
+                        .unwrap()
+                        .unwrap(),
+                    ui.item_rect_max()[0],
+                )
+            })
+            .expect("the editor host should be visible");
+
+        let frame = context.render_legacy();
+        let mut highlight = None;
+        for list in frame.draw_lists() {
+            for command in list.commands() {
+                let DrawCmd::Elements { count, cmd_params } = command else {
+                    continue;
+                };
+                let positions: Vec<_> = list.idx_buffer()
+                    [cmd_params.idx_offset..cmd_params.idx_offset + count]
+                    .iter()
+                    .map(|&index| &list.vtx_buffer()[cmd_params.vtx_offset + usize::from(index)])
+                    .filter(|vertex| vertex.col == HIGHLIGHT)
+                    .map(|vertex| vertex.pos)
+                    .collect();
+                if positions.is_empty() {
+                    continue;
+                }
+                assert!(
+                    highlight.is_none(),
+                    "one current line should emit one highlight"
+                );
+                assert_eq!(
+                    positions.len(),
+                    6,
+                    "the highlight should be one filled quad"
+                );
+                let bounds = positions.iter().fold(
+                    [
+                        f32::INFINITY,
+                        f32::INFINITY,
+                        f32::NEG_INFINITY,
+                        f32::NEG_INFINITY,
+                    ],
+                    |[left, top, right, bottom], &[x, y]| {
+                        [left.min(x), top.min(y), right.max(x), bottom.max(y)]
+                    },
+                );
+                highlight = Some((bounds, cmd_params.clip_rect));
+            }
+        }
+        let (bounds, clip) = highlight.expect("the default current-line highlight must be drawn");
+        (bounds, clip, text_origin, right_edge)
+    }
+
+    let mut context = render_context();
+    context.io_mut().set_display_size([1600.0, 600.0]);
+    let mut editor = TextEditor::create(&context);
+    editor.set_text(&"long_line ".repeat(40)).unwrap();
+    editor.set_show_minimap(false);
+    editor.set_word_wrap_enabled(false);
+    assert!(editor.shows_current_line_highlight());
+    assert!(!editor.any_cursor_has_selection());
+    let mut palette = Palette::dark();
+    palette.set(PaletteColor::CurrentLineHighlight, HIGHLIGHT);
+    palette.set(PaletteColor::CurrentLineHighlightBorder, 0);
+    editor.set_palette(&palette).unwrap();
+
+    render_highlight(&mut context, &mut editor, 20.0);
+    let (initial, _, initial_origin, initial_right) =
+        render_highlight(&mut context, &mut editor, 20.0);
+    assert!((initial[0] - initial_origin[0]).abs() < 0.01);
+    assert!((initial[2] - initial_right).abs() < 0.01);
+
+    let (moved, moved_clip, moved_origin, moved_right) =
+        render_highlight(&mut context, &mut editor, 800.0);
+    assert!((moved[0] - initial[0] - 780.0).abs() < 0.01);
+    assert!((moved[2] - initial[2] - 780.0).abs() < 0.01);
+    assert!((moved[0] - moved_origin[0]).abs() < 0.01);
+    assert!((moved[2] - moved_right).abs() < 0.01);
+    assert!(moved[0] >= moved_clip[0] && moved[2] <= moved_clip[2]);
+
+    editor.set_cursor(Position::new(0, 200)).unwrap();
+    render_highlight(&mut context, &mut editor, 800.0);
+    let (scrolled, scrolled_clip, scrolled_origin, _) =
+        render_highlight(&mut context, &mut editor, 800.0);
+    assert!(
+        editor.first_visible_column() > 0,
+        "the fixture must scroll horizontally"
+    );
+    assert!(scrolled_origin[0] < moved_origin[0] - editor.glyph_width().unwrap());
+    assert_eq!(
+        scrolled, moved,
+        "the background must stay fixed as text scrolls"
+    );
+    assert_eq!(scrolled_clip, moved_clip);
+    assert!(!editor.any_cursor_has_selection());
+}
+
+#[test]
+fn screen_coordinates_require_a_visible_render_in_the_current_frame() {
+    let mut context = render_context();
+    let mut editor = TextEditor::create(&context);
+    editor.set_text("alpha\nbeta").unwrap();
+
+    for frame in 0..3 {
+        let ui = context.frame();
+        assert_eq!(
+            editor.document_to_screen(ui, Position::default()).unwrap(),
+            None
+        );
+        ui.window("Coordinate host")
+            .position([20.0, 20.0], Condition::Always)
+            .size([420.0, 240.0], Condition::Always)
+            .flags(WindowFlags::NO_SAVED_SETTINGS)
+            .build(|| {
+                ui.text_editor(&mut editor, "Source")
+                    .size([380.0, 180.0])
+                    .build()
+                    .unwrap();
+                let origin = editor
+                    .document_to_screen(ui, Position::default())
+                    .unwrap()
+                    .expect("visible render should initialize screen coordinates");
+                let adjacent = editor
+                    .document_to_screen(ui, Position::new(0, 1))
+                    .unwrap()
+                    .unwrap();
+                let next_line = editor
+                    .document_to_screen(ui, Position::new(1, 0))
+                    .unwrap()
+                    .unwrap();
+                assert!(origin.iter().all(|coordinate| coordinate.is_finite()));
+                assert!((adjacent[0] - origin[0] - editor.glyph_width().unwrap()).abs() < 0.001);
+                assert!((next_line[1] - origin[1] - editor.line_height().unwrap()).abs() < 0.001);
+
+                if frame == 1 {
+                    editor.set_text("changed\ntext").unwrap();
+                    assert_eq!(
+                        editor.document_to_screen(ui, Position::default()).unwrap(),
+                        None
+                    );
+                } else if frame == 2 {
+                    editor.set_word_wrap_enabled(true);
+                    assert_eq!(
+                        editor.document_to_screen(ui, Position::default()).unwrap(),
+                        None
+                    );
+                }
+            });
+        drop(context.render_legacy());
+    }
+}
+
+#[test]
+fn decorator_width_changes_invalidate_screen_coordinates_until_rendered() {
+    let mut context = render_context();
+    let mut editor = TextEditor::create(&context);
+    editor.set_text("alpha").unwrap();
+    let mut original_x = 0.0;
+    let mut decorated_x = 0.0;
+
+    for frame in 0..5 {
+        let ui = context.frame();
+        ui.window("Decorator coordinate host")
+            .position([20.0, 20.0], Condition::Always)
+            .size([420.0, 240.0], Condition::Always)
+            .flags(WindowFlags::NO_SAVED_SETTINGS)
+            .build(|| {
+                ui.text_editor(&mut editor, "Source")
+                    .size([380.0, 180.0])
+                    .build()
+                    .unwrap();
+                let x = editor
+                    .document_to_screen(ui, Position::default())
+                    .unwrap()
+                    .unwrap()[0];
+                match frame {
+                    0 => {
+                        original_x = x;
+                        editor.set_line_decorator(3, |_, _| {}).unwrap();
+                    }
+                    1 => {
+                        assert!(x > original_x);
+                        decorated_x = x;
+                        editor.set_line_decorator(5, |_, _| {}).unwrap();
+                    }
+                    2 => {
+                        assert!(x > decorated_x);
+                        editor.clear_line_decorator().unwrap();
+                    }
+                    3 => {
+                        assert!((x - original_x).abs() < 0.001);
+                        editor.set_line_decorator(4, |_, _| {}).unwrap();
+                    }
+                    4 => {
+                        assert!(x > original_x);
+                        editor.clear_callbacks().unwrap();
+                    }
+                    _ => unreachable!(),
+                }
+                assert_eq!(
+                    editor.document_to_screen(ui, Position::default()).unwrap(),
+                    None
+                );
+            });
+        drop(context.render_legacy());
+    }
 }
 
 #[test]
@@ -481,6 +730,10 @@ fn unicode_width_queries_cover_fullwidth_ranges_and_table_edges() {
         (0x1100, 2),
         (0x115f, 2),
         (0x1160, 1),
+        (0x2fff, 2),
+        (0x3000, 2),
+        (0x303e, 2),
+        (0x303f, 1),
         (0xfe6b, 2),
         (0xfe6c, 1),
         (0xff00, 1),

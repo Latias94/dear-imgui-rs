@@ -172,6 +172,11 @@ fn context_consumer_captures_managed_texture_bytes_and_binding() {
 
 #[test]
 fn snapshot_preserves_standard_sampler_callbacks() {
+    unsafe extern "C" fn from_texture(
+        _parent_list: *const imgui::sys::ImDrawList,
+        _cmd: *const imgui::sys::ImDrawCmd,
+    ) {
+    }
     unsafe extern "C" fn linear(
         _parent_list: *const imgui::sys::ImDrawList,
         _cmd: *const imgui::sys::ImDrawCmd,
@@ -191,6 +196,8 @@ fn snapshot_preserves_standard_sampler_callbacks() {
             .set_draw_callback_set_sampler_linear_raw(Some(linear));
         ctx.platform_io_mut()
             .set_draw_callback_set_sampler_nearest_raw(Some(nearest));
+        ctx.platform_io_mut()
+            .set_draw_callback_set_sampler_from_texture_raw(Some(from_texture));
     }
     let consumer = ctx.create_detached_renderer_consumer().unwrap();
     let frame = ctx.begin_frame();
@@ -198,6 +205,7 @@ fn snapshot_preserves_standard_sampler_callbacks() {
     unsafe {
         draw_list.add_callback(linear, std::ptr::null_mut(), 0);
         draw_list.add_callback(nearest, std::ptr::null_mut(), 0);
+        draw_list.add_callback(from_texture, std::ptr::null_mut(), 0);
     }
     drop(draw_list);
     let snapshot = frame.render_snapshot(&consumer).unwrap();
@@ -210,6 +218,14 @@ fn snapshot_preserves_standard_sampler_callbacks() {
         list.commands
             .iter()
             .any(|command| matches!(command, imgui::render::DrawCmdSnapshot::SetSamplerNearest))
+    }));
+    assert!(snapshot.draw_data().draw_lists.iter().any(|list| {
+        list.commands.iter().any(|command| {
+            matches!(
+                command,
+                imgui::render::DrawCmdSnapshot::SetSamplerFromTexture
+            )
+        })
     }));
 }
 

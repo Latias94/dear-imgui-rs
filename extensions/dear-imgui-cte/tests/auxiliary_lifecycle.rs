@@ -1,20 +1,15 @@
-use dear_imgui_cte::{
-    CteError, Notifications, TextDiff, dejavu_font_source, noto_sans_sc_font_source,
-};
+use dear_imgui_cte::{CteError, TextDiff, dejavu_font_source, noto_sans_sc_font_source};
 use dear_imgui_rs::{Context, sys};
 
 #[test]
 fn auxiliary_owners_bind_their_context_for_drop_and_restore_the_previous_one() {
     let context_a = Context::create();
     let diff = TextDiff::create(&context_a);
-    let notifications = Notifications::create(&context_a);
     let suspended_a = context_a.suspend_or_panic();
 
     let context_b = Context::create();
     let raw_b = context_b.as_raw();
     drop(diff);
-    assert_eq!(unsafe { sys::igGetCurrentContext() }, raw_b);
-    drop(notifications);
     assert_eq!(unsafe { sys::igGetCurrentContext() }, raw_b);
 
     drop(context_b);
@@ -25,14 +20,12 @@ fn auxiliary_owners_bind_their_context_for_drop_and_restore_the_previous_one() {
 fn dead_owner_drop_does_not_touch_another_context() {
     let context_a = Context::create();
     let diff = TextDiff::create(&context_a);
-    let notifications = Notifications::create(&context_a);
     let suspended_a = context_a.suspend_or_panic();
     drop(suspended_a);
 
     let context_b = Context::create();
     let raw_b = context_b.as_raw();
     drop(diff);
-    drop(notifications);
     assert_eq!(unsafe { sys::igGetCurrentContext() }, raw_b);
     drop(context_b);
 }
@@ -42,14 +35,9 @@ fn auxiliary_instances_have_independent_native_owners() {
     let context = Context::create();
     let first_diff = TextDiff::create(&context);
     let second_diff = TextDiff::create(&context);
-    let first_notifications = Notifications::create(&context);
-    let second_notifications = Notifications::create(&context);
 
     assert_ne!(unsafe { first_diff.as_raw() }, unsafe {
         second_diff.as_raw()
-    });
-    assert_ne!(unsafe { first_notifications.as_raw() }, unsafe {
-        second_notifications.as_raw()
     });
 }
 

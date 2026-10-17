@@ -23,7 +23,7 @@ exclude = [
 ]
 
 [package.metadata.dear-imgui-binding]
-source-revision = "11f13e6cd0f80e83d6409e78592b392967fa7954"
+source-revision = "1894cd216ae360e2423762cc52ea5e619abb7cec"
 
 # docs.rs configuration for offline builds
 [package.metadata.docs.rs]
@@ -41,7 +41,6 @@ tar = { workspace = true, optional = true }
 [build-dependencies]
 bindgen = { workspace = true, optional = true }
 cc.workspace = true
-cmake = "0.1"
 build-support = { workspace = true, features = ["binding-spec"] }
 
 [[bin]]
@@ -62,3 +61,4 @@ freetype = ["dear-imgui-sys/freetype"]
 wasm = ["dear-imgui-sys/wasm"]
 prebuilt = ["build-support/download"]
 build-from-source = []
+native-test-probe = []

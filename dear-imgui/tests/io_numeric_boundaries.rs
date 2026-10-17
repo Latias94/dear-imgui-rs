@@ -34,11 +34,18 @@ fn io_frame_inputs_reject_invalid_values_before_storing() {
     io.set_display_size([0.0, 0.0]);
     io.set_delta_time(0.0);
     io.set_delta_time(1.0 / 60.0);
-    io.set_display_framebuffer_scale([0.0, 2.0]);
+    io.set_display_framebuffer_scale([1.0, 2.0]);
 
     assert_eq!(io.display_size(), [0.0, 0.0]);
     assert_eq!(io.delta_time(), 1.0 / 60.0);
-    assert_eq!(io.display_framebuffer_scale(), [0.0, 2.0]);
+    assert_eq!(io.display_framebuffer_scale(), [1.0, 2.0]);
+
+    for scale in [[0.0, 1.0], [1.0, 0.0]] {
+        assert_panics!({
+            io.set_display_framebuffer_scale(scale);
+        });
+        assert_eq!(io.display_framebuffer_scale(), [1.0, 2.0]);
+    }
 
     assert_panics!({
         io.set_display_size([-1.0, 1.0]);
@@ -58,12 +65,12 @@ fn io_frame_inputs_reject_invalid_values_before_storing() {
     assert_panics!({
         io.set_display_framebuffer_scale([1.0, -0.1]);
     });
-    assert_eq!(io.display_framebuffer_scale(), [0.0, 2.0]);
+    assert_eq!(io.display_framebuffer_scale(), [1.0, 2.0]);
 
     assert_panics!({
         io.set_display_framebuffer_scale([1.0, f32::NAN]);
     });
-    assert_eq!(io.display_framebuffer_scale(), [0.0, 2.0]);
+    assert_eq!(io.display_framebuffer_scale(), [1.0, 2.0]);
 }
 
 #[test]

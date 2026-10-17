@@ -290,7 +290,8 @@ pub(super) unsafe extern "C" fn sdl3_get_window_framebuffer_scale(
     if out_scale.is_null() {
         return;
     }
-    let fallback = sys::ImVec2 { x: 0.0, y: 0.0 };
+    // Dear ImGui 1.93 uses this value for geometry before deferred faults are polled.
+    let fallback = sys::ImVec2 { x: 1.0, y: 1.0 };
     unsafe { out_scale.write(fallback) };
     run_owned_platform_callback(
         PlatformCallbackSlot::GetWindowFramebufferScale,
@@ -301,7 +302,19 @@ pub(super) unsafe extern "C" fn sdl3_get_window_framebuffer_scale(
                 return;
             };
             let mut result = (*live).FramebufferScale;
+            if result.x.is_finite() && result.y.is_finite() && result.x > 0.0 && result.y > 0.0 {
+                out_scale.write(result);
+            }
             if callbacks.invoke_get_window_framebuffer_scale(viewport, &mut result) {
+                if !result.x.is_finite()
+                    || !result.y.is_finite()
+                    || result.x <= 0.0
+                    || result.y <= 0.0
+                {
+                    control.record_platform_state_replaced("Viewport.FramebufferScale");
+                    control.mark_viewport_failed(viewport);
+                    return;
+                }
                 out_scale.write(result);
             }
         },

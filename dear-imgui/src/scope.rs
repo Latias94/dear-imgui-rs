@@ -116,6 +116,7 @@ enum NativeScopeKey {
     StackLayout(WindowScope),
     DrawListClip(usize),
     DrawListTexture(usize),
+    DrawListFlags(usize),
     TableStack,
 }
 
@@ -169,6 +170,10 @@ pub(crate) enum NativeScopePop {
         draw_list: *mut sys::ImDrawList,
         window_scoped: bool,
     },
+    DrawListPopDrawFlag {
+        draw_list: *mut sys::ImDrawList,
+        window_scoped: bool,
+    },
     PopTableBackgroundChannel,
     PopTableColumnChannel,
 }
@@ -218,6 +223,9 @@ impl NativeScopePop {
                 draw_list,
                 window_scoped: _,
             } => NativeScopeKey::DrawListTexture(draw_list as usize),
+            Self::DrawListPopDrawFlag { draw_list, .. } => {
+                NativeScopeKey::DrawListFlags(draw_list as usize)
+            }
         };
         let secondary = match self {
             Self::EndDisabled {
@@ -263,6 +271,10 @@ impl NativeScopePop {
                 ..
             }
             | Self::DrawListPopTexture {
+                window_scoped: true,
+                ..
+            }
+            | Self::DrawListPopDrawFlag {
                 window_scoped: true,
                 ..
             } => true,
@@ -312,6 +324,9 @@ impl NativeScopePop {
                     window_scoped: false,
                     ..
                 } | Self::DrawListPopTexture {
+                    window_scoped: false,
+                    ..
+                } | Self::DrawListPopDrawFlag {
                     window_scoped: false,
                     ..
                 }
@@ -387,6 +402,9 @@ impl NativeScopePop {
                     sys::ImDrawList_PopClipRect(draw_list)
                 }
                 Self::DrawListPopTexture { draw_list, .. } => sys::ImDrawList_PopTexture(draw_list),
+                Self::DrawListPopDrawFlag { draw_list, .. } => {
+                    sys::ImDrawList_PopDrawFlag(draw_list)
+                }
                 Self::PopTableBackgroundChannel => sys::igTablePopBackgroundChannel(),
                 Self::PopTableColumnChannel => sys::igTablePopColumnChannel(),
             }

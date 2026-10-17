@@ -22,7 +22,7 @@ exclude = [
 ]
 
 [package.metadata.dear-imgui-binding]
-source-revision = "8d04820c009357e791e30a004e410c6eb98522d1"
+source-revision = "c7f3d8cc091d39ad55c0233580e6e06774321791"
 
 [package.metadata.docs.rs]
 no-default-features = true
