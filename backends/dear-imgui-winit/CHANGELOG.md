@@ -17,6 +17,10 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 - Add exact-registration pointer control with explicit grab attempts, fallback failures, and release observations for escape, focus loss, close, retirement, and shutdown. Engine ownership suspends Dear ImGui cursor updates for that window.
 - Retain exact native allocations and their owner chains through renderer work leases. Routing retirement rejects new work while submitted frames retain the resources required to present or discard; pending work freezes native owner changes.
 
+### Fixed
+
+- Treat Dear ImGui parent viewport IDs as optional hints: unsupported native hosts leave them unapplied, and Windows permits independent windows when a parent ID does not resolve. Live parents still require this backend's valid native registration, with owner-cycle and pending-work protections preserved.
+
 ## [0.16.0] - 2026-08-14
 
 ### Breaking Changes

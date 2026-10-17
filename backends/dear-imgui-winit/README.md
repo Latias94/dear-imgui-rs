@@ -89,10 +89,11 @@ unknown where Winit lacks native queries. Wayland desktop positioning and second
 remain unsupported.
 
 Windows applies Dear ImGui `ParentViewportId` using top-level native ownership, including
-dynamic owner changes, and advertises `HAS_PARENT_VIEWPORT`. Owner cycles and unavailable
-registrations are rejected. Renderer work using an owned window must retain its owner chain
-until presentation/discard. macOS/X11 report native owner policy as unsupported and leave the
-default main-parent hint unapplied; explicit secondary-parent requests return a typed error.
+dynamic owner changes, and advertises `HAS_PARENT_VIEWPORT`. An unresolved parent viewport hint
+means no native owner; live parents require valid registrations, and owner cycles are rejected.
+Renderer work using an owned window must retain its owner chain until presentation/discard.
+macOS/X11 report native owner policy as unsupported and leave all `ParentViewportId` hints
+unapplied, including explicit WindowClass hints and popup parent chains.
 Per-window icons are unsupported on macOS.
 
 Minimal flow with winit 0.30 ApplicationHandler-style loops:

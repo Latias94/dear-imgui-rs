@@ -1130,6 +1130,86 @@ fn unsupported_viewport_policy_fault_requests_close() {
     assert_eq!(runtime.poll_fault(), Err(error));
 }
 
+#[test]
+fn unresolved_parent_viewport_hint_does_not_require_a_native_owner() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let mut runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
+    let mut viewport = dear_imgui_rs::sys::ImGuiViewport {
+        ID: 0x1234,
+        ParentViewportId: 0x12345678,
+        ..Default::default()
+    };
+    assert!(unsafe { dear_imgui_rs::sys::igFindViewportByID(viewport.ParentViewportId) }.is_null());
+
+    let owner = super::native_owner::resolve_owner(runtime.control(), &mut viewport)
+        .expect("an unresolved Dear ImGui parent hint must allow an independent native window");
+
+    assert!(owner.is_none());
+    assert_eq!(viewport.ParentViewportId, 0x12345678);
+    assert!(!viewport.PlatformRequestClose);
+    assert!(runtime.poll_fault().is_ok());
+    runtime.shutdown(&mut context).unwrap();
+}
+
+#[cfg(not(target_os = "windows"))]
+#[test]
+fn unsupported_native_owner_keeps_all_parent_hints_advisory() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let mut runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
+    assert!(
+        !context
+            .io()
+            .backend_flags()
+            .contains(BackendFlags::HAS_PARENT_VIEWPORT)
+    );
+    let main_id = context.main_viewport().id().raw();
+    let mut viewport = dear_imgui_rs::sys::ImGuiViewport {
+        ID: 0x1234,
+        ..Default::default()
+    };
+    for parent_id in [0, main_id, 0x5678, 0x12345678, viewport.ID] {
+        viewport.ParentViewportId = parent_id;
+        assert!(
+            super::native_owner::resolve_owner(runtime.control(), &mut viewport)
+                .expect("unsupported native ownership must not reject core parent metadata")
+                .is_none()
+        );
+        assert_eq!(viewport.ParentViewportId, parent_id);
+        assert!(!viewport.PlatformRequestClose);
+    }
+    assert!(runtime.poll_fault().is_ok());
+    runtime.shutdown(&mut context).unwrap();
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn native_owner_hints_still_reject_self_and_live_unregistered_parents() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let mut runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
+    let main_id = context.main_viewport().id().raw();
+    let mut viewport = dear_imgui_rs::sys::ImGuiViewport {
+        ID: 0x1234,
+        ParentViewportId: main_id,
+        ..Default::default()
+    };
+    assert!(matches!(
+        super::native_owner::resolve_owner(runtime.control(), &mut viewport),
+        Err(WinitPlatformError::NativeOwnerUnavailable { viewport_id }) if viewport_id == main_id
+    ));
+    viewport.ParentViewportId = viewport.ID;
+    assert!(matches!(
+        super::native_owner::resolve_owner(runtime.control(), &mut viewport),
+        Err(WinitPlatformError::InvalidWindowConfiguration {
+            field: "ParentViewportId",
+            ..
+        })
+    ));
+    runtime.shutdown(&mut context).unwrap();
+}
+
 fn create_headless_secondary_viewport(
     context: &mut Context,
 ) -> *mut dear_imgui_rs::sys::ImGuiViewport {

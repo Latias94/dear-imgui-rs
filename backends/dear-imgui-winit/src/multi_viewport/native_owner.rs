@@ -13,37 +13,36 @@ pub(super) fn resolve_owner(
     control: &RuntimeControl,
     viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
 ) -> Result<Option<(NativeWindowTarget, Arc<Window>)>, WinitPlatformError> {
-    let parent_id = unsafe { (*viewport).ParentViewportId };
-    if parent_id == 0 {
-        return Ok(None);
-    }
-    if parent_id == unsafe { (*viewport).ID } {
-        return Err(WinitPlatformError::InvalidWindowConfiguration {
-            field: "ParentViewportId",
-            reason: "a native window cannot own itself",
-        });
-    }
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = control;
-        // Dear ImGui publishes this default hint even when HAS_PARENT_VIEWPORT is absent.
-        // Unsupported hosts leave that default unapplied, while explicit secondary-owner
-        // requests fail instead of silently modifying a different native relationship.
-        let main = unsafe { dear_imgui_rs::sys::igGetMainViewport() };
-        if !main.is_null() && parent_id == unsafe { (*main).ID } {
-            return Ok(None);
-        }
-        return Err(WinitPlatformError::WindowPolicyUnsupported {
-            policy: "ParentViewportId",
-            operation: "native owner relationship",
-        });
+        // ParentViewportId is advisory even for explicit WindowClass values. Hosts without
+        // HAS_PARENT_VIEWPORT leave all such hints unapplied, including popup parent chains.
+        let _ = (control, viewport);
+        Ok(None)
     }
     #[cfg(target_os = "windows")]
-    registered_window_for_viewport_id(control, parent_id)
-        .map(Some)
-        .ok_or(WinitPlatformError::NativeOwnerUnavailable {
-            viewport_id: parent_id,
-        })
+    {
+        let parent_id = unsafe { (*viewport).ParentViewportId };
+        if parent_id == 0 {
+            return Ok(None);
+        }
+        if parent_id == unsafe { (*viewport).ID } {
+            return Err(WinitPlatformError::InvalidWindowConfiguration {
+                field: "ParentViewportId",
+                reason: "a native window cannot own itself",
+            });
+        }
+        // Match upstream native backends: an unresolved core hint means no native owner.
+        // A live parent still requires this runtime's exact registered allocation below.
+        if unsafe { dear_imgui_rs::sys::igFindViewportByID(parent_id) }.is_null() {
+            return Ok(None);
+        }
+        registered_window_for_viewport_id(control, parent_id)
+            .map(Some)
+            .ok_or(WinitPlatformError::NativeOwnerUnavailable {
+                viewport_id: parent_id,
+            })
+    }
 }
 
 pub(super) fn creation_attributes(
