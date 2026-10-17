@@ -796,10 +796,11 @@ impl ApplicationHandler for App {
             window_id: _window_id,
             event: event.clone(),
         };
-        if let Err(error) = window.imgui.platform.handle_event(
-            &mut window.imgui.context,
-            &full_event,
-        ) {
+        if let Err(error) = window
+            .imgui
+            .platform
+            .handle_event(&mut window.imgui.context, &full_event)
+        {
             web_sys::console::error_1(&JsValue::from_str(&format!(
                 "Winit platform event error: {error}"
             )));
