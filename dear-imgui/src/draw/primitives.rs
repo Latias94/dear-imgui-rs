@@ -2,20 +2,25 @@ use crate::internal::len_i32;
 use crate::sys;
 
 use super::color::ImColor32;
-use super::counts::{DrawCornerFlags, DrawSegmentCount, PolylineFlags};
+use super::counts::{DrawFlags, DrawSegmentCount};
 use super::list::DrawListMut;
 use super::util::{
-    assert_corner_flags, assert_non_negative_f32, assert_polyline_flags, assert_positive_f32,
-    finite_vec2,
+    CORNER_FLAGS, FILL_FLAGS, STROKE_FLAGS, STROKE_POSITION, assert_draw_flags,
+    assert_non_negative_f32, assert_polyline_flags, assert_positive_f32, finite_vec2,
 };
 
-/// Represents a line about to be drawn
+/// Represents a line about to be drawn.
+///
+/// Coordinates describe the stroke center. Dear ImGui 1.93 no longer adds a
+/// half-pixel offset. Use [`DrawFlags::STROKE_LEGACY`] for the previous placement,
+/// or use horizontal/vertical line helpers for integer-aligned UI borders.
 #[must_use = "should call .build() to draw the object"]
 pub struct Line<'ui> {
     p1: [f32; 2],
     p2: [f32; 2],
     color: ImColor32,
     thickness: f32,
+    flags: DrawFlags,
     draw_list: &'ui DrawListMut<'ui>,
 }
 
@@ -34,6 +39,7 @@ impl<'ui> Line<'ui> {
             p2: finite_vec2("Line::new()", "p2", p2).into(),
             color: c.into(),
             thickness: 1.0,
+            flags: DrawFlags::NONE,
             draw_list,
         }
     }
@@ -42,6 +48,15 @@ impl<'ui> Line<'ui> {
     pub fn thickness(mut self, thickness: f32) -> Self {
         assert_positive_f32("Line::thickness()", "thickness", thickness);
         self.thickness = thickness;
+        self
+    }
+
+    /// Configure stroke placement, anti-aliasing, joins, or caps.
+    ///
+    /// These options apply to the outline when this shape can also be filled.
+    pub fn flags(mut self, flags: DrawFlags) -> Self {
+        assert_draw_flags("Line::flags()", flags, STROKE_FLAGS);
+        self.flags = flags;
         self
     }
 
@@ -62,6 +77,7 @@ impl<'ui> Line<'ui> {
                 p2,
                 self.color.into(),
                 self.thickness,
+                self.flags.bits() as sys::ImDrawFlags,
             )
         }
     }
@@ -74,7 +90,7 @@ pub struct Rect<'ui> {
     p2: [f32; 2],
     color: ImColor32,
     rounding: f32,
-    flags: DrawCornerFlags,
+    flags: DrawFlags,
     thickness: f32,
     filled: bool,
     draw_list: &'ui DrawListMut<'ui>,
@@ -95,7 +111,7 @@ impl<'ui> Rect<'ui> {
             p2: finite_vec2("Rect::new()", "p2", p2).into(),
             color: c.into(),
             rounding: 0.0,
-            flags: DrawCornerFlags::ALL,
+            flags: DrawFlags::NONE,
             thickness: 1.0,
             filled: false,
             draw_list,
@@ -122,9 +138,13 @@ impl<'ui> Rect<'ui> {
         self
     }
 
-    /// Set rectangle's corner rounding flags
-    pub fn flags(mut self, flags: DrawCornerFlags) -> Self {
-        assert_corner_flags("Rect::flags()", flags);
+    /// Configure corner rounding, stroke placement, and anti-aliasing
+    pub fn flags(mut self, flags: DrawFlags) -> Self {
+        assert_draw_flags(
+            "Rect::flags()",
+            flags,
+            CORNER_FLAGS | STROKE_FLAGS | FILL_FLAGS,
+        );
         self.flags = flags;
         self
     }
@@ -167,7 +187,10 @@ impl<'ui> Rect<'ui> {
     }
 }
 
-/// Represents a circle about to be drawn
+/// Represents a circle about to be drawn.
+///
+/// Outlines default to an inside stroke. The radius is used as given, without
+/// the half-pixel reduction applied before Dear ImGui 1.93.
 #[must_use = "should call .build() to draw the object"]
 pub struct Circle<'ui> {
     center: [f32; 2],
@@ -175,6 +198,7 @@ pub struct Circle<'ui> {
     color: ImColor32,
     num_segments: DrawSegmentCount,
     thickness: f32,
+    flags: DrawFlags,
     filled: bool,
     draw_list: &'ui DrawListMut<'ui>,
 }
@@ -196,6 +220,7 @@ impl<'ui> Circle<'ui> {
             color: color.into(),
             num_segments: DrawSegmentCount::AUTO,
             thickness: 1.0,
+            flags: DrawFlags::NONE,
             filled: false,
             draw_list,
         }
@@ -205,6 +230,16 @@ impl<'ui> Circle<'ui> {
     pub fn thickness(mut self, thickness: f32) -> Self {
         assert_positive_f32("Circle::thickness()", "thickness", thickness);
         self.thickness = thickness;
+        self
+    }
+
+    /// Configure the stroke position. Has no effect on a filled circle.
+    ///
+    /// Configure anti-aliasing with [`DrawListMut::with_draw_flags`]; the native
+    /// circle implementation does not apply per-circle anti-aliasing flags.
+    pub fn flags(mut self, flags: DrawFlags) -> Self {
+        assert_draw_flags("Circle::flags()", flags, STROKE_POSITION);
+        self.flags = flags;
         self
     }
 
@@ -247,6 +282,7 @@ impl<'ui> Circle<'ui> {
                     self.color.into(),
                     num_segments,
                     self.thickness,
+                    self.flags.bits() as sys::ImDrawFlags,
                 )
             }
         }
@@ -262,6 +298,7 @@ pub struct BezierCurve<'ui> {
     cp1: [f32; 2],
     color: ImColor32,
     thickness: f32,
+    flags: DrawFlags,
     /// If num_segments is not set, the bezier curve is auto-tessalated.
     num_segments: DrawSegmentCount,
     draw_list: &'ui DrawListMut<'ui>,
@@ -287,6 +324,7 @@ impl<'ui> BezierCurve<'ui> {
             pos1: finite_vec2("BezierCurve::new()", "pos1", pos1).into(),
             color: c.into(),
             thickness: 1.0,
+            flags: DrawFlags::NONE,
             num_segments: DrawSegmentCount::AUTO,
             draw_list,
         }
@@ -303,6 +341,15 @@ impl<'ui> BezierCurve<'ui> {
     /// bezier curve is auto-tessalated.
     pub fn num_segments(mut self, num_segments: impl Into<DrawSegmentCount>) -> Self {
         self.num_segments = num_segments.into();
+        self
+    }
+
+    /// Configure stroke placement, anti-aliasing, joins, or caps.
+    ///
+    /// These options apply to the outline when this shape can also be filled.
+    pub fn flags(mut self, flags: DrawFlags) -> Self {
+        assert_draw_flags("BezierCurve::flags()", flags, STROKE_FLAGS);
+        self.flags = flags;
         self
     }
 
@@ -323,6 +370,7 @@ impl<'ui> BezierCurve<'ui> {
                 self.color.into(),
                 self.thickness,
                 self.num_segments.into_i32("BezierCurve::num_segments()"),
+                self.flags.bits() as sys::ImDrawFlags,
             )
         }
     }
@@ -333,7 +381,7 @@ impl<'ui> BezierCurve<'ui> {
 pub struct Polyline<'ui> {
     points: Vec<sys::ImVec2>,
     thickness: f32,
-    flags: PolylineFlags,
+    flags: DrawFlags,
     filled: bool,
     color: ImColor32,
     draw_list: &'ui DrawListMut<'ui>,
@@ -356,7 +404,7 @@ impl<'ui> Polyline<'ui> {
                 .collect(),
             color: c.into(),
             thickness: 1.0,
-            flags: PolylineFlags::NONE,
+            flags: DrawFlags::NONE,
             filled: false,
             draw_list,
         }
@@ -370,8 +418,8 @@ impl<'ui> Polyline<'ui> {
         self
     }
 
-    /// Set polyline flags. Has no effect if shape is filled.
-    pub fn flags(mut self, flags: PolylineFlags) -> Self {
+    /// Configure closure and stroke options, or fill anti-aliasing and joins.
+    pub fn flags(mut self, flags: DrawFlags) -> Self {
         assert_polyline_flags("Polyline::flags()", flags);
         self.flags = flags;
         self
@@ -379,7 +427,7 @@ impl<'ui> Polyline<'ui> {
 
     /// Draw the polyline as a closed shape. Has no effect if shape is filled.
     pub fn closed(mut self, closed: bool) -> Self {
-        self.flags.set(PolylineFlags::CLOSED, closed);
+        self.flags.set(DrawFlags::CLOSED, closed);
         self
     }
 
@@ -399,6 +447,7 @@ impl<'ui> Polyline<'ui> {
                     self.points.as_ptr(),
                     count,
                     self.color.into(),
+                    self.flags.bits() as sys::ImDrawFlags,
                 )
             }
         } else {
@@ -424,6 +473,7 @@ pub struct Triangle<'ui> {
     p3: [f32; 2],
     color: ImColor32,
     thickness: f32,
+    flags: DrawFlags,
     filled: bool,
     draw_list: &'ui DrawListMut<'ui>,
 }
@@ -445,6 +495,7 @@ impl<'ui> Triangle<'ui> {
             p3: finite_vec2("Triangle::new()", "p3", p3).into(),
             color: c.into(),
             thickness: 1.0,
+            flags: DrawFlags::NONE,
             filled: false,
             draw_list,
         }
@@ -460,6 +511,15 @@ impl<'ui> Triangle<'ui> {
     /// Set to `true` to make a filled triangle (default to `false`).
     pub fn filled(mut self, filled: bool) -> Self {
         self.filled = filled;
+        self
+    }
+
+    /// Configure stroke placement, anti-aliasing, joins, or caps.
+    ///
+    /// These options apply to the outline when this shape can also be filled.
+    pub fn flags(mut self, flags: DrawFlags) -> Self {
+        assert_draw_flags("Triangle::flags()", flags, STROKE_FLAGS);
+        self.flags = flags;
         self
     }
 
@@ -497,6 +557,7 @@ impl<'ui> Triangle<'ui> {
                     p3,
                     self.color.into(),
                     self.thickness,
+                    self.flags.bits() as sys::ImDrawFlags,
                 )
             }
         }

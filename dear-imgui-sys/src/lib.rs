@@ -613,6 +613,12 @@ pub struct DearImguiRsPublicAggregateLayoutProbe {
     pub ImGuiPlatformIOMonitorsOffset: usize,
     pub ImGuiPlatformIOTexturesOffset: usize,
     pub ImGuiPlatformIOViewportsOffset: usize,
+    pub ImDrawListSize: usize,
+    pub ImDrawListAlign: usize,
+    pub ImDrawListFlagsStackOffset: usize,
+    pub ImGuiStyleLineEndsOffset: usize,
+    pub ImGuiStyleCurveErrorOffset: usize,
+    pub ImGuiPlatformIOTextureSamplerOffset: usize,
 }
 
 #[cfg(feature = "abi-probe")]

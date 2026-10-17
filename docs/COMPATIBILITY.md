@@ -24,6 +24,12 @@ paths, see [the Apple platform guide](workstreams/apple-platform-support.md).
 - Previous train: unified `v0.8.0` (use `version = "0.8"`).
 - Internal dependency constraints use the compatible current stable minor (`0.20`); prerelease trains use exact requirements. Mixing different release trains across our crates is unsupported.
 
+## Unreleased: Dear ImGui 1.93
+
+The development branch tracks the latest `cimgui/docking_inter` pin (`5d7cc7e12de9a868bbecc00ce2ed74e58d266f1c`), which embeds Dear ImGui **1.93.1 WIP** (`d88f238d1d363ef387382b2e29ad12cf96f826ac`). This includes the 1.93.0 release and subsequent upstream cleanup. All maintained extension wrappers and their nested dependencies follow their updated upstream pins.
+
+This update breaks the custom drawing, style, text-filter, and CTE notification APIs. See the [1.93 migration guide](IMGUI_193_MIGRATION.md). Rebuild custom native archives and Emscripten providers against these pins; old ABI-compatible-looking archives are unsupported. Published 0.20.0 retains its original 1.92.9b baseline. Dependency requirements and MSRV are unchanged.
+
 ## 0.20 Stable Release
 
 All 29 publishable crates move together to `0.20.0`. Use `version = "0.20"` for every workspace crate in an application. Dear ImGui remains v1.92.9b docking, the core MSRV remains Rust 1.92, and development and publishing use Rust 1.99.

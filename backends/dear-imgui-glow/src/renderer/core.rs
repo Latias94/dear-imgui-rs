@@ -7,6 +7,18 @@ use std::ffi::c_void;
 use super::sampler::SamplerObjects;
 use super::texture::{ManagedTextureBinding, ManagedTextureTombstone};
 
+/// Clip origin used by the application-owned OpenGL context.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GlowClipOrigin {
+    /// Matches the OpenGL default and avoids querying GL state during rendering.
+    #[default]
+    LowerLeft,
+    /// Matches `glClipControl(GL_UPPER_LEFT, ...)`.
+    UpperLeft,
+    /// Queries `GL_CLIP_ORIGIN` when the context supports clip control.
+    Auto,
+}
+
 /// Stable marker stored in `BackendRendererUserData` while Glow owns renderer state.
 #[derive(Debug, Default)]
 pub(super) struct GlowBackendUserData {
@@ -44,6 +56,7 @@ pub struct GlowRenderer {
     pub(super) samplers: Option<SamplerObjects>,
     pub(super) gl_version: GlVersion,
     pub(super) has_clip_origin_support: bool,
+    pub(super) clip_origin: GlowClipOrigin,
     pub(super) has_separate_polygon_modes: bool,
     pub(super) has_sampler_object_support: bool,
 
@@ -89,6 +102,19 @@ impl GlowRenderer {
     /// Returns whether the live context supports querying `GL_CLIP_ORIGIN`.
     pub fn supports_clip_origin(&self) -> bool {
         self.has_clip_origin_support
+    }
+
+    /// Returns the configured origin. The default is [`GlowClipOrigin::LowerLeft`].
+    pub fn clip_origin(&self) -> GlowClipOrigin {
+        self.clip_origin
+    }
+
+    /// Matches the projection to the application's `glClipControl()` origin.
+    ///
+    /// This does not call `glClipControl()`. Use [`GlowClipOrigin::Auto`] to query the
+    /// current GL origin during rendering, or select an explicit origin to avoid that query.
+    pub fn set_clip_origin(&mut self, origin: GlowClipOrigin) {
+        self.clip_origin = origin;
     }
 
     /// Returns whether the live context exposes desktop `GL_FRAMEBUFFER_SRGB` control.

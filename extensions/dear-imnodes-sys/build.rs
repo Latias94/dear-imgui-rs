@@ -290,11 +290,21 @@ fn build_with_cc(
     build.include(cimnodes_root.join("imnodes"));
     build.define("IMNODES_NAMESPACE", Some("imnodes"));
     for file_id in ["wrapper", "core", "shim"] {
-        build.file(
-            sources
-                .file(file_id)
-                .unwrap_or_else(|error| panic!("dear-imnodes-sys: {error}")),
-        );
+        let source = sources
+            .file(file_id)
+            .unwrap_or_else(|error| panic!("dear-imnodes-sys: {error}"));
+        if file_id == "core" {
+            let contents = std::fs::read_to_string(&source)
+                .unwrap_or_else(|error| panic!("read {}: {error}", source.display()));
+            let patched = build_support::patch_imnodes_cpp_for_imgui(&contents)
+                .unwrap_or_else(|error| panic!("dear-imnodes-sys: {error}"));
+            let output = cfg.out_dir.join("imnodes-imgui-193.cpp");
+            std::fs::write(&output, patched)
+                .unwrap_or_else(|error| panic!("write {}: {error}", output.display()));
+            build.file(output);
+        } else {
+            build.file(source);
+        }
     }
     if cfg.is_msvc() && cfg.is_windows() {
         build.flag("/EHsc");
@@ -341,7 +351,6 @@ fn main() {
     println!("cargo:rerun-if-env-changed=IMNODES_SYS_PREBUILT_URL");
     println!("cargo:rerun-if-env-changed=IMNODES_SYS_FORCE_BUILD");
     println!("cargo:rerun-if-env-changed=IMNODES_SYS_CACHE_DIR");
-    println!("cargo:rerun-if-env-changed=IMNODES_SYS_USE_CMAKE");
     println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_REGEN_BINDINGS");
     println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_CANDIDATE_SHA");
     println!("cargo:rerun-if-env-changed=DEAR_IMGUI_CORE_ARTIFACT_IDENTITY_HASH");

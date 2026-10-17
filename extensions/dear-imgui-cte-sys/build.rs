@@ -397,6 +397,7 @@ fn build_with_cc(
             build.debug(false).opt_level(2);
         }
         build.flag("/D_ITERATOR_DEBUG_LEVEL=0");
+        build.flag("/utf-8");
     }
 
     native_binding_spec().apply_extension_binding_defines(&mut build, env::vars());
@@ -406,13 +407,24 @@ fn build_with_cc(
         .include(source_root)
         .include(source_root.join("ImGuiColorTextEdit"));
     for source in native_sources {
-        if source.file_name().and_then(|name| name.to_str()) == Some("TextEditor.cpp") {
+        let name = source.file_name().and_then(|name| name.to_str());
+        if matches!(name, Some("TextEditor.cpp" | "TextDiff.cpp")) {
             let contents = fs::read_to_string(source).unwrap_or_else(|error| {
                 panic!("{CRATE_LABEL}: read {}: {error}", source.display())
             });
-            let patched = build_support::patch_cte_text_editor_unicode_range_lookup(&contents)
-                .unwrap_or_else(|error| panic!("{CRATE_LABEL}: {error}"));
-            let output = config.out_dir.join("cte-text-editor-unicode-ranges.cpp");
+            let (patched, output_name) = if name == Some("TextEditor.cpp") {
+                (
+                    build_support::patch_cte_text_editor_unicode_range_lookup(&contents),
+                    "cte-text-editor-unicode-ranges.cpp",
+                )
+            } else {
+                (
+                    build_support::patch_cte_text_diff_draw_flags(&contents),
+                    "cte-text-diff-draw-flags.cpp",
+                )
+            };
+            let patched = patched.unwrap_or_else(|error| panic!("{CRATE_LABEL}: {error}"));
+            let output = config.out_dir.join(output_name);
             fs::write(&output, patched).unwrap_or_else(|error| {
                 panic!("{CRATE_LABEL}: write {}: {error}", output.display())
             });

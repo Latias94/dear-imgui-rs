@@ -21,6 +21,12 @@ regeneration is explicitly requested. `wasm` uses import bindings for the fixed
 `imgui-sys-v1` provider and skips C++ compilation in Cargo; build the provider
 separately with Emscripten.
 
+Native and WebAssembly providers share an `implot3d-draw-flags-v1` source adaptation
+for Dear ImGui 1.93. It updates the internal drawing flags and delegates line texture
+selection to Dear ImGui, preserving fractional widths and framebuffer density while
+avoiding atlas-index overflow on thick lines. The adaptation is part of artifact identity.
+Legend scrolling also requires the plot's window to be hovered, so overlapping windows retain input.
+
 This crate supports multiple ways to obtain the native `dear_implot3d` static library:
 
 - Source build (default)

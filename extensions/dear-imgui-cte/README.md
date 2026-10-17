@@ -1,8 +1,8 @@
 # dear-imgui-cte
 
 Preview safe Rust bindings for ImGuiColorTextEdit through `cimCTE`. The crate
-provides context-bound text editors, text diffs, autocomplete, callbacks, and
-notifications on native and WebAssembly targets.
+provides context-bound text editors, text diffs, autocomplete, and callbacks on
+native and WebAssembly targets.
 
 ## Links
 
@@ -78,8 +78,6 @@ cargo run -p xtask -- web-demo cte
   state. The built-in Trie is attached to and destroyed with its editor.
 - `TextDiff` supports integrated and side-by-side rendering with independent
   language, palette, and display configuration.
-- `Notifications` owns a timed notification queue rendered through the same
-  `Ui` context.
 - `dejavu_font_source` and `noto_sans_sc_font_source` expose bundled fonts through the safe managed atlas
   path without clearing the application's other fonts.
 
@@ -107,7 +105,7 @@ migration, see [the compatibility guide](../../docs/COMPATIBILITY.md#020-stable-
 
 ## Safety and Lifecycle
 
-`TextEditor`, `TextDiff`, and `Notifications` are bound to the `Context` used at
+`TextEditor` and `TextDiff` are bound to the `Context` used at
 creation and are neither `Send` nor `Sync`. Rendering with a `Ui` from another
 context is rejected before FFI. Drop temporarily binds the owner context and
 restores the prior current context. Applications should destroy CTE state before
@@ -151,6 +149,13 @@ outside renderer texture management; prefer `dejavu_font_source`. Native
 glyph/iterator pointer graphs, process-current Context mutation, and raw
 line-break configuration also remain sys-only. Raw callbacks must never unwind
 through the C ABI.
+
+The current upstream removed its notification helper; use an application-owned
+notification UI. `add_squiggle` now takes a `SquiggleStyle`, either `Wave` or
+`Background`. `document_to_screen(ui, position)` returns coordinates only after
+the editor renders visibly in that frame; document or layout changes invalidate
+the cached coordinates. Current-line highlighting and the built-in find/replace
+UI can be toggled independently.
 
 ## License
 

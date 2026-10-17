@@ -927,6 +927,19 @@ impl ExtensionBindingIdentity {
                 "source_overlay",
                 crate::CTE_UNICODE_RANGE_LOOKUP_PATCH_VERSION,
             );
+            hash.field(
+                "text_diff_source_overlay",
+                crate::CTE_TEXT_DIFF_DRAW_FLAGS_PATCH_VERSION,
+            );
+        }
+        if self.extension == ExtensionBinding::ImPlot3d {
+            hash.field("source_overlay", crate::IMPLOT3D_DRAW_FLAGS_PATCH_VERSION);
+        }
+        if self.extension == ExtensionBinding::ImNodes {
+            hash.field("source_overlay", crate::IMNODES_IMGUI_PATCH_VERSION);
+        }
+        if self.extension == ExtensionBinding::ImPlot {
+            hash.field("source_overlay", crate::IMPLOT_IMGUI_PATCH_VERSION);
         }
         hash.finish()
     }
@@ -1426,7 +1439,6 @@ const CTE_FUNCTIONS: &[&str] = &[
     "Glyph_.*",
     "Iterator_.*",
     "Language_.*",
-    "Notifications_.*",
     "Palette_.*",
     "TrieAutoComplete_.*",
     "CodePoint_.*",
@@ -1436,7 +1448,7 @@ const CTE_FUNCTIONS: &[&str] = &[
     "dear_imgui_cte_.*",
 ];
 const CTE_TYPES: &[&str] = &[
-    "(TextEditor|TextDiff|DocPos.*|DocSelection.*|VisPos.*|Glyph|Iterator|Language|Notifications|Palette|TrieAutoComplete|CodePoint|Change|Decorator|CustomCaret|CustomLineNumber|PopupData|AutoComplete.*|LineBreakConfig|Color|BreakOption|Scroll|Type)",
+    "(TextEditor|TextDiff|DocPos.*|DocSelection.*|VisPos.*|Glyph|Iterator|Language|Palette|TrieAutoComplete|CodePoint|Change|Decorator|CustomCaret|CustomLineNumber|PopupData|AutoComplete.*|LineBreakConfig|Color|BreakOption|Scroll|SquiggleStyle)",
     "DearImGuiCte.*",
 ];
 const CTE_BLOCKLIST_TYPES: &[&str] = &[
@@ -1485,8 +1497,8 @@ const CTE_SYMBOLS: &[&str] = &[
     "Iterator_Iterator_Nil",
     "TrieAutoComplete_TrieAutoComplete",
     "TrieAutoComplete_destroy",
-    "Notifications_Notifications",
-    "Notifications_destroy",
+    "TextEditor_DocPos2ScreenPos",
+    "TextEditor_SetShowCurrentLineHighlightEnabled",
     "Palette_Palette",
     "Palette_destroy",
     "Language_Cpp",

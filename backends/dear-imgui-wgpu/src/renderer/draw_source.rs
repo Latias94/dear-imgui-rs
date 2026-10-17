@@ -96,6 +96,7 @@ pub(super) enum DrawCommand<'a> {
     ResetRenderState,
     SetSamplerLinear,
     SetSamplerNearest,
+    SetSamplerFromTexture,
     RawCallback(RawCallbackCommand<'a>),
 }
 
@@ -120,6 +121,7 @@ impl<'a> Iterator for DrawCommands<'a> {
                 DrawCmd::ResetRenderState => DrawCommand::ResetRenderState,
                 DrawCmd::SetSamplerLinear => DrawCommand::SetSamplerLinear,
                 DrawCmd::SetSamplerNearest => DrawCommand::SetSamplerNearest,
+                DrawCmd::SetSamplerFromTexture => DrawCommand::SetSamplerFromTexture,
                 DrawCmd::RawCallback(callback) => DrawCommand::RawCallback(callback),
             },
             Self::Snapshot(commands) => match *commands.next()? {
@@ -139,6 +141,7 @@ impl<'a> Iterator for DrawCommands<'a> {
                 DrawCmdSnapshot::ResetRenderState => DrawCommand::ResetRenderState,
                 DrawCmdSnapshot::SetSamplerLinear => DrawCommand::SetSamplerLinear,
                 DrawCmdSnapshot::SetSamplerNearest => DrawCommand::SetSamplerNearest,
+                DrawCmdSnapshot::SetSamplerFromTexture => DrawCommand::SetSamplerFromTexture,
             },
         })
     }

@@ -280,6 +280,10 @@ impl<'ui> NodeEditorFrame<'ui> {
         })
     }
 
+    /// Returns the upstream zoom value, the inverse of the canvas display scale.
+    ///
+    /// For example, a persisted `view.zoom` of `0.5` displays content at half size
+    /// and is reported here as `2.0`.
     pub fn current_zoom(&self) -> f32 {
         self.with_current("NodeEditorFrame::current_zoom()", || unsafe {
             sys::dne_get_current_zoom()

@@ -50,6 +50,12 @@ struct DearImguiRsLayoutProbe
     size_t ImGuiPlatformIOMonitorsOffset;
     size_t ImGuiPlatformIOTexturesOffset;
     size_t ImGuiPlatformIOViewportsOffset;
+    size_t ImDrawListSize;
+    size_t ImDrawListAlign;
+    size_t ImDrawListFlagsStackOffset;
+    size_t ImGuiStyleLineEndsOffset;
+    size_t ImGuiStyleCurveErrorOffset;
+    size_t ImGuiPlatformIOTextureSamplerOffset;
 };
 
 struct DearImguiRsPlatformIoInvocationProbeResult
@@ -146,6 +152,12 @@ extern "C" int dear_imgui_rs_probe_public_aggregate_layouts(DearImguiRsLayoutPro
     out_probe->ImGuiPlatformIOMonitorsOffset = offsetof(ImGuiPlatformIO, Monitors);
     out_probe->ImGuiPlatformIOTexturesOffset = offsetof(ImGuiPlatformIO, Textures);
     out_probe->ImGuiPlatformIOViewportsOffset = offsetof(ImGuiPlatformIO, Viewports);
+    out_probe->ImDrawListSize = sizeof(ImDrawList);
+    out_probe->ImDrawListAlign = alignof(ImDrawList);
+    out_probe->ImDrawListFlagsStackOffset = offsetof(ImDrawList, _DrawFlagsStack);
+    out_probe->ImGuiStyleLineEndsOffset = offsetof(ImGuiStyle, AntiAliasedLineEnds);
+    out_probe->ImGuiStyleCurveErrorOffset = offsetof(ImGuiStyle, CurveTessellationMaxError);
+    out_probe->ImGuiPlatformIOTextureSamplerOffset = offsetof(ImGuiPlatformIO, DrawCallback_SetSamplerFromTex);
     return 1;
 }
 

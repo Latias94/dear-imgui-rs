@@ -96,4 +96,23 @@ impl PlatformIo {
     pub fn draw_callback_set_sampler_nearest_raw(&self) -> sys::ImDrawCallback {
         self.inner().DrawCallback_SetSamplerNearest
     }
+
+    /// Sets the standard callback requesting a texture's own sampler settings.
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_draw_callback_reset_render_state_raw`].
+    #[doc(alias = "DrawCallback_SetSamplerFromTex")]
+    pub unsafe fn set_draw_callback_set_sampler_from_texture_raw(
+        &mut self,
+        callback: sys::ImDrawCallback,
+    ) {
+        self.inner_mut().DrawCallback_SetSamplerFromTex = callback;
+    }
+
+    /// Gets the standard callback requesting a texture's own sampler settings.
+    #[doc(alias = "DrawCallback_SetSamplerFromTex")]
+    pub fn draw_callback_set_sampler_from_texture_raw(&self) -> sys::ImDrawCallback {
+        self.inner().DrawCallback_SetSamplerFromTex
+    }
 }

@@ -1167,6 +1167,19 @@ impl Sdl3PlatformBackend {
     }
 }
 
+/// Clip origin used by the application-owned OpenGL context.
+#[cfg(feature = "opengl3-renderer")]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Sdl3OpenGl3ClipOrigin {
+    /// OpenGL's lower-left default, without querying driver state.
+    #[default]
+    LowerLeft,
+    /// Matches `glClipControl(GL_UPPER_LEFT, ...)`.
+    UpperLeft,
+    /// Query `GL_CLIP_ORIGIN` when the context supports it.
+    Auto,
+}
+
 /// RAII owner for SDL3 platform + official OpenGL3 renderer backends.
 #[cfg(feature = "opengl3-renderer")]
 #[must_use = "call shutdown for reported cleanup errors, or retain the owner until Context teardown"]
@@ -1437,6 +1450,27 @@ impl Sdl3OpenGl3Backend {
     /// Create OpenGL3 renderer device objects.
     pub fn create_device_objects(&mut self, imgui: &mut Context) -> Result<bool, Sdl3BackendError> {
         run_backend_entry(&self.runtime, imgui, create_opengl3_device_objects)
+    }
+
+    /// Matches rendering to the application's OpenGL clip origin.
+    ///
+    /// Dear ImGui 1.93 defaults to lower-left. Choose `UpperLeft` when the
+    /// application uses `glClipControl(GL_UPPER_LEFT, ...)`, or `Auto` to query
+    /// the driver during rendering. This method configures the renderer; it
+    /// does not change the OpenGL context's clip-control state.
+    pub fn set_clip_origin(
+        &mut self,
+        imgui: &mut Context,
+        origin: Sdl3OpenGl3ClipOrigin,
+    ) -> Result<(), Sdl3BackendError> {
+        let origin = match origin {
+            Sdl3OpenGl3ClipOrigin::LowerLeft => 0x8CA1,
+            Sdl3OpenGl3ClipOrigin::UpperLeft => 0x8CA2,
+            Sdl3OpenGl3ClipOrigin::Auto => 0,
+        };
+        run_backend_entry(&self.runtime, imgui, || unsafe {
+            opengl3_backend::dear_imgui_backend_opengl3_set_clip_origin(origin);
+        })
     }
 
     /// Destroy OpenGL3 renderer device objects.

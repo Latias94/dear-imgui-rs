@@ -10,6 +10,7 @@ pub(crate) enum StandardDrawCallback {
     ResetRenderState,
     SetSamplerLinear,
     SetSamplerNearest,
+    SetSamplerFromTexture,
 }
 
 #[inline]
@@ -47,6 +48,8 @@ pub(crate) fn classify_standard_draw_callback(
         Some(StandardDrawCallback::SetSamplerLinear)
     } else if callback_matches(callback, platform_io.DrawCallback_SetSamplerNearest) {
         Some(StandardDrawCallback::SetSamplerNearest)
+    } else if callback_matches(callback, platform_io.DrawCallback_SetSamplerFromTex) {
+        Some(StandardDrawCallback::SetSamplerFromTexture)
     } else {
         None
     }

@@ -30,4 +30,10 @@ unsafe extern "C" {
     pub fn dear_imgui_backend_opengl3_create_device_objects() -> bool;
     pub fn dear_imgui_backend_opengl3_destroy_device_objects();
     pub fn dear_imgui_backend_opengl3_update_texture(texture: *mut ImTextureData);
+    /// Sets the clip origin after initialization: `GL_LOWER_LEFT` (`0x8CA1`, the default),
+    /// `GL_UPPER_LEFT` (`0x8CA2`), or zero to query `GL_CLIP_ORIGIN` during rendering.
+    ///
+    /// Match the application-owned GL context's `glClipControl()` origin. Dear ImGui 1.93
+    /// defaults to lower-left instead of querying the context automatically.
+    pub fn dear_imgui_backend_opengl3_set_clip_origin(clip_origin: u32);
 }

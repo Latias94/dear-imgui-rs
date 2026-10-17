@@ -160,6 +160,12 @@ impl TextEditor {
         sys::TextEditor_IsReadOnlyEnabled
     );
     bool_property!(
+        set_find_replace_enabled,
+        is_find_replace_enabled,
+        sys::TextEditor_SetFindReplaceEnabled,
+        sys::TextEditor_IsFindReplaceEnabled
+    );
+    bool_property!(
         set_carets_visible,
         are_carets_visible,
         sys::TextEditor_SetCaretsVisible,
@@ -212,6 +218,12 @@ impl TextEditor {
         shows_pan_scroll_indicator,
         sys::TextEditor_SetShowPanScrollIndicatorEnabled,
         sys::TextEditor_IsShowPanScrollIndicatorEnabled
+    );
+    bool_property!(
+        set_show_current_line_highlight,
+        shows_current_line_highlight,
+        sys::TextEditor_SetShowCurrentLineHighlightEnabled,
+        sys::TextEditor_IsShowCurrentLineHighlightEnabled
     );
     layout_bool_property!(
         set_show_matching_brackets,

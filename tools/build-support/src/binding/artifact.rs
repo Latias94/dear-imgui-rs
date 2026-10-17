@@ -198,13 +198,22 @@ pub fn core_source_contract_hash() -> String {
                 "patch-imgui-widgets-numeric-conversions",
                 "defined-numeric-conversions-v2",
             ),
-            ProviderTransform::PatchImnodesFileIo => {
-                ("patch-imnodes-file-io", "imgui-file-handle-v1")
+            ProviderTransform::PatchImnodes => {
+                ("patch-imnodes", crate::IMNODES_IMGUI_PATCH_VERSION)
             }
             ProviderTransform::PatchCteUnicodeRangeLookup => (
                 "patch-cte-unicode-range-lookup",
                 crate::CTE_UNICODE_RANGE_LOOKUP_PATCH_VERSION,
             ),
+            ProviderTransform::PatchCteTextDiffDrawFlags => (
+                "patch-cte-text-diff-draw-flags",
+                crate::CTE_TEXT_DIFF_DRAW_FLAGS_PATCH_VERSION,
+            ),
+            ProviderTransform::PatchImplot3dDrawFlags => (
+                "patch-implot3d-draw-flags",
+                crate::IMPLOT3D_DRAW_FLAGS_PATCH_VERSION,
+            ),
+            ProviderTransform::PatchImplot => ("patch-implot", crate::IMPLOT_IMGUI_PATCH_VERSION),
         }
     }
 

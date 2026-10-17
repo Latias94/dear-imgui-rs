@@ -1,5 +1,69 @@
 use super::*;
 
+#[test]
+fn framebuffer_scale_callback_rejects_invalid_density_before_native_geometry() {
+    let _guard = crate::tests::test_guard();
+    for scale in [
+        [0.0, 1.0],
+        [1.0, 0.0],
+        [-1.0, 1.0],
+        [f32::NAN, 1.0],
+        [1.0, f32::INFINITY],
+    ] {
+        let mut context = Context::create();
+        let mut runtime = synthetic_claimed_registration(
+            &mut context,
+            Rc::new(Cell::new(0)),
+            Rc::new(Cell::new(0)),
+            Rc::new(Cell::new(0)),
+            synthetic_create_window,
+        );
+        let mut viewport = sys::ImGuiViewport::default();
+        viewport.FramebufferScale = sys::ImVec2 { x: 2.0, y: 2.0 };
+        context
+            .binding()
+            .with_bound_context(|| unsafe { create_window_callback_for_test(&mut viewport) });
+
+        FRAMEBUFFER_SCALE_RESULT.with(|result| result.set(scale));
+        let mut actual = sys::ImVec2 { x: 0.0, y: 0.0 };
+        context.binding().with_bound_context(|| unsafe {
+            assert!(
+                sys::ImGuiPlatformIO_InvokePlatformGetWindowFramebufferScale(
+                    sys::igGetPlatformIO_Nil(),
+                    &mut viewport,
+                    &mut actual,
+                )
+            );
+        });
+        FRAMEBUFFER_SCALE_RESULT.with(|result| result.set([1.5, 1.5]));
+
+        assert_eq!([actual.x, actual.y], [2.0, 2.0]);
+        assert!(viewport.PlatformRequestClose);
+        assert!(matches!(
+            runtime.poll_fault(),
+            Err(Sdl3BackendError::PlatformStateReplaced {
+                field: "Viewport.FramebufferScale"
+            })
+        ));
+
+        context.binding().with_bound_context(|| unsafe {
+            assert!(
+                sys::ImGuiPlatformIO_InvokePlatformGetWindowFramebufferScale(
+                    sys::igGetPlatformIO_Nil(),
+                    &mut viewport,
+                    &mut actual,
+                )
+            );
+        });
+        assert_eq!([actual.x, actual.y], [1.0, 1.0]);
+
+        context
+            .binding()
+            .with_bound_context(|| unsafe { destroy_window_callback_for_test(&mut viewport) });
+        runtime.shutdown_platform(&mut context).unwrap();
+    }
+}
+
 #[cfg(any(
     feature = "opengl3-renderer",
     feature = "sdlrenderer3-renderer",

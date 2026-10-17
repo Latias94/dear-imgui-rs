@@ -170,6 +170,51 @@ def write_base_extension_matrix(
 
 
 class CteBindingIdentityTests(unittest.TestCase):
+    def test_implot_identity_matches_the_rust_producer_test_vector(self):
+        vector = json.loads(
+            (REPO_ROOT / "tools/build-support/tests/fixtures/implot_binding_identity.json")
+            .read_text(encoding="utf-8")
+        )
+        spec = PREBUILT.EXTENSION_BY_ID["implot"]
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            binding = root / "extensions/dear-implot-sys/src/bindings_pregenerated.rs"
+            binding.parent.mkdir(parents=True)
+            binding.write_text(vector["provenance"], encoding="utf-8")
+            actual = PREBUILT.expected_extension_binding_identity(root, spec)
+            self.assertEqual(actual, vector["identity"])
+            self.assertNotEqual(actual, vector["unpatched_identity"])
+
+    def test_imnodes_identity_matches_the_rust_producer_test_vector(self):
+        vector = json.loads(
+            (REPO_ROOT / "tools/build-support/tests/fixtures/imnodes_binding_identity.json")
+            .read_text(encoding="utf-8")
+        )
+        spec = PREBUILT.EXTENSION_BY_ID["imnodes"]
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            binding = root / "extensions/dear-imnodes-sys/src/bindings_pregenerated.rs"
+            binding.parent.mkdir(parents=True)
+            binding.write_text(vector["provenance"], encoding="utf-8")
+            actual = PREBUILT.expected_extension_binding_identity(root, spec)
+            self.assertEqual(actual, vector["identity"])
+            self.assertNotEqual(actual, vector["unpatched_identity"])
+
+    def test_implot3d_identity_matches_the_rust_producer_test_vector(self):
+        vector = json.loads(
+            (REPO_ROOT / "tools/build-support/tests/fixtures/implot3d_binding_identity.json")
+            .read_text(encoding="utf-8")
+        )
+        spec = PREBUILT.EXTENSION_BY_ID["implot3d"]
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            binding = root / "extensions/dear-implot3d-sys/src/bindings_pregenerated.rs"
+            binding.parent.mkdir(parents=True)
+            binding.write_text(vector["provenance"], encoding="utf-8")
+            actual = PREBUILT.expected_extension_binding_identity(root, spec)
+            self.assertEqual(actual, vector["identity"])
+            self.assertNotEqual(actual, vector["unpatched_identity"])
+
     def test_identity_matches_the_rust_producer_test_vector(self):
         vector = json.loads(
             (REPO_ROOT / "tools/build-support/tests/fixtures/cte_binding_identity.json")

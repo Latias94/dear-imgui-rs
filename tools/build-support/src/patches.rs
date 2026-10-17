@@ -1073,14 +1073,30 @@ bool ImGui::DataTypeApplyFromText(const char* buf, ImGuiDataType data_type, void
     Ok(restore_cpp_newlines(patched, newline))
 }
 
-/// Patch ImNodes persistence to use Dear ImGui's file-handle abstraction.
+/// Source contract for ImNodes's Dear ImGui 1.93 drawing flags and file handles.
+pub const IMNODES_IMGUI_PATCH_VERSION: &str = "imnodes-imgui-193-v1";
+
+/// Adapt ImNodes drawing flags and persistence to Dear ImGui's current APIs.
 ///
 /// Upstream ImNodes currently assigns `ImFileOpen()` to `FILE*` and calls the
 /// C runtime directly. That is incompatible with `IMGUI_DISABLE_FILE_FUNCTIONS`,
 /// where Dear ImGui intentionally defines `ImFileHandle` as an opaque pointer
 /// and provides fail-closed inline file helpers.
-pub fn patch_imnodes_cpp_for_file_handle(source: &str) -> Result<String, String> {
+pub fn patch_imnodes_cpp_for_imgui(source: &str) -> Result<String, String> {
     let (mut patched, newline) = normalize_cpp_source(source);
+
+    for (old, new, expected) in [
+        ("ImDrawFlags_RoundCornersTop", "ImDrawFlags_RoundTop", 1),
+        ("ImDrawFlags_RoundCornersAll", "ImDrawFlags_RoundAll", 2),
+    ] {
+        let count = patched.matches(old).count();
+        if count != expected {
+            return Err(format!(
+                "ImNodes drawing flags: expected exactly {expected} {old} identifiers, found {count}"
+            ));
+        }
+        patched = patched.replace(old, new);
+    }
 
     patched = replace_cpp_source_once(
         &patched,
@@ -1164,6 +1180,188 @@ pub fn patch_cte_text_editor_unicode_range_lookup(source: &str) -> Result<String
     Ok(restore_cpp_newlines(patched, newline))
 }
 
+/// Source contract for TextDiff's Dear ImGui 1.93 drawing flags.
+pub const CTE_TEXT_DIFF_DRAW_FLAGS_PATCH_VERSION: &str = "cte-text-diff-draw-flags-v1";
+
+/// Rename the three scrollbar corner flags without enabling obsolete Dear ImGui APIs.
+pub fn patch_cte_text_diff_draw_flags(source: &str) -> Result<String, String> {
+    const OLD: &str = "ImDrawFlags_RoundCornersAll";
+    const NEW: &str = "ImDrawFlags_RoundAll";
+    let count = source.matches(OLD).count();
+    if count != 3 {
+        return Err(format!(
+            "CTE TextDiff drawing flags: expected exactly three {OLD} identifiers, found {count}"
+        ));
+    }
+    Ok(source.replace(OLD, NEW))
+}
+
+/// Source contract for ImPlot3D's Dear ImGui 1.93 flags and line-texture selection.
+pub const IMPLOT3D_DRAW_FLAGS_PATCH_VERSION: &str = "implot3d-draw-flags-v1";
+
+/// Source contract for ImPlot drawing with Dear ImGui 1.93.
+pub const IMPLOT_IMGUI_PATCH_VERSION: &str = "implot-imgui-193-v1";
+
+/// Adapt ImPlot line textures, rectangle bounds, and demo coordinates to Dear ImGui 1.93.
+pub fn patch_implot_cpp_for_imgui(source: &str, file_name: &str) -> Result<String, String> {
+    let (source, newline) = normalize_cpp_source(source);
+    if file_name == "implot_demo.cpp" {
+        let source = replace_cpp_source_once(
+            &source,
+            "ImPlot::AddLineV(draw_list, (float)xs[i], (float)lows[i], (float)highs[i], color);",
+            "const ImVec2 low_pos = ImPlot::PlotToPixels(xs[i], lows[i]);\n            const ImVec2 high_pos = ImPlot::PlotToPixels(xs[i], highs[i]);\n            ImPlot::AddLineV(draw_list, low_pos.x, ImMin(low_pos.y, high_pos.y), ImMax(low_pos.y, high_pos.y), color);",
+            "ImPlot demo candlestick wick coordinates",
+        )?;
+        let source = replace_cpp_source_once(
+            &source,
+            "draw_list->AddRectFilled(open_pos, close_pos, color);",
+            "draw_list->AddRectFilled(ImMin(open_pos, close_pos), ImMax(open_pos, close_pos), color);",
+            "ImPlot demo candlestick body bounds",
+        )?;
+        return Ok(restore_cpp_newlines(source, newline));
+    }
+    if file_name != "implot_items.cpp" {
+        return Err(format!("unsupported ImPlot source {file_name}"));
+    }
+    const ORIGINAL: &str = r#"IMPLOT_INLINE void GetLineRenderProps(ImDrawList& draw_list, float& half_weight, ImVec2& tex_uv0, ImVec2& tex_uv1) {
+#if IMGUI_VERSION_NUM >= 19299 || defined(IM_DRAWLIST_TEX_LINES_SAMPLE_COUNT)
+    float fringe;
+    draw_list._SelectLineTexture(half_weight * 2.0f, &tex_uv0, &tex_uv1, &fringe, draw_list.Flags);
+    //tex_uv0.x -= 0.5f * draw_list._Data->FontAtlas->TexUvScale.x; // Changed in features/drawlist_v193 but seems unncessary?
+    //tex_uv1.x -= 0.5f * draw_list._Data->FontAtlas->TexUvScale.x;
+    half_weight += fringe * 0.5f;
+#else
+    const bool aa = ImHasFlag(draw_list.Flags, ImDrawListFlags_AntiAliasedLines) &&
+                    ImHasFlag(draw_list.Flags, ImDrawListFlags_AntiAliasedLinesUseTex);
+    if (aa) {
+        ImVec4 tex_uvs = draw_list._Data->TexUvLines[(int)(half_weight*2)];
+        tex_uv0 = ImVec2(tex_uvs.x, tex_uvs.y);
+        tex_uv1 = ImVec2(tex_uvs.z, tex_uvs.w);
+        half_weight += 1;
+    }
+    else {
+        tex_uv0 = tex_uv1 = draw_list._Data->TexUvWhitePixel;
+    }
+#endif
+}"#;
+    const REPLACEMENT: &str = r#"IMPLOT_INLINE void GetLineRenderProps(ImDrawList& draw_list, float& half_weight, ImVec2& tex_uv0, ImVec2& tex_uv1) {
+    const float thickness = ImMax(2.0f * half_weight, draw_list._FringeScale);
+    const float screen_thickness = ImMax(1.0f, thickness * draw_list._InvFringeScale);
+    float fringe = 0.0f;
+    draw_list._SelectLineTexture(screen_thickness, &tex_uv0, &tex_uv1, &fringe, draw_list.Flags);
+    half_weight = (thickness + fringe) * 0.5f;
+}"#;
+    let patched = replace_cpp_source_once(
+        &source,
+        ORIGINAL,
+        REPLACEMENT,
+        "ImPlot line texture selection",
+    )?;
+    let patched = replace_cpp_source_once(
+        &patched,
+        "draw_list.AddRectFilled(a, b, col);",
+        "draw_list.AddRectFilled(ImMin(a, b), ImMax(a, b), col);",
+        "ImPlot constant heatmap rectangle bounds",
+    )?;
+    let patched = replace_cpp_source_once(
+        &patched,
+        "draw_list.AddRectFilled(pMin, pMax, ImGui::GetColorU32(s.Spec.FillColor));",
+        "draw_list.AddRectFilled(ImMin(pMin, pMax), ImMax(pMin, pMax), ImGui::GetColorU32(s.Spec.FillColor));",
+        "ImPlot digital signal rectangle bounds",
+    )?;
+    Ok(restore_cpp_newlines(patched, newline))
+}
+
+/// Stage an ImPlot3D implementation and its internal header without changing upstream files.
+///
+/// Native and WebAssembly builds share this exact adaptation. The line renderer delegates
+/// atlas selection and anti-alias fringe calculation to Dear ImGui's current implementation.
+pub fn stage_implot3d_draw_flags(
+    source_path: &std::path::Path,
+    out_dir: &std::path::Path,
+) -> Result<std::path::PathBuf, String> {
+    const HEADER: &str = "implot3d-imgui-193-internal.h";
+    let file_name = source_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| format!("invalid ImPlot3D source path {}", source_path.display()))?;
+    if !matches!(
+        file_name,
+        "implot3d.cpp" | "implot3d_items.cpp" | "implot3d_demo.cpp"
+    ) {
+        return Err(format!("unsupported ImPlot3D source {file_name}"));
+    }
+    let header_path = source_path.with_file_name("implot3d_internal.h");
+    let header = std::fs::read_to_string(&header_path)
+        .map_err(|error| format!("read {}: {error}", header_path.display()))?;
+    let header = replace_cpp_source_once(
+        &header,
+        "ImDrawListFlags _Flags;",
+        "ImDrawFlags _Flags;",
+        "ImPlot3D internal draw flags type",
+    )?;
+    let header = replace_cpp_source_once(
+        &header,
+        "ImDrawListFlags_None",
+        "ImDrawFlags_None",
+        "ImPlot3D internal draw flags initializer",
+    )?;
+    let source = std::fs::read_to_string(source_path)
+        .map_err(|error| format!("read {}: {error}", source_path.display()))?;
+    let (source, newline) = normalize_cpp_source(&source);
+    let mut source = replace_cpp_source_once(
+        &source,
+        "#include \"implot3d_internal.h\"",
+        &format!("#include \"{HEADER}\""),
+        "ImPlot3D internal header include",
+    )?;
+    if file_name == "implot3d.cpp" {
+        source = replace_cpp_source_once(
+            &source,
+            "legend.Hovered = legend.Hovered || legend.RectClamped.Contains(IO.MousePos);",
+            "legend.Hovered = legend.Hovered || (ImGui::IsWindowHovered() && legend.RectClamped.Contains(IO.MousePos));",
+            "ImPlot3D legend window hover ownership",
+        )?;
+    }
+    if file_name == "implot3d_items.cpp" {
+        const ORIGINAL: &str = r#"IMPLOT3D_INLINE void GetLineRenderProps(const ImDrawList3D& draw_list_3d, float& half_weight, ImVec2& tex_uv0, ImVec2& tex_uv1) {
+    const bool aa = ImPlot3D::ImHasFlag(draw_list_3d._Flags, ImDrawListFlags_AntiAliasedLines) &&
+                    ImPlot3D::ImHasFlag(draw_list_3d._Flags, ImDrawListFlags_AntiAliasedLinesUseTex);
+    if (aa) {
+        ImVec4 tex_uvs = draw_list_3d._SharedData->TexUvLines[(int)(half_weight * 2)];
+        tex_uv0 = ImVec2(tex_uvs.x, tex_uvs.y);
+        tex_uv1 = ImVec2(tex_uvs.z, tex_uvs.w);
+        half_weight += 1;
+    } else {
+        tex_uv0 = tex_uv1 = draw_list_3d._SharedData->TexUvWhitePixel;
+    }
+}"#;
+        const REPLACEMENT: &str = r#"IMPLOT3D_INLINE void GetLineRenderProps(const ImDrawList3D& draw_list_3d, float& half_weight, ImVec2& tex_uv0, ImVec2& tex_uv1) {
+    ImDrawList* owner = ImGui::GetWindowDrawList();
+    const float thickness = ImMax(2.0f * half_weight, owner->_FringeScale);
+    const float screen_thickness = ImMax(1.0f, thickness * owner->_InvFringeScale);
+    float fringe = 0.0f;
+    owner->_SelectLineTexture(screen_thickness, &tex_uv0, &tex_uv1, &fringe, draw_list_3d._Flags);
+    half_weight = (thickness + fringe) * 0.5f;
+}"#;
+        source = replace_cpp_source_once(
+            &source,
+            ORIGINAL,
+            REPLACEMENT,
+            "ImPlot3D line texture selection",
+        )?;
+    }
+    std::fs::create_dir_all(out_dir)
+        .map_err(|error| format!("create {}: {error}", out_dir.display()))?;
+    let staged_header = out_dir.join(HEADER);
+    std::fs::write(&staged_header, header)
+        .map_err(|error| format!("write {}: {error}", staged_header.display()))?;
+    let output = out_dir.join(format!("imgui-193-{file_name}"));
+    std::fs::write(&output, restore_cpp_newlines(source, newline))
+        .map_err(|error| format!("write {}: {error}", output.display()))?;
+    Ok(output)
+}
+
 fn normalize_cpp_source(source: &str) -> (String, &'static str) {
     let newline = if source.contains("\r\n") {
         "\r\n"
@@ -1199,12 +1397,129 @@ fn replace_cpp_source_once(
 #[cfg(test)]
 mod tests {
     use super::{
-        patch_cte_text_editor_unicode_range_lookup, patch_imgui_cpp_for_safe_demo,
-        patch_imgui_demo_cpp_for_safe_demo,
-        patch_imgui_widgets_cpp_for_defined_numeric_conversions, patch_imnodes_cpp_for_file_handle,
-        patch_test_engine_capture_cpp_for_defined_geometry,
-        patch_test_engine_cpp_for_presentation_abort,
+        patch_cte_text_diff_draw_flags, patch_cte_text_editor_unicode_range_lookup,
+        patch_imgui_cpp_for_safe_demo, patch_imgui_demo_cpp_for_safe_demo,
+        patch_imgui_widgets_cpp_for_defined_numeric_conversions, patch_imnodes_cpp_for_imgui,
+        patch_implot_cpp_for_imgui, patch_test_engine_capture_cpp_for_defined_geometry,
+        patch_test_engine_cpp_for_presentation_abort, stage_implot3d_draw_flags,
     };
+
+    #[test]
+    fn implot_line_texture_patch_matches_upstream_and_rejects_drift() {
+        let source = include_str!(concat!(
+            "../../../extensions/dear-implot-sys/third-party/cimplot/implot/",
+            "implot_items.cpp"
+        ));
+        let patched = patch_implot_cpp_for_imgui(source, "implot_items.cpp").unwrap();
+        assert!(patched.contains("thickness * draw_list._InvFringeScale"));
+        assert!(patched.contains("half_weight = (thickness + fringe) * 0.5f;"));
+        assert!(!patched.contains("draw_list._SelectLineTexture(half_weight * 2.0f,"));
+        assert!(patch_implot_cpp_for_imgui(&patched, "implot_items.cpp").is_err());
+        let drifted = source.replacen("float fringe;", "float fringe = 0.0f;", 1);
+        assert!(patch_implot_cpp_for_imgui(&drifted, "implot_items.cpp").is_err());
+        let crlf = source.replace("\r\n", "\n").replace('\n', "\r\n");
+        assert_eq!(
+            patch_implot_cpp_for_imgui(&crlf, "implot_items.cpp")
+                .unwrap()
+                .replace("\r\n", "\n"),
+            patched.replace("\r\n", "\n")
+        );
+        assert!(patched.contains("AddRectFilled(ImMin(a, b), ImMax(a, b), col)"));
+        assert!(patched.contains("AddRectFilled(ImMin(pMin, pMax), ImMax(pMin, pMax),"));
+        let demo = include_str!(concat!(
+            "../../../extensions/dear-implot-sys/third-party/cimplot/implot/",
+            "implot_demo.cpp"
+        ));
+        let patched_demo = patch_implot_cpp_for_imgui(demo, "implot_demo.cpp").unwrap();
+        assert!(
+            patched_demo.contains("const ImVec2 low_pos = ImPlot::PlotToPixels(xs[i], lows[i]);")
+        );
+        assert!(
+            patched_demo
+                .contains("AddRectFilled(ImMin(open_pos, close_pos), ImMax(open_pos, close_pos),")
+        );
+        assert!(patch_implot_cpp_for_imgui(&patched_demo, "implot_demo.cpp").is_err());
+        let drifted_demo = demo.replacen(
+            "draw_list->AddRectFilled(open_pos, close_pos, color);",
+            "ChangedDrawRect();",
+            1,
+        );
+        assert!(patch_implot_cpp_for_imgui(&drifted_demo, "implot_demo.cpp").is_err());
+    }
+
+    #[test]
+    fn implot3d_draw_flags_staging_matches_upstream_and_rejects_drift() {
+        let source_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../extensions/dear-implot3d-sys/third-party/cimplot3d/implot3d");
+        let output = tempfile::tempdir().unwrap();
+        for name in ["implot3d.cpp", "implot3d_items.cpp", "implot3d_demo.cpp"] {
+            let source = source_root.join(name);
+            let staged = stage_implot3d_draw_flags(&source, output.path()).unwrap();
+            let patched = std::fs::read_to_string(staged).unwrap();
+            assert!(patched.contains("#include \"implot3d-imgui-193-internal.h\""));
+            if name == "implot3d_items.cpp" {
+                assert!(patched.contains("owner->_SelectLineTexture(screen_thickness,"));
+                assert!(!patched.contains("TexUvLines[(int)(half_weight * 2)]"));
+                assert!(!patched.contains("ImDrawListFlags_"));
+            }
+            if name == "implot3d.cpp" {
+                assert!(patched.contains(
+                    "ImGui::IsWindowHovered() && legend.RectClamped.Contains(IO.MousePos)"
+                ));
+            }
+        }
+        let header =
+            std::fs::read_to_string(output.path().join("implot3d-imgui-193-internal.h")).unwrap();
+        assert!(header.contains("ImDrawFlags _Flags;"));
+        assert!(!header.contains("ImDrawListFlags"));
+
+        let drift = tempfile::tempdir().unwrap();
+        let header = std::fs::read_to_string(source_root.join("implot3d_internal.h")).unwrap();
+        let source = std::fs::read_to_string(source_root.join("implot3d_items.cpp")).unwrap();
+        let drift_source = drift.path().join("implot3d_items.cpp");
+        let drift_header = drift.path().join("implot3d_internal.h");
+        std::fs::write(&drift_source, &source).unwrap();
+        std::fs::write(
+            &drift_header,
+            header.replace("ImDrawListFlags _Flags;", "int _Flags;"),
+        )
+        .unwrap();
+        assert!(stage_implot3d_draw_flags(&drift_source, output.path()).is_err());
+        std::fs::write(&drift_header, &header).unwrap();
+        std::fs::write(
+            &drift_source,
+            source.replace("half_weight += 1;", "half_weight += 2;"),
+        )
+        .unwrap();
+        assert!(stage_implot3d_draw_flags(&drift_source, output.path()).is_err());
+        std::fs::write(
+            &drift_source,
+            source.replace("#include \"implot3d_internal.h\"", "#include \"changed.h\""),
+        )
+        .unwrap();
+        assert!(stage_implot3d_draw_flags(&drift_source, output.path()).is_err());
+    }
+
+    #[test]
+    fn cte_text_diff_draw_flags_patch_matches_upstream_and_rejects_drift() {
+        let source = include_str!(concat!(
+            "../../../extensions/dear-imgui-cte-sys/third-party/cimCTE/",
+            "ImGuiColorTextEdit/TextDiff.cpp"
+        ));
+        let patched = patch_cte_text_diff_draw_flags(source).unwrap();
+        assert_eq!(patched.matches("ImDrawFlags_RoundAll").count(), 3);
+        assert!(!patched.contains("ImDrawFlags_RoundCornersAll"));
+        assert!(patch_cte_text_diff_draw_flags(&patched).is_err());
+        let drifted = source.replacen("ImDrawFlags_RoundCornersAll", "ImDrawFlags_RoundNone", 1);
+        assert!(patch_cte_text_diff_draw_flags(&drifted).is_err());
+        let crlf = source.replace("\r\n", "\n").replace('\n', "\r\n");
+        assert_eq!(
+            patch_cte_text_diff_draw_flags(&crlf)
+                .unwrap()
+                .replace("\r\n", "\n"),
+            patched.replace("\r\n", "\n")
+        );
+    }
 
     #[test]
     fn cte_unicode_range_patch_matches_upstream_and_rejects_drift() {
@@ -1465,7 +1780,7 @@ mod tests {
             "../../../extensions/dear-imnodes-sys/third-party/",
             "cimnodes/imnodes/imnodes.cpp"
         ));
-        let patched = patch_imnodes_cpp_for_file_handle(source).unwrap();
+        let patched = patch_imnodes_cpp_for_imgui(source).unwrap();
 
         assert!(patched.contains("ImFileHandle file = ImFileOpen(file_name, \"wt\");"));
         assert!(patched.contains("ImFileWrite(data, sizeof(char), data_size, file);"));
@@ -1473,6 +1788,12 @@ mod tests {
         assert!(!patched.contains("FILE*       file = ImFileOpen(file_name, \"wt\");"));
         assert!(!patched.contains("fwrite(data, sizeof(char), data_size, file);"));
         assert!(!patched.contains("fclose(file);"));
+        assert!(!patched.contains("ImDrawFlags_RoundCorners"));
+        assert_eq!(patched.matches("ImDrawFlags_RoundTop").count(), 1);
+        assert_eq!(patched.matches("ImDrawFlags_RoundAll").count(), 2);
+        assert!(patch_imnodes_cpp_for_imgui(&patched).is_err());
+        let drifted = source.replacen("ImDrawFlags_RoundCornersTop", "ImDrawFlags_RoundNone", 1);
+        assert!(patch_imnodes_cpp_for_imgui(&drifted).is_err());
     }
 
     #[test]
@@ -1483,7 +1804,7 @@ mod tests {
         ));
         let source_lf = checked_in_source.replace("\r\n", "\n");
         let source_crlf = source_lf.replace('\n', "\r\n");
-        let patched = patch_imnodes_cpp_for_file_handle(&source_crlf).unwrap();
+        let patched = patch_imnodes_cpp_for_imgui(&source_crlf).unwrap();
 
         assert!(patched.contains(
             "ImFileWrite(data, sizeof(char), data_size, file);\r\n    ImFileClose(file);"

@@ -27,8 +27,7 @@ fn combo_options_reject_non_independent_flag_bits_before_ffi() {
         imgui::ComboBoxFlags::from_bits_retain(imgui::sys::ImGuiComboFlags_HeightSmall);
     let no_preview_in_flags =
         imgui::ComboBoxFlags::from_bits_retain(imgui::sys::ImGuiComboFlags_NoPreview);
-    let custom_preview_in_flags =
-        imgui::ComboBoxFlags::from_bits_retain(imgui::sys::ImGuiComboFlags_CustomPreview);
+    let unknown_flags = imgui::ComboBoxFlags::from_bits_retain(1 << 30);
 
     let _ = ui.window("Combo flags").build(|| {
         assert!(
@@ -45,7 +44,7 @@ fn combo_options_reject_non_independent_flag_bits_before_ffi() {
         );
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = ui.begin_combo_with_flags("private in flags", "", custom_preview_in_flags);
+                let _ = ui.begin_combo_with_flags("unknown flags", "", unknown_flags);
             }))
             .is_err()
         );

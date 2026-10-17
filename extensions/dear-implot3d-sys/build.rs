@@ -439,11 +439,16 @@ fn build_with_cc(
     build.include(cimplot3d_root.join("implot3d"));
 
     for file_id in ["wrapper", "core", "items", "meshes", "demo"] {
-        build.file(
-            sources
-                .file(file_id)
-                .unwrap_or_else(|error| panic!("dear-implot3d-sys: {error}")),
-        );
+        let source = sources
+            .file(file_id)
+            .unwrap_or_else(|error| panic!("dear-implot3d-sys: {error}"));
+        if matches!(file_id, "core" | "items" | "demo") {
+            let staged = build_support::stage_implot3d_draw_flags(&source, &cfg.out_dir)
+                .unwrap_or_else(|error| panic!("dear-implot3d-sys: {error}"));
+            build.file(staged);
+        } else {
+            build.file(source);
+        }
     }
 
     build_support::compile_cpp_archive(
@@ -461,6 +466,13 @@ fn build_surface_test_probe(
     imgui_src: &Path,
     cimgui_root: &Path,
 ) {
+    // The source-built probe must use the same internal header as maintained native sources,
+    // even when the library itself is selected from a prebuilt artifact.
+    build_support::stage_implot3d_draw_flags(
+        &cimplot3d_root.join("implot3d/implot3d.cpp"),
+        &cfg.out_dir,
+    )
+    .unwrap_or_else(|error| panic!("dear-implot3d-sys: {error}"));
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
     build_support::configure_cpp_runtime_linkage(
@@ -475,6 +487,7 @@ fn build_surface_test_probe(
     native_binding_spec().apply_extension_binding_defines(&mut build, env::vars());
     build.define("IMGUI_DEFINE_MATH_OPERATORS", Some("1"));
     build
+        .include(&cfg.out_dir)
         .include(imgui_src)
         .include(cimgui_root)
         .include(cimplot3d_root)
@@ -517,6 +530,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src/surface_test_probe.cpp");
     println!("cargo:rerun-if-changed=third-party/cimplot3d/cimplot3d.h");
     println!("cargo:rerun-if-changed=third-party/cimplot3d/implot3d/implot3d.h");
+    println!("cargo:rerun-if-changed=third-party/cimplot3d/implot3d/implot3d_internal.h");
     for path in sources.native_candidate_paths() {
         println!("cargo:rerun-if-changed={}", path.display());
     }
@@ -559,10 +573,6 @@ fn main() {
         return;
     }
 
-    if cfg!(feature = "surface-test-probe") && cfg.target_arch != "wasm32" {
-        build_surface_test_probe(&cfg, &cimplot3d_root, &imgui_src, &cimgui_root);
-    }
-
     if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
         if !imgui_src.exists() {
             panic!("ImGui source not found at {:?}", imgui_src);
@@ -575,6 +585,10 @@ fn main() {
         }
         generate_bindings(&cfg, &cimplot3d_root, &imgui_src, &cimgui_root);
         return;
+    }
+
+    if cfg!(feature = "surface-test-probe") && cfg.target_arch != "wasm32" {
+        build_surface_test_probe(&cfg, &cimplot3d_root, &imgui_src, &cimgui_root);
     }
 
     if env::var("IMPLOT3D_SYS_SKIP_CC").is_ok() {

@@ -72,6 +72,7 @@ linked_symbols!(
         dear_imgui_backend_opengl3_create_device_objects,
         dear_imgui_backend_opengl3_destroy_device_objects,
         dear_imgui_backend_opengl3_update_texture,
+        dear_imgui_backend_opengl3_set_clip_origin,
     ]
 );
 

@@ -2,14 +2,12 @@ use crate::internal::len_i32;
 use crate::sys;
 
 use super::super::color::ImColor32;
-use super::super::counts::{
-    DrawCornerFlags, DrawNgonSegmentCount, DrawSegmentCount, PolylineFlags,
-};
+use super::super::counts::{DrawFlags, DrawNgonSegmentCount, DrawSegmentCount};
 use super::super::primitives::{BezierCurve, Circle, Line, Polyline, Rect, Triangle};
 use super::super::util::{
-    assert_arc_fast_steps, assert_corner_flags, assert_finite_f32, assert_non_negative_f32,
-    assert_path_not_empty, assert_polyline_flags, assert_positive_f32, finite_vec2,
-    non_negative_vec2,
+    FILL_FLAGS, STROKE_FLAGS, STROKE_POSITION, assert_arc_fast_steps, assert_corner_flags,
+    assert_draw_flags, assert_finite_f32, assert_non_negative_f32, assert_path_not_empty,
+    assert_polyline_flags, assert_positive_f32, finite_vec2, non_negative_vec2,
 };
 use super::DrawListMut;
 
@@ -29,10 +27,18 @@ impl<'ui> DrawListMut<'ui> {
 
     /// Draw a horizontal line from `min_x` to `max_x` at `y`.
     #[doc(alias = "AddLineH")]
-    pub fn add_line_h<C>(&self, min_x: f32, max_x: f32, y: f32, col: C, thickness: f32)
-    where
+    pub fn add_line_h<C>(
+        &self,
+        min_x: f32,
+        max_x: f32,
+        y: f32,
+        col: C,
+        thickness: f32,
+        flags: DrawFlags,
+    ) where
         C: Into<ImColor32>,
     {
+        assert_draw_flags("DrawListMut::add_line_h()", flags, STROKE_FLAGS);
         assert_finite_f32("DrawListMut::add_line_h()", "min_x", min_x);
         assert_finite_f32("DrawListMut::add_line_h()", "max_x", max_x);
         assert_finite_f32("DrawListMut::add_line_h()", "y", y);
@@ -46,16 +52,25 @@ impl<'ui> DrawListMut<'ui> {
                 y,
                 col.into().into(),
                 thickness,
+                flags.bits() as sys::ImDrawFlags,
             )
         }
     }
 
     /// Draw a vertical line from `min_y` to `max_y` at `x`.
     #[doc(alias = "AddLineV")]
-    pub fn add_line_v<C>(&self, x: f32, min_y: f32, max_y: f32, col: C, thickness: f32)
-    where
+    pub fn add_line_v<C>(
+        &self,
+        x: f32,
+        min_y: f32,
+        max_y: f32,
+        col: C,
+        thickness: f32,
+        flags: DrawFlags,
+    ) where
         C: Into<ImColor32>,
     {
+        assert_draw_flags("DrawListMut::add_line_v()", flags, STROKE_FLAGS);
         assert_finite_f32("DrawListMut::add_line_v()", "x", x);
         assert_finite_f32("DrawListMut::add_line_v()", "min_y", min_y);
         assert_finite_f32("DrawListMut::add_line_v()", "max_y", max_y);
@@ -69,6 +84,7 @@ impl<'ui> DrawListMut<'ui> {
                 max_y,
                 col.into().into(),
                 thickness,
+                flags.bits() as sys::ImDrawFlags,
             )
         }
     }
@@ -261,7 +277,7 @@ impl<'ui> DrawListMut<'ui> {
         rect_min: impl Into<sys::ImVec2>,
         rect_max: impl Into<sys::ImVec2>,
         rounding: f32,
-        flags: DrawCornerFlags,
+        flags: DrawFlags,
     ) {
         let min_vec = finite_vec2("DrawListMut::path_rect()", "rect_min", rect_min);
         let max_vec = finite_vec2("DrawListMut::path_rect()", "rect_max", rect_max);
@@ -355,7 +371,7 @@ impl<'ui> DrawListMut<'ui> {
 
     /// Stroke the current path with the specified color and thickness.
     #[doc(alias = "PathStroke")]
-    pub fn path_stroke(&self, color: impl Into<ImColor32>, flags: PolylineFlags, thickness: f32) {
+    pub fn path_stroke(&self, color: impl Into<ImColor32>, thickness: f32, flags: DrawFlags) {
         assert_polyline_flags("DrawListMut::path_stroke()", flags);
         assert_positive_f32("DrawListMut::path_stroke()", "thickness", thickness);
 
@@ -380,7 +396,8 @@ impl<'ui> DrawListMut<'ui> {
 
     /// Fill the current path as a convex polygon.
     #[doc(alias = "PathFillConvex")]
-    pub fn path_fill_convex(&self, color: impl Into<ImColor32>) {
+    pub fn path_fill_convex(&self, color: impl Into<ImColor32>, flags: DrawFlags) {
+        assert_draw_flags("DrawListMut::path_fill_convex()", flags, FILL_FLAGS);
         unsafe {
             // PathFillConvex is inline: AddConvexPolyFilled(_Path.Data, _Path.Size, col); _Path.Size = 0;
             let draw_list = self.draw_list;
@@ -392,6 +409,7 @@ impl<'ui> DrawListMut<'ui> {
                     path.Data,
                     path.Size,
                     color.into().into(),
+                    flags.bits() as sys::ImDrawFlags,
                 );
                 path.Size = 0; // Clear path after filling
             }
@@ -408,9 +426,11 @@ impl<'ui> DrawListMut<'ui> {
         p4: impl Into<sys::ImVec2>,
         col: C,
         thickness: f32,
+        flags: DrawFlags,
     ) where
         C: Into<ImColor32>,
     {
+        assert_draw_flags("DrawListMut::add_quad()", flags, STROKE_FLAGS);
         let p1 = finite_vec2("DrawListMut::add_quad()", "p1", p1);
         let p2 = finite_vec2("DrawListMut::add_quad()", "p2", p2);
         let p3 = finite_vec2("DrawListMut::add_quad()", "p3", p3);
@@ -418,7 +438,16 @@ impl<'ui> DrawListMut<'ui> {
         assert_positive_f32("DrawListMut::add_quad()", "thickness", thickness);
 
         unsafe {
-            sys::ImDrawList_AddQuad(self.draw_list, p1, p2, p3, p4, col.into().into(), thickness)
+            sys::ImDrawList_AddQuad(
+                self.draw_list,
+                p1,
+                p2,
+                p3,
+                p4,
+                col.into().into(),
+                thickness,
+                flags.bits() as sys::ImDrawFlags,
+            )
         }
     }
 
@@ -443,6 +472,10 @@ impl<'ui> DrawListMut<'ui> {
     }
 
     /// Draw a regular n-gon outline.
+    ///
+    /// `flags` selects the stroke position. Configure anti-aliasing with
+    /// [`Self::with_draw_flags`]; the native implementation does not apply
+    /// per-polygon anti-aliasing flags.
     #[doc(alias = "AddNgon")]
     pub fn add_ngon<C>(
         &self,
@@ -451,9 +484,11 @@ impl<'ui> DrawListMut<'ui> {
         col: C,
         num_segments: DrawNgonSegmentCount,
         thickness: f32,
+        flags: DrawFlags,
     ) where
         C: Into<ImColor32>,
     {
+        assert_draw_flags("DrawListMut::add_ngon()", flags, STROKE_POSITION);
         let center = finite_vec2("DrawListMut::add_ngon()", "center", center);
         assert_non_negative_f32("DrawListMut::add_ngon()", "radius", radius);
         assert_positive_f32("DrawListMut::add_ngon()", "thickness", thickness);
@@ -467,6 +502,7 @@ impl<'ui> DrawListMut<'ui> {
                 col.into().into(),
                 num_segments,
                 thickness,
+                flags.bits() as sys::ImDrawFlags,
             )
         }
     }
@@ -498,6 +534,10 @@ impl<'ui> DrawListMut<'ui> {
     }
 
     /// Draw an ellipse outline.
+    ///
+    /// `flags` selects the stroke position. Configure anti-aliasing with
+    /// [`Self::with_draw_flags`]; the native implementation does not apply
+    /// per-ellipse anti-aliasing flags.
     #[doc(alias = "AddEllipse")]
     pub fn add_ellipse<C>(
         &self,
@@ -507,9 +547,11 @@ impl<'ui> DrawListMut<'ui> {
         rot: f32,
         num_segments: impl Into<DrawSegmentCount>,
         thickness: f32,
+        flags: DrawFlags,
     ) where
         C: Into<ImColor32>,
     {
+        assert_draw_flags("DrawListMut::add_ellipse()", flags, STROKE_POSITION);
         let center = finite_vec2("DrawListMut::add_ellipse()", "center", center);
         let radius = non_negative_vec2("DrawListMut::add_ellipse()", "radius", radius);
         assert_finite_f32("DrawListMut::add_ellipse()", "rot", rot);
@@ -525,6 +567,7 @@ impl<'ui> DrawListMut<'ui> {
                 rot,
                 num_segments,
                 thickness,
+                flags.bits() as sys::ImDrawFlags,
             )
         }
     }
@@ -570,9 +613,11 @@ impl<'ui> DrawListMut<'ui> {
         col: C,
         thickness: f32,
         num_segments: impl Into<DrawSegmentCount>,
+        flags: DrawFlags,
     ) where
         C: Into<ImColor32>,
     {
+        assert_draw_flags("DrawListMut::add_bezier_quadratic()", flags, STROKE_FLAGS);
         let p1 = finite_vec2("DrawListMut::add_bezier_quadratic()", "p1", p1);
         let p2 = finite_vec2("DrawListMut::add_bezier_quadratic()", "p2", p2);
         let p3 = finite_vec2("DrawListMut::add_bezier_quadratic()", "p3", p3);
@@ -594,6 +639,7 @@ impl<'ui> DrawListMut<'ui> {
                 col.into().into(),
                 thickness,
                 num_segments,
+                flags.bits() as sys::ImDrawFlags,
             )
         }
     }

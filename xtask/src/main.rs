@@ -1320,11 +1320,19 @@ fn prepare_wasm_provider_inputs(
         for provider_source in source.provider_sources(&crate_root)? {
             match provider_source.transform {
                 ProviderTransform::Direct => source_files.push(provider_source.path),
+                ProviderTransform::PatchImplot3dDrawFlags => {
+                    source_files.push(
+                        build_support::stage_implot3d_draw_flags(&provider_source.path, out_dir)
+                            .map_err(anyhow::Error::msg)?,
+                    );
+                }
                 ProviderTransform::PatchImguiCore
                 | ProviderTransform::PatchImguiDemo
                 | ProviderTransform::PatchImguiWidgetsNumericConversions
-                | ProviderTransform::PatchImnodesFileIo
-                | ProviderTransform::PatchCteUnicodeRangeLookup => {
+                | ProviderTransform::PatchImnodes
+                | ProviderTransform::PatchCteUnicodeRangeLookup
+                | ProviderTransform::PatchCteTextDiffDrawFlags
+                | ProviderTransform::PatchImplot => {
                     let contents =
                         fs::read_to_string(&provider_source.path).with_context(|| {
                             format!("read provider source {}", provider_source.path.display())
@@ -1341,13 +1349,28 @@ fn prepare_wasm_provider_inputs(
                                 &contents,
                             )
                         }
-                        ProviderTransform::PatchImnodesFileIo => {
-                            build_support::patch_imnodes_cpp_for_file_handle(&contents)
+                        ProviderTransform::PatchImnodes => {
+                            build_support::patch_imnodes_cpp_for_imgui(&contents)
                         }
                         ProviderTransform::PatchCteUnicodeRangeLookup => {
                             build_support::patch_cte_text_editor_unicode_range_lookup(&contents)
                         }
-                        ProviderTransform::Direct => unreachable!(),
+                        ProviderTransform::PatchCteTextDiffDrawFlags => {
+                            build_support::patch_cte_text_diff_draw_flags(&contents)
+                        }
+                        ProviderTransform::PatchImplot => {
+                            build_support::patch_implot_cpp_for_imgui(
+                                &contents,
+                                provider_source
+                                    .path
+                                    .file_name()
+                                    .and_then(|name| name.to_str())
+                                    .context("ImPlot source name")?,
+                            )
+                        }
+                        ProviderTransform::Direct | ProviderTransform::PatchImplot3dDrawFlags => {
+                            unreachable!()
+                        }
                     }
                     .map_err(anyhow::Error::msg)?;
                     let patched_path = out_dir.join(format!(
@@ -1770,10 +1793,11 @@ mod tests {
         assert!(imnodes_source.contains("ImFileHandle file = ImFileOpen"));
         assert!(imnodes_source.contains("ImFileWrite(data, sizeof(char), data_size, file);"));
         assert!(imnodes_source.contains("ImFileClose(file);"));
+        assert!(!imnodes_source.contains("ImDrawFlags_RoundCorners"));
     }
 
     #[test]
-    fn cte_provider_patches_unicode_ranges_and_keeps_text_diff_upstream() {
+    fn cte_provider_patches_unicode_ranges_and_text_diff_draw_flags() {
         let mut inventory = SourceInventory::embedded().clone();
         inventory
             .sources
@@ -1794,16 +1818,74 @@ mod tests {
             )
             .unwrap()
         );
-        assert!(
-            inputs
-                .source_files
-                .contains(&source_root.join("TextDiff.cpp"))
+        let original = source_root.join("TextDiff.cpp");
+        let patched = output.path().join("provider-cte-text-diff-patched.cpp");
+        assert!(!inputs.source_files.contains(&original));
+        assert!(inputs.source_files.contains(&patched));
+        assert_eq!(
+            std::fs::read_to_string(patched).unwrap(),
+            build_support::patch_cte_text_diff_draw_flags(
+                &std::fs::read_to_string(original).unwrap()
+            )
+            .unwrap()
         );
+    }
+
+    #[test]
+    fn implot3d_provider_stages_the_same_internal_header_and_line_renderer() {
+        let mut inventory = SourceInventory::embedded().clone();
+        inventory
+            .sources
+            .retain(|source| source.id == "core" || source.id == "implot3d");
+        let output = tempfile::tempdir().unwrap();
+        let inputs =
+            prepare_wasm_provider_inputs(&inventory, &project_root(), output.path()).unwrap();
+        let source_root =
+            project_root().join("extensions/dear-implot3d-sys/third-party/cimplot3d/implot3d");
+        for name in ["implot3d.cpp", "implot3d_items.cpp", "implot3d_demo.cpp"] {
+            assert!(!inputs.source_files.contains(&source_root.join(name)));
+            assert!(
+                inputs
+                    .source_files
+                    .contains(&output.path().join(format!("imgui-193-{name}")))
+            );
+        }
+        let header =
+            std::fs::read_to_string(output.path().join("implot3d-imgui-193-internal.h")).unwrap();
+        assert!(header.contains("ImDrawFlags _Flags;"));
+        let items =
+            std::fs::read_to_string(output.path().join("imgui-193-implot3d_items.cpp")).unwrap();
+        assert!(items.contains("owner->_SelectLineTexture(screen_thickness,"));
+    }
+
+    #[test]
+    fn implot_provider_uses_density_correct_line_texture_selection() {
+        let mut inventory = SourceInventory::embedded().clone();
+        inventory
+            .sources
+            .retain(|source| source.id == "core" || source.id == "implot");
+        let output = tempfile::tempdir().unwrap();
+        let inputs =
+            prepare_wasm_provider_inputs(&inventory, &project_root(), output.path()).unwrap();
+        let original = project_root()
+            .join("extensions/dear-implot-sys/third-party/cimplot/implot/implot_items.cpp");
+        let patched = output.path().join("provider-implot-items-patched.cpp");
+        assert!(!inputs.source_files.contains(&original));
+        assert!(inputs.source_files.contains(&patched));
+        assert_eq!(
+            std::fs::read_to_string(patched).unwrap(),
+            build_support::patch_implot_cpp_for_imgui(
+                &std::fs::read_to_string(original).unwrap(),
+                "implot_items.cpp"
+            )
+            .unwrap()
+        );
+        let demo = output.path().join("provider-implot-demo-patched.cpp");
+        assert!(inputs.source_files.contains(&demo));
         assert!(
-            !output
-                .path()
-                .join("provider-cte-text-diff-patched.cpp")
-                .exists()
+            std::fs::read_to_string(demo)
+                .unwrap()
+                .contains("const ImVec2 low_pos = ImPlot::PlotToPixels")
         );
     }
 

@@ -1,10 +1,7 @@
 #![cfg(target_arch = "wasm32")]
 
 #[cfg(feature = "cte")]
-use dear_imgui_cte::{
-    CteResult, CteUiExt, Language, NotificationType, Notifications, TextDiff, TextEditor,
-    dejavu_font_source,
-};
+use dear_imgui_cte::{CteResult, CteUiExt, Language, TextDiff, TextEditor, dejavu_font_source};
 use dear_imgui_rs::*;
 use dear_imgui_wgpu::{FramebufferExtent, WgpuRenderer};
 use dear_imgui_winit::WinitPlatform;
@@ -20,7 +17,7 @@ use dear_implot::PlotContext;
 use dear_implot3d::{Axis3DFlags, Plot3DContext, Plot3DFlags, Scatter3DFlags};
 use log::info;
 #[cfg(feature = "cte")]
-use std::{cell::Cell, rc::Rc, time::Duration};
+use std::{cell::Cell, rc::Rc};
 use std::{cell::RefCell, ffi::CStr, sync::Arc};
 use wasm_bindgen::prelude::*;
 use web_time::Instant;
@@ -35,7 +32,6 @@ use winit::{
 struct CteWebState {
     editor: TextEditor,
     diff: TextDiff,
-    notifications: Notifications,
     transaction_count: Rc<Cell<usize>>,
 }
 
@@ -59,17 +55,9 @@ impl CteWebState {
         diff.set_language(Some(Language::Cpp));
         diff.set_side_by_side(true);
 
-        let mut notifications = Notifications::try_create(context)?;
-        notifications.add(
-            NotificationType::Info,
-            "CTE is using the shared WASM provider",
-            Duration::from_secs(4),
-        )?;
-
         Ok(Self {
             editor,
             diff,
-            notifications,
             transaction_count,
         })
     }
@@ -468,13 +456,6 @@ impl AppWindow {
                         "Trie connected: {connected} | transaction events: {}",
                         cte.transaction_count.get()
                     ));
-                    if ui.button("Notify") {
-                        cte.notifications.add(
-                            NotificationType::Success,
-                            "CTE notification from WebAssembly",
-                            Duration::from_secs(3),
-                        )?;
-                    }
                     ui.separator();
                     ui.text_editor(&mut cte.editor, "Source##cte_web")
                         .size([0.0, 280.0])
@@ -489,11 +470,6 @@ impl AppWindow {
                 result
                     .map_err(|error| JsValue::from_str(&format!("render CTE widgets: {error}")))?;
             }
-            ui.notifications(&mut cte.notifications)
-                .build()
-                .map_err(|error| {
-                    JsValue::from_str(&format!("render CTE notifications: {error}"))
-                })?;
         }
 
         #[cfg(feature = "implot")]

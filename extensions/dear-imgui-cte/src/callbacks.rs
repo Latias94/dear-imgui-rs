@@ -330,6 +330,7 @@ impl TextEditor {
             sys::dear_imgui_cte_set_line_decorator(raw, width, Some(decorator_trampoline), userdata)
         })?;
         check_status(OPERATION, status)?;
+        self.invalidate_layout();
         self.callbacks.decorator = Some(slot);
         Ok(())
     }
@@ -340,6 +341,7 @@ impl TextEditor {
             sys::dear_imgui_cte_set_line_decorator(raw, 0, None, ptr::null_mut())
         })?;
         check_status(OPERATION, status)?;
+        self.invalidate_layout();
         self.callbacks.decorator = None;
         Ok(())
     }
@@ -600,6 +602,7 @@ impl TextEditor {
             sys::dear_imgui_cte_text_editor_clear_callbacks(raw)
         })?;
         check_status(OPERATION, status)?;
+        self.invalidate_layout();
         self.callbacks.clear_owned();
         Ok(())
     }

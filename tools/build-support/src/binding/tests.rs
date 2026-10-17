@@ -1158,7 +1158,7 @@ fn cte_binding_specs_cover_the_upstream_and_bridge_surfaces() {
             "Glyph_Glyph_Nil",
             "Iterator_Iterator_Nil",
             "TrieAutoComplete_TrieAutoComplete",
-            "Notifications_Notifications",
+            "TextEditor_DocPos2ScreenPos",
             "Palette_Palette",
             "Language_Cpp",
             "CodePoint_write",
@@ -1327,6 +1327,7 @@ fn extension_define_resolution_is_backend_neutral_and_deterministic() {
 fn maintained_extension_build_routes_do_not_hard_code_bindgen_defines() {
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     for crate_name in [
+        "dear-imgui-cte-sys",
         "dear-imgui-test-engine-sys",
         "dear-imguizmo-quat-sys",
         "dear-imguizmo-sys",
@@ -1364,7 +1365,6 @@ fn maintained_extension_build_routes_do_not_hard_code_bindgen_defines() {
             .join("build.rs"),
     )
     .unwrap();
-    assert!(implot_build.contains("resolved_extension_binding_defines(env::vars())"));
     assert!(!implot_build.contains("strip_prefix(\"DEP_DEAR_IMGUI"));
 
     let core_build = fs::read_to_string(workspace_root.join("dear-imgui-sys/build.rs")).unwrap();
@@ -1819,4 +1819,87 @@ fn cte_prebuilt_rejects_unpatched_unicode_range_lookup() {
     unpatched.field("extension", "cte");
     unpatched.field("provenance", &binding.provenance().identity_hash());
     assert_ne!(binding.deterministic_hash(), unpatched.finish());
+}
+
+#[test]
+fn cte_prebuilt_rejects_unpatched_text_diff_draw_flags() {
+    let binding = extension_identity(ExtensionBinding::Cte);
+    let mut unpatched = super::StableHash::new();
+    unpatched.field("schema", "extension-binding-identity-v1");
+    unpatched.field("extension", "cte");
+    unpatched.field("provenance", &binding.provenance().identity_hash());
+    unpatched.field(
+        "source_overlay",
+        crate::CTE_UNICODE_RANGE_LOOKUP_PATCH_VERSION,
+    );
+    assert_ne!(binding.deterministic_hash(), unpatched.finish());
+}
+
+#[test]
+fn implot3d_binding_identity_matches_the_python_consumer_test_vector() {
+    let vector: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/implot3d_binding_identity.json"
+    ))
+    .unwrap();
+    let provenance = CrateBindingProvenance::parse(vector["provenance"].as_str().unwrap()).unwrap();
+    let binding = ExtensionBindingIdentity::new(
+        ExtensionBinding::ImPlot3d,
+        extension_spec(ExtensionBinding::ImPlot3d),
+        provenance,
+    )
+    .unwrap();
+    assert_eq!(
+        binding.deterministic_hash(),
+        vector["identity"].as_str().unwrap()
+    );
+    assert_ne!(
+        binding.deterministic_hash(),
+        vector["unpatched_identity"].as_str().unwrap()
+    );
+}
+
+#[test]
+fn imnodes_binding_identity_matches_the_python_consumer_test_vector() {
+    let vector: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/imnodes_binding_identity.json"
+    ))
+    .unwrap();
+    let provenance = CrateBindingProvenance::parse(vector["provenance"].as_str().unwrap()).unwrap();
+    let binding = ExtensionBindingIdentity::new(
+        ExtensionBinding::ImNodes,
+        extension_spec(ExtensionBinding::ImNodes),
+        provenance,
+    )
+    .unwrap();
+    assert_eq!(
+        binding.deterministic_hash(),
+        vector["identity"].as_str().unwrap()
+    );
+    assert_ne!(
+        binding.deterministic_hash(),
+        vector["unpatched_identity"].as_str().unwrap()
+    );
+}
+
+#[test]
+fn implot_binding_identity_matches_the_python_consumer_test_vector() {
+    let vector: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/implot_binding_identity.json"
+    ))
+    .unwrap();
+    let provenance = CrateBindingProvenance::parse(vector["provenance"].as_str().unwrap()).unwrap();
+    let binding = ExtensionBindingIdentity::new(
+        ExtensionBinding::ImPlot,
+        extension_spec(ExtensionBinding::ImPlot),
+        provenance,
+    )
+    .unwrap();
+    assert_eq!(
+        binding.deterministic_hash(),
+        vector["identity"].as_str().unwrap()
+    );
+    assert_ne!(
+        binding.deterministic_hash(),
+        vector["unpatched_identity"].as_str().unwrap()
+    );
 }

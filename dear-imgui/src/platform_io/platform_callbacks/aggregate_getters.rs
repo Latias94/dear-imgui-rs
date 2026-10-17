@@ -210,6 +210,8 @@ impl PlatformIo {
     /// # Safety
     ///
     /// See [`Self::set_platform_get_window_pos_raw`].
+    /// The callback must write a finite, strictly positive scale on both axes,
+    /// including when the viewport is minimized or has a zero-sized framebuffer.
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_get_window_framebuffer_scale_raw(
         &mut self,
@@ -261,6 +263,7 @@ impl PlatformIo {
     ///
     /// See [`Self::set_platform_get_window_framebuffer_scale_raw`] for why this path must go
     /// through the out-parameter shim.
+    /// The callback must write a finite, strictly positive scale on both axes.
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_get_window_framebuffer_scale(
         &mut self,

@@ -34,8 +34,8 @@ exclude = [
 ]
 
 [package.metadata.dear-imgui-binding]
-source-revision = "3cdee0b5e1d8f0a59a40fda80c4a6b894d752240"
-nested-source-revision = "f28136480fa4091164e0b528dc9cca147c5a6ee9"
+source-revision = "3333a9bd3b7b881a0c34d8abbd97c8ab2c60ea3f"
+nested-source-revision = "b12d713e77e8edddff1e69973f67085ac9cfaf74"
 
 [package.metadata.docs.rs]
 no-default-features = true

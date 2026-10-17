@@ -6,6 +6,7 @@ use super::DrawListMut;
 enum StandardSampler {
     Linear,
     Nearest,
+    FromTexture,
 }
 
 impl StandardSampler {
@@ -13,6 +14,7 @@ impl StandardSampler {
         match self {
             Self::Linear => "linear",
             Self::Nearest => "nearest",
+            Self::FromTexture => "from_texture",
         }
     }
 }
@@ -30,6 +32,7 @@ impl DrawListMut<'_> {
                 match sampler {
                     StandardSampler::Linear => (*platform_io).DrawCallback_SetSamplerLinear,
                     StandardSampler::Nearest => (*platform_io).DrawCallback_SetSamplerNearest,
+                    StandardSampler::FromTexture => (*platform_io).DrawCallback_SetSamplerFromTex,
                 }
             }
             .unwrap_or_else(|| {
@@ -70,5 +73,15 @@ impl DrawListMut<'_> {
     #[doc(alias = "DrawCallback_SetSamplerNearest")]
     pub fn set_sampler_nearest(&self) {
         self.set_standard_sampler(StandardSampler::Nearest);
+    }
+
+    /// Insert the standard renderer command that restores each texture's sampler.
+    ///
+    /// Subsequent draws use the sampler associated with their texture until a sampler
+    /// override, renderer-state reset, or raw callback changes the binding. Panics before
+    /// modifying the draw list if the active renderer does not advertise this callback.
+    #[doc(alias = "DrawCallback_SetSamplerFromTex")]
+    pub fn set_sampler_from_texture(&self) {
+        self.set_standard_sampler(StandardSampler::FromTexture);
     }
 }

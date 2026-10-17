@@ -1,6 +1,6 @@
 use crate::{EditorConfig, EditorConfigSnapshot, NodeEditorStyle, StyleColor, sys};
 use dear_imgui_rs::{Context as ImGuiContext, ContextBinding, ContextId};
-use std::{ffi::c_void, ptr};
+use std::{cell::Cell, ffi::c_void, ptr};
 
 /// Errors returned by the node-editor safe layer.
 #[derive(Debug, thiserror::Error)]
@@ -16,6 +16,7 @@ pub struct EditorContext {
     config: EditorConfigSnapshot,
     _settings_file: Option<std::ffi::CString>,
     _callbacks: Option<Box<crate::config::CallbackState>>,
+    pub(crate) frame_active: Cell<bool>,
 }
 
 impl EditorContext {
@@ -48,6 +49,7 @@ impl EditorContext {
             config: config_snapshot,
             _settings_file: config.settings_file.take(),
             _callbacks: config.callbacks.take(),
+            frame_active: Cell::new(false),
         })
     }
 
@@ -477,6 +479,294 @@ mod tests {
             editor.end();
         });
         drop(imgui.render_legacy());
+    }
+
+    #[test]
+    fn node_background_requires_an_ended_node_submitted_in_the_current_frame() {
+        let _guard = test_guard();
+        let mut imgui = ImGuiContext::create();
+        imgui.io_mut().set_display_size([640.0, 480.0]);
+        imgui.io_mut().set_delta_time(1.0 / 60.0);
+        imgui
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("headless test requires the legacy font-atlas capability")
+            .build();
+        let context = EditorContext::create(&imgui);
+        let node_id = NodeId::new(1);
+
+        for frame_index in 0..2 {
+            let ui = imgui.frame();
+            ui.window("node-background-contract")
+                .size([500.0, 350.0], dear_imgui_rs::Condition::Always)
+                .build(|| {
+                    let frame = ui.node_editor(&context, "background", [400.0, 260.0]);
+                    assert!(frame.node_background_draw_list(node_id).is_none());
+                    if frame_index == 0 {
+                        let node = frame.begin_node(node_id);
+                        ui.text("Node");
+                        assert!(
+                            catch_unwind(AssertUnwindSafe(|| {
+                                let _ = frame.node_background_draw_list(node_id);
+                            }))
+                            .is_err()
+                        );
+                        assert!(
+                            catch_unwind(AssertUnwindSafe(|| {
+                                let _ = frame.begin_group_hint(node_id);
+                            }))
+                            .is_err()
+                        );
+                        node.end();
+                        assert!(frame.node_background_draw_list(node_id).is_some());
+                    }
+                    frame.end();
+                });
+            drop(imgui.render_legacy());
+        }
+    }
+
+    #[test]
+    fn group_hint_scopes_reject_reentry_without_ending_the_active_hint() {
+        let _guard = test_guard();
+        let mut imgui = ImGuiContext::create();
+        imgui.io_mut().set_display_size([640.0, 480.0]);
+        imgui.io_mut().set_delta_time(1.0 / 60.0);
+        imgui
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .expect("headless test requires the legacy font-atlas capability")
+            .build();
+
+        struct ZoomedOutSettings;
+        impl crate::SettingsHandler for ZoomedOutSettings {
+            fn load_settings(&mut self) -> Option<Vec<u8>> {
+                Some(br#"{"view":{"zoom":0.5}}"#.to_vec())
+            }
+        }
+        let context = EditorContext::create_with_config(
+            &imgui,
+            EditorConfig::new().settings_handler(ZoomedOutSettings),
+        );
+        let node_id = NodeId::new(1);
+        let ui = imgui.frame();
+        ui.window("group-hint-contract")
+            .size([500.0, 350.0], dear_imgui_rs::Condition::Always)
+            .build(|| {
+                let frame = ui.node_editor(&context, "hints", [400.0, 260.0]);
+                // Upstream reports the inverse of the persisted canvas scale.
+                assert!((frame.current_zoom() - 2.0).abs() < 0.001);
+                assert!(frame.begin_group_hint(NodeId::new(999)).is_none());
+                let node = frame.begin_node(node_id);
+                frame.group([100.0, 80.0]);
+                node.end();
+
+                let hint = frame
+                    .begin_group_hint(node_id)
+                    .expect("zoomed-out group has a hint");
+                let min = hint.min();
+                let max = hint.max();
+                assert!(
+                    catch_unwind(AssertUnwindSafe(|| {
+                        let _ = frame.begin_group_hint(node_id);
+                    }))
+                    .is_err()
+                );
+                assert!(
+                    catch_unwind(AssertUnwindSafe(|| {
+                        let _ = frame.begin_node(NodeId::new(2));
+                    }))
+                    .is_err()
+                );
+                assert!(
+                    catch_unwind(AssertUnwindSafe(|| {
+                        let _ = frame.node_background_draw_list(node_id);
+                    }))
+                    .is_err()
+                );
+                assert_eq!(hint.min(), min);
+                assert_eq!(hint.max(), max);
+                hint.end();
+
+                frame.begin_group_hint(node_id).unwrap().end();
+                frame.begin_node(NodeId::new(2)).end();
+                frame.end();
+            });
+        drop(imgui.render_legacy());
+    }
+
+    #[test]
+    fn deletion_candidates_must_be_queried_and_consumed_once() {
+        let _guard = test_guard();
+        let mut imgui = ImGuiContext::create();
+        imgui.io_mut().set_display_size([640.0, 480.0]);
+        imgui.io_mut().set_delta_time(1.0 / 60.0);
+        imgui
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        let context = EditorContext::create(&imgui);
+        let first = NodeId::new(1);
+        let second = NodeId::new(2);
+        for frame_index in 0..2 {
+            let ui = imgui.frame();
+            ui.window("delete-candidate-contract")
+                .size([500.0, 350.0], dear_imgui_rs::Condition::Always)
+                .build(|| {
+                    let frame = ui.node_editor(&context, "delete", [400.0, 260.0]);
+                    frame.node(first, |_| ui.text("First"));
+                    frame.node(second, |_| ui.text("Second"));
+                    if frame_index == 0 {
+                        assert!(frame.delete_node(first));
+                        assert!(frame.delete_node(second));
+                    } else {
+                        let delete = frame
+                            .begin_delete()
+                            .expect("queued nodes should be offered");
+                        assert!(
+                            catch_unwind(AssertUnwindSafe(|| delete.accept_deleted_item(true)))
+                                .is_err()
+                        );
+                        assert!(
+                            catch_unwind(AssertUnwindSafe(|| delete.reject_deleted_item()))
+                                .is_err()
+                        );
+                        assert!(catch_unwind(AssertUnwindSafe(|| frame.begin_delete())).is_err());
+                        assert_eq!(delete.query_deleted_node(), Some(first));
+                        assert!(delete.accept_deleted_item(true));
+                        assert!(
+                            catch_unwind(AssertUnwindSafe(|| delete.accept_deleted_item(true)))
+                                .is_err()
+                        );
+                        assert_eq!(delete.query_deleted_node(), Some(second));
+                        delete.reject_deleted_item();
+                        assert!(
+                            catch_unwind(AssertUnwindSafe(|| delete.reject_deleted_item()))
+                                .is_err()
+                        );
+                        assert_eq!(delete.query_deleted_node(), None);
+                        assert!(
+                            catch_unwind(AssertUnwindSafe(|| delete.accept_deleted_item(true)))
+                                .is_err()
+                        );
+                        assert!(
+                            catch_unwind(AssertUnwindSafe(|| delete.reject_deleted_item()))
+                                .is_err()
+                        );
+                        delete.end();
+                    }
+                    assert!(frame.begin_create([1.0; 4], 1.0).is_none());
+                    assert!(frame.begin_create([1.0; 4], 1.0).is_none());
+                    frame.end();
+                });
+            drop(imgui.render_legacy());
+        }
+    }
+
+    #[test]
+    fn pin_ids_are_unique_per_editor_begin_and_reusable_after_it_ends() {
+        let _guard = test_guard();
+        let mut imgui = ImGuiContext::create();
+        imgui.io_mut().set_display_size([640.0, 480.0]);
+        imgui.io_mut().set_delta_time(1.0 / 60.0);
+        imgui
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        let context = EditorContext::create(&imgui);
+        let pin_id = PinId::new(11);
+        for _ in 0..2 {
+            let ui = imgui.frame();
+            ui.window("unique-pin-contract")
+                .size([500.0, 350.0], dear_imgui_rs::Condition::Always)
+                .build(|| {
+                    for _ in 0..2 {
+                        let frame = ui.node_editor(&context, "pins", [200.0, 100.0]);
+                        assert!(
+                            catch_unwind(AssertUnwindSafe(|| {
+                                let _ = ui.node_editor(&context, "nested", [20.0, 20.0]);
+                            }))
+                            .is_err()
+                        );
+                        let node = frame.begin_node(NodeId::new(1));
+                        let pin = node.begin_pin(pin_id, PinKind::Output);
+                        ui.text("Output");
+                        assert!(
+                            catch_unwind(AssertUnwindSafe(
+                                || node.begin_pin(PinId::new(12), PinKind::Output)
+                            ))
+                            .is_err()
+                        );
+                        assert!(
+                            catch_unwind(AssertUnwindSafe(|| frame.group([20.0, 20.0]))).is_err()
+                        );
+                        pin.end();
+                        assert!(
+                            catch_unwind(AssertUnwindSafe(
+                                || node.begin_pin(pin_id, PinKind::Output)
+                            ))
+                            .is_err()
+                        );
+                        node.end();
+                        let second = frame.begin_node(NodeId::new(2));
+                        assert!(
+                            catch_unwind(AssertUnwindSafe(
+                                || second.begin_pin(pin_id, PinKind::Input)
+                            ))
+                            .is_err()
+                        );
+                        second.end();
+                        frame.end();
+                    }
+                });
+            drop(imgui.render_legacy());
+        }
+    }
+
+    #[test]
+    fn frame_and_phase_guard_panics_unwind_tokens_before_reusing_the_editor() {
+        let _guard = test_guard();
+        let mut imgui = ImGuiContext::create();
+        imgui.io_mut().set_display_size([640.0, 480.0]);
+        imgui.io_mut().set_delta_time(1.0 / 60.0);
+        imgui
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        let context = EditorContext::create(&imgui);
+        let ui = imgui.frame();
+        ui.window("guard-unwind-contract")
+            .size([500.0, 350.0], dear_imgui_rs::Condition::Always)
+            .build(|| {
+                for reject_frame_reentry in [true, false] {
+                    assert!(
+                        catch_unwind(AssertUnwindSafe(|| {
+                            let frame = ui.node_editor(&context, "unwind", [200.0, 80.0]);
+                            let node = frame.begin_node(NodeId::new(1));
+                            let _pin = node.begin_pin(PinId::new(11), PinKind::Output);
+                            ui.text("Output");
+                            if reject_frame_reentry {
+                                let _ = ui.node_editor(&context, "nested", [20.0, 20.0]);
+                            } else {
+                                let _ = frame.begin_delete();
+                            }
+                        }))
+                        .is_err()
+                    );
+                    assert!(!context.frame_active.get());
+                }
+                let frame = ui.node_editor(&context, "unwind", [200.0, 80.0]);
+                let node = frame.begin_node(NodeId::new(1));
+                node.begin_pin(PinId::new(11), PinKind::Output).end();
+                node.end();
+                frame.end();
+                assert!(!context.frame_active.get());
+            });
+        drop(imgui.render_legacy());
+        drop(context);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use super::core::NodeEditorFrame;
+use super::core::{BuildPhase, NodeEditorFrame};
 use super::validation::{
     assert_finite_f32, assert_finite_rect, assert_finite_vec2, assert_finite_vec4,
     assert_non_negative_finite_f32, assert_non_negative_finite_vec2, assert_style_var_type,
@@ -8,15 +8,27 @@ use crate::{
     StyleVar, StyleVarType, from_vec2, sys, vec2, vec4,
 };
 use dear_imgui_rs::{DrawListMut, Ui};
-use std::{cell::Cell, marker::PhantomData, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashSet,
+    marker::PhantomData,
+    rc::Rc,
+};
 
 impl<'ui> NodeEditorFrame<'ui> {
     pub fn begin_node<'a>(&'a self, node: NodeId) -> NodeToken<'a> {
+        assert!(
+            self.phase.get() == BuildPhase::Idle,
+            "NodeEditorFrame::begin_node() requires the current node or group hint to be ended"
+        );
         self.with_current("NodeEditorFrame::begin_node()", || unsafe {
             sys::dne_begin_node(node.raw())
         });
+        self.phase.set(BuildPhase::Node);
         NodeToken {
             editor: self._editor,
+            phase: &self.phase,
+            submitted_pins: &self.submitted_pins,
             ended: false,
             _not_send_sync: PhantomData,
         }
@@ -30,23 +42,40 @@ impl<'ui> NodeEditorFrame<'ui> {
     }
 
     pub fn begin_group_hint<'a>(&'a self, node: NodeId) -> Option<GroupHintToken<'a>> {
+        assert!(
+            self.phase.get() == BuildPhase::Idle,
+            "NodeEditorFrame::begin_group_hint() requires the current node or group hint to be ended"
+        );
         self.with_current("NodeEditorFrame::begin_group_hint()", || unsafe {
             sys::dne_begin_group_hint(node.raw())
         })
-        .then_some(GroupHintToken {
-            editor: self._editor,
-            ui: self._ui,
-            ended: false,
-            _not_send_sync: PhantomData,
+        .then(|| {
+            self.phase.set(BuildPhase::GroupHint);
+            GroupHintToken {
+                editor: self._editor,
+                ui: self._ui,
+                phase: &self.phase,
+                ended: false,
+                _not_send_sync: PhantomData,
+            }
         })
     }
 
-    pub fn node_background_draw_list(&self, node: NodeId) -> DrawListMut<'_> {
+    /// Returns a node's background draw list after that node has been ended.
+    ///
+    /// Returns `None` when the node was not submitted in this frame or the host
+    /// window skips rendering. Panics while a node or group hint is being built.
+    pub fn node_background_draw_list(&self, node: NodeId) -> Option<DrawListMut<'_>> {
+        assert!(
+            self.phase.get() == BuildPhase::Idle,
+            "NodeEditorFrame::node_background_draw_list() requires the current node or group hint to be ended"
+        );
         let draw_list = self
             .with_current("NodeEditorFrame::node_background_draw_list()", || unsafe {
                 sys::dne_get_node_background_draw_list(node.raw())
             });
-        unsafe { DrawListMut::from_raw_mut(self._ui, draw_list.cast()) }
+        (!draw_list.is_null())
+            .then(|| unsafe { DrawListMut::from_raw_mut(self._ui, draw_list.cast()) })
     }
 
     #[doc(alias = "GetStyle")]
@@ -56,9 +85,15 @@ impl<'ui> NodeEditorFrame<'ui> {
 
     pub fn group(&self, size: [f32; 2]) {
         assert_non_negative_finite_vec2("NodeEditorFrame::group()", "size", size);
+        assert_eq!(
+            self.phase.get(),
+            BuildPhase::Node,
+            "NodeEditorFrame::group() requires an active node with no pin or previous group"
+        );
         self.with_current("NodeEditorFrame::group()", || unsafe {
             sys::dne_group(vec2(size))
         });
+        self.phase.set(BuildPhase::Group);
     }
 
     pub fn set_group_size(&self, node: NodeId, size: [f32; 2]) {
@@ -195,18 +230,35 @@ impl<'ui> NodeEditorFrame<'ui> {
 
 pub struct NodeToken<'a> {
     editor: &'a EditorContext,
+    phase: &'a Cell<BuildPhase>,
+    submitted_pins: &'a RefCell<HashSet<PinId>>,
     ended: bool,
     _not_send_sync: PhantomData<Rc<()>>,
 }
 
 impl NodeToken<'_> {
+    /// Begins a pin whose ID is unique across this editor's current Begin/End scope.
+    ///
+    /// Panics before FFI if another pin is active, this node is a group, or the ID
+    /// was already submitted. IDs can be reused after the editor frame ends.
     pub fn begin_pin<'a>(&'a self, pin: PinId, kind: PinKind) -> PinToken<'a> {
+        assert_eq!(
+            self.phase.get(),
+            BuildPhase::Node,
+            "NodeToken::begin_pin() requires a node with no active pin or group"
+        );
+        assert!(
+            self.submitted_pins.borrow_mut().insert(pin),
+            "NodeToken::begin_pin() requires each pin ID to be submitted only once per editor frame"
+        );
         self.editor
             .with_current("NodeToken::begin_pin()", || unsafe {
                 sys::dne_begin_pin(pin.raw(), kind.raw())
             });
+        self.phase.set(BuildPhase::Pin);
         PinToken {
             editor: self.editor,
+            phase: self.phase,
             ended: false,
             _not_send_sync: PhantomData,
         }
@@ -227,6 +279,7 @@ impl NodeToken<'_> {
         if !self.ended {
             self.editor
                 .with_current("NodeToken::end()", || unsafe { sys::dne_end_node() });
+            self.phase.set(BuildPhase::Idle);
             self.ended = true;
         }
     }
@@ -240,6 +293,7 @@ impl Drop for NodeToken<'_> {
 
 pub struct PinToken<'a> {
     editor: &'a EditorContext,
+    phase: &'a Cell<BuildPhase>,
     ended: bool,
     _not_send_sync: PhantomData<Rc<()>>,
 }
@@ -292,6 +346,7 @@ impl PinToken<'_> {
         if !self.ended {
             self.editor
                 .with_current("PinToken::end()", || unsafe { sys::dne_end_pin() });
+            self.phase.set(BuildPhase::Node);
             self.ended = true;
         }
     }
@@ -306,6 +361,7 @@ impl Drop for PinToken<'_> {
 pub struct GroupHintToken<'a> {
     editor: &'a EditorContext,
     ui: &'a Ui,
+    phase: &'a Cell<BuildPhase>,
     ended: bool,
     _not_send_sync: PhantomData<Rc<()>>,
 }
@@ -351,6 +407,7 @@ impl<'a> GroupHintToken<'a> {
                 .with_current("GroupHintToken::end()", || unsafe {
                     sys::dne_end_group_hint()
                 });
+            self.phase.set(BuildPhase::Idle);
             self.ended = true;
         }
     }

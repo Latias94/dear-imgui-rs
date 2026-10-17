@@ -39,6 +39,7 @@ freetype = ["dear-imgui-rs/freetype", "dear-implot-sys/freetype"]
 wasm = ["dear-imgui-rs/wasm", "dear-implot-sys/wasm"]
 
 [dev-dependencies]
+dear-implot-sys = { workspace = true, features = ["native-test-probe"] }
 approx = "0.5"
 pretty_assertions = "1.4"
 static_assertions = "1.1"

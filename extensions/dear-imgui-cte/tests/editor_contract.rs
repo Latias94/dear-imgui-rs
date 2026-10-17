@@ -1,6 +1,6 @@
 use dear_imgui_cte::{
     CteUiExt, Language, Palette, PaletteColor, Position, SearchOptions, Selection, SquiggleKind,
-    TextEditor, VisualPosition,
+    SquiggleStyle, TextEditor, VisualPosition,
 };
 use dear_imgui_rs::{ChildFlags, Condition, Context, MouseButton, WindowFlags};
 
@@ -63,6 +63,8 @@ fn editors_keep_configuration_and_document_state_independent() {
 
     let mut first_palette = Palette::dark();
     first_palette.set(PaletteColor::Keyword, 0x1122_3344);
+    first_palette.set(PaletteColor::CurrentLineHighlight, 0x5566_7788);
+    first_palette.set(PaletteColor::CurrentLineHighlightBorder, 0x99aa_bbcc);
     first.set_palette(&first_palette).unwrap();
     second.set_palette(&Palette::light()).unwrap();
 
@@ -77,6 +79,16 @@ fn editors_keep_configuration_and_document_state_independent() {
     assert!(first.is_word_wrap_enabled());
     assert!(!second.is_word_wrap_enabled());
     assert_eq!(first.palette().get(PaletteColor::Keyword), 0x1122_3344);
+    assert_eq!(
+        first.palette().get(PaletteColor::CurrentLineHighlight),
+        0x5566_7788
+    );
+    assert_eq!(
+        first
+            .palette()
+            .get(PaletteColor::CurrentLineHighlightBorder),
+        0x99aa_bbcc
+    );
     assert_ne!(first.palette(), second.palette());
 }
 
@@ -92,6 +104,13 @@ fn upstream_configuration_defaults_remain_representable() {
     assert_eq!(editor.minimap_columns(), 0);
     editor.set_tab_size(255).unwrap();
     assert_eq!(editor.tab_size(), 255);
+
+    assert!(editor.is_find_replace_enabled());
+    assert!(editor.shows_current_line_highlight());
+    editor.set_find_replace_enabled(false);
+    editor.set_show_current_line_highlight(false);
+    assert!(!editor.is_find_replace_enabled());
+    assert!(!editor.shows_current_line_highlight());
     assert!(editor.set_tab_size(256).is_err());
     assert!(editor.set_tab_size(usize::MAX).is_err());
     assert_eq!(editor.tab_size(), 255);
@@ -151,6 +170,7 @@ fn editing_navigation_diagnostics_and_undo_are_safe() {
             SquiggleKind::new(7),
             0xFF00_00FF,
             "diagnostic",
+            SquiggleStyle::Wave,
         )
         .unwrap();
     assert!(editor.has_squiggles());
@@ -252,6 +272,117 @@ fn two_editors_render_across_multiple_frames() {
     assert_eq!(second.text().unwrap(), "second");
     assert!(first.line_height().is_some_and(|value| value > 0.0));
     assert!(first.glyph_width().is_some_and(|value| value > 0.0));
+}
+
+#[test]
+fn screen_coordinates_require_a_visible_render_in_the_current_frame() {
+    let mut context = render_context();
+    let mut editor = TextEditor::create(&context);
+    editor.set_text("alpha\nbeta").unwrap();
+
+    for frame in 0..3 {
+        let ui = context.frame();
+        assert_eq!(
+            editor.document_to_screen(ui, Position::default()).unwrap(),
+            None
+        );
+        ui.window("Coordinate host")
+            .position([20.0, 20.0], Condition::Always)
+            .size([420.0, 240.0], Condition::Always)
+            .flags(WindowFlags::NO_SAVED_SETTINGS)
+            .build(|| {
+                ui.text_editor(&mut editor, "Source")
+                    .size([380.0, 180.0])
+                    .build()
+                    .unwrap();
+                let origin = editor
+                    .document_to_screen(ui, Position::default())
+                    .unwrap()
+                    .expect("visible render should initialize screen coordinates");
+                let adjacent = editor
+                    .document_to_screen(ui, Position::new(0, 1))
+                    .unwrap()
+                    .unwrap();
+                let next_line = editor
+                    .document_to_screen(ui, Position::new(1, 0))
+                    .unwrap()
+                    .unwrap();
+                assert!(origin.iter().all(|coordinate| coordinate.is_finite()));
+                assert!((adjacent[0] - origin[0] - editor.glyph_width().unwrap()).abs() < 0.001);
+                assert!((next_line[1] - origin[1] - editor.line_height().unwrap()).abs() < 0.001);
+
+                if frame == 1 {
+                    editor.set_text("changed\ntext").unwrap();
+                    assert_eq!(
+                        editor.document_to_screen(ui, Position::default()).unwrap(),
+                        None
+                    );
+                } else if frame == 2 {
+                    editor.set_word_wrap_enabled(true);
+                    assert_eq!(
+                        editor.document_to_screen(ui, Position::default()).unwrap(),
+                        None
+                    );
+                }
+            });
+        drop(context.render_legacy());
+    }
+}
+
+#[test]
+fn decorator_width_changes_invalidate_screen_coordinates_until_rendered() {
+    let mut context = render_context();
+    let mut editor = TextEditor::create(&context);
+    editor.set_text("alpha").unwrap();
+    let mut original_x = 0.0;
+    let mut decorated_x = 0.0;
+
+    for frame in 0..5 {
+        let ui = context.frame();
+        ui.window("Decorator coordinate host")
+            .position([20.0, 20.0], Condition::Always)
+            .size([420.0, 240.0], Condition::Always)
+            .flags(WindowFlags::NO_SAVED_SETTINGS)
+            .build(|| {
+                ui.text_editor(&mut editor, "Source")
+                    .size([380.0, 180.0])
+                    .build()
+                    .unwrap();
+                let x = editor
+                    .document_to_screen(ui, Position::default())
+                    .unwrap()
+                    .unwrap()[0];
+                match frame {
+                    0 => {
+                        original_x = x;
+                        editor.set_line_decorator(3, |_, _| {}).unwrap();
+                    }
+                    1 => {
+                        assert!(x > original_x);
+                        decorated_x = x;
+                        editor.set_line_decorator(5, |_, _| {}).unwrap();
+                    }
+                    2 => {
+                        assert!(x > decorated_x);
+                        editor.clear_line_decorator().unwrap();
+                    }
+                    3 => {
+                        assert!((x - original_x).abs() < 0.001);
+                        editor.set_line_decorator(4, |_, _| {}).unwrap();
+                    }
+                    4 => {
+                        assert!(x > original_x);
+                        editor.clear_callbacks().unwrap();
+                    }
+                    _ => unreachable!(),
+                }
+                assert_eq!(
+                    editor.document_to_screen(ui, Position::default()).unwrap(),
+                    None
+                );
+            });
+        drop(context.render_legacy());
+    }
 }
 
 #[test]
@@ -481,6 +612,10 @@ fn unicode_width_queries_cover_fullwidth_ranges_and_table_edges() {
         (0x1100, 2),
         (0x115f, 2),
         (0x1160, 1),
+        (0x2fff, 2),
+        (0x3000, 2),
+        (0x303e, 2),
+        (0x303f, 1),
         (0xfe6b, 2),
         (0xfe6c, 1),
         (0xff00, 1),

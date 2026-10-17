@@ -67,6 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &implot3d_include,
             "include/implot3d",
             &["example", ".github", "docs", "misc"],
+            &sys_out.join("implot3d-imgui-193-internal.h"),
         )?;
         println!(
             "Added filtered include/implot3d headers from: {}",
@@ -141,6 +142,7 @@ fn append_headers_only(
     src_dir: &Path,
     dst_root: &str,
     exclude_dirs: &[&str],
+    internal_header: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     fn excluded(path: &Path, exclude_dirs: &[&str]) -> bool {
         for comp in path.components() {
@@ -172,7 +174,12 @@ fn append_headers_only(
                 .map(|s| s.eq_ignore_ascii_case("h"))
                 .unwrap_or(false)
             {
-                let mut f = fs::File::open(&p)?;
+                let source = if rel == Path::new("implot3d_internal.h") {
+                    internal_header
+                } else {
+                    &p
+                };
+                let mut f = fs::File::open(source)?;
                 let dst_path = format!("{}/{}", dst_root, rel.display());
                 tar.append_file(dst_path, &mut f)?;
             }

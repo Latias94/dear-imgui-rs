@@ -31,7 +31,7 @@
 ## What’s in this repo
 
 - Core
-  - `dear-imgui-sys` — low-level FFI via cimgui (docking branch), with pregenerated bindings for Dear ImGui v1.92.9b
+  - `dear-imgui-sys` — low-level FFI via cimgui (docking branch), with pregenerated bindings for Dear ImGui v1.93.1 WIP
   - `dear-imgui-rs` — safe, idiomatic Rust API (RAII + builder style similar to imgui-rs)
   - Backends: `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-ash`, `dear-imgui-winit`, `dear-imgui-sdl3`, `dear-imgui-bevy`
     - `dear-imgui-bevy` is an experimental Bevy-native backend on Bevy `0.20.0`, with docking,
@@ -44,7 +44,7 @@
   - `dear-implot` — plotting (cimplot C API)
   - `dear-implot3d` — 3D plotting (cimplot3d C API)
   - `dear-imguizmo-quat` — quaternion + 3D gizmo (cimguizmo_quat C API)
-  - `dear-imgui-cte` — Preview context-bound code editor, text diff, autocomplete, and notifications (cimCTE / ImGuiColorTextEdit)
+  - `dear-imgui-cte` — Preview context-bound code editor, text diff, autocomplete, and diagnostics (cimCTE / ImGuiColorTextEdit)
   - `dear-imgui-test-engine` — Dear ImGui UI automation/test runner integration
   - `dear-file-browser` — native dialogs (rfd) + pure ImGui in-UI file browser
   - `dear-imgui-reflect` — reflection-based UI helpers (auto-generate ImGui widgets from Rust types)
@@ -290,7 +290,7 @@ dear-imguizmo-quat = "0.20" # Quaternion-based gizmo
 dear-imnodes = "0.20"
 dear-node-editor = "0.20" # native-only; add feature "blueprints" for stack layout
 
-# Code editor, text diff, autocomplete, and notifications
+# Code editor, text diff, autocomplete, and diagnostics
 dear-imgui-cte = "0.20"
 
 # Test automation
@@ -379,14 +379,14 @@ Quick examples (enable auto prebuilt download):
 
 ## Compatibility
 
-The workspace follows a release-train model. The tables below describe the `0.20.0` train; applications should upgrade all workspace crates together. See [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for version history, dependency requirements, and migration notes.
+The workspace follows a release-train model; applications should upgrade all workspace crates together. The tables below describe the development checkout. Published `0.20.0` uses Dear ImGui `1.92.9b`; the unreleased `1.93.1 WIP` APIs currently require Git dependencies. See [compatibility and migration](docs/COMPATIBILITY.md) for release history and requirements.
 
 Core
 
 | Crate           | Version | Notes                                     |
 |-----------------|---------|-------------------------------------------|
 | dear-imgui-rs   | 0.20.0 | Safe Rust API over dear-imgui-sys     |
-| dear-imgui-sys  | 0.20.0 | Dear ImGui v1.92.9b docking via cimgui |
+| dear-imgui-sys  | 0.20.0 | Dear ImGui v1.93.1 WIP docking via cimgui |
 
 Backends
 
@@ -416,7 +416,7 @@ Extensions
 | dear-file-browser   | 0.20.0 | 0.20.0 | —                              | State-owned ImGui UI + native dialog backends |
 | dear-implot3d       | 0.20.0 | 0.20.0 | dear-implot3d-sys 0.20.0 | 3D plotting                       |
 | dear-imguizmo-quat  | 0.20.0 | 0.20.0 | dear-imguizmo-quat-sys 0.20.0 | Quaternion gizmo              |
-| dear-imgui-cte      | 0.20.0 | 0.20.0 | dear-imgui-cte-sys 0.20.0 | Preview ImGuiColorTextEdit editor, diff, autocomplete, and notifications |
+| dear-imgui-cte      | 0.20.0 | 0.20.0 | dear-imgui-cte-sys 0.20.0 | Preview ImGuiColorTextEdit editor, diff, autocomplete, and diagnostics |
 | dear-imgui-test-engine | 0.20.0 | 0.20.0 | dear-imgui-test-engine-sys 0.20.0 | UI automation and test runner |
 | dear-imgui-reflect  | 0.20.0 | 0.20.0 | —                              | Session-owned reflection UI              |
 
@@ -453,7 +453,7 @@ Maintenance rules
 
 ## Version & FFI
 
-- FFI layer is generated from the cimgui `docking_inter` branch matching Dear ImGui v1.92.9b.
+- FFI layer is generated from the cimgui `docking_inter` branch matching Dear ImGui v1.93.1 WIP.
 - Core cimgui calls cross a C ABI boundary, but callback-bearing `ImGuiPlatformIO` fields still have C++ compiler ABI-sensitive signatures. The repository-owned aggregate callback shims translate the seven `ImVec2`/`ImVec4` by-value slots to pointer/out-parameter C callbacks and are exercised on MSVC `/MD` and `/MT`.
 - Checked-in bindings are target profiles, not one universal header snapshot: Windows 64-bit, supported non-Windows native targets, and the fixed browser import ABI each have a separate reproducible artifact.
 - `BINDING_VERSION` is the Rust binding crate release version. It is the direct replacement for the old `IMGUI_VERSION` constant; use `igGetVersion()` to inspect the linked Dear ImGui runtime.
@@ -463,7 +463,7 @@ Maintenance rules
 
 ```text
 dear-imgui-rs/         # Safe Rust bindings (renamed from dear-imgui)
-dear-imgui-sys/        # cimgui FFI (docking; ImGui v1.92.9b)
+dear-imgui-sys/        # cimgui FFI (docking; ImGui v1.93.1 WIP)
 backends/
   dear-imgui-wgpu/     # WGPU renderer
   dear-imgui-glow/     # OpenGL renderer
@@ -479,7 +479,7 @@ extensions/
   dear-implot/         # ImPlot (2D plotting)
   dear-implot3d/       # ImPlot3D (3D plotting)
   dear-imguizmo-quat/  # ImGuIZMO.quat (quaternion gizmo)
-  dear-imgui-cte/      # Preview ImGuiColorTextEdit editor, diff, autocomplete, and notifications
+  dear-imgui-cte/      # Preview ImGuiColorTextEdit editor, diff, autocomplete, and diagnostics
   dear-imgui-test-engine/ # ImGui Test Engine integration
   dear-file-browser/   # File dialogs (rfd) + pure ImGui browser
   dear-imgui-reflect/  # Reflection-based UI helpers for dear-imgui-rs

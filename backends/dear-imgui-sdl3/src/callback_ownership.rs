@@ -57,6 +57,7 @@ macro_rules! for_each_renderer_non_aggregate_callback {
         $macro!(DrawCallback_ResetRenderState);
         $macro!(DrawCallback_SetSamplerLinear);
         $macro!(DrawCallback_SetSamplerNearest);
+        $macro!(DrawCallback_SetSamplerFromTex);
         $macro!(Renderer_CreateWindow);
         $macro!(Renderer_DestroyWindow);
         $macro!(Renderer_RenderWindow);

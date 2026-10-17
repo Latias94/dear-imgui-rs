@@ -6,6 +6,9 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+- Clip origin now defaults to lower-left. Engines using `GL_UPPER_LEFT` must select `GlowClipOrigin::UpperLeft`; `Auto` preserves automatic GL-state queries.
+- Support Dear ImGui 1.93 texture-owned sampling commands and round fractional framebuffer sizes.
+
 ## [0.16.0] - 2026-08-14
 
 ### Breaking

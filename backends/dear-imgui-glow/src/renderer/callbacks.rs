@@ -6,6 +6,8 @@ static RESET_RENDER_STATE_MARKER: u8 = 0;
 static SAMPLER_LINEAR_MARKER: u8 = 1;
 #[used]
 static SAMPLER_NEAREST_MARKER: u8 = 2;
+#[used]
+static SAMPLER_FROM_TEXTURE_MARKER: u8 = 3;
 
 #[inline(never)]
 pub(super) unsafe extern "C" fn draw_callback_reset_render_state(
@@ -32,6 +34,14 @@ pub(super) unsafe extern "C" fn draw_callback_set_sampler_nearest(
     let _ = unsafe { std::ptr::read_volatile(&SAMPLER_NEAREST_MARKER) };
 }
 
+#[inline(never)]
+pub(super) unsafe extern "C" fn draw_callback_set_sampler_from_texture(
+    _parent_list: *const sys::ImDrawList,
+    _cmd: *const sys::ImDrawCmd,
+) {
+    let _ = unsafe { std::ptr::read_volatile(&SAMPLER_FROM_TEXTURE_MARKER) };
+}
+
 #[cfg(test)]
 mod tests {
     use dear_imgui_rs::{Context, FramePrepareOptions, render::DrawCmd};
@@ -41,10 +51,11 @@ mod tests {
     #[test]
     fn standard_draw_callbacks_have_distinct_addresses() {
         type RawDrawCallback = unsafe extern "C" fn(*const sys::ImDrawList, *const sys::ImDrawCmd);
-        let callbacks: [RawDrawCallback; 3] = [
+        let callbacks: [RawDrawCallback; 4] = [
             draw_callback_reset_render_state,
             draw_callback_set_sampler_linear,
             draw_callback_set_sampler_nearest,
+            draw_callback_set_sampler_from_texture,
         ];
         for left in 0..callbacks.len() {
             for right in (left + 1)..callbacks.len() {
@@ -57,7 +68,7 @@ mod tests {
     }
 
     #[test]
-    fn standard_draw_callbacks_classify_as_three_distinct_commands() {
+    fn standard_draw_callbacks_classify_as_four_distinct_commands() {
         let mut context = Context::create();
         let platform_io = context.platform_io_mut();
         unsafe {
@@ -67,6 +78,9 @@ mod tests {
                 .set_draw_callback_set_sampler_linear_raw(Some(draw_callback_set_sampler_linear));
             platform_io
                 .set_draw_callback_set_sampler_nearest_raw(Some(draw_callback_set_sampler_nearest));
+            platform_io.set_draw_callback_set_sampler_from_texture_raw(Some(
+                draw_callback_set_sampler_from_texture,
+            ));
         }
 
         context
@@ -82,6 +96,11 @@ mod tests {
             draw_list.add_callback(draw_callback_reset_render_state, std::ptr::null_mut(), 0);
             draw_list.add_callback(draw_callback_set_sampler_linear, std::ptr::null_mut(), 0);
             draw_list.add_callback(draw_callback_set_sampler_nearest, std::ptr::null_mut(), 0);
+            draw_list.add_callback(
+                draw_callback_set_sampler_from_texture,
+                std::ptr::null_mut(),
+                0,
+            );
         }
         drop(draw_list);
         let frame = context.render_legacy();
@@ -95,13 +114,15 @@ mod tests {
                     DrawCmd::ResetRenderState
                         | DrawCmd::SetSamplerLinear
                         | DrawCmd::SetSamplerNearest
+                        | DrawCmd::SetSamplerFromTexture
                 )
             })
             .collect::<Vec<_>>();
 
-        assert_eq!(commands.len(), 3);
+        assert_eq!(commands.len(), 4);
         assert!(matches!(commands[0], DrawCmd::ResetRenderState));
         assert!(matches!(commands[1], DrawCmd::SetSamplerLinear));
         assert!(matches!(commands[2], DrawCmd::SetSamplerNearest));
+        assert!(matches!(commands[3], DrawCmd::SetSamplerFromTexture));
     }
 }

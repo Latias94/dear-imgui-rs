@@ -16,4 +16,6 @@ pub enum Marker {
     Cross = sys::ImPlotMarker_Cross as i32,
     Plus = sys::ImPlotMarker_Plus as i32,
     Asterisk = sys::ImPlotMarker_Asterisk as i32,
+    Vertical = sys::ImPlotMarker_Vertical as i32,
+    Horizontal = sys::ImPlotMarker_Horizontal as i32,
 }

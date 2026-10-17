@@ -52,13 +52,13 @@ fn style_setters_reject_values_that_would_trip_new_frame_assertions() {
 
     style.set_alpha(0.5);
     style.set_window_min_size([1.0, 2.0]);
-    style.set_curve_tessellation_tol(0.1);
+    style.set_curve_tessellation_max_error(0.1);
     style.set_circle_tessellation_max_error(0.1);
     style.set_window_border_hover_padding(0.1);
 
     assert_eq!(style.alpha(), 0.5);
     assert_eq!(style.window_min_size(), [1.0, 2.0]);
-    assert_eq!(style.curve_tessellation_tol(), 0.1);
+    assert_eq!(style.curve_tessellation_max_error(), 0.1);
     assert_eq!(style.circle_tessellation_max_error(), 0.1);
     assert_eq!(style.window_border_hover_padding(), 0.1);
 
@@ -73,9 +73,9 @@ fn style_setters_reject_values_that_would_trip_new_frame_assertions() {
     assert_eq!(style.window_min_size(), [1.0, 2.0]);
 
     assert_panics!({
-        style.set_curve_tessellation_tol(0.0);
+        style.set_curve_tessellation_max_error(0.0);
     });
-    assert_eq!(style.curve_tessellation_tol(), 0.1);
+    assert_eq!(style.curve_tessellation_max_error(), 0.1);
 
     assert_panics!({
         style.set_circle_tessellation_max_error(f32::NAN);

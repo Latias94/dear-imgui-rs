@@ -1,6 +1,18 @@
 use super::*;
 
 impl Io {
+    /// Returns whether every draw list defaults to legacy stroke rendering.
+    #[doc(alias = "ConfigDebugDrawListDefaultsToStrokeLegacy")]
+    pub fn config_debug_draw_list_defaults_to_stroke_legacy(&self) -> bool {
+        self.inner().ConfigDebugDrawListDefaultsToStrokeLegacy
+    }
+
+    /// Enables legacy stroke rendering to compare custom drawing across ImGui versions.
+    #[doc(alias = "ConfigDebugDrawListDefaultsToStrokeLegacy")]
+    pub fn set_config_debug_draw_list_defaults_to_stroke_legacy(&mut self, enabled: bool) {
+        self.inner_mut().ConfigDebugDrawListDefaultsToStrokeLegacy = enabled;
+    }
+
     /// Returns whether error recovery is enabled.
     #[doc(alias = "ConfigErrorRecovery")]
     pub fn config_error_recovery(&self) -> bool {

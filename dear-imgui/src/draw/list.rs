@@ -3,6 +3,7 @@ use std::cell::RefCell;
 use crate::sys;
 
 mod clip;
+mod flags;
 mod geometry;
 mod image;
 mod raw;

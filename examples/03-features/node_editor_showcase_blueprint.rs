@@ -1,6 +1,6 @@
 use dear_imgui_rs::{
-    DrawCornerFlags, DrawListMut, DrawSegmentCount, HorizontalStackLayoutToken, IdStackToken,
-    ManagedTextureId, PolylineFlags, StackLayoutId, Ui, VerticalStackLayoutToken,
+    DrawFlags, DrawListMut, DrawSegmentCount, HorizontalStackLayoutToken, IdStackToken,
+    ManagedTextureId, StackLayoutId, Ui, VerticalStackLayoutToken,
 };
 use dear_node_editor::{
     NodeEditorFrame, NodeId, NodeToken, PinId, PinKind, PinToken, StyleVar, StyleVarToken,
@@ -284,7 +284,9 @@ impl<'ui, 'frame> BlueprintNodeBuilder<'ui, 'frame> {
             self.header_color[2],
             alpha,
         ];
-        let draw_list = self.editor.node_background_draw_list(self.current_node_id);
+        let Some(draw_list) = self.editor.node_background_draw_list(self.current_node_id) else {
+            return;
+        };
 
         draw_list.add_image_rounded(
             header_texture,
@@ -300,7 +302,7 @@ impl<'ui, 'frame> BlueprintNodeBuilder<'ui, 'frame> {
             uv,
             header_color,
             node_style.node_rounding,
-            DrawCornerFlags::TOP,
+            DrawFlags::ROUND_TOP,
         );
 
         if self.content_min[1] > self.header_max[1] {
@@ -416,20 +418,20 @@ pub fn draw_icon(
                 draw_list
                     .add_rect(p0, p1, color)
                     .filled(true)
-                    .flags(DrawCornerFlags::ALL)
+                    .flags(DrawFlags::ROUND_ALL)
                     .build();
             } else {
                 if inner_color[3] > 0.0 {
                     draw_list
                         .add_rect(p0, p1, inner_color)
                         .filled(true)
-                        .flags(DrawCornerFlags::ALL)
+                        .flags(DrawFlags::ROUND_ALL)
                         .build();
                 }
                 draw_list
                     .add_rect(p0, p1, color)
                     .thickness(2.0 * outline_scale)
-                    .flags(DrawCornerFlags::ALL)
+                    .flags(DrawFlags::ROUND_ALL)
                     .build();
             }
         }
@@ -469,7 +471,7 @@ pub fn draw_icon(
                     .add_rect(p0, p1, color)
                     .filled(true)
                     .rounding(corner_radius)
-                    .flags(DrawCornerFlags::ALL)
+                    .flags(DrawFlags::ROUND_ALL)
                     .build();
             } else {
                 if inner_color[3] > 0.0 {
@@ -477,14 +479,14 @@ pub fn draw_icon(
                         .add_rect(p0, p1, inner_color)
                         .filled(true)
                         .rounding(corner_radius)
-                        .flags(DrawCornerFlags::ALL)
+                        .flags(DrawFlags::ROUND_ALL)
                         .build();
                 }
                 draw_list
                     .add_rect(p0, p1, color)
                     .rounding(corner_radius)
                     .thickness(2.0 * outline_scale)
-                    .flags(DrawCornerFlags::ALL)
+                    .flags(DrawFlags::ROUND_ALL)
                     .build();
             }
         }
@@ -552,15 +554,15 @@ fn draw_flow_icon(
         draw_list, left, top, bottom, rounding, tip_top, tip_right, tip_bottom, tip_round,
     );
     if filled {
-        draw_list.path_fill_convex(color);
+        draw_list.path_fill_convex(color, DrawFlags::NONE);
     } else {
         if inner_color[3] > 0.0 {
-            draw_list.path_fill_convex(inner_color);
+            draw_list.path_fill_convex(inner_color, DrawFlags::NONE);
             path_flow_icon(
                 draw_list, left, top, bottom, rounding, tip_top, tip_right, tip_bottom, tip_round,
             );
         }
-        draw_list.path_stroke(color, PolylineFlags::CLOSED, 2.0 * outline_scale);
+        draw_list.path_stroke(color, 2.0 * outline_scale, DrawFlags::CLOSED);
     }
 }
 
@@ -618,13 +620,13 @@ fn draw_diamond_icon(
     let radius = 0.607 * rect_w / 2.0 - if filled { 0.0 } else { 0.5 };
     path_diamond(draw_list, center, radius);
     if filled {
-        draw_list.path_fill_convex(color);
+        draw_list.path_fill_convex(color, DrawFlags::NONE);
     } else {
         if inner_color[3] > 0.0 {
-            draw_list.path_fill_convex(inner_color);
+            draw_list.path_fill_convex(inner_color, DrawFlags::NONE);
             path_diamond(draw_list, center, radius);
         }
-        draw_list.path_stroke(color, PolylineFlags::CLOSED, 2.0 * outline_scale);
+        draw_list.path_stroke(color, 2.0 * outline_scale, DrawFlags::CLOSED);
     }
 }
 

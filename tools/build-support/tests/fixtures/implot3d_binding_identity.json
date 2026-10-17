@@ -1,0 +1,5 @@
+{
+  "provenance": "// dear-imgui-rs-binding-provenance-v1 crate=dear-implot3d-sys target=native source=c7f3d8cc091d39ad55c0233580e6e06774321791 spec=fnv1a64:3de7744cfcac54fe inputs=fnv1a64:083ad71c45d21930 output=fnv1a64:39266f540281e004",
+  "identity": "fnv1a64:d4bd0facb0d58e92",
+  "unpatched_identity": "fnv1a64:8123ab4182fec7f3"
+}

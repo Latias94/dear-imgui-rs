@@ -1,7 +1,7 @@
 use crate::sys;
 
 use super::super::color::ImColor32;
-use super::super::counts::DrawCornerFlags;
+use super::super::counts::DrawFlags;
 use super::super::util::{assert_corner_flags, assert_non_negative_f32, finite_vec2};
 use super::DrawListMut;
 
@@ -108,7 +108,7 @@ impl<'ui> DrawListMut<'ui> {
         uv_max: impl Into<sys::ImVec2>,
         col: impl Into<ImColor32>,
         rounding: f32,
-        flags: DrawCornerFlags,
+        flags: DrawFlags,
     ) {
         // Example:
         // let tex = texture::TextureId::new(5);
@@ -118,7 +118,7 @@ impl<'ui> DrawListMut<'ui> {
         //     [0.0,0.0], [1.0,1.0],
         //     Color::WHITE,
         //     8.0,
-        //     DrawCornerFlags::ALL,
+        //     DrawFlags::ROUND_ALL,
         // );
         let p_min = finite_vec2("DrawListMut::add_image_rounded()", "p_min", p_min);
         let p_max = finite_vec2("DrawListMut::add_image_rounded()", "p_max", p_max);

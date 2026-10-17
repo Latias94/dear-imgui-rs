@@ -28,6 +28,10 @@
 //! - `-word` - Exclude items containing "word"
 //! - `word1,word2` - Include items containing "word1" OR "word2"
 //! - `word1,-word2` - Include items containing "word1" but NOT "word2"
+//! - `word1 word2` - Require both words
+//! - `"word1 word2"` - Match the exact phrase
+//!
+//! Exclusions take precedence over inclusions.
 
 use crate::{Ui, sys};
 use std::ops::Range;
@@ -131,8 +135,8 @@ impl TextFilter {
 
     /// Draws an InputText widget to control the filter.
     ///
-    /// This is equivalent to [`draw_with_size`](Self::draw_with_size) with `size` set to `0.0`.
     /// Returns `true` if the filter was modified.
+    /// Use [`Ui::set_next_item_width`] to set the input width.
     ///
     /// # Examples
     ///
@@ -147,36 +151,19 @@ impl TextFilter {
     /// }
     /// ```
     pub fn draw(&mut self, ui: &Ui) -> bool {
-        self.draw_with_size(ui, 0.0)
+        let label_ptr = ui.scratch_txt(&self.label);
+        ui.run_with_bound_context(|| unsafe { sys::ImGuiTextFilter_Draw(self.raw, label_ptr) })
     }
 
-    /// Draws an InputText widget to control the filter with a specific width.
+    /// Draws the filter input with a custom hint when the filter is empty.
     ///
-    /// # Arguments
-    /// * `width` - The width of the input text widget (0.0 for default width)
-    ///
-    /// Returns `true` if the filter was modified.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// # use dear_imgui_rs::*;
-    /// # let mut ctx = Context::create();
-    /// # let ui = ctx.frame();
-    /// let mut filter = TextFilter::new("Search");
-    ///
-    /// if filter.draw_with_size(&ui, 200.0) {
-    ///     println!("Filter was modified!");
-    /// }
-    /// ```
-    pub fn draw_with_size(&mut self, ui: &Ui, width: f32) -> bool {
-        assert!(
-            width.is_finite(),
-            "TextFilter::draw_with_size() width must be finite"
-        );
-        let label_ptr = ui.scratch_txt(&self.label);
+    /// Returns `true` if the filter was modified. Use [`Ui::set_next_item_width`]
+    /// to set the input width.
+    #[doc(alias = "DrawWithHint")]
+    pub fn draw_with_hint(&mut self, ui: &Ui, hint: impl AsRef<str>) -> bool {
+        let (label_ptr, hint_ptr) = ui.scratch_txt_two(&self.label, hint);
         ui.run_with_bound_context(|| unsafe {
-            sys::ImGuiTextFilter_Draw(self.raw, label_ptr, width)
+            sys::ImGuiTextFilter_DrawWithHint(self.raw, label_ptr, hint_ptr)
         })
     }
 
@@ -198,9 +185,7 @@ impl TextFilter {
     /// assert!(active_filter.is_active());
     /// ```
     pub fn is_active(&self) -> bool {
-        // IsActive() is an inline method: return !Filters.empty();
-        // We need to check if the Filters vector is empty
-        unsafe { (*self.raw).Filters.Size > 0 }
+        unsafe { sys::ImGuiTextFilter_IsActive(self.raw) }
     }
 
     /// Returns true if the text matches the filter.
@@ -349,6 +334,24 @@ mod tests {
         filter.build();
         assert!(filter.pass_filter("xxabcxx"));
         assert!(!filter.pass_filter("xxdefxx"));
+    }
+
+    #[test]
+    fn filter_supports_words_phrases_and_exclusion_precedence() {
+        let _lock = TEST_CTX_LOCK.lock().unwrap();
+        let _ctx = crate::Context::create();
+
+        let filter = TextFilter::new_with_filter("Search", "hello world");
+        assert!(filter.pass_filter("world says hello"));
+        assert!(!filter.pass_filter("hello there"));
+
+        let filter = TextFilter::new_with_filter("Search", "\"hello world\"");
+        assert!(filter.pass_filter("say hello world"));
+        assert!(!filter.pass_filter("hello brave world"));
+
+        let filter = TextFilter::new_with_filter("Search", "hello,-world");
+        assert!(filter.pass_filter("hello there"));
+        assert!(!filter.pass_filter("hello world"));
     }
 
     #[test]
