@@ -54,7 +54,24 @@ release candidate. `download_prebuilt` stages files but does not establish that
 they are compatible: validate the matching profile before emitting link flags.
 Use the repository package tools to produce release-compatible archives.
 
-## Build-script target ABI migration
+## Native Build Policy
+
+`native_build::NativeBuildPlan::from_env(prefix, source_required, prebuilt_enabled)` reads native mode settings once and emits their rerun triggers.
+It normalizes the new `BUILD_MODE` setting and legacy `SKIP_CC` / `FORCE_BUILD` flags without performing downloads or invoking a compiler.
+Raw inputs and the value-only resolver are private; sys crates inspect a validated plan through `mode()` and `prebuilt_source()` rather than constructing or mutating its fields.
+The core uses `NativeBuildPlan::from_core_env` to normalize the existing Test Engine dual-skip route at the same input adapter, without re-reading mode flags in its build script.
+
+Sys crates keep their target-specific compilation, ABI validation, and link order.
+In automatic or strict-prebuilt mode, an explicit `PrebuiltSource` is acquired with `acquire`; the returned directory must still pass the crate's existing artifact-profile validation before any link directives are emitted.
+Acquisition errors are fatal for explicit inputs. `finish_prebuilt_lookup` permits an automatic cache miss but rejects one in strict-prebuilt mode.
+Explicit sources use separate cache namespaces. Local archive replacement invalidates extraction through a content freshness key under the existing extraction lock; offline HTTP routes may reuse cached downloads but never start a network request.
+Core and extension manifest readers track both candidate locations, watching the parent directory for absent candidates to catch newly added overrides without perpetual rebuilds.
+No generic provider registry, build graph, or binary ABI inference is involved.
+
+Core mode changes participate in the existing build-request hash.
+Docs.rs, binding regeneration, and browser WASM imports remain separate paths and must not accidentally invoke native policy acquisition.
+
+## Build-script Target ABI Migration
 
 Build scripts must preserve Rust's complete target identity, including `CARGO_CFG_TARGET_ABI`. Populate `TargetFacts::target_abi`, `NativeAbiTarget::target_abi`, and `BuildRequestInput::target_abi` with the exact Rust cfg value (usually an empty string, and `llvm` for Windows gnullvm). `BuildRequest::new` carries that value into the public `BuildRequest::target_abi` field, so callers that construct or destructure `BuildRequest` directly must handle it. The field participates in strict target validation and deterministic binding/build-request hashes.
 

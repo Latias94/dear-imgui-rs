@@ -20,7 +20,8 @@ vendored does not mean its wrapper is available.
 Native platform-specific modules are absent on other targets, allowing feature
 unification across native platforms. All shim features are rejected on
 `wasm32-unknown-unknown`; enabling the core `wasm` feature on a native target does
-not select the browser ABI. `IMGUI_SYS_SKIP_CC` cannot be combined with shims.
+not select the browser ABI. `IMGUI_SYS_BUILD_MODE=bindings-only` cannot be combined with shims.
+Core `prebuilt` mode (including legacy `SKIP_CC` with an explicit prebuilt selection) still permits local shim compilation; it does not promise a compiler-free build.
 Core prebuilts do not contain backend libraries: the enabled shim and its
 matching vendored upstream backend are always compiled locally.
 

@@ -2,6 +2,23 @@
 
 This document tracks compatibility across the workspace crates, upstream Dear ImGui, and key external dependencies. The root README shows the latest recommendations; this file keeps version history and compatibility policy.
 
+## Unreleased Native Build Policy
+
+The core and seven prebuilt-capable extension sys crates share `<PREFIX>_BUILD_MODE=auto|source|prebuilt|bindings-only`.
+The default remains source-capable with downloads opt-in. Strict prebuilt mode never falls back to compiling that library; enabled core backend shims still compile locally.
+Only bindings-only intentionally omits native symbols, and it is not a supported external-provider contract.
+
+`IMGUI_SYS_LIB_DIR` overrides the location of a compatible dear-imgui-rs core artifact; it does not select an arbitrary system ImGui/cimgui installation. The Rust declarations require cimgui's C entry points, this repository's bridges and source adaptations, and matching native layouts/build options. Use a matching project release artifact or an equivalent artifact built with the repository's tooling, and retain its manifest. Installation paths are unrestricted, but renaming a system library or copying a manifest cannot make it ABI-compatible. See [accepted artifacts and ABI requirements](../dear-imgui-sys/README.md#what-imgui_sys_lib_dir-accepts).
+
+Migration: explicit library/archive/package-directory overrides are now strict and mutually exclusive; missing or incompatible selections stop the build.
+Legacy `SKIP_CC=1` without artifact intent retains check-only behavior, while combining it with an explicit artifact or feature `prebuilt` requires a compatible prebuilt.
+Legacy source-forcing and skipping are conflicting instructions and now fail early. Boolean flags accept false values instead of treating mere presence as true.
+Source requirements still win over download features and stale artifact overrides in automatic mode; explicitly choosing prebuilt or bindings-only rejects source-only requirements.
+Do not combine the new mode setting with enabled legacy mode flags.
+The source-only Test Engine keeps its existing source/check-only routes and does not add prebuilt mode.
+Its existing native-free CI check remains available through both `IMGUI_SYS_SKIP_CC=1` and `IMGUI_TEST_ENGINE_SYS_SKIP_CC=1`, without an explicit mode, prebuilt selection/feature, packaging, or ABI probe.
+See the [native build policy](../dear-imgui-sys/README.md#native-build-policy) for detailed semantics.
+
 For Apple-specific integration notes and the repository-owned iOS example
 paths, see [the Apple platform guide](workstreams/apple-platform-support.md).
 

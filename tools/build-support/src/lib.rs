@@ -1,5 +1,6 @@
 #[cfg(any(feature = "binding-spec", test))]
 pub mod binding;
+pub mod native_build;
 mod native_deps;
 mod patches;
 mod prebuilt;

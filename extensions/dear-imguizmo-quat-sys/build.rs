@@ -1,11 +1,8 @@
+use build_support::native_build::{NativeBuildMode, NativeBuildPlan};
 use std::{env, path::Path, path::PathBuf};
 
 fn is_http_url(s: &str) -> bool {
     s.starts_with("http://") || s.starts_with("https://")
-}
-
-fn is_archive_urlish(s: &str) -> bool {
-    s.ends_with(".tar.gz") || s.ends_with(".tgz")
 }
 
 #[derive(Clone, Debug)]
@@ -277,20 +274,16 @@ fn expected_lib_name(target_env: &str) -> &'static str {
     }
 }
 
-fn try_link_prebuilt(dir: PathBuf, cfg: &BuildConfig) -> bool {
+fn try_link_prebuilt(dir: PathBuf, cfg: &BuildConfig) -> Result<bool, String> {
     let lib_name = expected_lib_name(&cfg.target_env);
     let lib_path = dir.join(lib_name);
     if !lib_path.exists() {
-        return false;
+        return Ok(false);
     }
-    extension_artifact_profile(cfg, false)
-        .validate_prebuilt_dir(&dir)
-        .unwrap_or_else(|error| {
-            panic!("dear-imguizmo-quat-sys: incompatible prebuilt artifact: {error}")
-        });
+    extension_artifact_profile(cfg, false).validate_prebuilt_dir(&dir)?;
     println!("cargo:rustc-link-search=native={}", dir.display());
     println!("cargo:rustc-link-lib=static=dear_imguizmo_quat");
-    true
+    Ok(true)
 }
 
 fn prebuilt_cache_root(cfg: &BuildConfig) -> PathBuf {
@@ -325,23 +318,7 @@ fn try_download_prebuilt(
 fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
     let profile = extension_artifact_profile(cfg, false);
     let tags = build_support::release_tags("dear-imguizmo-quat-sys", &profile.version);
-    if let Ok(pkg_dir) = env::var("IMGUIZMO_QUAT_SYS_PACKAGE_DIR") {
-        let pkg_dir = PathBuf::from(pkg_dir);
-        let archive_path = pkg_dir.join(&profile.archive_name);
-        if archive_path.exists() {
-            let cache_root = prebuilt_cache_root(cfg);
-            if let Ok(lib_dir) = build_support::extract_archive_to_cache(
-                &archive_path,
-                &cache_root,
-                expected_lib_name(&cfg.target_env),
-            ) {
-                return Some(lib_dir);
-            }
-        }
-    }
-    if build_support::is_offline() {
-        return None;
-    }
+
     let cache_root = prebuilt_cache_root(cfg);
     let urls = build_support::release_candidate_urls_env(&tags, &[profile.archive_name]);
     for url in urls {
@@ -352,63 +329,34 @@ fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
     None
 }
 
-fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
-    let target_env = &cfg.target_env;
-    if let Ok(dir) = env::var("IMGUIZMO_QUAT_SYS_LIB_DIR") {
-        if try_link_prebuilt(PathBuf::from(dir.clone()), cfg) {
-            return true;
-        }
-        println!(
-            "cargo:warning=IMGUIZMO_QUAT_SYS_LIB_DIR set but library not found in {}",
-            dir
+fn try_link_prebuilt_all(cfg: &BuildConfig, plan: &NativeBuildPlan) -> bool {
+    if let Some(source) = plan.prebuilt_source() {
+        let profile = extension_artifact_profile(cfg, false);
+        let directory = source
+            .acquire(
+                &prebuilt_cache_root(cfg),
+                &expected_lib_name(&cfg.target_env),
+                &cfg.target_env,
+                &[profile.archive_name],
+            )
+            .unwrap_or_else(|error| panic!("dear-imguizmo-quat-sys: {error}"));
+        assert!(
+            try_link_prebuilt(directory, cfg).unwrap_or_else(|error| panic!(
+                "dear-imguizmo-quat-sys: incompatible explicit prebuilt artifact: {error}"
+            )),
+            "dear-imguizmo-quat-sys: explicit prebuilt disappeared before linking"
         );
+        return true;
     }
-    if let Ok(url) = env::var("IMGUIZMO_QUAT_SYS_PREBUILT_URL") {
-        if (is_http_url(&url) || is_archive_urlish(&url)) && !cfg!(feature = "prebuilt") {
-            println!(
-                "cargo:warning=IMGUIZMO_QUAT_SYS_PREBUILT_URL is an HTTP(S) URL or a .tar.gz archive, but feature `prebuilt` is disabled; \
-                 enable it to allow downloads/extraction (e.g. `cargo build -p dear-imguizmo-quat-sys --features prebuilt`) \
-                 or use IMGUIZMO_QUAT_SYS_LIB_DIR instead."
-            );
-            return false;
-        }
-        let cache_root = prebuilt_cache_root(cfg);
-        if let Ok(dir) = try_download_prebuilt(&cache_root, &url, target_env)
-            && try_link_prebuilt(dir.clone(), cfg)
-        {
-            return true;
-        }
-    } else {
-        // Only attempt automatic release download when explicitly enabled.
-        let allow_feature = cfg!(feature = "prebuilt");
-        let allow_env = matches!(
-            env::var("IMGUIZMO_QUAT_SYS_USE_PREBUILT").ok().as_deref(),
-            Some("1") | Some("true") | Some("yes")
-        );
-        if allow_env && !allow_feature {
-            println!(
-                "cargo:warning=IMGUIZMO_QUAT_SYS_USE_PREBUILT is set, but feature `prebuilt` is disabled; \
-                 downloads are unavailable without enabling the feature (e.g. `cargo build -p dear-imguizmo-quat-sys --features prebuilt`)."
-            );
-        }
-        let allow_auto_prebuilt = allow_feature;
-        if allow_auto_prebuilt {
-            let source = match (allow_feature, allow_env) {
-                (true, true) => "feature+env",
-                (true, false) => "feature",
-                _ => "",
-            };
-            let (owner, repo) = build_support::release_owner_repo();
-            println!(
-                "cargo:warning=auto-prebuilt enabled (dear-imguizmo-quat-sys): source={}, repo={}/{}",
-                source, owner, repo
-            );
-            if let Some(dir) = try_download_prebuilt_from_release(cfg)
-                && try_link_prebuilt(dir.clone(), cfg)
-            {
-                return true;
-            }
-        }
+    if cfg!(feature = "prebuilt")
+        && env::var_os("DEP_DEAR_IMGUI_ARTIFACT_IDENTITY_HASH").is_some()
+        && let Some(directory) = try_download_prebuilt_from_release(cfg)
+        && try_link_prebuilt(directory, cfg).unwrap_or_else(|error| {
+            println!("cargo:warning=Rejecting incompatible automatic prebuilt: {error}");
+            false
+        })
+    {
+        return true;
     }
     false
 }
@@ -519,9 +467,7 @@ fn main() {
     }
 
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
-    let quat_root = sources
-        .source_root()
-        .unwrap_or_else(|error| panic!("dear-imguizmo-quat-sys: {error}"));
+    let quat_root = cfg.manifest_dir.join(&sources.source().source_root);
     if cfg.docs_rs {
         docsrs_build(&cfg, &quat_root, &imgui_src, &cimgui_root);
         return;
@@ -544,20 +490,45 @@ fn main() {
         return;
     }
 
-    if env::var("IMGUIZMO_QUAT_SYS_SKIP_CC").is_ok() {
-        let ok = if cfg.target_arch == "wasm32" {
-            use_pregenerated_wasm_bindings(&cfg.out_dir)
-        } else {
-            use_pregenerated_bindings(&cfg.out_dir)
-        };
-        if !ok {
-            panic!(
-                "IMGUIZMO_QUAT_SYS_SKIP_CC is set but no pregenerated bindings were found. \
-                 Please ensure src/bindings_pregenerated.rs exists, or unset IMGUIZMO_QUAT_SYS_SKIP_CC."
-            );
-        }
-        let _ = try_link_prebuilt_all(&cfg);
+    if cfg.target_arch == "wasm32" {
+        assert!(
+            cfg!(feature = "wasm"),
+            "dear-imguizmo-quat-sys: wasm32 targets require the `wasm` feature"
+        );
+        assert!(
+            use_pregenerated_wasm_bindings(&cfg.out_dir),
+            "dear-imguizmo-quat-sys: WASM requires pregenerated bindings"
+        );
         return;
+    }
+    let plan = NativeBuildPlan::from_env(
+        "IMGUIZMO_QUAT_SYS",
+        cfg!(feature = "package-bin") || cfg!(feature = "build-from-source"),
+        cfg!(feature = "prebuilt"),
+    )
+    .unwrap_or_else(|error| panic!("dear-imguizmo-quat-sys: {error}"));
+    if plan.mode() == NativeBuildMode::BindingsOnly {
+        assert!(
+            use_pregenerated_bindings(&cfg.out_dir),
+            "dear-imguizmo-quat-sys: bindings-only requires pregenerated bindings"
+        );
+        return;
+    }
+    if matches!(
+        plan.mode(),
+        NativeBuildMode::Auto | NativeBuildMode::Prebuilt
+    ) {
+        let linked = try_link_prebuilt_all(&cfg, &plan);
+        if plan
+            .finish_prebuilt_lookup(linked)
+            .unwrap_or_else(|error| panic!("dear-imguizmo-quat-sys: {error}"))
+        {
+            assert!(
+                use_pregenerated_bindings(&cfg.out_dir),
+                "dear-imguizmo-quat-sys: prebuilt mode requires pregenerated bindings"
+            );
+            return;
+        }
     }
 
     if !imgui_src.exists() {
@@ -573,40 +544,13 @@ fn main() {
         );
     }
 
-    let bindings_ready = if cfg.target_arch == "wasm32" {
-        if !cfg!(feature = "wasm") {
-            panic!(
-                "dear-imguizmo-quat-sys: building for wasm32 requires the `wasm` feature.\n\
-                 Enable it in your Cargo.toml: features = [\"wasm\"]"
-            );
-        }
-        use_pregenerated_wasm_bindings(&cfg.out_dir)
-    } else {
-        use_pregenerated_bindings(&cfg.out_dir)
-    };
+    let bindings_ready = use_pregenerated_bindings(&cfg.out_dir);
     if !bindings_ready {
         generate_bindings(&cfg, &quat_root, &imgui_src, &cimgui_root);
     }
 
-    // Link/build native
-    let force_build = cfg!(feature = "package-bin")
-        || cfg!(feature = "build-from-source")
-        || env::var("IMGUIZMO_QUAT_SYS_FORCE_BUILD").is_ok();
-    let linked_prebuilt = if force_build {
-        false
-    } else {
-        try_link_prebuilt_all(&cfg)
-    };
-    if cfg.target_arch != "wasm32" {
-        if !cfg.docs_rs && !linked_prebuilt && env::var("IMGUIZMO_QUAT_SYS_SKIP_CC").is_err() {
-            sources
-                .validate_native()
-                .unwrap_or_else(|error| panic!("dear-imguizmo-quat-sys: {error}"));
-            build_with_cc(&cfg, &sources, &quat_root, &imgui_src, &cimgui_root);
-        }
-    } else {
-        println!(
-            "cargo:warning=Skipping native ImGuIZMO.quat build for wasm32 (using import-style wasm bindings)"
-        );
-    }
+    sources
+        .validate_native()
+        .unwrap_or_else(|error| panic!("dear-imguizmo-quat-sys: {error}"));
+    build_with_cc(&cfg, &sources, &quat_root, &imgui_src, &cimgui_root);
 }

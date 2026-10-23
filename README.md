@@ -341,7 +341,8 @@ fn ui_frame(
 - Windows source builds support `x86_64-pc-windows-gnullvm` and `aarch64-pc-windows-gnullvm` with an installed llvm-mingw toolchain; Visual Studio is not required for those targets. The x64 target is runtime/ABI tested in both its default and `+crt-static` modes. The Arm64 gnullvm target and `aarch64-pc-windows-msvc` `/MD` route are cross-link/PE-tested only and are not executed in CI.
 - The gnullvm support claim covers the core and maintained C++ extension sys crates with their default native dependency set. It does not add gnullvm prebuilts or cover the SDL3 backend's external CMake dependency, FreeType, or other optional native packages.
 - Windows core packages cover both MSVC CRT modes (MD/MT), with optional `freetype` and a distinct `stack-layout` artifact profile. Linux and macOS core archives are also eligible for opt-in release download on their supported targets; source builds remain the default everywhere.
-- Opt-in core prebuilt download from Release: enable `dear-imgui-rs/prebuilt`, or `dear-imgui-sys/prebuilt` when depending on the low-level crate directly (the env toggle `IMGUI_SYS_USE_PREBUILT=1` is still accepted but requires that feature). `IMGUI_SYS_LIB_DIR` points to the static-library directory and requires its matching `manifest.txt` there or in the parent artifact root, while `IMGUI_SYS_PREBUILT_URL` should point to a package-tool-generated archive. Bare core `.a`/`.lib` files without adjacent provenance are rejected.
+- Opt-in core prebuilt download from Release: enable `dear-imgui-rs/prebuilt`, or `dear-imgui-sys/prebuilt` when depending on the low-level crate directly (the env toggle `IMGUI_SYS_USE_PREBUILT=1` is still accepted but requires that feature). `IMGUI_SYS_PREBUILT_URL` should point to a package-tool-generated archive. Automatic release acquisition and normal source builds manage their own output/cache directories; neither requires `IMGUI_SYS_LIB_DIR`.
+- `IMGUI_SYS_LIB_DIR` explicitly selects the static-library directory of a matching dear-imgui-rs artifact, not an arbitrary system `libimgui`/`libcimgui`; the bindings also require this repository's C ABI bridges, source adaptations, and layout/build options. Keep its matching `manifest.txt` there or in the parent artifact root. Bare core `.a`/`.lib` files without adjacent provenance are rejected. See [accepted artifacts and ABI requirements](dear-imgui-sys/README.md#what-imgui_sys_lib_dir-accepts).
 - Every accepted core prebuilt manifest records crate/version, target, link type, MSVC CRT, normalized features, cimgui and Dear ImGui revisions, and the binding-spec hash. Missing, unknown, duplicate, or mismatched fields reject the core artifact instead of falling back to an ABI guess. Extension `*-sys` crates retain their crate-specific prebuilt contracts.
 - `dear-implot`, `dear-implot3d`, `dear-imnodes`, `dear-imguizmo`,
   `dear-imguizmo-quat`, `dear-imgui-cte`, and `dear-node-editor` forward both `prebuilt` and
@@ -357,14 +358,14 @@ Test engine hooks (important):
   - To actually run UI automation/tests, link `dear-imgui-test-engine` (or `dear-imgui-test-engine-sys`), which registers the real hook implementations at runtime.
 
 Common env-var shapes used by `-sys` crates (consult each crate README for its exact contract):
-- `<CRATE>_SYS_LIB_DIR` — explicit library directory; core `IMGUI_SYS_LIB_DIR` also requires the strict matching `manifest.txt` in that directory or its parent artifact root
+- `<CRATE>_SYS_BUILD_MODE` — `auto` (default), `source`, `prebuilt` (no core/extension source fallback), or `bindings-only`; see the [native build policy](dear-imgui-sys/README.md#native-build-policy). Supported by the core and prebuilt-capable extension sys crates, not the source-only Test Engine.
+- `<CRATE>_SYS_LIB_DIR` — explicit matching artifact directory, not a generic system-library search path; core `IMGUI_SYS_LIB_DIR` also requires the strict matching `manifest.txt` in that directory or its parent artifact root
 - `<CRATE>_SYS_PREBUILT_URL` — explicit URL or local artifact path; for core use a packaged archive rather than a bare `.a/.lib` (HTTP(S) and `.tar.gz` extraction require feature `prebuilt`)
 - `<CRATE>_SYS_USE_PREBUILT=1` — allow auto download from GitHub Releases (requires feature `prebuilt`)
 - `<CRATE>_SYS_PACKAGE_DIR` — local dir with `.tar.gz` packages
 - `<CRATE>_SYS_CACHE_DIR` — cache root for downloads/extraction
-- `<CRATE>_SYS_SKIP_CC` — skip C/C++ compilation
+- `<CRATE>_SYS_SKIP_CC` — legacy bindings-only without artifact intent; with an explicit artifact or feature `prebuilt`, require a compatible prebuilt
 - `<CRATE>_SYS_FORCE_BUILD` — force source build
-- `IMPLOT_SYS_USE_CMAKE` — prefer CMake for `dear-implot-sys` when available; otherwise cc
 - `CARGO_NET_OFFLINE=true` — forbid network; use only local packages or repo prebuilt
 
 FreeType: enable once anywhere. Turning on `freetype` in `dear-implot`, `dear-imnodes`, `dear-node-editor`, `dear-imguizmo`, `dear-imguizmo-quat`, or `dear-imgui-test-engine` propagates to `dear-imgui-sys`. Source builds probe `pkg-config freetype2` first and then vcpkg's `freetype` port; if neither is available, the build fails instead of silently disabling FreeType. When using a prebuilt `dear-imgui-sys` with freetype, ensure the package manifest includes `features=freetype` (our packager writes this).

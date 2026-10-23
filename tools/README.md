@@ -37,6 +37,25 @@ the GitHub Release.
 
 ## Available Scripts
 
+### Tool Tests and Build Integration Tests
+
+Run Python tooling unit tests without invoking the native build-policy Cargo matrix:
+
+```bash
+python3 -B -m unittest discover -s tools/tests -p 'test_*.py' -v
+```
+
+Run the separate native build integration checks explicitly:
+
+```bash
+python3 -B -m unittest discover -s tools/integration_tests -p 'test_*.py' -v
+```
+
+The integration suite uses real Cargo consumers to verify sys-crate wiring, Test Engine check-only compatibility, the issue #96 directory diagnostic, and incremental manifest validation.
+It does not compile C++, uses at most two Cargo build jobs, and reuses the workspace target directory.
+The shared Rust policy unit tests cover configuration combinations; the Cargo suite keeps per-crate source-feature and prebuilt-selection wiring rather than repeating every policy rule for every crate.
+CI runs both suites as separate steps.
+
 ### 1. `tasks.py` - Task Runner (Recommended)
 
 Convenient shortcuts for common tasks.

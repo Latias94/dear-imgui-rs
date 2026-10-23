@@ -8,6 +8,11 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
+### Build Policy
+
+- Add `<PREFIX>_BUILD_MODE=auto|source|prebuilt|bindings-only` for the core and seven prebuilt-capable extension sys crates. Explicit artifact selectors now fail on missing or incompatible artifacts instead of silently falling back. Conflicting source/skip instructions fail in the build script rather than producing undefined symbols at final link. Legacy `SKIP_CC` remains check-only without artifact intent and becomes strict prebuilt with an artifact selector or feature `prebuilt`. See the [migration notes](docs/COMPATIBILITY.md#unreleased-native-build-policy). Addresses [#96](https://github.com/Latias94/dear-imgui-rs/issues/96).
+- Retain the native-free Test Engine dual-skip check, prevent network requests on offline cache misses, refresh extraction caches after local archive replacement, and revalidate core/extension manifests when they change or a higher-priority manifest is added.
+
 ## [0.21.0] - 2026-10-17
 
 This release brings Dear ImGui 1.93 rendering and native engine-editor integration to the unified workspace. Upgrade the crates together; custom drawing code and applications owning Winit events or WGPU multi-viewport execution need the migrations below.
