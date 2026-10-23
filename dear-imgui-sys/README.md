@@ -22,10 +22,35 @@ This crate provides unsafe Rust bindings to Dear ImGui v1.92.9b (docking branch)
 
 This crate supports multiple build strategies to fit different development workflows:
 
+Pregenerated Rust bindings and prebuilt native libraries solve different problems:
+
+| Component | What it supplies | Normal source build |
+|-----------|------------------|---------------------|
+| Pregenerated Rust bindings | Rust declarations of C functions and native data layouts | Use the checked-in declarations; no bindgen or libclang needed |
+| Native core library | Compiled implementations of Dear ImGui, cimgui, and this repository's bridges/adaptations | Compile the vendored C++ sources with `cc`, then link the resulting static archive |
+
+For normal native use, run `cargo build` without prebuilt overrides or skip flags. Without feature `prebuilt`, there is no automatic release download; in a normal checkout/package without a compatible repository prebuilt, the build script compiles the native library automatically. No `IMGUI_SYS_LIB_DIR` is needed for that output: `cc` places it under Cargo's `OUT_DIR` and emits the link metadata. A C++ toolchain is still required, and Cargo reuses unchanged build artifacts on subsequent builds.
+
 ### 1. Prebuilt Static Libraries (Recommended)
 
 The fastest way to get started is to use prebuilt static libraries instead of compiling from source.
 Official release archives cover the supported release targets and profiles. Use an archive matching the crate version. Choose one of the alternatives below; unset previous `IMGUI_SYS_LIB_DIR`, `IMGUI_SYS_PREBUILT_URL`, or `IMGUI_SYS_PACKAGE_DIR` overrides when switching routes.
+
+#### What `IMGUI_SYS_LIB_DIR` accepts
+
+`IMGUI_SYS_LIB_DIR` selects a compatible **dear-imgui-rs native artifact**, not an arbitrary system-installed Dear ImGui or cimgui library. Use a matching archive from this project's releases, or build and package an equivalent artifact with this repository's tooling. The installation location is unrestricted: a compatible artifact installed under `/usr/local` is fine, but pointing at `/usr/lib` does not make a distribution's `libimgui` compatible.
+
+The distinction matters for three reasons:
+
+- Rust calls cimgui's C ABI symbols such as `igBeginCombo`; a plain C++ Dear ImGui library does not provide those entry points.
+- This repository's core archive includes its own bridge symbols, such as PlatformIO aggregate hooks, and source adaptations required by the Rust API. A generic cimgui build does not necessarily contain them.
+- The checked-in Rust declarations require matching native layouts and build options. Dear ImGui/cimgui revisions, `IMGUI_USE_WCHAR32`, optional FreeType/stack-layout profiles, and the target/CRT configuration must match; a library can link successfully while an incompatible layout still makes FFI access unsound.
+
+The build script therefore expects `libdear_imgui.a` (`dear_imgui.lib` on MSVC) and validates the matching `manifest.txt` in that directory or its parent. Keep the manifest with the artifact; renaming a system library or copying a manifest beside it does not add missing symbols or make its ABI compatible. This variable overrides artifact location; it is not a system-ImGui discovery interface. If no compatible artifact is available, leave prebuilt overrides unset and use the default source build.
+
+Set `IMGUI_SYS_LIB_DIR` only when you already have an extracted compatible artifact and want to select it explicitly, for example for an offline build, an internally distributed package, or a specific locally packaged build. Automatic release acquisition with feature `prebuilt` manages its own cache and does not require this variable; the default source build does not require it either. Core backend-shim features may still compile locally when the core library is prebuilt.
+
+#### Prebuilt selection examples
 
 ```bash
 # Option A: Point to the library directory inside an extracted core artifact.
@@ -517,7 +542,7 @@ Control build behavior with these environment variables:
 | Variable | Description |
 |----------|-------------|
 | `IMGUI_SYS_BUILD_MODE` | Native policy: `auto`, `source`, `prebuilt`, or `bindings-only` |
-| `IMGUI_SYS_LIB_DIR` | Directory containing the core static library; a matching strict `manifest.txt` must be in that directory or its parent |
+| `IMGUI_SYS_LIB_DIR` | Directory containing a compatible dear-imgui-rs core artifact, not an arbitrary system ImGui/cimgui library; a matching strict `manifest.txt` must be in that directory or its parent. See [accepted artifacts and ABI requirements](#what-imgui_sys_lib_dir-accepts). |
 | `IMGUI_SYS_PREBUILT_URL` | Local path or direct URL to a package-tool-generated core archive; HTTP(S) and `.tar.gz` extraction require feature `prebuilt` |
 | `IMGUI_SYS_USE_PREBUILT` | Enable automatic download from GitHub releases (`1`, requires feature `prebuilt`) |
 | `IMGUI_SYS_PACKAGE_DIR` | Directory containing the exact matching packaged archive; requires feature `prebuilt`, also works offline |

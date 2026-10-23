@@ -8,6 +8,8 @@ The core and seven prebuilt-capable extension sys crates share `<PREFIX>_BUILD_M
 The default remains source-capable with downloads opt-in. Strict prebuilt mode never falls back to compiling that library; enabled core backend shims still compile locally.
 Only bindings-only intentionally omits native symbols, and it is not a supported external-provider contract.
 
+`IMGUI_SYS_LIB_DIR` overrides the location of a compatible dear-imgui-rs core artifact; it does not select an arbitrary system ImGui/cimgui installation. The Rust declarations require cimgui's C entry points, this repository's bridges and source adaptations, and matching native layouts/build options. Use a matching project release artifact or an equivalent artifact built with the repository's tooling, and retain its manifest. Installation paths are unrestricted, but renaming a system library or copying a manifest cannot make it ABI-compatible. See [accepted artifacts and ABI requirements](../dear-imgui-sys/README.md#what-imgui_sys_lib_dir-accepts).
+
 Migration: explicit library/archive/package-directory overrides are now strict and mutually exclusive; missing or incompatible selections stop the build.
 Legacy `SKIP_CC=1` without artifact intent retains check-only behavior, while combining it with an explicit artifact or feature `prebuilt` requires a compatible prebuilt.
 Legacy source-forcing and skipping are conflicting instructions and now fail early. Boolean flags accept false values instead of treating mere presence as true.
