@@ -136,6 +136,23 @@ class NativeBuildPolicyTests(unittest.TestCase):
             "IMGUI_SYS_LIB_DIR": self.consumer / "missing",
         }, "does not contain")
 
+    def test_incompatible_core_manifest_preserves_the_packaging_diagnostic(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "lib").mkdir()
+            (root / "lib/libdear_imgui.a").write_bytes(b"")
+            (root / "lib/dear_imgui.lib").write_bytes(b"")
+            (root / "manifest.txt").write_text(
+                "dear-imgui prebuilt\nversion=incompatible\n", encoding="utf-8"
+            )
+            code, output = self.check({
+                "IMGUI_SYS_BUILD_MODE": "prebuilt",
+                "IMGUI_SYS_LIB_DIR": root / "lib",
+            })
+            self.assertNotEqual(code, 0, output)
+            self.assertIn("artifact manifest version mismatch", output)
+            self.assertIn("selected an incompatible dear_imgui artifact", output)
+
     def test_bindings_only_rejects_artifact_selectors(self):
         self.assert_failure({"IMGUI_SYS_LIB_DIR": self.consumer}, "cannot be combined with a prebuilt selector")
 

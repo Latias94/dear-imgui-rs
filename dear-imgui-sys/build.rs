@@ -599,7 +599,7 @@ fn find_prebuilt_all(cfg: &BuildConfig, plan: &NativeBuildPlan) -> Option<Prebui
             .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}"));
         let identity =
             validate_prebuilt_artifact_profile(&directory, cfg).unwrap_or_else(|error| {
-                panic!("dear-imgui-sys: incompatible explicit prebuilt artifact: {error}")
+                panic!("dear-imgui-sys: selected an incompatible dear_imgui artifact: {error}")
             });
         return Some(PrebuiltCore {
             directory,
