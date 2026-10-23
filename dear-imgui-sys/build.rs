@@ -353,39 +353,23 @@ fn main() {
         return;
     }
 
-    // The established Test Engine CI route explicitly skips both native libraries.
-    // Cargo cannot distinguish the implied build-from-source feature from a direct one.
-    let legacy_test_engine_check = cfg!(feature = "test-engine")
-        && !cfg!(feature = "prebuilt")
-        && !cfg!(feature = "package-bin")
-        && !cfg!(feature = "abi-probe")
-        && skip_cc
-        && build_support::parse_bool_env("IMGUI_TEST_ENGINE_SYS_SKIP_CC")
-        && !build_support::parse_bool_env("IMGUI_SYS_FORCE_BUILD")
-        && [
-            "IMGUI_SYS_BUILD_MODE",
-            "IMGUI_SYS_LIB_DIR",
-            "IMGUI_SYS_PREBUILT_URL",
-            "IMGUI_SYS_PACKAGE_DIR",
-        ]
-        .iter()
-        .all(|name| env::var_os(name).is_none());
     let native_plan = if cfg.is_core_wasm_target() {
         None
     } else {
         Some(
-            NativeBuildPlan::from_env(
-                "IMGUI_SYS",
-                (cfg!(feature = "build-from-source") || cfg!(feature = "package-bin"))
-                    && !legacy_test_engine_check,
+            NativeBuildPlan::from_core_env(
+                cfg!(feature = "build-from-source") || cfg!(feature = "package-bin"),
                 cfg!(feature = "prebuilt"),
+                cfg!(feature = "test-engine")
+                    && !cfg!(feature = "package-bin")
+                    && !cfg!(feature = "abi-probe"),
             )
             .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}")),
         )
     };
     let bindings_only = native_plan
         .as_ref()
-        .is_some_and(|plan| plan.mode == NativeBuildMode::BindingsOnly);
+        .is_some_and(|plan| plan.mode() == NativeBuildMode::BindingsOnly);
     if bindings_only && any_backend_shim_enabled() {
         panic!(
             "bindings-only mode is incompatible with backend-shim-* features; disable shims or choose a native build mode"
@@ -397,7 +381,7 @@ fn main() {
         if bindings_only
             || native_plan
                 .as_ref()
-                .is_some_and(|plan| plan.mode == NativeBuildMode::Prebuilt)
+                .is_some_and(|plan| plan.mode() == NativeBuildMode::Prebuilt)
         {
             panic!("the selected build mode requires checked-in pregenerated bindings");
         }
@@ -405,7 +389,12 @@ fn main() {
     }
 
     let prebuilt = match native_plan.as_ref() {
-        Some(plan) if matches!(plan.mode, NativeBuildMode::Auto | NativeBuildMode::Prebuilt) => {
+        Some(plan)
+            if matches!(
+                plan.mode(),
+                NativeBuildMode::Auto | NativeBuildMode::Prebuilt
+            ) =>
+        {
             let artifact = find_prebuilt_all(&cfg, plan);
             plan.finish_prebuilt_lookup(artifact.is_some())
                 .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}"));
@@ -421,7 +410,7 @@ fn main() {
 
     let outcome = match native_plan.as_ref() {
         None => CoreBuildOutcome::WasmImports,
-        Some(plan) => match plan.mode {
+        Some(plan) => match plan.mode() {
             NativeBuildMode::BindingsOnly => CoreBuildOutcome::BindingsOnly,
             NativeBuildMode::Source => {
                 build_with_cc_cfg(&cfg, &sources);
@@ -594,7 +583,7 @@ struct PrebuiltCore {
 }
 
 fn find_prebuilt_all(cfg: &BuildConfig, plan: &NativeBuildPlan) -> Option<PrebuiltCore> {
-    if let Some(source) = &plan.prebuilt {
+    if let Some(source) = plan.prebuilt_source() {
         let mut names = vec![cfg.archive_name(cfg.crt_profile())];
         let fallback = cfg.archive_name("");
         if fallback != names[0] {

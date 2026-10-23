@@ -306,7 +306,7 @@ fn try_download_prebuilt_from_release(
 
 fn try_link_prebuilt_all(config: &BuildConfig, plan: &NativeBuildPlan) -> bool {
     let profile = OnceCell::new();
-    if let Some(source) = &plan.prebuilt {
+    if let Some(source) = plan.prebuilt_source() {
         let profile_value = profile.get_or_init(|| extension_artifact_profile(config, false));
         let directory = source
             .acquire(
@@ -495,14 +495,17 @@ fn main() {
         cfg!(feature = "prebuilt"),
     )
     .unwrap_or_else(|error| panic!("{CRATE_LABEL}: {error}"));
-    if plan.mode == NativeBuildMode::BindingsOnly {
+    if plan.mode() == NativeBuildMode::BindingsOnly {
         assert!(
             use_pregenerated_bindings(&config.out_dir),
             "{CRATE_LABEL}: bindings-only requires pregenerated bindings"
         );
         return;
     }
-    if matches!(plan.mode, NativeBuildMode::Auto | NativeBuildMode::Prebuilt) {
+    if matches!(
+        plan.mode(),
+        NativeBuildMode::Auto | NativeBuildMode::Prebuilt
+    ) {
         let linked = try_link_prebuilt_all(&config, &plan);
         if plan
             .finish_prebuilt_lookup(linked)

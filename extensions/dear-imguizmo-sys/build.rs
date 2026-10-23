@@ -275,7 +275,7 @@ fn docsrs_build(cfg: &BuildConfig, cimguizmo_root: &Path, imgui_src: &Path, cimg
 }
 
 fn try_link_prebuilt_all(cfg: &BuildConfig, plan: &NativeBuildPlan) -> bool {
-    if let Some(source) = &plan.prebuilt {
+    if let Some(source) = plan.prebuilt_source() {
         let profile = extension_artifact_profile(cfg, false);
         let directory = source
             .acquire(
@@ -447,14 +447,17 @@ fn main() {
         cfg!(feature = "prebuilt"),
     )
     .unwrap_or_else(|error| panic!("dear-imguizmo-sys: {error}"));
-    if plan.mode == NativeBuildMode::BindingsOnly {
+    if plan.mode() == NativeBuildMode::BindingsOnly {
         assert!(
             use_pregenerated_bindings(&cfg.out_dir),
             "dear-imguizmo-sys: bindings-only requires pregenerated bindings"
         );
         return;
     }
-    if matches!(plan.mode, NativeBuildMode::Auto | NativeBuildMode::Prebuilt) {
+    if matches!(
+        plan.mode(),
+        NativeBuildMode::Auto | NativeBuildMode::Prebuilt
+    ) {
         let linked = try_link_prebuilt_all(&cfg, &plan);
         if plan
             .finish_prebuilt_lookup(linked)

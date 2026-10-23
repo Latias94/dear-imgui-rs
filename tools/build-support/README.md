@@ -58,7 +58,8 @@ Use the repository package tools to produce release-compatible archives.
 
 `native_build::NativeBuildPlan::from_env(prefix, source_required, prebuilt_enabled)` reads native mode settings once and emits their rerun triggers.
 It normalizes the new `BUILD_MODE` setting and legacy `SKIP_CC` / `FORCE_BUILD` flags without performing downloads or invoking a compiler.
-`NativeBuildOptions::resolve` is the value-only policy seam used by unit tests.
+Raw inputs and the value-only resolver are private; sys crates inspect a validated plan through `mode()` and `prebuilt_source()` rather than constructing or mutating its fields.
+The core uses `NativeBuildPlan::from_core_env` to normalize the existing Test Engine dual-skip route at the same input adapter, without re-reading mode flags in its build script.
 
 Sys crates keep their target-specific compilation, ABI validation, and link order.
 In automatic or strict-prebuilt mode, an explicit `PrebuiltSource` is acquired with `acquire`; the returned directory must still pass the crate's existing artifact-profile validation before any link directives are emitted.

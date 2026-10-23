@@ -1870,6 +1870,9 @@ jobs:
       - name: Test release tooling and source provenance
         run: python3 -B -m unittest discover -s tools/tests -p 'test_*.py' -v
 
+      - name: Test native build policy with real Cargo consumers
+        run: python3 -B -m unittest discover -s tools/integration_tests -p 'test_*.py' -v
+
       - name: Package, unpack, and consume core crates
         run: python3 tools/ci/verify_packaged_core.py
 

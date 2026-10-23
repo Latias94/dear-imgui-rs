@@ -90,30 +90,44 @@ impl PrebuiltSource {
 
 /// Value inputs keep policy tests independent of the process environment.
 #[derive(Clone, Debug, Default)]
-pub struct NativeBuildOptions {
-    pub mode: Option<NativeBuildMode>,
-    pub skip_cc: bool,
-    pub force_source: bool,
-    pub source_required: bool,
-    pub prebuilt_enabled: bool,
-    pub prebuilt: Option<PrebuiltSource>,
+struct NativeBuildOptions {
+    mode: Option<NativeBuildMode>,
+    skip_cc: bool,
+    force_source: bool,
+    source_required: bool,
+    prebuilt_enabled: bool,
+    prebuilt: Option<PrebuiltSource>,
+    legacy_test_engine_skip: bool,
 }
 
 /// A normalized request; only `BindingsOnly` can intentionally omit a native library.
 #[derive(Clone, Debug)]
 pub struct NativeBuildPlan {
-    pub mode: NativeBuildMode,
-    pub prebuilt: Option<PrebuiltSource>,
+    mode: NativeBuildMode,
+    prebuilt: Option<PrebuiltSource>,
 }
 
 impl NativeBuildOptions {
-    pub fn resolve(self, prefix: &str) -> Result<NativeBuildPlan, String> {
+    fn is_legacy_test_engine_check(&self) -> bool {
+        self.legacy_test_engine_skip
+            && self.skip_cc
+            && self.mode.is_none()
+            && !self.force_source
+            && !self.prebuilt_enabled
+            && self.prebuilt.is_none()
+    }
+
+    fn requires_source(&self) -> bool {
+        (self.source_required || self.force_source) && !self.is_legacy_test_engine_check()
+    }
+
+    fn resolve(self, prefix: &str) -> Result<NativeBuildPlan, String> {
         if self.mode.is_some() && (self.skip_cc || self.force_source) {
             return Err(format!(
                 "{prefix}_BUILD_MODE cannot be combined with enabled {prefix}_SKIP_CC or {prefix}_FORCE_BUILD; use one build-mode interface"
             ));
         }
-        let source_required = self.source_required || self.force_source;
+        let source_required = self.requires_source();
         if source_required && self.skip_cc {
             return Err(format!(
                 "{prefix}_SKIP_CC conflicts with a required source build (build-from-source, a source-only feature, packaging, or {prefix}_FORCE_BUILD)"
@@ -183,11 +197,45 @@ impl NativeBuildOptions {
 }
 
 impl NativeBuildPlan {
+    /// The resolved policy; callers cannot construct or mutate an unchecked plan.
+    pub fn mode(&self) -> NativeBuildMode {
+        self.mode
+    }
+
+    /// The authoritative artifact selector, if the resolved policy uses one.
+    pub fn prebuilt_source(&self) -> Option<&PrebuiltSource> {
+        self.prebuilt.as_ref()
+    }
+
     /// Read legacy mode flags once, preserving source-feature priority in automatic mode.
     pub fn from_env(
         prefix: &str,
         source_required: bool,
         prebuilt_enabled: bool,
+    ) -> Result<Self, String> {
+        Self::read_env(prefix, source_required, prebuilt_enabled, false)
+    }
+
+    /// Resolve core settings, including its established dual-skip Test Engine check.
+    /// The caller must disable that compatibility route for packaging and ABI probes.
+    pub fn from_core_env(
+        source_required: bool,
+        prebuilt_enabled: bool,
+        allow_test_engine_check: bool,
+    ) -> Result<Self, String> {
+        Self::read_env(
+            "IMGUI_SYS",
+            source_required,
+            prebuilt_enabled,
+            allow_test_engine_check,
+        )
+    }
+
+    fn read_env(
+        prefix: &str,
+        source_required: bool,
+        prebuilt_enabled: bool,
+        allow_test_engine_check: bool,
     ) -> Result<Self, String> {
         for suffix in [
             "BUILD_MODE",
@@ -227,10 +275,22 @@ impl NativeBuildPlan {
             &format!("{prefix}_USE_PREBUILT"),
             read_string("USE_PREBUILT")?.as_deref(),
         )?;
+        let mut options = NativeBuildOptions {
+            mode,
+            skip_cc,
+            force_source,
+            source_required,
+            prebuilt_enabled,
+            prebuilt: None,
+            legacy_test_engine_skip: allow_test_engine_check
+                && crate::parse_bool_env("IMGUI_TEST_ENGINE_SYS_SKIP_CC"),
+        };
+        let raw_selectors = ["LIB_DIR", "PREBUILT_URL", "PACKAGE_DIR"]
+            .map(|suffix| env::var_os(format!("{prefix}_{suffix}")));
+        options.legacy_test_engine_skip &= raw_selectors.iter().all(Option::is_none);
         if use_prebuilt
             && !prebuilt_enabled
-            && !source_required
-            && !force_source
+            && !options.requires_source()
             && !matches!(
                 mode,
                 Some(NativeBuildMode::Source | NativeBuildMode::BindingsOnly)
@@ -240,31 +300,30 @@ impl NativeBuildPlan {
                 "{prefix}_USE_PREBUILT requires feature `prebuilt`; enable it or use {prefix}_LIB_DIR with an extracted artifact"
             ));
         }
-        let mut options = NativeBuildOptions {
-            mode,
-            skip_cc,
-            force_source,
-            source_required,
-            prebuilt_enabled,
-            prebuilt: None,
-        };
-        if (source_required || force_source) && mode.unwrap_or_default() == NativeBuildMode::Auto {
+        if options.requires_source() && mode.unwrap_or_default() == NativeBuildMode::Auto {
             return options.resolve(prefix);
         }
         let mut selectors = Vec::new();
-        if let Some(directory) = env::var_os(format!("{prefix}_LIB_DIR")) {
+        let [lib_dir, prebuilt_url, package_dir] = raw_selectors;
+        if let Some(directory) = lib_dir {
             if directory.is_empty() {
                 return Err(format!("{prefix}_LIB_DIR must not be empty"));
             }
             selectors.push(PrebuiltSource::LibraryDir(directory.into()));
         }
-        if let Some(source) = read_string("PREBUILT_URL")? {
+        if let Some(source) = prebuilt_url {
+            let source = source.into_string().map_err(|value| {
+                format!(
+                    "{prefix}_PREBUILT_URL: {}",
+                    env::VarError::NotUnicode(value)
+                )
+            })?;
             if source.trim().is_empty() {
                 return Err(format!("{prefix}_PREBUILT_URL must not be empty"));
             }
             selectors.push(PrebuiltSource::Archive(source));
         }
-        if let Some(directory) = env::var_os(format!("{prefix}_PACKAGE_DIR")) {
+        if let Some(directory) = package_dir {
             if directory.is_empty() {
                 return Err(format!("{prefix}_PACKAGE_DIR must not be empty"));
             }
@@ -309,11 +368,7 @@ fn explicit_cache_root(root: &Path, source: &str) -> PathBuf {
 }
 
 /// Diagnose an extraction root without silently changing the user's explicit selection.
-pub fn require_library_dir(
-    directory: &Path,
-    library_name: &str,
-    label: &str,
-) -> Result<(), String> {
+fn require_library_dir(directory: &Path, library_name: &str, label: &str) -> Result<(), String> {
     let library = directory.join(library_name);
     println!("cargo:rerun-if-changed={}", library.display());
     if library.is_file() {
@@ -403,6 +458,81 @@ mod tests {
     }
 
     #[test]
+    fn test_engine_dual_skip_is_only_a_bindings_only_compatibility_route() {
+        let input = NativeBuildOptions {
+            skip_cc: true,
+            source_required: true,
+            legacy_test_engine_skip: true,
+            ..options()
+        };
+        assert_eq!(
+            input.clone().resolve("IMGUI_SYS").unwrap().mode(),
+            NativeBuildMode::BindingsOnly
+        );
+        for conflicting in [
+            NativeBuildOptions {
+                legacy_test_engine_skip: false,
+                ..input.clone()
+            },
+            NativeBuildOptions {
+                mode: Some(NativeBuildMode::Auto),
+                ..input.clone()
+            },
+            NativeBuildOptions {
+                force_source: true,
+                ..input.clone()
+            },
+            NativeBuildOptions {
+                prebuilt_enabled: true,
+                ..input.clone()
+            },
+            NativeBuildOptions {
+                prebuilt: Some(PrebuiltSource::LibraryDir("artifact/lib".into())),
+                ..input
+            },
+        ] {
+            assert!(conflicting.resolve("IMGUI_SYS").is_err());
+        }
+    }
+
+    #[test]
+    fn archive_selection_requires_download_capability_but_direct_libraries_do_not() {
+        for source in [
+            PrebuiltSource::Archive("artifact.tar.gz".into()),
+            PrebuiltSource::Archive("https://example.invalid/artifact".into()),
+            PrebuiltSource::PackageDir("packages".into()),
+        ] {
+            let input = NativeBuildOptions {
+                prebuilt: Some(source),
+                ..options()
+            };
+            assert!(
+                input
+                    .clone()
+                    .resolve("IMGUI_SYS")
+                    .unwrap_err()
+                    .contains("requires feature `prebuilt`")
+            );
+            assert!(
+                NativeBuildOptions {
+                    prebuilt_enabled: true,
+                    ..input
+                }
+                .resolve("IMGUI_SYS")
+                .is_ok()
+            );
+        }
+        assert!(
+            NativeBuildOptions {
+                prebuilt: Some(PrebuiltSource::LibraryDir("artifact/lib".into())),
+                ..options()
+            }
+            .resolve("IMGUI_SYS")
+            .is_ok()
+        );
+    }
+
+    #[test]
     fn unified_source_feature_wins_over_download_and_stale_selector_in_auto() {
         let plan = NativeBuildOptions {
             source_required: true,
@@ -475,9 +605,12 @@ mod tests {
             NativeBuildMode::Prebuilt
         );
         assert!("typo".parse::<NativeBuildMode>().is_err());
-        assert!(!parse_flag("IMGUI_SYS_SKIP_CC", Some("0")).unwrap());
-        assert!(!parse_flag("IMGUI_SYS_SKIP_CC", Some("false")).unwrap());
-        assert!(parse_flag("IMGUI_SYS_SKIP_CC", Some("1")).unwrap());
+        for value in ["0", "false", "False", "no", "No", "off", "Off"] {
+            assert!(!parse_flag("IMGUI_SYS_SKIP_CC", Some(value)).unwrap());
+        }
+        for value in ["1", "true", "True", "yes", "Yes", "on", "On"] {
+            assert!(parse_flag("IMGUI_SYS_SKIP_CC", Some(value)).unwrap());
+        }
         assert!(parse_flag("IMGUI_SYS_SKIP_CC", Some("maybe")).is_err());
     }
 

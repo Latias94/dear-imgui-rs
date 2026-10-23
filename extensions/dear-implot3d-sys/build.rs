@@ -310,7 +310,7 @@ fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
 }
 
 fn try_link_prebuilt_all(cfg: &BuildConfig, plan: &NativeBuildPlan) -> bool {
-    if let Some(source) = &plan.prebuilt {
+    if let Some(source) = plan.prebuilt_source() {
         let profile = extension_artifact_profile(cfg, false);
         let directory = source
             .acquire(
@@ -553,19 +553,22 @@ fn main() {
     .unwrap_or_else(|error| panic!("dear-implot3d-sys: {error}"));
     if cfg!(feature = "surface-test-probe") {
         assert!(
-            plan.mode != NativeBuildMode::BindingsOnly,
+            plan.mode() != NativeBuildMode::BindingsOnly,
             "dear-implot3d-sys: feature `surface-test-probe` requires native compilation"
         );
         build_surface_test_probe(&cfg, &cimplot3d_root, &imgui_src, &cimgui_root);
     }
-    if plan.mode == NativeBuildMode::BindingsOnly {
+    if plan.mode() == NativeBuildMode::BindingsOnly {
         assert!(
             use_pregenerated_bindings(&cfg.out_dir),
             "dear-implot3d-sys: bindings-only requires pregenerated bindings"
         );
         return;
     }
-    if matches!(plan.mode, NativeBuildMode::Auto | NativeBuildMode::Prebuilt) {
+    if matches!(
+        plan.mode(),
+        NativeBuildMode::Auto | NativeBuildMode::Prebuilt
+    ) {
         let linked = try_link_prebuilt_all(&cfg, &plan);
         if plan
             .finish_prebuilt_lookup(linked)

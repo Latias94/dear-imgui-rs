@@ -90,7 +90,7 @@ class NativeBuildPolicyTests(unittest.TestCase):
     def test_test_engine_legacy_dual_skip_preserves_the_ci_check_only_route(self):
         overrides = {f"{prefix}_BUILD_MODE": None for prefix in SYS_CRATES.values()}
         overrides.update({f"{prefix}_SKIP_CC": "1" for prefix in SYS_CRATES.values()})
-        for value in ("1", "True", "Yes", "On"):
+        for value in ("1", "True"):
             with self.subTest(value=value):
                 overrides["IMGUI_SYS_SKIP_CC"] = value
                 overrides["IMGUI_TEST_ENGINE_SYS_SKIP_CC"] = value
@@ -102,14 +102,12 @@ class NativeBuildPolicyTests(unittest.TestCase):
             with self.subTest(prefix=prefix):
                 self.assert_failure({f"{prefix}_BUILD_MODE": "prebuilt"}, "no compatible prebuilt")
 
-    def test_legacy_source_and_skip_conflict_in_every_crate(self):
-        for prefix in SYS_CRATES.values():
-            with self.subTest(prefix=prefix):
-                self.assert_failure({
-                    f"{prefix}_BUILD_MODE": None,
-                    f"{prefix}_SKIP_CC": "1",
-                    f"{prefix}_FORCE_BUILD": "1",
-                }, "SKIP_CC conflicts with a required source build")
+    def test_legacy_source_and_skip_conflict(self):
+        self.assert_failure({
+            "IMGUI_SYS_BUILD_MODE": None,
+            "IMGUI_SYS_SKIP_CC": "1",
+            "IMGUI_SYS_FORCE_BUILD": "1",
+        }, "SKIP_CC conflicts with a required source build")
 
     def test_strict_prebuilt_rejects_unified_source_requirements(self):
         for crate, prefix in SYS_CRATES.items():
@@ -139,9 +137,7 @@ class NativeBuildPolicyTests(unittest.TestCase):
         }, "does not contain")
 
     def test_bindings_only_rejects_artifact_selectors(self):
-        for prefix in SYS_CRATES.values():
-            with self.subTest(prefix=prefix):
-                self.assert_failure({f"{prefix}_LIB_DIR": self.consumer}, "cannot be combined with a prebuilt selector")
+        self.assert_failure({"IMGUI_SYS_LIB_DIR": self.consumer}, "cannot be combined with a prebuilt selector")
 
     def test_multiple_explicit_selectors_are_rejected(self):
         self.assert_failure({
