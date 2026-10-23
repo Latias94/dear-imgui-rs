@@ -357,14 +357,14 @@ Test engine hooks (important):
   - To actually run UI automation/tests, link `dear-imgui-test-engine` (or `dear-imgui-test-engine-sys`), which registers the real hook implementations at runtime.
 
 Common env-var shapes used by `-sys` crates (consult each crate README for its exact contract):
+- `<CRATE>_SYS_BUILD_MODE` — `auto` (default), `source`, `prebuilt` (no core/extension source fallback), or `bindings-only`; see the [native build policy](dear-imgui-sys/README.md#native-build-policy). Supported by the core and prebuilt-capable extension sys crates, not the source-only Test Engine.
 - `<CRATE>_SYS_LIB_DIR` — explicit library directory; core `IMGUI_SYS_LIB_DIR` also requires the strict matching `manifest.txt` in that directory or its parent artifact root
 - `<CRATE>_SYS_PREBUILT_URL` — explicit URL or local artifact path; for core use a packaged archive rather than a bare `.a/.lib` (HTTP(S) and `.tar.gz` extraction require feature `prebuilt`)
 - `<CRATE>_SYS_USE_PREBUILT=1` — allow auto download from GitHub Releases (requires feature `prebuilt`)
 - `<CRATE>_SYS_PACKAGE_DIR` — local dir with `.tar.gz` packages
 - `<CRATE>_SYS_CACHE_DIR` — cache root for downloads/extraction
-- `<CRATE>_SYS_SKIP_CC` — skip C/C++ compilation
+- `<CRATE>_SYS_SKIP_CC` — legacy bindings-only without artifact intent; with an explicit artifact or feature `prebuilt`, require a compatible prebuilt
 - `<CRATE>_SYS_FORCE_BUILD` — force source build
-- `IMPLOT_SYS_USE_CMAKE` — prefer CMake for `dear-implot-sys` when available; otherwise cc
 - `CARGO_NET_OFFLINE=true` — forbid network; use only local packages or repo prebuilt
 
 FreeType: enable once anywhere. Turning on `freetype` in `dear-implot`, `dear-imnodes`, `dear-node-editor`, `dear-imguizmo`, `dear-imguizmo-quat`, or `dear-imgui-test-engine` propagates to `dear-imgui-sys`. Source builds probe `pkg-config freetype2` first and then vcpkg's `freetype` port; if neither is available, the build fails instead of silently disabling FreeType. When using a prebuilt `dear-imgui-sys` with freetype, ensure the package manifest includes `features=freetype` (our packager writes this).

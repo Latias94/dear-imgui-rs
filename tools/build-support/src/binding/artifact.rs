@@ -772,6 +772,15 @@ impl ExtensionArtifactProfile {
         if let Some(parent) = dir.parent() {
             candidates.push(parent.join("manifest.txt"));
         }
+        for manifest in &candidates {
+            // The directory catches a newly added override without perpetual rebuilds.
+            let watch = if manifest.is_file() {
+                manifest.as_path()
+            } else {
+                manifest.parent().unwrap()
+            };
+            println!("cargo:rerun-if-changed={}", watch.display());
+        }
         for manifest in candidates {
             match std::fs::read(&manifest) {
                 Ok(bytes) => return self.validate_manifest_bytes(&bytes),

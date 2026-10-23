@@ -1226,7 +1226,9 @@ class ConsumerContractTests(unittest.TestCase):
 
     def test_prebuilt_environment_removes_ambient_build_modes(self):
         ambient = {
+            "IMGUI_SYS_BUILD_MODE": "source",
             "IMGUI_SYS_FORCE_BUILD": "1",
+            "IMGUI_SYS_PACKAGE_DIR": "stale-packages",
             "IMGUI_SYS_PREBUILT_URL": "https://invalid.example",
             "IMGUI_SYS_USE_PREBUILT": "1",
         }
@@ -1244,6 +1246,7 @@ class ConsumerContractTests(unittest.TestCase):
     def test_extension_prebuilt_environment_binds_both_exact_artifacts(self):
         spec = PREBUILT.EXTENSION_SPECS[0]
         ambient = {
+            "IMPLOT_SYS_BUILD_MODE": "source",
             "IMPLOT_SYS_FORCE_BUILD": "1",
             "IMPLOT_SYS_PREBUILT_URL": "https://invalid.example",
             "IMPLOT_SYS_USE_PREBUILT": "1",

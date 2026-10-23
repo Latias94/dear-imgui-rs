@@ -1,3 +1,4 @@
+use build_support::native_build::{NativeBuildMode, NativeBuildPlan};
 use std::{
     cell::OnceCell,
     env, fs,
@@ -8,14 +9,6 @@ const ARTIFACT_SPEC: build_support::binding::ExtensionArtifactSpec =
     build_support::binding::ExtensionBinding::Cte.artifact_spec();
 const CRATE_LABEL: &str = ARTIFACT_SPEC.sys_crate_name;
 const LIBRARY_NAME: &str = ARTIFACT_SPEC.library_name;
-
-fn is_http_url(value: &str) -> bool {
-    value.starts_with("http://") || value.starts_with("https://")
-}
-
-fn is_archive_urlish(value: &str) -> bool {
-    value.ends_with(".tar.gz") || value.ends_with(".tgz")
-}
 
 #[derive(Clone, Debug)]
 struct BuildConfig {
@@ -253,15 +246,14 @@ fn try_link_prebuilt(
     directory: PathBuf,
     config: &BuildConfig,
     profile: &OnceCell<build_support::binding::ExtensionArtifactProfile>,
-) -> bool {
+) -> Result<bool, String> {
     let library = directory.join(expected_lib_name(&config.target_env));
     if !library.exists() {
-        return false;
+        return Ok(false);
     }
     profile
         .get_or_init(|| extension_artifact_profile(config, false))
-        .validate_prebuilt_dir(&directory)
-        .unwrap_or_else(|error| panic!("{CRATE_LABEL}: incompatible prebuilt artifact: {error}"));
+        .validate_prebuilt_dir(&directory)?;
     println!("cargo:rustc-link-search=native={}", directory.display());
     println!("cargo:rustc-link-lib=static={LIBRARY_NAME}");
     build_support::emit_prebuilt_cpp_runtime_linkage(
@@ -269,7 +261,7 @@ fn try_link_prebuilt(
         &config.target_env,
         &config.target_abi,
     );
-    true
+    Ok(true)
 }
 
 fn prebuilt_cache_root(
@@ -299,22 +291,7 @@ fn try_download_prebuilt_from_release(
 ) -> Option<PathBuf> {
     let profile = profile.get_or_init(|| extension_artifact_profile(config, false));
     let tags = build_support::release_tags(CRATE_LABEL, &profile.version);
-    if let Ok(package_dir) = env::var("CTE_SYS_PACKAGE_DIR") {
-        let archive = PathBuf::from(package_dir).join(&profile.archive_name);
-        let library_name = expected_lib_name(&config.target_env);
-        if archive.exists()
-            && let Ok(library_dir) = build_support::extract_archive_to_cache(
-                &archive,
-                &prebuilt_cache_root(config, profile),
-                &library_name,
-            )
-        {
-            return Some(library_dir);
-        }
-    }
-    if build_support::is_offline() {
-        return None;
-    }
+
     let cache_root = prebuilt_cache_root(config, profile);
     for url in build_support::release_candidate_urls_env(
         &tags,
@@ -327,44 +304,35 @@ fn try_download_prebuilt_from_release(
     None
 }
 
-fn try_link_prebuilt_all(config: &BuildConfig) -> bool {
+fn try_link_prebuilt_all(config: &BuildConfig, plan: &NativeBuildPlan) -> bool {
     let profile = OnceCell::new();
-    if let Ok(directory) = env::var("CTE_SYS_LIB_DIR") {
-        if try_link_prebuilt(PathBuf::from(&directory), config, &profile) {
-            return true;
-        }
-        println!("cargo:warning=CTE_SYS_LIB_DIR set but library not found in {directory}");
-    }
-    if let Ok(url) = env::var("CTE_SYS_PREBUILT_URL") {
-        if (is_http_url(&url) || is_archive_urlish(&url)) && !cfg!(feature = "prebuilt") {
-            println!(
-                "cargo:warning=CTE_SYS_PREBUILT_URL requires the `prebuilt` feature for downloads or archive extraction"
-            );
-            return false;
-        }
+    if let Some(source) = &plan.prebuilt {
         let profile_value = profile.get_or_init(|| extension_artifact_profile(config, false));
-        if let Ok(directory) = try_download_prebuilt(
-            &prebuilt_cache_root(config, profile_value),
-            &url,
-            &config.target_env,
-        ) && try_link_prebuilt(directory, config, &profile)
-        {
-            return true;
-        }
-    } else {
-        let feature_enabled = cfg!(feature = "prebuilt");
-        let env_enabled = build_support::parse_bool_env("CTE_SYS_USE_PREBUILT");
-        if env_enabled && !feature_enabled {
-            println!(
-                "cargo:warning=CTE_SYS_USE_PREBUILT is set but the `prebuilt` feature is disabled"
-            );
-        }
-        if feature_enabled
-            && let Some(directory) = try_download_prebuilt_from_release(config, &profile)
-            && try_link_prebuilt(directory, config, &profile)
-        {
-            return true;
-        }
+        let directory = source
+            .acquire(
+                &prebuilt_cache_root(config, profile_value),
+                &expected_lib_name(&config.target_env),
+                &config.target_env,
+                std::slice::from_ref(&profile_value.archive_name),
+            )
+            .unwrap_or_else(|error| panic!("{CRATE_LABEL}: {error}"));
+        assert!(
+            try_link_prebuilt(directory, config, &profile).unwrap_or_else(|error| panic!(
+                "dear-imgui-cte-sys: incompatible explicit prebuilt artifact: {error}"
+            )),
+            "explicit prebuilt disappeared before linking"
+        );
+        return true;
+    }
+    if cfg!(feature = "prebuilt")
+        && env::var_os("DEP_DEAR_IMGUI_ARTIFACT_IDENTITY_HASH").is_some()
+        && let Some(directory) = try_download_prebuilt_from_release(config, &profile)
+        && try_link_prebuilt(directory, config, &profile).unwrap_or_else(|error| {
+            println!("cargo:warning=Rejecting incompatible automatic prebuilt: {error}");
+            false
+        })
+    {
+        return true;
     }
     false
 }
@@ -499,9 +467,7 @@ fn main() {
     }
 
     let (imgui, cimgui) = resolve_imgui_includes(&config);
-    let source_root = sources
-        .source_root()
-        .unwrap_or_else(|error| panic!("{CRATE_LABEL}: {error}"));
+    let source_root = config.manifest_dir.join(&sources.source().source_root);
     if config.docs_rs {
         docsrs_build(&config, &source_root, &imgui, &cimgui);
         return;
@@ -512,36 +478,48 @@ fn main() {
         return;
     }
 
-    let skip_cc = env::var_os("CTE_SYS_SKIP_CC").is_some();
-    let bindings_ready = if config.target_arch == "wasm32" {
-        if !cfg!(feature = "wasm") {
-            panic!("{CRATE_LABEL}: wasm32 targets require the `wasm` feature");
+    if config.target_arch == "wasm32" {
+        assert!(
+            cfg!(feature = "wasm"),
+            "{CRATE_LABEL}: wasm32 targets require the `wasm` feature"
+        );
+        assert!(
+            use_pregenerated_wasm_bindings(&config.out_dir),
+            "{CRATE_LABEL}: WASM requires pregenerated bindings"
+        );
+        return;
+    }
+    let plan = NativeBuildPlan::from_env(
+        "CTE_SYS",
+        cfg!(feature = "package-bin") || cfg!(feature = "build-from-source"),
+        cfg!(feature = "prebuilt"),
+    )
+    .unwrap_or_else(|error| panic!("{CRATE_LABEL}: {error}"));
+    if plan.mode == NativeBuildMode::BindingsOnly {
+        assert!(
+            use_pregenerated_bindings(&config.out_dir),
+            "{CRATE_LABEL}: bindings-only requires pregenerated bindings"
+        );
+        return;
+    }
+    if matches!(plan.mode, NativeBuildMode::Auto | NativeBuildMode::Prebuilt) {
+        let linked = try_link_prebuilt_all(&config, &plan);
+        if plan
+            .finish_prebuilt_lookup(linked)
+            .unwrap_or_else(|error| panic!("{CRATE_LABEL}: {error}"))
+        {
+            assert!(
+                use_pregenerated_bindings(&config.out_dir),
+                "{CRATE_LABEL}: prebuilt mode requires pregenerated bindings"
+            );
+            return;
         }
-        use_pregenerated_wasm_bindings(&config.out_dir)
-    } else {
-        use_pregenerated_bindings(&config.out_dir)
-    };
-    if !bindings_ready {
-        assert!(!skip_cc, "CTE_SYS_SKIP_CC requires pregenerated bindings");
+    }
+    if !use_pregenerated_bindings(&config.out_dir) {
         generate_bindings(&config, &source_root, &imgui, &cimgui);
     }
-    if config.target_arch == "wasm32" {
-        println!("cargo:warning=Skipping native cimCTE build for wasm32");
-        return;
-    }
-    if skip_cc {
-        let _ = try_link_prebuilt_all(&config);
-        return;
-    }
-
-    let force_source = cfg!(feature = "package-bin")
-        || cfg!(feature = "build-from-source")
-        || build_support::parse_bool_env("CTE_SYS_FORCE_BUILD");
-    let linked_prebuilt = !force_source && try_link_prebuilt_all(&config);
-    if !linked_prebuilt {
-        let native_sources = sources
-            .validate_native()
-            .unwrap_or_else(|error| panic!("{CRATE_LABEL}: {error}"));
-        build_with_cc(&config, &native_sources, &source_root, &imgui, &cimgui);
-    }
+    let native_sources = sources
+        .validate_native()
+        .unwrap_or_else(|error| panic!("{CRATE_LABEL}: {error}"));
+    build_with_cc(&config, &native_sources, &source_root, &imgui, &cimgui);
 }

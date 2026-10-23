@@ -25,7 +25,7 @@ This crate supports multiple build strategies to fit different development workf
 ### 1. Prebuilt Static Libraries (Recommended)
 
 The fastest way to get started is to use prebuilt static libraries instead of compiling from source.
-Official release archives cover the supported release targets and profiles. Use an archive matching the crate version. Choose one of the alternatives below; unset previous `IMGUI_SYS_LIB_DIR` or `IMGUI_SYS_PREBUILT_URL` overrides when switching routes.
+Official release archives cover the supported release targets and profiles. Use an archive matching the crate version. Choose one of the alternatives below; unset previous `IMGUI_SYS_LIB_DIR`, `IMGUI_SYS_PREBUILT_URL`, or `IMGUI_SYS_PACKAGE_DIR` overrides when switching routes.
 
 ```bash
 # Option A: Point to the library directory inside an extracted core artifact.
@@ -110,13 +110,42 @@ vcpkg triplet such as `x64-windows`, also set `VCPKGRS_DYNAMIC=1`.
 Skip C/C++ compilation for faster Rust-only iteration:
 
 ```bash
-export IMGUI_SYS_SKIP_CC=1
+export IMGUI_SYS_BUILD_MODE=bindings-only
 cargo check -p dear-imgui-sys
 ```
 
 This uses pregenerated bindings and skips native compilation. Use `cargo check`
 for Rust-only iteration; binaries and tests still need the native libraries to
 link. Native `backend-shim-*` features reject this mode.
+
+### Native Build Policy
+
+`IMGUI_SYS_BUILD_MODE` selects one native policy. It does not select the Rust binding ABI or change WASM imports.
+
+| Mode | Contract |
+|------|----------|
+| `auto` (default) | Try an explicit artifact or opted-in release discovery, then compile from source if automatic discovery misses. No automatic download without feature `prebuilt`. |
+| `source` | Compile the core from the packaged sources. Reject explicit artifact selectors. |
+| `prebuilt` | Require a compatible core prebuilt. Never fall back to compiling the core. |
+| `bindings-only` | Prepare checked-in Rust declarations only; no core compilation, prebuilt lookup, or core linking. Intended for checks and documentation, not runnable applications. |
+
+Choose at most one explicit artifact selector: `IMGUI_SYS_LIB_DIR`, `IMGUI_SYS_PREBUILT_URL`, or `IMGUI_SYS_PACKAGE_DIR`.
+An explicit selection is authoritative: missing files, incompatible manifests, and acquisition failures stop the build instead of falling back.
+`LIB_DIR` must point directly to the directory containing `libdear_imgui.a` (or `dear_imgui.lib`), not the extraction root.
+Archives and package directories require feature `prebuilt`; extracted library directories do not.
+Local archives and package directories remain usable offline.
+
+Cargo feature unification is unchanged: `build-from-source`, `test-engine`, `abi-probe`, and packaging require source builds in `auto` mode, even with feature `prebuilt` or stale artifact overrides.
+An explicit `prebuilt` or `bindings-only` mode rejects source-only requirements.
+Core `prebuilt` mode still compiles enabled backend shims locally and therefore does not promise a compiler-free dependency tree.
+
+Legacy boolean flags remain supported and accept `1/0`, `true/false`, `yes/no`, and `on/off` (case-insensitive).
+`IMGUI_SYS_FORCE_BUILD=1` selects source; `IMGUI_SYS_SKIP_CC=1` alone selects bindings-only, but selects strict prebuilt when an artifact selector or feature `prebuilt` is present.
+Combining enabled `SKIP_CC` and a source requirement is an error.
+The established Test Engine check-only exception is retained: with feature `test-engine`, set both `IMGUI_SYS_SKIP_CC=1` and `IMGUI_TEST_ENGINE_SYS_SKIP_CC=1`, without a build mode, artifact selector, download feature, packaging, or ABI probe.
+That explicit dual-skip route only prepares declarations; it does not provide runnable Test Engine support.
+Do not mix enabled legacy mode flags with `IMGUI_SYS_BUILD_MODE`.
+Bindings-only is not a verified external-library provider contract; the application remains responsible for any manually supplied symbols and their ABI.
 
 ## Offline Builds & docs.rs
 
@@ -487,10 +516,12 @@ Control build behavior with these environment variables:
 
 | Variable | Description |
 |----------|-------------|
+| `IMGUI_SYS_BUILD_MODE` | Native policy: `auto`, `source`, `prebuilt`, or `bindings-only` |
 | `IMGUI_SYS_LIB_DIR` | Directory containing the core static library; a matching strict `manifest.txt` must be in that directory or its parent |
 | `IMGUI_SYS_PREBUILT_URL` | Local path or direct URL to a package-tool-generated core archive; HTTP(S) and `.tar.gz` extraction require feature `prebuilt` |
 | `IMGUI_SYS_USE_PREBUILT` | Enable automatic download from GitHub releases (`1`, requires feature `prebuilt`) |
-| `IMGUI_SYS_SKIP_CC` | Skip C/C++ compilation, use pregenerated bindings only (`1`) |
+| `IMGUI_SYS_PACKAGE_DIR` | Directory containing the exact matching packaged archive; requires feature `prebuilt`, also works offline |
+| `IMGUI_SYS_SKIP_CC` | Legacy: bindings-only without artifact intent, otherwise strict core prebuilt (`1`) |
 | `IMGUI_SYS_FORCE_BUILD` | Force build from source, ignore prebuilt options (`1`) |
 | `DEAR_IMGUI_RS_REGEN_BINDINGS` | Regenerate Rust bindings with bindgen (`1`; requires `--features bindgen` and libclang) |
 

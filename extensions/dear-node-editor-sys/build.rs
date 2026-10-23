@@ -1,15 +1,8 @@
+use build_support::native_build::{NativeBuildMode, NativeBuildPlan};
 use std::{
     env,
     path::{Path, PathBuf},
 };
-
-fn is_http_url(value: &str) -> bool {
-    value.starts_with("http://") || value.starts_with("https://")
-}
-
-fn is_archive_urlish(value: &str) -> bool {
-    value.ends_with(".tar.gz") || value.ends_with(".tgz")
-}
 
 #[derive(Clone, Debug)]
 struct BuildConfig {
@@ -255,73 +248,45 @@ fn expected_lib_name(target_env: &str) -> String {
     build_support::expected_lib_name(target_env, "dear_node_editor")
 }
 
-fn try_link_prebuilt(dir: PathBuf, cfg: &BuildConfig) -> bool {
+fn try_link_prebuilt(dir: PathBuf, cfg: &BuildConfig) -> Result<bool, String> {
     let lib_name = expected_lib_name(&cfg.target_env);
     if !dir.join(&lib_name).exists() {
-        return false;
+        return Ok(false);
     }
-    extension_artifact_profile(cfg, false)
-        .validate_prebuilt_dir(&dir)
-        .unwrap_or_else(|error| {
-            panic!("dear-node-editor-sys: incompatible prebuilt artifact: {error}")
-        });
+    extension_artifact_profile(cfg, false).validate_prebuilt_dir(&dir)?;
     println!("cargo:rustc-link-search=native={}", dir.display());
     println!("cargo:rustc-link-lib=static=dear_node_editor");
-    true
+    Ok(true)
 }
 
-fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
-    let target_env = &cfg.target_env;
-    if let Ok(dir) = env::var("NODE_EDITOR_SYS_LIB_DIR") {
-        if try_link_prebuilt(PathBuf::from(dir.clone()), cfg) {
-            return true;
-        }
-        println!(
-            "cargo:warning=NODE_EDITOR_SYS_LIB_DIR set but library not found in {}",
-            dir
+fn try_link_prebuilt_all(cfg: &BuildConfig, plan: &NativeBuildPlan) -> bool {
+    if let Some(source) = &plan.prebuilt {
+        let profile = extension_artifact_profile(cfg, false);
+        let directory = source
+            .acquire(
+                &prebuilt_cache_root(cfg),
+                &expected_lib_name(&cfg.target_env),
+                &cfg.target_env,
+                &[profile.archive_name],
+            )
+            .unwrap_or_else(|error| panic!("dear-node-editor-sys: {error}"));
+        assert!(
+            try_link_prebuilt(directory, cfg).unwrap_or_else(|error| panic!(
+                "dear-node-editor-sys: incompatible explicit prebuilt artifact: {error}"
+            )),
+            "dear-node-editor-sys: explicit prebuilt disappeared before linking"
         );
+        return true;
     }
-    if let Ok(url) = env::var("NODE_EDITOR_SYS_PREBUILT_URL") {
-        if !cfg!(feature = "prebuilt") && (is_http_url(&url) || is_archive_urlish(&url)) {
-            println!(
-                "cargo:warning=NODE_EDITOR_SYS_PREBUILT_URL is an HTTP(S) URL or archive, but feature `prebuilt` is disabled; enable it for downloads/extraction or use NODE_EDITOR_SYS_LIB_DIR"
-            );
-            return false;
-        }
-        let cache_root = prebuilt_cache_root(cfg);
-        if let Ok(dir) = build_support::download_prebuilt(
-            &cache_root,
-            &url,
-            &expected_lib_name(target_env),
-            target_env,
-        ) && try_link_prebuilt(dir, cfg)
-        {
-            return true;
-        }
-    } else {
-        let allow_feature = cfg!(feature = "prebuilt");
-        let allow_env = matches!(
-            env::var("NODE_EDITOR_SYS_USE_PREBUILT").ok().as_deref(),
-            Some("1") | Some("true") | Some("yes")
-        );
-        if allow_env && !allow_feature {
-            println!(
-                "cargo:warning=NODE_EDITOR_SYS_USE_PREBUILT is set, but feature `prebuilt` is disabled"
-            );
-        }
-        if allow_feature {
-            let source = if allow_env { "feature+env" } else { "feature" };
-            let (owner, repo) = build_support::release_owner_repo();
-            println!(
-                "cargo:warning=auto-prebuilt enabled (dear-node-editor-sys): source={}, repo={}/{}",
-                source, owner, repo
-            );
-            if let Some(dir) = try_download_prebuilt_from_release(cfg)
-                && try_link_prebuilt(dir, cfg)
-            {
-                return true;
-            }
-        }
+    if cfg!(feature = "prebuilt")
+        && env::var_os("DEP_DEAR_IMGUI_ARTIFACT_IDENTITY_HASH").is_some()
+        && let Some(directory) = try_download_prebuilt_from_release(cfg)
+        && try_link_prebuilt(directory, cfg).unwrap_or_else(|error| {
+            println!("cargo:warning=Rejecting incompatible automatic prebuilt: {error}");
+            false
+        })
+    {
+        return true;
     }
     false
 }
@@ -338,22 +303,7 @@ fn prebuilt_cache_root(cfg: &BuildConfig) -> PathBuf {
 fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
     let profile = extension_artifact_profile(cfg, false);
     let tags = build_support::release_tags("dear-node-editor-sys", &profile.version);
-    if let Ok(package_dir) = env::var("NODE_EDITOR_SYS_PACKAGE_DIR") {
-        let archive_path = PathBuf::from(package_dir).join(&profile.archive_name);
-        if archive_path.exists() {
-            let cache_root = prebuilt_cache_root(cfg);
-            if let Ok(lib_dir) = build_support::extract_archive_to_cache(
-                &archive_path,
-                &cache_root,
-                &expected_lib_name(&cfg.target_env),
-            ) {
-                return Some(lib_dir);
-            }
-        }
-    }
-    if build_support::is_offline() {
-        return None;
-    }
+
     let urls = build_support::release_candidate_urls_env(&tags, &[profile.archive_name]);
     let cache_root = prebuilt_cache_root(cfg);
     let lib_name = expected_lib_name(&cfg.target_env);
@@ -482,19 +432,42 @@ fn main() {
     }
 
     let regen_bindings = build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS");
-    if !regen_bindings && env::var("NODE_EDITOR_SYS_SKIP_CC").is_ok() {
-        if !use_pregenerated_bindings(&cfg.out_dir) {
-            panic!("NODE_EDITOR_SYS_SKIP_CC is set but no pregenerated bindings were found");
-        }
-        let _ = try_link_prebuilt_all(&cfg);
+    let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
+    let node_editor_root = cfg.manifest_dir.join(&sources.source().source_root);
+
+    if regen_bindings {
+        generate_bindings(&cfg, &node_editor_root, &imgui_src, &cimgui_root);
         return;
     }
-
-    let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
-    let node_editor_root = sources
-        .source_root()
-        .unwrap_or_else(|error| panic!("dear-node-editor-sys: {error}"));
-
+    if cfg.target_arch == "wasm32" {
+        panic_wasm_unsupported();
+    }
+    let plan = NativeBuildPlan::from_env(
+        "NODE_EDITOR_SYS",
+        cfg!(feature = "package-bin") || cfg!(feature = "build-from-source"),
+        cfg!(feature = "prebuilt"),
+    )
+    .unwrap_or_else(|error| panic!("dear-node-editor-sys: {error}"));
+    if plan.mode == NativeBuildMode::BindingsOnly {
+        assert!(
+            use_pregenerated_bindings(&cfg.out_dir),
+            "dear-node-editor-sys: bindings-only requires pregenerated bindings"
+        );
+        return;
+    }
+    if matches!(plan.mode, NativeBuildMode::Auto | NativeBuildMode::Prebuilt) {
+        let linked = try_link_prebuilt_all(&cfg, &plan);
+        if plan
+            .finish_prebuilt_lookup(linked)
+            .unwrap_or_else(|error| panic!("dear-node-editor-sys: {error}"))
+        {
+            assert!(
+                use_pregenerated_bindings(&cfg.out_dir),
+                "dear-node-editor-sys: prebuilt mode requires pregenerated bindings"
+            );
+            return;
+        }
+    }
     if !imgui_src.exists() {
         panic!("ImGui include not found at {:?}", imgui_src);
     }
@@ -505,32 +478,13 @@ fn main() {
         );
     }
 
-    if regen_bindings {
-        generate_bindings(&cfg, &node_editor_root, &imgui_src, &cimgui_root);
-        return;
-    }
-
-    if cfg.target_arch == "wasm32" {
-        panic_wasm_unsupported();
-    }
-
     let bindings_ready = use_pregenerated_bindings(&cfg.out_dir);
     if !bindings_ready {
         generate_bindings(&cfg, &node_editor_root, &imgui_src, &cimgui_root);
     }
 
-    let force_build = cfg!(feature = "package-bin")
-        || cfg!(feature = "build-from-source")
-        || env::var("NODE_EDITOR_SYS_FORCE_BUILD").is_ok();
-    let linked = if force_build {
-        false
-    } else {
-        try_link_prebuilt_all(&cfg)
-    };
-    if !linked {
-        sources
-            .validate_native()
-            .unwrap_or_else(|error| panic!("dear-node-editor-sys: {error}"));
-        build_with_cc(&cfg, &sources, &node_editor_root, &imgui_src, &cimgui_root);
-    }
+    sources
+        .validate_native()
+        .unwrap_or_else(|error| panic!("dear-node-editor-sys: {error}"));
+    build_with_cc(&cfg, &sources, &node_editor_root, &imgui_src, &cimgui_root);
 }
