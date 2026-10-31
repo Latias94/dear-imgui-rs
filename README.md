@@ -34,7 +34,7 @@
   - `dear-imgui-sys` — low-level FFI via cimgui (docking branch), with pregenerated bindings for Dear ImGui v1.93.1 WIP
   - `dear-imgui-rs` — safe, idiomatic Rust API (RAII + builder style similar to imgui-rs)
   - Backends: `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-ash`, `dear-imgui-winit`, `dear-imgui-sdl3`, `dear-imgui-bevy`
-    - `dear-imgui-bevy` is an experimental Bevy-native backend on Bevy `0.20.0`, with docking,
+    - `dear-imgui-bevy` is an experimental Bevy-native backend on Bevy `0.20.1`, with docking,
       texture interop, and native multi-viewport on supported targets.
   - `dear-app` — generation-aware Winit + WGPU application runtime (docking, themes, add-ons)
 - Extensions
@@ -386,40 +386,40 @@ Core
 
 | Crate           | Version | Notes                                     |
 |-----------------|---------|-------------------------------------------|
-| dear-imgui-rs   | 0.21.0 | Safe Rust API over dear-imgui-sys     |
-| dear-imgui-sys  | 0.21.0 | Dear ImGui v1.93.1 WIP docking via cimgui |
+| dear-imgui-rs   | 0.21.1 | Safe Rust API over dear-imgui-sys     |
+| dear-imgui-sys  | 0.21.1 | Dear ImGui v1.93.1 WIP docking via cimgui |
 
 Backends
 
 | Crate            | Version | External deps     | Notes                          |
 |------------------|---------|-------------------|--------------------------------|
-| dear-imgui-wgpu  | 0.21.0 | wgpu = 30/29/28/27 | WebGPU renderer; WGPU 30 default, native Winit/SDL3 multi-viewport, browser single-window |
-| dear-imgui-glow  | 0.21.0 | glow = 0.18       | OpenGL renderer (winit/glutin) |
-| dear-imgui-ash   | 0.21.0 | ash = 0.38        | Native Vulkan renderer with Winit/SDL3 multi-viewport adapters |
-| dear-imgui-winit | 0.21.0 | winit = 0.30.13   | Winit platform backend         |
-| dear-imgui-sdl3  | 0.21.0 | sdl3 = 0.20.0     | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
-| dear-imgui-bevy  | 0.21.0 | Bevy = 0.20.0     | Experimental Bevy-native backend with docking, texture interop, and native multi-viewport |
+| dear-imgui-wgpu  | 0.21.1 | wgpu = 30/29/28/27 | WebGPU renderer; WGPU 30 default, native Winit/SDL3 multi-viewport, browser single-window |
+| dear-imgui-glow  | 0.21.1 | glow = 0.18       | OpenGL renderer (winit/glutin) |
+| dear-imgui-ash   | 0.21.1 | ash = 0.38        | Native Vulkan renderer with Winit/SDL3 multi-viewport adapters |
+| dear-imgui-winit | 0.21.1 | winit = 0.30.13   | Winit platform backend         |
+| dear-imgui-sdl3  | 0.21.1 | sdl3 = 0.20.0     | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
+| dear-imgui-bevy  | 0.21.1 | Bevy = 0.20.1     | Experimental Bevy-native backend with docking, texture interop, and native multi-viewport |
 
 Application Runtime
 
 | Crate     | Version | Requires dear-imgui-rs | Notes                                            |
 |-----------|---------|------------------------|--------------------------------------------------|
-| dear-app  | 0.21.0 | 0.21.0       | Generation-aware Winit + WGPU application runtime |
+| dear-app  | 0.21.1 | 0.21.1       | Generation-aware Winit + WGPU application runtime |
 
 Extensions
 
 | Crate               | Version | Requires dear-imgui-rs | Sys crate                   | Notes                                  |
 |---------------------|---------|------------------------|-----------------------------|----------------------------------------|
-| dear-implot         | 0.21.0 | 0.21.0 | dear-implot-sys 0.21.0 | 2D plotting                         |
-| dear-imnodes        | 0.21.0 | 0.21.0 | dear-imnodes-sys 0.21.0 | WASM-capable node editor            |
-| dear-node-editor    | 0.21.0 | 0.21.0 | dear-node-editor-sys 0.21.0 | Native imgui-node-editor; optional blueprints profile |
-| dear-imguizmo       | 0.21.0 | 0.21.0 | dear-imguizmo-sys 0.21.0 | 3D gizmo + GraphEditor              |
-| dear-file-browser   | 0.21.0 | 0.21.0 | —                              | State-owned ImGui UI + native dialog backends |
-| dear-implot3d       | 0.21.0 | 0.21.0 | dear-implot3d-sys 0.21.0 | 3D plotting                       |
-| dear-imguizmo-quat  | 0.21.0 | 0.21.0 | dear-imguizmo-quat-sys 0.21.0 | Quaternion gizmo              |
-| dear-imgui-cte      | 0.21.0 | 0.21.0 | dear-imgui-cte-sys 0.21.0 | Preview ImGuiColorTextEdit editor, diff, autocomplete, and diagnostics |
-| dear-imgui-test-engine | 0.21.0 | 0.21.0 | dear-imgui-test-engine-sys 0.21.0 | UI automation and test runner |
-| dear-imgui-reflect  | 0.21.0 | 0.21.0 | —                              | Session-owned reflection UI              |
+| dear-implot         | 0.21.1 | 0.21.1 | dear-implot-sys 0.21.1 | 2D plotting                         |
+| dear-imnodes        | 0.21.1 | 0.21.1 | dear-imnodes-sys 0.21.1 | WASM-capable node editor            |
+| dear-node-editor    | 0.21.1 | 0.21.1 | dear-node-editor-sys 0.21.1 | Native imgui-node-editor; optional blueprints profile |
+| dear-imguizmo       | 0.21.1 | 0.21.1 | dear-imguizmo-sys 0.21.1 | 3D gizmo + GraphEditor              |
+| dear-file-browser   | 0.21.1 | 0.21.1 | —                              | State-owned ImGui UI + native dialog backends |
+| dear-implot3d       | 0.21.1 | 0.21.1 | dear-implot3d-sys 0.21.1 | 3D plotting                       |
+| dear-imguizmo-quat  | 0.21.1 | 0.21.1 | dear-imguizmo-quat-sys 0.21.1 | Quaternion gizmo              |
+| dear-imgui-cte      | 0.21.1 | 0.21.1 | dear-imgui-cte-sys 0.21.1 | Preview ImGuiColorTextEdit editor, diff, autocomplete, and diagnostics |
+| dear-imgui-test-engine | 0.21.1 | 0.21.1 | dear-imgui-test-engine-sys 0.21.1 | UI automation and test runner |
+| dear-imgui-reflect  | 0.21.1 | 0.21.1 | —                              | Session-owned reflection UI              |
 
 The workspace MSRV is Rust 1.92. The experimental Bevy backend requires Rust 1.97.1 because Bevy 0.20 does. The development toolchain is Rust 1.99. Select exactly one WGPU major; `dear-app` follows the WGPU 30 default.
 
