@@ -55,7 +55,7 @@ The core uses `cimgui/docking_inter` pin `5d7cc7e12de9a868bbecc00ce2ed74e58d266f
 | Glow | 0.18 |
 | Ash | 0.38 |
 | SDL3 | sdl3 0.20, sdl3-sys 0.7, SDL 3.4.18 |
-| Bevy | exactly 0.20.0; Rust 1.97.1 or newer |
+| Bevy | exactly 0.20.1 (0.21.1; 0.21.0 used 0.20.0); Rust 1.97.1 or newer |
 | glam interoperability | 0.34 |
 
 The core MSRV remains Rust 1.92, and development and publishing use Rust 1.99. Canonical binding generation remains fixed to Rust 1.95 and LLVM 14. External dependency requirements are unchanged from 0.20.0. `dear-app` uses WGPU 30; browser rendering remains single-window, and `dear-node-editor` remains native-only.

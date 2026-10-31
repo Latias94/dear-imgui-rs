@@ -8,6 +8,10 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
+### Bevy
+
+- Bump all workspace crates to 0.21.1. `dear-imgui-bevy` now requires Bevy exactly 0.20.1 (previously 0.20.0); Rust 1.97.1 or newer is unchanged.
+
 ### Build Policy
 
 - Add `<PREFIX>_BUILD_MODE=auto|source|prebuilt|bindings-only` for the core and seven prebuilt-capable extension sys crates. Explicit artifact selectors now fail on missing or incompatible artifacts instead of silently falling back. Conflicting source/skip instructions fail in the build script rather than producing undefined symbols at final link. Legacy `SKIP_CC` remains check-only without artifact intent and becomes strict prebuilt with an artifact selector or feature `prebuilt`. See the [migration notes](docs/COMPATIBILITY.md#unreleased-native-build-policy). Addresses [#96](https://github.com/Latias94/dear-imgui-rs/issues/96).
