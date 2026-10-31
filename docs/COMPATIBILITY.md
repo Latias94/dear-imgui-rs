@@ -2,7 +2,7 @@
 
 This document tracks compatibility across the workspace crates, upstream Dear ImGui, and key external dependencies. The root README shows the latest recommendations; this file keeps version history and compatibility policy.
 
-## Unreleased Native Build Policy
+## 0.21.1 Native Build Policy
 
 The core and seven prebuilt-capable extension sys crates share `<PREFIX>_BUILD_MODE=auto|source|prebuilt|bindings-only`.
 The default remains source-capable with downloads opt-in. Strict prebuilt mode never falls back to compiling that library; enabled core backend shims still compile locally.
@@ -25,8 +25,9 @@ paths, see [the Apple platform guide](workstreams/apple-platform-support.md).
 ## Versioning Policy
 
 - Unified release train: all published `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
-- Preparing 0.21 train: unified `v0.21.0` (use `version = "0.21"` once published).
-- Published stable 0.20 train: unified `v0.20.0` (use `version = "0.20"`).
+- Current release candidate: unified `v0.21.1` (use `version = "0.21"`; Bevy applications need backend `0.21.1` for Bevy `0.20.1`).
+- Published stable 0.21 train: unified `v0.21.0` (use `version = "0.21"`).
+- Previous stable 0.20 train: unified `v0.20.0` (use `version = "0.20"`).
 - Previous stable train: unified `v0.19.0` (use `version = "0.19"`).
 - Previous stable train: unified `v0.18.0` (use `version = "0.18"`).
 - Previous stable train: unified `v0.17.0` (use `version = "0.17"`).
@@ -44,7 +45,7 @@ paths, see [the Apple platform guide](workstreams/apple-platform-support.md).
 
 ## 0.21 Release Train
 
-All 29 publishable crates move together to `0.21.0`. Use `version = "0.21"` for every workspace crate once this candidate is published. Until then, use Git dependencies for these APIs. Published 0.20.0 retains its original 1.92.9b baseline.
+All 29 publishable crates share the `0.21` release train, first published as `0.21.0`; this checkout prepares the `0.21.1` patch. Use `version = "0.21"` for workspace crates, or `"0.21.1"` for the Bevy backend when using Bevy `0.20.1`. Published 0.20.0 retains its original 1.92.9b baseline.
 
 The core uses `cimgui/docking_inter` pin `5d7cc7e12de9a868bbecc00ce2ed74e58d266f1c`, embedding Dear ImGui **1.93.1 WIP** at `d88f238d1d363ef387382b2e29ad12cf96f826ac`. This includes the 1.93.0 release and subsequent upstream cleanup. All maintained extension wrappers and their nested dependencies follow their updated upstream pins.
 
@@ -58,7 +59,7 @@ The core uses `cimgui/docking_inter` pin `5d7cc7e12de9a868bbecc00ce2ed74e58d266f
 | Bevy | exactly 0.20.1 (0.21.1; 0.21.0 used 0.20.0); Rust 1.97.1 or newer |
 | glam interoperability | 0.34 |
 
-The core MSRV remains Rust 1.92, and development and publishing use Rust 1.99. Canonical binding generation remains fixed to Rust 1.95 and LLVM 14. External dependency requirements are unchanged from 0.20.0. `dear-app` uses WGPU 30; browser rendering remains single-window, and `dear-node-editor` remains native-only.
+The core MSRV remains Rust 1.92, and development and publishing use Rust 1.99. Canonical binding generation remains fixed to Rust 1.95 and LLVM 14. WGPU, Winit, SDL3, Glow, Ash, and glam requirements are unchanged from 0.21.0; the Bevy target changes from exactly 0.20.0 to exactly 0.20.1 in backend 0.21.1. `dear-app` uses WGPU 30; browser rendering remains single-window, and `dear-node-editor` remains native-only.
 
 - Upgrade custom drawing, style, text-filter, CTE notification, and node-background callers using the [Dear ImGui 1.93 migration guide](IMGUI_193_MIGRATION.md).
 - Applications owning Winit event dispatch or WGPU multi-viewport execution must follow the [editor backend migration guide](EDITOR_BACKEND_MIGRATION.md). WGPU observations distinguish recorded, submitted, and presentation-requested work; they do not prove that pixels became visible.

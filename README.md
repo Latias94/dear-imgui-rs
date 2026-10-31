@@ -171,7 +171,7 @@ under `examples/ci/` are release evidence and are intentionally excluded from th
 
 ## Installation
 
-This checkout prepares the `0.21.0` release train. The installation snippets below target the compatible `"0.21"` requirement once published; until then, use Git dependencies for this checkout. Applications using the published `0.20.0` release should follow the [v0.20.0 README](https://github.com/Latias94/dear-imgui-rs/blob/v0.20.0/README.md). Upgrade all workspace crates together and review the [1.93](docs/IMGUI_193_MIGRATION.md) and [editor backend](docs/EDITOR_BACKEND_MIGRATION.md) migrations.
+The `0.21` release train is published on crates.io; this checkout prepares `0.21.1`. The installation snippets below use the compatible `"0.21"` requirement; use Git dependencies for changes that are not yet published. Applications using the `0.20` release train should follow the [v0.20.0 README](https://github.com/Latias94/dear-imgui-rs/blob/v0.20.0/README.md). Upgrade all workspace crates together and review the [1.93](docs/IMGUI_193_MIGRATION.md) and [editor backend](docs/EDITOR_BACKEND_MIGRATION.md) migrations.
 
 ### Core + Backends
 
@@ -380,7 +380,7 @@ Quick examples (enable auto prebuilt download):
 
 ## Compatibility
 
-The workspace follows a release-train model; applications should upgrade all workspace crates together. The tables below describe the `0.21.0` release candidate, which embeds Dear ImGui `1.93.1 WIP`. Published `0.20.0` retains its Dear ImGui `1.92.9b` baseline; use Git dependencies for the new APIs until `0.21.0` is published. See [compatibility and migration](docs/COMPATIBILITY.md) for release history and requirements.
+The workspace follows a release-train model; applications should upgrade all workspace crates together. The tables below describe the `0.21.1` release candidate, which keeps the Dear ImGui `1.93.1 WIP` baseline from published `0.21.0`. Version `0.21.1` updates the Bevy target to `0.20.1`; backend `0.21.0` uses Bevy `0.20.0`. See [compatibility and migration](docs/COMPATIBILITY.md) for release history and requirements.
 
 Core
 

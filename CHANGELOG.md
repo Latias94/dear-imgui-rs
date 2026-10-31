@@ -8,13 +8,23 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
-### Bevy
+## [0.21.1] - 2026-10-31
 
-- Bump all workspace crates to 0.21.1. `dear-imgui-bevy` now requires Bevy exactly 0.20.1 (previously 0.20.0); Rust 1.97.1 or newer is unchanged.
+This patch updates the Bevy integration and Rust dependencies, and makes native artifact selection explicit and predictable. Upgrade applications using Bevy to exactly 0.20.1 and review the native build policy below if you select prebuilt libraries or use legacy build environment variables.
+
+### Changed
+
+- Release all workspace crates as 0.21.1. `dear-imgui-bevy` now requires Bevy exactly 0.20.1 (previously 0.20.0); Rust 1.97.1 or newer is unchanged. Correct `BEVY_TARGET_VERSION` to report the matching target.
+- Update build dependencies to `cc` 1.10 and `ureq` 3.5, and desktop clipboard support to `arboard` 3.7. Refresh the locked `serde_json`, `syn`, and `log` dependencies and the standalone mobile lockfiles. The core MSRV remains Rust 1.92.
+- Update the browser binding family to `wasm-bindgen` 0.2.130, `wasm-bindgen-futures` 0.4.80, and `web-sys`/`js-sys` 0.3.107. Use the matching `wasm-bindgen-cli` when building the web demo.
+
+### Fixed
+
+- ImPlot3D: reject fewer than two range ticks when custom labels are provided, before entering native code. This prevents an out-of-bounds label read when the native implementation raises a one-tick request to two ticks. Unlabeled one-tick requests retain their existing native behavior.
 
 ### Build Policy
 
-- Add `<PREFIX>_BUILD_MODE=auto|source|prebuilt|bindings-only` for the core and seven prebuilt-capable extension sys crates. Explicit artifact selectors now fail on missing or incompatible artifacts instead of silently falling back. Conflicting source/skip instructions fail in the build script rather than producing undefined symbols at final link. Legacy `SKIP_CC` remains check-only without artifact intent and becomes strict prebuilt with an artifact selector or feature `prebuilt`. See the [migration notes](docs/COMPATIBILITY.md#unreleased-native-build-policy). Addresses [#96](https://github.com/Latias94/dear-imgui-rs/issues/96).
+- Add `<PREFIX>_BUILD_MODE=auto|source|prebuilt|bindings-only` for the core and seven prebuilt-capable extension sys crates. Explicit artifact selectors now fail on missing or incompatible artifacts instead of silently falling back. Conflicting source/skip instructions fail in the build script rather than producing undefined symbols at final link. Legacy `SKIP_CC` remains check-only without artifact intent and becomes strict prebuilt with an artifact selector or feature `prebuilt`. See the [migration notes](docs/COMPATIBILITY.md#0211-native-build-policy). Addresses [#96](https://github.com/Latias94/dear-imgui-rs/issues/96).
 - Retain the native-free Test Engine dual-skip check, prevent network requests on offline cache misses, refresh extraction caches after local archive replacement, and revalidate core/extension manifests when they change or a higher-priority manifest is added.
 
 ## [0.21.0] - 2026-10-17

@@ -16,12 +16,12 @@ The backend owns Dear ImGui Contexts on Bevy's main thread, routes Bevy window i
 
 ## Installation
 
-Use the matching `0.21` release train with Bevy `0.20.1` (0.21.0 targets Bevy `0.20.0`). The `0.20` release train also targets Bevy `0.20.0`; the `0.19.0` backend targets Bevy `0.19.1`.
+Use `dear-imgui-bevy` `0.21.1` or newer in the `0.21` release train with Bevy `0.20.1`. Version `0.21.0` and the `0.20` release train target Bevy `0.20.0`; the `0.19.0` backend targets Bevy `0.19.1`.
 
 ```toml
 [dependencies]
 bevy = "=0.20.1"
-dear-imgui-bevy = "0.21"
+dear-imgui-bevy = "0.21.1"
 dear-imgui-rs = "0.21"
 ```
 

@@ -2,9 +2,12 @@
 
 ## Unreleased
 
+## 0.21.1 - 2026-10-31
+
 ### Changed
 
 - Update Bevy to 0.20.1. Applications must upgrade `bevy` and its subcrates to exactly `0.20.1` together with this release.
+- Correct `BEVY_TARGET_VERSION` to report `0.20.1`.
 
 ## 0.21.0 - 2026-10-17
 
