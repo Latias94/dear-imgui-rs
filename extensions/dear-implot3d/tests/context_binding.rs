@@ -3,7 +3,7 @@ use std::ptr;
 use std::sync::{Mutex, OnceLock};
 
 use dear_imgui_rs::Context;
-use dear_implot3d::{Plot3DContext, Plot3DItemArrayStyle};
+use dear_implot3d::{Axis3D, Plot3DContext, Plot3DItemArrayStyle};
 
 fn test_guard() -> std::sync::MutexGuard<'static, ()> {
     static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
@@ -110,4 +110,62 @@ fn dead_imgui_context_rejects_calls_and_plot3d_drop_skips_ffi() {
     );
     drop(plot_b);
     drop(imgui_b);
+}
+
+#[test]
+#[should_panic(expected = "n_ticks must be at least 2 when labels are provided")]
+fn axis_ticks_range_rejects_zero_ticks_with_labels_before_ffi() {
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    prepare_imgui(&mut imgui);
+    let plot = Plot3DContext::create(&imgui);
+    let frame = imgui.begin_frame();
+    let plot_ui = plot.get_plot_ui(frame.ui());
+
+    // No plot is begun: count validation must run before native setup.
+    plot_ui.setup_axis_ticks_range(Axis3D::X, 0.0, 1.0, 0, Some(&[]), false);
+}
+
+#[test]
+#[should_panic(expected = "n_ticks must be at least 2 when labels are provided")]
+fn axis_ticks_range_rejects_one_tick_with_labels_before_ffi() {
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    prepare_imgui(&mut imgui);
+    let plot = Plot3DContext::create(&imgui);
+    let frame = imgui.begin_frame();
+    let plot_ui = plot.get_plot_ui(frame.ui());
+
+    plot_ui.setup_axis_ticks_range(Axis3D::X, 0.0, 1.0, 1, Some(&["only tick"]), false);
+}
+
+#[test]
+#[should_panic(expected = "n_ticks must be positive")]
+fn axis_ticks_range_rejects_zero_ticks_without_labels_before_ffi() {
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    prepare_imgui(&mut imgui);
+    let plot = Plot3DContext::create(&imgui);
+    let frame = imgui.begin_frame();
+    let plot_ui = plot.get_plot_ui(frame.ui());
+
+    plot_ui.setup_axis_ticks_range(Axis3D::X, 0.0, 1.0, 0, None, false);
+}
+
+#[test]
+fn axis_ticks_range_accepts_two_labels_and_unlabeled_counts() {
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    prepare_imgui(&mut imgui);
+    let plot = Plot3DContext::create(&imgui);
+    let frame = imgui.begin_frame();
+    let plot_ui = plot.get_plot_ui(frame.ui());
+    let _plot = plot_ui
+        .begin_plot("axis ticks range native probe")
+        .build()
+        .expect("axis ticks probe plot should begin");
+
+    plot_ui.setup_axis_ticks_range(Axis3D::X, 0.0, 1.0, 2, Some(&["min", "max"]), false);
+    plot_ui.setup_axis_ticks_range(Axis3D::Y, 0.0, 1.0, 1, None, false);
+    plot_ui.setup_axis_ticks_range(Axis3D::Z, 0.0, 1.0, 2, None, true);
 }

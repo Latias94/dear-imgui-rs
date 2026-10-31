@@ -134,6 +134,16 @@ impl<'ui> Plot3DUi<'ui> {
         })
     }
 
+    /// Setup evenly spaced axis ticks over a range with optional labels.
+    ///
+    /// If `labels` is provided, `n_ticks` must be at least 2 and `labels` must
+    /// have length `n_ticks`. A label length mismatch leaves the axis unchanged.
+    /// Without labels, ImPlot3D clamps a count of 1 to 2 ticks.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `n_ticks` is zero, exceeds `i32::MAX`, or is less than 2 when
+    /// `labels` is provided.
     pub fn setup_axis_ticks_range(
         &self,
         axis: Axis3D,
@@ -143,6 +153,13 @@ impl<'ui> Plot3DUi<'ui> {
         labels: Option<&[&str]>,
         keep_default: bool,
     ) {
+        if labels.is_some() {
+            // ImPlot3D clamps the count to at least 2 before indexing labels.
+            assert!(
+                n_ticks >= 2,
+                "Plot3DUi::setup_axis_ticks_range() n_ticks must be at least 2 when labels are provided"
+            );
+        }
         let n_ticks_i32 = axis_tick_count_to_i32("Plot3DUi::setup_axis_ticks_range()", n_ticks);
         self.with_bound_context(|| {
             debug_before_setup();
