@@ -113,7 +113,7 @@ x11-dl = "2.21"
 
 # Build dependencies
 bindgen = { version = "=0.73.2", default-features = false, features = ["logging", "runtime"] }
-cc = "1.7"
+cc = "1.10"
 pkg-config = "0.3"
 vcpkg = "0.2.15"
 
@@ -134,7 +134,7 @@ web-time = "1.1"
 # WASM dependencies
 console_error_panic_hook = "0.1"
 console_log = "1"
-wasm-bindgen = "0.2.129"
+wasm-bindgen = "0.2.130"
 wasm-bindgen-futures = "0.4"
 web-sys = "0.3"
 

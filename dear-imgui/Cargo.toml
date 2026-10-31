@@ -2,7 +2,7 @@
 name = "dear-imgui-rs"
 version.workspace = true
 edition.workspace = true
-description = "High-level Rust bindings to Dear ImGui v1.92.9b with docking, WGPU/GL backends, and extensions (ImPlot/ImPlot3D, ImNodes, ImGuizmo, file browser, reflection-based UI)"
+description = "High-level Rust bindings to Dear ImGui v1.93.1 WIP with docking, WGPU/GL backends, and extensions (ImPlot/ImPlot3D, ImNodes, ImGuizmo, file browser, reflection-based UI)"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -23,7 +23,7 @@ thiserror.workspace = true
 serde = { workspace = true, optional = true }
 
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
-arboard = { version = "3.6.1", default-features = false, optional = true }
+arboard = { version = "3.7", default-features = false, optional = true }
 
 [features]
 default = []
