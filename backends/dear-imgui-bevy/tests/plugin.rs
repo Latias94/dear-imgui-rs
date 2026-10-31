@@ -86,7 +86,7 @@ fn plugin_registers_the_primary_registry_and_private_driver_schedule() {
         "the plugin must install its private serial driver schedule"
     );
 
-    assert_eq!(BEVY_TARGET_VERSION, "0.20.0");
+    assert_eq!(BEVY_TARGET_VERSION, "0.20.1");
     assert_eq!(
         BEVY_TARGET_COMMIT,
         "b3bdd75becaffe9a16677cf5bae5bd6d198f052b"

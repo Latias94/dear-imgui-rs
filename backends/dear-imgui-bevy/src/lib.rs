@@ -149,12 +149,12 @@ pub use self::viewport::{
 };
 
 /// Current Bevy version targeted by this crate.
-pub const BEVY_TARGET_VERSION: &str = "0.20.0";
+pub const BEVY_TARGET_VERSION: &str = "0.20.1";
 /// Bevy reference commit used by the workstream.
 pub const BEVY_TARGET_COMMIT: &str = "b3bdd75becaffe9a16677cf5bae5bd6d198f052b";
 /// Rust version required by the current Bevy target train.
 pub const RUST_TARGET_VERSION: &str = "1.97.1";
-/// WGPU version used by Bevy `0.20.0`.
+/// WGPU version used by Bevy `0.20.1`.
 pub const WGPU_TARGET_VERSION: &str = "30.0.1";
 
 #[cfg(feature = "render")]
