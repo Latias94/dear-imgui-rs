@@ -13,10 +13,9 @@ use thiserror::Error;
 use crate::sys;
 
 // All safe context switching, including backend callbacks, serializes through this lock.
-pub(crate) static CTX_MUTEX: ReentrantMutex<()> = parking_lot::const_reentrant_mutex(());
+pub(crate) static CTX_MUTEX: ReentrantMutex<()> = ReentrantMutex::new(());
 
-static CONTEXT_THREAD_OWNER: Mutex<ContextThreadOwner> =
-    parking_lot::const_mutex(ContextThreadOwner::new());
+static CONTEXT_THREAD_OWNER: Mutex<ContextThreadOwner> = Mutex::new(ContextThreadOwner::new());
 
 static NEXT_CONTEXT_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -142,10 +141,9 @@ enum ManagedContextEntry {
 pub struct ContextId(NonZeroU64);
 
 impl ContextId {
-    #[allow(deprecated, reason = "Keep compatibility with the Rust 1.92 MSRV")]
     pub(crate) fn allocate() -> Option<Self> {
         let value = NEXT_CONTEXT_ID
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 current.checked_add(1)
             })
             .ok()?;

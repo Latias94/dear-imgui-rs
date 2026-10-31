@@ -10,27 +10,27 @@ The backend owns Dear ImGui Contexts on Bevy's main thread, routes Bevy window i
 | --- | --- |
 | Rust | `1.97.1` or newer |
 | Bevy | exactly `0.20.1` |
-| dear-imgui-rs | matching `0.21` release train |
+| dear-imgui-rs | matching `0.22` release train |
 
 `dear-imgui-bevy` defaults to the renderer plus deterministic Bevy UI ordering. Native multi-viewport is supported through an explicit feature and runtime opt-in. WASM supports the normal and headless feature sets but cannot create native platform windows.
 
 ## Installation
 
-Use `dear-imgui-bevy` `0.21.1` or newer in the `0.21` release train with Bevy `0.20.1`. Version `0.21.0` and the `0.20` release train target Bevy `0.20.0`; the `0.19.0` backend targets Bevy `0.19.1`.
+The `0.22` release train targets Bevy exactly `0.20.1`. Version `0.21.0` and the `0.20` release train target Bevy `0.20.0`; the `0.19.0` backend targets Bevy `0.19.1`.
 
 ```toml
 [dependencies]
 bevy = "=0.20.1"
-dear-imgui-bevy = "0.21.1"
-dear-imgui-rs = "0.21"
+dear-imgui-bevy = "0.22"
+dear-imgui-rs = "0.22"
 ```
 
-This checkout targets Bevy 0.20.1. Upgrade Bevy and its subcrates together, and use Rust 1.97.1 or newer. The Context, private UI pass, texture lease, and route APIs are unchanged by this backend upgrade. See the root changelog for earlier backend API migrations.
+Upgrade Bevy and its subcrates together, and use Rust 1.97.1 or newer. The Context, private UI pass, texture lease, and route APIs are unchanged by this backend upgrade. Upgrade all workspace crates together to `"0.22"` and review the shared [native build policy migration](../../docs/COMPATIBILITY.md#0220-native-build-policy). See the root changelog for earlier backend API migrations.
 
 For a headless integration that drives private UI passes without installing the Bevy renderer:
 
 ```toml
-dear-imgui-bevy = { version = "0.21", default-features = false }
+dear-imgui-bevy = { version = "0.22", default-features = false }
 ```
 
 ## Quick Start

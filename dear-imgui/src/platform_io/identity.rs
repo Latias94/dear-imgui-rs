@@ -57,10 +57,9 @@ impl NativeWindowInstanceId {
 #[error("native window registration identity space is exhausted")]
 pub struct NativeWindowIdentityExhausted;
 
-#[allow(deprecated, reason = "Keep compatibility with the Rust 1.92 MSRV")]
 fn allocate_serial(counter: &AtomicU64) -> Result<NonZeroU64, NativeWindowIdentityExhausted> {
     let value = counter
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
             current.checked_add(1)
         })
         .map_err(|_| NativeWindowIdentityExhausted)?;

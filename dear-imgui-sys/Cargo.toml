@@ -2,6 +2,7 @@
 name = "dear-imgui-sys"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Low-level FFI bindings to Dear ImGui v1.93.1 WIP (docking branch) via cimgui (C API)"
 license.workspace = true
 repository.workspace = true

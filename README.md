@@ -89,6 +89,8 @@ The README focuses on current supported usage. For source-breaking migrations be
 read `CHANGELOG.md`; for release-train, dependency, MSRV, and backend compatibility baselines, see
 `docs/COMPATIBILITY.md`.
 
+The `0.22` release train raises the workspace and core MSRV to Rust 1.95 and changes native artifact selection and legacy build environment flags. Upgrade all workspace crates together to `"0.22"` and follow the [native build policy migration](docs/COMPATIBILITY.md#0220-native-build-policy). The experimental Bevy backend targets exactly Bevy 0.20.1 and still requires Rust 1.97.1.
+
 The safe API intentionally encodes Dear ImGui FFI invariants in Rust types. Source breaks are
 accepted when the previous safe wrapper shape could preserve stale handles, unchecked sizes,
 invalid sentinels, wrong-context access, or other states that should remain outside safe Rust.
@@ -171,25 +173,25 @@ under `examples/ci/` are release evidence and are intentionally excluded from th
 
 ## Installation
 
-The `0.21` release train is published on crates.io; this checkout prepares `0.21.1`. The installation snippets below use the compatible `"0.21"` requirement; use Git dependencies for changes that are not yet published. Applications using the `0.20` release train should follow the [v0.20.0 README](https://github.com/Latias94/dear-imgui-rs/blob/v0.20.0/README.md). Upgrade all workspace crates together and review the [1.93](docs/IMGUI_193_MIGRATION.md) and [editor backend](docs/EDITOR_BACKEND_MIGRATION.md) migrations.
+The installation snippets below target the `"0.22"` release train. Upgrade all workspace crates together, use Rust 1.95 or newer, and review the [native build policy migration](docs/COMPATIBILITY.md#0220-native-build-policy). Applications staying on published `0.21.0` should follow the [v0.21.0 README](https://github.com/Latias94/dear-imgui-rs/blob/v0.21.0/README.md). Applications upgrading from 0.20 or earlier also need the [1.93](docs/IMGUI_193_MIGRATION.md) and [editor backend](docs/EDITOR_BACKEND_MIGRATION.md) migrations. When using Git dependencies, keep all workspace crates on the same revision.
 
 ### Core + Backends
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.21"
+dear-imgui-rs = "0.22"
 # Choose a backend + platform integration
-dear-imgui-wgpu = "0.21"  # or dear-imgui-glow / dear-imgui-ash
-dear-imgui-winit = "0.21" # or dear-imgui-sdl3
+dear-imgui-wgpu = "0.22"  # or dear-imgui-glow / dear-imgui-ash
+dear-imgui-winit = "0.22" # or dear-imgui-sdl3
 ```
 
-`dear-imgui-wgpu` 0.21 defaults to WGPU 30. WGPU 29, 28, and 27 remain available as separate, mutually exclusive compatibility features:
+`dear-imgui-wgpu` 0.22 defaults to WGPU 30. WGPU 29, 28, and 27 remain available as separate, mutually exclusive compatibility features:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.21"
-dear-imgui-wgpu = { version = "0.21", default-features = false, features = ["wgpu-29"] }
-dear-imgui-winit = "0.21"
+dear-imgui-rs = "0.22"
+dear-imgui-wgpu = { version = "0.22", default-features = false, features = ["wgpu-29"] }
+dear-imgui-winit = "0.22"
 ```
 
 Replace `wgpu-29` with `wgpu-28` or `wgpu-27` when integrating an older WGPU application.
@@ -198,7 +200,7 @@ Replace `wgpu-29` with `wgpu-28` or `wgpu-27` when integrating an older WGPU app
 
 ```toml
 [dependencies]
-dear-app = "0.21" # State-owning Winit + WGPU runtime with docking support
+dear-app = "0.22" # State-owning Winit + WGPU runtime with docking support
 ```
 
 ### Apple Platform Examples
@@ -247,7 +249,7 @@ Example: low-level Android route without a dedicated Android convenience crate:
 
 ```toml
 [dependencies]
-dear-imgui-sys = { version = "0.21", features = ["backend-shim-android", "backend-shim-opengl3"] }
+dear-imgui-sys = { version = "0.22", features = ["backend-shim-android", "backend-shim-opengl3"] }
 ```
 
 Recommended ownership split:
@@ -279,31 +281,31 @@ assembly.
 ```toml
 [dependencies]
 # Plotting
-dear-implot = "0.21"   # 2D plotting
-dear-implot3d = "0.21" # 3D plotting
+dear-implot = "0.22"   # 2D plotting
+dear-implot3d = "0.22" # 3D plotting
 
 # 3D Gizmos
-dear-imguizmo = "0.21"      # Standard 3D gizmo + GraphEditor
-dear-imguizmo-quat = "0.21" # Quaternion-based gizmo
+dear-imguizmo = "0.22"      # Standard 3D gizmo + GraphEditor
+dear-imguizmo-quat = "0.22" # Quaternion-based gizmo
 
 # Node Editor
-dear-imnodes = "0.21"
-dear-node-editor = "0.21" # native-only; add feature "blueprints" for stack layout
+dear-imnodes = "0.22"
+dear-node-editor = "0.22" # native-only; add feature "blueprints" for stack layout
 
 # Code editor, text diff, autocomplete, and diagnostics
-dear-imgui-cte = "0.21"
+dear-imgui-cte = "0.22"
 
 # Test automation
-dear-imgui-test-engine = "0.21"
+dear-imgui-test-engine = "0.22"
 
 # File Browser
-dear-file-browser = "0.21" # Native dialogs + ImGui file browser
+dear-file-browser = "0.22" # Native dialogs + ImGui file browser
 
 # Reflection-based UI helpers
-dear-imgui-reflect = "0.21"
+dear-imgui-reflect = "0.22"
 ```
 
-`dear-imgui-cte` is a Preview crate in the `0.21.0` train. Use it from
+`dear-imgui-cte` is a Preview crate in the `0.22` train. Use it from
 the same release train as `dear-imgui-rs` and `dear-imgui-cte-sys`; mixing
 different train versions across the safe and sys crates is unsupported.
 
@@ -380,48 +382,48 @@ Quick examples (enable auto prebuilt download):
 
 ## Compatibility
 
-The workspace follows a release-train model; applications should upgrade all workspace crates together. The tables below describe the `0.21.1` release candidate, which keeps the Dear ImGui `1.93.1 WIP` baseline from published `0.21.0`. Version `0.21.1` updates the Bevy target to `0.20.1`; backend `0.21.0` uses Bevy `0.20.0`. See [compatibility and migration](docs/COMPATIBILITY.md) for release history and requirements.
+The workspace follows a release-train model; applications should upgrade all workspace crates together. The tables below describe `0.22.0`, which keeps the Dear ImGui `1.93.1 WIP` baseline and all native source pins from published `0.21.0`. Version `0.22.0` raises the workspace and core MSRV to Rust 1.95, introduces the native build policy migration, and targets exactly Bevy `0.20.1`; backend `0.21.0` uses Bevy `0.20.0`. See [compatibility and migration](docs/COMPATIBILITY.md) for release history and requirements.
 
 Core
 
 | Crate           | Version | Notes                                     |
 |-----------------|---------|-------------------------------------------|
-| dear-imgui-rs   | 0.21.1 | Safe Rust API over dear-imgui-sys     |
-| dear-imgui-sys  | 0.21.1 | Dear ImGui v1.93.1 WIP docking via cimgui |
+| dear-imgui-rs   | 0.22.0 | Safe Rust API over dear-imgui-sys     |
+| dear-imgui-sys  | 0.22.0 | Dear ImGui v1.93.1 WIP docking via cimgui |
 
 Backends
 
 | Crate            | Version | External deps     | Notes                          |
 |------------------|---------|-------------------|--------------------------------|
-| dear-imgui-wgpu  | 0.21.1 | wgpu = 30/29/28/27 | WebGPU renderer; WGPU 30 default, native Winit/SDL3 multi-viewport, browser single-window |
-| dear-imgui-glow  | 0.21.1 | glow = 0.18       | OpenGL renderer (winit/glutin) |
-| dear-imgui-ash   | 0.21.1 | ash = 0.38        | Native Vulkan renderer with Winit/SDL3 multi-viewport adapters |
-| dear-imgui-winit | 0.21.1 | winit = 0.30.13   | Winit platform backend         |
-| dear-imgui-sdl3  | 0.21.1 | sdl3 = 0.20.0     | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
-| dear-imgui-bevy  | 0.21.1 | Bevy = 0.20.1     | Experimental Bevy-native backend with docking, texture interop, and native multi-viewport |
+| dear-imgui-wgpu  | 0.22.0 | wgpu = 30/29/28/27 | WebGPU renderer; WGPU 30 default, native Winit/SDL3 multi-viewport, browser single-window |
+| dear-imgui-glow  | 0.22.0 | glow = 0.18       | OpenGL renderer (winit/glutin) |
+| dear-imgui-ash   | 0.22.0 | ash = 0.38        | Native Vulkan renderer with Winit/SDL3 multi-viewport adapters |
+| dear-imgui-winit | 0.22.0 | winit = 0.30.13   | Winit platform backend         |
+| dear-imgui-sdl3  | 0.22.0 | sdl3 = 0.20.0     | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
+| dear-imgui-bevy  | 0.22.0 | Bevy = 0.20.1     | Experimental Bevy-native backend with docking, texture interop, and native multi-viewport |
 
 Application Runtime
 
 | Crate     | Version | Requires dear-imgui-rs | Notes                                            |
 |-----------|---------|------------------------|--------------------------------------------------|
-| dear-app  | 0.21.1 | 0.21.1       | Generation-aware Winit + WGPU application runtime |
+| dear-app  | 0.22.0 | 0.22.0       | Generation-aware Winit + WGPU application runtime |
 
 Extensions
 
 | Crate               | Version | Requires dear-imgui-rs | Sys crate                   | Notes                                  |
 |---------------------|---------|------------------------|-----------------------------|----------------------------------------|
-| dear-implot         | 0.21.1 | 0.21.1 | dear-implot-sys 0.21.1 | 2D plotting                         |
-| dear-imnodes        | 0.21.1 | 0.21.1 | dear-imnodes-sys 0.21.1 | WASM-capable node editor            |
-| dear-node-editor    | 0.21.1 | 0.21.1 | dear-node-editor-sys 0.21.1 | Native imgui-node-editor; optional blueprints profile |
-| dear-imguizmo       | 0.21.1 | 0.21.1 | dear-imguizmo-sys 0.21.1 | 3D gizmo + GraphEditor              |
-| dear-file-browser   | 0.21.1 | 0.21.1 | —                              | State-owned ImGui UI + native dialog backends |
-| dear-implot3d       | 0.21.1 | 0.21.1 | dear-implot3d-sys 0.21.1 | 3D plotting                       |
-| dear-imguizmo-quat  | 0.21.1 | 0.21.1 | dear-imguizmo-quat-sys 0.21.1 | Quaternion gizmo              |
-| dear-imgui-cte      | 0.21.1 | 0.21.1 | dear-imgui-cte-sys 0.21.1 | Preview ImGuiColorTextEdit editor, diff, autocomplete, and diagnostics |
-| dear-imgui-test-engine | 0.21.1 | 0.21.1 | dear-imgui-test-engine-sys 0.21.1 | UI automation and test runner |
-| dear-imgui-reflect  | 0.21.1 | 0.21.1 | —                              | Session-owned reflection UI              |
+| dear-implot         | 0.22.0 | 0.22.0 | dear-implot-sys 0.22.0 | 2D plotting                         |
+| dear-imnodes        | 0.22.0 | 0.22.0 | dear-imnodes-sys 0.22.0 | WASM-capable node editor            |
+| dear-node-editor    | 0.22.0 | 0.22.0 | dear-node-editor-sys 0.22.0 | Native imgui-node-editor; optional blueprints profile |
+| dear-imguizmo       | 0.22.0 | 0.22.0 | dear-imguizmo-sys 0.22.0 | 3D gizmo + GraphEditor              |
+| dear-file-browser   | 0.22.0 | 0.22.0 | —                              | State-owned ImGui UI + native dialog backends |
+| dear-implot3d       | 0.22.0 | 0.22.0 | dear-implot3d-sys 0.22.0 | 3D plotting                       |
+| dear-imguizmo-quat  | 0.22.0 | 0.22.0 | dear-imguizmo-quat-sys 0.22.0 | Quaternion gizmo              |
+| dear-imgui-cte      | 0.22.0 | 0.22.0 | dear-imgui-cte-sys 0.22.0 | Preview ImGuiColorTextEdit editor, diff, autocomplete, and diagnostics |
+| dear-imgui-test-engine | 0.22.0 | 0.22.0 | dear-imgui-test-engine-sys 0.22.0 | UI automation and test runner |
+| dear-imgui-reflect  | 0.22.0 | 0.22.0 | —                              | Session-owned reflection UI              |
 
-The workspace MSRV is Rust 1.92. The experimental Bevy backend requires Rust 1.97.1 because Bevy 0.20 does. The development toolchain is Rust 1.99. Select exactly one WGPU major; `dear-app` follows the WGPU 30 default.
+The workspace and core MSRV is Rust 1.95, raised for the private `parking_lot` 0.13 dependency. The experimental Bevy backend requires Rust 1.97.1 because Bevy 0.20 does. The development toolchain is Rust 1.99. Select exactly one WGPU major; `dear-app` follows the WGPU 30 default.
 
 Maintenance rules
 

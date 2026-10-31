@@ -2,6 +2,7 @@
 name = "dear-app"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Generation-aware Dear ImGui application runtime for dear-imgui-rs on Winit and WGPU"
 license.workspace = true
 repository.workspace = true

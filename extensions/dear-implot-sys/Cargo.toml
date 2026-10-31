@@ -2,6 +2,7 @@
 name = "dear-implot-sys"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Low-level FFI bindings for ImPlot via cimplot (C API)"
 license.workspace = true
 repository.workspace = true

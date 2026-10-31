@@ -23,14 +23,14 @@ Use compatible stable requirements:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.21"
-dear-imgui-reflect = "0.21"
+dear-imgui-rs = "0.22"
+dear-imgui-reflect = "0.22"
 ```
 
 Optional math support:
 
 ```toml
-dear-imgui-reflect = { version = "0.21", features = ["glam", "mint"] }
+dear-imgui-reflect = { version = "0.22", features = ["glam", "mint"] }
 glam = "0.34"
 mint = "0.5"
 ```
@@ -197,10 +197,12 @@ See `examples/03-features/reflect_demo.rs` for a complete inspector and
 
 ## Compatibility
 
+The `0.22` release train requires Rust 1.95 or newer. Upgrade all workspace crates together. See the [0.22 migration notes](../../docs/COMPATIBILITY.md#022-release-train).
+
 | Item | Version |
 |---|---|
-| Crate | 0.21.0 |
-| dear-imgui-rs | 0.21.0 |
+| Crate | 0.22.0 |
+| dear-imgui-rs | 0.22.0 |
 
 ## License
 

@@ -2,6 +2,7 @@
 name = "dear-imguizmo"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "High-level Rust bindings for ImGuizmo (C API) with Dear ImGui integration"
 license.workspace = true
 repository.workspace = true

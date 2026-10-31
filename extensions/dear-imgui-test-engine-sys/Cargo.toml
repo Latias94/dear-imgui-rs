@@ -2,6 +2,7 @@
 name = "dear-imgui-test-engine-sys"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Low-level FFI bindings for Dear ImGui Test Engine"
 license-file = "LICENSE.txt"
 repository.workspace = true

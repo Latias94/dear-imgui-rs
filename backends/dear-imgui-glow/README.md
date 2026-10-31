@@ -242,10 +242,12 @@ proof; shared runtime tests remain the teardown evidence. See the
 
 ## Compatibility
 
+The `0.22` release train requires Rust 1.95 or newer. Upgrade all workspace crates together. See the [0.22 migration notes](../../docs/COMPATIBILITY.md#022-release-train).
+
 | Item          | Version |
 |---------------|---------|
-| Crate         | 0.21.0  |
-| dear-imgui-rs | 0.21.0  |
+| Crate         | 0.22.0  |
+| dear-imgui-rs | 0.22.0  |
 | glow          | 0.18    |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.

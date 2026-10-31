@@ -2,6 +2,7 @@
 name = "dear-imnodes-sys"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Low-level FFI bindings for ImNodes via cimnodes (C API)"
 license.workspace = true
 repository.workspace = true

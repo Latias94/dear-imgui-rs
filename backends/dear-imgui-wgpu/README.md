@@ -384,28 +384,28 @@ replacements are preserved rather than overwritten.
 
 ## Selecting wgpu version
 
-The `0.21.0` release defaults to WGPU 30:
+The `0.22` release train defaults to WGPU 30 and requires Rust 1.95 or newer. Upgrade all workspace crates together and review the [0.22 migration notes](../../docs/COMPATIBILITY.md#022-release-train):
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = "0.21"
+dear-imgui-wgpu = "0.22"
 ```
 
 If your ecosystem is pinned to `wgpu` v29, v28, or v27, select it explicitly:
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "0.21", default-features = false, features = ["wgpu-29"] }
+dear-imgui-wgpu = { version = "0.22", default-features = false, features = ["wgpu-29"] }
 ```
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "0.21", default-features = false, features = ["wgpu-28"] }
+dear-imgui-wgpu = { version = "0.22", default-features = false, features = ["wgpu-28"] }
 ```
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "0.21", default-features = false, features = ["wgpu-27"] }
+dear-imgui-wgpu = { version = "0.22", default-features = false, features = ["wgpu-27"] }
 ```
 
 ## What You Get
@@ -424,6 +424,7 @@ dear-imgui-wgpu = { version = "0.21", default-features = false, features = ["wgp
 
 | Track | wgpu support |
 |-------|--------------|
+| `0.22.0` | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
 | `0.21.0` | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
 | `0.20.0` | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
 | `0.19.0` | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |

@@ -4,13 +4,15 @@ Low-level Rust bindings for Dear ImGui via cimgui (C API) and checked-in pregene
 
 ## Overview
 
-This crate provides unsafe Rust bindings to Dear ImGui v1.92.9b (docking branch) using the [cimgui](https://github.com/cimgui/cimgui) C API. The core `ig*` API crosses a C ABI boundary. C++ backend integration and callback-bearing platform APIs use explicit repository-owned shims because their compiler ABI still matters, especially on MSVC.
+This crate provides unsafe Rust bindings to Dear ImGui v1.93.1 WIP (docking branch) using the [cimgui](https://github.com/cimgui/cimgui) C API. The core `ig*` API crosses a C ABI boundary. C++ backend integration and callback-bearing platform APIs use explicit repository-owned shims because their compiler ABI still matters, especially on MSVC.
+
+This README describes the `0.22` release train. Use Rust 1.95 or newer and upgrade all workspace crates together. Review the [native build policy migration](../docs/COMPATIBILITY.md#0220-native-build-policy) when carrying environment settings forward from 0.21.0.
 
 ## Key Features
 
 - **cimgui C API**: A deliberate C boundary for the core `ig*` API
 - **Docking Support**: Full docking support; PlatformIO primitives for backend-specific native multi-viewport routes
-- **Modern Dear ImGui**: Based on Dear ImGui v1.92.9b docking branch
+- **Modern Dear ImGui**: Based on Dear ImGui v1.93.1 WIP docking branch
 - **Cross-platform**: Consistent builds on Windows (MSVC, MinGW-GCC, and GNU/LLVM), Linux, macOS, and WebAssembly
 - **Prebuilt Binaries**: Optional prebuilt static libraries for faster builds
 - **Offline-friendly**: Pregenerated bindings for normal builds, docs.rs, and offline environments
@@ -59,7 +61,7 @@ export IMGUI_SYS_LIB_DIR=/path/to/extracted/dear-imgui-artifact/lib
 cargo build -p dear-imgui-sys
 
 # Option B: Use a package-tool-generated local archive or HTTP(S) URL.
-export IMGUI_SYS_PREBUILT_URL=/path/to/dear-imgui-prebuilt-0.21.0-<target>-static.tar.gz
+export IMGUI_SYS_PREBUILT_URL=/path/to/dear-imgui-prebuilt-0.22.0-<target>-static.tar.gz
 cargo build -p dear-imgui-sys --features prebuilt
 
 # Option C: Enable HTTP(S) downloads / auto-download from GitHub releases
@@ -240,14 +242,14 @@ For a complete, up-to-date guide (including required tools, commands, and troubl
 
 This is a low-level sys crate providing unsafe FFI bindings. Most users should use the higher-level [`dear-imgui-rs`](https://crates.io/crates/dear-imgui-rs) crate instead, which provides safe Rust wrappers.
 
-Use the compatible stable requirement:
+Use a matching 0.22 requirement:
 
 ```toml
 [dependencies]
-dear-imgui-sys = "0.21"
+dear-imgui-sys = "0.22"
 
 # Alternatively, enable native FreeType (replace the preceding dependency entry).
-# dear-imgui-sys = { version = "0.21", features = ["freetype"] }
+# dear-imgui-sys = { version = "0.22", features = ["freetype"] }
 ```
 
 ### Direct FFI Usage (Advanced)
@@ -287,7 +289,7 @@ can expose optional backend shim modules behind `backend-shim-*` features:
 
 ```toml
 [dependencies]
-dear-imgui-sys = { version = "0.21", features = ["backend-shim-opengl3"] }
+dear-imgui-sys = { version = "0.22", features = ["backend-shim-opengl3"] }
 ```
 
 These features expose self-contained modules such as:
@@ -457,7 +459,7 @@ There are two first-class Android directions.
 
    ```toml
    [dependencies]
-   dear-imgui-sys = { version = "0.21", features = ["backend-shim-android", "backend-shim-opengl3"] }
+   dear-imgui-sys = { version = "0.22", features = ["backend-shim-android", "backend-shim-opengl3"] }
    ```
 
    Use the raw `dear-imgui-sys` context and frame API with
@@ -531,8 +533,8 @@ require both source submodules to be clean and to match the recorded revisions.
 
 ### Version Information
 
-- **Dear ImGui Version**: v1.92.9b (docking branch)
-- **cimgui Version**: Pinned to a revision generated against Dear ImGui v1.92.9b
+- **Dear ImGui Version**: v1.93.1 WIP (docking branch)
+- **cimgui Version**: Pinned to the same revision as 0.21.0, generated against Dear ImGui v1.93.1 WIP
 - **Supported Features**: Docking, FreeType font rendering, and low-level PlatformIO/multi-viewport primitives; end-to-end status is documented per backend route
 
 ### Environment Variables

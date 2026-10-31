@@ -17,11 +17,13 @@ Safe, idiomatic Rust bindings for ImGuIZMO.quat (quaternion + 3D gizmo helpers) 
 
 ## Compatibility
 
+The `0.22` release train requires Rust 1.95 or newer. Upgrade all workspace crates together. See the [0.22 migration notes](../../docs/COMPATIBILITY.md#022-release-train).
+
 | Item                   | Version |
 |------------------------|---------|
-| Crate                  | 0.21.0  |
-| dear-imgui-rs          | 0.21.0  |
-| dear-imguizmo-quat-sys | 0.21.0  |
+| Crate                  | 0.22.0  |
+| dear-imgui-rs          | 0.22.0  |
+| dear-imguizmo-quat-sys | 0.22.0  |
 
 See also: docs/COMPATIBILITY.md in the workspace for the full matrix.
 
@@ -56,7 +58,7 @@ python -m http.server -d target/web-demo 8080
 
 Notes:
 - The `dear-imgui-web-demo` crate in `examples-wasm` can enable the `imguizmo-quat` feature; when present, an “ImGuIZMO.quat (Web)” window is shown if bindings + provider are available.
-- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific compatible `0.21` release and follow changes in `docs/WASM.md`.
+- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific compatible `0.22` release and follow changes in `docs/WASM.md`.
 
 ## Features
 
@@ -97,8 +99,8 @@ Use compatible stable requirements:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.21"
-dear-imguizmo-quat = "0.21"
+dear-imgui-rs = "0.22"
+dear-imguizmo-quat = "0.22"
 glam = "0.34"
 ```
 

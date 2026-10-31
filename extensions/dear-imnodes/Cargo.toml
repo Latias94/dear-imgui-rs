@@ -2,6 +2,7 @@
 name = "dear-imnodes"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Safe, idiomatic Rust bindings for ImNodes (node editor for Dear ImGui)"
 license.workspace = true
 repository.workspace = true

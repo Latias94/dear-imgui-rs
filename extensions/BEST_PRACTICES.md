@@ -121,10 +121,10 @@ Use C bindings (cimgui family) + bindgen when available:
 Centralize all prebuilt download/extract/naming logic via the shared helper crate:
 
 - Depend on `dear-imgui-build-support` in your `-sys` crate as a build-dependency.
-  Use the compatible stable requirement:
+  Use at least the matching full release version so a lockfile cannot retain a helper that lacks the required APIs:
   ```toml
   [build-dependencies]
-  build-support = { package = "dear-imgui-build-support", version = "0.21", features = ["binding-spec"] }
+  build-support = { package = "dear-imgui-build-support", version = "0.22.0", features = ["binding-spec"] }
   ```
 
   Workspace members should inherit the repository catalog instead:
@@ -157,7 +157,7 @@ For extensions that support prebuilt artifacts, provide these routes:
 - Local prebuilt: `*_SYS_LIB_DIR` -> validate the matching library and manifest, then emit search/link directives
 - Remote/archive prebuilt: `*_SYS_PREBUILT_URL` -> download/extract with `prebuilt`, validate, then link
 
-Document route precedence. `build-from-source` and `*_SYS_FORCE_BUILD` force source builds; a local directory override precedes an explicit archive URL, which precedes automatic release lookup. Choose one override at a time. Test Engine is source-only and does not implement the prebuilt routes.
+Use `native_build::NativeBuildPlan` to resolve `<EXT>_SYS_BUILD_MODE=auto|source|prebuilt|bindings-only` and legacy flags consistently. In automatic mode, source requirements win over prebuilt discovery; explicit prebuilt and bindings-only modes reject source-only requirements. Explicit `LIB_DIR`, `PREBUILT_URL`, and `PACKAGE_DIR` selectors are mutually exclusive and authoritative: acquisition or validation errors must stop the build. Strict prebuilt mode never falls back to source. `SKIP_CC=1` alone is check-only; with an artifact selector or feature `prebuilt`, it requires a compatible prebuilt. Do not mix the new mode with enabled legacy mode flags. Test Engine is source-only and retains its separate source/check-only routes. See the [0.22 native build policy migration](../docs/COMPATIBILITY.md#0220-native-build-policy).
 
 Tip: allow automated downloads from GitHub Releases by generating candidate URLs via
 `build_support::release_candidate_urls_env()` and trying them in order.
@@ -171,7 +171,7 @@ Naming convention for static libs:
 
 - Crate names: `dear-<ext>-sys` (FFI) and `dear-<ext>` (safe)
 - Cargo `links`: `dear_<ext>`; native static library name follows the same
-- Env vars: `<EXT>_SYS_LIB_DIR`, `<EXT>_SYS_PREBUILT_URL`, `<EXT>_SYS_SKIP_CC`, optional `<EXT>_SYS_USE_PREBUILT`, `<EXT>_SYS_FORCE_BUILD`
+- Env vars: `<EXT>_SYS_BUILD_MODE`, `<EXT>_SYS_LIB_DIR`, `<EXT>_SYS_PREBUILT_URL`, `<EXT>_SYS_PACKAGE_DIR`, `<EXT>_SYS_SKIP_CC`, optional `<EXT>_SYS_USE_PREBUILT`, `<EXT>_SYS_FORCE_BUILD`
 - Features: `prebuilt`, `build-from-source` (opt-in toggles) and passthroughs like `freetype` to `dear-imgui-sys`
 - Optional: `package-bin` gates the internal `bin/package` helper for producing release archives consistent with `tools/build-support`; it is a maintainer tool, not an application dependency feature.
 

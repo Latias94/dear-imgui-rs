@@ -2,6 +2,7 @@
 name = "dear-imgui-test-engine"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Safe Rust wrapper for Dear ImGui Test Engine"
 license.workspace = true
 repository.workspace = true

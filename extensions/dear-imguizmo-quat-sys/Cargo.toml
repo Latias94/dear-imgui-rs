@@ -2,6 +2,7 @@
 name = "dear-imguizmo-quat-sys"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Low-level FFI bindings for ImGuIZMO.quat via cimguizmo_quat (C API)"
 license.workspace = true
 repository.workspace = true

@@ -553,13 +553,10 @@ jobs:
       - name: Initialize required nested submodules
         run: python3 tools/ci/update_submodules.py
 
-      - name: Install current Rust toolchain
+      - name: Install declared MSRV toolchain
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           toolchain: '1.95.0'
-
-      - name: Install declared MSRV toolchain
-        run: rustup toolchain install 1.92.0 --profile minimal
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
@@ -581,7 +578,7 @@ jobs:
 
       - name: Check publishable non-Bevy crates at the declared MSRV
         run: >-
-          cargo +1.92.0 check --workspace
+          cargo +1.95.0 check --workspace
           --exclude dear-imgui-bevy
           --exclude dear-imgui-examples
           --exclude dear-imgui-web-demo

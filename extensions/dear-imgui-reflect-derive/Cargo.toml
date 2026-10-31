@@ -2,6 +2,7 @@
 name = "dear-imgui-reflect-derive"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Derive macro for dear-imgui-reflect"
 license.workspace = true
 repository.workspace = true

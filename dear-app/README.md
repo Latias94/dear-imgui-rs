@@ -7,11 +7,11 @@
 
 ## Quick Start
 
-Create a binary crate and add the stable release:
+The `0.22` release train requires Rust 1.95 or newer. Upgrade all workspace crates together and review the [native build policy migration](../docs/COMPATIBILITY.md#0220-native-build-policy). Create a binary crate and add the matching release:
 
 ```toml
 [dependencies]
-dear-app = "0.21"
+dear-app = "0.22"
 ```
 
 Then use `dear_app::run_ui` for applications that only need persistent UI state:

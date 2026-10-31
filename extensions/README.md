@@ -33,11 +33,12 @@ Key points:
 
 ## Build Modes
 
-Each `*-sys` crate supports multiple ways to obtain its own native static library (see each `-sys` README for details):
+The core and seven prebuilt-capable extension sys crates follow the shared [0.22 native build policy](../docs/COMPATIBILITY.md#0220-native-build-policy). Test Engine is source-only. See each `-sys` README for its artifact requirements:
 
 - Source build (default): compile upstream C/C++ sources with `cc`.
-- System/prebuilt: set a directory env var so Cargo can find the static lib.
-- Remote prebuilt: set a direct URL (requires feature `prebuilt`); the file is downloaded into `OUT_DIR/prebuilt/`.
+- Matching prebuilt: select one compatible library directory, archive, or package directory. Explicit selectors are mutually exclusive and authoritative; missing or incompatible artifacts stop the build.
+- Automatic prebuilt discovery: enable feature `prebuilt` to allow release lookup and cached acquisition. Automatic misses may fall back to source; strict `BUILD_MODE=prebuilt` never does.
+- Bindings-only: select `BUILD_MODE=bindings-only` for declaration-only checks; it does not provide native symbols for runnable applications.
 
 Environment variables:
 
@@ -49,6 +50,8 @@ Environment variables:
 - ImGuIZMO.quat: `IMGUIZMO_QUAT_SYS_LIB_DIR`, `IMGUIZMO_QUAT_SYS_PREBUILT_URL`, `IMGUIZMO_QUAT_SYS_SKIP_CC`.
 - ImGuiColorTextEdit: `CTE_SYS_LIB_DIR`, `CTE_SYS_PREBUILT_URL`, `CTE_SYS_SKIP_CC`.
 - ImGui Test Engine: source build only (`IMGUI_TEST_ENGINE_SYS_SKIP_CC` supported for pregenerated-bindings check/docs workflows).
+
+Each prebuilt-capable prefix also accepts `*_SYS_BUILD_MODE=auto|source|prebuilt|bindings-only` and `*_SYS_PACKAGE_DIR`. Legacy `*_SYS_SKIP_CC=1` alone is check-only, but with an artifact selector or feature `prebuilt` it requires a compatible prebuilt. Do not combine `BUILD_MODE` with enabled legacy `SKIP_CC` or `FORCE_BUILD` flags. Source requirements win in automatic mode; explicit prebuilt and bindings-only modes reject them. Test Engine retains its documented dual-skip check route instead of adding these prebuilt modes.
 
 Optional toggles:
 

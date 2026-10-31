@@ -46,13 +46,13 @@ The package gate intentionally uses a clean clone and isolated consumers so
 workspace files and previously built libraries cannot hide missing crate inputs.
 
 ```bash
-python3 tools/tasks.py release-prepare 0.21.0
+python3 tools/tasks.py release-prepare 0.22.0
 
 # Review generated bindings, source metadata, Cargo.lock, CHANGELOG.md, and docs.
 git diff
 git add -p
 # Stage reviewed new files explicitly with git add -- <path>.
-git commit -m "chore(release): prepare v0.21.0"
+git commit -m "chore(release): prepare v0.22.0"
 
 python3 tools/tasks.py release-check
 ```
@@ -64,7 +64,7 @@ Before merging, require normal CI to pass on Linux, Windows, and macOS. The root
 Merge the candidate to `main`, then dispatch the release workflow with the matching tag:
 
 ```bash
-gh workflow run release.yml --ref main -f tag=v0.21.0
+gh workflow run release.yml --ref main -f tag=v0.22.0
 ```
 
 The workflow binds the tag to the workspace version and the exact `main` commit before doing any irreversible work. It then:

@@ -2,6 +2,7 @@
 name = "dear-node-editor-sys"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Low-level FFI bindings for imgui-node-editor via cimnodes_editor"
 license.workspace = true
 repository.workspace = true

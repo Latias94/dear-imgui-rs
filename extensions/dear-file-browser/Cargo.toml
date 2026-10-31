@@ -2,6 +2,7 @@
 name = "dear-file-browser"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "File dialogs and in-UI file browser for dear-imgui-rs"
 license.workspace = true
 repository.workspace = true

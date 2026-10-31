@@ -2,6 +2,7 @@
 name = "dear-imgui-sdl3"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "SDL3 platform backend with optional OpenGL3, SDLRenderer3, and SDLGPU3 renderers for dear-imgui-rs"
 license.workspace = true
 repository.workspace = true

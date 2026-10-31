@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-## 0.21.1 - 2026-10-31
+## 0.22.0 - 2026-11-01
+
+Upgrade all workspace crates together to `"0.22"` and review the shared [native build policy migration](../../docs/COMPATIBILITY.md#0220-native-build-policy). The workspace/core MSRV rises to Rust 1.95; this backend retains its Rust 1.97.1 minimum.
 
 ### Changed
 

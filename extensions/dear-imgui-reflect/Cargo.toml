@@ -2,6 +2,7 @@
 name = "dear-imgui-reflect"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Reflection-based UI helpers for dear-imgui-rs (auto-generate ImGui widgets for Rust structs)"
 license.workspace = true
 repository.workspace = true

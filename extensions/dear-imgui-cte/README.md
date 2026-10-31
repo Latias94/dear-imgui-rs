@@ -12,15 +12,12 @@ native and WebAssembly targets.
 
 ## Compatibility
 
-This crate is a Preview crate in the `0.21` release train. Use it from the same
-release train as `dear-imgui-rs` and `dear-imgui-cte-sys`; mixing release trains
-is unsupported. The checked-in source identity is recorded in the sys crate
-README and Cargo metadata.
+This Preview crate uses the `0.22` release train and requires Rust 1.95 or newer. Use it from the same release train as `dear-imgui-rs` and `dear-imgui-cte-sys`; mixing release trains is unsupported. The checked-in source identity is recorded in the sys crate README and Cargo metadata. See the [native build policy migration](../../docs/COMPATIBILITY.md#0220-native-build-policy).
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.21"
-dear-imgui-cte = "0.21"
+dear-imgui-rs = "0.22"
+dear-imgui-cte = "0.22"
 ```
 
 ## Quick Start

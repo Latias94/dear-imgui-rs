@@ -8,24 +8,30 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
-## [0.21.1] - 2026-10-31
+## [0.22.0] - 2026-11-01
 
-This patch updates the Bevy integration and Rust dependencies, and makes native artifact selection explicit and predictable. Upgrade applications using Bevy to exactly 0.20.1 and review the native build policy below if you select prebuilt libraries or use legacy build environment variables.
+The 0.22 release train raises the core MSRV and makes native artifact selection explicit and predictable. Upgrade all workspace crates together and review the native build migration if you select prebuilt libraries or use legacy build environment variables.
+
+### Breaking Changes and Migration
+
+- Update all workspace crate dependencies together to `"0.22"`. The workspace and core MSRV rises from Rust 1.92 to Rust 1.95 because the internal locking dependency moves to `parking_lot` 0.13. Development and publishing continue to use Rust 1.99.
+- Native builds: explicit library, archive, and package-directory selectors are now mutually exclusive and authoritative. Missing or incompatible selected artifacts stop the build instead of silently falling back to source. Choose `<PREFIX>_BUILD_MODE=auto|source|prebuilt|bindings-only` to express the intended route; strict prebuilt mode never compiles that core or extension library as a fallback. Enabled core backend shims still compile locally. See the [native build policy migration](docs/COMPATIBILITY.md#0220-native-build-policy). Addresses [#96](https://github.com/Latias94/dear-imgui-rs/issues/96).
+- Native environment flags: `SKIP_CC=1` alone remains check-only, but combining it with an artifact selector or feature `prebuilt` now requires a compatible prebuilt. Conflicting source/skip instructions fail early; boolean flags honor false values. Do not combine `BUILD_MODE` with enabled legacy `SKIP_CC` or `FORCE_BUILD` flags. The source-only Test Engine retains its documented dual-skip check route.
+- Bevy integration now requires Bevy exactly 0.20.1 (previously 0.20.0). Upgrade `bevy` and its subcrates together; the Bevy backend's Rust 1.97.1 minimum is unchanged.
 
 ### Changed
 
-- Release all workspace crates as 0.21.1. `dear-imgui-bevy` now requires Bevy exactly 0.20.1 (previously 0.20.0); Rust 1.97.1 or newer is unchanged. Correct `BEVY_TARGET_VERSION` to report the matching target.
-- Update build dependencies to `cc` 1.10 and `ureq` 3.5, and desktop clipboard support to `arboard` 3.7. Refresh the locked `serde_json`, `syn`, and `log` dependencies and the standalone mobile lockfiles. The core MSRV remains Rust 1.92.
+- Update `parking_lot` from 0.12 to 0.13 and initialize internal locks through their const constructors instead of the removed helper functions. The dependency is private; downstream applications do not need to migrate a public `parking_lot` API.
+- Explicitly declare the shared Rust 1.95 MSRV in all 28 non-Bevy published crate manifests through workspace inheritance; the Bevy backend retains its Rust 1.97.1 requirement.
+- Update build dependencies to `cc` 1.10 and `ureq` 3.5, and desktop clipboard support to `arboard` 3.7. Refresh the locked `serde_json`, `syn`, and `log` dependencies and the standalone mobile lockfiles.
 - Update the browser binding family to `wasm-bindgen` 0.2.130, `wasm-bindgen-futures` 0.4.80, and `web-sys`/`js-sys` 0.3.107. Use the matching `wasm-bindgen-cli` when building the web demo.
+- Retain all native source pins, including the Dear ImGui 1.93.1 WIP docking baseline from 0.21.0. Native artifacts must still match the 0.22.0 crate version and manifest identity; rebuild custom archives with the matching repository tooling.
 
 ### Fixed
 
-- Require internal dependencies from at least 0.21.1 while allowing later compatible patches. In particular, sys build scripts require the new `dear-imgui-build-support::native_build` API, so updating a sys crate must also update a previously locked 0.21.0 build helper.
+- Require internal dependencies from at least 0.22.0 while allowing later compatible patches. In particular, sys build scripts require the new `dear-imgui-build-support::native_build` API, so a sys crate cannot retain an older build helper that lacks this API.
+- Correct `BEVY_TARGET_VERSION` to report the matching Bevy 0.20.1 target.
 - ImPlot3D: reject fewer than two range ticks when custom labels are provided, before entering native code. This prevents an out-of-bounds label read when the native implementation raises a one-tick request to two ticks. Unlabeled one-tick requests retain their existing native behavior.
-
-### Build Policy
-
-- Add `<PREFIX>_BUILD_MODE=auto|source|prebuilt|bindings-only` for the core and seven prebuilt-capable extension sys crates. Explicit artifact selectors now fail on missing or incompatible artifacts instead of silently falling back. Conflicting source/skip instructions fail in the build script rather than producing undefined symbols at final link. Legacy `SKIP_CC` remains check-only without artifact intent and becomes strict prebuilt with an artifact selector or feature `prebuilt`. See the [migration notes](docs/COMPATIBILITY.md#0211-native-build-policy). Addresses [#96](https://github.com/Latias94/dear-imgui-rs/issues/96).
 - Retain the native-free Test Engine dual-skip check, prevent network requests on offline cache misses, refresh extraction caches after local archive replacement, and revalidate core/extension manifests when they change or a higher-priority manifest is added.
 
 ## [0.21.0] - 2026-10-17

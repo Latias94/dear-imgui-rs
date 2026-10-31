@@ -13,11 +13,7 @@ length-aware filters, transactions, and autocomplete configuration.
 
 ## Compatibility and Provenance
 
-This crate is a Preview `-sys` crate in the `0.21` release train and must use
-the same release train, workspace checkout, or Git revision as `dear-imgui-sys`
-and `dear-imgui-cte`. It shares the Dear ImGui and cimgui core supplied by
-`dear-imgui-sys`; upstream CMake files are not used because they compile a
-second core.
+This Preview `-sys` crate uses the `0.22` release train and requires Rust 1.95 or newer. It must use the same release train, workspace checkout, or Git revision as `dear-imgui-sys` and `dear-imgui-cte`. It shares the Dear ImGui and cimgui core supplied by `dear-imgui-sys`; upstream CMake files are not used because they compile a second core.
 
 The checked-in binding and source identity is:
 
@@ -77,9 +73,12 @@ Rust text access continues to use UTF-8 with owned results.
 | --- | --- |
 | Native source, default | Compiles only cimCTE, TextEditor, TextDiff, DejaVu, Noto Sans SC, Trie, and the repository bridge |
 | `build-from-source` | Forces the native source route even if Cargo also enables `prebuilt` |
-| `prebuilt` | Accepts only an archive whose target, CRT, source revisions, binding identity, feature profile, candidate SHA, and shared-core identity match |
+| `prebuilt` feature | Enables verified archive discovery; automatic discovery may fall back to source unless strict prebuilt mode is selected |
+| `CTE_SYS_BUILD_MODE=prebuilt` | Requires a compatible artifact and never falls back to source; target, CRT, source revisions, binding identity, feature profile, candidate SHA, and shared-core identity must match |
 | `wasm` | Uses import bindings for the single fixed `imgui-sys-v1` provider on `wasm32-unknown-unknown`; Cargo does not compile C++ for this target |
 | docs.rs | Uses checked-in binding-only output and does not link a native archive |
+
+`CTE_SYS_BUILD_MODE` accepts `auto` (default), `source`, `prebuilt`, or `bindings-only`. Explicit library, archive, and package-directory selectors are mutually exclusive; missing or incompatible selections stop the build. Do not combine the mode with enabled legacy `SKIP_CC` or `FORCE_BUILD` flags. Source requirements win in automatic mode; explicit prebuilt and bindings-only modes reject them. See the [native build policy migration](../../docs/COMPATIBILITY.md#0220-native-build-policy).
 
 The native static library is named `dear_imgui_cte`. Maintained source builds
 use C++20 and disable C++ exceptions (`/EHs-c-` and `_HAS_EXCEPTIONS=0` on
@@ -90,10 +89,11 @@ Allocation failure therefore terminates instead of unwinding into Rust.
 
 | Variable | Purpose |
 | --- | --- |
+| `CTE_SYS_BUILD_MODE` | Select `auto`, `source`, `prebuilt`, or `bindings-only` |
 | `CTE_SYS_LIB_DIR` | Directory containing a matching packaged static library and manifest |
 | `CTE_SYS_PREBUILT_URL` | Explicit packaged archive URL or local archive path; download/extraction requires `prebuilt` |
 | `CTE_SYS_USE_PREBUILT=1` | Allow automatic release archive resolution; requires `prebuilt` |
-| `CTE_SYS_SKIP_CC` | Skip C++ compilation and use pregenerated bindings; an external library route must satisfy final linking |
+| `CTE_SYS_SKIP_CC` | Legacy boolean: `1` selects check-only without artifact intent, or strict prebuilt with an explicit selector or feature `prebuilt`; conflicts with source requirements and honors false values |
 | `CTE_SYS_FORCE_BUILD=1` | Force the source build route |
 | `CTE_SYS_PACKAGE_DIR` | Directory containing locally produced release archives |
 | `CTE_SYS_CACHE_DIR` | Override the verified archive download/extraction cache root |

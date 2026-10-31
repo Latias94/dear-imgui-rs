@@ -19,11 +19,13 @@ For native build/link options (source, system/prebuilt, remote prebuilt), see `e
 
 ## Compatibility
 
+The `0.22` release train requires Rust 1.95 or newer. Upgrade all workspace crates together. See the [0.22 migration notes](../../docs/COMPATIBILITY.md#022-release-train).
+
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.21.0  |
-| dear-imgui-rs     | 0.21.0  |
-| dear-implot-sys   | 0.21.0  |
+| Crate             | 0.22.0  |
+| dear-imgui-rs     | 0.22.0  |
+| dear-implot-sys   | 0.22.0  |
 
 ### WASM (WebAssembly) support
 
@@ -55,7 +57,7 @@ python -m http.server -d target/web-demo 8080
 
 Notes:
 - The `dear-imgui-web-demo` crate in `examples-wasm` enables `implot` when passed to `xtask web-demo implot`; it is not a default feature.
-- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific compatible `0.21` release and follow changes in `docs/WASM.md`.
+- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific compatible `0.22` release and follow changes in `docs/WASM.md`.
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
@@ -68,8 +70,8 @@ Use compatible stable requirements:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.21"
-dear-implot = "0.21"
+dear-imgui-rs = "0.22"
+dear-implot = "0.22"
 ```
 
 ```rust
@@ -161,8 +163,8 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.21"
-dear-implot = "0.21"
+dear-imgui-rs = "0.22"
+dear-implot = "0.22"
 ```
 
 Basic usage:
@@ -482,7 +484,7 @@ cargo run -p dear-imgui-examples --bin implot_showcase --features implot
 
 This crate requires:
 
-- Rust 1.92 or later (the workspace minimum).
+- Rust 1.95 or later (the workspace minimum).
 - A C++17 compiler for default native source builds.
 - Initialized recursive submodules when building from a Git checkout.
 

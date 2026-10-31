@@ -44,11 +44,13 @@ layout compatibility notice.
 
 ## Compatibility
 
+The `0.22` release train requires Rust 1.95 or newer. Upgrade all workspace crates together. See the [0.22 migration notes](../../docs/COMPATIBILITY.md#022-release-train).
+
 | Item                 | Version |
 |----------------------|---------|
-| Crate                | 0.21.0  |
-| dear-imgui-rs        | 0.21.0  |
-| dear-node-editor-sys | 0.21.0  |
+| Crate                | 0.22.0  |
+| dear-imgui-rs        | 0.22.0  |
+| dear-node-editor-sys | 0.22.0  |
 
 ## Quick Start
 

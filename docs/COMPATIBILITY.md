@@ -2,22 +2,22 @@
 
 This document tracks compatibility across the workspace crates, upstream Dear ImGui, and key external dependencies. The root README shows the latest recommendations; this file keeps version history and compatibility policy.
 
-## 0.21.1 Native Build Policy
+## 0.22.0 Native Build Policy
 
-The core and seven prebuilt-capable extension sys crates share `<PREFIX>_BUILD_MODE=auto|source|prebuilt|bindings-only`.
-The default remains source-capable with downloads opt-in. Strict prebuilt mode never falls back to compiling that library; enabled core backend shims still compile locally.
-Only bindings-only intentionally omits native symbols, and it is not a supported external-provider contract.
+The 0.22 release train introduces a breaking native environment policy for the core and seven prebuilt-capable extension sys crates. They share `<PREFIX>_BUILD_MODE=auto|source|prebuilt|bindings-only`. The default remains source-capable with downloads opt-in. Strict prebuilt mode never falls back to compiling that library; enabled core backend shims still compile locally. Only bindings-only intentionally omits native symbols, and it is not a supported external-provider contract.
 
 `IMGUI_SYS_LIB_DIR` overrides the location of a compatible dear-imgui-rs core artifact; it does not select an arbitrary system ImGui/cimgui installation. The Rust declarations require cimgui's C entry points, this repository's bridges and source adaptations, and matching native layouts/build options. Use a matching project release artifact or an equivalent artifact built with the repository's tooling, and retain its manifest. Installation paths are unrestricted, but renaming a system library or copying a manifest cannot make it ABI-compatible. See [accepted artifacts and ABI requirements](../dear-imgui-sys/README.md#what-imgui_sys_lib_dir-accepts).
 
-Migration: explicit library/archive/package-directory overrides are now strict and mutually exclusive; missing or incompatible selections stop the build.
-Legacy `SKIP_CC=1` without artifact intent retains check-only behavior, while combining it with an explicit artifact or feature `prebuilt` requires a compatible prebuilt.
-Legacy source-forcing and skipping are conflicting instructions and now fail early. Boolean flags accept false values instead of treating mere presence as true.
-Source requirements still win over download features and stale artifact overrides in automatic mode; explicitly choosing prebuilt or bindings-only rejects source-only requirements.
-Do not combine the new mode setting with enabled legacy mode flags.
-The source-only Test Engine keeps its existing source/check-only routes and does not add prebuilt mode.
-Its existing native-free CI check remains available through both `IMGUI_SYS_SKIP_CC=1` and `IMGUI_TEST_ENGINE_SYS_SKIP_CC=1`, without an explicit mode, prebuilt selection/feature, packaging, or ABI probe.
-See the [native build policy](../dear-imgui-sys/README.md#native-build-policy) for detailed semantics.
+When migrating from 0.21.0, update build scripts and CI environment settings as follows:
+
+- Choose at most one explicit library, archive, or package-directory override per sys crate. These selections are now strict and mutually exclusive; missing or incompatible selections stop the build. Clear stale overrides when switching routes.
+- Use `BUILD_MODE=source` for an explicit source-only build, `BUILD_MODE=prebuilt` when a compatible artifact is required, and `BUILD_MODE=bindings-only` for declaration-only checks. Leave the mode unset or use `auto` for normal source-capable builds.
+- Treat `SKIP_CC=1` without artifact intent as check-only. Combined with an explicit artifact or feature `prebuilt`, it now requires a compatible prebuilt and fails if none is available.
+- Remove conflicting source-forcing and skipping instructions. They now fail early. Boolean flags accept `1/0`, `true/false`, `yes/no`, and `on/off` case-insensitively instead of treating mere presence as true.
+- Do not combine `BUILD_MODE` with enabled legacy `SKIP_CC` or `FORCE_BUILD` flags. Source requirements still win over download features and stale artifact overrides in automatic mode; explicit prebuilt and bindings-only modes reject source-only requirements.
+- Keep the source-only Test Engine on its source/check-only routes; it does not add prebuilt mode. Its native-free CI check remains available through both `IMGUI_SYS_SKIP_CC=1` and `IMGUI_TEST_ENGINE_SYS_SKIP_CC=1`, without an explicit mode, prebuilt selection/feature, packaging, or ABI probe.
+
+See the [native build policy](../dear-imgui-sys/README.md#native-build-policy) for detailed semantics. Matching local artifacts remain usable offline; an offline cache miss never initiates a network request.
 
 For Apple-specific integration notes and the repository-owned iOS example
 paths, see [the Apple platform guide](workstreams/apple-platform-support.md).
@@ -25,7 +25,7 @@ paths, see [the Apple platform guide](workstreams/apple-platform-support.md).
 ## Versioning Policy
 
 - Unified release train: all published `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
-- Current release candidate: unified `v0.21.1` (use `version = "0.21"`; Bevy applications need backend `0.21.1` for Bevy `0.20.1`).
+- Current release train: unified `v0.22.0` (use `version = "0.22"`; Git dependencies must use the same revision across workspace crates).
 - Published stable 0.21 train: unified `v0.21.0` (use `version = "0.21"`).
 - Previous stable 0.20 train: unified `v0.20.0` (use `version = "0.20"`).
 - Previous stable train: unified `v0.19.0` (use `version = "0.19"`).
@@ -41,11 +41,34 @@ paths, see [the Apple platform guide](workstreams/apple-platform-support.md).
 - Previous train: unified `v0.10.4` (use `version = "0.10"`).
 - Previous train: unified `v0.9.0` (use `version = "0.9"`).
 - Previous train: unified `v0.8.0` (use `version = "0.8"`).
-- Internal dependency constraints require at least the current full release version (`0.21.1`) and allow later compatible patches; prerelease trains use exact requirements. This prevents a lockfile from retaining older internal packages that lack newly used APIs. Consumer dependencies may continue to use `"0.21"`. Mixing different release trains across our crates is unsupported.
+- Internal dependency constraints require at least the current full release version (`0.22.0`) and allow later compatible patches; prerelease trains use exact requirements. This prevents a lockfile from retaining older internal packages that lack newly used APIs. Consumer dependencies for the new train may use `"0.22"`. Mixing different release trains across our crates is unsupported.
+
+## 0.22 Release Train
+
+All 29 publishable crates move together to `0.22.0`. Update every workspace crate dependency in an application to `version = "0.22"` and refresh the lockfile together. Applications staying on published `0.21.0` should use the historical [0.21 release-train baseline](#021-release-train).
+
+The workspace and core MSRV rises from Rust 1.92 to Rust 1.95 for `parking_lot` 0.13. Internal mutexes use const constructors in place of the removed initialization helpers. Locking remains private, so downstream applications do not need to migrate a public `parking_lot` API. Development and publishing use Rust 1.99; canonical binding generation remains fixed to Rust 1.95 and LLVM 14. The experimental Bevy backend still requires Rust 1.97.1.
+
+| Integration | Required external versions |
+| --- | --- |
+| WGPU | 30 by default; select exactly one of the 30/29/28/27 feature routes |
+| Winit | 0.30.13 |
+| Glow | 0.18 |
+| Ash | 0.38 |
+| SDL3 | sdl3 0.20, sdl3-sys 0.7, SDL 3.4.18 |
+| Bevy | exactly 0.20.1; Rust 1.97.1 or newer |
+| glam interoperability | 0.34 |
+
+All native pins are unchanged from 0.21.0, including `cimgui/docking_inter` at `5d7cc7e12de9a868bbecc00ce2ed74e58d266f1c` and Dear ImGui **1.93.1 WIP** at `d88f238d1d363ef387382b2e29ad12cf96f826ac`. Prebuilt artifacts still require the matching 0.22.0 crate version, target, CRT, features, binding/source identity, and shared-core manifest; rebuild custom archives with the matching tooling rather than reusing 0.21 artifacts.
+
+- Review the [native build policy migration](#0220-native-build-policy) before carrying build environment variables forward from 0.21.0.
+- Upgrade Bevy and its subcrates to exactly 0.20.1 with the 0.22 backend. WGPU, Winit, SDL3, Glow, Ash, and glam requirements remain unchanged from 0.21.0. `dear-app` continues to use WGPU 30; browser rendering remains single-window, and `dear-node-editor` remains native-only.
+- Browser tooling must use `wasm-bindgen-cli` 0.2.130 to match the updated `wasm-bindgen` dependency. See the [WASM guide](WASM.md).
+- Applications upgrading from 0.20 or earlier must also follow the existing [Dear ImGui 1.93](IMGUI_193_MIGRATION.md) and [editor backend](EDITOR_BACKEND_MIGRATION.md) migration guides.
 
 ## 0.21 Release Train
 
-All 29 publishable crates share the `0.21` release train, first published as `0.21.0`; this checkout prepares the `0.21.1` patch. Use `version = "0.21"` for workspace crates, or `"0.21.1"` for the Bevy backend when using Bevy `0.20.1`. Published 0.20.0 retains its original 1.92.9b baseline.
+All 29 publishable crates share the `0.21` release train, published as `0.21.0`. Use `version = "0.21"` for applications staying on this train. Published 0.20.0 retains its original 1.92.9b baseline.
 
 The core uses `cimgui/docking_inter` pin `5d7cc7e12de9a868bbecc00ce2ed74e58d266f1c`, embedding Dear ImGui **1.93.1 WIP** at `d88f238d1d363ef387382b2e29ad12cf96f826ac`. This includes the 1.93.0 release and subsequent upstream cleanup. All maintained extension wrappers and their nested dependencies follow their updated upstream pins.
 
@@ -56,10 +79,10 @@ The core uses `cimgui/docking_inter` pin `5d7cc7e12de9a868bbecc00ce2ed74e58d266f
 | Glow | 0.18 |
 | Ash | 0.38 |
 | SDL3 | sdl3 0.20, sdl3-sys 0.7, SDL 3.4.18 |
-| Bevy | exactly 0.20.1 (0.21.1; 0.21.0 used 0.20.0); Rust 1.97.1 or newer |
+| Bevy | exactly 0.20.0; Rust 1.97.1 or newer |
 | glam interoperability | 0.34 |
 
-The core MSRV remains Rust 1.92, and development and publishing use Rust 1.99. Canonical binding generation remains fixed to Rust 1.95 and LLVM 14. WGPU, Winit, SDL3, Glow, Ash, and glam requirements are unchanged from 0.21.0; the Bevy target changes from exactly 0.20.0 to exactly 0.20.1 in backend 0.21.1. `dear-app` uses WGPU 30; browser rendering remains single-window, and `dear-node-editor` remains native-only.
+The 0.21.0 core MSRV is Rust 1.92, and development and publishing use Rust 1.99. Canonical binding generation remains fixed to Rust 1.95 and LLVM 14. WGPU, Winit, SDL3, Glow, Ash, glam, and Bevy requirements are unchanged from 0.20.0. `dear-app` uses WGPU 30; browser rendering remains single-window, and `dear-node-editor` remains native-only.
 
 - Upgrade custom drawing, style, text-filter, CTE notification, and node-background callers using the [Dear ImGui 1.93 migration guide](IMGUI_193_MIGRATION.md).
 - Applications owning Winit event dispatch or WGPU multi-viewport execution must follow the [editor backend migration guide](EDITOR_BACKEND_MIGRATION.md). WGPU observations distinguish recorded, submitted, and presentation-requested work; they do not prove that pixels became visible.

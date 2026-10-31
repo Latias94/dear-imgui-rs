@@ -2,6 +2,7 @@
 name = "dear-node-editor"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Safe Rust bindings for imgui-node-editor for Dear ImGui"
 license.workspace = true
 repository.workspace = true
