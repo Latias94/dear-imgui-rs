@@ -20,6 +20,7 @@ This patch updates the Bevy integration and Rust dependencies, and makes native 
 
 ### Fixed
 
+- Require internal dependencies from at least 0.21.1 while allowing later compatible patches. In particular, sys build scripts require the new `dear-imgui-build-support::native_build` API, so updating a sys crate must also update a previously locked 0.21.0 build helper.
 - ImPlot3D: reject fewer than two range ticks when custom labels are provided, before entering native code. This prevents an out-of-bounds label read when the native implementation raises a one-tick request to two ticks. Unlabeled one-tick requests retain their existing native behavior.
 
 ### Build Policy

@@ -86,6 +86,18 @@ class MetadataTests(unittest.TestCase):
 
         self.assertTrue(any("expected ^0.16" in error for error in errors), errors)
 
+    def test_stable_patch_requirements_exclude_older_internal_apis(self):
+        version = "0.21.1"
+        self.assertEqual(
+            release_metadata.expected_internal_requirement(version), "^0.21.1"
+        )
+        current = complete_release_metadata(version=version)
+        self.assertEqual(release_metadata.validate_release_workspace(current), [])
+
+        loose = complete_release_metadata(version=version, sys_requirement="^0.21")
+        errors = release_metadata.validate_release_workspace(loose)
+        self.assertTrue(any("expected ^0.21.1" in error for error in errors), errors)
+
     def test_rejects_publishable_version_drift(self):
         metadata = complete_release_metadata(sys_version="0.16.1")
 

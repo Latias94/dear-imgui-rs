@@ -782,7 +782,7 @@ fn release_requirement(version: &Version) -> Result<String> {
         "release version {version} cannot contain build metadata because Cargo ignores it in dependency requirements"
     );
     Ok(if version.pre.is_empty() {
-        format!("{}.{}", version.major, version.minor)
+        version.to_string()
     } else {
         format!("={version}")
     })
@@ -882,7 +882,7 @@ mod tests {
                 };
                 writeln!(
                     catalog,
-                    "{key} = {{ {package_field}version = \"0.16\", path = \"{path}\"{defaults} }}"
+                    "{key} = {{ {package_field}version = \"0.16.0\", path = \"{path}\"{defaults} }}"
                 )
                 .unwrap();
                 let manifest = root.join(&path).join("Cargo.toml");
@@ -969,24 +969,33 @@ xtask = {{ path = \"xtask\", version = \"0.1.0\" }}\n\
 
     #[test]
     fn plans_cargo_compatible_stable_and_prerelease_requirements() {
-        for (target, requirement) in [("0.17.0", "0.17"), ("0.17.0-alpha.1", "=0.17.0-alpha.1")] {
+        for (target, requirement) in [
+            ("0.17.0", "0.17.0"),
+            ("0.17.1", "0.17.1"),
+            ("0.17.0-alpha.1", "=0.17.0-alpha.1"),
+        ] {
             let fixture = Fixture::new();
             let plan = Plan::build(fixture.root(), Version::parse(target).unwrap()).unwrap();
             assert!(
                 plan.updated_root
                     .contains(&format!("version = \"{target}\" # release"))
             );
-            assert_eq!(
-                plan.updated_root
-                    .matches(&format!("version = \"{requirement}\""))
-                    .count(),
-                27
-            );
+            let updated = plan.updated_root.parse::<DocumentMut>().unwrap();
+            let catalog = updated["workspace"]["dependencies"].as_table().unwrap();
+            assert_eq!(catalog.len(), 27);
+            for (_, dependency) in catalog {
+                assert_eq!(dependency["version"].as_str(), Some(requirement));
+            }
             assert!(
                 semver::VersionReq::parse(&plan.requirement)
                     .unwrap()
                     .matches(&Version::parse(target).unwrap())
             );
+            if target == "0.17.1" {
+                let requirement = semver::VersionReq::parse(&plan.requirement).unwrap();
+                assert!(!requirement.matches(&Version::parse("0.17.0").unwrap()));
+                assert!(requirement.matches(&Version::parse("0.17.2").unwrap()));
+            }
         }
     }
 
@@ -1089,7 +1098,7 @@ xtask = {{ path = \"xtask\", version = \"0.1.0\" }}\n\
         let manifest = &fixture.manifests[0];
         let source = fs::read_to_string(manifest).unwrap().replace(
             "pkg-01.workspace = true",
-            "pkg-01 = { path = \"../p01\", version = \"0.16\" }",
+            "pkg-01 = { path = \"../p01\", version = \"0.16.0\" }",
         );
         fs::write(manifest, source).unwrap();
         assert!(
@@ -1103,7 +1112,7 @@ xtask = {{ path = \"xtask\", version = \"0.1.0\" }}\n\
         let manifest = &fixture.manifests[0];
         let source = fs::read_to_string(manifest).unwrap().replace(
             "pkg-03.workspace = true",
-            "pkg-03 = { path = \"../p03\", version = \"0.16\" }",
+            "pkg-03 = { path = \"../p03\", version = \"0.16.0\" }",
         );
         fs::write(manifest, source).unwrap();
         assert!(
@@ -1131,8 +1140,8 @@ xtask = {{ path = \"xtask\", version = \"0.1.0\" }}\n\
         let fixture = Fixture::new();
         let root = fixture.root_manifest();
         let source = fs::read_to_string(&root).unwrap().replace(
-            "pkg-01 = { version = \"0.16\", path = \"members/p01\" }",
-            "pkg-01 = { version = \"0.16\", path = \"members/p01\", features = [\"leak\"] }",
+            "pkg-01 = { version = \"0.16.0\", path = \"members/p01\" }",
+            "pkg-01 = { version = \"0.16.0\", path = \"members/p01\", features = [\"leak\"] }",
         );
         fs::write(root, source).unwrap();
         assert!(
@@ -1181,8 +1190,8 @@ xtask = {{ path = \"xtask\", version = \"0.1.0\" }}\n\
         let fixture = Fixture::new();
         let root = fixture.root_manifest();
         let source = fs::read_to_string(&root).unwrap().replace(
-            "pkg-01 = { version = \"0.16\", path = \"members/p01\" }",
-            "pkg-01 = { version = \"0.16\", path = \"members/p01\", default-features = false }",
+            "pkg-01 = { version = \"0.16.0\", path = \"members/p01\" }",
+            "pkg-01 = { version = \"0.16.0\", path = \"members/p01\", default-features = false }",
         );
         fs::write(root, source).unwrap();
 
@@ -1194,8 +1203,8 @@ xtask = {{ path = \"xtask\", version = \"0.1.0\" }}\n\
         let fixture = Fixture::new();
         let root = fixture.root_manifest();
         let source = fs::read_to_string(&root).unwrap().replace(
-            "pkg-01 = { version = \"0.16\", path = \"members/p01\" }",
-            "pkg-01 = { version = \"0.16\", path = \"members/p01\", default-features = true }",
+            "pkg-01 = { version = \"0.16.0\", path = \"members/p01\" }",
+            "pkg-01 = { version = \"0.16.0\", path = \"members/p01\", default-features = true }",
         );
         fs::write(root, source).unwrap();
         assert!(

@@ -41,7 +41,7 @@ paths, see [the Apple platform guide](workstreams/apple-platform-support.md).
 - Previous train: unified `v0.10.4` (use `version = "0.10"`).
 - Previous train: unified `v0.9.0` (use `version = "0.9"`).
 - Previous train: unified `v0.8.0` (use `version = "0.8"`).
-- Internal dependency constraints use the compatible current release minor (`0.21`); prerelease trains use exact requirements. Mixing different release trains across our crates is unsupported.
+- Internal dependency constraints require at least the current full release version (`0.21.1`) and allow later compatible patches; prerelease trains use exact requirements. This prevents a lockfile from retaining older internal packages that lack newly used APIs. Consumer dependencies may continue to use `"0.21"`. Mixing different release trains across our crates is unsupported.
 
 ## 0.21 Release Train
 

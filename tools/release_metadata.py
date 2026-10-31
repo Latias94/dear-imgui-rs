@@ -326,7 +326,7 @@ def expected_internal_requirement(version: str) -> str:
         )
     if match.group("prerelease") is not None:
         return f"={version}"
-    return f"^{match.group('major')}.{match.group('minor')}"
+    return f"^{version}"
 
 
 def validate_release_workspace(metadata: WorkspaceMetadata) -> list[str]:
