@@ -92,7 +92,7 @@ jobs:
         uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           cache-bin: "false"
 
@@ -502,7 +502,7 @@ jobs:
           --destination "${{ runner.temp }}/llvm"
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           cache-bin: "false"
           key: binding-contract
@@ -559,7 +559,7 @@ jobs:
           toolchain: '1.95.0'
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           cache-bin: 'false'
           key: source-contracts
@@ -655,7 +655,7 @@ jobs:
         uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           cache-bin: "false"
           key: wgpu-${{ matrix.wgpu }}-${{ matrix.platform }}
@@ -750,7 +750,7 @@ jobs:
         uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           cache-bin: "false"
           key: ash-${{ matrix.platform }}-${{ matrix.rendering }}
@@ -829,7 +829,7 @@ jobs:
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           cache-bin: "false"
           key: feature-conflict-contracts
@@ -867,7 +867,7 @@ jobs:
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           cache-bin: "false"
           key: node-editor-normal
@@ -919,7 +919,7 @@ jobs:
         uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           cache-bin: "false"
           key: stack-layout-${{ matrix.profile }}
@@ -989,7 +989,7 @@ jobs:
           components: clippy
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           cache-bin: "false"
           key: clippy-default
@@ -1038,7 +1038,7 @@ jobs:
           components: clippy
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           cache-bin: "false"
           key: clippy-focused
@@ -1095,7 +1095,7 @@ jobs:
         uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           cache-bin: "false"
 
@@ -1202,7 +1202,7 @@ jobs:
         uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           cache-bin: "false"
           key: platform-io-${{ matrix.crt }}
@@ -1310,7 +1310,7 @@ jobs:
         uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           cache-bin: "false"
           key: windows-source-abi-${{ matrix.lane }}
@@ -1487,7 +1487,7 @@ jobs:
 
       - name: Retain Windows PE evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: windows-source-abi-${{ matrix.lane }}
           path: target/ci-evidence/windows-source-abi/${{ matrix.lane }}/
@@ -1508,7 +1508,7 @@ jobs:
         uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           cache-bin: "false"
 
@@ -1602,7 +1602,7 @@ jobs:
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           cache-bin: "false"
 
@@ -1657,12 +1657,12 @@ jobs:
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           cache-bin: "false"
 
       - name: Setup MSYS2 (mingw64)
-        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2
         id: msys2
         with:
           msystem: MINGW64
@@ -1716,7 +1716,7 @@ jobs:
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           cache-bin: "false"
 
@@ -1749,7 +1749,7 @@ jobs:
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           cache-bin: "false"
           shared-key: android-native
@@ -1783,7 +1783,7 @@ jobs:
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           cache-bin: "false"
 
@@ -1907,7 +1907,7 @@ jobs:
         uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
         with:
           cache-bin: "false"
 
