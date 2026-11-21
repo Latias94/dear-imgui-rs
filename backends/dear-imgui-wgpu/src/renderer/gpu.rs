@@ -15,7 +15,7 @@ pub(super) struct GpuState {
     pub(super) texture_manager: WgpuTextureManager,
     /// Default texture for fallback
     pub(super) default_texture: Option<TextureView>,
-    /// Gamma mode: automatic (by format), force linear (1.0), or force 2.2
+    /// Fragment color transfer selected for subsequent draws.
     pub(super) gamma_mode: GammaMode,
 }
 

@@ -83,24 +83,9 @@ impl super::gpu::GpuState {
             write_mask: ColorWrites::ALL,
         };
 
-        // Determine if we need gamma correction based on format
-        let use_gamma_correction = matches!(
-            backend_data.render_target_format,
-            TextureFormat::Rgba8UnormSrgb
-                | TextureFormat::Bgra8UnormSrgb
-                | TextureFormat::Bc1RgbaUnormSrgb
-                | TextureFormat::Bc2RgbaUnormSrgb
-                | TextureFormat::Bc3RgbaUnormSrgb
-                | TextureFormat::Bc7RgbaUnormSrgb
-        );
-
         // Create fragment state
         let color_targets = [Some(color_target)];
-        let fragment_state = crate::shaders::create_fragment_state(
-            shader_module,
-            &color_targets,
-            use_gamma_correction,
-        );
+        let fragment_state = crate::shaders::create_fragment_state(shader_module, &color_targets);
 
         // Create depth stencil state if needed (matches imgui_impl_wgpu.cpp depth-stencil setup)
         let depth_stencil = backend_data.depth_stencil_format.map(|format| {

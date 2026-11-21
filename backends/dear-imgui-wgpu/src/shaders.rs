@@ -154,13 +154,10 @@ pub fn create_vertex_state<'a>(
 pub fn create_fragment_state<'a>(
     shader_module: &'a ShaderModule,
     targets: &'a [Option<ColorTargetState>],
-    _use_gamma_correction: bool,
 ) -> FragmentState<'a> {
-    let entry_point = FS_ENTRY_POINT;
-
     FragmentState {
         module: shader_module,
-        entry_point: Some(entry_point),
+        entry_point: Some(FS_ENTRY_POINT),
         compilation_options: Default::default(),
         targets,
     }
