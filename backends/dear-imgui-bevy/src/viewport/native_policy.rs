@@ -127,14 +127,10 @@ impl NativeViewportPolicyState {
         else {
             return false;
         };
-        if *current_entity != entity || *window_id != window.id() {
-            return false;
-        }
+        let same_window = *current_entity == entity && *window_id == window.id();
         #[cfg(target_os = "windows")]
-        if !lease.matches_window(window) {
-            return false;
-        }
-        true
+        let same_window = same_window && lease.matches_window(window);
+        same_window
     }
 
     pub(super) fn sync(
