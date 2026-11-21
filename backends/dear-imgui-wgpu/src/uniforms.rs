@@ -62,6 +62,16 @@ impl Uniforms {
         ]
     }
 
+    pub(crate) fn shader_gamma(mode: crate::GammaMode, format: TextureFormat) -> f32 {
+        match mode {
+            crate::GammaMode::Auto => Self::gamma_for_format(format),
+            crate::GammaMode::Linear => 1.0,
+            crate::GammaMode::Gamma22 => 2.2,
+            // Negative selects the piecewise sRGB transfer instead of a power exponent.
+            crate::GammaMode::Srgb => -1.0,
+        }
+    }
+
     /// Determine gamma value based on texture format
     ///
     /// This matches the gamma detection logic in ImGui_ImplWGPU_SetupRenderState

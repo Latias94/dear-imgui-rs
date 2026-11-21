@@ -215,6 +215,46 @@ fn snapshot_managed_update_preserves_unsubmitted_texture_contents() -> RendererR
 }
 
 #[test]
+fn srgb_mode_decodes_rgb_before_alpha_blending() -> RendererResult<()> {
+    let (device, queue) = request_test_device().expect("color readback requires a WGPU adapter");
+    let mut context = Context::create();
+    let mut renderer = WgpuRenderer::new(
+        WgpuInitInfo::new(
+            device.clone(),
+            queue.clone(),
+            wgpu::TextureFormat::Rgba8Unorm,
+        ),
+        &mut context,
+    )?;
+    renderer.set_gamma_mode(GammaMode::Srgb);
+    context.io_mut().set_display_size([16.0, 16.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
+    let texture = context.register_texture(
+        dear_imgui_rs::texture::OwnedTextureData::from_pixels(
+            dear_imgui_rs::texture::TextureFormat::RGBA32,
+            2,
+            1,
+            &[10, 64, 128, 255, 255, 128, 64, 128],
+        )
+        .unwrap(),
+    );
+    draw_managed_texels(context.frame(), texture);
+    let pending = context.try_render(renderer.renderer_consumer()?)?;
+    let (commands, readback) = record_texture_readback(&device, |pass| {
+        renderer
+            .render(pending, pass, FramebufferExtent::new(16, 16))
+            .map(|_| ())
+    })?;
+    queue.submit([commands]);
+    // Linear UNORM storage exposes the decoded values. The second texel blends over black.
+    assert_eq!(
+        read_texture_texels(&device, &readback),
+        [[1, 13, 55, 255], [128, 28, 7, 255]]
+    );
+    renderer.shutdown(&mut context)
+}
+
+#[test]
 fn live_managed_update_preserves_unsubmitted_texture_contents() -> RendererResult<()> {
     let (device, queue) = request_test_device().expect("managed isolation requires a WGPU adapter");
     let mut context = Context::create();

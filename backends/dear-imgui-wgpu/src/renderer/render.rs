@@ -7,8 +7,7 @@ use super::{
 };
 use crate::wgpu;
 use crate::{
-    GammaMode, RendererError, RendererResult, Uniforms, WgpuDrawRecording, WgpuFrameScope,
-    WgpuFrameSkipReason,
+    RendererError, RendererResult, Uniforms, WgpuDrawRecording, WgpuFrameScope, WgpuFrameSkipReason,
 };
 use dear_imgui_rs::{
     ContextBinding,
@@ -244,11 +243,7 @@ impl WgpuRenderer {
             ));
         }
 
-        let gamma = match self.gpu.gamma_mode {
-            GammaMode::Auto => Uniforms::gamma_for_format(backend_data.render_target_format),
-            GammaMode::Linear => 1.0,
-            GammaMode::Gamma22 => 2.2,
-        };
+        let gamma = Uniforms::shader_gamma(self.gpu.gamma_mode, backend_data.render_target_format);
         let state = Self::prepare_render_state_static(
             draw_data,
             backend_data,

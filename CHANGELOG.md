@@ -8,6 +8,10 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
+### Added
+
+- `dear-imgui-wgpu`: `GammaMode::Srgb` decodes sRGB fragment colors to linear light before blending. The default `Auto` mode is unchanged. Downstream exhaustive matches on `GammaMode` must handle the new variant.
+
 ## [0.22.0] - 2026-11-01
 
 The 0.22 release train raises the core MSRV and makes native artifact selection explicit and predictable. Upgrade all workspace crates together and review the native build migration if you select prebuilt libraries or use legacy build environment variables.
