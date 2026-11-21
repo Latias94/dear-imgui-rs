@@ -6,6 +6,10 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+### Breaking
+
+- Add a `GammaMode::Srgb` arm to exhaustive matches on `GammaMode`. Select this mode to decode the product of vertex and texture RGB to linear light before blending. [PR #100](https://github.com/Latias94/dear-imgui-rs/pull/100)
+
 ## [0.21.0] - 2026-10-17
 
 ### Breaking

@@ -75,7 +75,7 @@ fn record_texture_readback(
             resolve_target: None,
             depth_slice: None,
             ops: Operations {
-                load: LoadOp::Clear(Color::BLACK),
+                load: LoadOp::Clear(Color::TRANSPARENT),
                 store: StoreOp::Store,
             },
         })];
@@ -212,6 +212,46 @@ fn snapshot_managed_update_preserves_unsubmitted_texture_contents() -> RendererR
         original_id
     );
     owner.shutdown(&mut context, &mut executor)
+}
+
+#[test]
+fn srgb_mode_decodes_rgb_before_alpha_blending() -> RendererResult<()> {
+    let (device, queue) = request_test_device().expect("color readback requires a WGPU adapter");
+    let mut context = Context::create();
+    let mut renderer = WgpuRenderer::new(
+        WgpuInitInfo::new(
+            device.clone(),
+            queue.clone(),
+            wgpu::TextureFormat::Rgba8Unorm,
+        ),
+        &mut context,
+    )?;
+    renderer.set_gamma_mode(GammaMode::Srgb);
+    context.io_mut().set_display_size([16.0, 16.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
+    let texture = context.register_texture(
+        dear_imgui_rs::texture::OwnedTextureData::from_pixels(
+            dear_imgui_rs::texture::TextureFormat::RGBA32,
+            2,
+            1,
+            &[10, 64, 128, 255, 255, 128, 64, 128],
+        )
+        .unwrap(),
+    );
+    draw_managed_texels(context.frame(), texture);
+    let pending = context.try_render(renderer.renderer_consumer()?)?;
+    let (commands, readback) = record_texture_readback(&device, |pass| {
+        renderer
+            .render(pending, pass, FramebufferExtent::new(16, 16))
+            .map(|_| ())
+    })?;
+    queue.submit([commands]);
+    // Transparent black exposes both the decoded RGB times source alpha and source alpha itself.
+    assert_eq!(
+        read_texture_texels(&device, &readback),
+        [[1, 13, 55, 255], [128, 28, 7, 128]]
+    );
+    renderer.shutdown(&mut context)
 }
 
 #[test]
@@ -714,11 +754,12 @@ fn detached_executor_records_and_reads_back_on_a_worker_thread() -> RendererResu
         },
     );
     let mut context = Context::create();
+    let target_format = TextureFormat::Rgba8UnormSrgb;
     let (mut owner, mut executor) = WgpuSnapshotRenderer::new(
-        WgpuInitInfo::new(device, queue, TextureFormat::Rgba8Unorm),
+        WgpuInitInfo::new(device, queue, target_format),
         &mut context,
     )?;
-    executor.set_gamma_mode(GammaMode::Linear);
+    executor.set_gamma_mode(GammaMode::Srgb);
     let external = executor.register_external_texture(&scene_view)?;
     let original = executor.external_texture_binding(external)?;
     let managed = context.register_texture(
@@ -726,7 +767,7 @@ fn detached_executor_records_and_reads_back_on_a_worker_thread() -> RendererResu
             dear_imgui_rs::texture::TextureFormat::RGBA32,
             1,
             1,
-            &[0, 255, 0, 255],
+            &[0, 64, 128, 255],
         )
         .unwrap(),
     );
@@ -752,7 +793,7 @@ fn detached_executor_records_and_reads_back_on_a_worker_thread() -> RendererResu
             [16.0, 16.0],
             [0.0, 0.0],
             [1.0, 1.0],
-            dear_imgui_rs::Color::WHITE,
+            dear_imgui_rs::Color::from_rgb_bytes(255, 255, 128),
         );
     }
     let snapshot = frame.render_snapshot(owner.renderer_consumer()?)?;
@@ -782,7 +823,7 @@ fn detached_executor_records_and_reads_back_on_a_worker_thread() -> RendererResu
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: TextureDimension::D2,
-                format: TextureFormat::Rgba8Unorm,
+                format: target_format,
                 usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC,
                 view_formats: &[],
             });
@@ -907,14 +948,20 @@ fn detached_executor_records_and_reads_back_on_a_worker_thread() -> RendererResu
         result_tx.send(result).ok();
         executor
     });
-    let pixel = result_rx
+    let [scene_pixel, managed_pixel] = result_rx
         .recv()
         .expect("worker should return readback")
         .expect("worker render should succeed");
+    // The linear segment preserves black. Tinting blue before decoding round-trips to 64.
     assert_eq!(
-        pixel,
-        [[255, 0, 0, 255], [0, 255, 0, 255]],
-        "worker must sample the newly produced scene and the managed upload"
+        managed_pixel,
+        [0, 64, 64, 255],
+        "sRGB decode and attachment encode must round-trip the tinted managed texel"
+    );
+    assert_eq!(
+        scene_pixel,
+        [255, 0, 0, 255],
+        "worker must sample the newly produced scene"
     );
     let mut executor = worker.join().expect("worker should not panic");
     context.poll_snapshot_completions()?;

@@ -653,11 +653,7 @@ impl WgpuPreparedSnapshot<'_> {
             .expect("validated captured target")
             .draw
             .dependencies = dependencies.clone();
-        let gamma = match gpu.gamma_mode {
-            GammaMode::Auto => Uniforms::gamma_for_format(backend.render_target_format),
-            GammaMode::Linear => 1.0,
-            GammaMode::Gamma22 => 2.2,
-        };
+        let gamma = Uniforms::shader_gamma(gpu.gamma_mode, backend.render_target_format);
         let state = WgpuRenderer::prepare_render_state_source(
             source,
             backend,

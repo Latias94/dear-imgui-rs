@@ -343,4 +343,7 @@ pub enum GammaMode {
     Linear,
     /// Force gamma 2.2 curve (gamma = 2.2)
     Gamma22,
+    /// Decode the modulated fragment RGB from sRGB to linear light before blending.
+    /// This mode leaves alpha unchanged and applies regardless of the target format.
+    Srgb,
 }
