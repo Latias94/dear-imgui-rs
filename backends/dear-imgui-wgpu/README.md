@@ -12,8 +12,8 @@ use dear_imgui_wgpu::{FramebufferExtent, GammaMode, WgpuInitInfo, WgpuRenderer};
 let mut imgui = Context::create();
 let mut renderer = WgpuRenderer::new(WgpuInitInfo::new(device, queue, surface_format), &mut imgui)?;
 
-// Optional: unify gamma policy across backends
-renderer.set_gamma_mode(GammaMode::Auto); // Auto | Linear | Gamma22 | Srgb
+// Auto selects the gamma curve from the render target format (the default).
+renderer.set_gamma_mode(GammaMode::Auto);
 
 // per-frame
 // First update platform metrics/input, then open and build the UI.
@@ -418,7 +418,7 @@ dear-imgui-wgpu = { version = "0.22", default-features = false, features = ["wgp
 
 - Default `GammaMode::Auto`: picks `gamma=2.2` for sRGB targets and `1.0` for linear targets.
 - You can force `Linear` (1.0) or `Gamma22` (2.2).
-- Use `Srgb` when the product of the vertex and sampled texture RGB is sRGB-encoded. This mode applies the IEC 61966-2-1 inverse transfer to that product before blending. Alpha stays linear. An sRGB target then encodes the blended RGB for storage. Do not use this mode if your fragment RGB is already linear (for example, a white tint over a hardware-decoded sRGB texture).
+- `GammaMode::Srgb` (unreleased) applies the IEC 61966-2-1 inverse transfer when the product of the vertex and sampled texture RGB is sRGB-encoded. Alpha stays linear. An sRGB target then encodes the blended RGB for storage. For fragment RGB that is already linear, such as a white tint over a hardware-decoded sRGB texture, use `Linear`.
 - Pair this with your swapchain format to avoid double correction.
 
 ## Compatibility

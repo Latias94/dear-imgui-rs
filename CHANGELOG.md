@@ -8,9 +8,9 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
-### Added
+### Breaking Changes and Migration
 
-- `dear-imgui-wgpu`: `GammaMode::Srgb` decodes sRGB fragment colors to linear light before blending. The default `Auto` mode is unchanged. Downstream exhaustive matches on `GammaMode` must handle the new variant.
+- `dear-imgui-wgpu` adds `GammaMode::Srgb` to decode sRGB fragment colors to linear light before blending. Downstream exhaustive matches on `GammaMode` must handle the new variant. The default `Auto` mode retains its existing behavior. Contributed by [@acfrazier](https://github.com/acfrazier) in [PR #100](https://github.com/Latias94/dear-imgui-rs/pull/100).
 
 ## [0.22.0] - 2026-11-01
 
