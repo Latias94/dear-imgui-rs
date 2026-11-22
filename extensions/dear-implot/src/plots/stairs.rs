@@ -95,7 +95,7 @@ impl<'a> StairsPlot<'a> {
     }
 
     /// Plot the stairs
-    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+    pub fn plot(self, plot_ui: &crate::PlotScope<'_>) {
         if self.validate().is_err() {
             return;
         }
@@ -105,6 +105,7 @@ impl<'a> StairsPlot<'a> {
         plot_ui.with_bound_context(|| {
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     self.layout,
@@ -199,7 +200,7 @@ impl<'a> StairsPlotF32<'a> {
     }
 
     /// Plot the stairs
-    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+    pub fn plot(self, plot_ui: &crate::PlotScope<'_>) {
         if self.validate().is_err() {
             return;
         }
@@ -209,6 +210,7 @@ impl<'a> StairsPlotF32<'a> {
         plot_ui.with_bound_context(|| {
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     PlotDataLayout::DEFAULT,
@@ -311,7 +313,7 @@ impl<'a> SimpleStairsPlot<'a> {
     }
 
     /// Plot the stairs
-    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+    pub fn plot(self, plot_ui: &crate::PlotScope<'_>) {
         if self.validate().is_err() {
             return;
         }
@@ -321,6 +323,7 @@ impl<'a> SimpleStairsPlot<'a> {
         plot_ui.with_bound_context(|| {
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     PlotDataLayout::DEFAULT,

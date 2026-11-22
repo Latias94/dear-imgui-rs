@@ -152,7 +152,7 @@ impl<'a> BarGroupsPlot<'a> {
     }
 
     /// Plot the bar groups
-    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+    pub fn plot(self, plot_ui: &crate::PlotScope<'_>) {
         if self.validate().is_err() {
             return;
         }
@@ -165,6 +165,7 @@ impl<'a> BarGroupsPlot<'a> {
         plot_ui.with_bound_context(|| {
             with_plot_str_slice(&self.label_ids, |label_ptrs| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     bar_group_flags(self.flags, self.item_flags).bits(),
                     PlotDataLayout::DEFAULT,
@@ -287,7 +288,7 @@ impl<'a> BarGroupsPlotF32<'a> {
     }
 
     /// Plot the bar groups
-    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+    pub fn plot(self, plot_ui: &crate::PlotScope<'_>) {
         if self.validate().is_err() {
             return;
         }
@@ -300,6 +301,7 @@ impl<'a> BarGroupsPlotF32<'a> {
         plot_ui.with_bound_context(|| {
             with_plot_str_slice(&self.label_ids, |label_ptrs| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     bar_group_flags(self.flags, self.item_flags).bits(),
                     PlotDataLayout::DEFAULT,
@@ -399,7 +401,7 @@ impl<'a> SimpleBarGroupsPlot<'a> {
     }
 
     /// Plot the bar groups
-    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+    pub fn plot(self, plot_ui: &crate::PlotScope<'_>) {
         if self.labels.len() != self.data.len() {
             return;
         }

@@ -1,6 +1,6 @@
 // Utility functions for ImPlot
 
-use crate::{Axis, PlotUi, XAxis, YAxis, sys};
+use crate::{Axis, PlotScope, PlotUi, XAxis, YAxis, sys};
 use dear_imgui_rs::with_scratch_txt;
 use std::{borrow::Cow, fmt};
 
@@ -37,10 +37,13 @@ fn assert_finite_point(caller: &str, name: &str, value: sys::ImPlotPoint) {
     );
 }
 
-impl PlotUi<'_> {
-    /// Check if any subplots area is hovered.
+impl PlotScope<'_> {
+    /// Check whether the subplot grid containing this plot is hovered.
     pub fn is_subplots_hovered(&self) -> bool {
-        self.with_bound_context(|| unsafe { sys::ImPlot_IsSubplotsHovered() })
+        self.with_bound_context(|| unsafe {
+            !(*sys::ImPlot_GetCurrentContext()).CurrentSubplot.is_null()
+                && sys::ImPlot_IsSubplotsHovered()
+        })
     }
 
     /// Check if a legend entry is hovered.
@@ -58,142 +61,96 @@ impl PlotUi<'_> {
         &self,
         y_axis_choice: Option<crate::YAxisChoice>,
     ) -> sys::ImPlotPoint {
-        let x_axis = 0; // ImAxis_X1
-        let y_axis = match y_axis_choice {
-            Some(crate::YAxisChoice::First) => 3,  // ImAxis_Y1
-            Some(crate::YAxisChoice::Second) => 4, // ImAxis_Y2
-            Some(crate::YAxisChoice::Third) => 5,  // ImAxis_Y3
-            None => 3,                             // Default to Y1
-        };
-        self.with_bound_context(|| unsafe {
-            sys::ImPlot_GetPlotMousePos(x_axis as sys::ImAxis, y_axis as sys::ImAxis)
-        })
+        self.mouse_pos(
+            crate::IMPLOT_AUTO,
+            crate::y_axis_choice_option_to_i32(y_axis_choice),
+        )
     }
 
     /// Get the mouse position in plot coordinates for specific axes.
     pub fn plot_mouse_position_axes(&self, x_axis: XAxis, y_axis: YAxis) -> sys::ImPlotPoint {
-        self.with_bound_context(|| unsafe {
-            sys::ImPlot_GetPlotMousePos(x_axis as sys::ImAxis, y_axis as sys::ImAxis)
-        })
+        self.mouse_pos(x_axis as _, y_axis as _)
     }
 
-    /// Convert pixels to plot coordinates.
+    fn mouse_pos(&self, x: sys::ImAxis, y: sys::ImAxis) -> sys::ImPlotPoint {
+        self.with_axes(&[x, y], || unsafe { sys::ImPlot_GetPlotMousePos(x, y) })
+    }
+
+    /// Convert pixels using the current X axis and the selected or current Y axis.
     pub fn pixels_to_plot(
         &self,
         pixel_position: [f32; 2],
-        y_axis_choice: Option<crate::YAxisChoice>,
+        y_axis: Option<crate::YAxisChoice>,
     ) -> sys::ImPlotPoint {
-        assert_finite_vec2("PlotUi::pixels_to_plot()", "pixel_position", pixel_position);
-        // Map absolute pixel coordinates to plot coordinates using current plot's axes.
-        let y_index = match y_axis_choice {
-            Some(crate::YAxisChoice::First) => 0,
-            Some(crate::YAxisChoice::Second) => 1,
-            Some(crate::YAxisChoice::Third) => 2,
-            None => 0,
-        };
-        self.with_bound_context(|| unsafe {
-            let plot = sys::ImPlot_GetCurrentPlot();
-            if plot.is_null() {
-                return sys::ImPlotPoint { x: 0.0, y: 0.0 };
-            }
-            let x_axis_ptr = sys::ImPlotPlot_XAxis_Nil(plot, 0);
-            let y_axis_ptr = sys::ImPlotPlot_YAxis_Nil(plot, y_index);
-            let x = sys::ImPlotAxis_PixelsToPlot(x_axis_ptr, pixel_position[0]);
-            let y = sys::ImPlotAxis_PixelsToPlot(y_axis_ptr, pixel_position[1]);
-            sys::ImPlotPoint { x, y }
-        })
+        self.convert_pixels(
+            pixel_position,
+            crate::IMPLOT_AUTO,
+            crate::y_axis_choice_option_to_i32(y_axis),
+        )
     }
 
-    /// Convert pixels to plot coordinates for specific axes.
+    /// Convert pixels using specific axes.
     pub fn pixels_to_plot_axes(
         &self,
         pixel_position: [f32; 2],
         x_axis: XAxis,
         y_axis: YAxis,
     ) -> sys::ImPlotPoint {
-        assert_finite_vec2(
-            "PlotUi::pixels_to_plot_axes()",
-            "pixel_position",
-            pixel_position,
-        );
-        self.with_bound_context(|| unsafe {
-            let plot = sys::ImPlot_GetCurrentPlot();
-            if plot.is_null() {
-                return sys::ImPlotPoint { x: 0.0, y: 0.0 };
-            }
-            let x_axis_ptr = sys::ImPlotPlot_XAxis_Nil(plot, x_axis as i32);
-            let y_axis_ptr = sys::ImPlotPlot_YAxis_Nil(plot, y_axis.to_index());
-            let x = sys::ImPlotAxis_PixelsToPlot(x_axis_ptr, pixel_position[0]);
-            let y = sys::ImPlotAxis_PixelsToPlot(y_axis_ptr, pixel_position[1]);
-            sys::ImPlotPoint { x, y }
+        self.convert_pixels(pixel_position, x_axis as _, y_axis as _)
+    }
+
+    fn convert_pixels(&self, pos: [f32; 2], x: sys::ImAxis, y: sys::ImAxis) -> sys::ImPlotPoint {
+        assert_finite_vec2("PlotScope::pixels_to_plot()", "pixel_position", pos);
+        self.with_axes(&[x, y], || unsafe {
+            sys::ImPlot_PixelsToPlot_Float(pos[0], pos[1], x, y)
         })
     }
 
-    /// Convert plot coordinates to pixels.
+    /// Convert coordinates using the current X axis and the selected or current Y axis.
     pub fn plot_to_pixels(
         &self,
-        plot_position: sys::ImPlotPoint,
-        y_axis_choice: Option<crate::YAxisChoice>,
+        pos: sys::ImPlotPoint,
+        y_axis: Option<crate::YAxisChoice>,
     ) -> [f32; 2] {
-        assert_finite_point("PlotUi::plot_to_pixels()", "plot_position", plot_position);
-        let y_index = match y_axis_choice {
-            Some(crate::YAxisChoice::First) => 0,
-            Some(crate::YAxisChoice::Second) => 1,
-            Some(crate::YAxisChoice::Third) => 2,
-            None => 0,
-        };
-        self.with_bound_context(|| unsafe {
-            let plot = sys::ImPlot_GetCurrentPlot();
-            if plot.is_null() {
-                return [0.0, 0.0];
-            }
-            let x_axis_ptr = sys::ImPlotPlot_XAxis_Nil(plot, 0);
-            let y_axis_ptr = sys::ImPlotPlot_YAxis_Nil(plot, y_index);
-            let px = sys::ImPlotAxis_PlotToPixels(x_axis_ptr, plot_position.x);
-            let py = sys::ImPlotAxis_PlotToPixels(y_axis_ptr, plot_position.y);
-            [px, py]
-        })
+        self.convert_plot_point(
+            pos,
+            crate::IMPLOT_AUTO,
+            crate::y_axis_choice_option_to_i32(y_axis),
+        )
     }
 
-    /// Convert plot coordinates to pixels for specific axes.
+    /// Convert coordinates using specific axes.
     pub fn plot_to_pixels_axes(
         &self,
-        plot_position: sys::ImPlotPoint,
+        pos: sys::ImPlotPoint,
         x_axis: XAxis,
         y_axis: YAxis,
     ) -> [f32; 2] {
-        assert_finite_point(
-            "PlotUi::plot_to_pixels_axes()",
-            "plot_position",
-            plot_position,
-        );
-        self.with_bound_context(|| unsafe {
-            let plot = sys::ImPlot_GetCurrentPlot();
-            if plot.is_null() {
-                return [0.0, 0.0];
-            }
-            let x_axis_ptr = sys::ImPlotPlot_XAxis_Nil(plot, x_axis as i32);
-            let y_axis_ptr = sys::ImPlotPlot_YAxis_Nil(plot, y_axis.to_index());
-            let px = sys::ImPlotAxis_PlotToPixels(x_axis_ptr, plot_position.x);
-            let py = sys::ImPlotAxis_PlotToPixels(y_axis_ptr, plot_position.y);
-            [px, py]
+        self.convert_plot_point(pos, x_axis as _, y_axis as _)
+    }
+
+    fn convert_plot_point(
+        &self,
+        pos: sys::ImPlotPoint,
+        x: sys::ImAxis,
+        y: sys::ImAxis,
+    ) -> [f32; 2] {
+        assert_finite_point("PlotScope::plot_to_pixels()", "position", pos);
+        self.with_axes(&[x, y], || unsafe {
+            let pixels = sys::ImPlot_PlotToPixels_double(pos.x, pos.y, x, y);
+            [pixels.x, pixels.y]
         })
     }
 
-    /// Get the current plot limits.
+    /// Get limits for the selected axes. Each `None` uses the corresponding current axis.
     pub fn plot_limits(
         &self,
-        _x_axis_choice: Option<crate::YAxisChoice>,
-        y_axis_choice: Option<crate::YAxisChoice>,
+        x_axis: Option<XAxis>,
+        y_axis: Option<crate::YAxisChoice>,
     ) -> sys::ImPlotRect {
-        let x_axis = 0; // ImAxis_X1
-        let y_axis = match y_axis_choice {
-            Some(crate::YAxisChoice::First) => 3,  // ImAxis_Y1
-            Some(crate::YAxisChoice::Second) => 4, // ImAxis_Y2
-            Some(crate::YAxisChoice::Third) => 5,  // ImAxis_Y3
-            None => 3,                             // Default to Y1
-        };
-        self.with_bound_context(|| unsafe { sys::ImPlot_GetPlotLimits(x_axis, y_axis) })
+        let x = x_axis.map_or(crate::IMPLOT_AUTO, |axis| axis as _);
+        let y = crate::y_axis_choice_option_to_i32(y_axis);
+        self.with_axes(&[x, y], || unsafe { sys::ImPlot_GetPlotLimits(x, y) })
     }
 
     /// Whether a plot has an active selection region.
@@ -206,7 +163,7 @@ impl PlotUi<'_> {
         if !self.is_plot_selected() {
             return None;
         }
-        self.with_bound_context(|| {
+        self.with_axes(&[x_axis as _, y_axis as _], || {
             let rect = unsafe { sys::ImPlot_GetPlotSelection(x_axis as i32, y_axis as i32) };
             Some(rect)
         })
@@ -222,10 +179,14 @@ impl PlotUi<'_> {
         clamp: bool,
         round: bool,
     ) {
-        assert_finite_f64("PlotUi::annotation_point()", "x", x);
-        assert_finite_f64("PlotUi::annotation_point()", "y", y);
-        assert_finite_color("PlotUi::annotation_point()", "color", color);
-        assert_finite_vec2("PlotUi::annotation_point()", "pixel_offset", pixel_offset);
+        assert_finite_f64("PlotScope::annotation_point()", "x", x);
+        assert_finite_f64("PlotScope::annotation_point()", "y", y);
+        assert_finite_color("PlotScope::annotation_point()", "color", color);
+        assert_finite_vec2(
+            "PlotScope::annotation_point()",
+            "pixel_offset",
+            pixel_offset,
+        );
         let col = sys::ImVec4_c {
             x: color[0],
             y: color[1],
@@ -254,10 +215,10 @@ impl PlotUi<'_> {
         clamp: bool,
         text: &str,
     ) {
-        assert_finite_f64("PlotUi::annotation_text()", "x", x);
-        assert_finite_f64("PlotUi::annotation_text()", "y", y);
-        assert_finite_color("PlotUi::annotation_text()", "color", color);
-        assert_finite_vec2("PlotUi::annotation_text()", "pixel_offset", pixel_offset);
+        assert_finite_f64("PlotScope::annotation_text()", "x", x);
+        assert_finite_f64("PlotScope::annotation_text()", "y", y);
+        assert_finite_color("PlotScope::annotation_text()", "color", color);
+        assert_finite_vec2("PlotScope::annotation_text()", "pixel_offset", pixel_offset);
         let col = sys::ImVec4_c {
             x: color[0],
             y: color[1],
@@ -279,8 +240,8 @@ impl PlotUi<'_> {
 
     /// Tag the X axis at position x with a tick-like mark.
     pub fn tag_x(&self, x: f64, color: [f32; 4], round: bool) {
-        assert_finite_f64("PlotUi::tag_x()", "x", x);
-        assert_finite_color("PlotUi::tag_x()", "color", color);
+        assert_finite_f64("PlotScope::tag_x()", "x", x);
+        assert_finite_color("PlotScope::tag_x()", "color", color);
         let col = sys::ImVec4_c {
             x: color[0],
             y: color[1],
@@ -292,8 +253,8 @@ impl PlotUi<'_> {
 
     /// Tag the X axis at position x with a literal text label.
     pub fn tag_x_text(&self, x: f64, color: [f32; 4], text: &str) {
-        assert_finite_f64("PlotUi::tag_x_text()", "x", x);
-        assert_finite_color("PlotUi::tag_x_text()", "color", color);
+        assert_finite_f64("PlotScope::tag_x_text()", "x", x);
+        assert_finite_color("PlotScope::tag_x_text()", "color", color);
         let col = sys::ImVec4_c {
             x: color[0],
             y: color[1],
@@ -311,8 +272,8 @@ impl PlotUi<'_> {
 
     /// Tag the Y axis at position y with a tick-like mark.
     pub fn tag_y(&self, y: f64, color: [f32; 4], round: bool) {
-        assert_finite_f64("PlotUi::tag_y()", "y", y);
-        assert_finite_color("PlotUi::tag_y()", "color", color);
+        assert_finite_f64("PlotScope::tag_y()", "y", y);
+        assert_finite_color("PlotScope::tag_y()", "color", color);
         let col = sys::ImVec4_c {
             x: color[0],
             y: color[1],
@@ -324,8 +285,8 @@ impl PlotUi<'_> {
 
     /// Tag the Y axis at position y with a literal text label.
     pub fn tag_y_text(&self, y: f64, color: [f32; 4], text: &str) {
-        assert_finite_f64("PlotUi::tag_y_text()", "y", y);
-        assert_finite_color("PlotUi::tag_y_text()", "color", color);
+        assert_finite_f64("PlotScope::tag_y_text()", "y", y);
+        assert_finite_color("PlotScope::tag_y_text()", "color", color);
         let col = sys::ImVec4_c {
             x: color[0],
             y: color[1],
@@ -343,14 +304,15 @@ impl PlotUi<'_> {
 
     /// Get the current plot limits for specific axes.
     pub fn plot_limits_axes(&self, x_axis: XAxis, y_axis: YAxis) -> sys::ImPlotRect {
-        self.with_bound_context(|| unsafe {
+        self.with_axes(&[x_axis as _, y_axis as _], || unsafe {
             sys::ImPlot_GetPlotLimits(x_axis as i32, y_axis as i32)
         })
     }
 
-    /// Check if an axis is hovered.
+    /// Check if an enabled axis is hovered. Disabled axes return `false`.
     pub fn is_axis_hovered(&self, axis: Axis) -> bool {
-        self.with_bound_context(|| unsafe { sys::ImPlot_IsAxisHovered(axis.to_sys()) })
+        // SAFETY: Axis only represents the six native axes.
+        unsafe { self.is_axis_hovered_unchecked(axis.to_sys()) }
     }
 
     /// Check if a raw axis is hovered.
@@ -360,12 +322,17 @@ impl PlotUi<'_> {
     /// `axis` must be a valid ImPlot `ImAxis` value for the current plot. Passing an
     /// out-of-range value lets ImPlot index internal axis arrays out of bounds.
     pub unsafe fn is_axis_hovered_unchecked(&self, axis: sys::ImAxis) -> bool {
-        self.with_bound_context(|| unsafe { sys::ImPlot_IsAxisHovered(axis) })
+        self.with_bound_context(|| unsafe {
+            (*sys::ImPlot_GetCurrentPlot()).Axes[axis as usize].Enabled
+                && sys::ImPlot_IsAxisHovered(axis)
+        })
     }
 
     /// Check if the X axis is hovered.
     pub fn is_plot_x_axis_hovered(&self) -> bool {
-        self.is_axis_hovered(Axis::X1)
+        self.with_bound_context(|| unsafe {
+            sys::ImPlot_IsAxisHovered((*sys::ImPlot_GetCurrentPlot()).CurrentX)
+        })
     }
 
     /// Check if a specific X axis is hovered.
@@ -376,7 +343,13 @@ impl PlotUi<'_> {
     /// Check if a Y axis is hovered.
     pub fn is_plot_y_axis_hovered(&self, y_axis_choice: Option<crate::YAxisChoice>) -> bool {
         let axis = match y_axis_choice {
-            Some(crate::YAxisChoice::First) | None => Axis::Y1,
+            None => {
+                return self.with_bound_context(|| unsafe {
+                    let current = (*sys::ImPlot_GetCurrentPlot()).CurrentY;
+                    sys::ImPlot_IsAxisHovered(current)
+                });
+            }
+            Some(crate::YAxisChoice::First) => Axis::Y1,
             Some(crate::YAxisChoice::Second) => Axis::Y2,
             Some(crate::YAxisChoice::Third) => Axis::Y3,
         };
@@ -386,26 +359,6 @@ impl PlotUi<'_> {
     /// Check if a specific Y axis is hovered.
     pub fn is_plot_y_axis_hovered_axis(&self, y_axis: YAxis) -> bool {
         self.is_axis_hovered(y_axis.into())
-    }
-
-    /// Show the ImPlot demo window (requires sys demo symbols to be linked).
-    #[cfg(feature = "demo")]
-    pub fn show_demo_window(&self, show: &mut bool) {
-        self.with_bound_context(|| unsafe { sys::ImPlot_ShowDemoWindow(show) })
-    }
-
-    /// Stub when demo feature is disabled.
-    #[cfg(not(feature = "demo"))]
-    pub fn show_demo_window(&self, _show: &mut bool) {}
-
-    /// Show the built-in user guide for ImPlot.
-    pub fn show_user_guide(&self) {
-        self.with_bound_context(|| unsafe { sys::ImPlot_ShowUserGuide() })
-    }
-
-    /// Show the metrics window.
-    pub fn show_metrics_window(&self, open: &mut bool) {
-        self.with_bound_context(|| unsafe { sys::ImPlot_ShowMetricsWindow(open as *mut bool) })
     }
 
     /// Get current plot position (top-left) in pixels.
@@ -422,6 +375,36 @@ impl PlotUi<'_> {
             let out = unsafe { sys::ImPlot_GetPlotSize() };
             [out.x, out.y]
         })
+    }
+}
+
+impl PlotUi<'_> {
+    /// Check if any subplots area is hovered.
+    pub fn is_subplots_hovered(&self) -> bool {
+        assert!(self.subplot.is_some(), "subplot hover requires a grid");
+        self.with_bound_context(|| unsafe { sys::ImPlot_IsSubplotsHovered() })
+    }
+
+    /// Show the native ImPlot demo when the `demo` feature is enabled.
+    pub fn show_demo_window(&self, show: &mut bool) {
+        self.with_idle_context(|| {
+            #[cfg(feature = "demo")]
+            unsafe {
+                sys::ImPlot_ShowDemoWindow(show)
+            };
+            #[cfg(not(feature = "demo"))]
+            let _ = show;
+        });
+    }
+
+    /// Show the built-in user guide for ImPlot.
+    pub fn show_user_guide(&self) {
+        self.with_bound_context(|| unsafe { sys::ImPlot_ShowUserGuide() })
+    }
+
+    /// Show the native metrics inspector outside any plot or subplot grid.
+    pub fn show_metrics_window(&self, open: &mut bool) {
+        self.with_idle_context(|| unsafe { sys::ImPlot_ShowMetricsWindow(open as *mut bool) })
     }
 }
 
@@ -489,7 +472,7 @@ fn color4(rgba: [f32; 4]) -> sys::ImVec4_c {
     }
 }
 
-impl PlotUi<'_> {
+impl PlotScope<'_> {
     /// Draggable point with result flags.
     pub fn drag_point(
         &self,

@@ -221,7 +221,7 @@ impl<'a, F: AsRef<str>> HeatmapPlot<'a, F> {
         )
     }
 
-    pub(super) fn plot_checked(&self, plot_ui: &crate::PlotUi<'_>) -> Result<(), PlotError> {
+    pub(super) fn plot_checked(&self, plot_ui: &crate::PlotScope<'_>) -> Result<(), PlotError> {
         let (min, max) = self.checked_scale()?;
         let (rows, cols) = (self.rows as i32, self.cols as i32);
         let label_fmt = self.label_fmt.as_ref().map(AsRef::as_ref);
@@ -234,6 +234,7 @@ impl<'a, F: AsRef<str>> HeatmapPlot<'a, F> {
                 };
                 with_scratch_txt_two(label, label_fmt, |label_ptr, label_fmt_ptr| unsafe {
                     let spec = plot_spec_with_style(
+                        plot_ui,
                         self.style,
                         self.flags.bits() | self.item_flags.bits(),
                         PlotDataLayout::DEFAULT,
@@ -254,6 +255,7 @@ impl<'a, F: AsRef<str>> HeatmapPlot<'a, F> {
             }
             None => with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     PlotDataLayout::DEFAULT,
@@ -277,7 +279,7 @@ impl<'a, F: AsRef<str>> HeatmapPlot<'a, F> {
 }
 
 impl<F: AsRef<str>> Plot for HeatmapPlot<'_, F> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
         let _ = self.plot_checked(plot_ui);
     }
 
@@ -412,7 +414,7 @@ impl<'a, F: AsRef<str>> HeatmapPlotF32<'a, F> {
         )
     }
 
-    fn plot_checked(&self, plot_ui: &crate::PlotUi<'_>) -> Result<(), PlotError> {
+    fn plot_checked(&self, plot_ui: &crate::PlotScope<'_>) -> Result<(), PlotError> {
         let (min, max) = self.checked_scale()?;
         let (rows, cols) = (self.rows as i32, self.cols as i32);
         let label_fmt = self.label_fmt.as_ref().map(AsRef::as_ref);
@@ -425,6 +427,7 @@ impl<'a, F: AsRef<str>> HeatmapPlotF32<'a, F> {
                 };
                 with_scratch_txt_two(label, label_fmt, |label_ptr, label_fmt_ptr| unsafe {
                     let spec = plot_spec_with_style(
+                        plot_ui,
                         self.style,
                         self.flags.bits() | self.item_flags.bits(),
                         PlotDataLayout::DEFAULT,
@@ -445,6 +448,7 @@ impl<'a, F: AsRef<str>> HeatmapPlotF32<'a, F> {
             }
             None => with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     PlotDataLayout::DEFAULT,
@@ -468,7 +472,7 @@ impl<'a, F: AsRef<str>> HeatmapPlotF32<'a, F> {
 }
 
 impl<F: AsRef<str>> Plot for HeatmapPlotF32<'_, F> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
         let _ = self.plot_checked(plot_ui);
     }
 
@@ -478,7 +482,7 @@ impl<F: AsRef<str>> Plot for HeatmapPlotF32<'_, F> {
 }
 
 /// Convenience functions for quick heatmap plotting
-impl<'ui> crate::PlotUi<'ui> {
+impl<'ui> crate::PlotScope<'ui> {
     /// Plot a heatmap with f64 data
     pub fn heatmap_plot(
         &self,

@@ -61,10 +61,11 @@ impl<'a> DummyPlot<'a> {
     }
 
     /// Plot the dummy entry
-    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+    pub fn plot(self, plot_ui: &crate::PlotScope<'_>) {
         plot_ui.with_bound_context(|| {
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     PlotDataLayout::DEFAULT,
@@ -147,7 +148,7 @@ impl<'a> MultiDummyPlot<'a> {
     }
 
     /// Plot all dummy entries
-    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+    pub fn plot(self, plot_ui: &crate::PlotScope<'_>) {
         for &label in &self.labels {
             let dummy_plot = DummyPlot::new(label)
                 .with_style(self.style)
@@ -204,7 +205,7 @@ impl<'a> LegendSeparator<'a> {
     }
 
     /// Plot the separator
-    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+    pub fn plot(self, plot_ui: &crate::PlotScope<'_>) {
         let dummy_plot = DummyPlot::new(self.label).with_style(self.style);
         dummy_plot.plot(plot_ui);
     }
@@ -238,7 +239,7 @@ impl<'a> LegendHeader<'a> {
     }
 
     /// Plot the header
-    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+    pub fn plot(self, plot_ui: &crate::PlotScope<'_>) {
         let dummy_plot = DummyPlot::new(self.title).with_style(self.style);
         dummy_plot.plot(plot_ui);
     }
@@ -288,7 +289,7 @@ impl<'a> CustomLegendEntry<'a> {
     }
 
     /// Plot the custom entry
-    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+    pub fn plot(self, plot_ui: &crate::PlotScope<'_>) {
         let dummy_plot = DummyPlot::new(self.label)
             .with_style(self.style)
             .with_flags(self.flags)
@@ -335,7 +336,7 @@ impl<'a> LegendGroup<'a> {
     }
 
     /// Plot the legend group
-    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+    pub fn plot(self, plot_ui: &crate::PlotScope<'_>) {
         // Plot the header
         LegendHeader::new(self.title)
             .with_style(self.style)

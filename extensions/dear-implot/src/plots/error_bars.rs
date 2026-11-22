@@ -99,7 +99,7 @@ impl<'a> ErrorBarsPlot<'a> {
 }
 
 impl<'a> Plot for ErrorBarsPlot<'a> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
         if self.validate().is_err() {
             return;
         }
@@ -109,6 +109,7 @@ impl<'a> Plot for ErrorBarsPlot<'a> {
         plot_ui.with_bound_context(|| {
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     self.layout,
@@ -233,7 +234,7 @@ impl<'a> AsymmetricErrorBarsPlot<'a> {
 }
 
 impl<'a> Plot for AsymmetricErrorBarsPlot<'a> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
         if self.validate().is_err() {
             return;
         }
@@ -243,6 +244,7 @@ impl<'a> Plot for AsymmetricErrorBarsPlot<'a> {
         plot_ui.with_bound_context(|| {
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     self.layout,
@@ -335,7 +337,7 @@ impl<'a> SimpleErrorBarsPlot<'a> {
 }
 
 impl<'a> Plot for SimpleErrorBarsPlot<'a> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
         if self.validate().is_err() {
             return;
         }
@@ -351,6 +353,7 @@ impl<'a> Plot for SimpleErrorBarsPlot<'a> {
         plot_ui.with_bound_context(|| {
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     PlotDataLayout::DEFAULT,
@@ -373,7 +376,7 @@ impl<'a> Plot for SimpleErrorBarsPlot<'a> {
 }
 
 /// Convenience functions for quick error bars plotting
-impl<'ui> crate::PlotUi<'ui> {
+impl<'ui> crate::PlotScope<'ui> {
     /// Plot error bars with symmetric errors
     pub fn error_bars_plot(
         &self,

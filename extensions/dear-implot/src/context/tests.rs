@@ -36,23 +36,25 @@ fn hidden_item_query_survives_frames_and_last_item_resets_on_begin_plot() {
         let frame = imgui.begin_frame();
         {
             let ui = plot.get_plot_ui(frame.ui());
-            let _token = ui.begin_plot("visibility").expect("plot must begin");
-            ui.with_bound_context(|| {
-                // SAFETY: Both contexts and the plot are active, and the label is a C literal.
-                unsafe {
-                    assert!(!sys::ImPlot_IsLastItemHidden());
-                    assert_eq!(sys::ImPlot_IsItemHidden(c"series".as_ptr()), was_hidden);
-                    sys::ImPlot_HideNextItem(true, sys::ImPlotCond_Always as _);
-                }
-                crate::DummyPlot::new("series").plot(&ui);
-                assert!(unsafe { sys::ImPlot_IsLastItemHidden() });
-            });
+            ui.with_plot("visibility", |plot| {
+                plot.with_bound_context(|| {
+                    // SAFETY: Both contexts and the plot are active, and the label is a C literal.
+                    unsafe {
+                        assert!(!sys::ImPlot_IsLastItemHidden());
+                        assert_eq!(sys::ImPlot_IsItemHidden(c"series".as_ptr()), was_hidden);
+                        sys::ImPlot_HideNextItem(true, sys::ImPlotCond_Always as _);
+                    }
+                    crate::DummyPlot::new("series").plot(plot);
+                    assert!(unsafe { sys::ImPlot_IsLastItemHidden() });
+                })
+            })
+            .expect("plot must begin");
         }
         let _ = frame.render_legacy();
     }
 }
 
-fn histogram_counts(ui: &crate::PlotUi<'_>) -> Vec<f64> {
+fn histogram_counts(ui: &crate::PlotScope<'_>) -> Vec<f64> {
     ui.with_bound_context(|| unsafe {
         // PlotHistogram2D fills TempDouble1 before drawing. Copy it before the next ImPlot call.
         let bins = &(*sys::ImPlot_GetCurrentContext()).TempDouble1;
@@ -70,16 +72,17 @@ fn asymmetric_error_bars_fit_the_signed_endpoints() {
     let frame = imgui.begin_frame();
     let ui = plot.get_plot_ui(frame.ui());
     ui.set_next_axes_to_fit();
-    let _token = ui.begin_plot("signed errors").unwrap();
-
-    // Both endpoints can be above the estimate: 10 - (-2) and 10 + 5.
-    ui.asymmetric_error_bars_plot("interval", &[1.0], &[10.0], &[-2.0], &[5.0])
-        .unwrap();
-    ui.with_bound_context(|| unsafe {
-        let plot = (*sys::ImPlot_GetCurrentContext()).CurrentPlot;
-        let fit = (*plot).Axes[YAxis::Y1 as usize].FitExtents;
-        assert_eq!((fit.Min, fit.Max), (12.0, 15.0));
-    });
+    ui.with_plot("signed errors", |plot| {
+        // Both endpoints can be above the estimate: 10 - (-2) and 10 + 5.
+        plot.asymmetric_error_bars_plot("interval", &[1.0], &[10.0], &[-2.0], &[5.0])
+            .unwrap();
+        plot.with_bound_context(|| unsafe {
+            let plot = (*sys::ImPlot_GetCurrentContext()).CurrentPlot;
+            let fit = (*plot).Axes[YAxis::Y1 as usize].FitExtents;
+            assert_eq!((fit.Min, fit.Max), (12.0, 15.0));
+        });
+    })
+    .expect("plot must begin");
 }
 
 #[test]
@@ -90,20 +93,21 @@ fn histogram_1d_counts_constant_samples_in_a_finite_bin() {
     let plot = PlotContext::create(&imgui);
     let frame = imgui.begin_frame();
     let ui = plot.get_plot_ui(frame.ui());
-    let _token = ui.begin_plot("constant samples").unwrap();
-
-    ui.histogram_plot_with_bins("sensor", &[7.0; 3], crate::BinMethod::Scott)
-        .unwrap();
-    ui.with_bound_context(|| unsafe {
-        // PlotHistogram stores its bin centers and counts in the two scratch vectors.
-        let ctx = &*sys::ImPlot_GetCurrentContext();
-        assert_eq!((ctx.TempDouble1.Size, ctx.TempDouble2.Size), (1, 1));
-        assert_eq!((*ctx.TempDouble1.Data, *ctx.TempDouble2.Data), (7.0, 3.0));
-    });
-    assert!(
-        ui.histogram_plot_with_bins("invalid", &[7.0], 0usize)
-            .is_err()
-    );
+    ui.with_plot("constant samples", |plot| {
+        plot.histogram_plot_with_bins("sensor", &[7.0; 3], crate::BinMethod::Scott)
+            .unwrap();
+        plot.with_bound_context(|| unsafe {
+            // PlotHistogram stores its bin centers and counts in the two scratch vectors.
+            let ctx = &*sys::ImPlot_GetCurrentContext();
+            assert_eq!((ctx.TempDouble1.Size, ctx.TempDouble2.Size), (1, 1));
+            assert_eq!((*ctx.TempDouble1.Data, *ctx.TempDouble2.Data), (7.0, 3.0));
+        });
+        assert!(
+            plot.histogram_plot_with_bins("invalid", &[7.0], 0usize)
+                .is_err()
+        );
+    })
+    .expect("plot must begin");
 }
 
 #[test]
@@ -114,31 +118,33 @@ fn histogram_2d_bins_both_automatic_ranges_through_the_plot_ui() {
     let plot = PlotContext::create(&imgui);
     let frame = imgui.begin_frame();
     let ui = plot.get_plot_ui(frame.ui());
-    let _token = ui.begin_plot("counts").expect("plot must begin");
-    let xs = [10.0, 11.0, 18.0, 20.0, 12.0];
-    let ys = [-7.0, 3.0, -6.0, 2.0, -7.0];
+    ui.with_plot("counts", |plot| {
+        let xs = [10.0, 11.0, 18.0, 20.0, 12.0];
+        let ys = [-7.0, 3.0, -6.0, 2.0, -7.0];
 
-    ui.histogram_2d_plot_with_bins(
-        "series",
-        &xs,
-        &ys,
-        crate::BinMethod::Sqrt,
-        crate::BinMethod::Rice,
-    )
-    .unwrap();
-    // Three X bins and four Y bins. Both maxima belong to the last bin on their axis.
-    assert_eq!(
-        histogram_counts(&ui),
-        [2., 0., 1., 0., 0., 0., 0., 0., 0., 1., 0., 1.]
-    );
+        plot.histogram_2d_plot_with_bins(
+            "series",
+            &xs,
+            &ys,
+            crate::BinMethod::Sqrt,
+            crate::BinMethod::Rice,
+        )
+        .unwrap();
+        // Three X bins and four Y bins. Both maxima belong to the last bin on their axis.
+        assert_eq!(
+            histogram_counts(plot),
+            [2., 0., 1., 0., 0., 0., 0., 0., 0., 1., 0., 1.]
+        );
 
-    ui.histogram_2d_plot("default", &xs, &ys).unwrap();
-    assert_eq!(
-        histogram_counts(&ui),
-        [
-            2., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 1.
-        ]
-    );
+        plot.histogram_2d_plot("default", &xs, &ys).unwrap();
+        assert_eq!(
+            histogram_counts(plot),
+            [
+                2., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 1.
+            ]
+        );
+    })
+    .expect("plot must begin");
 }
 
 #[test]
@@ -155,36 +161,38 @@ fn histogram_2d_scott_matches_native_bins_for_large_offset_samples() {
     let xs = [base, base, base + 2.0, base + 3.0, base + 5.0];
     let ys = [0.0, 1.0, 2.0, 3.0, 4.0];
     ui.set_next_x_axis_limits(XAxis::X1, base, base + 5.0, PlotCond::Always);
-    let _token = ui.begin_plot("Scott").expect("plot must begin");
-    let range = sys::ImPlotRect {
-        X: sys::ImPlotRange {
-            Min: base,
-            Max: base + 5.0,
-        },
-        Y: sys::ImPlotRange { Min: 0.0, Max: 4.0 },
-    };
+    ui.with_plot("Scott", |plot| {
+        let range = sys::ImPlotRect {
+            X: sys::ImPlotRange {
+                Min: base,
+                Max: base + 5.0,
+            },
+            Y: sys::ImPlotRange { Min: 0.0, Max: 4.0 },
+        };
 
-    Histogram2DPlot::new("safe", &xs, &ys)
-        .with_bins(BinMethod::Scott, 2usize)
-        .plot(&ui);
-    let safe = histogram_counts(&ui);
-    assert_eq!(safe, [2., 3.]);
+        Histogram2DPlot::new("safe", &xs, &ys)
+            .with_bins(BinMethod::Scott, 2usize)
+            .plot(plot);
+        let safe = histogram_counts(plot);
+        assert_eq!(safe, [2., 3.]);
 
-    let native_peak = ui.with_bound_context(|| unsafe {
-        // Explicit bounds isolate native CalculateBins from the upstream automatic X-range typo.
-        sys::ImPlot_PlotHistogram2D_doublePtr(
-            c"reference".as_ptr(),
-            xs.as_ptr(),
-            ys.as_ptr(),
-            5,
-            BinMethod::Scott as i32,
-            2,
-            range,
-            crate::plots::default_plot_spec(),
-        )
-    });
-    assert_eq!(native_peak, 3.0);
-    assert_eq!(histogram_counts(&ui), safe);
+        let native_peak = plot.with_bound_context(|| unsafe {
+            // Explicit bounds isolate native CalculateBins from the upstream automatic X-range typo.
+            sys::ImPlot_PlotHistogram2D_doublePtr(
+                c"reference".as_ptr(),
+                xs.as_ptr(),
+                ys.as_ptr(),
+                5,
+                BinMethod::Scott as i32,
+                2,
+                range,
+                crate::plots::default_plot_spec(),
+            )
+        });
+        assert_eq!(native_peak, 3.0);
+        assert_eq!(histogram_counts(plot), safe);
+    })
+    .expect("plot must begin");
 }
 
 #[test]
@@ -202,16 +210,14 @@ fn nested_plot_bindings_restore_imgui_and_implot_contexts() {
     let plot_b_raw = unsafe { plot_b.raw() };
     unsafe { sys::ImPlot_SetCurrentContext(plot_b_raw) };
 
-    let binding_a = plot_a.binding();
-    let binding_b = plot_b.binding();
-    binding_a.with_bound_context("test outer ImPlot binding", || {
+    plot_a.with_bound_context("test outer ImPlot binding", || {
         assert_eq!(
             unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
             imgui_a_raw
         );
         assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, plot_a_raw);
 
-        binding_b.with_bound_context("test inner ImPlot binding", || {
+        plot_b.with_bound_context("test inner ImPlot binding", || {
             assert_eq!(
                 unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
                 imgui_b_raw
@@ -233,8 +239,8 @@ fn nested_plot_bindings_restore_imgui_and_implot_contexts() {
     assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, plot_b_raw);
 
     let panic_result = catch_unwind(AssertUnwindSafe(|| {
-        binding_a.with_bound_context("test panicking outer ImPlot binding", || {
-            binding_b.with_bound_context("test panicking inner ImPlot binding", || {
+        plot_a.with_bound_context("test panicking outer ImPlot binding", || {
+            plot_b.with_bound_context("test panicking inner ImPlot binding", || {
                 panic!("nested binding panic probe");
             });
         });
@@ -260,18 +266,16 @@ fn nested_plot_binding_never_restores_a_destroyed_outer_context() {
     let _guard = test_guard();
     let imgui_a = Context::create();
     let plot_a = PlotContext::create(&imgui_a);
-    let binding_a = plot_a.binding();
     let mut suspended_a = Some(imgui_a.suspend_or_panic());
 
     let imgui_b = Context::create();
     let imgui_b_raw = imgui_b.as_raw();
     let plot_b = PlotContext::create(&imgui_b);
     let plot_b_raw = unsafe { plot_b.raw() };
-    let binding_b = plot_b.binding();
     unsafe { sys::ImPlot_SetCurrentContext(plot_b_raw) };
 
-    binding_a.with_bound_context("test outer ImPlot binding", || {
-        binding_b.with_bound_context("test inner ImPlot binding", || {
+    plot_a.with_bound_context("test outer ImPlot binding", || {
+        plot_b.with_bound_context("test inner ImPlot binding", || {
             drop(
                 suspended_a
                     .take()
@@ -303,12 +307,11 @@ fn plot_owner_keeps_its_thread_and_destroys_the_native_plot_after_imgui_drops() 
     let _guard = test_guard();
     let imgui = Context::create();
     let plot = PlotContext::create(&imgui);
-    let binding = plot.binding();
     unsafe { sys::ImPlot_SetCurrentContext(plot.raw()) };
     drop(imgui);
 
     let entered = Cell::new(false);
-    let result = binding.try_with_bound_context(|| entered.set(true));
+    let result = plot.try_with_bound_context(|| entered.set(true));
 
     assert!(matches!(result, Err(ContextBindingError::NativeDestroyed)));
     assert!(!entered.get());
@@ -385,56 +388,92 @@ fn plot_ui_binds_own_context_before_calls() {
 }
 
 #[test]
-fn plot_token_binds_own_context_before_drop() {
+fn plot_and_clip_scopes_restore_the_previous_native_context() {
     let _guard = test_guard();
     let mut imgui = Context::create();
     prepare_imgui(&mut imgui);
-    let plot_a = PlotContext::create(&imgui);
-    let plot_b = PlotContext::create(&imgui);
-    let raw_b = unsafe { plot_b.raw() };
-
-    {
-        let frame = imgui.begin_frame();
-        let plot_ui = plot_a.get_plot_ui(frame.ui());
-        let token = plot_ui.begin_plot("token").expect("failed to begin plot");
-
-        unsafe { sys::ImPlot_SetCurrentContext(raw_b) };
-        drop(token);
-
-        assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, raw_b);
-    }
-
-    drop(plot_b);
-    drop(plot_a);
+    let a = PlotContext::create(&imgui);
+    let b = PlotContext::create(&imgui);
+    let raw_b = unsafe { b.raw() };
+    let frame = imgui.begin_frame();
+    let ui = a.get_plot_ui(frame.ui());
+    ui.with_style_var_f32(crate::StyleVar::MinorAlpha, 0.5, || {
+        ui.with_plot("clip", |plot| {
+            plot.with_plot_clip_rect(0.0, || unsafe { sys::ImPlot_SetCurrentContext(raw_b) });
+            assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, raw_b);
+        })
+        .expect("visible plot");
+    });
+    assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, raw_b);
+    a.with_bound_context("closed scopes", || unsafe {
+        assert!((*a.raw()).CurrentPlot.is_null());
+        assert_eq!((*a.raw()).StyleModifiers.Size, 0);
+    });
 }
 
 #[test]
-fn style_and_plot_clip_tokens_bind_own_context_before_drop() {
+fn temporary_context_switch_forgets_a_destroyed_previous_plot_owner() {
+    let _guard = test_guard();
+    let imgui = Context::create();
+    let a = PlotContext::create(&imgui);
+    let b = PlotContext::create(&imgui);
+    unsafe { sys::ImPlot_SetCurrentContext(a.raw()) };
+    b.with_bound_context("temporary owner", || drop(a));
+    assert!(unsafe { sys::ImPlot_GetCurrentContext() }.is_null());
+}
+
+#[test]
+fn styles_check_the_context_and_a_nested_plot_cannot_consume_outer_arrays() {
     let _guard = test_guard();
     let mut imgui = Context::create();
     prepare_imgui(&mut imgui);
-    let plot_a = PlotContext::create(&imgui);
-    let plot_b = PlotContext::create(&imgui);
-    let raw_b = unsafe { plot_b.raw() };
-
-    {
-        let frame = imgui.begin_frame();
-        let plot_ui = plot_a.get_plot_ui(frame.ui());
-        let style = plot_ui.push_style_var_f32(crate::StyleVar::MinorAlpha, 0.5);
-        unsafe { sys::ImPlot_SetCurrentContext(raw_b) };
-        drop(style);
-        assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, raw_b);
-
-        let token = plot_ui.begin_plot("clip").expect("failed to begin plot");
-        let clip = token.push_plot_clip_rect(0.0);
-        unsafe { sys::ImPlot_SetCurrentContext(raw_b) };
-        drop(clip);
-        assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, raw_b);
-        drop(token);
-    }
-
-    drop(plot_b);
-    drop(plot_a);
+    let a = PlotContext::create(&imgui);
+    let b = PlotContext::create(&imgui);
+    let frame = imgui.begin_frame();
+    let ui = frame.ui();
+    let outer = a.get_plot_ui(ui);
+    let unknown = crate::ColormapIndex::from(a.colormap_count());
+    assert!(catch_unwind(AssertUnwindSafe(|| outer.with_colormap(unknown, || ()))).is_err());
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| outer.with_style_var_f32(
+            crate::StyleVar::PlotPadding,
+            0.5,
+            || ()
+        )))
+        .is_err()
+    );
+    ui.window("same-window plots")
+        .size([400.0, 400.0], dear_imgui_rs::Condition::Always)
+        .build(|| {
+            outer
+                .with_plot_size("outer style", [200.0, 140.0], |plot| {
+                    let colors = [0xff00ffff; 2];
+                    let style = crate::PlotItemArrayStyle::new().with_line_colors(&colors);
+                    // SAFETY: the sole styled item has two vertices and a packed color for each one.
+                    unsafe {
+                        plot.with_next_plot_item_array_style(style, |plot| {
+                            b.get_plot_ui(ui)
+                                .with_plot_size("inner", [120.0, 90.0], |inner| {
+                                    assert!(inner.next_spec.get().is_none());
+                                    // Even in the same window, only the inner extension is current.
+                                    assert!(
+                                        catch_unwind(AssertUnwindSafe(|| plot.plot_pos())).is_err()
+                                    );
+                                    inner.plot_line("plain", &[0.0, 1.0], &[1.0, 2.0]);
+                                })
+                                .unwrap();
+                            assert_eq!(
+                                plot.next_spec.get().unwrap().LineColors.cast_const(),
+                                colors.as_ptr()
+                            );
+                            plot.plot_line("colored", &[0.0, 1.0], &[1.0, 2.0]);
+                            assert!(plot.next_spec.get().is_none());
+                        })
+                    };
+                })
+                .unwrap();
+        })
+        .unwrap();
 }
 
 #[test]
@@ -481,7 +520,7 @@ fn set_next_axis_limits_rejects_non_finite_values_before_ffi() {
 }
 
 #[test]
-#[should_panic(expected = "PlotUi::setup_axis_zoom_constraints() min must be positive")]
+#[should_panic(expected = "PlotSetup::setup_axis_zoom_constraints() min must be positive")]
 fn axis_zoom_constraints_reject_non_positive_min_before_ffi() {
     let _guard = test_guard();
     let mut imgui = Context::create();
@@ -491,11 +530,16 @@ fn axis_zoom_constraints_reject_non_positive_min_before_ffi() {
     {
         let frame = imgui.begin_frame();
         let plot_ui = plot.get_plot_ui(frame.ui());
-        let token = plot_ui
-            .begin_plot("constraints")
-            .expect("failed to begin plot");
-        plot_ui.setup_axis_zoom_constraints(Axis::Y1, 0.0, 10.0);
-        token.end();
+        plot_ui
+            .with_plot_setup(
+                "constraints",
+                [-1.0, 0.0],
+                |setup| {
+                    setup.setup_axis_zoom_constraints(Axis::Y1, 0.0, 10.0);
+                },
+                |_| (),
+            )
+            .expect("plot must begin");
     }
 }
 
@@ -520,17 +564,22 @@ fn typed_axis_apis_accept_valid_axes() {
         unsafe { plot_ui.set_next_axis_links(Axis::X1, Some(&mut x_min), Some(&mut x_max)) };
         plot_ui.set_next_x_axis_limits(XAxis::X1, -2.0, 2.0, PlotCond::Always);
 
-        let token = plot_ui
-            .begin_plot("typed-axis")
-            .expect("failed to begin plot");
-        plot_ui.setup_x_axis(XAxis::X1, None, crate::AxisFlags::NONE);
-        plot_ui.setup_y_axis(YAxis::Y1, None, crate::AxisFlags::NONE);
-        // SAFETY: Y1 is enabled and setup is unlocked; storage outlives PlotContext.
-        unsafe { plot_ui.setup_axis_links(Axis::Y1, Some(&mut min), Some(&mut max)) };
-        plot_ui.setup_y_axis_limits(YAxis::Y1, 2.0, 5.0, PlotCond::Always);
-        plot_ui.setup_axis_limits_constraints(Axis::Y1, -10.0, 10.0);
-        plot_ui.setup_axis_zoom_constraints(Axis::Y1, 0.1, 20.0);
-        token.end();
+        plot_ui
+            .with_plot_setup(
+                "typed-axis",
+                [-1.0, 0.0],
+                |setup| {
+                    setup.setup_x_axis(XAxis::X1, None, crate::AxisFlags::NONE);
+                    setup.setup_y_axis(YAxis::Y1, None, crate::AxisFlags::NONE);
+                    // SAFETY: Y1 is enabled and setup is unlocked; storage outlives PlotContext.
+                    unsafe { setup.setup_axis_links(Axis::Y1, Some(&mut min), Some(&mut max)) };
+                    setup.setup_y_axis_limits(YAxis::Y1, 2.0, 5.0, PlotCond::Always);
+                    setup.setup_axis_limits_constraints(Axis::Y1, -10.0, 10.0);
+                    setup.setup_axis_zoom_constraints(Axis::Y1, 0.1, 20.0);
+                },
+                |_| (),
+            )
+            .expect("plot must begin");
     }
     drop(plot);
     assert_eq!((x_min, x_max), (-2.0, 2.0));
@@ -538,51 +587,223 @@ fn typed_axis_apis_accept_valid_axes() {
 }
 
 #[test]
-fn secondary_axis_links_are_explicitly_unlinked_on_the_same_plot() {
+fn plot_end_writes_back_and_detaches_secondary_axis_links() {
     let _guard = test_guard();
     let mut imgui = Context::create();
     prepare_imgui(&mut imgui);
-    // Storage also outlives PlotContext if any frame panics before unlinking.
+    let owner = PlotContext::create(&imgui);
     let mut min = 0.0;
     let mut max = 1.0;
-    let plot = PlotContext::create(&imgui);
-
-    {
-        let frame = imgui.begin_frame();
-        let plot_ui = plot.get_plot_ui(frame.ui());
-        let token = plot_ui
-            .begin_plot("secondary-links")
-            .expect("plot must begin");
-        plot_ui.setup_y_axis(YAxis::Y2, None, crate::AxisFlags::NONE);
-        // SAFETY: Y2 is enabled; distinct storage outlives PlotContext even on unwinding.
-        unsafe { plot_ui.setup_axis_links(Axis::Y2, Some(&mut min), Some(&mut max)) };
-        plot_ui.setup_y_axis_limits(YAxis::Y2, 3.0, 7.0, PlotCond::Always);
-        token.end();
-    }
-    {
-        let frame = imgui.begin_frame();
-        let plot_ui = plot.get_plot_ui(frame.ui());
-        let token = plot_ui
-            .begin_plot("secondary-links")
-            .expect("plot must begin");
-        plot_ui.setup_y_axis(YAxis::Y2, None, crate::AxisFlags::NONE);
-        // SAFETY: the same plot ID and enabled axis are in their setup phase.
-        unsafe { plot_ui.setup_axis_links(Axis::Y2, None, None) };
-        token.end();
-    }
+    let frame = imgui.begin_frame();
+    let plot_ui = owner.get_plot_ui(frame.ui());
+    let raw = plot_ui
+        .with_plot_setup(
+            "secondary-links",
+            [-1.0, 0.0],
+            |setup| {
+                setup.setup_y_axis(YAxis::Y2, None, crate::AxisFlags::NONE);
+                // SAFETY: distinct, stable storage remains exclusively available until the plot ends.
+                unsafe { setup.setup_axis_links(Axis::Y2, Some(&mut min), Some(&mut max)) };
+                setup.setup_y_axis_limits(YAxis::Y2, 3.0, 7.0, PlotCond::Always);
+            },
+            |plot| plot.with_bound_context(|| unsafe { sys::ImPlot_GetCurrentPlot() }),
+        )
+        .unwrap();
     assert_eq!((min, max), (3.0, 7.0));
-    // Explicit unlinking permits access before PlotContext is destroyed.
-    min = 11.0;
-    max = 13.0;
-    {
+    // The owner is alive and no subsequent plot has grown its pool.
+    let axis = unsafe { &(*raw).Axes[YAxis::Y2 as usize] };
+    assert!(axis.LinkedMin.is_null() && axis.LinkedMax.is_null());
+}
+
+#[test]
+fn plot_and_axis_titles_preserve_literal_percent_signs() {
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    prepare_imgui(&mut imgui);
+    let owner = PlotContext::create(&imgui);
+    let frame = imgui.begin_frame();
+    let plots = owner.get_plot_ui(frame.ui());
+    plots
+        .with_plot_setup(
+            "Capacity at 75%",
+            [240.0, 160.0],
+            |setup| {
+                let x = String::from("Load (%)");
+                let y = String::from("Yield (%)");
+                setup.setup_axes(
+                    Some(&x),
+                    Some(&y),
+                    crate::AxisFlags::NONE,
+                    crate::AxisFlags::NONE,
+                );
+            },
+            |plot| {
+                plot.with_bound_context(|| unsafe {
+                    // All three offsets refer to the plot's own text buffer after the setup strings drop.
+                    let native = &*sys::ImPlot_GetCurrentPlot();
+                    let buf = &native.TextBuffer.Buf;
+                    let text = std::slice::from_raw_parts(buf.Data.cast::<u8>(), buf.Size as usize);
+                    for (offset, expected) in [
+                        (native.TitleOffset, "Capacity at 75%"),
+                        (native.Axes[XAxis::X1 as usize].LabelOffset, "Load (%)"),
+                        (native.Axes[YAxis::Y1 as usize].LabelOffset, "Yield (%)"),
+                    ] {
+                        let offset = usize::try_from(offset).expect("visible label");
+                        let label = std::ffi::CStr::from_bytes_until_nul(&text[offset..]).unwrap();
+                        assert_eq!(label.to_bytes(), expected.as_bytes());
+                    }
+                })
+            },
+        )
+        .expect("visible plot");
+}
+
+#[test]
+fn phases_balance_host_tokens_and_native_ids_on_return_and_unwind() {
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    prepare_imgui(&mut imgui);
+    let owner = PlotContext::create(&imgui);
+
+    for panic_in in [None, Some("setup"), Some("drawing")] {
         let frame = imgui.begin_frame();
-        let plot_ui = plot.get_plot_ui(frame.ui());
-        let token = plot_ui
-            .begin_plot("secondary-links")
-            .expect("plot must begin");
-        token.end();
+        let ui = frame.ui();
+        let plots = owner.get_plot_ui(ui);
+        let depths = || {
+            ui.with_bound_context(|| unsafe {
+                let window = &*dear_imgui_rs::sys::igGetCurrentWindowRead();
+                (window.IDStack.Size, (*window.DrawList)._ClipRectStack.Size)
+            })
+        };
+        let (ids, clips) = depths();
+        let mut setup_id = None;
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            plots
+                .with_plot_setup(
+                    "phases",
+                    [220.0, 180.0],
+                    |_| {
+                        setup_id = Some(ui.push_id("setup id"));
+                        assert_eq!(depths(), (ids + 1, clips));
+                        if panic_in == Some("setup") {
+                            panic!("leave the setup closure");
+                        }
+                    },
+                    |plot| {
+                        // The setup token has already been balanced. Only ImPlot's item ID is active.
+                        assert_eq!(depths(), (ids + 1, clips));
+                        assert!(
+                            catch_unwind(AssertUnwindSafe(|| plots.with_plot("nested", |_| ())))
+                                .is_err()
+                        );
+                        assert!(
+                            catch_unwind(
+                                AssertUnwindSafe(|| plots.show_metrics_window(&mut false))
+                            )
+                            .is_err()
+                        );
+                        assert!(
+                            catch_unwind(AssertUnwindSafe(|| plots.show_demo_window(&mut false)))
+                                .is_err()
+                        );
+                        plot.with_plot_clip_rect(0.0, || {
+                            assert_eq!(depths(), (ids + 1, clips + 1));
+                            std::mem::forget(ui.push_id("nested id"));
+                            if panic_in == Some("drawing") {
+                                panic!("leave the drawing closure");
+                            }
+                        });
+                        assert_eq!(depths(), (ids + 1, clips));
+                    },
+                )
+                .expect("visible plot");
+        }));
+        assert_eq!(result.is_err(), panic_in.is_some());
+        assert_eq!(depths(), (ids, clips));
+        drop(setup_id);
+        assert_eq!(depths(), (ids, clips));
+        assert!(unsafe { (*owner.raw()).CurrentPlot.is_null() });
     }
-    drop(plot);
-    // A disabled Y2 must not write its old limits back through retained pointers.
-    assert_eq!((min, max), (11.0, 13.0));
+}
+
+#[test]
+fn clipped_plot_skips_both_phases_and_leaves_the_context_ready() {
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    prepare_imgui(&mut imgui);
+    let owner = PlotContext::create(&imgui);
+    let frame = imgui.begin_frame();
+    let ui = frame.ui();
+    ui.window("clipped plot host")
+        .size([320.0, 320.0], dear_imgui_rs::Condition::Always)
+        .build(|| {
+            let plots = owner.get_plot_ui(ui);
+            let clip = ui.push_clip_rect([0.0; 2], [0.0; 2], true);
+            let skipped: Option<()> = plots.with_plot_setup(
+                "clipped",
+                [160.0, 60.0],
+                |_| panic!("clipped setup"),
+                |_| panic!("clipped draw"),
+            );
+            assert!(skipped.is_none());
+            drop(clip);
+            assert!(unsafe { (*owner.raw()).CurrentPlot.is_null() });
+            assert_eq!(
+                plots.with_plot_size("visible", [160.0, 60.0], |_| 7),
+                Some(7)
+            );
+        })
+        .unwrap();
+}
+
+#[test]
+fn implicit_axes_follow_the_current_pair_and_secondary_axes_require_setup() {
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    prepare_imgui(&mut imgui);
+    let owner = PlotContext::create(&imgui);
+    let frame = imgui.begin_frame();
+    let plots = owner.get_plot_ui(frame.ui());
+    plots.set_next_x_axis_limits(XAxis::X2, 10.0, 20.0, PlotCond::Always);
+    plots
+        .with_plot_setup(
+            "axes",
+            [240.0, 180.0],
+            |setup| {
+                assert!(
+                    catch_unwind(AssertUnwindSafe(|| setup.setup_y_axis_limits(
+                        YAxis::Y2,
+                        2.0,
+                        4.0,
+                        PlotCond::Always
+                    )))
+                    .is_err()
+                );
+                setup.setup_x_axis(XAxis::X2, None, crate::AxisFlags::NONE);
+                setup.setup_y_axis(YAxis::Y2, None, crate::AxisFlags::NONE);
+                setup.setup_y_axis_limits(YAxis::Y2, 30.0, 40.0, PlotCond::Always);
+            },
+            |plot| {
+                plot.set_axes(XAxis::X2, YAxis::Y2);
+                let limits = plot.plot_limits(None, None);
+                assert_eq!(
+                    (limits.X.Min, limits.X.Max, limits.Y.Min, limits.Y.Max),
+                    (10.0, 20.0, 30.0, 40.0)
+                );
+                let point = sys::ImPlotPoint { x: 17.0, y: 36.0 };
+                let pixels = plot.plot_to_pixels(point, None);
+                assert_eq!(
+                    pixels,
+                    plot.plot_to_pixels_axes(point, XAxis::X2, YAxis::Y2)
+                );
+                let recovered = plot.pixels_to_plot(pixels, None);
+                assert!(
+                    (recovered.x - point.x).abs() < 0.001 && (recovered.y - point.y).abs() < 0.001
+                );
+                assert!(
+                    catch_unwind(AssertUnwindSafe(|| plot.set_axes(XAxis::X3, YAxis::Y1))).is_err()
+                );
+            },
+        )
+        .expect("visible plot");
 }

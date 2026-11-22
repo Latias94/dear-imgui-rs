@@ -122,11 +122,12 @@ impl<'a> HistogramPlot<'a> {
         Ok((range, bins))
     }
 
-    pub(super) fn plot_checked(&self, plot_ui: &crate::PlotUi<'_>) -> Result<(), PlotError> {
+    pub(super) fn plot_checked(&self, plot_ui: &crate::PlotScope<'_>) -> Result<(), PlotError> {
         let (range, bins) = self.bin_axis()?;
         plot_ui.with_bound_context(|| {
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     PlotDataLayout::DEFAULT,
@@ -147,7 +148,7 @@ impl<'a> HistogramPlot<'a> {
 }
 
 impl Plot for HistogramPlot<'_> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
         let _ = self.plot_checked(plot_ui);
     }
 
@@ -294,11 +295,12 @@ impl<'a> Histogram2DPlot<'a> {
         ))
     }
 
-    fn plot_checked(&self, plot_ui: &crate::PlotUi<'_>) -> Result<(), PlotError> {
+    fn plot_checked(&self, plot_ui: &crate::PlotScope<'_>) -> Result<(), PlotError> {
         let (range, x_bins, y_bins) = self.bin_grid()?;
         plot_ui.with_bound_context(|| {
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     PlotDataLayout::DEFAULT,
@@ -431,7 +433,7 @@ fn scott_bins(values: &[f64], span: f64) -> Result<f64, PlotError> {
 }
 
 impl<'a> Plot for Histogram2DPlot<'a> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
         let _ = self.plot_checked(plot_ui);
     }
 
@@ -441,7 +443,7 @@ impl<'a> Plot for Histogram2DPlot<'a> {
 }
 
 /// Convenience functions for quick histogram plotting
-impl<'ui> crate::PlotUi<'ui> {
+impl<'ui> crate::PlotScope<'ui> {
     /// Plot a 1D histogram with default settings
     pub fn histogram_plot(&self, label: &str, values: &[f64]) -> Result<(), PlotError> {
         HistogramPlot::new(label, values).plot_checked(self)

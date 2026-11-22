@@ -47,14 +47,13 @@ fn public_numeric_format_apis_execute_with_validated_formats() {
         );
 
         let values = [0.0, 0.25, 0.75, 1.0];
-        if let Some(plot_token) = plot_ui.begin_plot("heatmap") {
+        plot_ui.with_plot("heatmap", |plot| {
             HeatmapPlot::new("values", &values, 2, 2)
                 .with_label_format(format.borrowed())
-                .plot(&plot_ui);
+                .plot(plot);
             HeatmapPlot::new("no labels", &values, 2, 2)
                 .without_value_labels()
-                .plot(&plot_ui);
-            plot_token.end();
-        }
+                .plot(plot);
+        });
     });
 }

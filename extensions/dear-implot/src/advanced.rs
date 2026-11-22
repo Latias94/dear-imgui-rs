@@ -3,12 +3,10 @@
 //! This module provides high-level functionality for creating complex plots
 //! with multiple subplots, legends, and advanced layout management.
 
-use crate::context::PlotScopeGuard;
+use crate::context::with_cleanup;
 use crate::{AxisFlags, YAxis, plots::PlotError, sys};
-use crate::{PlotContextBinding, PlotUi};
+use crate::{PlotCond, PlotScope, PlotSetup, PlotUi};
 use std::ffi::CString;
-use std::marker::PhantomData;
-use std::rc::Rc;
 
 fn validate_size(caller: &str, size: [f32; 2]) -> Result<(), PlotError> {
     if size[0].is_finite() && size[1].is_finite() {
@@ -126,46 +124,49 @@ impl<'a> SubplotGrid<'a> {
         self
     }
 
-    /// Begin the subplot grid on a bound ImPlot UI and return a token.
-    pub fn begin<'ui>(self, plot_ui: &'ui PlotUi<'ui>) -> Result<SubplotToken<'ui>, PlotError> {
-        let rows = count_to_i32("SubplotGrid::begin()", "rows", self.rows)?;
-        let cols = count_to_i32("SubplotGrid::begin()", "cols", self.cols)?;
+    /// Draw a grid. Use the supplied plotting UI for its cells and next-plot settings.
+    pub fn build<R>(
+        self,
+        plot_ui: &PlotUi<'_>,
+        draw: impl FnOnce(&PlotUi<'_>) -> R,
+    ) -> Result<R, PlotError> {
+        let rows = count_to_i32("SubplotGrid::build()", "rows", self.rows)?;
+        let cols = count_to_i32("SubplotGrid::build()", "cols", self.cols)?;
         rows.checked_mul(cols).ok_or_else(|| {
             PlotError::InvalidData(
-                "SubplotGrid::begin() rows * cols exceeded ImPlot's i32 range".into(),
+                "SubplotGrid::build() rows * cols exceeded ImPlot's i32 range".into(),
             )
         })?;
         let title_cstr =
             CString::new(self.title).map_err(|e| PlotError::StringConversion(e.to_string()))?;
 
         let size = self.size.unwrap_or([-1.0, -1.0]);
-        validate_size("SubplotGrid::begin()", size)?;
+        validate_size("SubplotGrid::build()", size)?;
         let size_vec = sys::ImVec2_c {
             x: size[0],
             y: size[1],
         };
 
-        // The C API takes `float*` for ratios. Keep owned copies alive in the token to avoid
-        // casting away constness and to stay sound even if the backend ever writes to them.
+        // BeginSubplots reads and writes the ratios during this call.
         let mut row_ratios = self.row_ratios;
         let mut col_ratios = self.col_ratios;
         if let Some(row_ratios) = &row_ratios {
             if row_ratios.len() != self.rows {
                 return Err(PlotError::InvalidData(format!(
-                    "SubplotGrid::begin() row_ratios length must equal rows ({})",
+                    "SubplotGrid::build() row_ratios length must equal rows ({})",
                     self.rows
                 )));
             }
-            validate_ratios("SubplotGrid::begin()", "row_ratios", row_ratios)?;
+            validate_ratios("SubplotGrid::build()", "row_ratios", row_ratios)?;
         }
         if let Some(col_ratios) = &col_ratios {
             if col_ratios.len() != self.cols {
                 return Err(PlotError::InvalidData(format!(
-                    "SubplotGrid::begin() col_ratios length must equal cols ({})",
+                    "SubplotGrid::build() col_ratios length must equal cols ({})",
                     self.cols
                 )));
             }
-            validate_ratios("SubplotGrid::begin()", "col_ratios", col_ratios)?;
+            validate_ratios("SubplotGrid::build()", "col_ratios", col_ratios)?;
         }
         let row_ratios_ptr = row_ratios
             .as_mut()
@@ -176,59 +177,50 @@ impl<'a> SubplotGrid<'a> {
             .map(|c| c.as_mut_ptr())
             .unwrap_or(std::ptr::null_mut());
 
-        plot_ui.with_bound_context(|| {
-            let success = unsafe {
+        plot_ui.with_idle_context(|| ());
+        plot_ui.ui.with_native_window_scope(|host| {
+            let context = plot_ui.context;
+            let started = context.with_bound_context("dear-implot: BeginSubplots", || unsafe {
                 sys::ImPlot_BeginSubplots(
                     title_cstr.as_ptr(),
                     rows,
                     cols,
                     size_vec,
-                    self.flags.bits() as i32,
+                    self.flags.bits() as _,
                     row_ratios_ptr,
                     col_ratios_ptr,
                 )
-            };
-
-            if success {
-                Ok(SubplotToken {
-                    binding: plot_ui.context.binding(),
-                    _title: title_cstr,
-                    _row_ratios: row_ratios,
-                    _col_ratios: col_ratios,
-                    _lifetime: PhantomData,
-                    _not_send_or_sync: PhantomData,
-                })
-            } else {
-                Err(PlotError::PlotCreationFailed(
-                    "Failed to begin subplots".to_string(),
-                ))
+            });
+            if !started {
+                return Err(PlotError::PlotCreationFailed(
+                    "Failed to begin subplots".into(),
+                ));
             }
+            with_cleanup(
+                || {
+                    context.with_bound_context("dear-implot: EndSubplots", || unsafe {
+                        sys::ImPlot_EndSubplots();
+                        // An unfinished grid leaves next-cell links pointing into its row/column vectors.
+                        for axis in [crate::Axis::X1, crate::Axis::Y1] {
+                            sys::ImPlot_SetNextAxisLinks(
+                                axis.to_sys(),
+                                std::ptr::null_mut(),
+                                std::ptr::null_mut(),
+                            );
+                        }
+                    })
+                },
+                || {
+                    Ok(host.run(|| {
+                        draw(&PlotUi {
+                            ui: plot_ui.ui,
+                            context: plot_ui.context,
+                            subplot: Some(host),
+                        })
+                    }))
+                },
+            )
         })
-    }
-}
-
-/// Token representing an active subplot grid
-pub struct SubplotToken<'ui> {
-    binding: PlotContextBinding,
-    _title: CString,
-    _row_ratios: Option<Vec<f32>>,
-    _col_ratios: Option<Vec<f32>>,
-    _lifetime: PhantomData<&'ui PlotUi<'ui>>,
-    _not_send_or_sync: PhantomData<Rc<()>>,
-}
-
-impl SubplotToken<'_> {
-    /// End the subplot grid
-    pub fn end(self) {
-        // The actual ending happens in Drop.
-    }
-}
-
-impl Drop for SubplotToken<'_> {
-    fn drop(&mut self) {
-        let _ = self
-            .binding
-            .try_with_bound_context(|| unsafe { sys::ImPlot_EndSubplots() });
     }
 }
 
@@ -268,11 +260,17 @@ impl<'a> MultiAxisPlot<'a> {
         self
     }
 
-    /// Begin the multi-axis plot on a bound ImPlot UI.
-    pub fn begin<'ui>(self, plot_ui: &'ui PlotUi<'ui>) -> Result<MultiAxisToken<'ui>, PlotError> {
-        let title_cstr =
-            CString::new(self.title).map_err(|e| PlotError::StringConversion(e.to_string()))?;
-
+    /// Set up the configured Y axes and draw a plot.
+    pub fn build<R>(
+        self,
+        plot_ui: &PlotUi<'_>,
+        draw: impl FnOnce(&PlotScope<'_>) -> R,
+    ) -> Result<R, PlotError> {
+        if self.title.contains('\0') {
+            return Err(PlotError::StringConversion(
+                "Plot title contained an interior NUL byte".into(),
+            ));
+        }
         for axis in &self.y_axes {
             if let Some(label) = axis.label
                 && label.contains('\0')
@@ -282,168 +280,81 @@ impl<'a> MultiAxisPlot<'a> {
                 ));
             }
             if let Some((min, max)) = axis.range {
-                validate_range("MultiAxisPlot::begin()", min, max)?;
+                validate_range("MultiAxisPlot::build()", min, max)?;
             }
         }
         if self.y_axes.len() > 3 {
             return Err(PlotError::InvalidData(
-                "MultiAxisPlot::begin() supports at most 3 Y axes".to_string(),
+                "MultiAxisPlot::build() supports at most 3 Y axes".to_string(),
             ));
         }
 
         let size = self.size.unwrap_or([-1.0, -1.0]);
-        validate_size("MultiAxisPlot::begin()", size)?;
-        let size_vec = sys::ImVec2_c {
-            x: size[0],
-            y: size[1],
-        };
-
-        plot_ui.with_bound_context(|| {
-            let success = unsafe { sys::ImPlot_BeginPlot(title_cstr.as_ptr(), size_vec, 0) };
-
-            if success {
-                let mut axis_labels: Vec<CString> = Vec::new();
-
-                // Setup Y-axes (Y1..), matching `token.set_y_axis(YAxis::Y*)` convention.
-                for (i, axis_config) in self.y_axes.iter().enumerate() {
-                    let label_ptr = if let Some(label) = axis_config.label {
-                        let cstr = CString::new(label)
-                            .map_err(|e| PlotError::StringConversion(e.to_string()))?;
-                        let ptr = cstr.as_ptr();
-                        axis_labels.push(cstr);
-                        ptr
-                    } else {
-                        std::ptr::null()
-                    };
-
-                    unsafe {
-                        let axis_enum = (i as i32) + 3; // ImAxis_Y1 = 3
-                        sys::ImPlot_SetupAxis(
-                            axis_enum,
-                            label_ptr,
-                            axis_config.flags.bits() as i32,
-                        );
-
-                        if let Some((min, max)) = axis_config.range {
-                            sys::ImPlot_SetupAxisLimits(axis_enum, min, max, 0);
+        validate_size("MultiAxisPlot::build()", size)?;
+        plot_ui
+            .with_plot_setup(
+                self.title,
+                size,
+                |setup| {
+                    for (axis, config) in [YAxis::Y1, YAxis::Y2, YAxis::Y3]
+                        .into_iter()
+                        .zip(self.y_axes)
+                    {
+                        setup.setup_y_axis(axis, config.label, config.flags);
+                        if let Some((min, max)) = config.range {
+                            setup.setup_y_axis_limits(axis, min, max, PlotCond::None);
                         }
                     }
-                }
-
-                Ok(MultiAxisToken {
-                    binding: plot_ui.context.binding(),
-                    _title: title_cstr,
-                    _axis_labels: axis_labels,
-                    _scope: PlotScopeGuard::new(),
-                    _lifetime: PhantomData,
-                    _not_send_or_sync: PhantomData,
-                })
-            } else {
-                Err(PlotError::PlotCreationFailed(
-                    "Failed to begin multi-axis plot".to_string(),
-                ))
-            }
-        })
+                },
+                draw,
+            )
+            .ok_or_else(|| PlotError::PlotCreationFailed("Failed to begin multi-axis plot".into()))
     }
 }
 
-/// Token representing an active multi-axis plot
-pub struct MultiAxisToken<'ui> {
-    binding: PlotContextBinding,
-    _title: CString,
-    _axis_labels: Vec<CString>,
-    _scope: PlotScopeGuard,
-    _lifetime: PhantomData<&'ui PlotUi<'ui>>,
-    _not_send_or_sync: PhantomData<Rc<()>>,
-}
-
-impl MultiAxisToken<'_> {
-    /// Set the current Y-axis for subsequent plots
-    pub fn set_y_axis(&self, axis: YAxis) {
-        self.binding
-            .with_bound_context("dear-implot: MultiAxisToken", || {
-                unsafe {
-                    sys::ImPlot_SetAxes(
-                        0, // ImAxis_X1
-                        axis as i32,
-                    );
-                }
-            })
-    }
-
-    /// Set the current raw Y-axis for subsequent plots.
-    ///
-    /// # Safety
-    ///
-    /// `axis` must be a valid ImPlot Y-axis value for the active plot. Passing an
-    /// out-of-range value lets ImPlot index internal axis arrays out of bounds.
-    pub unsafe fn set_y_axis_unchecked(&self, axis: sys::ImAxis) {
-        self.binding
-            .with_bound_context("dear-implot: MultiAxisToken", || {
-                unsafe {
-                    sys::ImPlot_SetAxes(
-                        0, // ImAxis_X1
-                        axis,
-                    );
-                }
-            })
-    }
-
-    /// End the multi-axis plot
-    pub fn end(self) {
-        // The actual ending happens in Drop.
-    }
-}
-
-impl Drop for MultiAxisToken<'_> {
-    fn drop(&mut self) {
-        let _ = self
-            .binding
-            .try_with_bound_context(|| unsafe { sys::ImPlot_EndPlot() });
-    }
-}
-
-/// Legend management utilities
+/// Plot legend configuration and popup contents.
 pub struct LegendManager;
 
 impl LegendManager {
-    /// Setup legend with custom position and flags
-    pub fn setup(plot_ui: &PlotUi<'_>, location: LegendLocation, flags: LegendFlags) {
-        plot_ui.with_bound_context(|| unsafe {
-            sys::ImPlot_SetupLegend(location as i32, flags.bits() as i32);
-        })
+    /// Configure the legend during plot setup.
+    pub fn setup(setup: &PlotSetup<'_>, location: LegendLocation, flags: LegendFlags) {
+        setup.plot.with_bound_context(|| unsafe {
+            sys::ImPlot_SetupLegend(location as _, flags.bits() as _)
+        });
     }
 
-    /// Begin a custom legend popup on a bound ImPlot UI.
-    pub fn begin_custom<'ui>(
-        plot_ui: &'ui PlotUi<'ui>,
-        label: &str,
-        _size: [f32; 2],
-    ) -> Result<LegendToken<'ui>, PlotError> {
-        let label_cstr =
-            CString::new(label).map_err(|e| PlotError::StringConversion(e.to_string()))?;
-
-        plot_ui.with_bound_context(|| {
-            let success = unsafe {
-                sys::ImPlot_BeginLegendPopup(
-                    label_cstr.as_ptr(),
-                    1, // mouse button
+    /// Draw the ImGui contents of an open legend entry popup.
+    pub fn with_popup<R>(plot: &PlotScope<'_>, label: &str, draw: impl FnOnce() -> R) -> Option<R> {
+        let label = CString::new(label).ok()?;
+        plot.host.run(|| {
+            let open = plot
+                .with_bound_context(|| unsafe { sys::ImPlot_BeginLegendPopup(label.as_ptr(), 1) });
+            open.then(|| {
+                with_cleanup(
+                    || {
+                        plot.context
+                            .with_bound_context("dear-implot: EndLegendPopup", || unsafe {
+                                sys::ImPlot_EndLegendPopup()
+                            })
+                    },
+                    // BeginLegendPopup switched ImGui to the popup window. Protect that host until its contents end.
+                    || plot.ui.with_native_window_scope(|popup| popup.run(draw)),
                 )
-            };
-
-            if success {
-                Ok(LegendToken {
-                    binding: plot_ui.context.binding(),
-                    _label: label_cstr,
-                    _lifetime: PhantomData,
-                    _not_send_or_sync: PhantomData,
-                })
-            } else {
-                Err(PlotError::PlotCreationFailed(
-                    "Failed to begin legend".to_string(),
-                ))
-            }
+            })
         })
+    }
+}
+
+impl PlotUi<'_> {
+    /// Configure the shared legend between subplot cells.
+    pub fn setup_subplot_legend(&self, location: LegendLocation, flags: LegendFlags) {
+        assert!(
+            self.subplot.is_some(),
+            "subplot legend setup requires a grid"
+        );
+        self.with_bound_context(|| unsafe {
+            sys::ImPlot_SetupLegend(location as _, flags.bits() as _)
+        });
     }
 }
 
@@ -473,29 +384,6 @@ bitflags::bitflags! {
         const HORIZONTAL        = sys::ImPlotLegendFlags_Horizontal as u32;
         const SORT              = sys::ImPlotLegendFlags_Sort as u32;
         const REVERSE           = sys::ImPlotLegendFlags_Reverse as u32;
-    }
-}
-
-/// Token representing an active legend
-pub struct LegendToken<'ui> {
-    binding: PlotContextBinding,
-    _label: CString,
-    _lifetime: PhantomData<&'ui PlotUi<'ui>>,
-    _not_send_or_sync: PhantomData<Rc<()>>,
-}
-
-impl LegendToken<'_> {
-    /// End the legend
-    pub fn end(self) {
-        // The actual ending happens in Drop.
-    }
-}
-
-impl Drop for LegendToken<'_> {
-    fn drop(&mut self) {
-        let _ = self
-            .binding
-            .try_with_bound_context(|| unsafe { sys::ImPlot_EndLegendPopup() });
     }
 }
 
@@ -533,10 +421,10 @@ mod tests {
         }
     }
 
-    fn expect_invalid_data(result: Result<super::SubplotToken<'_>, PlotError>) -> String {
+    fn expect_invalid_data(result: Result<(), PlotError>) -> String {
         match result {
             Err(err) => invalid_data_message(err),
-            Ok(_) => panic!("expected SubplotGrid::begin() to reject invalid input"),
+            Ok(_) => panic!("expected SubplotGrid::build() to reject invalid input"),
         }
     }
 
@@ -571,21 +459,23 @@ mod tests {
         let frame = imgui.begin_frame();
         let plot_ui = plot.get_plot_ui(frame.ui());
         let flags = SubplotFlags::NO_RESIZE | SubplotFlags::LINK_ROWS | SubplotFlags::COLUMN_MAJOR;
-        let _subplot = SubplotGrid::new("flag forwarding", 1, 1)
+        SubplotGrid::new("flag forwarding", 1, 1)
             .with_size([200.0, 180.0])
             .with_flags(flags)
-            .begin(&plot_ui)
+            .build(&plot_ui, |grid| {
+                grid.with_bound_context(|| unsafe {
+                    let subplot = (*sys::ImPlot_GetCurrentContext()).CurrentSubplot;
+                    assert!(!subplot.is_null());
+                    assert_eq!(
+                        (*subplot).Flags,
+                        (sys::ImPlotSubplotFlags_NoResize
+                            | sys::ImPlotSubplotFlags_LinkRows
+                            | sys::ImPlotSubplotFlags_ColMajor)
+                            as sys::ImPlotSubplotFlags
+                    );
+                })
+            })
             .expect("subplot should be visible");
-        plot_ui.with_bound_context(|| unsafe {
-            let subplot = (*sys::ImPlot_GetCurrentContext()).CurrentSubplot;
-            assert!(!subplot.is_null());
-            assert_eq!(
-                (*subplot).Flags,
-                (sys::ImPlotSubplotFlags_NoResize
-                    | sys::ImPlotSubplotFlags_LinkRows
-                    | sys::ImPlotSubplotFlags_ColMajor) as sys::ImPlotSubplotFlags
-            );
-        });
     }
 
     #[test]
@@ -595,19 +485,20 @@ mod tests {
         let frame = imgui.begin_frame();
         let plot_ui = _plot.get_plot_ui(frame.ui());
 
-        let rows = expect_invalid_data(SubplotGrid::new("bad_rows", 0, 1).begin(&plot_ui));
+        let rows = expect_invalid_data(SubplotGrid::new("bad_rows", 0, 1).build(&plot_ui, |_| ()));
         assert!(rows.contains("rows must be positive"));
 
-        let cols = expect_invalid_data(SubplotGrid::new("bad_cols", 1, 0).begin(&plot_ui));
+        let cols = expect_invalid_data(SubplotGrid::new("bad_cols", 1, 0).build(&plot_ui, |_| ()));
         assert!(cols.contains("cols must be positive"));
 
         let overflow = expect_invalid_data(
-            SubplotGrid::new("too_many_rows", i32::MAX as usize + 1, 1).begin(&plot_ui),
+            SubplotGrid::new("too_many_rows", i32::MAX as usize + 1, 1).build(&plot_ui, |_| ()),
         );
         assert!(overflow.contains("rows exceeded"));
 
-        let cells =
-            expect_invalid_data(SubplotGrid::new("too_many_cells", 65_536, 32_768).begin(&plot_ui));
+        let cells = expect_invalid_data(
+            SubplotGrid::new("too_many_cells", 65_536, 32_768).build(&plot_ui, |_| ()),
+        );
         assert!(cells.contains("rows * cols exceeded"));
     }
 
@@ -621,9 +512,46 @@ mod tests {
         let err = expect_invalid_data(
             SubplotGrid::new("bad_ratios", 2usize, 1usize)
                 .with_row_ratios(&[1.0])
-                .begin(&plot_ui),
+                .build(&plot_ui, |_| ()),
         );
 
         assert!(err.contains("row_ratios length must equal rows (2)"));
+    }
+
+    #[test]
+    fn unfinished_grid_clears_cell_links_and_balances_subplot_styles() {
+        let _guard = test_guard();
+        let (mut imgui, owner) = setup_context();
+        let frame = imgui.begin_frame();
+        let plots = owner.get_plot_ui(frame.ui());
+        plots.with_style_var_f32(crate::StyleVar::MinorAlpha, 0.25, || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                SubplotGrid::new("linked grid", 1, 2)
+                    .with_flags(SubplotFlags::LINK_ALL_X | SubplotFlags::LINK_ALL_Y)
+                    .with_size([200.0, 140.0])
+                    .build(&plots, |grid| {
+                        grid.with_plot("cell", |plot| {
+                            plot.plot_line("samples", &[0.0, 1.0], &[1.0, 2.0])
+                        })
+                        .unwrap();
+                        grid.with_bound_context(|| unsafe {
+                            let pending = &(*owner.raw()).NextPlotData;
+                            assert!(!pending.LinkedMin[crate::Axis::X1 as usize].is_null());
+                        });
+                        panic!("leave before opening the second cell");
+                    })
+            }));
+            assert!(result.is_err());
+            plots.with_bound_context(|| unsafe {
+                let ctx = &*owner.raw();
+                assert_eq!(ctx.StyleModifiers.Size, 1);
+                assert_eq!(ctx.ColorModifiers.Size, 0);
+                assert!(ctx.CurrentSubplot.is_null());
+                for axis in [crate::Axis::X1, crate::Axis::Y1] {
+                    assert!(ctx.NextPlotData.LinkedMin[axis as usize].is_null());
+                    assert!(ctx.NextPlotData.LinkedMax[axis as usize].is_null());
+                }
+            });
+        });
     }
 }

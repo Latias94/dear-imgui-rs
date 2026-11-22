@@ -93,7 +93,7 @@ impl<'a> StemPlot<'a> {
 }
 
 impl<'a> Plot for StemPlot<'a> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
         if self.validate().is_err() {
             return;
         }
@@ -104,6 +104,7 @@ impl<'a> Plot for StemPlot<'a> {
         plot_ui.with_bound_context(|| {
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     self.layout,
@@ -190,7 +191,7 @@ impl<'a> SimpleStemPlot<'a> {
 }
 
 impl<'a> Plot for SimpleStemPlot<'a> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
         if self.values.is_empty() {
             return;
         }
@@ -201,6 +202,7 @@ impl<'a> Plot for SimpleStemPlot<'a> {
         plot_ui.with_bound_context(|| {
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     PlotDataLayout::DEFAULT,
@@ -224,7 +226,7 @@ impl<'a> Plot for SimpleStemPlot<'a> {
 }
 
 /// Convenience functions for quick stem plotting
-impl<'ui> crate::PlotUi<'ui> {
+impl<'ui> crate::PlotScope<'ui> {
     /// Plot a stem plot with X and Y data
     pub fn stem_plot(&self, label: &str, x_data: &[f64], y_data: &[f64]) -> Result<(), PlotError> {
         let plot = StemPlot::new(label, x_data, y_data);

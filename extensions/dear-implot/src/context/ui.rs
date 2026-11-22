@@ -1,72 +1,114 @@
 use super::core::PlotContext;
-use super::token::PlotToken;
+use super::scope::{ActivePlot, PlotScope, PlotSetup};
 use super::validation::assert_finite_vec2;
 use crate::{XAxis, YAxis, sys};
-use dear_imgui_rs::{Ui, with_scratch_txt};
+use dear_imgui_rs::{NativeWindowScope, Ui, with_scratch_txt};
 
-/// A temporary reference for building plots
-///
-/// This struct ensures that plots can only be created when both ImGui and ImPlot
-/// contexts are available and properly set up.
+/// A plotting context bound to its Dear ImGui frame, or to a cell in a subplot grid.
 pub struct PlotUi<'ui> {
-    #[allow(dead_code)]
     pub(crate) context: &'ui PlotContext,
-    #[allow(dead_code)]
     pub(crate) ui: &'ui Ui,
+    pub(crate) subplot: Option<&'ui NativeWindowScope<'ui>>,
 }
 
-impl<'ui> PlotUi<'ui> {
-    #[inline]
+impl PlotUi<'_> {
     pub(crate) fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
-        self.context
-            .binding()
-            .with_bound_context("dear-implot: PlotUi", f)
+        self.context.with_ui(self.ui, || {
+            let ctx = unsafe { sys::ImPlot_GetCurrentContext() };
+            assert!(
+                unsafe { (*ctx).CurrentPlot.is_null() },
+                "this operation requires no active plot"
+            );
+            assert_eq!(
+                self.subplot.is_some(),
+                unsafe { !(*ctx).CurrentSubplot.is_null() },
+                "use the PlotUi supplied by the current subplot grid"
+            );
+            if let Some(host) = self.subplot {
+                assert!(
+                    host.is_current(),
+                    "subplot requires its original window and table cell"
+                );
+            }
+            f()
+        })
     }
 
-    /// Begin a new plot with the given title
+    pub(crate) fn with_idle_context<R>(&self, f: impl FnOnce() -> R) -> R {
+        assert!(
+            self.subplot.is_none(),
+            "this operation requires a context outside a subplot grid"
+        );
+        self.with_bound_context(f)
+    }
+
+    /// Draw a plot using its default size. Returns `None` for a skipped plot or a full grid.
+    pub fn with_plot<R>(&self, title: &str, draw: impl FnOnce(&PlotScope<'_>) -> R) -> Option<R> {
+        self.with_plot_size(title, [-1.0, 0.0], draw)
+    }
+
+    /// Draw a plot using a custom size.
+    pub fn with_plot_size<R>(
+        &self,
+        title: &str,
+        size: [f32; 2],
+        draw: impl FnOnce(&PlotScope<'_>) -> R,
+    ) -> Option<R> {
+        self.with_plot_setup(title, size, |_| (), draw)
+    }
+
+    /// Configure axes and the legend before drawing. Both closures are skipped for a clipped plot.
     ///
-    /// Returns a PlotToken if the plot was successfully started.
-    /// The plot will be automatically ended when the token is dropped.
-    pub fn begin_plot(&self, title: &str) -> Option<PlotToken<'_>> {
-        let size = sys::ImVec2_c { x: -1.0, y: 0.0 };
+    /// ImPlot pushes its item ID when setup finishes. The setup closure's window, table and ID
+    /// scopes are balanced before that push. Drawing scopes are balanced before `EndPlot`.
+    ///
+    /// ```compile_fail
+    /// use dear_implot::PlotUi;
+    /// fn escape(ui: &PlotUi<'_>) {
+    ///     let _plot = ui.with_plot("plot", |plot| plot);
+    /// }
+    /// ```
+    pub fn with_plot_setup<R>(
+        &self,
+        title: &str,
+        size: [f32; 2],
+        setup: impl FnOnce(&mut PlotSetup<'_>),
+        draw: impl FnOnce(&PlotScope<'_>) -> R,
+    ) -> Option<R> {
+        assert_finite_vec2("PlotUi::with_plot_setup()", "size", size);
         if title.contains('\0') {
             return None;
         }
-        self.with_bound_context(|| {
-            let started =
-                with_scratch_txt(title, |ptr| unsafe { sys::ImPlot_BeginPlot(ptr, size, 0) });
-
-            if started {
-                Some(PlotToken::new(self.context.binding(), self.ui))
-            } else {
-                None
-            }
-        })
-    }
-
-    /// Begin a plot with custom size
-    pub fn begin_plot_with_size(&self, title: &str, size: [f32; 2]) -> Option<PlotToken<'_>> {
-        assert_finite_vec2("PlotUi::begin_plot_with_size()", "size", size);
-        let plot_size = sys::ImVec2_c {
-            x: size[0],
-            y: size[1],
-        };
-        if title.contains('\0') {
+        let has_cell = self.with_bound_context(|| unsafe {
+            let grid = (*sys::ImPlot_GetCurrentContext()).CurrentSubplot;
+            grid.is_null() || (*grid).CurrentIdx < (*grid).Rows * (*grid).Cols
+        });
+        if !has_cell {
             return None;
         }
-        self.with_bound_context(|| {
-            let started = with_scratch_txt(title, |ptr| unsafe {
-                sys::ImPlot_BeginPlot(ptr, plot_size, 0)
-            });
-
-            if started {
-                Some(PlotToken::new(self.context.binding(), self.ui))
-            } else {
-                None
-            }
+        self.ui.with_native_window_scope(|host| {
+            let size = sys::ImVec2_c {
+                x: size[0],
+                y: size[1],
+            };
+            let raw = self
+                .context
+                .with_bound_context("dear-implot: BeginPlot", || {
+                    with_scratch_txt(title, |ptr| unsafe {
+                        sys::ImPlot_BeginPlot(ptr, size, 0).then(|| sys::ImPlot_GetCurrentPlot())
+                    })
+                })?;
+            let mut active = ActivePlot::new(self, host, raw);
+            host.run(|| setup(&mut active.setup()));
+            active
+                .plot
+                .with_bound_context(|| unsafe { sys::ImPlot_SetupFinish() });
+            Some(host.run(|| draw(&active.plot)))
         })
     }
+}
 
+impl PlotScope<'_> {
     /// Plot a line with the given label and data
     ///
     /// This is a convenience method that can be called within a plot.
@@ -82,7 +124,11 @@ impl<'ui> PlotUi<'ui> {
         let label = if label.contains('\0') { "" } else { label };
         self.with_bound_context(|| {
             with_scratch_txt(label, |ptr| unsafe {
-                let spec = crate::plots::plot_spec_from(0, crate::plots::PlotDataLayout::DEFAULT);
+                let spec = crate::plots::plot_spec_from(
+                    self.next_spec.take(),
+                    0,
+                    crate::plots::PlotDataLayout::DEFAULT,
+                );
                 sys::ImPlot_PlotLine_doublePtrdoublePtr(
                     ptr,
                     x_data.as_ptr(),
@@ -107,7 +153,11 @@ impl<'ui> PlotUi<'ui> {
         let label = if label.contains('\0') { "" } else { label };
         self.with_bound_context(|| {
             with_scratch_txt(label, |ptr| unsafe {
-                let spec = crate::plots::plot_spec_from(0, crate::plots::PlotDataLayout::DEFAULT);
+                let spec = crate::plots::plot_spec_from(
+                    self.next_spec.take(),
+                    0,
+                    crate::plots::PlotDataLayout::DEFAULT,
+                );
                 sys::ImPlot_PlotScatter_doublePtrdoublePtr(
                     ptr,
                     x_data.as_ptr(),
@@ -132,7 +182,11 @@ impl<'ui> PlotUi<'ui> {
         let label = if label.contains('\0') { "" } else { label };
         self.with_bound_context(|| {
             with_scratch_txt(label, |ptr| unsafe {
-                let spec = crate::plots::plot_spec_from(0, crate::plots::PlotDataLayout::DEFAULT);
+                let spec = crate::plots::plot_spec_from(
+                    self.next_spec.take(),
+                    0,
+                    crate::plots::PlotDataLayout::DEFAULT,
+                );
                 sys::ImPlot_PlotPolygon_doublePtr(
                     ptr,
                     x_data.as_ptr(),
@@ -151,25 +205,18 @@ impl<'ui> PlotUi<'ui> {
 
     /// Get the mouse position in plot coordinates
     pub fn get_plot_mouse_pos(&self, y_axis: Option<crate::YAxisChoice>) -> sys::ImPlotPoint {
-        let y_axis_i32 = crate::y_axis_choice_option_to_i32(y_axis);
-        let y_axis = match y_axis_i32 {
-            0 => 3,
-            1 => 4,
-            2 => 5,
-            _ => 3,
-        };
-        self.with_bound_context(|| unsafe { sys::ImPlot_GetPlotMousePos(0, y_axis) })
+        self.plot_mouse_position(y_axis)
     }
 
     /// Get the mouse position in plot coordinates for specific axes
     pub fn get_plot_mouse_pos_axes(&self, x_axis: XAxis, y_axis: YAxis) -> sys::ImPlotPoint {
-        self.with_bound_context(|| unsafe {
-            sys::ImPlot_GetPlotMousePos(x_axis as i32, y_axis as i32)
-        })
+        self.plot_mouse_position_axes(x_axis, y_axis)
     }
 
     /// Set current axes for subsequent plot submissions
     pub fn set_axes(&self, x_axis: XAxis, y_axis: YAxis) {
-        self.with_bound_context(|| unsafe { sys::ImPlot_SetAxes(x_axis as i32, y_axis as i32) })
+        self.with_axes(&[x_axis as _, y_axis as _], || unsafe {
+            sys::ImPlot_SetAxes(x_axis as i32, y_axis as i32)
+        })
     }
 }

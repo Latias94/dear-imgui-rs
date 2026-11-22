@@ -138,7 +138,7 @@ impl<'a> LinePlot<'a> {
 }
 
 impl<'a> Plot for LinePlot<'a> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
         if self.validate().is_err() {
             return; // Skip plotting if data is invalid
         }
@@ -149,6 +149,7 @@ impl<'a> Plot for LinePlot<'a> {
         plot_ui.with_bound_context(|| {
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     self.layout,
@@ -280,7 +281,7 @@ impl<'a> SimpleLinePlot<'a> {
 }
 
 impl<'a> Plot for SimpleLinePlot<'a> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
         if self.values.is_empty() {
             return;
         }
@@ -291,6 +292,7 @@ impl<'a> Plot for SimpleLinePlot<'a> {
         plot_ui.with_bound_context(|| {
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     PlotDataLayout::DEFAULT,
@@ -313,7 +315,7 @@ impl<'a> Plot for SimpleLinePlot<'a> {
 }
 
 /// Convenience functions for quick line plotting
-impl<'ui> crate::PlotUi<'ui> {
+impl<'ui> crate::PlotScope<'ui> {
     /// Plot a line with X and Y data
     pub fn line_plot(&self, label: &str, x_data: &[f64], y_data: &[f64]) -> Result<(), PlotError> {
         let plot = LinePlot::new(label, x_data, y_data);

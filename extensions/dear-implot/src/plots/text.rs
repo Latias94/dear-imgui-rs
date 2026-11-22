@@ -80,7 +80,7 @@ impl<'a> TextPlot<'a> {
     }
 
     /// Plot the text
-    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+    pub fn plot(self, plot_ui: &crate::PlotScope<'_>) {
         let pix_offset = sys::ImVec2_c {
             x: self.pix_offset_x as f32,
             y: self.pix_offset_y as f32,
@@ -88,6 +88,7 @@ impl<'a> TextPlot<'a> {
         plot_ui.with_bound_context(|| {
             let _ = with_plot_str(self.text, |text_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     PlotDataLayout::DEFAULT,
@@ -197,7 +198,7 @@ impl<'a> MultiTextPlot<'a> {
     }
 
     /// Plot all texts
-    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+    pub fn plot(self, plot_ui: &crate::PlotScope<'_>) {
         if self.validate().is_err() {
             return;
         }
@@ -303,7 +304,7 @@ impl FormattedTextPlot {
     }
 
     /// Plot the formatted text
-    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+    pub fn plot(self, plot_ui: &crate::PlotScope<'_>) {
         let pix_offset = sys::ImVec2_c {
             x: self.pix_offset_x as f32,
             y: self.pix_offset_y as f32,
@@ -311,6 +312,7 @@ impl FormattedTextPlot {
         plot_ui.with_bound_context(|| {
             let _ = with_plot_str(&self.text, |text_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     PlotDataLayout::DEFAULT,
@@ -395,7 +397,7 @@ impl<'a> TextAnnotation<'a> {
     }
 
     /// Plot the annotation
-    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+    pub fn plot(self, plot_ui: &crate::PlotScope<'_>) {
         let offset = if self.auto_offset {
             // Simple auto-offset logic - could be enhanced
             (5.0, -5.0)

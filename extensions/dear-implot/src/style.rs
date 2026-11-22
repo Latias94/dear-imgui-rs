@@ -1,11 +1,11 @@
 // Style and theming for plots
 
+use crate::context::with_cleanup;
 use crate::sys;
-use crate::{FloatFormat, PlotContext, PlotContextBinding, PlotUi};
+use crate::{FloatFormat, PlotContext, PlotScope, PlotUi};
 use dear_imgui_rs::{with_scratch_txt, with_scratch_txt_two};
 use std::borrow::Cow;
-use std::marker::PhantomData;
-use std::rc::Rc;
+use std::cell::Cell;
 
 use crate::Colormap;
 
@@ -36,80 +36,6 @@ pub enum StyleVar {
     FitPadding = sys::ImPlotStyleVar_FitPadding as i32,
     DigitalPadding = sys::ImPlotStyleVar_DigitalPadding as i32,
     DigitalSpacing = sys::ImPlotStyleVar_DigitalSpacing as i32,
-}
-
-/// Token for managing style variable changes
-pub struct StyleVarToken<'ui> {
-    binding: PlotContextBinding,
-    was_popped: bool,
-    _lifetime: PhantomData<&'ui PlotUi<'ui>>,
-    _not_send_or_sync: PhantomData<Rc<()>>,
-}
-
-impl StyleVarToken<'_> {
-    /// Pop this style variable from the stack
-    pub fn pop(mut self) {
-        self.pop_inner();
-    }
-
-    fn pop_inner(&mut self) {
-        if self.was_popped {
-            panic!("Attempted to pop an ImPlot style var token twice.");
-        }
-        self.binding
-            .with_bound_context("dear-implot: StyleVarToken", || {
-                unsafe { sys::ImPlot_PopStyleVar(1) };
-            });
-        self.was_popped = true;
-    }
-}
-
-impl Drop for StyleVarToken<'_> {
-    fn drop(&mut self) {
-        if !self.was_popped {
-            let _ = self
-                .binding
-                .try_with_bound_context(|| unsafe { sys::ImPlot_PopStyleVar(1) });
-            self.was_popped = true;
-        }
-    }
-}
-
-/// Token for managing style color changes
-pub struct StyleColorToken<'ui> {
-    binding: PlotContextBinding,
-    was_popped: bool,
-    _lifetime: PhantomData<&'ui PlotUi<'ui>>,
-    _not_send_or_sync: PhantomData<Rc<()>>,
-}
-
-impl StyleColorToken<'_> {
-    /// Pop this style color from the stack
-    pub fn pop(mut self) {
-        self.pop_inner();
-    }
-
-    fn pop_inner(&mut self) {
-        if self.was_popped {
-            panic!("Attempted to pop an ImPlot style color token twice.");
-        }
-        self.binding
-            .with_bound_context("dear-implot: StyleColorToken", || {
-                unsafe { sys::ImPlot_PopStyleColor(1) };
-            });
-        self.was_popped = true;
-    }
-}
-
-impl Drop for StyleColorToken<'_> {
-    fn drop(&mut self) {
-        if !self.was_popped {
-            let _ = self
-                .binding
-                .try_with_bound_context(|| unsafe { sys::ImPlot_PopStyleColor(1) });
-            self.was_popped = true;
-        }
-    }
 }
 
 /// Runtime ImPlot colormap index.
@@ -233,48 +159,10 @@ impl From<usize> for ColormapColorIndex {
     }
 }
 
-/// Token for managing colormap changes.
-#[must_use]
-pub struct ColormapToken<'ui> {
-    binding: PlotContextBinding,
-    was_popped: bool,
-    _lifetime: PhantomData<&'ui PlotUi<'ui>>,
-    _not_send_or_sync: PhantomData<Rc<()>>,
-}
-
-impl ColormapToken<'_> {
-    /// Pop this colormap from the stack.
-    pub fn pop(mut self) {
-        self.pop_inner();
-    }
-
-    fn pop_inner(&mut self) {
-        if self.was_popped {
-            panic!("Attempted to pop an ImPlot colormap token twice.");
-        }
-        self.binding
-            .with_bound_context("dear-implot: ColormapToken", || {
-                unsafe { sys::ImPlot_PopColormap(1) };
-            });
-        self.was_popped = true;
-    }
-}
-
-impl Drop for ColormapToken<'_> {
-    fn drop(&mut self) {
-        if !self.was_popped {
-            let _ = self
-                .binding
-                .try_with_bound_context(|| unsafe { sys::ImPlot_PopColormap(1) });
-            self.was_popped = true;
-        }
-    }
-}
-
 /// One-shot array-backed item style overrides for the next plot submission.
 ///
 /// This mirrors the new per-item array fields added to `ImPlotSpec` without storing
-/// borrowed pointers beyond the closure passed to [`with_next_plot_item_array_style`].
+/// borrowed pointers beyond the closure passed to [`PlotScope::with_next_plot_item_array_style`].
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PlotItemArrayStyle<'a> {
     line_colors: Option<Cow<'a, [u32]>>,
@@ -349,157 +237,154 @@ impl<'a> PlotItemArrayStyle<'a> {
     }
 }
 
-struct ScopedNextPlotItemArrayStyle {
-    previous: Option<sys::ImPlotSpec_c>,
-    active: bool,
-}
-
-impl ScopedNextPlotItemArrayStyle {
-    fn restore_if_unused(&mut self) {
-        if !self.active {
-            return;
-        }
-
-        if crate::plots::take_next_plot_spec().is_some() {
-            crate::plots::set_next_plot_spec(self.previous.take());
-        }
-        self.active = false;
-    }
-}
-
-impl Drop for ScopedNextPlotItemArrayStyle {
-    fn drop(&mut self) {
-        self.restore_if_unused();
-    }
-}
-
-fn with_scoped_next_plot_item_array_style<'a, R>(
-    style: PlotItemArrayStyle<'a>,
-    f: impl FnOnce() -> R,
+fn with_scoped_next_plot_item_array_style<R>(
+    pending: &Cell<Option<sys::ImPlotSpec_c>>,
+    style: PlotItemArrayStyle<'_>,
+    draw: impl FnOnce() -> R,
 ) -> R {
-    let previous = crate::plots::take_next_plot_spec();
+    let previous = pending.get();
     let mut spec = previous.unwrap_or_else(crate::plots::default_plot_spec);
     style.apply_to_spec(&mut spec);
-    crate::plots::set_next_plot_spec(Some(spec));
-
-    let mut guard = ScopedNextPlotItemArrayStyle {
-        previous,
-        active: true,
-    };
-    let out = f();
-    guard.restore_if_unused();
-    out
+    pending.set(Some(spec));
+    with_cleanup(
+        || {
+            if pending.take().is_some() {
+                pending.set(previous);
+            }
+        },
+        draw,
+    )
 }
 
-impl<'ui> PlotUi<'ui> {
-    /// Apply array-backed item styling to the next plot submission executed inside `f`.
-    ///
-    /// This is closure-scoped so borrowed slices stay valid for the entire next plot
-    /// call and are restored even if `f` panics before submitting an item.
+impl PlotScope<'_> {
+    /// Apply array-backed styling to the next item in this plot within `draw`.
     ///
     /// # Safety
-    ///
-    /// Every non-empty style array must contain enough elements for every index the submitted plot
-    /// may read. Upstream accepts only pointers and carries no array lengths, so this cannot be
-    /// validated by the wrapper.
-    pub unsafe fn with_next_plot_item_array_style<'a, R>(
+    /// Every supplied array must cover every index its item may read. ImPlot's item ABI
+    /// only carries pointers and does not report the required array length.
+    pub unsafe fn with_next_plot_item_array_style<R>(
         &self,
-        style: PlotItemArrayStyle<'a>,
-        f: impl FnOnce(&PlotUi<'ui>) -> R,
+        style: PlotItemArrayStyle<'_>,
+        draw: impl FnOnce(&Self) -> R,
     ) -> R {
-        self.with_bound_context(|| with_scoped_next_plot_item_array_style(style, || f(self)))
+        self.with_bound_context(|| ());
+        with_scoped_next_plot_item_array_style(&self.next_spec, style, || draw(self))
     }
 
-    /// Push a float style variable to this ImPlot context's stack.
-    pub fn push_style_var_f32(&self, var: StyleVar, value: f32) -> StyleVarToken<'_> {
-        self.with_bound_context(|| {
-            unsafe {
-                sys::ImPlot_PushStyleVar_Float(var as sys::ImPlotStyleVar, value);
-            }
-            StyleVarToken {
-                binding: self.context.binding(),
-                was_popped: false,
-                _lifetime: PhantomData,
-                _not_send_or_sync: PhantomData,
-            }
+    /// Read the next color from the active item group and advance its cursor.
+    pub fn next_colormap_color(&self) -> [f32; 4] {
+        self.with_bound_context(|| unsafe {
+            let out = sys::ImPlot_NextColormapColor();
+            [out.x, out.y, out.z, out.w]
         })
     }
+}
 
-    /// Push a Vec2 style variable to this ImPlot context's stack.
-    pub fn push_style_var_vec2(&self, var: StyleVar, value: [f32; 2]) -> StyleVarToken<'_> {
-        self.with_bound_context(|| {
-            unsafe {
-                sys::ImPlot_PushStyleVar_Vec2(
-                    var as sys::ImPlotStyleVar,
-                    sys::ImVec2_c {
-                        x: value[0],
-                        y: value[1],
-                    },
-                );
-            }
-            StyleVarToken {
-                binding: self.context.binding(),
-                was_popped: false,
-                _lifetime: PhantomData,
-                _not_send_or_sync: PhantomData,
-            }
-        })
+impl StyleVar {
+    fn is_scalar(self) -> bool {
+        matches!(
+            self,
+            Self::PlotBorderSize | Self::MinorAlpha | Self::DigitalPadding | Self::DigitalSpacing
+        )
+    }
+}
+
+impl PlotUi<'_> {
+    // ImPlot's style stacks belong to the context. Keep the scope lexical across plots and
+    // subplot-owned modifiers, and bind only for the two native calls.
+    fn with_style<R>(
+        &self,
+        push: impl FnOnce(),
+        pop: impl FnOnce(),
+        draw: impl FnOnce() -> R,
+    ) -> R {
+        self.context
+            .with_bound_context("dear-implot: push style", push);
+        with_cleanup(
+            || {
+                self.context
+                    .with_bound_context("dear-implot: pop style", pop)
+            },
+            draw,
+        )
     }
 
-    /// Push a style color to this ImPlot context's stack.
-    pub fn push_style_color(
+    /// Use a scalar style variable while drawing.
+    pub fn with_style_var_f32<R>(&self, var: StyleVar, value: f32, draw: impl FnOnce() -> R) -> R {
+        assert!(var.is_scalar(), "this style variable requires a Vec2");
+        self.with_style(
+            || unsafe { sys::ImPlot_PushStyleVar_Float(var as _, value) },
+            || unsafe { sys::ImPlot_PopStyleVar(1) },
+            draw,
+        )
+    }
+
+    /// Use a two-component style variable while drawing.
+    pub fn with_style_var_vec2<R>(
+        &self,
+        var: StyleVar,
+        value: [f32; 2],
+        draw: impl FnOnce() -> R,
+    ) -> R {
+        assert!(!var.is_scalar(), "this style variable requires a scalar");
+        let value = sys::ImVec2_c {
+            x: value[0],
+            y: value[1],
+        };
+        self.with_style(
+            || unsafe { sys::ImPlot_PushStyleVar_Vec2(var as _, value) },
+            || unsafe { sys::ImPlot_PopStyleVar(1) },
+            draw,
+        )
+    }
+
+    /// Use a style color while drawing.
+    pub fn with_style_color<R>(
         &self,
         element: crate::PlotColorElement,
         color: [f32; 4],
-    ) -> StyleColorToken<'_> {
-        self.with_bound_context(|| {
-            unsafe {
-                // Convert color to ImU32 format (RGBA).
-                let r = (color[0] * 255.0) as u32;
-                let g = (color[1] * 255.0) as u32;
-                let b = (color[2] * 255.0) as u32;
-                let a = (color[3] * 255.0) as u32;
-                let color_u32 = (a << 24) | (b << 16) | (g << 8) | r;
-
-                sys::ImPlot_PushStyleColor_U32(element as sys::ImPlotCol, color_u32);
-            }
-            StyleColorToken {
-                binding: self.context.binding(),
-                was_popped: false,
-                _lifetime: PhantomData,
-                _not_send_or_sync: PhantomData,
-            }
-        })
+        draw: impl FnOnce() -> R,
+    ) -> R {
+        let value = sys::ImVec4_c {
+            x: color[0],
+            y: color[1],
+            z: color[2],
+            w: color[3],
+        };
+        self.with_style(
+            || unsafe { sys::ImPlot_PushStyleColor_Vec4(element as _, value) },
+            || unsafe { sys::ImPlot_PopStyleColor(1) },
+            draw,
+        )
     }
 
-    /// Push a colormap to this ImPlot context's stack.
-    pub fn push_colormap(&self, cmap: impl Into<ColormapIndex>) -> ColormapToken<'_> {
-        self.with_bound_context(|| {
-            unsafe {
-                sys::ImPlot_PushColormap_PlotColormap(cmap.into().raw());
-            }
-            ColormapToken {
-                binding: self.context.binding(),
-                was_popped: false,
-                _lifetime: PhantomData,
-                _not_send_or_sync: PhantomData,
-            }
-        })
+    /// Select a registered colormap while drawing.
+    pub fn with_colormap<R>(&self, cmap: impl Into<ColormapIndex>, draw: impl FnOnce() -> R) -> R {
+        let cmap = cmap.into().raw();
+        self.with_style(
+            || unsafe { sys::ImPlot_PushColormap_PlotColormap(checked_colormap(cmap)) },
+            || unsafe { sys::ImPlot_PopColormap(1) },
+            draw,
+        )
     }
 
-    /// Push a colormap by name to this ImPlot context's stack.
-    pub fn push_colormap_name(&self, name: &str) -> ColormapToken<'_> {
-        assert!(!name.contains('\0'), "colormap name contained NUL");
-        self.with_bound_context(|| {
-            with_scratch_txt(name, |ptr| unsafe { sys::ImPlot_PushColormap_Str(ptr) });
-            ColormapToken {
-                binding: self.context.binding(),
-                was_popped: false,
-                _lifetime: PhantomData,
-                _not_send_or_sync: PhantomData,
-            }
-        })
+    /// Select a registered colormap by name while drawing.
+    pub fn with_colormap_name<R>(&self, name: &str, draw: impl FnOnce() -> R) -> R {
+        let index = self
+            .context
+            .colormap_index_by_name(name)
+            .expect("unknown colormap name");
+        self.with_colormap(index, draw)
     }
+}
+
+// The caller has bound the owning ImPlot context. IMPLOT_AUTO selects its current style.
+fn checked_colormap(raw: i32) -> i32 {
+    assert!(
+        raw == crate::IMPLOT_AUTO || (0..unsafe { sys::ImPlot_GetColormapCount() }).contains(&raw),
+        "colormap is not registered in this context"
+    );
+    raw
 }
 
 fn colormap_count_from_i32(raw: i32, caller: &str) -> usize {
@@ -514,12 +399,24 @@ fn assert_colormap_sample_t(t: f32) {
     );
 }
 
-impl PlotContext {
-    #[inline]
-    fn with_bound_style<R>(&self, caller: &str, f: impl FnOnce() -> R) -> R {
-        self.binding().with_bound_context(caller, || f())
+// ImPlot::LerpTable computes its last lookup with f32 arithmetic before indexing an ImVector.
+fn colormap_table_size(count: i32, qualitative: bool) -> i64 {
+    if qualitative {
+        assert!(
+            (count as f32) as i64 <= i64::from(i32::MAX),
+            "colormap lookup exceeds ImPlot's index range"
+        );
+        return i64::from(count);
     }
+    let last = 255 * (i64::from(count) - 1);
+    assert!(
+        ((last as f32 + 0.5) as i64) <= last,
+        "colormap endpoint rounds past its interpolation table"
+    );
+    last + 1
+}
 
+impl PlotContext {
     /// Add a custom colormap from colors. The colors are copied by ImPlot.
     pub fn add_colormap(
         &self,
@@ -540,17 +437,28 @@ impl PlotContext {
             "colormap colors must be finite"
         );
         let count = i32::try_from(colors.len()).expect("colormap contained too many colors");
-        let colors: Vec<sys::ImVec4> = colors
-            .iter()
-            .map(|color| sys::ImVec4 {
-                x: color[0],
-                y: color[1],
-                z: color[2],
-                w: color[3],
-            })
-            .collect();
-        let index = self.with_bound_style("dear-implot: PlotContext::add_colormap()", || {
+        let index = self.with_bound_context("dear-implot: PlotContext::add_colormap()", || {
+            let table_size = colormap_table_size(count, qualitative);
+            let data = unsafe { &(*sys::ImPlot_GetCurrentContext()).ColormapData };
+            assert!(
+                i64::from(data.Tables.Size) + table_size <= i64::from(i32::MAX)
+                    && data.Keys.Size.checked_add(count).is_some(),
+                "colormap exceeds ImPlot's index range"
+            );
             with_scratch_txt(name, |ptr| unsafe {
+                assert!(
+                    sys::ImPlot_GetColormapIndex(ptr) < 0,
+                    "colormap name is already registered"
+                );
+                let colors: Vec<sys::ImVec4> = colors
+                    .iter()
+                    .map(|color| sys::ImVec4 {
+                        x: color[0],
+                        y: color[1],
+                        z: color[2],
+                        w: color[3],
+                    })
+                    .collect();
                 sys::ImPlot_AddColormap_Vec4Ptr(ptr, colors.as_ptr(), count, qualitative)
             })
         });
@@ -559,7 +467,7 @@ impl PlotContext {
 
     /// Return the number of available colormaps.
     pub fn colormap_count(&self) -> usize {
-        self.with_bound_style("dear-implot: PlotContext::colormap_count()", || {
+        self.with_bound_context("dear-implot: PlotContext::colormap_count()", || {
             colormap_count_from_i32(
                 unsafe { sys::ImPlot_GetColormapCount() },
                 "PlotContext::colormap_count()",
@@ -569,7 +477,7 @@ impl PlotContext {
 
     /// Return a colormap name, or an empty string if the index is invalid for this context.
     pub fn colormap_name(&self, index: impl Into<ColormapIndex>) -> String {
-        self.with_bound_style("dear-implot: PlotContext::colormap_name()", || unsafe {
+        self.with_bound_context("dear-implot: PlotContext::colormap_name()", || unsafe {
             let p = sys::ImPlot_GetColormapName(index.into().raw());
             if p.is_null() {
                 return String::new();
@@ -584,7 +492,7 @@ impl PlotContext {
             return None;
         }
         let index = self
-            .with_bound_style("dear-implot: PlotContext::colormap_index_by_name()", || {
+            .with_bound_context("dear-implot: PlotContext::colormap_index_by_name()", || {
                 with_scratch_txt(name, |ptr| unsafe { sys::ImPlot_GetColormapIndex(ptr) })
             });
         ColormapIndex::from_raw(index)
@@ -592,9 +500,9 @@ impl PlotContext {
 
     /// Return the number of color entries in a colormap.
     pub fn colormap_size(&self, index: impl Into<ColormapIndex>) -> usize {
-        self.with_bound_style("dear-implot: PlotContext::colormap_size()", || {
+        self.with_bound_context("dear-implot: PlotContext::colormap_size()", || {
             colormap_count_from_i32(
-                unsafe { sys::ImPlot_GetColormapSize(index.into().raw()) },
+                unsafe { sys::ImPlot_GetColormapSize(checked_colormap(index.into().raw())) },
                 "PlotContext::colormap_size()",
             )
         })
@@ -602,7 +510,7 @@ impl PlotContext {
 
     /// Return the default colormap stored in this ImPlot context's style.
     pub fn style_colormap_index(&self) -> Option<ColormapIndex> {
-        self.with_bound_style(
+        self.with_bound_context(
             "dear-implot: PlotContext::style_colormap_index()",
             || unsafe {
                 let style = sys::ImPlot_GetStyle();
@@ -626,7 +534,7 @@ impl PlotContext {
 
     /// Permanently set the default colormap used by this ImPlot context.
     pub fn set_style_colormap(&self, index: impl Into<ColormapIndex>) {
-        self.with_bound_style(
+        self.with_bound_context(
             "dear-implot: PlotContext::set_style_colormap()",
             || unsafe {
                 let style = sys::ImPlot_GetStyle();
@@ -654,7 +562,7 @@ impl PlotContext {
 
     /// Return a color from this context's active colormap.
     pub fn colormap_color(&self, index: ColormapColorIndex) -> [f32; 4] {
-        self.with_bound_style("dear-implot: PlotContext::colormap_color()", || unsafe {
+        self.with_bound_context("dear-implot: PlotContext::colormap_color()", || unsafe {
             let out = sys::ImPlot_GetColormapColor(index.raw(), crate::IMPLOT_AUTO);
             [out.x, out.y, out.z, out.w]
         })
@@ -666,10 +574,11 @@ impl PlotContext {
         index: ColormapColorIndex,
         cmap: impl Into<ColormapIndex>,
     ) -> [f32; 4] {
-        self.with_bound_style(
+        self.with_bound_context(
             "dear-implot: PlotContext::colormap_color_from()",
             || unsafe {
-                let out = sys::ImPlot_GetColormapColor(index.raw(), cmap.into().raw());
+                let out =
+                    sys::ImPlot_GetColormapColor(index.raw(), checked_colormap(cmap.into().raw()));
                 [out.x, out.y, out.z, out.w]
             },
         )
@@ -678,7 +587,7 @@ impl PlotContext {
     /// Sample this context's active colormap at `t` in `[0, 1]`.
     pub fn sample_colormap(&self, t: f32) -> [f32; 4] {
         assert_colormap_sample_t(t);
-        self.with_bound_style("dear-implot: PlotContext::sample_colormap()", || unsafe {
+        self.with_bound_context("dear-implot: PlotContext::sample_colormap()", || unsafe {
             let out = sys::ImPlot_SampleColormap(t, crate::IMPLOT_AUTO);
             [out.x, out.y, out.z, out.w]
         })
@@ -687,21 +596,10 @@ impl PlotContext {
     /// Sample a selected colormap at `t` in `[0, 1]`.
     pub fn sample_colormap_from(&self, t: f32, cmap: impl Into<ColormapSelection>) -> [f32; 4] {
         assert_colormap_sample_t(t);
-        self.with_bound_style(
+        self.with_bound_context(
             "dear-implot: PlotContext::sample_colormap_from()",
             || unsafe {
-                let out = sys::ImPlot_SampleColormap(t, cmap.into().raw());
-                [out.x, out.y, out.z, out.w]
-            },
-        )
-    }
-
-    /// Return the next color from this context's current colormap and advance its color cursor.
-    pub fn next_colormap_color(&self) -> [f32; 4] {
-        self.with_bound_style(
-            "dear-implot: PlotContext::next_colormap_color()",
-            || unsafe {
-                let out = sys::ImPlot_NextColormapColor();
+                let out = sys::ImPlot_SampleColormap(t, checked_colormap(cmap.into().raw()));
                 [out.x, out.y, out.z, out.w]
             },
         )
@@ -709,14 +607,14 @@ impl PlotContext {
 
     /// Map this context's input scheme to ImPlot defaults.
     pub fn map_input_default(&self) {
-        self.with_bound_style("dear-implot: PlotContext::map_input_default()", || unsafe {
+        self.with_bound_context("dear-implot: PlotContext::map_input_default()", || unsafe {
             sys::ImPlot_MapInputDefault(sys::ImPlot_GetInputMap())
         })
     }
 
     /// Map this context's input scheme to ImPlot's reversed scheme.
     pub fn map_input_reverse(&self) {
-        self.with_bound_style("dear-implot: PlotContext::map_input_reverse()", || unsafe {
+        self.with_bound_context("dear-implot: PlotContext::map_input_reverse()", || unsafe {
             sys::ImPlot_MapInputReverse(sys::ImPlot_GetInputMap())
         })
     }
@@ -725,7 +623,7 @@ impl PlotContext {
 impl PlotUi<'_> {
     /// Show the ImPlot style editor window for this context.
     pub fn show_style_editor(&self) {
-        self.with_bound_context(|| unsafe { sys::ImPlot_ShowStyleEditor(std::ptr::null_mut()) })
+        self.with_idle_context(|| unsafe { sys::ImPlot_ShowStyleEditor(std::ptr::null_mut()) })
     }
 
     /// Show the ImPlot style selector combo; returns true if selection changed.
@@ -739,7 +637,7 @@ impl PlotUi<'_> {
     /// Show the ImPlot colormap selector combo; returns true if selection changed.
     pub fn show_colormap_selector(&self, label: &str) -> bool {
         let label = if label.contains('\0') { "" } else { label };
-        self.with_bound_context(|| {
+        self.with_idle_context(|| {
             with_scratch_txt(label, |ptr| unsafe {
                 sys::ImPlot_ShowColormapSelector(ptr)
             })
@@ -818,6 +716,7 @@ impl PlotUi<'_> {
         let flags = sys::ImPlotColormapScaleFlags_None as sys::ImPlotColormapScaleFlags;
         let cmap = cmap.raw();
         self.with_bound_context(|| {
+            let cmap = checked_colormap(cmap);
             with_scratch_txt_two(label, format, |label_ptr, format_ptr| unsafe {
                 sys::ImPlot_ColormapScale(
                     label_ptr, scale_min, scale_max, size, format_ptr, flags, cmap,
@@ -879,6 +778,7 @@ impl PlotUi<'_> {
         };
 
         self.with_bound_context(|| {
+            let cmap = checked_colormap(cmap);
             let changed = with_scratch_txt_two(label, format, |label_ptr, format_ptr| unsafe {
                 sys::ImPlot_ColormapSlider(label_ptr, t as *mut f32, out_ptr, format_ptr, cmap)
             });
@@ -909,7 +809,7 @@ impl PlotUi<'_> {
         let cmap = cmap.into().raw();
         self.with_bound_context(|| {
             with_scratch_txt(label, |ptr| unsafe {
-                sys::ImPlot_ColormapButton(ptr, sz, cmap)
+                sys::ImPlot_ColormapButton(ptr, sz, checked_colormap(cmap))
             })
         })
     }
@@ -921,9 +821,14 @@ mod tests {
         Colormap, ColormapColorIndex, ColormapIndex, ColormapSelection, PlotItemArrayStyle,
         with_scoped_next_plot_item_array_style,
     };
-    use crate::plots::{
-        PlotDataLayout, PlotDataOffset, PlotDataStride, set_next_plot_spec, take_next_plot_spec,
-    };
+    use crate::plots::{PlotDataLayout, PlotDataOffset, PlotDataStride};
+
+    #[test]
+    fn colormap_table_endpoints_fit_the_native_lookup() {
+        assert_eq!(super::colormap_table_size(3, false), 511);
+        assert_eq!(super::colormap_table_size(32_900, true), 32_900);
+        assert!(std::panic::catch_unwind(|| super::colormap_table_size(32_900, false)).is_err());
+    }
 
     #[test]
     fn colormap_indices_reject_negative_values() {
@@ -966,11 +871,13 @@ mod tests {
 
     #[test]
     fn next_plot_item_array_style_is_consumed_by_next_spec() {
+        let pending = std::cell::Cell::new(None);
         let line_colors = [0x01020304u32, 0x05060708];
         let fill_colors = [0x11121314u32];
         let marker_sizes = [2.0f32, 4.0, 8.0];
 
         with_scoped_next_plot_item_array_style(
+            &pending,
             PlotItemArrayStyle::new()
                 .with_line_colors(&line_colors)
                 .with_fill_colors(&fill_colors)
@@ -978,7 +885,7 @@ mod tests {
             || {
                 let layout =
                     PlotDataLayout::new(PlotDataOffset::samples(3), PlotDataStride::bytes(16));
-                let spec = crate::plots::plot_spec_from(7, layout);
+                let spec = crate::plots::plot_spec_from(pending.take(), 7, layout);
                 assert_eq!(spec.Flags, 7);
                 assert_eq!(spec.Offset, 3);
                 assert_eq!(spec.Stride, 16);
@@ -988,7 +895,7 @@ mod tests {
             },
         );
 
-        let spec = crate::plots::plot_spec_from(0, PlotDataLayout::DEFAULT);
+        let spec = crate::plots::plot_spec_from(pending.take(), 0, PlotDataLayout::DEFAULT);
         assert!(spec.LineColors.is_null());
         assert!(spec.FillColors.is_null());
         assert!(spec.MarkerSizes.is_null());
@@ -996,30 +903,33 @@ mod tests {
 
     #[test]
     fn next_plot_item_array_style_is_restored_if_unused() {
+        let pending = std::cell::Cell::new(None);
         let line_colors = [0xAABBCCDDu32];
 
         with_scoped_next_plot_item_array_style(
+            &pending,
             PlotItemArrayStyle::new().with_line_colors(&line_colors),
             || {},
         );
 
-        let spec = crate::plots::plot_spec_from(0, PlotDataLayout::DEFAULT);
+        let spec = crate::plots::plot_spec_from(pending.take(), 0, PlotDataLayout::DEFAULT);
         assert!(spec.LineColors.is_null());
     }
 
     #[test]
     fn next_plot_item_array_style_is_restored_if_closure_panics() {
-        set_next_plot_spec(None);
+        let pending = std::cell::Cell::new(None);
         let line_colors = [0xAABBCCDDu32];
 
-        let result = std::panic::catch_unwind(|| {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             with_scoped_next_plot_item_array_style(
+                &pending,
                 PlotItemArrayStyle::new().with_line_colors(&line_colors),
                 || panic!("boom"),
             );
-        });
+        }));
 
         assert!(result.is_err());
-        assert!(take_next_plot_spec().is_none());
+        assert!(pending.take().is_none());
     }
 }

@@ -85,7 +85,7 @@ impl<'a> InfLinesPlot<'a> {
 }
 
 impl<'a> Plot for InfLinesPlot<'a> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
         if self.validate().is_err() {
             return;
         }
@@ -95,6 +95,7 @@ impl<'a> Plot for InfLinesPlot<'a> {
         plot_ui.with_bound_context(|| {
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     self.layout,
@@ -110,7 +111,7 @@ impl<'a> Plot for InfLinesPlot<'a> {
 }
 
 /// Convenience functions for quick inf-lines plotting
-impl<'ui> crate::PlotUi<'ui> {
+impl<'ui> crate::PlotScope<'ui> {
     /// Plot vertical infinite lines at given x positions
     pub fn inf_lines_vertical(&self, label: &str, xs: &[f64]) -> Result<(), PlotError> {
         let plot = InfLinesPlot::new(label, xs);

@@ -1,71 +1,62 @@
-use super::ui::PlotUi;
 use super::validation::{
     assert_axis_constraint_range, assert_axis_limit_range, assert_axis_zoom_range,
     assert_finite_f64_slice, axis_tick_count_to_i32,
 };
+use super::{PlotSetup, PlotUi};
 use crate::{Axis, AxisFlags, AxisFormat, PlotCond, XAxis, YAxis, sys};
-use dear_imgui_rs::{with_scratch_txt, with_scratch_txt_slice, with_scratch_txt_two};
+use dear_imgui_rs::with_scratch_txt;
 use std::os::raw::c_char;
 
-impl<'ui> PlotUi<'ui> {
-    /// Setup a specific X axis
+impl PlotSetup<'_> {
+    /// Enable and label an X axis.
     pub fn setup_x_axis(&self, axis: XAxis, label: Option<&str>, flags: AxisFlags) {
-        self.with_bound_context(|| {
-            let label = label.filter(|s| !s.contains('\0'));
-            match label {
-                Some(label) => with_scratch_txt(label, |ptr| unsafe {
-                    sys::ImPlot_SetupAxis(
-                        axis as sys::ImAxis,
-                        ptr,
-                        flags.bits() as sys::ImPlotAxisFlags,
-                    )
-                }),
-                None => unsafe {
-                    sys::ImPlot_SetupAxis(
-                        axis as sys::ImAxis,
-                        std::ptr::null(),
-                        flags.bits() as sys::ImPlotAxisFlags,
-                    )
-                },
-            }
-        })
+        self.setup_axis(axis.into(), label, flags);
     }
 
-    /// Setup a specific Y axis
+    /// Enable and label a Y axis.
     pub fn setup_y_axis(&self, axis: YAxis, label: Option<&str>, flags: AxisFlags) {
-        self.with_bound_context(|| {
-            let label = label.filter(|s| !s.contains('\0'));
-            match label {
-                Some(label) => with_scratch_txt(label, |ptr| unsafe {
-                    sys::ImPlot_SetupAxis(
-                        axis as sys::ImAxis,
-                        ptr,
-                        flags.bits() as sys::ImPlotAxisFlags,
-                    )
-                }),
-                None => unsafe {
-                    sys::ImPlot_SetupAxis(
-                        axis as sys::ImAxis,
-                        std::ptr::null(),
-                        flags.bits() as sys::ImPlotAxisFlags,
-                    )
-                },
+        self.setup_axis(axis.into(), label, flags);
+    }
+
+    fn setup_axis(&self, axis: Axis, label: Option<&str>, flags: AxisFlags) {
+        let idx = axis as usize;
+        self.plot.with_bound_context(|| unsafe {
+            let enabling = !(*sys::ImPlot_GetCurrentPlot()).Axes[idx].Enabled;
+            let configure = |label| sys::ImPlot_SetupAxis(axis.to_sys(), label, flags.bits() as _);
+            match label.filter(|label| !label.contains('\0')) {
+                Some(label) => with_scratch_txt(label, configure),
+                None => configure(std::ptr::null()),
             }
-        })
+            // BeginPlot applies next settings before secondary axes can be enabled. Apply
+            // their pending links and range once, in the same order as ApplyNextPlotData.
+            if enabling {
+                let next = &(*sys::ImPlot_GetCurrentContext()).NextPlotData;
+                sys::ImPlot_SetupAxisLinks(axis.to_sys(), next.LinkedMin[idx], next.LinkedMax[idx]);
+                if next.HasRange[idx] {
+                    let range = next.Range[idx];
+                    sys::ImPlot_SetupAxisLimits(
+                        axis.to_sys(),
+                        range.Min,
+                        range.Max,
+                        next.RangeCond[idx],
+                    );
+                }
+            }
+        });
     }
 
     /// Setup axis limits for a specific X axis
     pub fn setup_x_axis_limits(&self, axis: XAxis, min: f64, max: f64, cond: PlotCond) {
-        assert_axis_limit_range("PlotUi::setup_x_axis_limits()", min, max);
-        self.with_bound_context(|| unsafe {
+        assert_axis_limit_range("PlotSetup::setup_x_axis_limits()", min, max);
+        self.plot.with_axes(&[axis as sys::ImAxis], || unsafe {
             sys::ImPlot_SetupAxisLimits(axis as sys::ImAxis, min, max, cond as sys::ImPlotCond)
         })
     }
 
     /// Setup axis limits for a specific Y axis
     pub fn setup_y_axis_limits(&self, axis: YAxis, min: f64, max: f64, cond: PlotCond) {
-        assert_axis_limit_range("PlotUi::setup_y_axis_limits()", min, max);
-        self.with_bound_context(|| unsafe {
+        assert_axis_limit_range("PlotSetup::setup_y_axis_limits()", min, max);
+        self.plot.with_axes(&[axis as sys::ImAxis], || unsafe {
             sys::ImPlot_SetupAxisLimits(axis as sys::ImAxis, min, max, cond as sys::ImPlotCond)
         })
     }
@@ -74,19 +65,13 @@ impl<'ui> PlotUi<'ui> {
     ///
     /// # Safety
     ///
-    /// Call after `begin_plot` succeeds, before plotting or any other setup-locking call.
-    /// The axis must be enabled. Every supplied value must stay initialized at a stable
-    /// address until this `PlotContext` is destroyed, unless its link is explicitly cleared.
-    /// To clear it, begin the same plot ID, enable this axis, call this method with `None`
-    /// for the corresponding value, and end that plot. Also clear any pending next-plot
-    /// link for that value. `EndPlot` alone does not unlink every axis: later uses of the
-    /// same plot can still write through retained pointers, even when an axis is disabled.
-    /// Do not move, drop, or otherwise access values while linked, including during
-    /// unwinding. Separate linked values must not alias.
+    /// The axis must be enabled. Keep each value initialized at a stable, distinct address
+    /// until this plot ends, including unwinding. Do not otherwise access a linked value.
+    /// The plot writes its final limits and clears the cached pointers when it ends.
     ///
     /// ```compile_fail
-    /// use dear_implot::{Axis, PlotUi};
-    /// fn link(plot_ui: &PlotUi<'_>, min: &mut f64, max: &mut f64) {
+    /// use dear_implot::{Axis, PlotSetup};
+    /// fn link(plot_ui: &PlotSetup<'_>, min: &mut f64, max: &mut f64) {
     ///     plot_ui.setup_axis_links(Axis::Y1, Some(min), Some(max));
     /// }
     /// ```
@@ -98,7 +83,9 @@ impl<'ui> PlotUi<'ui> {
     ) {
         let pmin = link_min.map_or(std::ptr::null_mut(), |r| r as *mut f64);
         let pmax = link_max.map_or(std::ptr::null_mut(), |r| r as *mut f64);
-        self.with_bound_context(|| unsafe { sys::ImPlot_SetupAxisLinks(axis.to_sys(), pmin, pmax) })
+        self.plot.with_axes(&[axis.to_sys()], || unsafe {
+            sys::ImPlot_SetupAxisLinks(axis.to_sys(), pmin, pmax)
+        })
     }
 
     /// Link a raw axis to external min/max values (live binding).
@@ -107,14 +94,7 @@ impl<'ui> PlotUi<'ui> {
     ///
     /// `axis` must be a valid ImPlot `ImAxis` value for the active plot. Passing an
     /// out-of-range value lets ImPlot index internal axis arrays out of bounds.
-    /// Call after `begin_plot` succeeds, before any setup-locking call, with the axis enabled.
-    /// Every supplied value must stay initialized at a stable address until the owning
-    /// `PlotContext` is destroyed or the corresponding stored and pending links are
-    /// explicitly cleared. Clear the stored link on the same plot ID and enabled axis
-    /// with `None`, then end that plot; clear pending next-plot links separately.
-    /// `EndPlot` alone does not unlink every axis, and later plots may still write to it.
-    /// Do not move, drop, or otherwise access values while linked, including during
-    /// unwinding. Separate linked values must not alias.
+    /// The axis must be enabled. The storage and access requirements of [`Self::setup_axis_links`] apply.
     pub unsafe fn setup_axis_links_unchecked(
         &self,
         axis: sys::ImAxis,
@@ -123,7 +103,9 @@ impl<'ui> PlotUi<'ui> {
     ) {
         let pmin = link_min.map_or(std::ptr::null_mut(), |r| r as *mut f64);
         let pmax = link_max.map_or(std::ptr::null_mut(), |r| r as *mut f64);
-        self.with_bound_context(|| unsafe { sys::ImPlot_SetupAxisLinks(axis, pmin, pmax) })
+        self.plot.with_axes(&[axis], || unsafe {
+            sys::ImPlot_SetupAxisLinks(axis, pmin, pmax)
+        })
     }
 
     /// Setup both axes labels/flags at once
@@ -134,47 +116,8 @@ impl<'ui> PlotUi<'ui> {
         x_flags: AxisFlags,
         y_flags: AxisFlags,
     ) {
-        self.with_bound_context(|| {
-            let x_label = x_label.filter(|s| !s.contains('\0'));
-            let y_label = y_label.filter(|s| !s.contains('\0'));
-
-            match (x_label, y_label) {
-                (Some(x_label), Some(y_label)) => {
-                    with_scratch_txt_two(x_label, y_label, |xp, yp| unsafe {
-                        sys::ImPlot_SetupAxes(
-                            xp,
-                            yp,
-                            x_flags.bits() as sys::ImPlotAxisFlags,
-                            y_flags.bits() as sys::ImPlotAxisFlags,
-                        )
-                    })
-                }
-                (Some(x_label), None) => with_scratch_txt(x_label, |xp| unsafe {
-                    sys::ImPlot_SetupAxes(
-                        xp,
-                        std::ptr::null(),
-                        x_flags.bits() as sys::ImPlotAxisFlags,
-                        y_flags.bits() as sys::ImPlotAxisFlags,
-                    )
-                }),
-                (None, Some(y_label)) => with_scratch_txt(y_label, |yp| unsafe {
-                    sys::ImPlot_SetupAxes(
-                        std::ptr::null(),
-                        yp,
-                        x_flags.bits() as sys::ImPlotAxisFlags,
-                        y_flags.bits() as sys::ImPlotAxisFlags,
-                    )
-                }),
-                (None, None) => unsafe {
-                    sys::ImPlot_SetupAxes(
-                        std::ptr::null(),
-                        std::ptr::null(),
-                        x_flags.bits() as sys::ImPlotAxisFlags,
-                        y_flags.bits() as sys::ImPlotAxisFlags,
-                    )
-                },
-            }
-        })
+        self.setup_x_axis(XAxis::X1, x_label, x_flags);
+        self.setup_y_axis(YAxis::Y1, y_label, y_flags);
     }
 
     /// Setup axes limits (both) at once
@@ -186,18 +129,231 @@ impl<'ui> PlotUi<'ui> {
         y_max: f64,
         cond: PlotCond,
     ) {
-        assert_axis_limit_range("PlotUi::setup_axes_limits() x axis", x_min, x_max);
-        assert_axis_limit_range("PlotUi::setup_axes_limits() y axis", y_min, y_max);
-        self.with_bound_context(|| unsafe {
+        assert_axis_limit_range("PlotSetup::setup_axes_limits() x axis", x_min, x_max);
+        assert_axis_limit_range("PlotSetup::setup_axes_limits() y axis", y_min, y_max);
+        self.plot.with_bound_context(|| unsafe {
             sys::ImPlot_SetupAxesLimits(x_min, x_max, y_min, y_max, cond as sys::ImPlotCond)
         })
     }
 
-    /// Call after axis setup to finalize configuration
-    pub fn setup_finish(&self) {
-        self.with_bound_context(|| unsafe { sys::ImPlot_SetupFinish() })
+    /// Set explicit X tick positions. If supplied, labels must match the positions in length.
+    pub fn setup_x_axis_ticks_positions(
+        &self,
+        axis: XAxis,
+        values: &[f64],
+        labels: Option<&[&str]>,
+        keep_default: bool,
+    ) {
+        self.ticks_positions(axis.into(), values, labels, keep_default);
     }
 
+    /// Set explicit Y tick positions. ImPlot copies labels into its ticker during setup.
+    pub fn setup_y_axis_ticks_positions(
+        &self,
+        axis: YAxis,
+        values: &[f64],
+        labels: Option<&[&str]>,
+        keep_default: bool,
+    ) {
+        self.ticks_positions(axis.into(), values, labels, keep_default);
+    }
+
+    fn ticks_positions(
+        &self,
+        axis: Axis,
+        values: &[f64],
+        labels: Option<&[&str]>,
+        keep_default: bool,
+    ) {
+        assert_finite_f64_slice("axis tick positions", "values", values);
+        let Ok(count) = i32::try_from(values.len()) else {
+            return;
+        };
+        self.plot.with_axes(&[axis.to_sys()], || {
+            with_tick_labels(labels, values.len(), |labels| unsafe {
+                sys::ImPlot_SetupAxisTicks_doublePtr(
+                    axis.to_sys(),
+                    values.as_ptr(),
+                    count,
+                    labels,
+                    keep_default,
+                )
+            });
+        });
+    }
+
+    /// Set X ticks across a range. Labeled ranges require at least two ticks.
+    pub fn setup_x_axis_ticks_range(
+        &self,
+        axis: XAxis,
+        v_min: f64,
+        v_max: f64,
+        n_ticks: usize,
+        labels: Option<&[&str]>,
+        keep_default: bool,
+    ) {
+        self.ticks_range(axis.into(), v_min, v_max, n_ticks, labels, keep_default);
+    }
+
+    /// Set Y ticks across a range. Labeled ranges require at least two ticks.
+    pub fn setup_y_axis_ticks_range(
+        &self,
+        axis: YAxis,
+        v_min: f64,
+        v_max: f64,
+        n_ticks: usize,
+        labels: Option<&[&str]>,
+        keep_default: bool,
+    ) {
+        self.ticks_range(axis.into(), v_min, v_max, n_ticks, labels, keep_default);
+    }
+
+    fn ticks_range(
+        &self,
+        axis: Axis,
+        v_min: f64,
+        v_max: f64,
+        n_ticks: usize,
+        labels: Option<&[&str]>,
+        keep_default: bool,
+    ) {
+        assert_axis_limit_range("axis tick range", v_min, v_max);
+        let count = axis_tick_count_to_i32("axis tick range", n_ticks, labels.is_some());
+        self.plot.with_axes(&[axis.to_sys()], || {
+            with_tick_labels(labels, n_ticks, |labels| unsafe {
+                sys::ImPlot_SetupAxisTicks_double(
+                    axis.to_sys(),
+                    v_min,
+                    v_max,
+                    count,
+                    labels,
+                    keep_default,
+                )
+            });
+        });
+    }
+
+    /// Set a validated X tick format. Replaces a custom formatter registered on this axis.
+    pub fn setup_x_axis_format(&self, axis: XAxis, format: &AxisFormat<'_>) {
+        self.format(axis.into(), format);
+    }
+
+    /// Set a validated Y tick format. Replaces a custom formatter registered on this axis.
+    pub fn setup_y_axis_format(&self, axis: YAxis, format: &AxisFormat<'_>) {
+        self.format(axis.into(), format);
+    }
+
+    fn format(&self, axis: Axis, format: &AxisFormat<'_>) {
+        self.plot.with_axes(&[axis.to_sys()], || {
+            with_scratch_txt(format.as_str(), |ptr| unsafe {
+                // The string overload only writes the axis's 16-byte FormatSpec.
+                sys::ImPlot_SetupAxisFormat_PlotFormatter(
+                    axis.to_sys(),
+                    None,
+                    std::ptr::null_mut(),
+                );
+                sys::ImPlot_SetupAxisFormat_Str(axis.to_sys(), ptr);
+            });
+        });
+    }
+
+    /// Setup scale for a specific X axis (pass sys::ImPlotScale variant)
+    pub fn setup_x_axis_scale(&self, axis: XAxis, scale: sys::ImPlotScale) {
+        self.plot.with_axes(&[axis as sys::ImAxis], || unsafe {
+            sys::ImPlot_SetupAxisScale_PlotScale(axis as sys::ImAxis, scale)
+        })
+    }
+
+    /// Setup scale for a specific Y axis (pass sys::ImPlotScale variant)
+    pub fn setup_y_axis_scale(&self, axis: YAxis, scale: sys::ImPlotScale) {
+        assert_ne!(
+            scale,
+            sys::ImPlotScale_Time,
+            "time ticks require a horizontal axis"
+        );
+        self.plot.with_axes(&[axis as sys::ImAxis], || unsafe {
+            sys::ImPlot_SetupAxisScale_PlotScale(axis as sys::ImAxis, scale)
+        })
+    }
+
+    /// Setup axis limits constraints
+    pub fn setup_axis_limits_constraints(&self, axis: Axis, v_min: f64, v_max: f64) {
+        assert_axis_constraint_range("PlotSetup::setup_axis_limits_constraints()", v_min, v_max);
+        self.plot.with_axes(&[axis.to_sys()], || unsafe {
+            sys::ImPlot_SetupAxisLimitsConstraints(axis.to_sys(), v_min, v_max)
+        })
+    }
+
+    /// Setup raw axis limits constraints.
+    ///
+    /// # Safety
+    ///
+    /// `axis` must be a valid ImPlot `ImAxis` value for the active plot. Passing an
+    /// out-of-range value lets ImPlot index internal axis arrays out of bounds.
+    pub unsafe fn setup_axis_limits_constraints_unchecked(
+        &self,
+        axis: sys::ImAxis,
+        v_min: f64,
+        v_max: f64,
+    ) {
+        assert_axis_constraint_range(
+            "PlotSetup::setup_axis_limits_constraints_unchecked()",
+            v_min,
+            v_max,
+        );
+        self.plot.with_axes(&[axis], || unsafe {
+            sys::ImPlot_SetupAxisLimitsConstraints(axis, v_min, v_max)
+        })
+    }
+
+    /// Setup axis zoom constraints
+    pub fn setup_axis_zoom_constraints(&self, axis: Axis, z_min: f64, z_max: f64) {
+        assert_axis_zoom_range("PlotSetup::setup_axis_zoom_constraints()", z_min, z_max);
+        self.plot.with_axes(&[axis.to_sys()], || unsafe {
+            sys::ImPlot_SetupAxisZoomConstraints(axis.to_sys(), z_min, z_max)
+        })
+    }
+
+    /// Setup raw axis zoom constraints.
+    ///
+    /// # Safety
+    ///
+    /// `axis` must be a valid ImPlot `ImAxis` value for the active plot. Passing an
+    /// out-of-range value lets ImPlot index internal axis arrays out of bounds.
+    pub unsafe fn setup_axis_zoom_constraints_unchecked(
+        &self,
+        axis: sys::ImAxis,
+        z_min: f64,
+        z_max: f64,
+    ) {
+        assert_axis_zoom_range(
+            "PlotSetup::setup_axis_zoom_constraints_unchecked()",
+            z_min,
+            z_max,
+        );
+        self.plot.with_axes(&[axis], || unsafe {
+            sys::ImPlot_SetupAxisZoomConstraints(axis, z_min, z_max)
+        })
+    }
+}
+
+// AddTicksCustom copies the labels synchronously. With no labels it invokes the current
+// formatter instead. Keep the null pointer distinct from an array of empty strings.
+fn with_tick_labels(
+    labels: Option<&[&str]>,
+    count: usize,
+    apply: impl FnOnce(*const *const c_char),
+) {
+    match labels {
+        Some(labels) if labels.len() == count => {
+            crate::plots::with_plot_str_slice(labels, |ptrs| apply(ptrs.as_ptr()))
+        }
+        Some(_) => (),
+        None => apply(std::ptr::null()),
+    }
+}
+
+impl PlotUi<'_> {
     /// Set next frame limits for a specific axis
     pub fn set_next_x_axis_limits(&self, axis: XAxis, min: f64, max: f64, cond: PlotCond) {
         assert_axis_limit_range("PlotUi::set_next_x_axis_limits()", min, max);
@@ -218,14 +374,11 @@ impl<'ui> PlotUi<'ui> {
     ///
     /// # Safety
     ///
-    /// Call before `begin_plot`, with no plot active. Enable the axis in the next plot.
-    /// Every supplied value must stay initialized at a stable address until the owning
-    /// `PlotContext` is destroyed or all corresponding pending and stored links are cleared.
-    /// Clear a pending link with this method and `None`; clear an applied link with
-    /// `setup_axis_links` and `None` on the same plot ID and enabled axis, then end that plot.
-    /// `EndPlot`, a rejected `begin_plot`, a frame change, or disabling an axis does not
-    /// generally unlink it. Do not move, drop, or otherwise access values while linked,
-    /// including during unwinding. Separate linked values must not alias.
+    /// Primary axes consume these links at `BeginPlot`. Enable a secondary axis in the setup
+    /// closure to apply its pending links.
+    /// Keep values initialized, stable, distinct and otherwise inaccessible until the plot
+    /// that consumes these settings has ended, the pending links are cleared, or the context
+    /// is destroyed. A skipped call or a frame boundary is insufficient to establish this.
     ///
     /// ```compile_fail
     /// use dear_implot::{Axis, PlotUi};
@@ -252,14 +405,7 @@ impl<'ui> PlotUi<'ui> {
     ///
     /// `axis` must be a valid ImPlot `ImAxis` value. Passing an out-of-range
     /// value lets ImPlot index internal next-plot arrays out of bounds.
-    /// Call before `begin_plot`, with no plot active, and enable the axis in the next plot.
-    /// Every supplied value must stay initialized at a stable address until the owning
-    /// `PlotContext` is destroyed or all corresponding pending and stored links are cleared.
-    /// Clear pending links with `None` here; clear applied links with `None` on the same
-    /// plot ID and enabled axis using `setup_axis_links_unchecked`, then end that plot.
-    /// `EndPlot`, rejected `begin_plot` calls, frame changes, and disabled axes do not
-    /// generally unlink it. Do not move, drop, or otherwise access values while linked,
-    /// including during unwinding. Separate linked values must not alias.
+    /// The storage and access requirements of [`Self::set_next_axis_links`] apply.
     pub unsafe fn set_next_axis_links_unchecked(
         &self,
         axis: sys::ImAxis,
@@ -315,305 +461,5 @@ impl<'ui> PlotUi<'ui> {
     /// Fit a specific Y axis on the next plot
     pub fn set_next_y_axis_to_fit(&self, axis: YAxis) {
         self.with_bound_context(|| unsafe { sys::ImPlot_SetNextAxisToFit(axis as sys::ImAxis) })
-    }
-
-    /// Setup ticks with explicit positions and optional labels for an X axis.
-    ///
-    /// If `labels` is provided, it must have the same length as `values`.
-    pub fn setup_x_axis_ticks_positions(
-        &self,
-        axis: XAxis,
-        values: &[f64],
-        labels: Option<&[&str]>,
-        keep_default: bool,
-    ) {
-        assert_finite_f64_slice("PlotUi::setup_x_axis_ticks_positions()", "values", values);
-        self.with_bound_context(|| {
-            let count = match i32::try_from(values.len()) {
-                Ok(v) => v,
-                Err(_) => return,
-            };
-            if let Some(labels) = labels {
-                if labels.len() != values.len() {
-                    return;
-                }
-                let cleaned: Vec<&str> = labels
-                    .iter()
-                    .map(|&s| if s.contains('\0') { "" } else { s })
-                    .collect();
-                with_scratch_txt_slice(&cleaned, |ptrs| unsafe {
-                    sys::ImPlot_SetupAxisTicks_doublePtr(
-                        axis as sys::ImAxis,
-                        values.as_ptr(),
-                        count,
-                        ptrs.as_ptr() as *const *const c_char,
-                        keep_default,
-                    )
-                })
-            } else {
-                unsafe {
-                    sys::ImPlot_SetupAxisTicks_doublePtr(
-                        axis as sys::ImAxis,
-                        values.as_ptr(),
-                        count,
-                        std::ptr::null(),
-                        keep_default,
-                    )
-                }
-            }
-        })
-    }
-
-    /// Setup ticks with explicit positions and optional labels for a Y axis.
-    ///
-    /// If `labels` is provided, it must have the same length as `values`.
-    pub fn setup_y_axis_ticks_positions(
-        &self,
-        axis: YAxis,
-        values: &[f64],
-        labels: Option<&[&str]>,
-        keep_default: bool,
-    ) {
-        assert_finite_f64_slice("PlotUi::setup_y_axis_ticks_positions()", "values", values);
-        self.with_bound_context(|| {
-            let count = match i32::try_from(values.len()) {
-                Ok(v) => v,
-                Err(_) => return,
-            };
-            if let Some(labels) = labels {
-                if labels.len() != values.len() {
-                    return;
-                }
-                let cleaned: Vec<&str> = labels
-                    .iter()
-                    .map(|&s| if s.contains('\0') { "" } else { s })
-                    .collect();
-                with_scratch_txt_slice(&cleaned, |ptrs| unsafe {
-                    sys::ImPlot_SetupAxisTicks_doublePtr(
-                        axis as sys::ImAxis,
-                        values.as_ptr(),
-                        count,
-                        ptrs.as_ptr() as *const *const c_char,
-                        keep_default,
-                    )
-                })
-            } else {
-                unsafe {
-                    sys::ImPlot_SetupAxisTicks_doublePtr(
-                        axis as sys::ImAxis,
-                        values.as_ptr(),
-                        count,
-                        std::ptr::null(),
-                        keep_default,
-                    )
-                }
-            }
-        })
-    }
-
-    /// Setup ticks on a range with tick count and optional labels for an X axis.
-    ///
-    /// If `labels` is provided, it must have length `n_ticks`. ImPlot generates
-    /// both endpoints even when an unlabeled range requests a single tick.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `n_ticks` is zero, exceeds `i32::MAX`, or is less than two with labels.
-    pub fn setup_x_axis_ticks_range(
-        &self,
-        axis: XAxis,
-        v_min: f64,
-        v_max: f64,
-        n_ticks: usize,
-        labels: Option<&[&str]>,
-        keep_default: bool,
-    ) {
-        assert_axis_limit_range("PlotUi::setup_x_axis_ticks_range()", v_min, v_max);
-        let n_ticks_i32 = axis_tick_count_to_i32(
-            "PlotUi::setup_x_axis_ticks_range()",
-            n_ticks,
-            labels.is_some(),
-        );
-        self.with_bound_context(|| {
-            if let Some(labels) = labels {
-                if labels.len() != n_ticks {
-                    return;
-                }
-                let cleaned: Vec<&str> = labels
-                    .iter()
-                    .map(|&s| if s.contains('\0') { "" } else { s })
-                    .collect();
-                with_scratch_txt_slice(&cleaned, |ptrs| unsafe {
-                    sys::ImPlot_SetupAxisTicks_double(
-                        axis as sys::ImAxis,
-                        v_min,
-                        v_max,
-                        n_ticks_i32,
-                        ptrs.as_ptr() as *const *const c_char,
-                        keep_default,
-                    )
-                })
-            } else {
-                unsafe {
-                    sys::ImPlot_SetupAxisTicks_double(
-                        axis as sys::ImAxis,
-                        v_min,
-                        v_max,
-                        n_ticks_i32,
-                        std::ptr::null(),
-                        keep_default,
-                    )
-                }
-            }
-        })
-    }
-
-    /// Setup ticks on a range with tick count and optional labels for a Y axis.
-    ///
-    /// If `labels` is provided, it must have length `n_ticks`. ImPlot generates
-    /// both endpoints even when an unlabeled range requests a single tick.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `n_ticks` is zero, exceeds `i32::MAX`, or is less than two with labels.
-    pub fn setup_y_axis_ticks_range(
-        &self,
-        axis: YAxis,
-        v_min: f64,
-        v_max: f64,
-        n_ticks: usize,
-        labels: Option<&[&str]>,
-        keep_default: bool,
-    ) {
-        assert_axis_limit_range("PlotUi::setup_y_axis_ticks_range()", v_min, v_max);
-        let n_ticks_i32 = axis_tick_count_to_i32(
-            "PlotUi::setup_y_axis_ticks_range()",
-            n_ticks,
-            labels.is_some(),
-        );
-        self.with_bound_context(|| {
-            if let Some(labels) = labels {
-                if labels.len() != n_ticks {
-                    return;
-                }
-                let cleaned: Vec<&str> = labels
-                    .iter()
-                    .map(|&s| if s.contains('\0') { "" } else { s })
-                    .collect();
-                with_scratch_txt_slice(&cleaned, |ptrs| unsafe {
-                    sys::ImPlot_SetupAxisTicks_double(
-                        axis as sys::ImAxis,
-                        v_min,
-                        v_max,
-                        n_ticks_i32,
-                        ptrs.as_ptr() as *const *const c_char,
-                        keep_default,
-                    )
-                })
-            } else {
-                unsafe {
-                    sys::ImPlot_SetupAxisTicks_double(
-                        axis as sys::ImAxis,
-                        v_min,
-                        v_max,
-                        n_ticks_i32,
-                        std::ptr::null(),
-                        keep_default,
-                    )
-                }
-            }
-        })
-    }
-
-    /// Setup a validated tick label format for a specific X axis.
-    pub fn setup_x_axis_format(&self, axis: XAxis, format: &AxisFormat<'_>) {
-        self.with_bound_context(|| {
-            with_scratch_txt(format.as_str(), |ptr| unsafe {
-                sys::ImPlot_SetupAxisFormat_Str(axis as sys::ImAxis, ptr)
-            })
-        })
-    }
-
-    /// Setup a validated tick label format for a specific Y axis.
-    pub fn setup_y_axis_format(&self, axis: YAxis, format: &AxisFormat<'_>) {
-        self.with_bound_context(|| {
-            with_scratch_txt(format.as_str(), |ptr| unsafe {
-                sys::ImPlot_SetupAxisFormat_Str(axis as sys::ImAxis, ptr)
-            })
-        })
-    }
-
-    /// Setup scale for a specific X axis (pass sys::ImPlotScale variant)
-    pub fn setup_x_axis_scale(&self, axis: XAxis, scale: sys::ImPlotScale) {
-        self.with_bound_context(|| unsafe {
-            sys::ImPlot_SetupAxisScale_PlotScale(axis as sys::ImAxis, scale)
-        })
-    }
-
-    /// Setup scale for a specific Y axis (pass sys::ImPlotScale variant)
-    pub fn setup_y_axis_scale(&self, axis: YAxis, scale: sys::ImPlotScale) {
-        self.with_bound_context(|| unsafe {
-            sys::ImPlot_SetupAxisScale_PlotScale(axis as sys::ImAxis, scale)
-        })
-    }
-
-    /// Setup axis limits constraints
-    pub fn setup_axis_limits_constraints(&self, axis: Axis, v_min: f64, v_max: f64) {
-        assert_axis_constraint_range("PlotUi::setup_axis_limits_constraints()", v_min, v_max);
-        self.with_bound_context(|| unsafe {
-            sys::ImPlot_SetupAxisLimitsConstraints(axis.to_sys(), v_min, v_max)
-        })
-    }
-
-    /// Setup raw axis limits constraints.
-    ///
-    /// # Safety
-    ///
-    /// `axis` must be a valid ImPlot `ImAxis` value for the active plot. Passing an
-    /// out-of-range value lets ImPlot index internal axis arrays out of bounds.
-    pub unsafe fn setup_axis_limits_constraints_unchecked(
-        &self,
-        axis: sys::ImAxis,
-        v_min: f64,
-        v_max: f64,
-    ) {
-        assert_axis_constraint_range(
-            "PlotUi::setup_axis_limits_constraints_unchecked()",
-            v_min,
-            v_max,
-        );
-        self.with_bound_context(|| unsafe {
-            sys::ImPlot_SetupAxisLimitsConstraints(axis, v_min, v_max)
-        })
-    }
-
-    /// Setup axis zoom constraints
-    pub fn setup_axis_zoom_constraints(&self, axis: Axis, z_min: f64, z_max: f64) {
-        assert_axis_zoom_range("PlotUi::setup_axis_zoom_constraints()", z_min, z_max);
-        self.with_bound_context(|| unsafe {
-            sys::ImPlot_SetupAxisZoomConstraints(axis.to_sys(), z_min, z_max)
-        })
-    }
-
-    /// Setup raw axis zoom constraints.
-    ///
-    /// # Safety
-    ///
-    /// `axis` must be a valid ImPlot `ImAxis` value for the active plot. Passing an
-    /// out-of-range value lets ImPlot index internal axis arrays out of bounds.
-    pub unsafe fn setup_axis_zoom_constraints_unchecked(
-        &self,
-        axis: sys::ImAxis,
-        z_min: f64,
-        z_max: f64,
-    ) {
-        assert_axis_zoom_range(
-            "PlotUi::setup_axis_zoom_constraints_unchecked()",
-            z_min,
-            z_max,
-        );
-        self.with_bound_context(|| unsafe {
-            sys::ImPlot_SetupAxisZoomConstraints(axis, z_min, z_max)
-        })
     }
 }

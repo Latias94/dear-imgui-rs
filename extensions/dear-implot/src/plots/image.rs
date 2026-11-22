@@ -82,7 +82,7 @@ impl<'a, 'tex> ImagePlot<'a, 'tex> {
 }
 
 impl<'a, 'tex> Plot for ImagePlot<'a, 'tex> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
         if self.validate().is_err() {
             return;
         }
@@ -104,6 +104,7 @@ impl<'a, 'tex> Plot for ImagePlot<'a, 'tex> {
             let tex_ref = to_sys_texture_ref(plot_ui.ui, self.texture);
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     PlotDataLayout::DEFAULT,
@@ -127,8 +128,8 @@ impl<'a, 'tex> Plot for ImagePlot<'a, 'tex> {
     }
 }
 
-/// Convenience methods on PlotUi
-impl<'ui> crate::PlotUi<'ui> {
+/// Convenience methods on PlotScope
+impl<'ui> crate::PlotScope<'ui> {
     pub fn plot_image<'tex>(
         &self,
         label: &str,
