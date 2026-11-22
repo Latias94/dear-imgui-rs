@@ -700,7 +700,7 @@ pub(crate) struct FileDialogUiRuntime {
     /// Accumulated IGFD-style type-to-select prefix.
     pub(crate) type_select_buffer: String,
     /// Last keypress timestamp used to expire the type-to-select prefix.
-    pub(crate) type_select_last_input: Option<std::time::Instant>,
+    pub(crate) type_select_last_input: Option<web_time::Instant>,
     /// Breadcrumb runtime state.
     pub(crate) breadcrumb: BreadcrumbUiRuntime,
     /// Footer runtime state.

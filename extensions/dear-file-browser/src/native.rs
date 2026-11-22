@@ -31,14 +31,13 @@ impl FileDialog {
             d = d.set_file_name(name);
         }
         for f in &self.filters {
-            let exts_owned: Vec<String> = f
+            let extensions: Vec<String> = f
                 .extensions
                 .iter()
                 .filter_map(|s| plain_extension_for_native(s))
                 .collect();
-            let exts: Vec<&str> = exts_owned.iter().map(|s| s.as_str()).collect();
-            if !exts.is_empty() {
-                d = d.add_filter(&f.name, &exts);
+            if !extensions.is_empty() {
+                d = d.add_filter(&f.name, &extensions);
             }
         }
         d
@@ -65,16 +64,16 @@ impl FileDialog {
         a
     }
 
-    /// Open a dialog synchronously (blocking).
-    pub fn open_blocking(self) -> Result<Selection, FileDialogError> {
-        match self.effective_backend() {
-            Backend::Native => self.open_blocking_native(),
+    fn require_native_backend(&self) -> Result<(), FileDialogError> {
+        match self.backend {
+            Backend::Auto | Backend::Native => Ok(()),
             Backend::ImGui => Err(FileDialogError::Unsupported),
-            Backend::Auto => unreachable!("resolved in effective_backend"),
         }
     }
 
-    fn open_blocking_native(self) -> Result<Selection, FileDialogError> {
+    /// Open a dialog synchronously (blocking).
+    pub fn open_blocking(self) -> Result<Selection, FileDialogError> {
+        self.require_native_backend()?;
         #[cfg(feature = "tracing")]
         trace!(?self.mode, "rfd blocking open");
         let mut sel = Selection::default();
@@ -114,9 +113,10 @@ impl FileDialog {
         }
     }
 
-    /// Open a dialog asynchronously via `rfd::AsyncFileDialog`.
+    /// Open a native dialog asynchronously. An explicit ImGui backend returns
+    /// [`FileDialogError::Unsupported`], just as [`Self::open_blocking`] does.
     pub async fn open_async(self) -> Result<Selection, FileDialogError> {
-        use rfd::AsyncFileDialog as A;
+        self.require_native_backend()?;
         #[cfg(feature = "tracing")]
         trace!(?self.mode, "rfd async open");
         let mut sel = Selection::default();
@@ -144,11 +144,7 @@ impl FileDialog {
                 }
             }
             DialogMode::PickFolder => {
-                let mut a = A::new();
-                if let Some(dir) = self.start_dir.as_deref() {
-                    a = a.set_directory(dir);
-                }
-                let f = a.pick_folder().await;
+                let f = self.to_rfd_async().pick_folder().await;
                 if let Some(h) = f {
                     sel.paths.push(h.path().to_path_buf());
                 }
@@ -192,4 +188,22 @@ fn plain_extension_for_native(token: &str) -> Option<String> {
         return None;
     }
     Some(t.to_lowercase())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_imgui_backend_rejects_native_dialog_entry_points() {
+        let dialog = FileDialog::new(DialogMode::OpenFile).backend(Backend::ImGui);
+        assert!(matches!(
+            dialog.clone().open_blocking(),
+            Err(FileDialogError::Unsupported)
+        ));
+        assert!(matches!(
+            pollster::block_on(dialog.open_async()),
+            Err(FileDialogError::Unsupported)
+        ));
+    }
 }

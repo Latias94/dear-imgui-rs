@@ -12,9 +12,9 @@ pub struct FsMetadata {
 /// Directory entry yielded by [`FileSystem::visit_dir`].
 #[derive(Clone, Debug)]
 pub struct FsEntry {
-    /// Base name (no parent path)
+    /// Display name. Use the file name from `path` for filesystem operations.
     pub name: String,
-    /// Full path
+    /// Full path of the immediate child, preserving its native file name.
     pub path: PathBuf,
     /// Whether this entry is a directory.
     pub is_dir: bool,
@@ -24,6 +24,23 @@ pub struct FsEntry {
     pub size: Option<u64>,
     /// Last modified timestamp (when available).
     pub modified: Option<std::time::SystemTime>,
+}
+
+impl FsEntry {
+    fn from_metadata(path: PathBuf, metadata: std::fs::Metadata) -> Self {
+        Self {
+            name: path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+            path,
+            is_dir: metadata.is_dir(),
+            is_symlink: metadata.file_type().is_symlink(),
+            size: metadata.is_file().then_some(metadata.len()),
+            modified: metadata.modified().ok(),
+        }
+    }
 }
 
 /// Flow control returned from a [`FileSystem::visit_dir`] visitor.
@@ -52,27 +69,51 @@ pub trait FileSystem {
     /// should return promptly afterward. The visitor is invoked on the scan
     /// worker for background scans and on the caller thread for
     /// [`crate::ScanPolicy::Blocking`] scans. Destroying a background dialog
-    /// waits for its worker to return after cancellation.
+    /// waits for its worker to return after cancellation. Return an error if an
+    /// entry cannot be enumerated or classified, since callers also use this
+    /// method to copy directory contents.
     fn visit_dir(
         &self,
         dir: &Path,
         visit: &mut dyn FnMut(FsEntry) -> ScanVisit,
     ) -> std::io::Result<()>;
-    /// Canonicalize a path (best-effort absolute normalization).
+    /// Resolve an existing path to its canonical absolute path, including links.
     fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf>;
     /// Fetch minimal metadata for a path.
     fn metadata(&self, path: &Path) -> std::io::Result<FsMetadata>;
-    /// Create a directory.
+    /// Inspect the named entry without following its final symbolic link.
+    /// A dangling link is an existing entry. Backends that follow links in
+    /// `metadata` must override this method if they support symbolic links.
+    /// Cross-device cuts need a size or modification time for each file to
+    /// check for changes before removing the source. The default supplies neither.
+    fn inspect_entry(&self, path: &Path) -> std::io::Result<FsEntry> {
+        let metadata = self.metadata(path)?;
+        Ok(FsEntry {
+            name: path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+            path: path.to_owned(),
+            is_dir: metadata.is_dir,
+            is_symlink: metadata.is_symlink,
+            size: None,
+            modified: None,
+        })
+    }
+    /// Create a new directory. Return [`std::io::ErrorKind::AlreadyExists`]
+    /// if any entry occupies the path. Paste uses this to claim its work directory.
     fn create_dir(&self, path: &Path) -> std::io::Result<()>;
-    /// Rename/move a path.
+    /// Rename/move a path. Return [`std::io::ErrorKind::CrossesDevices`] when a
+    /// move requires copying between filesystems.
     fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()>;
     /// Remove a file.
     fn remove_file(&self, path: &Path) -> std::io::Result<()>;
     /// Remove an empty directory.
     fn remove_dir(&self, path: &Path) -> std::io::Result<()>;
-    /// Remove a directory and all of its contents (recursive).
+    /// Remove a directory and all of its contents without traversing symbolic links.
     fn remove_dir_all(&self, path: &Path) -> std::io::Result<()>;
-    /// Copy a file.
+    /// Copy a file. The destination may be truncated if it already exists.
     ///
     /// Returns the number of bytes copied (mirrors `std::fs::copy`).
     fn copy_file(&self, from: &Path, to: &Path) -> std::io::Result<u64>;
@@ -88,38 +129,9 @@ impl FileSystem for StdFileSystem {
         dir: &Path,
         visit: &mut dyn FnMut(FsEntry) -> ScanVisit,
     ) -> std::io::Result<()> {
-        let rd = std::fs::read_dir(dir)?;
-        for e in rd {
-            let e = match e {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            let ft = match e.file_type() {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            let name = e.file_name().to_string_lossy().to_string();
-            let path = e.path();
-            let meta = e.metadata().ok();
-            let modified = meta.as_ref().and_then(|m| m.modified().ok());
-            let is_dir = ft.is_dir();
-            let is_symlink = ft.is_symlink();
-            let size = if is_dir {
-                None
-            } else {
-                meta.as_ref().filter(|m| m.is_file()).map(|m| m.len())
-            };
-            if matches!(
-                visit(FsEntry {
-                    name,
-                    path,
-                    is_dir,
-                    is_symlink,
-                    size,
-                    modified,
-                }),
-                ScanVisit::Stop
-            ) {
+        for e in std::fs::read_dir(dir)? {
+            let e = e?;
+            if visit(FsEntry::from_metadata(e.path(), e.metadata()?)) == ScanVisit::Stop {
                 break;
             }
         }
@@ -137,6 +149,13 @@ impl FileSystem for StdFileSystem {
             is_dir: md.is_dir(),
             is_symlink: link_md.file_type().is_symlink(),
         })
+    }
+
+    fn inspect_entry(&self, path: &Path) -> std::io::Result<FsEntry> {
+        Ok(FsEntry::from_metadata(
+            path.to_owned(),
+            std::fs::symlink_metadata(path)?,
+        ))
     }
 
     fn create_dir(&self, path: &Path) -> std::io::Result<()> {
@@ -160,6 +179,12 @@ impl FileSystem for StdFileSystem {
     }
 
     fn copy_file(&self, from: &Path, to: &Path) -> std::io::Result<u64> {
+        if !std::fs::metadata(from)?.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "expected a regular file",
+            ));
+        }
         std::fs::copy(from, to)
     }
 }

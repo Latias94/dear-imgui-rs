@@ -751,7 +751,7 @@ pub struct FileDialogCore {
     scan_status: ScanStatus,
     scan_generation: ScanGeneration,
     scan_requested_cwd: Option<PathBuf>,
-    scan_started_at: Option<std::time::Instant>,
+    scan_started_at: Option<web_time::Instant>,
     scan_runtime: ScanRuntime,
     dir_snapshot: DirSnapshot,
     dir_snapshot_dirty: bool,
@@ -1251,7 +1251,7 @@ impl FileDialogCore {
     }
 
     fn rebuild_projection(&mut self, key: ViewKey, reason: &'static str) {
-        let rebuild_started_at = std::time::Instant::now();
+        let rebuild_started_at = web_time::Instant::now();
         #[cfg(test)]
         let input_entries = self.dir_snapshot.entries.len();
         let mut entries = self.dir_snapshot.entries.clone();
@@ -1276,7 +1276,7 @@ impl FileDialogCore {
     fn append_projection_batch(&mut self, mut entries: Vec<DirEntry>) {
         // The caller has already verified that the existing view uses the
         // current projection inputs, so only this accepted batch needs work.
-        let project_started_at = std::time::Instant::now();
+        let project_started_at = web_time::Instant::now();
         let input_entries = entries.len();
         self.filter_projection_entries(&mut entries);
         let visible_entries = entries.len();
@@ -1353,7 +1353,7 @@ impl FileDialogCore {
             self.scan_requested_cwd = Some(cwd.clone());
             self.dir_snapshot = empty_snapshot_for_cwd(&cwd);
             self.last_view_key = None;
-            self.scan_started_at = Some(std::time::Instant::now());
+            self.scan_started_at = Some(web_time::Instant::now());
             self.scan_status = ScanStatus::Scanning { generation };
             if let Err(error) = filesystem.submit_scan(
                 &mut self.scan_runtime,
@@ -1416,7 +1416,7 @@ impl FileDialogCore {
                 }
                 self.last_view_key = None;
                 self.scan_started_at
-                    .get_or_insert_with(std::time::Instant::now);
+                    .get_or_insert_with(web_time::Instant::now);
                 self.scan_status = ScanStatus::Scanning {
                     generation: runtime_batch.generation,
                 };
@@ -1811,7 +1811,8 @@ impl FileDialogCore {
                         return Ok(());
                     }
                 }
-                Err(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
             }
         }
 
@@ -2785,6 +2786,7 @@ mod tests {
         visit_dir_calls: AtomicUsize,
         visit_threads: Mutex<Vec<std::thread::ThreadId>>,
         visit_dir_error: Option<std::io::ErrorKind>,
+        metadata_error: Option<std::io::ErrorKind>,
     }
 
     impl crate::fs::FileSystem for TestFs {
@@ -2814,6 +2816,9 @@ mod tests {
         }
 
         fn metadata(&self, path: &Path) -> std::io::Result<crate::fs::FsMetadata> {
+            if let Some(kind) = self.metadata_error {
+                return Err(kind.into());
+            }
             self.meta
                 .get(path)
                 .cloned()
@@ -3664,6 +3669,23 @@ mod tests {
         assert!(core.pending_overwrite().is_none());
         let sel = core.take_result().unwrap().unwrap();
         assert_eq!(sel.paths[0], PathBuf::from("/tmp/asset.png"));
+    }
+
+    #[test]
+    fn save_reports_failure_to_check_the_overwrite_target() {
+        let fs = TestFs {
+            metadata_error: Some(std::io::ErrorKind::PermissionDenied),
+            ..Default::default()
+        };
+        let mut core = FileDialogCore::new(DialogMode::SaveFile);
+        core.save_name = "asset.png".into();
+
+        let result = core.confirm(&fs, &ConfirmGate::default(), None);
+        assert!(
+            matches!(result, Err(FileDialogError::Io(e)) if e.kind() == std::io::ErrorKind::PermissionDenied)
+        );
+        assert!(core.take_result().is_none());
+        assert!(core.pending_overwrite().is_none());
     }
 
     #[test]

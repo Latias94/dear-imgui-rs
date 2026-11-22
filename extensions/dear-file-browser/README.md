@@ -619,6 +619,12 @@ permission/picker work before drawing the browser. Stop enumeration when the
 visitor returns `ScanVisit::Stop` so cancellation and generation filtering keep
 their normal semantics.
 
+### Copying and moving files on a custom filesystem
+
+Return directory enumeration errors from `visit_dir` so a partial listing cannot be mistaken for a complete copy. Implement `inspect_entry` when your backend supports links or cross-device moves. It must describe the entry itself and provide a size or modification timestamp for files that will be removed after copying. Return `ErrorKind::CrossesDevices` from `rename` to request that fallback.
+
+A paste with overwrite replaces the selected destination file or directory. A same-filesystem rename can move a link directly. Recursive copies stop on symbolic links. If another process creates a file during a cross-device move, it stays in the source directory and the browser reports the incomplete cleanup.
+
 ## Fonts (CJK/Emoji)
 
 Dear ImGui’s default font does not include CJK glyphs or emoji. If your filesystem contains non‑ASCII names (e.g., Chinese), load a font with the required glyphs into the atlas during initialization. See `examples/03-features/style_and_fonts.rs` for a complete pattern. Enabling the `freetype` feature in `dear-imgui-rs` also improves text quality.

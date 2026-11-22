@@ -569,24 +569,6 @@ impl FileDialog {
         self.filters.extend(parsed);
         Ok(self)
     }
-
-    /// Resolve the effective backend
-    pub(crate) fn effective_backend(&self) -> Backend {
-        match self.backend {
-            Backend::Native => Backend::Native,
-            Backend::ImGui => Backend::ImGui,
-            Backend::Auto => {
-                #[cfg(feature = "native-rfd")]
-                {
-                    Backend::Native
-                }
-                #[cfg(not(feature = "native-rfd"))]
-                {
-                    Backend::ImGui
-                }
-            }
-        }
-    }
 }
 
 // Default stubs when native feature is disabled
