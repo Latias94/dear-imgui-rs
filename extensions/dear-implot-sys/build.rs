@@ -278,24 +278,20 @@ fn build_with_cc(
         let source = sources
             .file(file_id)
             .unwrap_or_else(|error| panic!("dear-implot-sys: {error}"));
-        if matches!(file_id, "items" | "demo") {
-            let contents = std::fs::read_to_string(&source)
-                .unwrap_or_else(|error| panic!("read {}: {error}", source.display()));
-            let patched = build_support::patch_implot_cpp_for_imgui(
-                &contents,
-                source
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .expect("ImPlot source name"),
-            )
-            .unwrap_or_else(|error| panic!("dear-implot-sys: {error}"));
-            let output = cfg.out_dir.join(format!("implot-{file_id}-imgui-193.cpp"));
-            std::fs::write(&output, patched)
-                .unwrap_or_else(|error| panic!("write {}: {error}", output.display()));
-            build.file(output);
-        } else {
-            build.file(source);
-        }
+        let contents = std::fs::read_to_string(&source)
+            .unwrap_or_else(|error| panic!("read {}: {error}", source.display()));
+        let patched = build_support::patch_implot_cpp_for_imgui(
+            &contents,
+            source
+                .file_name()
+                .and_then(|name| name.to_str())
+                .expect("ImPlot source name"),
+        )
+        .unwrap_or_else(|error| panic!("dear-implot-sys: {error}"));
+        let output = cfg.out_dir.join(format!("implot-{file_id}-imgui-193.cpp"));
+        std::fs::write(&output, patched)
+            .unwrap_or_else(|error| panic!("write {}: {error}", output.display()));
+        build.file(output);
     }
 
     build_support::compile_cpp_archive(

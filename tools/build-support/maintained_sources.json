@@ -72,7 +72,7 @@
       "source_root": "third-party/cimplot",
       "files": [
         { "id": "wrapper", "canonical": "third-party/cimplot/cimplot.cpp", "alternates": [], "provider_transform": "direct" },
-        { "id": "core", "canonical": "third-party/cimplot/implot/implot.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "core", "canonical": "third-party/cimplot/implot/implot.cpp", "alternates": [], "provider_transform": "patch-implot" },
         { "id": "items", "canonical": "third-party/cimplot/implot/implot_items.cpp", "alternates": [], "provider_transform": "patch-implot" },
         { "id": "demo", "canonical": "third-party/cimplot/implot/implot_demo.cpp", "alternates": [], "provider_transform": "patch-implot" }
       ],

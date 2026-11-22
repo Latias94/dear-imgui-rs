@@ -22,7 +22,8 @@ regeneration is explicitly requested. `wasm` uses import bindings for the fixed
 `imgui-sys-v1` provider and skips C++ compilation in Cargo; build the provider
 separately with Emscripten.
 
-Native and WebAssembly providers share the `implot-imgui-193-v3` adaptation.
+Native and WebAssembly providers share the `implot-imgui-193-v4` adaptation.
+Axis menus display application labels literally. The metrics window resolves orthogonal axes against the inspected plot before reading their IDs.
 Line textures use physical thickness at the active viewport's framebuffer density,
 while geometry remains in local coordinates. Lines widened to one physical pixel retain
 their original alpha coverage. Artifact identity includes this correction.

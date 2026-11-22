@@ -1202,12 +1202,48 @@ pub fn patch_cte_text_editor(source: &str) -> Result<String, String> {
 /// Source contract for ImPlot3D's Dear ImGui 1.93 flags and line-texture selection.
 pub const IMPLOT3D_DRAW_FLAGS_PATCH_VERSION: &str = "implot3d-draw-flags-v2";
 
-/// Source contract for ImPlot drawing and item visibility with Dear ImGui 1.93.
-pub const IMPLOT_IMGUI_PATCH_VERSION: &str = "implot-imgui-193-v3";
+/// Source contract for ImPlot drawing, axis menus and metrics with Dear ImGui 1.93.
+pub const IMPLOT_IMGUI_PATCH_VERSION: &str = "implot-imgui-193-v4";
 
 /// Adapt ImPlot rendering and establish the plot ID scope for item visibility queries.
 pub fn patch_implot_cpp_for_imgui(source: &str, file_name: &str) -> Result<String, String> {
     let (source, newline) = normalize_cpp_source(source);
+    if file_name == "implot.cpp" {
+        let source = replace_cpp_source_once(
+            &source,
+            r#"ImGui::Text(x_axis.HasLabel() ? plot.GetAxisLabel(x_axis) :  i == 0 ? "X-Axis" : "X-Axis %d", i + 1);"#,
+            r#"if (x_axis.HasLabel())
+                ImGui::TextUnformatted(plot.GetAxisLabel(x_axis));
+            else
+                ImGui::Text(i == 0 ? "X-Axis" : "X-Axis %d", i + 1);"#,
+            "ImPlot X-axis context menu heading",
+        )?;
+        let source = replace_cpp_source_once(
+            &source,
+            r#"ImGui::Text(y_axis.HasLabel() ? plot.GetAxisLabel(y_axis) : i == 0 ? "Y-Axis" : "Y-Axis %d", i + 1);"#,
+            r#"if (y_axis.HasLabel())
+                ImGui::TextUnformatted(plot.GetAxisLabel(y_axis));
+            else
+                ImGui::Text(i == 0 ? "Y-Axis" : "Y-Axis %d", i + 1);"#,
+            "ImPlot Y-axis context menu heading",
+        )?;
+        // The inspector may display a cached plot after its pool has moved. Read an ID only
+        // from an axis in the live plot, not through the address saved during layout.
+        let source = replace_cpp_source_once(
+            &source,
+            r#"ImGui::BulletText(axis.OrthoAxis == nullptr ? "OrthoAxis: NULL" : "OrthoAxis: 0x%08X", axis.OrthoAxis->ID);"#,
+            r#"const ImPlotAxis* ortho = nullptr;
+    for (const ImPlotAxis& candidate : plot.Axes)
+        if (&candidate == axis.OrthoAxis)
+            ortho = &candidate;
+    if (ortho)
+        ImGui::BulletText("OrthoAxis: 0x%08X", ortho->ID);
+    else
+        ImGui::BulletText("OrthoAxis: %s", axis.OrthoAxis ? "unavailable" : "NULL");"#,
+            "ImPlot cached axis metrics",
+        )?;
+        return Ok(restore_cpp_newlines(source, newline));
+    }
     if file_name == "implot_demo.cpp" {
         let source = replace_cpp_source_once(
             &source,
