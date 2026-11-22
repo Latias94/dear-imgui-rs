@@ -23,6 +23,9 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 - Typed callbacks passed to `set_platform_set_window_pos`, `set_platform_set_window_size` and `set_renderer_set_window_size` now receive `&ImVec2`. Custom native core archives must be rebuilt for the updated platform hook contract. See the [custom backend guide](docs/CUSTOM_BACKENDS.md).
 - Build node-editor UIs with `ui.with_node_editor(&editor, id, size, |frame| { ... })`. Use `node`, `pin`, `group_hint`, `with_create` and `with_suspended` for nested scopes. Their manually balanced counterparts now require `unsafe`. Exhaustive matches on `NodeEditorError` must handle `ThreadLease`. See the [node-editor migration examples](extensions/dear-node-editor/README.md).
 - `Plot3DContext::get_plot_ui` borrows the plot context and the `Ui` for the lifetime of the returned view. Keep the plot owner alive until drawing finishes.
+- Submit ImPlot items inside `PlotUi::with_plot` or `with_plot_size`. For axis configuration, call `with_plot_setup` and use its separate setup and drawing closures. In ImPlot3D, pass the drawing closure to `begin_plot(...).build(...)` or use `build_with_setup` to configure axes first.
+- In ImNodes, `setup.with_nodes(|editor| { ... })` returns the completed editor's `PostEditor`. Submit nodes and attributes through their closures. Read minimap hover events from `post.minimap_hovered_nodes()` after the canvas closes.
+- Rebuild custom ImPlot, ImPlot3D, ImNodes and ImGuizmo archives and the browser provider. The ImGuizmo wrapper uses the new `ImGuizmo_ResetInteraction` entry point when switching ImGui contexts.
 - Custom renderers must release the previous renderer's texture resources and commit a renderer texture reset when taking over its Context. A replacement consumer reports `RendererTextureResetRequired` until this handoff is complete.
 
 ### Changed
@@ -33,6 +36,11 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ### Fixed
 
+- Acknowledging an old table sort snapshot preserves any newer sort order requested in the same frame. `TableSortSpecs::clear_dirty` returns `false` when the caller needs to read the new order.
+- List clippers opened in a native extension callback release their native temporary storage on return or unwind. An enclosing list can continue from its own window after the callback.
+- ImPlot and ImPlot3D display axis names containing percent signs literally in their context menus. ImPlot's metrics window reads the axes of the selected plot even after the native plot pool grows.
+- ImNodes restores positions to the editor named by the load operation, ignores unrecognized INI sections and includes the body origin in the bounds of title-only nodes.
+- Multiple gizmos can share an ImGui frame without consuming the next window's settings. Switching ImGui contexts cancels the previous gizmo gesture. Dragging and view interpolation continue across frames belonging to the same context.
 - Removing a managed texture immediately revokes the application handle and preserves the pixels and binding needed by commands already submitted to the current frame. The same frame can still be captured for a second viewport pass before retirement begins.
 - Live draw commands and snapshots use the standard callback identities recorded when their owning Context rendered the frame. Removing the renderer or switching to another Context keeps those commands readable. Engine-owned frames stay open when `try_render` or snapshot capture rejects a foreign renderer, allowing the correct renderer to retry the same frame.
 - Standalone native textures, text filters, selections, and state storage retain the allocator's thread through destruction. CTE and plot contexts can release their native objects after their ImGui Context is dropped. An ImNodes editor selection is restored on the context that owned it before the operation.

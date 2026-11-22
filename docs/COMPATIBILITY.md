@@ -20,6 +20,29 @@ Custom multi-viewport backends should accept `&ImVec2` in typed window position 
 
 When replacing a custom renderer that has received texture requests, release its GPU resources and commit a reset prepared with `Context::prepare_renderer_texture_reset`. A replacement consumer returns `RendererConsumerError::RendererTextureResetRequired` until that reset completes. Its first capture can then upload the complete textures for its own device. Committing the reset also expires the previous frame's permission to render secondary viewports.
 
+### Drawing plots and node graphs
+
+ImPlot and ImPlot3D separate frame access, axis setup, and item submission. Move calls on the former frame-wide plotting handle into the corresponding closure. Each plot finishes in its original window and table cell, including when application code unwinds.
+
+```rust
+use dear_implot3d::{Axis3DFlags, Line3DFlags};
+
+plot_ui.with_plot("Frame time", |plot| {
+    plot.plot_line("CPU", &sample_times, &cpu_ms);
+});
+
+plot3d_ui.begin_plot("Trajectory").build_with_setup(
+    |setup| setup.setup_axes("X", "Y", "Z", Axis3DFlags::NONE, Axis3DFlags::NONE, Axis3DFlags::NONE),
+    |plot| plot.plot_line_f32("Path", &x, &y, &z, Line3DFlags::NONE),
+);
+```
+
+For 2D plots with custom axes or a legend, use `plot_ui.with_plot_setup(title, size, setup, draw)`. The setup closure runs before ImPlot locks the axes. Pass a `dear_implot::AxisScale` to `setup_x_axis_scale` or `setup_y_axis_scale`. A subplot grid supplies a `PlotUi` for its own cells. For 3D plots using the default axes, pass just the drawing closure to `build`.
+
+For ImNodes, configure positions on `ui.imnodes_editor(&nodes, Some(&graph))`, then call `with_nodes`. Use `editor.node(id, |node| { ... })`, `node.title_bar(...)`, and the `input_attr`, `output_attr` or `static_attr` closures to submit contents. Links refer to pins already submitted in that frame. Read selection, link events and `minimap_hovered_nodes()` from the returned `PostEditor`.
+
+ImGuizmo starts its native overlay once per frame. A gesture belongs to one ImGui context, so switching the active gizmo to a different context cancels the drag or view transition. Repeated operations on the same context preserve it. Custom native archives and browser providers must include `ImGuizmo_ResetInteraction` along with the updated ImPlot, ImPlot3D and ImNodes source adaptations.
+
 ### Native sources on `main`
 
 These wrapper revisions determine the C headers and the native source each extension builds. Rebuild custom native archives and the browser provider when upgrading a checkout across these revisions.

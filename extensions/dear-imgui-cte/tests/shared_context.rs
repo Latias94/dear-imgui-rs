@@ -37,17 +37,13 @@ fn cte_core_implot_and_imnodes_share_one_imgui_context() {
                 .unwrap();
 
             let plot_ui = plot_context.get_plot_ui(ui);
-            if let Some(plot) = plot_ui.begin_plot("Shared ImPlot") {
-                plot_ui.plot_line("values", &[0.0, 1.0, 2.0], &[1.0, 3.0, 2.0]);
-                plot.end();
-            }
+            plot_ui.with_plot("Shared ImPlot", |plot| {
+                plot.plot_line("values", &[0.0, 1.0, 2.0], &[1.0, 3.0, 2.0]);
+            });
 
-            let nodes = ui
-                .imnodes(&nodes_context)
+            ui.imnodes(&nodes_context)
                 .editor(Some(&node_editor))
-                .begin_nodes();
-            nodes.node(NodeId::new(1)).end();
-            nodes.end();
+                .with_nodes(|nodes| nodes.node(NodeId::new(1), |_| {}));
         });
 
     assert_eq!(unsafe { sys::igGetCurrentContext() }, raw_context);

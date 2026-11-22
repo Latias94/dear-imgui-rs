@@ -199,11 +199,10 @@ fn render_profiler_plot(
 ) {
     ui.text("ImPlot uses the same Ui borrowed from the primary ImguiFrame.");
     let plot_ui = ui.implot(plot_context);
-    if let Some(plot) = plot_ui.begin_plot_with_size("Frame timing", [-1.0, 230.0]) {
-        plot_ui.plot_line("cpu ms", &state.sample_time, &state.cpu_ms);
-        plot_ui.plot_line("gpu ms", &state.sample_time, &state.gpu_ms);
-        plot.end();
-    }
+    plot_ui.with_plot_size("Frame timing", [-1.0, 230.0], |plot| {
+        plot.plot_line("cpu ms", &state.sample_time, &state.cpu_ms);
+        plot.plot_line("gpu ms", &state.sample_time, &state.gpu_ms);
+    });
 }
 
 fn render_frame_graph(
@@ -226,15 +225,13 @@ fn render_frame_graph(
         *positions_initialized = true;
     }
 
-    let editor = editor_setup.begin_nodes();
-
-    render_graph_source(ui, &editor, source_output);
-    render_graph_pass(ui, &editor, pass_input, pass_output);
-    render_graph_sink(ui, &editor, sink_input);
-
-    editor.link(dear_imnodes::LinkId::new(100), source_output, pass_input);
-    editor.link(dear_imnodes::LinkId::new(101), pass_output, sink_input);
-    let _post = editor.end();
+    editor_setup.with_nodes(|editor| {
+        render_graph_source(ui, editor, source_output);
+        render_graph_pass(ui, editor, pass_input, pass_output);
+        render_graph_sink(ui, editor, sink_input);
+        editor.link(dear_imnodes::LinkId::new(100), source_output, pass_input);
+        editor.link(dear_imnodes::LinkId::new(101), pass_output, sink_input);
+    });
 }
 
 fn render_graph_source(
@@ -242,12 +239,12 @@ fn render_graph_source(
     editor: &dear_imnodes::NodeEditor<'_>,
     output_id: dear_imnodes::PinId,
 ) {
-    let node = editor.node(dear_imnodes::NodeId::new(1));
-    node.title_bar(|| ui.text("Extract"));
-    let output = node.output_attr(output_id, dear_imnodes::PinShape::CircleFilled);
-    ui.text("Frame Data");
-    output.end();
-    node.end();
+    editor.node(dear_imnodes::NodeId::new(1), |node| {
+        node.title_bar(|| ui.text("Extract"));
+        node.output_attr(output_id, dear_imnodes::PinShape::CircleFilled, || {
+            ui.text("Frame Data")
+        });
+    });
 }
 
 fn render_graph_pass(
@@ -256,15 +253,15 @@ fn render_graph_pass(
     input_id: dear_imnodes::PinId,
     output_id: dear_imnodes::PinId,
 ) {
-    let node = editor.node(dear_imnodes::NodeId::new(2));
-    node.title_bar(|| ui.text("Render Pass"));
-    let input = node.input_attr(input_id, dear_imnodes::PinShape::TriangleFilled);
-    ui.text("Input");
-    input.end();
-    let output = node.output_attr(output_id, dear_imnodes::PinShape::TriangleFilled);
-    ui.text("Color Target");
-    output.end();
-    node.end();
+    editor.node(dear_imnodes::NodeId::new(2), |node| {
+        node.title_bar(|| ui.text("Render Pass"));
+        node.input_attr(input_id, dear_imnodes::PinShape::TriangleFilled, || {
+            ui.text("Input")
+        });
+        node.output_attr(output_id, dear_imnodes::PinShape::TriangleFilled, || {
+            ui.text("Color Target")
+        });
+    });
 }
 
 fn render_graph_sink(
@@ -272,12 +269,12 @@ fn render_graph_sink(
     editor: &dear_imnodes::NodeEditor<'_>,
     input_id: dear_imnodes::PinId,
 ) {
-    let node = editor.node(dear_imnodes::NodeId::new(3));
-    node.title_bar(|| ui.text("Present"));
-    let input = node.input_attr(input_id, dear_imnodes::PinShape::QuadFilled);
-    ui.text("Swapchain");
-    input.end();
-    node.end();
+    editor.node(dear_imnodes::NodeId::new(3), |node| {
+        node.title_bar(|| ui.text("Present"));
+        node.input_attr(input_id, dear_imnodes::PinShape::QuadFilled, || {
+            ui.text("Swapchain")
+        });
+    });
 }
 
 fn render_gizmo(ui: &dear_imgui_rs::Ui, frame_index: u64) {
