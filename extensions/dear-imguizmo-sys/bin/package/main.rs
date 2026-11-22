@@ -138,7 +138,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     hdr.set_cksum();
     tar.append_data(&mut hdr, "manifest.txt", manifest_txt.as_slice())?;
 
-    tar.finish()?;
+    tar.into_inner()?.finish()?;
     println!("Package created: {}", pkg_dir.join(&ar_name).display());
     Ok(())
 }

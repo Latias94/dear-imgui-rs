@@ -58,37 +58,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let enc = GzEncoder::new(file, Compression::best());
     let mut tar = tar::Builder::new(enc);
 
-    // Include headers: implot3d headers + cimplot3d.h
     let cimplot3d_root = manifest_dir.join("third-party").join("cimplot3d");
-    let implot3d_include = cimplot3d_root.join("implot3d");
-    if implot3d_include.exists() {
-        append_headers_only(
-            &mut tar,
-            &implot3d_include,
-            "include/implot3d",
-            &["example", ".github", "docs", "misc"],
-            &sys_out.join("implot3d-imgui-193-internal.h"),
+    tar.append_path_with_name(
+        cimplot3d_root.join("cimplot3d.h"),
+        "include/cimplot3d/cimplot3d.h",
+    )?;
+    for name in ["implot3d.h", "implot3d_internal.h"] {
+        tar.append_path_with_name(
+            cimplot3d_root.join("implot3d").join(name),
+            format!("include/implot3d/{name}"),
         )?;
-        println!(
-            "Added filtered include/implot3d headers from: {}",
-            implot3d_include.display()
-        );
-    } else {
-        eprintln!(
-            "WARN: implot3d include dir not found: {}",
-            implot3d_include.display()
-        );
-    }
-    let cimplot3d_h = cimplot3d_root.join("cimplot3d.h");
-    if cimplot3d_h.exists() {
-        let mut f = fs::File::open(&cimplot3d_h)?;
-        tar.append_file("include/cimplot3d/cimplot3d.h", &mut f)?;
-        println!(
-            "Added include/cimplot3d/cimplot3d.h: {}",
-            cimplot3d_h.display()
-        );
-    } else {
-        eprintln!("WARN: cimplot3d.h not found: {}", cimplot3d_h.display());
     }
 
     // Licenses (project + third-party)
@@ -132,59 +111,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     hdr.set_cksum();
     tar.append_data(&mut hdr, "manifest.txt", manifest_txt.as_slice())?;
 
-    tar.finish()?;
+    tar.into_inner()?.finish()?;
     println!("Package created: {}", pkg_dir.join(&ar_name).display());
-    Ok(())
-}
-
-fn append_headers_only(
-    tar: &mut tar::Builder<flate2::write::GzEncoder<fs::File>>,
-    src_dir: &Path,
-    dst_root: &str,
-    exclude_dirs: &[&str],
-    internal_header: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    fn excluded(path: &Path, exclude_dirs: &[&str]) -> bool {
-        for comp in path.components() {
-            if let std::path::Component::Normal(os) = comp
-                && let Some(name) = os.to_str()
-                && exclude_dirs.iter().any(|e| e == &name)
-            {
-                return true;
-            }
-        }
-        false
-    }
-    let mut stack = vec![src_dir.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        if excluded(dir.strip_prefix(src_dir).unwrap_or(&dir), exclude_dirs) && dir != *src_dir {
-            continue;
-        }
-        for entry in fs::read_dir(&dir)? {
-            let entry = entry?;
-            let p = entry.path();
-            let rel = p.strip_prefix(src_dir).unwrap();
-            if p.is_dir() {
-                if !excluded(rel, exclude_dirs) {
-                    stack.push(p);
-                }
-            } else if p
-                .extension()
-                .and_then(|s| s.to_str())
-                .map(|s| s.eq_ignore_ascii_case("h"))
-                .unwrap_or(false)
-            {
-                let source = if rel == Path::new("implot3d_internal.h") {
-                    internal_header
-                } else {
-                    &p
-                };
-                let mut f = fs::File::open(source)?;
-                let dst_path = format!("{}/{}", dst_root, rel.display());
-                tar.append_file(dst_path, &mut f)?;
-            }
-        }
-    }
     Ok(())
 }
 

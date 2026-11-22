@@ -127,7 +127,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     header.set_mode(0o644);
     header.set_cksum();
     archive.append_data(&mut header, "manifest.txt", manifest.as_slice())?;
-    archive.finish()?;
+    archive.into_inner()?.finish()?;
     println!(
         "Package created: {}",
         package_dir.join(archive_name).display()
