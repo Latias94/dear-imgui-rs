@@ -8,7 +8,6 @@ fn thread_safety_imnodes_context_not_send_sync() {
     assert_not_impl_any!(dear_imnodes::NodeEditorSetup<'static>: Send, Sync);
     assert_not_impl_any!(dear_imnodes::NodeEditor<'static>: Send, Sync);
     assert_not_impl_any!(dear_imnodes::NodeToken<'static>: Send, Sync);
-    assert_not_impl_any!(dear_imnodes::AttributeToken<'static>: Send, Sync);
     assert_not_impl_any!(dear_imnodes::ColorToken<'static>: Send, Sync);
     assert_not_impl_any!(dear_imnodes::StyleVarToken<'static>: Send, Sync);
     assert_not_impl_any!(dear_imnodes::AttributeFlagToken<'static>: Send, Sync);

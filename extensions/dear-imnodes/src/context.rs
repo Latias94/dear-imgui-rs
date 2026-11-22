@@ -1,5 +1,5 @@
 use crate::sys;
-use dear_imgui_rs::{ContextBinding, ContextThreadLease, Ui};
+use dear_imgui_rs::{ContextBinding, ContextThreadLease, NativeWindowScope, Ui};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::{Rc, Weak};
@@ -12,7 +12,7 @@ mod ui;
 
 pub use global::BoundEditor;
 pub use post::PostEditor;
-pub use tokens::{AttributeToken, NodeToken};
+pub use tokens::NodeToken;
 
 /// Global ImNodes context
 pub struct Context {
@@ -44,16 +44,8 @@ struct SubmittedObjects {
     links: BTreeSet<crate::LinkId>,
 }
 
-#[derive(Clone)]
-pub(crate) struct ImNodesScope {
-    imgui_binding: ContextBinding,
-    ctx_raw: *mut sys::ImNodesContext,
-    ctx_alive: ImNodesContextAliveToken,
-    // A forgotten frame token must leak its native context instead of leaving a dangling pointer.
-    _ctx_lease: Rc<()>,
-    editor_raw: Option<*mut sys::ImNodesEditorContext>,
-    // Keep an explicit editor context alive for as long as any frame/post-frame scope can use it.
-    // If a token is intentionally forgotten, the native context leaks instead of becoming dangling.
+pub(crate) struct ImNodesScope<'ctx> {
+    ctx: &'ctx Context,
     editor_lease: Option<Rc<EditorContextInner>>,
 }
 
@@ -62,23 +54,22 @@ pub(crate) struct ImNodesScopeGuard {
     _context: ImNodesContextGuard,
 }
 
-impl ImNodesScope {
-    fn last_submission<'a>(&'a self, ctx: &'a Context) -> &'a RefCell<Rc<SubmittedObjects>> {
+impl ImNodesScope<'_> {
+    fn last_submission(&self) -> &RefCell<Rc<SubmittedObjects>> {
         self.editor_lease
             .as_ref()
-            .map_or(&ctx.default_editor_submission, |editor| {
+            .map_or(&self.ctx.default_editor_submission, |editor| {
                 &editor.last_submission
             })
     }
 
     #[inline]
     pub(crate) fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
-        assert!(
-            self.ctx_alive.is_alive(),
-            "dear-imnodes: ImNodes context has been dropped"
-        );
-        self.imgui_binding.with_bound_context(|| {
-            let _scope = ImNodesScopeGuard::bind(self.ctx_raw, self.editor_raw);
+        self.ctx.imgui_binding.with_bound_context(|| {
+            let _scope = ImNodesScopeGuard::bind(
+                self.ctx.raw,
+                self.editor_lease.as_ref().map(|editor| editor.raw),
+            );
             f()
         })
     }
@@ -109,9 +100,7 @@ impl Drop for ImNodesScopeGuard {
     }
 }
 
-// Native calls can invoke a minimap callback that drops a previously current owner.
-// Only live guards need a restoration entry. Destruction invalidates those entries
-// before the allocation can be freed or its address reused.
+// Destruction invalidates pending restorations before an address can be reused.
 #[derive(Clone, Copy, PartialEq)]
 enum SavedBinding {
     Context(*mut sys::ImNodesContext),
@@ -189,35 +178,30 @@ impl Drop for ImNodesContextGuard {
 
 /// Per-frame Ui extension entry point
 pub struct NodesUi<'ui> {
-    _ui: &'ui Ui,
-    _ctx: &'ui Context,
+    ui: &'ui Ui,
+    ctx: &'ui Context,
 }
 
 /// Pre-submission phase of a node editor frame.
 ///
 /// Configure persistent editor IO/style and queue per-node mutations before calling
-/// [`Self::begin_nodes`]. Queued mutations do not touch native node records until their matching
+/// [`Self::with_nodes`]. Queued mutations do not touch native node records until their matching
 /// [`NodeEditor::node`] call submits the node.
-#[must_use = "call begin_nodes() to render the editor, or end() to render an empty editor"]
+#[must_use = "call with_nodes() to draw the editor, or end() to draw an empty editor"]
 pub struct NodeEditorSetup<'ui> {
-    _ui: &'ui Ui,
-    _ctx: &'ui Context,
-    scope: ImNodesScope,
+    ui: &'ui Ui,
+    scope: ImNodesScope<'ui>,
     pending_node_options: RefCell<BTreeMap<crate::NodeId, crate::NodeOptions>>,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub(crate) enum EditorScope {
-    Editor,
-    Node,
-    TitleBar,
-    InputAttribute,
-    OutputAttribute,
-    StaticAttribute,
-    Ended,
+struct ActiveEditor<'a> {
+    scope: &'a ImNodesScope<'a>,
+    submitted: RefCell<SubmittedObjects>,
+    minimap: Cell<Option<(f32, crate::MiniMapLocation)>>,
+    minimap_hovered: &'a mut Vec<crate::NodeId>,
 }
 
-/// RAII token for the node-submission phase of an editor frame.
+/// The node-submission phase of an editor, borrowed inside [`NodeEditorSetup::with_nodes`].
 ///
 /// Phase-sensitive node mutations are intentionally unavailable here because upstream ImNodes
 /// requires them to run before the first `BeginNode`/`EndNode` pair. The type boundary prevents
@@ -237,29 +221,16 @@ pub(crate) enum EditorScope {
 ///     editor: &dear_imnodes::NodeEditor<'_>,
 ///     pin: dear_imnodes::PinId,
 /// ) {
-///     editor.input_attr(pin, dear_imnodes::PinShape::CircleFilled);
+///     editor.input_attr(pin, dear_imnodes::PinShape::CircleFilled, || {});
 /// }
 /// ```
-pub struct NodeEditor<'ui> {
-    _ui: &'ui Ui,
-    _ctx: &'ui Context,
-    scope: ImNodesScope,
-    ended: bool,
-    state: Cell<EditorScope>,
+pub struct NodeEditor<'a> {
+    ui: &'a Ui,
+    host: &'a NativeWindowScope<'a>,
+    frame: &'a ActiveEditor<'a>,
     pending_node_options: RefCell<BTreeMap<crate::NodeId, crate::NodeOptions>>,
-    submitted_nodes: RefCell<BTreeSet<crate::NodeId>>,
-    submitted_pins: RefCell<BTreeSet<crate::PinId>>,
-    submitted_links: RefCell<BTreeSet<crate::LinkId>>,
-    finalizing: Cell<bool>,
-    frame_active: &'ui Cell<bool>,
-    // Each callback address is handed to native code until EndNodeEditor; boxing keeps it stable
-    // when later callbacks grow the Vec.
-    #[allow(clippy::vec_box)]
-    minimap_callbacks: Vec<Box<MiniMapCallbackHolder<'ui>>>,
-}
-
-struct MiniMapCallbackHolder<'a> {
-    callback: Box<dyn FnMut(crate::NodeId) + 'a>,
+    attributes: RefCell<BTreeMap<crate::PinId, tokens::AttributeKind>>,
+    pub(crate) styles: crate::style::StyleStacks<'a>,
 }
 
 #[cfg(test)]
@@ -556,7 +527,7 @@ mod tests {
     }
 
     #[test]
-    fn node_editor_drop_restores_previous_imgui_context() {
+    fn scoped_editor_restores_previous_imgui_context() {
         let _guard = test_guard();
         let mut imgui = ImGuiContext::create();
         prepare_imgui(&mut imgui);
@@ -564,10 +535,10 @@ mod tests {
         let nodes = ImNodesContext::create(&imgui);
 
         let frame = imgui.begin_frame();
-        let editor = frame.ui().imnodes(&nodes).editor(None).begin_nodes();
+        let setup = frame.ui().imnodes(&nodes).editor(None);
 
         unsafe { imgui_sys::igSetCurrentContext(ptr::null_mut()) };
-        drop(editor);
+        setup.with_nodes(|editor| editor.node(crate::NodeId::new(1), |_| {}));
         assert_eq!(unsafe { imgui_sys::igGetCurrentContext() }, ptr::null_mut());
 
         unsafe { imgui_sys::igSetCurrentContext(raw_imgui) };

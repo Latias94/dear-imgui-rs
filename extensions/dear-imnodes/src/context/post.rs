@@ -1,44 +1,28 @@
-use super::{Context, ImNodesScope, NodeEditor, NodeEditorSetup, SubmittedObjects};
+use super::{ImNodesScope, SubmittedObjects};
 use crate::sys;
-use dear_imgui_rs::Ui;
-use std::marker::PhantomData;
 use std::os::raw::c_char;
 use std::rc::Rc;
 
 /// Post-editor queries (must be called after EndNodeEditor)
 pub struct PostEditor<'ui> {
-    #[allow(dead_code)]
-    pub(super) _ui: &'ui Ui,
-    #[allow(dead_code)]
-    pub(super) _ctx: &'ui Context,
-    pub(super) scope: ImNodesScope,
-    pub(super) editor_hovered: bool,
-    pub(super) hovered_node: Option<crate::NodeId>,
-    pub(super) hovered_link: Option<crate::LinkId>,
-    pub(super) hovered_pin: Option<crate::PinId>,
-    pub(super) link_created: Option<crate::LinkCreated>,
-    pub(super) link_created_ex: Option<crate::LinkCreatedEx>,
-    pub(super) link_destroyed: Option<crate::LinkId>,
-    pub(super) any_attribute_active: Option<crate::PinId>,
-    pub(super) link_started: Option<crate::PinId>,
-    pub(super) link_dropped_excluding_detached: Option<crate::PinId>,
-    pub(super) link_dropped_including_detached: Option<crate::PinId>,
+    scope: ImNodesScope<'ui>,
+    minimap_hovered: Vec<crate::NodeId>,
+    editor_hovered: bool,
+    hovered_node: Option<crate::NodeId>,
+    hovered_link: Option<crate::LinkId>,
+    hovered_pin: Option<crate::PinId>,
+    link_created: Option<crate::LinkCreated>,
+    link_created_ex: Option<crate::LinkCreatedEx>,
+    link_destroyed: Option<crate::LinkId>,
+    any_attribute_active: Option<crate::PinId>,
+    link_started: Option<crate::PinId>,
+    link_dropped_excluding_detached: Option<crate::PinId>,
+    link_dropped_including_detached: Option<crate::PinId>,
     submitted: Rc<SubmittedObjects>,
-    pub(super) _not_send_sync: PhantomData<Rc<()>>,
 }
 
-impl<'ui> NodeEditorSetup<'ui> {
-    /// End an editor without entering the node-submission phase.
-    pub fn end(self) -> PostEditor<'ui> {
-        self.begin_nodes().end()
-    }
-}
-
-impl<'ui> NodeEditor<'ui> {
-    /// Explicitly end the node editor and return post-editor query handle
-    pub fn end(mut self) -> PostEditor<'ui> {
-        self.finish_native();
-        let scope = self.scope.clone();
+impl<'ui> PostEditor<'ui> {
+    pub(super) fn capture(scope: ImNodesScope<'ui>, minimap_hovered: Vec<crate::NodeId>) -> Self {
         let (
             editor_hovered,
             hovered_node,
@@ -174,10 +158,10 @@ impl<'ui> NodeEditor<'ui> {
             )
         });
 
-        PostEditor {
-            _ui: self._ui,
-            _ctx: self._ctx,
-            scope: self.scope.clone(),
+        let submitted = scope.last_submission().borrow().clone();
+        Self {
+            scope,
+            minimap_hovered,
             editor_hovered,
             hovered_node,
             hovered_link,
@@ -189,16 +173,15 @@ impl<'ui> NodeEditor<'ui> {
             link_started,
             link_dropped_excluding_detached,
             link_dropped_including_detached,
-            submitted: self.scope.last_submission(self._ctx).borrow().clone(),
-            _not_send_sync: PhantomData,
+            submitted,
         }
     }
-}
 
-impl<'ui> PostEditor<'ui> {
     #[inline]
     fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
-        self._ctx.assert_no_active_frame("PostEditor operation");
+        self.scope
+            .ctx
+            .assert_no_active_frame("PostEditor operation");
         self.scope.with_bound_context(f)
     }
 
@@ -267,12 +250,12 @@ impl<'ui> PostEditor<'ui> {
     }
 
     fn contains_node(&self, id: crate::NodeId) -> bool {
-        let latest = self.scope.last_submission(self._ctx).borrow();
+        let latest = self.scope.last_submission().borrow();
         self.submitted.nodes.contains(&id) && latest.nodes.contains(&id)
     }
 
     fn contains_link(&self, id: crate::LinkId) -> bool {
-        let latest = self.scope.last_submission(self._ctx).borrow();
+        let latest = self.scope.last_submission().borrow();
         self.submitted.links.contains(&id) && latest.links.contains(&id)
     }
 
@@ -411,6 +394,11 @@ impl<'ui> PostEditor<'ui> {
 
     pub fn hovered_link(&self) -> Option<crate::LinkId> {
         self.hovered_link
+    }
+
+    /// Hovered minimap nodes in native draw order, captured when the editor ended.
+    pub fn minimap_hovered_nodes(&self) -> &[crate::NodeId] {
+        &self.minimap_hovered
     }
 
     pub fn hovered_pin(&self) -> Option<crate::PinId> {

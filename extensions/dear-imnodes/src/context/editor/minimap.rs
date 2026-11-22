@@ -1,73 +1,38 @@
-use super::super::{EditorScope, MiniMapCallbackHolder, NodeEditor};
-use crate::sys;
-use std::os::raw::c_void;
+use super::super::NodeEditor;
+use crate::{MiniMapLocation, NodeId, sys};
+use std::ffi::c_void;
 
-impl<'ui> NodeEditor<'ui> {
-    /// Draw a minimap in the editor
-    pub fn minimap(&self, size_fraction: f32, location: crate::MiniMapLocation) {
-        self.require_scope(EditorScope::Editor, "NodeEditor::minimap()");
-        validate_size_fraction(size_fraction);
-        self.finalizing.set(true);
-        self.with_bound_context(|| unsafe {
-            sys::imnodes_MiniMap(
-                size_fraction,
-                location as sys::ImNodesMiniMapLocation,
-                None,
-                std::ptr::null_mut(),
-            )
-        });
-    }
-
-    /// Draw a minimap with a node-hover callback (invoked during this call)
-    pub fn minimap_with_callback<F>(
-        &mut self,
-        size_fraction: f32,
-        location: crate::MiniMapLocation,
-        callback: F,
-    ) where
-        F: FnMut(crate::NodeId) + 'ui,
-    {
-        self.require_scope(EditorScope::Editor, "NodeEditor::minimap_with_callback()");
-        validate_size_fraction(size_fraction);
-        self.finalizing.set(true);
-        unsafe extern "C" fn trampoline(node_id: i32, user: *mut c_void) {
-            if user.is_null() {
-                return;
-            }
-            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
-                let holder = &mut *(user as *mut MiniMapCallbackHolder<'_>);
-                (holder.callback)(crate::NodeId::new(node_id));
-            }));
-            if res.is_err() {
-                eprintln!("dear-imnodes: panic in minimap callback");
-                std::process::abort();
-            }
-        }
-
-        // ImNodes may invoke the callback during EndNodeEditor(). Keep the closure alive for the
-        // whole editor frame by storing it inside the NodeEditor token.
-        self.minimap_callbacks.push(Box::new(MiniMapCallbackHolder {
-            callback: Box::new(callback),
-        }));
-        let user_ptr = self
-            .minimap_callbacks
-            .last_mut()
-            .map(|b| b.as_mut() as *mut MiniMapCallbackHolder<'ui> as *mut c_void)
-            .unwrap_or(std::ptr::null_mut());
-        self.with_bound_context(|| unsafe {
-            sys::imnodes_MiniMap(
-                size_fraction,
-                location as sys::ImNodesMiniMapLocation,
-                Some(trampoline),
-                user_ptr,
-            )
-        });
+impl NodeEditor<'_> {
+    /// Draws a minimap over the submitted graph. Read its hovered nodes from
+    /// [`PostEditor::minimap_hovered_nodes`](crate::PostEditor::minimap_hovered_nodes).
+    pub fn minimap(&self, size_fraction: f32, location: MiniMapLocation) {
+        assert!(self.host.is_current(), "minimap requires the editor canvas");
+        assert!(
+            size_fraction.is_finite() && size_fraction > 0.0 && size_fraction <= 1.0,
+            "dear-imnodes: minimap size fraction must be finite and in (0, 1]"
+        );
+        self.frame.minimap.set(Some((size_fraction, location)));
     }
 }
 
-fn validate_size_fraction(size_fraction: f32) {
-    assert!(
-        size_fraction.is_finite() && size_fraction > 0.0 && size_fraction <= 1.0,
-        "dear-imnodes: minimap size fraction must be finite and in (0, 1]"
-    );
+// The caller has bound the active editor. Keep the callback target borrowed for the entire
+// native End. A positive size enables MiniMapUpdate, which clears both callback fields.
+pub(super) unsafe fn end_editor(
+    minimap: Option<(f32, MiniMapLocation)>,
+    hovered: &mut Vec<NodeId>,
+) {
+    unsafe extern "C" fn record(id: i32, data: *mut c_void) {
+        unsafe { (*data.cast::<Vec<NodeId>>()).push(NodeId::new(id)) };
+    }
+    unsafe {
+        if let Some((size, location)) = minimap {
+            sys::imnodes_MiniMap(
+                size,
+                location as sys::ImNodesMiniMapLocation,
+                Some(record),
+                std::ptr::from_mut(hovered).cast(),
+            );
+        }
+        sys::imnodes_EndNodeEditor();
+    }
 }

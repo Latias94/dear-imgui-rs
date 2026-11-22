@@ -10,11 +10,11 @@ impl<'ui> NodesUi<'ui> {
             ctx.imgui_binding.id(),
             "dear-imnodes: NodesUi requires a Ui from the owning ImGui context"
         );
-        Self { _ui: ui, _ctx: ctx }
+        Self { ui, ctx }
     }
 
-    /// Begin a node editor with an optional EditorContext
+    /// Prepares the selected editor. Drawing begins inside [`NodeEditorSetup::with_nodes`].
     pub fn editor(&self, editor: Option<&EditorContext>) -> NodeEditorSetup<'ui> {
-        NodeEditorSetup::begin(self._ui, self._ctx, editor)
+        NodeEditorSetup::new(self.ui, self.ctx, editor)
     }
 }

@@ -126,6 +126,7 @@ impl<'ui> NodeEditorSetup<'ui> {
 
     /// Persistent style setters
     pub fn set_grid_spacing(&self, spacing: f32) {
+        crate::style::validate_grid_spacing(spacing);
         self.with_style(|style| style.GridSpacing = spacing);
     }
     pub fn set_link_thickness(&self, thickness: f32) {

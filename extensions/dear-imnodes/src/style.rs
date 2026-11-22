@@ -1,6 +1,6 @@
 use crate::context::ImNodesScope;
 use crate::sys;
-use std::marker::PhantomData;
+use std::cell::RefCell;
 
 #[repr(u32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -50,31 +50,96 @@ impl ColorElement {
     }
 }
 
-pub struct ColorToken<'a> {
-    scope: ImNodesScope,
-    _phantom: PhantomData<&'a crate::Context>,
+// ImNodes keeps three independent stacks on the ImNodes context. A token can be dropped
+// out of order or forgotten. Pop released entries from the top, then drain the rest before
+// EndNodeEditor so temporary styles cannot carry over to another editor.
+struct StyleStack<'a> {
+    scope: &'a ImNodesScope<'a>,
+    released: RefCell<Vec<bool>>,
+    pop_native: fn(),
 }
-impl<'a> ColorToken<'a> {
-    pub fn pop(self) {}
-}
-impl Drop for ColorToken<'_> {
-    fn drop(&mut self) {
-        self.scope
-            .with_bound_context(|| unsafe { sys::imnodes_PopColorStyle() });
+
+impl<'a> StyleStack<'a> {
+    fn new(scope: &'a ImNodesScope<'a>, pop_native: fn()) -> Self {
+        Self {
+            scope,
+            released: Default::default(),
+            pop_native,
+        }
+    }
+
+    fn push(&self, push_native: impl FnOnce()) -> StyleEntry<'_> {
+        let mut released = self.released.borrow_mut();
+        let index = released.len();
+        self.scope.with_bound_context(push_native);
+        released.push(false);
+        StyleEntry { stack: self, index }
+    }
+
+    fn pop(&self, count: usize) {
+        if count != 0 {
+            self.scope.with_bound_context(|| {
+                for _ in 0..count {
+                    (self.pop_native)();
+                }
+            });
+        }
     }
 }
 
-pub struct StyleVarToken<'a> {
-    scope: ImNodesScope,
-    _phantom: PhantomData<&'a crate::Context>,
-}
-impl<'a> StyleVarToken<'a> {
-    pub fn pop(self) {}
-}
-impl Drop for StyleVarToken<'_> {
+impl Drop for StyleStack<'_> {
     fn drop(&mut self) {
-        self.scope
-            .with_bound_context(|| unsafe { sys::imnodes_PopStyleVar(1) });
+        let count = self.released.get_mut().len();
+        self.pop(count);
+    }
+}
+
+struct StyleEntry<'a> {
+    stack: &'a StyleStack<'a>,
+    index: usize,
+}
+
+impl Drop for StyleEntry<'_> {
+    fn drop(&mut self) {
+        let mut released = self.stack.released.borrow_mut();
+        released[self.index] = true;
+        let before = released.len();
+        while released.last() == Some(&true) {
+            released.pop();
+        }
+        self.stack.pop(before - released.len());
+    }
+}
+
+pub(crate) struct StyleStacks<'a> {
+    colors: StyleStack<'a>,
+    vars: StyleStack<'a>,
+    flags: StyleStack<'a>,
+}
+
+impl<'a> StyleStacks<'a> {
+    pub(crate) fn new(scope: &'a ImNodesScope<'a>) -> Self {
+        Self {
+            colors: StyleStack::new(scope, || unsafe { sys::imnodes_PopColorStyle() }),
+            vars: StyleStack::new(scope, || unsafe { sys::imnodes_PopStyleVar(1) }),
+            flags: StyleStack::new(scope, || unsafe { sys::imnodes_PopAttributeFlag() }),
+        }
+    }
+}
+
+#[must_use = "dropping the token restores the previous color"]
+pub struct ColorToken<'a>(StyleEntry<'a>);
+impl ColorToken<'_> {
+    pub fn pop(self) {
+        drop(self.0);
+    }
+}
+
+#[must_use = "dropping the token restores the previous style value"]
+pub struct StyleVarToken<'a>(StyleEntry<'a>);
+impl StyleVarToken<'_> {
+    pub fn pop(self) {
+        drop(self.0);
     }
 }
 
@@ -83,75 +148,73 @@ pub enum StyleVarValue {
     Vec2([f32; 2]),
 }
 
-pub struct AttributeFlagToken<'a> {
-    scope: ImNodesScope,
-    _phantom: PhantomData<&'a crate::Context>,
-}
-impl<'a> AttributeFlagToken<'a> {
-    pub fn pop(self) {}
-}
-impl Drop for AttributeFlagToken<'_> {
-    fn drop(&mut self) {
-        self.scope
-            .with_bound_context(|| unsafe { sys::imnodes_PopAttributeFlag() });
+#[must_use = "dropping the token restores the previous attribute flags"]
+pub struct AttributeFlagToken<'a>(StyleEntry<'a>);
+impl AttributeFlagToken<'_> {
+    pub fn pop(self) {
+        drop(self.0);
     }
 }
 
-/// Style helpers available from NodeEditor
-impl<'ui> crate::NodeEditor<'ui> {
+impl crate::NodeEditor<'_> {
     pub fn push_attribute_flag(&self, flag: crate::AttributeFlags) -> AttributeFlagToken<'_> {
-        self.with_bound_context(|| unsafe { sys::imnodes_PushAttributeFlag(flag.bits()) });
-        AttributeFlagToken {
-            scope: self.scope(),
-            _phantom: PhantomData,
-        }
+        AttributeFlagToken(
+            self.styles
+                .flags
+                .push(|| unsafe { sys::imnodes_PushAttributeFlag(flag.bits()) }),
+        )
     }
 
     pub fn push_color(&self, elem: ColorElement, color: [f32; 4]) -> ColorToken<'_> {
         let col = rgba_to_abgr_u32(color);
-        self.with_bound_context(|| unsafe { sys::imnodes_PushColorStyle(elem as i32, col) });
-        ColorToken {
-            scope: self.scope(),
-            _phantom: PhantomData,
-        }
+        ColorToken(
+            self.styles
+                .colors
+                .push(|| unsafe { sys::imnodes_PushColorStyle(elem as i32, col) }),
+        )
     }
 
+    /// Pushes a temporary style value. The padding and minimap offset variables take a vector.
     pub fn push_style_var(&self, var: crate::StyleVar, value: StyleVarValue) -> StyleVarToken<'_> {
-        self.with_bound_context(|| match value {
-            StyleVarValue::Float(v) => unsafe { sys::imnodes_PushStyleVar_Float(var as i32, v) },
-            StyleVarValue::Vec2(v) => unsafe {
-                sys::imnodes_PushStyleVar_Vec2(var as i32, sys::ImVec2_c { x: v[0], y: v[1] })
-            },
-        });
-        StyleVarToken {
-            scope: self.scope(),
-            _phantom: PhantomData,
-        }
+        use crate::StyleVar;
+        let takes_vec2 = matches!(
+            var,
+            StyleVar::NodePadding | StyleVar::MiniMapPadding | StyleVar::MiniMapOffset
+        );
+        assert_eq!(
+            takes_vec2,
+            matches!(value, StyleVarValue::Vec2(_)),
+            "dear-imnodes: incorrect value type for {var:?}"
+        );
+        StyleVarToken(self.styles.vars.push(|| unsafe {
+            match value {
+                StyleVarValue::Float(value) => {
+                    if var == StyleVar::GridSpacing {
+                        validate_grid_spacing(value);
+                    }
+                    sys::imnodes_PushStyleVar_Float(var as i32, value);
+                }
+                StyleVarValue::Vec2([x, y]) => {
+                    sys::imnodes_PushStyleVar_Vec2(var as i32, sys::ImVec2_c { x, y })
+                }
+            }
+        }))
     }
 
     pub fn push_style_var_f32(&self, var: crate::StyleVar, value: f32) -> StyleVarToken<'_> {
-        self.with_bound_context(|| unsafe { sys::imnodes_PushStyleVar_Float(var as i32, value) });
-        StyleVarToken {
-            scope: self.scope(),
-            _phantom: PhantomData,
-        }
+        self.push_style_var(var, StyleVarValue::Float(value))
     }
 
     pub fn push_style_var_vec2(&self, var: crate::StyleVar, value: [f32; 2]) -> StyleVarToken<'_> {
-        self.with_bound_context(|| unsafe {
-            sys::imnodes_PushStyleVar_Vec2(
-                var as i32,
-                sys::ImVec2_c {
-                    x: value[0],
-                    y: value[1],
-                },
-            )
-        });
-        StyleVarToken {
-            scope: self.scope(),
-            _phantom: PhantomData,
-        }
+        self.push_style_var(var, StyleVarValue::Vec2(value))
     }
+}
+
+pub(crate) fn validate_grid_spacing(spacing: f32) {
+    assert!(
+        spacing.is_finite() && spacing > 0.0,
+        "dear-imnodes: grid spacing must be finite and positive"
+    );
 }
 
 /// Convert RGBA floats [0,1] to ImGui-packed ABGR (u32)
