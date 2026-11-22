@@ -1,5 +1,6 @@
 //! High-level safe helpers for ImGuizmo integrated with dear-imgui
 
+mod frame;
 pub mod graph;
 mod mat;
 mod op;

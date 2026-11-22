@@ -1,16 +1,12 @@
 use dear_imgui_rs::{ContextBinding, Ui};
 use dear_imguizmo_quat_sys as sys;
+use std::cell::RefCell;
 use std::os::raw::c_char;
 
 use crate::types::{
     Mode, Modifiers, QuatLike, Vec3Like, Vec4Like, from_sys_quat, from_sys_vec3, from_sys_vec4,
     modifiers_to_sys, to_sys_quat, to_sys_vec3, to_sys_vec4,
 };
-
-fn with_label_ptr<R>(label: &str, f: impl FnOnce(*const c_char) -> R) -> R {
-    assert!(!label.contains('\0'), "label contained NUL");
-    dear_imgui_rs::with_scratch_txt(label, f)
-}
 
 /// Lightweight handle to call ImGuIZMO.quat functions within a Ui frame
 #[derive(Clone, Copy)]
@@ -89,28 +85,42 @@ impl GizmoQuatSettings {
 /// and resize restore helpers are not stack based and are intentionally not wrapped
 /// by this guard.
 pub struct GizmoQuatSettingsToken<'ui> {
-    previous: GizmoQuatSettings,
-    active: bool,
+    slot: usize,
     ctx_binding: ContextBinding,
     _ui: std::marker::PhantomData<&'ui Ui>,
 }
 
-impl<'ui> GizmoQuatSettingsToken<'ui> {
-    /// Restore the previous settings before the token is dropped.
-    pub fn pop(mut self) {
-        self.ctx_binding
-            .with_bound_context(|| self.previous.apply_unchecked());
-        self.active = false;
+struct SettingsScope {
+    previous: GizmoQuatSettings,
+    released: bool,
+}
+
+thread_local! {
+    // Core reserves the native state for one thread across all its live contexts.
+    static SETTINGS_SCOPES: RefCell<Vec<SettingsScope>> = const { RefCell::new(Vec::new()) };
+}
+
+impl GizmoQuatSettingsToken<'_> {
+    /// Release this scope. A newer scope keeps its settings until it too is released.
+    pub fn pop(self) {
+        drop(self);
     }
 }
 
 impl Drop for GizmoQuatSettingsToken<'_> {
     fn drop(&mut self) {
-        if self.active {
-            let _ = self
-                .ctx_binding
-                .try_with_bound_context(|| self.previous.apply_unchecked());
-        }
+        let _ = self.ctx_binding.try_with_bound_context(|| {
+            SETTINGS_SCOPES.with_borrow_mut(|scopes| {
+                scopes[self.slot].released = true;
+                let mut restore = None;
+                while scopes.last().is_some_and(|scope| scope.released) {
+                    restore = scopes.pop().map(|scope| scope.previous);
+                }
+                if let Some(previous) = restore {
+                    previous.apply_unchecked();
+                }
+            });
+        });
     }
 }
 
@@ -276,6 +286,27 @@ impl<'ui> GizmoQuatUi<'ui> {
         self._ui.with_bound_context(f)
     }
 
+    fn with_widget(
+        &self,
+        label: &str,
+        size: f32,
+        draw: impl FnOnce(*const c_char) -> bool,
+    ) -> bool {
+        assert!(!label.contains('\0'), "label contained NUL");
+        assert!(
+            size.is_finite() && size > 0.0,
+            "ImGuIZMO.quat needs a positive finite widget size"
+        );
+        self.with_bound_context(|| {
+            let ctx = unsafe { dear_imgui_rs::sys::igGetCurrentContext() };
+            assert!(
+                unsafe { (*ctx).WithinFrameScope && !(*ctx).CurrentWindow.is_null() },
+                "ImGuIZMO.quat needs a window in an open ImGui frame"
+            );
+            dear_imgui_rs::with_scratch_txt(label, draw)
+        })
+    }
+
     /// Start a builder to configure size/mode ergonomically, then choose a gizmo variant.
     ///
     /// Example
@@ -309,19 +340,25 @@ impl<'ui> GizmoQuatUi<'ui> {
 
     /// Temporarily apply getter-backed global settings until the returned token is dropped.
     ///
-    /// The token restores only [`GizmoQuatSettings`] fields. Upstream color and
-    /// resize restore helpers are single saved-value helpers rather than stacks,
-    /// so nested color/resize scopes cannot be represented soundly here.
+    /// Scopes nest across ImGui contexts on the owning thread. Dropping an outer
+    /// token early leaves the inner settings in effect. Forgetting a token leaves
+    /// its settings scope installed. Only [`GizmoQuatSettings`] fields participate.
     #[must_use = "dropping the token immediately restores the previous ImGuIZMO.quat settings"]
     pub fn push_settings(&self, settings: GizmoQuatSettings) -> GizmoQuatSettingsToken<'ui> {
-        let previous = self.with_bound_context(|| {
-            let previous = GizmoQuatSettings::current_unchecked();
+        let slot = self.with_bound_context(|| {
+            let slot = SETTINGS_SCOPES.with_borrow_mut(|scopes| {
+                let slot = scopes.len();
+                scopes.push(SettingsScope {
+                    previous: GizmoQuatSettings::current_unchecked(),
+                    released: false,
+                });
+                slot
+            });
             settings.apply_unchecked();
-            previous
+            slot
         });
         GizmoQuatSettingsToken {
-            previous,
-            active: true,
+            slot,
             ctx_binding: self._ui.binding(),
             _ui: std::marker::PhantomData,
         }
@@ -330,10 +367,8 @@ impl<'ui> GizmoQuatUi<'ui> {
     /// Gizmo with quaternion for axes rotation
     pub fn gizmo3d_quat<Q: QuatLike>(&self, label: &str, q: &mut Q, size: f32, mode: Mode) -> bool {
         let mut sq = to_sys_quat(q);
-        let used = self.with_bound_context(|| {
-            with_label_ptr(label, |label_ptr| unsafe {
-                sys::iggizmo3D_quatPtrFloat(label_ptr, &mut sq as *mut _, size, mode.bits())
-            })
+        let used = self.with_widget(label, size, |label_ptr| unsafe {
+            sys::iggizmo3D_quatPtrFloat(label_ptr, &mut sq as *mut _, size, mode.bits())
         });
         from_sys_quat(q, sq);
         used
@@ -350,16 +385,14 @@ impl<'ui> GizmoQuatUi<'ui> {
     ) -> bool {
         let mut sq = to_sys_quat(q);
         let mut sl = to_sys_quat(light);
-        let used = self.with_bound_context(|| {
-            with_label_ptr(label, |label_ptr| unsafe {
-                sys::iggizmo3D_quatPtrquatPtr(
-                    label_ptr,
-                    &mut sq as *mut _,
-                    &mut sl as *mut _,
-                    size,
-                    mode.bits(),
-                )
-            })
+        let used = self.with_widget(label, size, |label_ptr| unsafe {
+            sys::iggizmo3D_quatPtrquatPtr(
+                label_ptr,
+                &mut sq as *mut _,
+                &mut sl as *mut _,
+                size,
+                mode.bits(),
+            )
         });
         from_sys_quat(q, sq);
         from_sys_quat(light, sl);
@@ -377,16 +410,14 @@ impl<'ui> GizmoQuatUi<'ui> {
     ) -> bool {
         let mut sq = to_sys_quat(q);
         let mut sv = to_sys_vec4(v);
-        let used = self.with_bound_context(|| {
-            with_label_ptr(label, |label_ptr| unsafe {
-                sys::iggizmo3D_quatPtrvec4Ptr(
-                    label_ptr,
-                    &mut sq as *mut _,
-                    &mut sv as *mut _,
-                    size,
-                    mode.bits(),
-                )
-            })
+        let used = self.with_widget(label, size, |label_ptr| unsafe {
+            sys::iggizmo3D_quatPtrvec4Ptr(
+                label_ptr,
+                &mut sq as *mut _,
+                &mut sv as *mut _,
+                size,
+                mode.bits(),
+            )
         });
         from_sys_quat(q, sq);
         from_sys_vec4(v, sv);
@@ -404,16 +435,14 @@ impl<'ui> GizmoQuatUi<'ui> {
     ) -> bool {
         let mut sq = to_sys_quat(q);
         let mut sv = to_sys_vec3(v);
-        let used = self.with_bound_context(|| {
-            with_label_ptr(label, |label_ptr| unsafe {
-                sys::iggizmo3D_quatPtrvec3Ptr(
-                    label_ptr,
-                    &mut sq as *mut _,
-                    &mut sv as *mut _,
-                    size,
-                    mode.bits(),
-                )
-            })
+        let used = self.with_widget(label, size, |label_ptr| unsafe {
+            sys::iggizmo3D_quatPtrvec3Ptr(
+                label_ptr,
+                &mut sq as *mut _,
+                &mut sv as *mut _,
+                size,
+                mode.bits(),
+            )
         });
         from_sys_quat(q, sq);
         from_sys_vec3(v, sv);
@@ -431,16 +460,14 @@ impl<'ui> GizmoQuatUi<'ui> {
     ) -> bool {
         let mut svm = to_sys_vec3(vm);
         let mut sq = to_sys_quat(q);
-        let used = self.with_bound_context(|| {
-            with_label_ptr(label, |label_ptr| unsafe {
-                sys::iggizmo3D_vec3PtrquatPtrFloat(
-                    label_ptr,
-                    &mut svm as *mut _,
-                    &mut sq as *mut _,
-                    size,
-                    mode.bits(),
-                )
-            })
+        let used = self.with_widget(label, size, |label_ptr| unsafe {
+            sys::iggizmo3D_vec3PtrquatPtrFloat(
+                label_ptr,
+                &mut svm as *mut _,
+                &mut sq as *mut _,
+                size,
+                mode.bits(),
+            )
         });
         from_sys_vec3(vm, svm);
         from_sys_quat(q, sq);
@@ -458,16 +485,14 @@ impl<'ui> GizmoQuatUi<'ui> {
     ) -> bool {
         let mut svm = to_sys_vec3(vm);
         let mut sv4 = to_sys_vec4(v);
-        let used = self.with_bound_context(|| {
-            with_label_ptr(label, |label_ptr| unsafe {
-                sys::iggizmo3D_vec3Ptrvec4Ptr(
-                    label_ptr,
-                    &mut svm as *mut _,
-                    &mut sv4 as *mut _,
-                    size,
-                    mode.bits(),
-                )
-            })
+        let used = self.with_widget(label, size, |label_ptr| unsafe {
+            sys::iggizmo3D_vec3Ptrvec4Ptr(
+                label_ptr,
+                &mut svm as *mut _,
+                &mut sv4 as *mut _,
+                size,
+                mode.bits(),
+            )
         });
         from_sys_vec3(vm, svm);
         from_sys_vec4(v, sv4);
@@ -485,16 +510,14 @@ impl<'ui> GizmoQuatUi<'ui> {
     ) -> bool {
         let mut svm = to_sys_vec3(vm);
         let mut sv3 = to_sys_vec3(v);
-        let used = self.with_bound_context(|| {
-            with_label_ptr(label, |label_ptr| unsafe {
-                sys::iggizmo3D_vec3Ptrvec3Ptr(
-                    label_ptr,
-                    &mut svm as *mut _,
-                    &mut sv3 as *mut _,
-                    size,
-                    mode.bits(),
-                )
-            })
+        let used = self.with_widget(label, size, |label_ptr| unsafe {
+            sys::iggizmo3D_vec3Ptrvec3Ptr(
+                label_ptr,
+                &mut svm as *mut _,
+                &mut sv3 as *mut _,
+                size,
+                mode.bits(),
+            )
         });
         from_sys_vec3(vm, svm);
         from_sys_vec3(v, sv3);
@@ -514,17 +537,15 @@ impl<'ui> GizmoQuatUi<'ui> {
         let mut svm = to_sys_vec3(vm);
         let mut sq = to_sys_quat(q);
         let mut sql = to_sys_quat(ql);
-        let used = self.with_bound_context(|| {
-            with_label_ptr(label, |label_ptr| unsafe {
-                sys::iggizmo3D_vec3PtrquatPtrquatPtr(
-                    label_ptr,
-                    &mut svm as *mut _,
-                    &mut sq as *mut _,
-                    &mut sql as *mut _,
-                    size,
-                    mode.bits(),
-                )
-            })
+        let used = self.with_widget(label, size, |label_ptr| unsafe {
+            sys::iggizmo3D_vec3PtrquatPtrquatPtr(
+                label_ptr,
+                &mut svm as *mut _,
+                &mut sq as *mut _,
+                &mut sql as *mut _,
+                size,
+                mode.bits(),
+            )
         });
         from_sys_vec3(vm, svm);
         from_sys_quat(q, sq);
@@ -545,17 +566,15 @@ impl<'ui> GizmoQuatUi<'ui> {
         let mut svm = to_sys_vec3(vm);
         let mut sq = to_sys_quat(q);
         let mut sv4 = to_sys_vec4(v);
-        let used = self.with_bound_context(|| {
-            with_label_ptr(label, |label_ptr| unsafe {
-                sys::iggizmo3D_vec3PtrquatPtrvec4Ptr(
-                    label_ptr,
-                    &mut svm as *mut _,
-                    &mut sq as *mut _,
-                    &mut sv4 as *mut _,
-                    size,
-                    mode.bits(),
-                )
-            })
+        let used = self.with_widget(label, size, |label_ptr| unsafe {
+            sys::iggizmo3D_vec3PtrquatPtrvec4Ptr(
+                label_ptr,
+                &mut svm as *mut _,
+                &mut sq as *mut _,
+                &mut sv4 as *mut _,
+                size,
+                mode.bits(),
+            )
         });
         from_sys_vec3(vm, svm);
         from_sys_quat(q, sq);
@@ -576,17 +595,15 @@ impl<'ui> GizmoQuatUi<'ui> {
         let mut svm = to_sys_vec3(vm);
         let mut sq = to_sys_quat(q);
         let mut sv3 = to_sys_vec3(v);
-        let used = self.with_bound_context(|| {
-            with_label_ptr(label, |label_ptr| unsafe {
-                sys::iggizmo3D_vec3PtrquatPtrvec3Ptr(
-                    label_ptr,
-                    &mut svm as *mut _,
-                    &mut sq as *mut _,
-                    &mut sv3 as *mut _,
-                    size,
-                    mode.bits(),
-                )
-            })
+        let used = self.with_widget(label, size, |label_ptr| unsafe {
+            sys::iggizmo3D_vec3PtrquatPtrvec3Ptr(
+                label_ptr,
+                &mut svm as *mut _,
+                &mut sq as *mut _,
+                &mut sv3 as *mut _,
+                size,
+                mode.bits(),
+            )
         });
         from_sys_vec3(vm, svm);
         from_sys_quat(q, sq);
@@ -797,10 +814,9 @@ impl<'ui> GizmoQuatUi<'ui> {
 
 #[cfg(test)]
 mod tests {
-    use super::{GizmoQuatExt, GizmoQuatSettings, GizmoQuatSettingsToken};
+    use super::GizmoQuatExt;
+    use dear_imgui_rs::Context;
     use dear_imgui_rs::sys as imgui_sys;
-    use dear_imgui_rs::{Context, ContextLifecycle};
-    use std::marker::PhantomData;
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::{Mutex, OnceLock};
 
@@ -878,24 +894,55 @@ mod tests {
     }
 
     #[test]
-    fn settings_token_drop_skips_destroyed_context() {
+    fn settings_scopes_nest_across_contexts_and_restore_on_unwind() {
         let _guard = test_guard();
-        let imgui = Context::create();
-        let binding = imgui.binding();
-        drop(imgui);
-        assert_eq!(binding.lifecycle(), ContextLifecycle::NativeDestroyed);
+        let mut a = Context::create();
+        prepare_imgui(&mut a);
+        let a_binding = a.binding();
+        let a_gizmo = a.frame().gizmo_quat();
+        let original = a_gizmo.current_settings();
+        let mut first = original;
+        first.pan_scale += 0.5;
+        let outer = a_gizmo.push_settings(first);
 
-        let original = GizmoQuatSettings::current_unchecked();
-        let mut stale_previous = original;
-        stale_previous.gizmo_feeling_rot += 1.0;
-        let token: GizmoQuatSettingsToken<'static> = GizmoQuatSettingsToken {
-            previous: stale_previous,
-            active: true,
-            ctx_binding: binding,
-            _ui: PhantomData,
-        };
+        unsafe { imgui_sys::igSetCurrentContext(std::ptr::null_mut()) };
+        let mut b = Context::create();
+        prepare_imgui(&mut b);
+        let b_raw = b.as_raw();
+        let b_gizmo = b.frame().gizmo_quat();
+        assert_eq!(b_gizmo.current_settings(), first);
+        let mut second = first;
+        second.flip_dolly = !second.flip_dolly;
+        let inner = b_gizmo.push_settings(second);
+        outer.pop();
+        assert_eq!(unsafe { imgui_sys::igGetCurrentContext() }, b_raw);
+        assert_eq!(a_gizmo.current_settings(), second);
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let _inner = inner;
+            panic!("leave the inner settings scope");
+        }));
+        assert!(result.is_err());
+        assert_eq!(b_gizmo.current_settings(), original);
+        assert!(b.end_frame());
+        a_binding.with_bound_context(|| assert!(a.end_frame()));
+    }
 
-        drop(token);
-        assert_eq!(GizmoQuatSettings::current_unchecked(), original);
+    #[test]
+    fn widgets_use_the_owning_uis_current_window() {
+        let _guard = test_guard();
+        let mut ctx = Context::create();
+        prepare_imgui(&mut ctx);
+        let ui = ctx.frame();
+        let gizmo = ui.gizmo_quat();
+        let mut q = [0.0, 0.0, 0.0, 1.0];
+        for name in ["Left", "Right"] {
+            ui.window(name).build(|| {
+                let list = unsafe { imgui_sys::igGetWindowDrawList() };
+                let vertices = unsafe { (*list).VtxBuffer.Size };
+                gizmo.builder().size(64.0).quat("##gizmo", &mut q);
+                assert!(unsafe { (*list).VtxBuffer.Size } > vertices);
+            });
+        }
+        assert!(ctx.end_frame());
     }
 }

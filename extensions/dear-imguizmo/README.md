@@ -120,7 +120,7 @@ bounds, and helpers.
 Typical usage order within a single frame:
 
 ```rust
-let giz = ui.guizmo(); // call once per frame
+let giz = ui.guizmo();
 
 // 1) Configure drawing area and destination
 let ds = ui.io().display_size();
@@ -136,9 +136,10 @@ let used = giz
 ```
 
 Notes:
-- Call `ui.guizmo()` exactly once per frame, then set `set_rect(...)` and a draw target before calling `manipulate`/`draw_*`.
-- You can select draw target with `giz.set_drawlist(DrawListTarget::Window|Background|Foreground)`.
-- Use RAII ID helpers: `let _id = giz.push_id(i);`.
+- The first `ui.guizmo()` opens the helper window. Further handles in the same ImGui frame share its draw target, ID scopes, and interaction state. Finish that frame before starting ImGuizmo in another ImGui context.
+- Consecutive frames of the same context continue drags and view interpolation. Handing ImGuizmo to another context cancels the previous interaction, including when the old context has been destroyed. Style, enablement, drawing rectangle, orthographic mode, axis options, and gizmo size remain process-global.
+- Set the drawing area with `set_rect(...)`. Use `set_drawlist_window()` to draw while the selected window is current, or select a viewport layer with `DrawListTarget::Background` or `DrawListTarget::Foreground`. Each frame starts on the helper window. A named alternative hover window is resolved by ID on subsequent frames of the same context.
+- Keep `let _id = giz.push_id(i);` alive while drawing the corresponding gizmo. An early outer drop preserves active inner IDs. The next frame starts at the root ID.
 - Style access: `let mut st = giz.style(); st.set_color(Color::Selection, [1.0,0.2,0.2,1.0]);`.
   More fields: `translation_line_arrow_size()`, `rotation_outer_line_thickness()`,
   `scale_line_circle_size()`, `hatched_axis_line_thickness()`, etc.
@@ -156,8 +157,7 @@ Simple utility methods you may find handy:
 
 ```rust
 // Hover test near a world-space position (in pixels)
-// Call after you've established view/projection for the frame
-// via manipulate/draw_grid/draw_cubes.
+// Call after manipulate has established the view and projection.
 let hovered = giz.is_over_at([0.0, 0.0, 0.0], 8.0);
 
 // Compute an ImGuizmo hashed ID from a pointer

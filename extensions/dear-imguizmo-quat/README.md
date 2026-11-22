@@ -89,6 +89,9 @@ let _settings_token = gizmo.push_settings(settings);
 // Dropping the token restores the previous getter-backed global settings.
 ```
 
+Nested tokens share the process-wide settings across ImGui contexts. Releasing
+an outer token early keeps the inner settings active until that token also ends.
+
 Color, modifier, and resize helpers are direct upstream wrappers. Their restore functions
 use one saved value rather than a stack, so avoid nesting `set_*`/`restore_*` or
 `resize_*`/`restore_*` pairs.
@@ -143,7 +146,7 @@ ui.gizmo_quat()
 
 ## Notes
 
-- Begin once per frame with `ui.gizmo_quat()` and call into the builder; no extra context is required.
+- Obtain `ui.gizmo_quat()` wherever you draw. Each widget uses the current window of that `Ui` and accepts a positive finite size in pixels.
 - RAII and ID usage follow dear-imgui patterns; use unique labels or `##suffix` to avoid ID clashes in loops.
 - Start with `examples/03-features/imguizmo_quat_minimal.rs` for a copy-ready integration.
 - See `examples/03-features/imguizmo_quat_showcase.rs` for the complete WGPU demo with cube and view controls.
