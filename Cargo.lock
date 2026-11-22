@@ -2723,9 +2723,11 @@ dependencies = [
  "pollster",
  "regex",
  "rfd",
+ "rustix 1.1.6",
  "thiserror 2.0.21",
  "tracing",
  "web-time",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

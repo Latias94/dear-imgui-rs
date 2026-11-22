@@ -6,7 +6,7 @@ use crate::dialog_state::{
     PendingPasteJob,
 };
 use crate::fs::FileSystem;
-use crate::fs_ops::{PasteError, entry_exists, keep_both_target, paste};
+use crate::fs_ops::{PasteError, delete_entry, entry_exists, keep_both_target, paste};
 
 pub(super) fn selected_entry_paths_from_ids(state: &FileDialogState) -> Vec<PathBuf> {
     state.core.selected_entry_paths()
@@ -27,9 +27,8 @@ pub(super) fn open_rename_modal_from_selection(state: &mut FileDialogState) {
         .core
         .entry_path_by_id(rename_target_id)
         .and_then(|path| path.file_name())
-        .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
-        .map(ToOwned::to_owned)
+        .map(|name| name.to_string_lossy().into_owned())
     else {
         return;
     };
@@ -49,6 +48,28 @@ pub(super) fn open_delete_modal_from_selection(state: &mut FileDialogState) {
     state.ui.operations.delete.error = None;
     state.ui.operations.delete.open_next = true;
 }
+
+pub(super) fn delete_targets(state: &mut FileDialogState, paths: &[PathBuf]) -> bool {
+    let delete = &mut state.ui.operations.delete;
+    let fs = state.filesystem.as_file_system();
+    state.core.invalidate_dir_cache();
+    for (index, path) in paths.iter().enumerate() {
+        if let Err(cause) = delete_entry(fs, path, delete.recursive) {
+            delete.target_ids.drain(..index);
+            state
+                .core
+                .replace_selection_by_ids(delete.target_ids.iter().copied());
+            delete.error = Some(format!("Failed to delete {}: {cause}", path.display()));
+            return false;
+        }
+    }
+    state.core.clear_selection();
+    delete.target_ids.clear();
+    delete.error = None;
+    delete.recursive = false;
+    true
+}
+
 pub(super) fn clipboard_set_from_selection(state: &mut FileDialogState, op: ClipboardOp) {
     if !state.core.has_selection() {
         return;
@@ -61,12 +82,12 @@ pub(super) fn clipboard_set_from_selection(state: &mut FileDialogState, op: Clip
     state.ui.operations.paste.clipboard = Some(FileClipboard { op, sources });
 }
 
-pub(super) fn start_paste_into_cwd(state: &mut FileDialogState) {
+pub(super) fn start_paste_into_cwd(state: &mut FileDialogState) -> Result<(), String> {
     let Some(clipboard) = state.ui.operations.paste.clipboard.clone() else {
-        return;
+        return Ok(());
     };
     if clipboard.sources.is_empty() {
-        return;
+        return Ok(());
     }
 
     state.ui.operations.paste.job = Some(PendingPasteJob {
@@ -78,13 +99,23 @@ pub(super) fn start_paste_into_cwd(state: &mut FileDialogState) {
         pending_conflict_action: None,
         conflict: None,
     });
+    run_paste_job_until_wait_or_done(state)
 }
 
-fn step_paste_job(
-    fs: &dyn FileSystem,
-    job: &mut PendingPasteJob,
-    selected: &mut Vec<EntryId>,
-) -> Result<bool, String> {
+pub(super) fn cancel_paste_job(state: &mut FileDialogState) {
+    let paste = &mut state.ui.operations.paste;
+    paste.conflict_open_next = false;
+    if let Some(mut job) = paste.job.take()
+        && job.clipboard.op == ClipboardOp::Cut
+        && job.next_index > 0
+    {
+        // A completed cut may already have a new file at its former name.
+        job.clipboard.sources.drain(..job.next_index);
+        paste.clipboard = (!job.clipboard.sources.is_empty()).then_some(job.clipboard);
+    }
+}
+
+fn step_paste_job(fs: &dyn FileSystem, job: &mut PendingPasteJob) -> Result<bool, String> {
     while job.next_index < job.clipboard.sources.len() {
         let src = &job.clipboard.sources[job.next_index];
         let name = src
@@ -94,13 +125,16 @@ fn step_paste_job(
         let mut dest = job.dest_dir.join(name);
         // A one-shot decision belongs only to this item, even if the conflict disappeared.
         let decision = job.pending_conflict_action.take();
-        if &dest == src || matches!(decision, Some(PasteConflictAction::Skip)) {
+        if (&dest == src && job.clipboard.op == ClipboardOp::Cut)
+            || matches!(decision, Some(PasteConflictAction::Skip))
+        {
             job.next_index += 1;
             continue;
         }
 
-        let mut overwrite = false;
-        if entry_exists(fs, &dest)
+        let action = if &dest == src {
+            Some(PasteConflictAction::KeepBoth)
+        } else if entry_exists(fs, &dest)
             .map_err(|e| format!("Could not inspect {}: {e}", dest.display()))?
         {
             let Some(action) = decision.or(job.apply_all_conflicts) else {
@@ -111,31 +145,30 @@ fn step_paste_job(
                 });
                 return Ok(false);
             };
-            match action {
-                PasteConflictAction::Skip => {
-                    job.next_index += 1;
-                    continue;
-                }
-                PasteConflictAction::KeepBoth => {
-                    dest = keep_both_target(fs, &dest).map_err(|e| {
-                        format!("Could not choose a name for {}: {e}", dest.display())
-                    })?;
-                }
-                PasteConflictAction::Overwrite => overwrite = true,
-            }
+            Some(action)
+        } else {
+            None
+        };
+        if action == Some(PasteConflictAction::Skip) {
+            job.next_index += 1;
+            continue;
+        }
+        if action == Some(PasteConflictAction::KeepBoth) {
+            dest = keep_both_target(fs, &dest)
+                .map_err(|e| format!("Could not choose a name for {}: {e}", dest.display()))?;
         }
 
-        let result = paste(fs, job.clipboard.op, src, &dest, overwrite);
+        let result = paste(
+            fs,
+            job.clipboard.op,
+            src,
+            &dest,
+            action == Some(PasteConflictAction::Overwrite),
+        );
         if let Err(PasteError::Transfer(e)) = &result {
             return Err(format!("Failed to paste {}: {e}", src.display()));
         }
-        selected.push(EntryId::from_path(&dest));
-        job.created.push(
-            dest.file_name()
-                .unwrap_or(name)
-                .to_string_lossy()
-                .into_owned(),
-        );
+        job.created.push(EntryId::from_path(&dest));
         job.next_index += 1;
         if let Err(PasteError::AfterInstall(e)) = result {
             return Err(format!("Pasted to {}. {e}", dest.display()));
@@ -153,36 +186,30 @@ pub(super) fn run_paste_job_until_wait_or_done(state: &mut FileDialogState) -> R
         return Ok(());
     }
 
-    let mut selected = if job.created.is_empty() {
-        Vec::new()
-    } else {
-        state.core.selected_entry_ids()
-    };
-    let previous_count = selected.len();
-    let done = step_paste_job(state.filesystem.as_file_system(), job, &mut selected);
-    let created = selected.len() != previous_count;
+    let previous_count = job.created.len();
+    let done = step_paste_job(state.filesystem.as_file_system(), job);
+    let created = job.created.len() != previous_count;
     if created {
-        state.ui.operations.reveal_id_next = selected.first().copied();
-        state.core.replace_selection_by_ids(selected);
+        state.ui.operations.reveal_id_next = job.created.first().copied();
+        state
+            .core
+            .replace_selection_by_ids(job.created.iter().copied());
     }
     if created || done.is_err() {
         state.core.invalidate_dir_cache();
     }
-    if done.is_err() && job.clipboard.op == ClipboardOp::Cut && job.next_index > 0 {
-        // Retrying a partially cleaned source could replace its complete destination.
-        let remaining = &job.clipboard.sources[job.next_index..];
-        state.ui.operations.paste.clipboard = (!remaining.is_empty()).then(|| FileClipboard {
-            op: ClipboardOp::Cut,
-            sources: remaining.to_vec(),
-        });
-    }
-    if done? {
-        if !job.created.is_empty() && job.clipboard.op == ClipboardOp::Cut {
-            state.ui.operations.paste.clipboard = None;
+    match done {
+        Ok(true) => {
+            if job.clipboard.op == ClipboardOp::Cut && !job.created.is_empty() {
+                state.ui.operations.paste.clipboard = None;
+            }
+            state.ui.operations.paste.job = None;
         }
-        state.ui.operations.paste.job = None;
-    } else {
-        state.ui.operations.paste.conflict_open_next = true;
+        Ok(false) => state.ui.operations.paste.conflict_open_next = true,
+        Err(e) => {
+            cancel_paste_job(state);
+            return Err(e);
+        }
     }
     Ok(())
 }
@@ -202,8 +229,7 @@ mod tests {
         );
         state.core.set_cwd(dir.to_owned());
         state.ui.operations.paste.clipboard = Some(FileClipboard { op, sources });
-        start_paste_into_cwd(&mut state);
-        run_paste_job_until_wait_or_done(&mut state).unwrap();
+        start_paste_into_cwd(&mut state).unwrap();
         state
     }
 
@@ -212,6 +238,88 @@ mod tests {
         assert!(job.conflict.take().is_some());
         job.pending_conflict_action = Some(action);
         run_paste_job_until_wait_or_done(state).unwrap();
+    }
+
+    #[test]
+    fn cancel_after_a_partial_cut_retries_only_the_remaining_sources() {
+        let temp = TempDir::new();
+        let first = temp.path().join("first");
+        let second = temp.path().join("second");
+        let dst = temp.path().join("target");
+        let retry = temp.path().join("retry");
+        fs::create_dir(&dst).unwrap();
+        fs::create_dir(&retry).unwrap();
+        fs::write(&first, b"first").unwrap();
+        fs::write(&second, b"second").unwrap();
+        fs::write(dst.join("second"), b"conflict").unwrap();
+        let mut state = start(ClipboardOp::Cut, vec![first.clone(), second], &dst);
+        assert!(
+            state
+                .ui
+                .operations
+                .paste
+                .job
+                .as_ref()
+                .unwrap()
+                .conflict
+                .is_some()
+        );
+        cancel_paste_job(&mut state);
+
+        fs::write(&first, b"reused name").unwrap();
+        state.core.set_cwd(retry.clone());
+        start_paste_into_cwd(&mut state).unwrap();
+        assert_eq!(fs::read(first).unwrap(), b"reused name");
+        assert_eq!(fs::read(dst.join("first")).unwrap(), b"first");
+        assert_eq!(fs::read(dst.join("second")).unwrap(), b"conflict");
+        assert_eq!(fs::read(retry.join("second")).unwrap(), b"second");
+        assert!(!retry.join("first").exists());
+    }
+
+    #[test]
+    fn copying_within_the_same_directory_creates_and_selects_a_sibling() {
+        let temp = TempDir::new();
+        let src = temp.path().join("a.txt");
+        let copy = temp.path().join("a (copy).txt");
+        fs::write(&src, b"original").unwrap();
+        let state = start(ClipboardOp::Copy, vec![src.clone()], temp.path());
+        assert_eq!(fs::read(src).unwrap(), b"original");
+        assert_eq!(fs::read(&copy).unwrap(), b"original");
+        assert_eq!(state.core.selected_entry_ids(), [EntryId::from_path(&copy)]);
+    }
+
+    #[test]
+    fn partial_delete_retries_only_the_entries_that_remain() {
+        let temp = TempDir::new();
+        let first = temp.path().join("first");
+        let dir = temp.path().join("nonempty");
+        fs::write(&first, b"old").unwrap();
+        fs::create_dir(&dir).unwrap();
+        fs::write(dir.join("child"), b"child").unwrap();
+        let mut state = FileDialogState::with_blocking_filesystem(
+            DialogMode::OpenFiles,
+            Box::new(StdFileSystem),
+        );
+        state.core.set_cwd(temp.path().to_owned());
+        state.core.rescan_if_needed(&StdFileSystem);
+        state
+            .core
+            .replace_selection_by_ids([EntryId::from_path(&first), EntryId::from_path(&dir)]);
+        open_delete_modal_from_selection(&mut state);
+        assert!(!delete_targets(&mut state, &[first.clone(), dir.clone()]));
+        assert!(state.ui.operations.delete.error.is_some());
+        assert_eq!(
+            state.ui.operations.delete.target_ids,
+            [EntryId::from_path(&dir)]
+        );
+        assert_eq!(state.core.selected_entry_ids(), [EntryId::from_path(&dir)]);
+
+        fs::write(&first, b"new").unwrap();
+        state.ui.operations.delete.recursive = true;
+        let remaining = state.core.selected_entry_paths();
+        assert!(delete_targets(&mut state, &remaining));
+        assert!(!dir.exists());
+        assert_eq!(fs::read(first).unwrap(), b"new");
     }
 
     #[test]
@@ -300,9 +408,8 @@ mod tests {
             op: ClipboardOp::Cut,
             sources: vec![source.clone(), pending.clone()],
         });
-        start_paste_into_cwd(&mut state);
         assert!(
-            run_paste_job_until_wait_or_done(&mut state)
+            start_paste_into_cwd(&mut state)
                 .unwrap_err()
                 .contains("source cleanup stopped")
         );
@@ -318,15 +425,14 @@ mod tests {
             [pending]
         );
 
-        start_paste_into_cwd(&mut state);
-        run_paste_job_until_wait_or_done(&mut state).unwrap();
+        start_paste_into_cwd(&mut state).unwrap();
         assert_eq!(fs::read(source.join("later")).unwrap(), b"new contents");
         assert_eq!(fs::read(dst.join("source/original")).unwrap(), b"original");
         assert!(!dst.join("source/later").exists());
         assert_eq!(fs::read(dst.join("pending")).unwrap(), b"pending");
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     #[test]
     fn keep_both_copies_and_selects_native_names_losslessly() {
         use std::ffi::OsStr;

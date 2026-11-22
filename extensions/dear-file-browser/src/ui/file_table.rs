@@ -12,7 +12,7 @@ use web_time::Instant;
 
 use super::ops::{
     clipboard_set_from_selection, open_delete_modal_from_selection,
-    open_rename_modal_from_selection, run_paste_job_until_wait_or_done, start_paste_into_cwd,
+    open_rename_modal_from_selection, start_paste_into_cwd,
 };
 
 mod columns;
@@ -161,12 +161,7 @@ fn draw_entry_context_menu(
         return;
     }
     if ui.menu_item_enabled_selected("Paste", Some("Ctrl+V"), false, can_paste) {
-        state.ui.runtime.error = None;
-        start_paste_into_cwd(state);
-        if let Err(e) = run_paste_job_until_wait_or_done(state) {
-            state.ui.runtime.error = Some(e);
-            state.ui.operations.paste.job = None;
-        }
+        state.ui.runtime.error = start_paste_into_cwd(state).err();
         ui.close_current_popup();
     }
 }
@@ -273,12 +268,7 @@ fn draw_file_list_window_context_menu(
     ui.separator();
 
     if ui.menu_item_enabled_selected("Paste", Some("Ctrl+V"), false, can_paste) {
-        state.ui.runtime.error = None;
-        start_paste_into_cwd(state);
-        if let Err(e) = run_paste_job_until_wait_or_done(state) {
-            state.ui.runtime.error = Some(e);
-            state.ui.operations.paste.job = None;
-        }
+        state.ui.runtime.error = start_paste_into_cwd(state).err();
         ui.close_current_popup();
     }
 }
@@ -448,12 +438,7 @@ fn draw_file_table_view(
                 clipboard_set_from_selection(state, ClipboardOp::Cut);
             }
             if modifiers.ctrl && ui.is_key_pressed(Key::V) && !modifiers.shift {
-                state.ui.runtime.error = None;
-                start_paste_into_cwd(state);
-                if let Err(e) = run_paste_job_until_wait_or_done(state) {
-                    state.ui.runtime.error = Some(e);
-                    state.ui.operations.paste.job = None;
-                }
+                state.ui.runtime.error = start_paste_into_cwd(state).err();
             }
             if ui.is_key_pressed_with_repeat(Key::UpArrow, true) {
                 let _ = state.core.handle_event(CoreEvent::MoveFocus {
@@ -511,6 +496,7 @@ fn draw_file_table_view(
         let modified_times = ModifiedTimeFormat::default();
         for e in &entries {
             ui.table_next_row();
+            let _id = ui.push_id(e.id.widget_id());
             if show_preview {
                 ui.table_next_column();
                 draw_thumbnail_cell(ui, state, e);
@@ -710,12 +696,7 @@ fn draw_file_grid_view(
                     clipboard_set_from_selection(state, ClipboardOp::Cut);
                 }
                 if modifiers.ctrl && ui.is_key_pressed(Key::V) && !modifiers.shift {
-                    state.ui.runtime.error = None;
-                    start_paste_into_cwd(state);
-                    if let Err(e) = run_paste_job_until_wait_or_done(state) {
-                        state.ui.runtime.error = Some(e);
-                        state.ui.operations.paste.job = None;
-                    }
+                    state.ui.runtime.error = start_paste_into_cwd(state).err();
                 }
                 if ui.is_key_pressed_with_repeat(Key::LeftArrow, true) {
                     let _ = state.core.handle_event(CoreEvent::MoveFocus {
@@ -767,7 +748,7 @@ fn draw_file_grid_view(
                         label = format!("{icon} {label}");
                     }
 
-                    let _id = ui.push_id(item_idx as i32);
+                    let _id = ui.push_id(e.id.widget_id());
                     let clicked = ui.invisible_button("##grid_item", [cell_w, cell_h]);
                     let hovered = ui.is_item_hovered();
                     let active = ui.is_item_active();

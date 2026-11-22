@@ -72,7 +72,7 @@ pub use file_style::FileStyleCallback;
 #[cfg(feature = "imgui")]
 pub use file_style::{EntryKind, FileStyle, FileStyleRegistry, StyleMatcher, StyleRule};
 #[cfg(feature = "imgui")]
-pub use fs::{FileSystem, FsEntry, FsMetadata, ScanVisit, StdFileSystem};
+pub use fs::{FileSystem, FsEntry, FsEntryIdentity, FsMetadata, ScanVisit, StdFileSystem};
 #[cfg(feature = "imgui")]
 pub use places::{
     Place, PlaceGroup, PlaceOrigin, Places, PlacesDeserializeError, PlacesMergeOptions,

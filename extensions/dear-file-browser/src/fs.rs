@@ -1,4 +1,23 @@
+use std::ffi::OsStr;
+use std::io;
 use std::path::{Path, PathBuf};
+
+#[cfg(windows)]
+mod windows;
+
+pub(crate) fn file_name(path: &Path) -> io::Result<&OsStr> {
+    path.file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "expected a named entry"))
+}
+
+pub(crate) fn canonical_entry(fs: &dyn FileSystem, path: &Path) -> io::Result<PathBuf> {
+    let name = file_name(path)?;
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    Ok(fs.canonicalize(parent)?.join(name))
+}
 
 /// Minimal file metadata used by the in-UI file browser.
 #[derive(Clone, Debug)]
@@ -7,6 +26,15 @@ pub struct FsMetadata {
     pub is_dir: bool,
     /// Whether the path itself is a symbolic link.
     pub is_symlink: bool,
+}
+
+/// Identity of a filesystem object across name lookups during a cross-device cut.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FsEntryIdentity {
+    /// Identifier of the filesystem containing the object.
+    pub volume: u64,
+    /// Object identifier within that filesystem.
+    pub file: u128,
 }
 
 /// Directory entry yielded by [`FileSystem::visit_dir`].
@@ -101,13 +129,30 @@ pub trait FileSystem {
             modified: None,
         })
     }
+    /// Inspect a source for a cross-device cut. The optional identity identifies the
+    /// filesystem object independently of its name, size and modification time.
+    /// Backends where other writers can replace entries should return an identity
+    /// from the same metadata snapshot. A single-writer backend can use the default.
+    fn inspect_move_source(&self, path: &Path) -> io::Result<(FsEntry, Option<FsEntryIdentity>)> {
+        Ok((self.inspect_entry(path)?, None))
+    }
     /// Create a new directory. Return [`std::io::ErrorKind::AlreadyExists`]
     /// if any entry occupies the path. Paste uses this to claim its work directory.
     fn create_dir(&self, path: &Path) -> std::io::Result<()>;
     /// Rename/move a path. Return [`std::io::ErrorKind::CrossesDevices`] when a
     /// move requires copying between filesystems.
     fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()>;
-    /// Remove a file.
+    /// Move an entry to a vacant name. The default suits single-writer filesystems.
+    /// Backends shared with other writers should check the destination atomically
+    /// with the rename so a concurrent arrival cannot be replaced.
+    fn rename_noreplace(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+        match self.inspect_entry(to) {
+            Ok(_) => Err(std::io::ErrorKind::AlreadyExists.into()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => self.rename(from, to),
+            Err(e) => Err(e),
+        }
+    }
+    /// Remove a file or the symbolic link itself, including a link to a directory.
     fn remove_file(&self, path: &Path) -> std::io::Result<()>;
     /// Remove an empty directory.
     fn remove_dir(&self, path: &Path) -> std::io::Result<()>;
@@ -131,7 +176,14 @@ impl FileSystem for StdFileSystem {
     ) -> std::io::Result<()> {
         for e in std::fs::read_dir(dir)? {
             let e = e?;
-            if visit(FsEntry::from_metadata(e.path(), e.metadata()?)) == ScanVisit::Stop {
+            let mut entry = FsEntry::from_metadata(e.path(), e.metadata()?);
+            if entry.is_symlink
+                && let Ok(target) = std::fs::metadata(&entry.path)
+            {
+                entry.is_dir = target.is_dir();
+                entry.size = target.is_file().then_some(target.len());
+            }
+            if visit(entry) == ScanVisit::Stop {
                 break;
             }
         }
@@ -158,6 +210,23 @@ impl FileSystem for StdFileSystem {
         ))
     }
 
+    #[cfg(unix)]
+    fn inspect_move_source(&self, path: &Path) -> io::Result<(FsEntry, Option<FsEntryIdentity>)> {
+        use std::os::unix::fs::MetadataExt;
+
+        let metadata = std::fs::symlink_metadata(path)?;
+        let id = FsEntryIdentity {
+            volume: metadata.dev(),
+            file: metadata.ino().into(),
+        };
+        Ok((FsEntry::from_metadata(path.to_owned(), metadata), Some(id)))
+    }
+
+    #[cfg(windows)]
+    fn inspect_move_source(&self, path: &Path) -> io::Result<(FsEntry, Option<FsEntryIdentity>)> {
+        windows::inspect_move_source(path)
+    }
+
     fn create_dir(&self, path: &Path) -> std::io::Result<()> {
         std::fs::create_dir(path)
     }
@@ -166,7 +235,29 @@ impl FileSystem for StdFileSystem {
         std::fs::rename(from, to)
     }
 
+    #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+    fn rename_noreplace(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+        use rustix::fs::{CWD, RenameFlags, renameat_with};
+
+        Ok(renameat_with(CWD, from, CWD, to, RenameFlags::NOREPLACE)?)
+    }
+
+    #[cfg(windows)]
+    fn rename_noreplace(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+        windows::rename_noreplace(from, to)
+    }
+
     fn remove_file(&self, path: &Path) -> std::io::Result<()> {
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::FileTypeExt;
+            if std::fs::symlink_metadata(path)?
+                .file_type()
+                .is_symlink_dir()
+            {
+                return std::fs::remove_dir(path);
+            }
+        }
         std::fs::remove_file(path)
     }
 

@@ -621,9 +621,11 @@ their normal semantics.
 
 ### Copying and moving files on a custom filesystem
 
-Return directory enumeration errors from `visit_dir` so a partial listing cannot be mistaken for a complete copy. Implement `inspect_entry` when your backend supports links or cross-device moves. It must describe the entry itself and provide a size or modification timestamp for files that will be removed after copying. Return `ErrorKind::CrossesDevices` from `rename` to request that fallback.
+Return directory enumeration errors from `visit_dir` so a partial listing cannot be mistaken for a complete copy. Implement `inspect_entry` when your backend supports links or cross-device moves. It must describe the named entry itself and provide a size or modification timestamp for files that will be removed after copying. Return `ErrorKind::CrossesDevices` when a rename crosses filesystems.
 
-A paste with overwrite replaces the selected destination file or directory. A same-filesystem rename can move a link directly. Recursive copies stop on symbolic links. If another process creates a file during a cross-device move, it stays in the source directory and the browser reports the incomplete cleanup.
+If other writers can change your filesystem during a paste, implement `rename_noreplace` with an atomic destination check and return a stable object ID from `inspect_move_source`. The defaults support single-writer adapters. The native backend uses exclusive rename on Windows, Linux, Android and Apple platforms. After installing a cross-device move, the browser claims each source entry in a temporary directory on the source volume. It checks the claimed object's volume and file ID on Windows or device and inode on Unix before deleting it. If a changed entry cannot be restored because the original name has been reused, the error reports its recovery path.
+
+A paste with overwrite replaces the selected destination file or directory. If installation fails and a new entry prevents rollback, the error gives the recovery path for the previous destination. A same-filesystem rename can move a link directly. Recursive copies stop on symbolic links. If another process creates a file during a cross-device move, it stays in the source directory and the browser reports the incomplete cleanup. Cancelling a batch at a conflict keeps the unprocessed cut items on the clipboard. Copying within the same directory creates a sibling with a ` (copy)` suffix before the extensions.
 
 ## Fonts (CJK/Emoji)
 

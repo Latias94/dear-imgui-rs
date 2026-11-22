@@ -18,7 +18,7 @@ features = ["imgui", "native-rfd"]
 # Defaults: enable both backends and tracing. Runtime picks the best.
 default = ["imgui", "native-rfd", "tracing"]
 # ImGui UI backend, including local file dates and scan timing.
-imgui = ["dep:jiff", "dep:regex", "dep:web-time"]
+imgui = ["dep:jiff", "dep:regex", "dep:rustix", "dep:web-time", "dep:windows-sys"]
 native-rfd = ["dep:rfd"]
 tracing = ["dep:tracing"]
 thumbnails-image = ["imgui", "dep:image"]
@@ -35,6 +35,12 @@ web-time = { workspace = true, optional = true }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"], optional = true }
 regex = { version = "1.13", optional = true }
 indexmap = "2"
+
+[target.'cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))'.dependencies]
+rustix = { version = "1.1", features = ["fs"], optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"], optional = true }
 
 [dev-dependencies]
 pollster = { workspace = true }

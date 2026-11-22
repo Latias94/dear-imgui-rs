@@ -1,5 +1,6 @@
 use super::*;
 use crate::fs::{FsMetadata, StdFileSystem};
+use std::cell::Cell;
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -33,15 +34,17 @@ impl Drop for TempDir {
     }
 }
 
-// Only the source rename is injected. Backup, installation and rollback use
-// ordinary same-volume operations inside the test directory.
+// The source rename can cross devices. Backup, installation and rollback use
+// the native same-volume primitives inside the test directory.
 pub(crate) struct MoveFs {
     source: PathBuf,
     read_only: bool,
     report_file_details: bool,
-    rename_error: ErrorKind,
+    rename_error: Cell<Option<ErrorKind>>,
     pub(crate) after_listing: fn(&Path) -> io::Result<()>,
     after_copy: fn(&Path) -> io::Result<()>,
+    before_rename: fn(&Path, &Path) -> io::Result<()>,
+    before_unlink: fn(&Path) -> io::Result<()>,
 }
 
 impl MoveFs {
@@ -50,9 +53,11 @@ impl MoveFs {
             source: source.to_owned(),
             read_only: false,
             report_file_details: true,
-            rename_error: ErrorKind::CrossesDevices,
+            rename_error: Cell::new(Some(ErrorKind::CrossesDevices)),
             after_listing: |_| Ok(()),
             after_copy: |_| Ok(()),
+            before_rename: |_, _| Ok(()),
+            before_unlink: |_| Ok(()),
         }
     }
 }
@@ -77,26 +82,36 @@ impl FileSystem for MoveFs {
         StdFileSystem.metadata(path)
     }
     fn inspect_entry(&self, path: &Path) -> io::Result<FsEntry> {
-        let mut entry = StdFileSystem.inspect_entry(path)?;
+        StdFileSystem.inspect_entry(path)
+    }
+    fn inspect_move_source(&self, path: &Path) -> io::Result<(FsEntry, Option<FsEntryIdentity>)> {
+        let (mut entry, id) = StdFileSystem.inspect_move_source(path)?;
         if !self.report_file_details {
             entry.size = None;
             entry.modified = None;
         }
-        Ok(entry)
+        Ok((entry, id))
     }
     fn create_dir(&self, path: &Path) -> io::Result<()> {
         assert!(!self.read_only);
         StdFileSystem.create_dir(path)
     }
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+        self.rename_noreplace(from, to)
+    }
+    fn rename_noreplace(&self, from: &Path, to: &Path) -> io::Result<()> {
         assert!(!self.read_only);
-        if from == self.source.as_path() {
-            return Err(Error::from(self.rename_error));
+        if from == self.source.as_path()
+            && let Some(error) = self.rename_error.take()
+        {
+            return Err(Error::from(error));
         }
-        StdFileSystem.rename(from, to)
+        (self.before_rename)(from, to)?;
+        StdFileSystem.rename_noreplace(from, to)
     }
     fn remove_file(&self, path: &Path) -> io::Result<()> {
         assert!(!self.read_only);
+        (self.before_unlink)(&self.source)?;
         StdFileSystem.remove_file(path)
     }
     fn remove_dir(&self, path: &Path) -> io::Result<()> {
@@ -184,6 +199,7 @@ fn keep_both_preserves_extensions_and_skips_occupied_names() {
     fs::write(dir.join("a.tar.gz"), b"original").unwrap();
     fs::write(dir.join("a (copy).tar.gz"), b"occupied").unwrap();
     fs::write(dir.join(".env"), b"original").unwrap();
+    fs::write(dir.join(".env.local"), b"original").unwrap();
     assert_eq!(
         keep_both_target(&StdFileSystem, &dir.join("a.tar.gz")).unwrap(),
         dir.join("a (copy 2).tar.gz")
@@ -192,9 +208,13 @@ fn keep_both_preserves_extensions_and_skips_occupied_names() {
         keep_both_target(&StdFileSystem, &dir.join(".env")).unwrap(),
         dir.join(".env (copy)")
     );
+    assert_eq!(
+        keep_both_target(&StdFileSystem, &dir.join(".env.local")).unwrap(),
+        dir.join(".env (copy).local")
+    );
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn directory_copy_and_keep_both_preserve_distinct_non_utf8_names() {
     use std::os::unix::ffi::OsStrExt;
@@ -251,7 +271,7 @@ fn rename_listing_and_copy_errors_preserve_source_and_previous_target() {
         let mut fs = MoveFs::cross_device(&src);
         match fault {
             ErrorKind::PermissionDenied => {
-                fs.rename_error = fault;
+                fs.rename_error.set(Some(fault));
                 fs.after_copy = |_| panic!("unexpected copy after a denied rename");
             }
             ErrorKind::Interrupted => fs.after_listing = |_| Err(ErrorKind::Interrupted.into()),
@@ -350,6 +370,143 @@ fn changed_source_file_is_retained_after_cross_device_copy() {
     assert_eq!(fs::read(&dst).unwrap(), b"original");
 }
 
+#[test]
+fn overwrite_install_and_rollback_preserve_an_arrival_at_rename_time() {
+    let temp = TempDir::new();
+    let src = temp.path().join("source");
+    let dst = temp.path().join("target");
+    fs::write(&src, b"source").unwrap();
+    fs::write(&dst, b"previous").unwrap();
+    let mut fs = MoveFs::cross_device(&src);
+    fs.before_rename = |from, to| {
+        if from.file_name() == Some(OsStr::new("incoming")) {
+            fs::write(to, b"new arrival")?;
+        }
+        Ok(())
+    };
+
+    let error = paste(&fs, ClipboardOp::Cut, &src, &dst, true).unwrap_err();
+    let previous = temp
+        .path()
+        .join(".dear-file-browser-paste-0")
+        .join("previous");
+    assert!(
+        error
+            .to_string()
+            .contains(previous.to_string_lossy().as_ref())
+    );
+    assert_eq!(fs::read(previous).unwrap(), b"previous");
+    assert_eq!(fs::read(dst).unwrap(), b"new arrival");
+    assert_eq!(fs::read(src).unwrap(), b"source");
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn cross_device_cut_keeps_a_replacement_with_the_same_size_and_timestamp() {
+    let temp = TempDir::new();
+    let src = temp.path().join("source");
+    let dst = temp.path().join("target");
+    fs::write(&src, b"old").unwrap();
+    let mut fs = MoveFs::cross_device(&src);
+    fs.before_rename = |path, to| {
+        if path.file_name() != Some(OsStr::new("source"))
+            || to.file_name() != Some(OsStr::new("removing"))
+        {
+            return Ok(());
+        }
+        let modified = fs::metadata(path)?.modified()?;
+        fs::rename(path, path.with_file_name("original"))?;
+        fs::write(path, b"new")?;
+        fs::File::options()
+            .write(true)
+            .open(path)?
+            .set_modified(modified)
+    };
+
+    assert!(matches!(
+        paste(&fs, ClipboardOp::Cut, &src, &dst, false),
+        Err(PasteError::AfterInstall(_))
+    ));
+    assert_eq!(fs::read(src).unwrap(), b"new");
+    assert_eq!(fs::read(dst).unwrap(), b"old");
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn cross_device_cut_checks_the_parent_identity_before_removing_its_children() {
+    let temp = TempDir::new();
+    let src = temp.path().join("source");
+    let dst = temp.path().join("target");
+    fs::create_dir(&src).unwrap();
+    fs::write(src.join("child"), b"original").unwrap();
+    let mut fs = MoveFs::cross_device(&src);
+    fs.after_copy = |path| {
+        let parent = path.parent().unwrap();
+        let old_parent = parent.with_file_name("old-parent");
+        fs::rename(parent, &old_parent)?;
+        fs::create_dir(parent)?;
+        fs::rename(old_parent.join("child"), path)
+    };
+
+    assert!(matches!(
+        paste(&fs, ClipboardOp::Cut, &src, &dst, false),
+        Err(PasteError::AfterInstall(_))
+    ));
+    assert_eq!(fs::read(src.join("child")).unwrap(), b"original");
+    assert_eq!(fs::read(dst.join("child")).unwrap(), b"original");
+}
+
+#[test]
+fn cross_device_cut_keeps_a_new_file_arriving_at_the_last_unlink() {
+    let temp = TempDir::new();
+    let src = temp.path().join("source");
+    let dst = temp.path().join("target");
+    fs::write(&src, b"old").unwrap();
+    let mut fs = MoveFs::cross_device(&src);
+    fs.before_unlink = |source| fs::write(source, b"new");
+    assert!(matches!(
+        paste(&fs, ClipboardOp::Cut, &src, &dst, false),
+        Err(PasteError::AfterInstall(_))
+    ));
+    assert_eq!(fs::read(src).unwrap(), b"new");
+    assert_eq!(fs::read(dst).unwrap(), b"old");
+    assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 2);
+}
+
+#[test]
+fn a_reoccupied_source_name_keeps_both_directories_on_cleanup_failure() {
+    let temp = TempDir::new();
+    let src = temp.path().join("source");
+    let dst = temp.path().join("target");
+    fs::create_dir(&src).unwrap();
+    fs::write(src.join("original"), b"moved").unwrap();
+    let mut fs = MoveFs::cross_device(&src);
+    fs.after_listing = |dir| fs::write(dir.join("later"), b"keep");
+    fs.before_rename = |from, to| {
+        if from.file_name() == Some(OsStr::new("removing"))
+            && to.file_name() == Some(OsStr::new("source"))
+        {
+            fs::create_dir(to)?;
+            fs::write(to.join("new"), b"new")?;
+        }
+        Ok(())
+    };
+    let error = paste(&fs, ClipboardOp::Cut, &src, &dst, false).unwrap_err();
+    let retained = temp
+        .path()
+        .join(".dear-file-browser-paste-0")
+        .join("removing");
+    assert!(matches!(&error, PasteError::AfterInstall(_)));
+    assert!(
+        error
+            .to_string()
+            .contains(retained.to_string_lossy().as_ref())
+    );
+    assert_eq!(fs::read(retained.join("later")).unwrap(), b"keep");
+    assert_eq!(fs::read(src.join("new")).unwrap(), b"new");
+    assert_eq!(fs::read(dst.join("original")).unwrap(), b"moved");
+}
+
 #[cfg(unix)]
 #[test]
 fn directory_links_are_renamed_as_entries_and_never_copied_recursively() {
@@ -378,4 +535,57 @@ fn directory_links_are_renamed_as_entries_and_never_copied_recursively() {
     paste(&StdFileSystem, ClipboardOp::Cut, &link, &moved, false).unwrap();
     assert_eq!(fs::read_link(moved).unwrap(), real);
     assert_eq!(fs::read(real.join("note")).unwrap(), b"original");
+}
+
+#[cfg(unix)]
+#[test]
+fn moves_and_deletes_act_on_the_link_even_when_its_referent_is_an_ancestor() {
+    use std::os::unix::fs::symlink;
+
+    let temp = TempDir::new();
+    let dir = temp.path();
+    let link = dir.join("link");
+    let moved = dir.join("moved");
+    symlink(dir, &link).unwrap();
+    StdFileSystem
+        .visit_dir(dir, &mut |entry| {
+            assert!(entry.is_dir && entry.is_symlink);
+            ScanVisit::Continue
+        })
+        .unwrap();
+    paste(&StdFileSystem, ClipboardOp::Cut, &link, &moved, false).unwrap();
+    assert_eq!(fs::read_link(&moved).unwrap(), dir);
+    delete_entry(&StdFileSystem, &moved, false).unwrap();
+    assert!(!entry_exists(&StdFileSystem, &moved).unwrap());
+
+    let source = dir.join("file");
+    fs::write(&source, b"source").unwrap();
+    symlink(dir.join("missing"), &link).unwrap();
+    assert!(StdFileSystem.rename_noreplace(&source, &link).is_err());
+    assert_eq!(fs::read_link(&link).unwrap(), dir.join("missing"));
+    fs::remove_file(&link).unwrap();
+    symlink(dir, &link).unwrap();
+    paste(&StdFileSystem, ClipboardOp::Copy, &source, &link, true).unwrap();
+    assert_eq!(fs::read(link).unwrap(), b"source");
+    assert_eq!(fs::read(source).unwrap(), b"source");
+}
+
+#[cfg(windows)]
+#[test]
+fn deleting_a_windows_directory_link_preserves_its_target() {
+    let temp = TempDir::new();
+    let target = temp.path().join("directory");
+    let link = temp.path().join("link");
+    fs::create_dir(&target).unwrap();
+    fs::write(target.join("child"), b"child").unwrap();
+    if let Err(e) = std::os::windows::fs::symlink_dir(&target, &link) {
+        if e.raw_os_error() == Some(windows_sys::Win32::Foundation::ERROR_PRIVILEGE_NOT_HELD as i32)
+        {
+            return;
+        }
+        panic!("could not create directory link: {e}");
+    }
+    delete_entry(&StdFileSystem, &link, false).unwrap();
+    assert!(!entry_exists(&StdFileSystem, &link).unwrap());
+    assert_eq!(fs::read(target.join("child")).unwrap(), b"child");
 }
