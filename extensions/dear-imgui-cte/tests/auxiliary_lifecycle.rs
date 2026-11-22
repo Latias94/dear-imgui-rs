@@ -17,7 +17,7 @@ fn auxiliary_owners_bind_their_context_for_drop_and_restore_the_previous_one() {
 }
 
 #[test]
-fn dead_owner_drop_does_not_touch_another_context() {
+fn dead_owner_drop_preserves_another_current_context() {
     let context_a = Context::create();
     let diff = TextDiff::create(&context_a);
     let suspended_a = context_a.suspend_or_panic();

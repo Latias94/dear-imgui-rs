@@ -87,6 +87,5 @@ fn calls_fail_closed_after_the_owner_context_is_destroyed() {
     let result = catch_unwind(AssertUnwindSafe(|| editor.line_count()));
     assert!(result.is_err());
 
-    // Drop intentionally leaks the native handle once the owner context is dead.
     drop(editor);
 }

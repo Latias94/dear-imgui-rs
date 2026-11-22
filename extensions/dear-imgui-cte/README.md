@@ -128,10 +128,10 @@ migration, see [the compatibility guide](../../docs/COMPATIBILITY.md#020-stable-
 
 `TextEditor` and `TextDiff` are bound to the `Context` used at
 creation and are neither `Send` nor `Sync`. Rendering with a `Ui` from another
-context is rejected before FFI. Drop temporarily binds the owner context and
-restores the prior current context. Applications should destroy CTE state before
-destroying its Context; after Context teardown, the wrapper deliberately leaks
-the native handle rather than dereferencing dead native state.
+context is rejected before FFI. Drop temporarily binds the owner while it is live.
+After Context teardown, the editor, its optional connected Trie, and the diff can
+still release their native allocations on the owning thread. Drop the last such
+owner before creating a Dear ImGui context on a different thread.
 
 Callbacks and their Rust userdata are owned by the editor. Replacing, clearing,
 or dropping a callback unregisters the native slot before releasing its Rust

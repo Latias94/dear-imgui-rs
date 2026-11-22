@@ -19,7 +19,7 @@ fn normal_drop_binds_the_owner_and_restores_the_previous_context() {
 }
 
 #[test]
-fn dead_owner_drop_does_not_switch_or_touch_another_context() {
+fn dead_owner_drop_preserves_another_current_context() {
     let context_a = Context::create();
     let editor = TextEditor::create(&context_a);
     let suspended_a = context_a.suspend_or_panic();
@@ -43,14 +43,6 @@ fn multiple_editors_have_independent_single_owner_lifecycles() {
     drop(context);
 }
 
-struct DropToken(Rc<Cell<usize>>);
-
-impl Drop for DropToken {
-    fn drop(&mut self) {
-        self.0.set(self.0.get() + 1);
-    }
-}
-
 struct NativeClearProbe {
     editor: *mut cte_sys::TextEditor,
     observed: Rc<Cell<Option<bool>>>,
@@ -65,48 +57,39 @@ impl Drop for NativeClearProbe {
 }
 
 #[test]
-fn normal_drop_clears_native_callbacks_before_releasing_rust_state() {
-    let context = Context::create();
-    let mut editor = TextEditor::create(&context);
-    let observed = Rc::new(Cell::new(None));
-    let probe = NativeClearProbe {
-        editor: unsafe { editor.as_raw() },
-        observed: Rc::clone(&observed),
-    };
-    editor
-        .set_line_decorator(1, move |_, _| {
-            let _ = &probe;
-        })
-        .unwrap();
-
-    drop(editor);
-    assert_eq!(observed.get(), Some(true));
+fn drop_clears_native_callbacks_before_releasing_rust_state_in_either_owner_order() {
+    for owner_first in [false, true] {
+        let context = Context::create();
+        let mut editor = TextEditor::create(&context);
+        let observed = Rc::new(Cell::new(None));
+        let probe = NativeClearProbe {
+            editor: unsafe { editor.as_raw() },
+            observed: Rc::clone(&observed),
+        };
+        editor.set_line_decorator(1, move |_, _| { let _ = &probe; }).unwrap();
+        if owner_first { drop(context); }
+        drop(editor);
+        assert_eq!(observed.get(), Some(true));
+    }
 }
 
 #[test]
-fn dead_owner_drop_releases_rust_callbacks_without_touching_native_state() {
+fn cte_owners_keep_allocator_thread_until_the_last_native_drop() {
     let context = Context::create();
-    let mut editor = TextEditor::create(&context);
-    let drops = Rc::new(Cell::new(0));
-    let token = DropToken(Rc::clone(&drops));
-    editor
-        .set_language_change_callback(move || {
-            let _ = &token;
-        })
-        .unwrap();
-    drop(context);
-
-    drop(editor);
-    assert_eq!(drops.get(), 1);
-}
-
-#[test]
-fn dead_owner_drop_leaks_connected_trie_instead_of_dereferencing_its_editor() {
-    let context = Context::create();
+    let diff = dear_imgui_cte::TextDiff::create(&context);
     let mut editor = TextEditor::create(&context);
     editor.set_language(Some(Language::Cpp));
     editor.enable_trie_autocomplete().unwrap();
     drop(context);
 
+    let another_thread_can_acquire = || {
+        std::thread::spawn(|| dear_imgui_rs::ContextThreadLease::acquire().is_ok())
+            .join()
+            .unwrap()
+    };
+    assert!(!another_thread_can_acquire());
     drop(editor);
+    assert!(!another_thread_can_acquire());
+    drop(diff);
+    assert!(another_thread_can_acquire());
 }

@@ -1,16 +1,17 @@
 use crate::{CteError, CteResult};
-use dear_imgui_rs::{Context, ContextBinding, ContextId, Ui};
+use dear_imgui_rs::{Context, ContextBinding, ContextId, ContextThreadLease, Ui};
 
-#[derive(Clone)]
 pub(crate) struct CteContextBinding {
     inner: ContextBinding,
+    _thread_lease: ContextThreadLease,
 }
 
 impl CteContextBinding {
-    pub(crate) fn new(context: &Context) -> Self {
-        Self {
+    pub(crate) fn new(context: &Context) -> CteResult<Self> {
+        Ok(Self {
             inner: context.binding(),
-        }
+            _thread_lease: ContextThreadLease::acquire()?,
+        })
     }
 
     pub(crate) fn id(&self) -> ContextId {
@@ -38,5 +39,14 @@ impl CteContextBinding {
         self.inner
             .try_with_bound_context(f)
             .map_err(|source| CteError::ContextBinding { operation, source })
+    }
+
+    // The audited destructors release owned CTE objects via IM_DELETE. The thread
+    // lease keeps the ImGui allocator on this thread even after the Context is gone.
+    pub(crate) fn destroy(&self, mut destroy: impl FnMut()) {
+        if self.inner.try_with_bound_context(&mut destroy).is_ok() {
+            return;
+        }
+        destroy();
     }
 }
