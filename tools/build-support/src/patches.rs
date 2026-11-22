@@ -1303,7 +1303,7 @@ pub fn patch_cte_text_editor(source: &str) -> Result<String, String> {
 }
 
 /// Source contract for ImPlot3D rendering and context-owned demo tools.
-pub const IMPLOT3D_DRAW_FLAGS_PATCH_VERSION: &str = "implot3d-draw-flags-v4";
+pub const IMPLOT3D_DRAW_FLAGS_PATCH_VERSION: &str = "implot3d-draw-flags-v5";
 
 /// Source contract for ImPlot drawing, inspectors and context-owned demo tools.
 pub const IMPLOT_IMGUI_PATCH_VERSION: &str = "implot-imgui-193-v5";
@@ -1583,6 +1583,12 @@ pub fn stage_implot3d_draw_flags(
     auto& flash_color_idx = tools.flash_color_idx;
     auto& flash_color_backup = tools.flash_color_backup;",
                 "ImPlot3D style color preview",
+            )?;
+            let source = replace_cpp_source_once(
+                &source,
+                "static int sel_colormap = 5; // Jet by default",
+                "auto& sel_colormap = DearImGuiRs::ImPlot3DTools::Get(ImPlot3D::GetCurrentContext()).surface_colormap;",
+                "ImPlot3D surface demo colormap selection",
             )?;
             replace_cpp_source_once(
                 &source,

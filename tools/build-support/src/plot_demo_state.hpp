@@ -52,6 +52,7 @@ struct ImPlot3DToolState {
     float flash_color_time = 0.5f;
     ImVec4 flash_color_backup;
     ImPlot3DColormap marker_colormap = ImPlot3DColormap_Viridis;
+    int surface_colormap = 5; // Jet in DemoSurfacePlots' list of names
 };
 using ImPlot3DTools = PlotToolStorage<ImPlot3DContext, ImPlot3DToolState>;
 #endif
