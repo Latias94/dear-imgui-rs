@@ -299,12 +299,13 @@ pub(super) fn render_surface_frame<A: Application>(
             generations,
             ..
         } = ownership;
+        let size = window.window.inner_size();
         let mut backend = RuntimeSurfaceAdmission {
             window,
             generations,
             config,
         };
-        admit_surface_frame(&mut backend)?
+        admit_surface_frame(size, &mut backend)?
     };
     dispatch_surface_frame(admitted, admitted_frame_count, |admitted, frame_index| {
         render_application_frame(

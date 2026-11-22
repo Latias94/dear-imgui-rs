@@ -103,11 +103,7 @@ impl MultiFrameDriver<'_> {
 
     fn render_main(&mut self, prepared: WgpuPreparedMainFrame<'_>) -> Result<bool, RunError> {
         let size = self.main.window.window.inner_size();
-        let admission = if size.width == 0 || size.height == 0 {
-            SurfaceAdmission::Skipped(SurfaceSkipReason::Occluded)
-        } else {
-            admit_surface_frame(&mut self.main)?
-        };
+        let admission = admit_surface_frame(size, &mut self.main)?;
         let admitted = match admission {
             SurfaceAdmission::Skipped(reason) => {
                 self.skip = Some(reason);

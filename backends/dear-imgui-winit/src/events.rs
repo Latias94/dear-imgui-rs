@@ -7,8 +7,6 @@ use dear_imgui_rs::Context;
 use dear_imgui_rs::input::MouseSource;
 use winit::event::{ElementState, Ime, KeyEvent, MouseScrollDelta, TouchPhase};
 
-use winit::window::Window;
-
 use crate::WinitEventForwarding;
 use crate::input::{to_imgui_mouse_button, winit_key_to_imgui_key};
 use crate::sanitize;
@@ -233,16 +231,6 @@ pub(crate) fn touch_transition(
         }
         _ => (active_id, None),
     }
-}
-
-pub(crate) fn touch_logical_position(
-    touch: &winit::event::Touch,
-    window: &Window,
-) -> Option<[f32; 2]> {
-    let position = touch
-        .location
-        .to_logical::<f64>(sanitize::positive_finite_or(window.scale_factor(), 1.0));
-    sanitize::finite_position(position)
 }
 
 pub(crate) fn handle_touch_event_at(

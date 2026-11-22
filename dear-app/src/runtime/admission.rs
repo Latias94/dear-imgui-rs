@@ -1,4 +1,5 @@
 use std::time::{Duration, Instant};
+use winit::dpi::PhysicalSize;
 
 use super::lifecycle::{LifecycleAction, SurfaceEvent};
 use crate::RunError;
@@ -126,11 +127,15 @@ pub(crate) trait SurfaceAdmissionBackend {
 }
 
 pub(crate) fn admit_surface_frame<Backend>(
+    window_size: PhysicalSize<u32>,
     backend: &mut Backend,
 ) -> Result<SurfaceAdmission<Backend::Frame>, RunError>
 where
     Backend: SurfaceAdmissionBackend,
 {
+    if window_size.width == 0 || window_size.height == 0 {
+        return Ok(SurfaceAdmission::Skipped(SurfaceSkipReason::Occluded));
+    }
     let mut recovery_retries = 0usize;
     loop {
         let acquisition = backend.acquire();
@@ -252,6 +257,7 @@ fn require_action(
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
+    use winit::dpi::PhysicalSize;
 
     use super::{
         AdmittedSurfaceFrame, SurfaceAcquisition, SurfaceAdmission, SurfaceAdmissionBackend,
@@ -260,6 +266,8 @@ mod tests {
     };
     use crate::RunError;
     use crate::runtime::lifecycle::{LifecycleAction, LifecycleMachine, SurfaceEvent};
+
+    const DRAWABLE_SIZE: PhysicalSize<u32> = PhysicalSize::new(640, 480);
 
     struct ProbeBackend {
         acquisitions: VecDeque<SurfaceAcquisition<u32>>,
@@ -307,10 +315,30 @@ mod tests {
     }
 
     #[test]
+    fn zero_sized_window_skips_acquisition_until_drawable_again() {
+        let mut backend = ProbeBackend::new([SurfaceAcquisition::Success(7)]);
+        for size in [
+            PhysicalSize::new(0, 480),
+            PhysicalSize::new(640, 0),
+            PhysicalSize::new(0, 0),
+        ] {
+            assert_eq!(
+                admit_surface_frame(size, &mut backend).unwrap(),
+                SurfaceAdmission::Skipped(SurfaceSkipReason::Occluded)
+            );
+        }
+        assert!(backend.events.is_empty());
+        assert!(matches!(
+            admit_surface_frame(DRAWABLE_SIZE, &mut backend).unwrap(),
+            SurfaceAdmission::Admitted(AdmittedSurfaceFrame { frame: 7, .. })
+        ));
+    }
+
+    #[test]
     fn successful_and_suboptimal_frames_preserve_post_present_policy() {
         let mut success = ProbeBackend::new([SurfaceAcquisition::Success(7)]);
         assert_eq!(
-            admit_surface_frame(&mut success).unwrap(),
+            admit_surface_frame(DRAWABLE_SIZE, &mut success).unwrap(),
             SurfaceAdmission::Admitted(AdmittedSurfaceFrame {
                 frame: 7,
                 reconfigure_after_present: false,
@@ -319,7 +347,7 @@ mod tests {
 
         let mut suboptimal = ProbeBackend::new([SurfaceAcquisition::Suboptimal(9)]);
         assert_eq!(
-            admit_surface_frame(&mut suboptimal).unwrap(),
+            admit_surface_frame(DRAWABLE_SIZE, &mut suboptimal).unwrap(),
             SurfaceAdmission::Admitted(AdmittedSurfaceFrame {
                 frame: 9,
                 reconfigure_after_present: true,
@@ -335,7 +363,7 @@ mod tests {
         ] {
             let mut backend = ProbeBackend::new([acquisition]);
             assert_eq!(
-                admit_surface_frame(&mut backend).unwrap(),
+                admit_surface_frame(DRAWABLE_SIZE, &mut backend).unwrap(),
                 SurfaceAdmission::Skipped(expected)
             );
             assert_eq!(backend.events.len(), 2);
@@ -353,7 +381,7 @@ mod tests {
         ] {
             let mut backend = ProbeBackend::new([first, SurfaceAcquisition::Success(11)]);
             assert_eq!(
-                admit_surface_frame(&mut backend).unwrap(),
+                admit_surface_frame(DRAWABLE_SIZE, &mut backend).unwrap(),
                 SurfaceAdmission::Admitted(AdmittedSurfaceFrame {
                     frame: 11,
                     reconfigure_after_present: false,
@@ -369,7 +397,7 @@ mod tests {
         let mut backend =
             ProbeBackend::new([SurfaceAcquisition::Lost, SurfaceAcquisition::Outdated]);
         assert_eq!(
-            admit_surface_frame(&mut backend).unwrap(),
+            admit_surface_frame(DRAWABLE_SIZE, &mut backend).unwrap(),
             SurfaceAdmission::Skipped(SurfaceSkipReason::RecoveryRetryExhausted(
                 SurfaceEvent::Outdated,
             ))
@@ -388,20 +416,20 @@ mod tests {
     fn validation_out_of_memory_and_recovery_failures_are_terminal_errors() {
         let mut validation = ProbeBackend::new([SurfaceAcquisition::Validation]);
         assert!(matches!(
-            admit_surface_frame(&mut validation),
+            admit_surface_frame(DRAWABLE_SIZE, &mut validation),
             Err(RunError::SurfaceValidation)
         ));
 
         let mut out_of_memory = ProbeBackend::new([SurfaceAcquisition::OutOfMemory]);
         assert!(matches!(
-            admit_surface_frame(&mut out_of_memory),
+            admit_surface_frame(DRAWABLE_SIZE, &mut out_of_memory),
             Err(RunError::GpuOutOfMemory { .. })
         ));
 
         let mut recovery = ProbeBackend::new([SurfaceAcquisition::Lost]);
         recovery.fail_recovery = true;
         assert!(
-            admit_surface_frame(&mut recovery)
+            admit_surface_frame(DRAWABLE_SIZE, &mut recovery)
                 .unwrap_err()
                 .to_string()
                 .contains("injected surface recovery failure")
@@ -432,7 +460,8 @@ mod tests {
     fn recovery_precedes_the_only_admitted_frame_and_frame_index() {
         let mut backend =
             ProbeBackend::new([SurfaceAcquisition::Lost, SurfaceAcquisition::Success(23)]);
-        let admission = admit_surface_frame(&mut backend).expect("recovered admission");
+        let admission =
+            admit_surface_frame(DRAWABLE_SIZE, &mut backend).expect("recovered admission");
         let mut admitted_frame_count = 4;
         let dispatch =
             dispatch_surface_frame(admission, &mut admitted_frame_count, |frame, index| {
