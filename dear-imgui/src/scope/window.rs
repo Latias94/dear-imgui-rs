@@ -118,6 +118,10 @@ impl Ui {
                 .any(|scope| scope.table == table)
     }
 
+    pub(crate) fn native_window_scope_depth(&self) -> usize {
+        self.native_scopes.borrow().window_boundaries.len()
+    }
+
     pub(crate) fn assert_host_table_can_change(&self, table: Option<TableScope>, operation: &str) {
         assert!(
             !self.native_window_scope_holds_table(table),
@@ -183,6 +187,9 @@ impl Drop for WindowBoundaryGuard<'_> {
                 .expect("active native window scope");
             tracker.refresh_pending_recovery();
         }
+        // The native extension has finished its work at this depth. Restore the clipper
+        // temporary stack before releasing any enclosing window or table that was deferred.
+        unsafe { crate::list_clipper::drain_finished_clippers(ui) };
         ui.finish_abandoned_native_scopes();
     }
 }

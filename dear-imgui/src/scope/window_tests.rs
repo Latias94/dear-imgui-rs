@@ -132,6 +132,54 @@ fn nested_extensions_in_one_window_have_distinct_hosts() {
 }
 
 #[test]
+fn escaped_clippers_release_their_native_stack_before_the_extension_continues() {
+    in_window(|ui| {
+        let depth = || unsafe { (*ui.context_raw()).ClipperTempDataStacked };
+        let mut outer = ListClipper::new(2).items_height(10.0).begin(ui);
+        assert_eq!(depth(), 1);
+        ui.with_native_window_scope(|host| {
+            let mut escaped = host.run(|| {
+                assert!(catch_unwind(AssertUnwindSafe(|| outer.step())).is_err());
+                let inner = ListClipper::unknown_count().items_height(10.0).begin(ui);
+                assert_eq!(depth(), 2);
+                inner
+            });
+            assert_eq!(depth(), 1);
+            assert!(catch_unwind(AssertUnwindSafe(|| escaped.next_range())).is_err());
+            drop(escaped);
+        });
+        assert!(outer.step());
+        outer.end();
+        assert_eq!(depth(), 0);
+    });
+}
+
+#[test]
+fn unwind_releases_forgotten_clippers_before_a_deferred_parent() {
+    in_window(|ui| {
+        let depth = || unsafe { (*ui.context_raw()).ClipperTempDataStacked };
+        let outer = ListClipper::new(2).items_height(10.0).begin(ui);
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            ui.with_native_window_scope(|host| {
+                host.run(|| {
+                    drop(outer);
+                    assert_eq!(depth(), 1);
+                    std::mem::forget(ListClipper::new(1).items_height(10.0).begin(ui));
+                    assert_eq!(depth(), 2);
+                    panic!("leave the clipper callback");
+                });
+            })
+        }));
+        assert_eq!(
+            result.unwrap_err().downcast_ref::<&str>(),
+            Some(&"leave the clipper callback")
+        );
+        assert_eq!(depth(), 0);
+        ListClipper::new(1).items_height(10.0).begin(ui).end();
+    });
+}
+
+#[test]
 fn a_host_table_keeps_its_cell_while_nested_tables_can_advance() {
     in_window(|ui| {
         let table = ui.begin_table("host table", 2).unwrap();
