@@ -11,6 +11,7 @@ use std::thread::ThreadId;
 use parking_lot::{Mutex, ReentrantMutex};
 use thiserror::Error;
 
+use crate::render::draw_data::StandardDrawCallbacks;
 use crate::{ImGuiError, ImGuiResult, sys};
 
 // All safe context switching, including backend callbacks, serializes through this lock.
@@ -193,8 +194,30 @@ pub(crate) struct ContextState {
     main_viewport_address: usize,
     raw: Cell<*mut sys::ImGuiContext>,
     lifecycle: Cell<ContextLifecycle>,
+    rendered_callbacks: Cell<Option<(i32, StandardDrawCallbacks)>>,
     dockspace_submissions: RefCell<FrameIdClaims>,
     dock_layout_applications: RefCell<FrameIdClaims>,
+}
+
+pub(crate) fn rendered_draw_callbacks(
+    context: *mut sys::ImGuiContext,
+    frame: i32,
+) -> Option<StandardDrawCallbacks> {
+    MANAGED_CONTEXTS
+        .try_with(|contexts| {
+            let contexts = contexts.borrow();
+            let ManagedContextEntry::Live { id, state } = contexts.get(&(context as usize))? else {
+                return None;
+            };
+            let state = state.upgrade()?;
+            if state.id != *id || state.raw.get() != context {
+                return None;
+            }
+            let (rendered_frame, callbacks) = state.rendered_callbacks.get()?;
+            (rendered_frame == frame).then_some(callbacks)
+        })
+        .ok()
+        .flatten()
 }
 
 #[derive(Default)]
@@ -244,6 +267,7 @@ impl ContextState {
             main_viewport_address,
             raw: Cell::new(raw),
             lifecycle: Cell::new(ContextLifecycle::Alive),
+            rendered_callbacks: Cell::new(None),
             dockspace_submissions: RefCell::new(FrameIdClaims::default()),
             dock_layout_applications: RefCell::new(FrameIdClaims::default()),
         });
@@ -269,6 +293,14 @@ impl ContextState {
 
     pub(crate) fn id(&self) -> ContextId {
         self.id
+    }
+
+    pub(super) fn record_rendered_draw_callbacks(
+        &self,
+        frame: i32,
+        callbacks: StandardDrawCallbacks,
+    ) {
+        self.rendered_callbacks.set(Some((frame, callbacks)));
     }
 
     pub(crate) fn lifecycle(&self) -> ContextLifecycle {

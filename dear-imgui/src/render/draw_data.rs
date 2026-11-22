@@ -17,4 +17,6 @@ pub use core::{DrawData, DrawRequirements};
 pub use list::{DrawList, DrawListIterator};
 pub use vertex::{DrawIdx, DrawVert};
 
-pub(crate) use callbacks::{StandardDrawCallback, classify_standard_draw_callback};
+pub(crate) use callbacks::{
+    StandardDrawCallback, StandardDrawCallbacks, classify_standard_draw_callback,
+};

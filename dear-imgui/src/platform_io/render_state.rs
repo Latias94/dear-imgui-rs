@@ -43,8 +43,9 @@ impl PlatformIo {
     ///
     /// When present, the callback must use the exact [`sys::ImDrawCallback`] ABI, remain callable
     /// while installed, accept the draw-list and draw-command pointers supplied by Dear ImGui,
-    /// and never unwind across the C ABI. Clearing or replacing a live callback is valid only
-    /// after no draw data can reference it.
+    /// and never unwind across the C ABI. Rust records the standard callback identities at
+    /// `Render()`, so the registration can be cleared after that frame is rendered. Keep the
+    /// function and any state it requires alive while a raw native consumer could still invoke it.
     #[doc(alias = "DrawCallback_ResetRenderState")]
     pub unsafe fn set_draw_callback_reset_render_state_raw(
         &mut self,

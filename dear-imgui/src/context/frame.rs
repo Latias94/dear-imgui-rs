@@ -386,6 +386,9 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
             if dd.is_null() {
                 panic!("Context::render() returned null draw data");
             }
+            // Backend teardown may clear or replace these slots while this draw data is live.
+            self.state
+                .record_rendered_draw_callbacks((*dd).FrameCount, (&(*self.raw).PlatformIO).into());
             std::ptr::NonNull::new_unchecked(dd as *mut crate::render::DrawData)
         };
         self.texture_registry
