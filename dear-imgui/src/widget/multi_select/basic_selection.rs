@@ -1,4 +1,5 @@
-use crate::{Id, sys};
+use crate::{ContextThreadLease, Id, ImGuiError, ImGuiResult, sys};
+use std::ptr::NonNull;
 
 /// Selection container backed by Dear ImGui's `ImGuiSelectionBasicStorage`.
 ///
@@ -7,25 +8,36 @@ use crate::{Id, sys};
 /// by stable IDs (e.g. table rows, tree nodes).
 #[derive(Debug)]
 pub struct BasicSelection {
-    raw: *mut sys::ImGuiSelectionBasicStorage,
+    raw: NonNull<sys::ImGuiSelectionBasicStorage>,
+    _thread_lease: ContextThreadLease,
 }
 
 impl BasicSelection {
     /// Create an empty selection storage.
+    ///
+    /// # Panics
+    ///
+    /// Panics if storage cannot be created on this thread. See [`Self::try_new`].
     pub fn new() -> Self {
-        unsafe {
-            let ptr = sys::ImGuiSelectionBasicStorage_ImGuiSelectionBasicStorage();
-            if ptr.is_null() {
-                panic!("ImGuiSelectionBasicStorage_ImGuiSelectionBasicStorage() returned null");
-            }
-            Self { raw: ptr }
-        }
+        Self::try_new().expect("failed to create Dear ImGui selection storage")
+    }
+
+    /// Tries to allocate empty selection storage on the Dear ImGui owner thread.
+    pub fn try_new() -> ImGuiResult<Self> {
+        let thread_lease = ContextThreadLease::acquire()?;
+        let raw =
+            NonNull::new(unsafe { sys::ImGuiSelectionBasicStorage_ImGuiSelectionBasicStorage() })
+                .ok_or_else(|| ImGuiError::resource_allocation("Dear ImGui selection storage"))?;
+        Ok(Self {
+            raw,
+            _thread_lease: thread_lease,
+        })
     }
 
     /// Return the number of selected items.
     pub fn len(&self) -> usize {
         unsafe {
-            let size = (*self.raw).Size;
+            let size = self.raw.as_ref().Size;
             if size <= 0 { 0 } else { size as usize }
         }
     }
@@ -38,19 +50,19 @@ impl BasicSelection {
     /// Clear the selection set.
     pub fn clear(&mut self) {
         unsafe {
-            sys::ImGuiSelectionBasicStorage_Clear(self.raw);
+            sys::ImGuiSelectionBasicStorage_Clear(self.as_raw());
         }
     }
 
     /// Returns true if the given id is selected.
     pub fn contains(&self, id: Id) -> bool {
-        unsafe { sys::ImGuiSelectionBasicStorage_Contains(self.raw, id.raw()) }
+        unsafe { sys::ImGuiSelectionBasicStorage_Contains(self.as_raw(), id.raw()) }
     }
 
     /// Set selection state for a given id.
     pub fn set_selected(&mut self, id: Id, selected: bool) {
         unsafe {
-            sys::ImGuiSelectionBasicStorage_SetItemSelected(self.raw, id.raw(), selected);
+            sys::ImGuiSelectionBasicStorage_SetItemSelected(self.as_raw(), id.raw(), selected);
         }
     }
 
@@ -64,7 +76,7 @@ impl BasicSelection {
 
     /// Expose raw pointer for internal helpers.
     pub(crate) fn as_raw(&self) -> *mut sys::ImGuiSelectionBasicStorage {
-        self.raw
+        self.raw.as_ptr()
     }
 }
 
@@ -76,12 +88,7 @@ impl Default for BasicSelection {
 
 impl Drop for BasicSelection {
     fn drop(&mut self) {
-        unsafe {
-            if !self.raw.is_null() {
-                sys::ImGuiSelectionBasicStorage_destroy(self.raw);
-                self.raw = std::ptr::null_mut();
-            }
-        }
+        unsafe { sys::ImGuiSelectionBasicStorage_destroy(self.as_raw()) }
     }
 }
 

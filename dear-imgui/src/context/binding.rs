@@ -1,6 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::marker::PhantomData;
 use std::num::NonZeroU64;
 use std::ptr;
 use std::rc::{Rc, Weak};
@@ -10,7 +11,7 @@ use std::thread::ThreadId;
 use parking_lot::{Mutex, ReentrantMutex};
 use thiserror::Error;
 
-use crate::sys;
+use crate::{ImGuiError, ImGuiResult, sys};
 
 // All safe context switching, including backend callbacks, serializes through this lock.
 pub(crate) static CTX_MUTEX: ReentrantMutex<()> = ReentrantMutex::new(());
@@ -35,38 +36,55 @@ thread_local! {
 #[derive(Debug)]
 struct ContextThreadOwner {
     thread: Option<ThreadId>,
-    live_contexts: usize,
+    live_leases: usize,
 }
 
 impl ContextThreadOwner {
     const fn new() -> Self {
         Self {
             thread: None,
-            live_contexts: 0,
+            live_leases: 0,
         }
     }
 }
 
-/// Process-global ownership of Dear ImGui's default `GImGui` storage.
+/// Reserves Dear ImGui's process-global native state for the current OS thread.
+///
+/// Extensions that own native objects allocated through Dear ImGui should acquire a lease
+/// before allocation and retain it through native destruction. The allocator can access
+/// the current context even when the object itself is independent of any context.
+///
+/// A lease can be acquired without an active [`Context`](crate::Context). It keeps the
+/// thread reservation alive across context destruction. Use [`ContextBinding`] to check
+/// whether a particular context is still alive and to enter that context.
 #[derive(Debug)]
-pub(crate) struct ContextThreadLease {
+#[must_use = "keep the lease until the native owner has been destroyed"]
+pub struct ContextThreadLease {
     thread: ThreadId,
+    _not_send_sync: PhantomData<Rc<()>>,
 }
 
 impl ContextThreadLease {
-    pub(crate) fn acquire() -> crate::error::ImGuiResult<Self> {
+    /// Acquires another lease on this thread, or claims ownership if all leases were dropped.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ImGuiError::ContextThreadConflict`] if another thread holds a lease, or
+    /// [`ImGuiError::ResourceAllocation`] if the process-wide lease count is exhausted.
+    pub fn acquire() -> ImGuiResult<Self> {
         let thread = std::thread::current().id();
         let mut owner = CONTEXT_THREAD_OWNER.lock();
         if owner.thread.is_some_and(|current| current != thread) {
-            return Err(crate::error::ImGuiError::ContextThreadConflict);
+            return Err(ImGuiError::ContextThreadConflict);
         }
-        owner.live_contexts = owner.live_contexts.checked_add(1).ok_or_else(|| {
-            crate::error::ImGuiError::context_creation(
-                "process Context ownership count is exhausted",
-            )
+        owner.live_leases = owner.live_leases.checked_add(1).ok_or_else(|| {
+            ImGuiError::resource_allocation("Dear ImGui native owner thread lease count exhausted")
         })?;
         owner.thread = Some(thread);
-        Ok(Self { thread })
+        Ok(Self {
+            thread,
+            _not_send_sync: PhantomData,
+        })
     }
 }
 
@@ -74,9 +92,9 @@ impl Drop for ContextThreadLease {
     fn drop(&mut self) {
         let mut owner = CONTEXT_THREAD_OWNER.lock();
         debug_assert_eq!(owner.thread, Some(self.thread));
-        debug_assert!(owner.live_contexts > 0);
-        owner.live_contexts -= 1;
-        if owner.live_contexts == 0 {
+        debug_assert!(owner.live_leases > 0);
+        owner.live_leases -= 1;
+        if owner.live_leases == 0 {
             owner.thread = None;
         }
     }
@@ -639,4 +657,111 @@ pub(crate) fn with_bound_context<R>(ctx: *mut sys::ImGuiContext, f: impl FnOnce(
     let _lock = CTX_MUTEX.lock();
     let _bound = RawBoundContextGuard::bind(ctx);
     f()
+}
+
+#[cfg(test)]
+mod thread_lease_tests {
+    use crate::{
+        BasicSelection, Context, ContextBindingError, ContextThreadLease, Id, ImGuiError,
+        ImGuiResult, OwnedStateStorage, OwnedTextureData, StateStorage, TextFilter,
+        TextureDataError, TextureFormat,
+    };
+    use static_assertions::assert_not_impl_any;
+
+    assert_not_impl_any!(ContextThreadLease: Send, Sync);
+    assert_not_impl_any!(OwnedTextureData: Send, Sync);
+    assert_not_impl_any!(OwnedStateStorage: Send, Sync);
+    assert_not_impl_any!(TextFilter: Send, Sync);
+    assert_not_impl_any!(BasicSelection: Send, Sync);
+
+    fn acquire_on_another_thread() -> ImGuiResult<()> {
+        std::thread::spawn(|| ContextThreadLease::acquire().map(drop))
+            .join()
+            .unwrap()
+    }
+
+    #[test]
+    fn standalone_constructors_report_a_foreign_thread_lease() {
+        let _guard = crate::test_support::imgui_context_guard();
+        let _lease = ContextThreadLease::acquire().unwrap();
+        std::thread::spawn(|| {
+            assert!(matches!(
+                Context::try_create(),
+                Err(ImGuiError::ContextThreadConflict)
+            ));
+            assert!(matches!(
+                OwnedTextureData::from_pixels(TextureFormat::Alpha8, 1, 1, &[7]),
+                Err(TextureDataError::ContextThreadConflict)
+            ));
+            assert!(matches!(
+                OwnedStateStorage::try_new(),
+                Err(ImGuiError::ContextThreadConflict)
+            ));
+            assert!(matches!(
+                TextFilter::try_new("Search"),
+                Err(ImGuiError::ContextThreadConflict)
+            ));
+            assert!(matches!(
+                BasicSelection::try_new(),
+                Err(ImGuiError::ContextThreadConflict)
+            ));
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn each_standalone_owner_retains_the_thread_after_context_destruction() {
+        fn check_owner<T>(owner: T) {
+            let context = Context::create();
+            let binding = context.binding();
+            drop(context);
+            assert_eq!(
+                binding.try_with_bound_context(|| ()),
+                Err(ContextBindingError::NativeDestroyed)
+            );
+            assert!(matches!(
+                acquire_on_another_thread(),
+                Err(ImGuiError::ContextThreadConflict)
+            ));
+            drop(owner);
+            acquire_on_another_thread().unwrap();
+        }
+
+        let _guard = crate::test_support::imgui_context_guard();
+        check_owner(OwnedTextureData::from_pixels(TextureFormat::Alpha8, 1, 1, &[7]).unwrap());
+        check_owner(TextFilter::new_with_filter("Search", "word"));
+
+        let mut selection = BasicSelection::new();
+        selection.set_selected(Id::from(1), true);
+        check_owner(selection);
+
+        let mut storage = OwnedStateStorage::default();
+        // The storage and its thread lease cover the temporary native view.
+        unsafe { StateStorage::from_raw(storage.as_raw_mut()) }.set_int(Id::from(1), 42);
+        check_owner(storage);
+    }
+
+    #[test]
+    fn raw_texture_transfers_release_each_thread_lease_once() {
+        let _guard = crate::test_support::imgui_context_guard();
+        let texture = OwnedTextureData::from_pixels(TextureFormat::Alpha8, 1, 1, &[7]).unwrap();
+        let (raw, lease) = texture.into_raw_parts();
+        assert!(matches!(
+            acquire_on_another_thread(),
+            Err(ImGuiError::ContextThreadConflict)
+        ));
+        // The raw allocation has one owner on this thread throughout both transfers.
+        let texture = unsafe { OwnedTextureData::from_raw_owned(raw) };
+        drop(lease);
+        assert!(matches!(
+            acquire_on_another_thread(),
+            Err(ImGuiError::ContextThreadConflict)
+        ));
+        let lease = ContextThreadLease::acquire().unwrap();
+        let raw = texture.into_raw();
+        unsafe { crate::sys::ImTextureData_destroy(raw) };
+        drop(lease);
+        acquire_on_another_thread().unwrap();
+    }
 }

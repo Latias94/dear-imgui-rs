@@ -26,9 +26,9 @@ pub enum ImGuiError {
     #[error("A Dear ImGui context is already active")]
     ContextAlreadyActive,
 
-    /// Safe contexts using the process-global `GImGui` storage belong to one OS thread.
+    /// Another OS thread holds a lease for Dear ImGui's process-global native state.
     #[error(
-        "Dear ImGui contexts are already owned by another OS thread; destroy every Context on that thread before creating one here"
+        "another OS thread owns Dear ImGui native state. Drop all contexts, native owners, and remaining thread leases there before acquiring ownership here"
     )]
     ContextThreadConflict,
 

@@ -31,6 +31,7 @@ pub use self::attachment::{
 };
 pub use self::binding::{
     ContextAliveToken, ContextBinding, ContextBindingError, ContextId, ContextLifecycle,
+    ContextThreadLease,
 };
 pub use self::core::Context;
 pub use self::error::{

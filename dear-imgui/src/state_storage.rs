@@ -4,7 +4,7 @@
 //! used by many widgets and can also be used by custom widgets to persist state.
 //!
 use crate::context::binding::CTX_MUTEX;
-use crate::{Id, sys};
+use crate::{ContextThreadLease, Id, ImGuiResult, sys};
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
@@ -20,6 +20,8 @@ impl<'ui> StateStorage<'ui> {
     /// `raw` must point to an initialized `ImGuiStorage` that remains live and accessible
     /// on this thread for `'ui`, including through any copies of the returned view. Its
     /// allocation must remain exclusively owned by the storage and its keys must stay sorted.
+    /// A Context or [`ContextThreadLease`] must cover any mutation that can allocate or free
+    /// entries through Dear ImGui.
     pub unsafe fn from_raw(raw: *mut sys::ImGuiStorage) -> Self {
         let raw = NonNull::new(raw).expect("StateStorage::from_raw() requires non-null pointer");
         Self {
@@ -35,8 +37,6 @@ impl<'ui> StateStorage<'ui> {
 
     /// Clears all storage entries.
     pub fn clear(&mut self) {
-        // Raw-created views may be used outside a bound Ui. Freeing or growing the native
-        // vector accesses the current context's allocator statistics even for standalone storage.
         let _guard = CTX_MUTEX.lock();
         unsafe { sys::ImGuiStorage_Clear(self.raw.as_ptr()) }
     }
@@ -73,14 +73,29 @@ impl<'ui> StateStorage<'ui> {
 /// This is useful when you want to keep widget state outside of the current
 /// window storage (e.g. sharing state across windows or providing custom storage
 /// for a widget subtree via [`crate::Ui::with_state_storage`]).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct OwnedStateStorage {
     raw: sys::ImGuiStorage,
+    _thread_lease: ContextThreadLease,
 }
 
 impl OwnedStateStorage {
+    /// Creates storage on the Dear ImGui owner thread.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the thread lease cannot be acquired. Use [`Self::try_new`] to handle this error.
     pub fn new() -> Self {
-        Self::default()
+        Self::try_new().expect("failed to acquire Dear ImGui thread ownership for state storage")
+    }
+
+    /// Reserves the current thread for this storage's native entries and creates empty storage.
+    pub fn try_new() -> ImGuiResult<Self> {
+        let thread_lease = ContextThreadLease::acquire()?;
+        Ok(Self {
+            raw: sys::ImGuiStorage::default(),
+            _thread_lease: thread_lease,
+        })
     }
 
     /// Borrows the native storage for direct mutation.
@@ -108,6 +123,12 @@ impl OwnedStateStorage {
 
     pub fn as_raw(&self) -> *const sys::ImGuiStorage {
         &self.raw as *const sys::ImGuiStorage
+    }
+}
+
+impl Default for OwnedStateStorage {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

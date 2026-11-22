@@ -1,6 +1,7 @@
 use super::validation::{require_exact_payload, validate_new_texture_layout};
 use super::{TextureData, TextureDataError, TextureFormat};
-use crate::sys;
+use crate::{ContextThreadLease, ImGuiError, ImGuiResult, sys};
+use std::mem::ManuallyDrop;
 use std::ptr::NonNull;
 
 /// Owned texture data managed by Dear ImGui.
@@ -35,13 +36,23 @@ use std::ptr::NonNull;
 /// ```
 pub struct OwnedTextureData {
     raw: NonNull<sys::ImTextureData>,
+    thread_lease: ContextThreadLease,
 }
 
 impl OwnedTextureData {
+    #[cfg(test)]
     pub(crate) fn empty() -> Self {
+        Self::try_empty().expect("failed to create empty Dear ImGui texture")
+    }
+
+    fn try_empty() -> Result<Self, TextureDataError> {
+        let thread_lease = ContextThreadLease::acquire().map_err(|error| match error {
+            ImGuiError::ContextThreadConflict => TextureDataError::ContextThreadConflict,
+            _ => TextureDataError::AllocationFailed,
+        })?;
         let raw = unsafe { sys::ImTextureData_ImTextureData() };
-        let raw = NonNull::new(raw).expect("ImTextureData_ImTextureData() returned null");
-        Self { raw }
+        let raw = NonNull::new(raw).ok_or(TextureDataError::AllocationFailed)?;
+        Ok(Self { raw, thread_lease })
     }
 
     /// Create owned texture data from an exact pixel payload.
@@ -51,8 +62,8 @@ impl OwnedTextureData {
     ///
     /// # Errors
     ///
-    /// Returns [`TextureDataError`] when the dimensions or allocation size are not representable,
-    /// or when `pixels` does not exactly match the requested layout.
+    /// Returns [`TextureDataError`] for an invalid layout or payload, a thread ownership
+    /// conflict, or a failed native allocation.
     pub fn from_pixels(
         format: TextureFormat,
         width: u32,
@@ -62,7 +73,7 @@ impl OwnedTextureData {
         let layout = validate_new_texture_layout(format, width, height)?;
         require_exact_payload(layout.byte_len, pixels.len())?;
 
-        let mut texture = Self::empty();
+        let mut texture = Self::try_empty()?;
         unsafe {
             sys::ImTextureData_Create(
                 texture.raw.as_ptr(),
@@ -75,21 +86,55 @@ impl OwnedTextureData {
         Ok(texture)
     }
 
-    /// Leak the underlying `ImTextureData*` without destroying it.
+    /// Transfers the native allocation to the caller and releases this owner's thread lease.
+    ///
+    /// Keep a separate [`ContextThreadLease`] on this thread through native use and destruction,
+    /// or use [`Self::into_raw_parts`] to take the existing lease with the pointer.
     pub fn into_raw(self) -> *mut sys::ImTextureData {
-        let raw = self.raw.as_ptr();
-        std::mem::forget(self);
-        raw
+        self.into_raw_parts().0
     }
 
-    /// Take ownership of a raw `ImTextureData*`.
+    /// Transfers the native allocation and its thread lease together.
+    ///
+    /// Keep the lease until `ImTextureData_destroy` returns or ownership has been transferred
+    /// to another owner on this thread.
+    pub fn into_raw_parts(self) -> (*mut sys::ImTextureData, ContextThreadLease) {
+        let texture = ManuallyDrop::new(self);
+        // Move the lease out exactly once. ManuallyDrop suppresses both the native destructor
+        // and the source lease's destructor.
+        (texture.raw.as_ptr(), unsafe {
+            std::ptr::read(&texture.thread_lease)
+        })
+    }
+
+    /// Tries to take ownership of a raw `ImTextureData*`.
+    ///
+    /// A null pointer or a thread lease failure returns an error. On error the caller retains
+    /// ownership of the allocation.
     ///
     /// # Safety
-    /// - `raw` must be a valid pointer returned by `ImTextureData_ImTextureData()`.
-    /// - The caller must ensure no other owner will call `ImTextureData_destroy(raw)`.
+    ///
+    /// A non-null `raw` must point to a live, exclusively owned `ImTextureData` allocated by
+    /// Dear ImGui on this thread. Keep the allocation's thread lease through the transfer.
+    pub unsafe fn try_from_raw_owned(raw: *mut sys::ImTextureData) -> ImGuiResult<Self> {
+        let raw = NonNull::new(raw).ok_or_else(|| {
+            ImGuiError::invalid_operation("cannot take ownership of a null ImTextureData pointer")
+        })?;
+        let thread_lease = ContextThreadLease::acquire()?;
+        Ok(Self { raw, thread_lease })
+    }
+
+    /// Takes ownership of a raw `ImTextureData*`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if [`Self::try_from_raw_owned`] returns an error.
+    ///
+    /// # Safety
+    /// The caller must uphold the ownership requirements of [`Self::try_from_raw_owned`].
     pub unsafe fn from_raw_owned(raw: *mut sys::ImTextureData) -> Self {
-        let raw = NonNull::new(raw).expect("raw ImTextureData pointer was null");
-        Self { raw }
+        unsafe { Self::try_from_raw_owned(raw) }
+            .expect("failed to take ownership of raw Dear ImGui texture")
     }
 }
 

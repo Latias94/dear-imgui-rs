@@ -34,7 +34,7 @@
 //! Exclusions take precedence over inclusions.
 
 use crate::context::binding::CTX_MUTEX;
-use crate::{Ui, sys};
+use crate::{ContextThreadLease, ImGuiError, ImGuiResult, Ui, sys};
 use std::ops::Range;
 use std::ptr;
 
@@ -61,6 +61,7 @@ use std::ptr;
 pub struct TextFilter {
     label: String,
     raw: *mut sys::ImGuiTextFilter,
+    _thread_lease: ContextThreadLease,
 }
 
 impl TextFilter {
@@ -70,6 +71,10 @@ impl TextFilter {
     ///
     /// # Arguments
     /// * `label` - The label to display for the filter input
+    ///
+    /// # Panics
+    ///
+    /// Panics if the filter cannot be created on this thread. Use [`Self::try_new`] to handle this error.
     ///
     /// # Examples
     ///
@@ -81,11 +86,20 @@ impl TextFilter {
         Self::new_with_filter(label, "")
     }
 
+    /// Tries to create an empty filter on the Dear ImGui owner thread.
+    pub fn try_new(label: impl Into<String>) -> ImGuiResult<Self> {
+        Self::try_new_with_filter(label, "")
+    }
+
     /// Creates a new TextFilter with a custom filter pattern.
     ///
     /// # Arguments
     /// * `label` - The label to display for the filter input
     /// * `filter` - The initial filter pattern
+    ///
+    /// # Panics
+    ///
+    /// Panics if the filter cannot be created on this thread. See [`Self::try_new_with_filter`].
     ///
     /// # Examples
     ///
@@ -97,16 +111,28 @@ impl TextFilter {
     /// );
     /// ```
     pub fn new_with_filter(label: impl Into<String>, filter: impl AsRef<str>) -> Self {
+        Self::try_new_with_filter(label, filter).expect("failed to create Dear ImGui text filter")
+    }
+
+    /// Tries to create a filter with an initial pattern on the Dear ImGui owner thread.
+    pub fn try_new_with_filter(
+        label: impl Into<String>,
+        filter: impl AsRef<str>,
+    ) -> ImGuiResult<Self> {
+        let thread_lease = ContextThreadLease::acquire()?;
         let label = label.into();
         let raw = crate::string::with_scratch_txt(filter, |filter_ptr| {
-            // Even standalone filters use ImGui's allocator, which updates the current context.
             let _guard = CTX_MUTEX.lock();
             unsafe { sys::ImGuiTextFilter_ImGuiTextFilter(filter_ptr) }
         });
         if raw.is_null() {
-            panic!("ImGuiTextFilter_ImGuiTextFilter() returned null");
+            return Err(ImGuiError::resource_allocation("Dear ImGui text filter"));
         }
-        Self { label, raw }
+        Ok(Self {
+            label,
+            raw,
+            _thread_lease: thread_lease,
+        })
     }
 
     /// Builds the TextFilter with its current filter pattern.

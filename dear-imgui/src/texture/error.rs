@@ -3,10 +3,18 @@ use thiserror::Error;
 use super::{ManagedTextureId, TextureRegion, TextureStatus};
 use crate::ContextId;
 
-/// Validation failure while creating or mutating CPU-side texture data.
+/// Failure to create or mutate CPU-side texture data.
 #[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
 #[non_exhaustive]
 pub enum TextureDataError {
+    /// Another OS thread owns Dear ImGui's native state.
+    #[error("cannot allocate a texture while another OS thread owns Dear ImGui native state")]
+    ContextThreadConflict,
+
+    /// The thread lease count was exhausted or the native texture allocation failed.
+    #[error("failed to allocate the owned Dear ImGui texture or its thread lease")]
+    AllocationFailed,
+
     /// Width or height was zero.
     #[error("texture dimensions must be positive (got {width}x{height})")]
     InvalidDimensions {
