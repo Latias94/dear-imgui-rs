@@ -1,4 +1,5 @@
-use crate::sys;
+use super::DrawList;
+use crate::{internal::RawWrapper, sys};
 
 type RawDrawCallback = unsafe extern "C" fn(*const sys::ImDrawList, *const sys::ImDrawCmd);
 
@@ -20,6 +21,7 @@ fn callback_matches(callback: RawDrawCallback, standard: sys::ImDrawCallback) ->
 
 #[inline]
 pub(crate) fn classify_standard_draw_callback(
+    draw_list: &DrawList,
     callback: sys::ImDrawCallback,
 ) -> Option<StandardDrawCallback> {
     let callback = callback?;
@@ -31,7 +33,9 @@ pub(crate) fn classify_standard_draw_callback(
         return Some(StandardDrawCallback::ResetRenderState);
     }
 
-    let context = unsafe { sys::igGetCurrentContext() };
+    // A reconciled draw list can be read while a different Context is bound. Dear ImGui
+    // sets this back-pointer when it initializes the list owner's shared draw data.
+    let context = unsafe { draw_list.raw()._Data.as_ref()?.Context };
     if context.is_null() {
         return None;
     }

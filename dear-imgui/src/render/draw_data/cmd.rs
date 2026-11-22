@@ -1,5 +1,7 @@
+use super::DrawList;
 use super::callbacks::{StandardDrawCallback, classify_standard_draw_callback};
 use crate::draw::RawDrawCallback;
+use crate::internal::RawWrapper;
 use crate::sys;
 use crate::texture::{TextureId, effective_texture_id};
 use std::fmt;
@@ -7,15 +9,12 @@ use std::slice;
 
 /// Iterator over draw commands
 pub struct DrawCmdIterator<'a> {
-    draw_list: &'a sys::ImDrawList,
+    draw_list: &'a DrawList,
     iter: slice::Iter<'a, sys::ImDrawCmd>,
 }
 
 impl<'a> DrawCmdIterator<'a> {
-    pub(super) fn new(
-        draw_list: &'a sys::ImDrawList,
-        iter: slice::Iter<'a, sys::ImDrawCmd>,
-    ) -> Self {
+    pub(super) fn new(draw_list: &'a DrawList, iter: slice::Iter<'a, sys::ImDrawCmd>) -> Self {
         Self { draw_list, iter }
     }
 }
@@ -24,8 +23,8 @@ impl<'a> Iterator for DrawCmdIterator<'a> {
     type Item = DrawCmd<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(
-            |cmd| match classify_standard_draw_callback(cmd.UserCallback) {
+        self.iter.next().map(|cmd| {
+            match classify_standard_draw_callback(self.draw_list, cmd.UserCallback) {
                 Some(StandardDrawCallback::ResetRenderState) => DrawCmd::ResetRenderState,
                 Some(StandardDrawCallback::SetSamplerLinear) => DrawCmd::SetSamplerLinear,
                 Some(StandardDrawCallback::SetSamplerNearest) => DrawCmd::SetSamplerNearest,
@@ -33,7 +32,7 @@ impl<'a> Iterator for DrawCmdIterator<'a> {
                 None => match cmd.UserCallback {
                     Some(callback) => DrawCmd::RawCallback(RawCallbackCommand {
                         callback,
-                        draw_list: self.draw_list,
+                        draw_list: unsafe { self.draw_list.raw() },
                         command: cmd,
                     }),
                     None => {
@@ -54,8 +53,8 @@ impl<'a> Iterator for DrawCmdIterator<'a> {
                         }
                     }
                 },
-            },
-        )
+            }
+        })
     }
 }
 
@@ -174,9 +173,10 @@ mod tests {
         let commands = [command];
 
         let draw_list = sys::ImDrawList::default();
-        let draw_command = DrawCmdIterator::new(&draw_list, commands.iter())
-            .next()
-            .unwrap();
+        let draw_command =
+            DrawCmdIterator::new(unsafe { DrawList::from_raw(&draw_list) }, commands.iter())
+                .next()
+                .unwrap();
         let DrawCmd::Elements { cmd_params, .. } = draw_command else {
             panic!("expected an element draw command");
         };
@@ -197,9 +197,10 @@ mod tests {
         let commands = [command];
 
         let draw_list = sys::ImDrawList::default();
-        let draw_command = DrawCmdIterator::new(&draw_list, commands.iter())
-            .next()
-            .unwrap();
+        let draw_command =
+            DrawCmdIterator::new(unsafe { DrawList::from_raw(&draw_list) }, commands.iter())
+                .next()
+                .unwrap();
         let DrawCmd::Elements { cmd_params, .. } = draw_command else {
             panic!("expected an element draw command");
         };
@@ -217,9 +218,10 @@ mod tests {
         };
         let command_address = &raw const command as usize;
         let commands = std::slice::from_mut(&mut command);
-        let DrawCmd::RawCallback(raw) = DrawCmdIterator::new(&draw_list, commands.iter())
-            .next()
-            .expect("raw callback command")
+        let DrawCmd::RawCallback(raw) =
+            DrawCmdIterator::new(unsafe { DrawList::from_raw(&draw_list) }, commands.iter())
+                .next()
+                .expect("raw callback command")
         else {
             panic!("expected raw callback command");
         };

@@ -67,23 +67,40 @@ fn draw_data_textures_empty_is_safe() {
 }
 
 #[test]
-fn platform_io_standard_draw_callbacks_are_classified() {
+fn draw_commands_use_their_owners_callback_table_while_another_context_is_current() {
     let _guard = crate::test_support::imgui_context_guard();
-    unsafe extern "C" fn reset(_parent_list: *const sys::ImDrawList, _cmd: *const sys::ImDrawCmd) {}
+    unsafe extern "C" fn reset(_parent_list: *const sys::ImDrawList, _cmd: *const sys::ImDrawCmd) {
+        std::hint::black_box(0);
+    }
     unsafe extern "C" fn linear(_parent_list: *const sys::ImDrawList, _cmd: *const sys::ImDrawCmd) {
+        std::hint::black_box(1);
     }
     unsafe extern "C" fn nearest(
         _parent_list: *const sys::ImDrawList,
         _cmd: *const sys::ImDrawCmd,
     ) {
+        std::hint::black_box(2);
     }
     unsafe extern "C" fn from_texture(
         _parent_list: *const sys::ImDrawList,
         _cmd: *const sys::ImDrawCmd,
     ) {
+        std::hint::black_box(3);
     }
 
+    let mut other = crate::Context::create();
+    unsafe {
+        other
+            .platform_io_mut()
+            .set_draw_callback_set_sampler_linear_raw(Some(nearest))
+    };
+    let other_binding = other.binding();
+    let _other = other.suspend_or_panic();
+
     let mut ctx = crate::Context::create();
+    ctx.prepare_frame(
+        crate::FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
+    );
     let platform_io = ctx.platform_io_mut();
     unsafe {
         platform_io.set_draw_callback_reset_render_state_raw(Some(reset));
@@ -92,20 +109,37 @@ fn platform_io_standard_draw_callbacks_are_classified() {
         platform_io.set_draw_callback_set_sampler_from_texture_raw(Some(from_texture));
     }
 
-    assert_eq!(
-        classify_standard_draw_callback(Some(reset)),
-        Some(StandardDrawCallback::ResetRenderState)
-    );
-    assert_eq!(
-        classify_standard_draw_callback(Some(linear)),
-        Some(StandardDrawCallback::SetSamplerLinear)
-    );
-    assert_eq!(
-        classify_standard_draw_callback(Some(nearest)),
-        Some(StandardDrawCallback::SetSamplerNearest)
-    );
-    assert_eq!(
-        classify_standard_draw_callback(Some(from_texture)),
-        Some(StandardDrawCallback::SetSamplerFromTexture)
-    );
+    let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
+    let frame = ctx.begin_frame();
+    let list = frame.ui().get_foreground_draw_list();
+    unsafe { list.add_callback(reset, std::ptr::null_mut(), 0) };
+    list.set_sampler_linear();
+    list.set_sampler_nearest();
+    list.set_sampler_from_texture();
+    drop(list);
+    let pending = frame.render(&consumer);
+    let feedback: Vec<_> = pending
+        .texture_requests()
+        .iter()
+        .map(|r| r.retry())
+        .collect();
+    let frame = pending.reconcile_texture_feedback(feedback).unwrap();
+
+    other_binding.with_bound_context(|| {
+        assert!(!frame.requirements().requires_raw_callback_support());
+        let commands: Vec<_> = frame
+            .draw_lists()
+            .flat_map(DrawList::commands)
+            .filter(|cmd| !matches!(cmd, DrawCmd::Elements { .. }))
+            .collect();
+        assert!(matches!(
+            commands.as_slice(),
+            [
+                DrawCmd::ResetRenderState,
+                DrawCmd::SetSamplerLinear,
+                DrawCmd::SetSamplerNearest,
+                DrawCmd::SetSamplerFromTexture
+            ]
+        ));
+    });
 }

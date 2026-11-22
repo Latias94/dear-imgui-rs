@@ -1,4 +1,4 @@
-use super::{DrawCmd, DrawListIterator};
+use super::{DrawListIterator, classify_standard_draw_callback};
 use crate::internal::{RawCast, RawWrapper};
 use crate::sys;
 use std::slice;
@@ -75,9 +75,10 @@ impl DrawData {
     #[must_use]
     pub fn requirements(&self) -> DrawRequirements {
         let raw_callbacks = self.draw_lists().any(|draw_list| {
-            draw_list
-                .commands()
-                .any(|command| matches!(command, DrawCmd::RawCallback(_)))
+            unsafe { draw_list.cmd_buffer() }.iter().any(|cmd| {
+                cmd.UserCallback.is_some()
+                    && classify_standard_draw_callback(draw_list, cmd.UserCallback).is_none()
+            })
         });
         DrawRequirements { raw_callbacks }
     }
