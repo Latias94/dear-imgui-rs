@@ -72,7 +72,10 @@ cargo run -p xtask -- web-demo cte
 - Typed callbacks cover changes, transactions, decorators, carets, line numbers, popups,
   language changes, identifier iteration, and atomic selection/line filters.
 - Custom autocomplete owns its callback and exposes only callback-scoped request
-  state. The built-in Trie is attached to and destroyed with its editor.
+  state. Configure extra trigger and word characters for completions such as
+  `\alpha`. A request can supply display labels and choose the glyph range to
+  replace. Submit asynchronous results on the editor's render thread. The
+  built-in Trie is attached to and destroyed with its editor.
 - `TextDiff` supports integrated and side-by-side rendering with independent
   language, palette, and display configuration.
 - `dejavu_font_source` and `noto_sans_sc_font_source` expose bundled fonts through the safe managed atlas
@@ -82,13 +85,34 @@ The default occurrence and word-boundary methods retain upstream defaults.
 Use their `_with_whole_word` variants to request complete-word occurrences or
 word-only navigation that leaves whitespace and punctuation in place.
 
+`Language::from_extension` accepts case-sensitive extensions with a leading dot,
+including `.jl` (Julia) and `.wgsl` (WGSL). Palettes have 33 slots, including
+`CustomColor1` through `CustomColor9`. Use `set_left_margin` for the editor margin
+in glyph columns. It also moves the text when line numbers are hidden. Smooth
+scrolling is opt-in through `set_smooth_scrolling_enabled`.
+
 See the family-level disposition ledger in
 [`docs/API_COVERAGE.md`](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/API_COVERAGE.md#imguicolortextedit-api-family-ledger)
 for the small set of raw-only capabilities.
 
+## Breaking changes
+
+The selected `cimCTE` revision replaces the removed `Language_*` raw getters with
+registry lookup. Safe code should use the `Language` enum, `Language::from_name`,
+or `Language::from_extension`. The built-in set now contains Julia and WGSL.
+`PaletteColor::COUNT` is 33 and includes `CustomColor1` through `CustomColor9`.
+The raw line-number margin functions were replaced by `TextEditor_SetLeftMargin`
+and `TextEditor_GetLeftMargin`. The safe wrapper keeps deprecated forwarding
+methods while callers migrate to `set_left_margin` and `left_margin`.
+
+Autocomplete configuration now supports extra trigger and word characters.
+Callbacks can inspect and change the replacement range and add display labels.
+Asynchronous labeled suggestions are copied during the render-thread call, so
+the input strings only need to remain valid for that call.
+
 ## Migrating from 0.18
 
-The 0.20 source pin includes upstream wide-glyph column handling. Remove the
+The 0.22 source pin includes upstream wide-glyph column handling. Remove the
 `cte-wide-glyphs-v1` overlays and rebuild custom native archives and CTE-enabled
 WASM providers together with the matching core. Raw `Glyph` mirrors now use
 `columns: u8` and `squiggle: u32`; inspect the generated sys bindings before

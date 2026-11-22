@@ -118,6 +118,17 @@ impl Plot3DDataLayout {
         self
     }
 
+    pub(crate) fn sample_count(self, len: usize) -> Option<i32> {
+        let count = i32::try_from(len).ok()?;
+        if count > i32::MAX / 2 && self.raw_offset() != 0 {
+            // Native ImPosMod adds count to the remainder, then IndexData adds the sample index.
+            let remainder = self.raw_offset() % count;
+            let offset = remainder.checked_add(count)? % count;
+            offset.checked_add(count - 1)?;
+        }
+        Some(count)
+    }
+
     #[inline]
     pub(crate) const fn raw_offset(self) -> i32 {
         self.offset.raw()
@@ -239,6 +250,17 @@ mod tests {
         let spec = plot3d_spec_from(0, layout);
         assert_eq!(spec.Offset, -8);
         assert_eq!(spec.Stride, super::IMPLOT3D_AUTO);
+    }
+
+    #[test]
+    fn circular_sample_count_checks_native_offset_arithmetic() {
+        let max = i32::MAX as usize;
+        assert_eq!(Plot3DDataLayout::DEFAULT.sample_count(max), Some(i32::MAX));
+        let backward = Plot3DDataLayout::DEFAULT.with_offset(Plot3DDataOffset::samples(-1));
+        assert_eq!(backward.sample_count(4), Some(4));
+        assert_eq!(backward.sample_count(max), None);
+        let forward = Plot3DDataLayout::DEFAULT.with_offset(Plot3DDataOffset::samples(1));
+        assert_eq!(forward.sample_count(max), None);
     }
 
     #[test]

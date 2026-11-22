@@ -413,7 +413,12 @@ impl<'ui> PlotUi<'ui> {
 
     /// Setup ticks on a range with tick count and optional labels for an X axis.
     ///
-    /// If `labels` is provided, it must have length `n_ticks`.
+    /// If `labels` is provided, it must have length `n_ticks`. ImPlot generates
+    /// both endpoints even when an unlabeled range requests a single tick.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `n_ticks` is zero, exceeds `i32::MAX`, or is less than two with labels.
     pub fn setup_x_axis_ticks_range(
         &self,
         axis: XAxis,
@@ -424,7 +429,11 @@ impl<'ui> PlotUi<'ui> {
         keep_default: bool,
     ) {
         assert_axis_limit_range("PlotUi::setup_x_axis_ticks_range()", v_min, v_max);
-        let n_ticks_i32 = axis_tick_count_to_i32("PlotUi::setup_x_axis_ticks_range()", n_ticks);
+        let n_ticks_i32 = axis_tick_count_to_i32(
+            "PlotUi::setup_x_axis_ticks_range()",
+            n_ticks,
+            labels.is_some(),
+        );
         self.with_bound_context(|| {
             if let Some(labels) = labels {
                 if labels.len() != n_ticks {
@@ -461,7 +470,12 @@ impl<'ui> PlotUi<'ui> {
 
     /// Setup ticks on a range with tick count and optional labels for a Y axis.
     ///
-    /// If `labels` is provided, it must have length `n_ticks`.
+    /// If `labels` is provided, it must have length `n_ticks`. ImPlot generates
+    /// both endpoints even when an unlabeled range requests a single tick.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `n_ticks` is zero, exceeds `i32::MAX`, or is less than two with labels.
     pub fn setup_y_axis_ticks_range(
         &self,
         axis: YAxis,
@@ -472,7 +486,11 @@ impl<'ui> PlotUi<'ui> {
         keep_default: bool,
     ) {
         assert_axis_limit_range("PlotUi::setup_y_axis_ticks_range()", v_min, v_max);
-        let n_ticks_i32 = axis_tick_count_to_i32("PlotUi::setup_y_axis_ticks_range()", n_ticks);
+        let n_ticks_i32 = axis_tick_count_to_i32(
+            "PlotUi::setup_y_axis_ticks_range()",
+            n_ticks,
+            labels.is_some(),
+        );
         self.with_bound_context(|| {
             if let Some(labels) = labels {
                 if labels.len() != n_ticks {

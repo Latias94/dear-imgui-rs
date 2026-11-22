@@ -59,6 +59,11 @@ impl<'a> Plot3D for Scatter3D<'a> {
             validate_nonempty(x)?;
             validate_lengths(x, y, "x/y")?;
             validate_lengths(y, z, "y/z")?;
+            self.layout
+                .sample_count(x.len())
+                .ok_or(Plot3DError::NativeCountOutOfRange {
+                    what: "scatter samples",
+                })?;
             unsafe {
                 // High-level plots keep the automatic contiguous stride; offset is normalized by
                 // ImPlot3D within the validated slice count.
@@ -69,6 +74,11 @@ impl<'a> Plot3D for Scatter3D<'a> {
             validate_nonempty(x)?;
             validate_lengths(x, y, "x/y")?;
             validate_lengths(y, z, "y/z")?;
+            self.layout
+                .sample_count(x.len())
+                .ok_or(Plot3DError::NativeCountOutOfRange {
+                    what: "scatter samples",
+                })?;
             unsafe {
                 // High-level plots keep the automatic contiguous stride; offset is normalized by
                 // ImPlot3D within the validated slice count.

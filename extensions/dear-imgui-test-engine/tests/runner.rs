@@ -693,6 +693,39 @@ fn runner_distinguishes_timeout_and_explicit_abort_after_cleanup() {
 }
 
 #[test]
+fn rejected_runner_requests_preserve_ready_engines_and_unconsumed_runs() {
+    let _guard = test_lock();
+    let mut context = context();
+    let mut engine = attached_engine(&mut context);
+
+    let error = TestRunner::new(&mut engine)
+        .filter("invalid\0filter")
+        .run_headless(&mut context, no_error)
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        RunnerError::TestEngine(TestEngineError::InvalidInput { .. })
+    ));
+    assert_eq!(engine.run_state(), RunState::Ready);
+
+    engine
+        .queue_tests(TestGroup::Tests, Some("no matches"), RunFlags::NONE)
+        .unwrap();
+    let summary = engine.result_summary().unwrap();
+    assert_eq!(engine.run_state(), RunState::Terminal);
+    let error = TestRunner::new(&mut engine)
+        .run_headless(&mut context, no_error)
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        RunnerError::TestEngine(TestEngineError::InvalidState { .. })
+    ));
+    assert_eq!(engine.take_terminal_summary().unwrap(), Some(summary));
+    assert_eq!(engine.run_state(), RunState::Ready);
+    engine.shutdown().unwrap();
+}
+
+#[test]
 fn ffi_and_callback_failures_remain_infrastructure_errors() {
     let _guard = test_lock();
 

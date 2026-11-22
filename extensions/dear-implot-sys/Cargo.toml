@@ -6,7 +6,6 @@ rust-version.workspace = true
 description = "Low-level FFI bindings for ImPlot via cimplot (C API)"
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 authors.workspace = true
 categories.workspace = true
 keywords.workspace = true
@@ -24,7 +23,7 @@ exclude = [
 ]
 
 [package.metadata.dear-imgui-binding]
-source-revision = "1894cd216ae360e2423762cc52ea5e619abb7cec"
+source-revision = "c809ff29c84813fe1cdc8a0c069145ef2285f22a"
 
 # docs.rs configuration for offline builds
 [package.metadata.docs.rs]

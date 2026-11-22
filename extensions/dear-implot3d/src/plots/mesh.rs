@@ -1,4 +1,4 @@
-use super::{Plot3D, Plot3DError, validate_nonempty};
+use super::{Plot3D, Plot3DError};
 use crate::{Mesh3DFlags, Plot3DUi};
 
 pub struct Mesh3D<'a> {
@@ -28,11 +28,8 @@ impl<'a> Plot3D for Mesh3D<'a> {
         self.label
     }
     fn try_plot(&self, ui: &Plot3DUi<'_>) -> Result<(), Plot3DError> {
-        validate_nonempty(self.vertices)?;
-        validate_nonempty(self.indices)?;
         ui.mesh(self.label, self.vertices, self.indices)
             .flags(self.flags)
-            .plot();
-        Ok(())
+            .try_plot()
     }
 }

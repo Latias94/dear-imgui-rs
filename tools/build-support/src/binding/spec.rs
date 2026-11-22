@@ -924,10 +924,6 @@ impl ExtensionBindingIdentity {
         hash.field("provenance", &self.provenance.identity_hash());
         if self.extension == ExtensionBinding::Cte {
             hash.field("source_overlay", crate::CTE_TEXT_EDITOR_PATCH_VERSION);
-            hash.field(
-                "text_diff_source_overlay",
-                crate::CTE_TEXT_DIFF_DRAW_FLAGS_PATCH_VERSION,
-            );
         }
         if self.extension == ExtensionBinding::ImPlot3d {
             hash.field("source_overlay", crate::IMPLOT3D_DRAW_FLAGS_PATCH_VERSION);
@@ -1435,7 +1431,8 @@ const CTE_FUNCTIONS: &[&str] = &[
     "VisPos_.*",
     "Glyph_.*",
     "Iterator_.*",
-    "Language_.*",
+    "AutoCompleteConfig_.*",
+    "AutoCompleteState_.*",
     "Palette_.*",
     "TrieAutoComplete_.*",
     "CodePoint_.*",
@@ -1498,7 +1495,23 @@ const CTE_SYMBOLS: &[&str] = &[
     "TextEditor_SetShowCurrentLineHighlightEnabled",
     "Palette_Palette",
     "Palette_destroy",
-    "Language_Cpp",
+    "TextEditor_LookupLanguage",
+    "TextEditor_LookupLanguageByExtension",
+    "TextEditor_SetLeftMargin",
+    "TextEditor_GetLeftMargin",
+    "TextEditor_SetSmoothScrollingEnabled",
+    "TextEditor_IsSmoothScrollingEnabled",
+    "AutoCompleteConfig_SetTriggerCharacters",
+    "AutoCompleteConfig_SetWordCharacters",
+    "AutoCompleteState_GetReplacementStart",
+    "AutoCompleteState_SetReplacementStart",
+    "AutoCompleteState_GetReplacementEnd",
+    "AutoCompleteState_SetReplacementEnd",
+    "AutoCompleteState_AddSuggestion",
+    "AutoCompleteState_GetSuggestionCount",
+    "AutoCompleteState_GetSuggestion",
+    "AutoCompleteState_GetLabel",
+    "TextEditor_SetAutoCompleteSuggestions_array",
     "CodePoint_write",
     "GetDejavu",
     "Getnotosans",
@@ -1526,6 +1539,7 @@ const CTE_SYMBOLS: &[&str] = &[
     "dear_imgui_cte_autocomplete_config_create",
     "dear_imgui_cte_autocomplete_config_destroy",
     "dear_imgui_cte_autocomplete_config_set_callback",
+    "dear_imgui_cte_autocomplete_config_set_characters",
     "dear_imgui_cte_text_editor_set_autocomplete_config",
     "dear_imgui_cte_text_editor_set_autocomplete_suggestions",
     "dear_imgui_cte_autocomplete_state_get_search_term",

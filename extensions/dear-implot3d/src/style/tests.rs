@@ -6,6 +6,27 @@ mod tests {
     };
 
     #[test]
+    fn empty_optional_style_arrays_leave_native_scalar_fallbacks_active() {
+        with_scoped_next_plot3d_item_array_style(
+            Plot3DItemArrayStyle::new()
+                .with_line_colors(&[])
+                .with_fill_colors(&[])
+                .with_marker_sizes(&[])
+                .with_marker_line_colors(&[])
+                .with_marker_fill_colors(&[]),
+            || {
+                let spec = crate::plot3d_spec_from(0, crate::Plot3DDataLayout::DEFAULT);
+                assert!(spec.LineColors.is_null() && spec.FillColors.is_null());
+                assert!(
+                    spec.MarkerSizes.is_null()
+                        && spec.MarkerLineColors.is_null()
+                        && spec.MarkerFillColors.is_null()
+                );
+            },
+        );
+    }
+
+    #[test]
     fn colormap_indices_reject_negative_values() {
         assert_eq!(ColormapIndex::from_raw(-1), None);
         assert_eq!(ColormapIndex::new(0).map(ColormapIndex::raw), Some(0));

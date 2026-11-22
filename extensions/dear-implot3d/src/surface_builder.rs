@@ -22,6 +22,7 @@ pub struct Surface3DBuilder<'ui> {
 }
 
 impl<'ui> Surface3DBuilder<'ui> {
+    /// Set the color range. Two zeros (the default) or two NaNs select the grid's Z range.
     pub fn scale(mut self, min: f64, max: f64) -> Self {
         self.scale_min = min;
         self.scale_max = max;
@@ -50,15 +51,14 @@ impl<'ui> Surface3DBuilder<'ui> {
         } = self;
 
         let label = SurfaceLabel::checked(label.as_ref())?;
-        let grid = SurfaceGrid::from_axes(xs, ys, zs)?;
+        let grid = SurfaceGrid::from_axes(xs, ys, zs, flags)?;
         submit_surface_grid(_ui, label, &grid, scale_min, scale_max, || {
             plot3d_spec_with_style(
                 style,
                 flags.bits() | item_flags.bits(),
                 Plot3DDataLayout::DEFAULT,
             )
-        });
-        Ok(())
+        })
     }
 }
 
@@ -77,8 +77,8 @@ impl<'ui> Plot3DUi<'ui> {
             xs,
             ys,
             zs,
-            scale_min: f64::NAN,
-            scale_max: f64::NAN,
+            scale_min: 0.0,
+            scale_max: 0.0,
             flags: Surface3DFlags::NONE,
             item_flags: Item3DFlags::NONE,
             style: Plot3DItemStyle::default(),
@@ -90,6 +90,7 @@ impl<'ui> Plot3DUi<'ui> {
     /// `xs_flat`, `ys_flat`, and `zs` must each contain exactly `x_count * y_count` values. The
     /// contiguous path does not accept an offset or stride; use [`Self::surface_f32_raw`] when
     /// the native layout is intentionally non-contiguous.
+    /// Pass two zeros for automatic color scaling over the grid's Z range.
     ///
     /// ```no_run
     /// use dear_implot3d::{Plot3DError, Plot3DUi, Surface3DFlags};
@@ -125,11 +126,10 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Surface3DFlags,
     ) -> Result<(), Plot3DError> {
         let label = SurfaceLabel::checked(label.as_ref())?;
-        let grid = SurfaceGrid::from_flattened(xs_flat, ys_flat, zs, x_count, y_count)?;
+        let grid = SurfaceGrid::from_flattened(xs_flat, ys_flat, zs, x_count, y_count, flags)?;
         submit_surface_grid(self, label, &grid, scale_min, scale_max, || {
             plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT)
-        });
-        Ok(())
+        })
     }
 
     /// Submit a surface with an explicitly arbitrary native data layout.
@@ -177,12 +177,11 @@ impl<'ui> Plot3DUi<'ui> {
         layout: Plot3DDataLayout,
     ) -> Result<(), Plot3DError> {
         let label = SurfaceLabel::checked(label.as_ref())?;
-        let shape = SurfaceGridShape::checked(x_count, y_count)?;
+        let shape = SurfaceGridShape::checked(x_count, y_count)?.validate_wireframe(flags)?;
         unsafe {
             submit_surface_raw(
                 self, label, xs, ys, zs, shape, scale_min, scale_max, flags, layout,
-            );
+            )
         }
-        Ok(())
     }
 }

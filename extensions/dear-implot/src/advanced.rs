@@ -130,6 +130,11 @@ impl<'a> SubplotGrid<'a> {
     pub fn begin<'ui>(self, plot_ui: &'ui PlotUi<'ui>) -> Result<SubplotToken<'ui>, PlotError> {
         let rows = count_to_i32("SubplotGrid::begin()", "rows", self.rows)?;
         let cols = count_to_i32("SubplotGrid::begin()", "cols", self.cols)?;
+        rows.checked_mul(cols).ok_or_else(|| {
+            PlotError::InvalidData(
+                "SubplotGrid::begin() rows * cols exceeded ImPlot's i32 range".into(),
+            )
+        })?;
         let title_cstr =
             CString::new(self.title).map_err(|e| PlotError::StringConversion(e.to_string()))?;
 
@@ -600,6 +605,10 @@ mod tests {
             SubplotGrid::new("too_many_rows", i32::MAX as usize + 1, 1).begin(&plot_ui),
         );
         assert!(overflow.contains("rows exceeded"));
+
+        let cells =
+            expect_invalid_data(SubplotGrid::new("too_many_cells", 65_536, 32_768).begin(&plot_ui));
+        assert!(cells.contains("rows * cols exceeded"));
     }
 
     #[test]

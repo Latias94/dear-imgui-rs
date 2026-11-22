@@ -313,6 +313,12 @@ fn build_with_cc(
     imgui_src: &Path,
     cimgui_root: &Path,
 ) {
+    // The two supported ImGuizmo layouts are mutually exclusive. Watching the source
+    // directory catches layout and header changes without registering a missing file.
+    for input in [cimguizmo_root, imgui_src, &cimgui_root.join("cimgui.h")] {
+        println!("cargo:rerun-if-changed={}", input.display());
+    }
+
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
     build_support::configure_cpp_runtime_linkage(
@@ -372,11 +378,6 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
-    println!("cargo:rerun-if-changed=third-party/cimguizmo/cimguizmo.h");
-    for path in sources.native_candidate_paths() {
-        println!("cargo:rerun-if-changed={}", path.display());
-    }
-    println!("cargo:rerun-if-changed=../../dear-imgui-sys");
     println!("cargo:rerun-if-env-changed=IMGUIZMO_SYS_LIB_DIR");
     println!("cargo:rerun-if-env-changed=IMGUIZMO_SYS_SKIP_CC");
     println!("cargo:rerun-if-env-changed=IMGUIZMO_SYS_PREBUILT_URL");

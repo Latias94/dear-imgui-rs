@@ -740,6 +740,15 @@ impl TestEngine {
         filter: Option<&str>,
         run_flags: RunFlags,
     ) -> TestEngineResult<()> {
+        self.validate_queue_request(filter, run_flags)?;
+        self.queue_validated_tests(group, filter, run_flags)
+    }
+
+    pub(crate) fn validate_queue_request(
+        &self,
+        filter: Option<&str>,
+        run_flags: RunFlags,
+    ) -> TestEngineResult<()> {
         const OPERATION: &str = "TestEngine::queue_tests";
         self.require_ready(OPERATION)?;
         if let Some(filter) = filter {
@@ -752,7 +761,16 @@ impl TestEngine {
                 "flags contain bits unknown to this Test Engine version",
             ));
         }
+        Ok(())
+    }
 
+    pub(crate) fn queue_validated_tests(
+        &mut self,
+        group: TestGroup,
+        filter: Option<&str>,
+        run_flags: RunFlags,
+    ) -> TestEngineResult<()> {
+        const OPERATION: &str = "TestEngine::queue_tests";
         let mut raw_run_id = 0;
         let status = match filter {
             Some(filter) => with_scratch_txt(filter, |filter_ptr| {

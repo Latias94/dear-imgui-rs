@@ -65,7 +65,8 @@ impl TextEditor {
         .map(|_| self.invalidate_layout())
     }
 
-    /// Selects an inclusive range of document lines.
+    /// Selects an inclusive range of document lines, including the final line's
+    /// newline when one is present.
     pub fn select_lines(&mut self, start: usize, end: usize) -> CteResult<()> {
         self.with_context("TextEditor::select_lines", |raw| unsafe {
             validate_line(raw, "TextEditor::select_lines", start)?;
@@ -77,7 +78,13 @@ impl TextEditor {
                     requirement: "ordered from first line to last line",
                 });
             }
-            sys::TextEditor_SelectLines(raw, start, end);
+            // SelectLine includes the newline, clamps at EOF, and scrolls the cursor into view.
+            // Native SelectLines instead stops at column zero of its end line.
+            sys::TextEditor_SelectLine(raw, end);
+            if start < end {
+                let line_end = sys::TextEditor_GetMainCursorSelection(raw).end;
+                sys::TextEditor_SelectRegion(raw, Position::new(start, 0).into_raw(), line_end);
+            }
             Ok(())
         })
         .map(|_| self.invalidate_layout())
@@ -408,14 +415,14 @@ impl TextEditor {
     pub fn word_start_with_whole_word(
         &self,
         position: Position,
-        whole_word: bool,
+        word_only: bool,
     ) -> CteResult<Position> {
         self.with_context("TextEditor::word_start", |raw| unsafe {
             validate_position(raw, "TextEditor::word_start", position)?;
             Ok(Position::from_raw(sys::TextEditor_FindWordStart(
                 raw,
                 position.into_raw(),
-                whole_word,
+                word_only,
             )))
         })
     }
@@ -428,14 +435,14 @@ impl TextEditor {
     pub fn word_end_with_whole_word(
         &self,
         position: Position,
-        whole_word: bool,
+        word_only: bool,
     ) -> CteResult<Position> {
         self.with_context("TextEditor::word_end", |raw| unsafe {
             validate_position(raw, "TextEditor::word_end", position)?;
             Ok(Position::from_raw(sys::TextEditor_FindWordEnd(
                 raw,
                 position.into_raw(),
-                whole_word,
+                word_only,
             )))
         })
     }

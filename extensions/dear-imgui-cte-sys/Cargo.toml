@@ -6,7 +6,6 @@ rust-version.workspace = true
 description = "Preview low-level FFI bindings for ImGuiColorTextEdit via cimCTE"
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 authors.workspace = true
 documentation = "https://docs.rs/dear-imgui-cte-sys"
 categories.workspace = true
@@ -35,8 +34,8 @@ exclude = [
 ]
 
 [package.metadata.dear-imgui-binding]
-source-revision = "3333a9bd3b7b881a0c34d8abbd97c8ab2c60ea3f"
-nested-source-revision = "b12d713e77e8edddff1e69973f67085ac9cfaf74"
+source-revision = "dbf2abe4841b9dd8a3f1f1864038ac9d60155c5e"
+nested-source-revision = "7515d1c765f8f9d47cd704fd3fbd20eb03fcc304"
 
 [package.metadata.docs.rs]
 no-default-features = true

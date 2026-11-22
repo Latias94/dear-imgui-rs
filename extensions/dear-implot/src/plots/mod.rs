@@ -149,6 +149,17 @@ impl PlotDataLayout {
         self
     }
 
+    pub(crate) fn sample_count(self, len: usize) -> Option<i32> {
+        let count = i32::try_from(len).ok()?;
+        if count > i32::MAX / 2 && self.raw_offset() != 0 {
+            // Native ImPosMod adds count to the remainder, then IndexData adds the sample index.
+            let remainder = self.raw_offset() % count;
+            let offset = remainder.checked_add(count)? % count;
+            offset.checked_add(count - 1)?;
+        }
+        Some(count)
+    }
+
     #[inline]
     pub(crate) const fn raw_offset(self) -> i32 {
         self.offset.raw()

@@ -198,6 +198,9 @@ impl<'a> MultiTextPlot<'a> {
 
     /// Plot all texts
     pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+        if self.validate().is_err() {
+            return;
+        }
         for (i, &text) in self.texts.iter().enumerate() {
             let position = self.positions[i];
             let offset = self.pixel_offsets[i];

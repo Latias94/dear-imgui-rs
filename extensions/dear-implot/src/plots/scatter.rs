@@ -130,7 +130,7 @@ impl<'a> Plot for ScatterPlot<'a> {
         if self.validate().is_err() {
             return; // Skip plotting if data is invalid
         }
-        let Ok(count) = i32::try_from(self.x_data.len()) else {
+        let Some(count) = self.layout.sample_count(self.x_data.len()) else {
             return;
         };
 

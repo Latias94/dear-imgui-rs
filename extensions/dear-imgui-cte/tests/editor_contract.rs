@@ -97,6 +97,10 @@ fn upstream_configuration_defaults_remain_representable() {
     let context = Context::create();
     let mut editor = TextEditor::create(&context);
 
+    assert!(!editor.is_smooth_scrolling_enabled());
+    editor.set_smooth_scrolling_enabled(true);
+    assert!(editor.is_smooth_scrolling_enabled());
+
     assert_eq!(editor.minimap_columns(), 0);
     editor.set_minimap_columns(48);
     assert_eq!(editor.minimap_columns(), 48);
@@ -122,6 +126,77 @@ fn upstream_configuration_defaults_remain_representable() {
             whole_word: false,
         }
     );
+}
+
+#[test]
+fn registry_resolves_builtin_names_and_case_sensitive_extensions() {
+    std::thread::scope(|scope| {
+        for (extension, language) in [
+            (".jl", Language::Julia),
+            (".wgsl", Language::Wgsl),
+            (".hpp", Language::Cpp),
+        ] {
+            scope.spawn(move || assert_eq!(Language::from_extension(extension), Some(language)));
+        }
+    });
+    for extension in [".JL", "wgsl", ".unknown", ".jl\0tail"] {
+        assert_eq!(Language::from_extension(extension), None);
+    }
+    let context = Context::create();
+    let mut editor = TextEditor::create(&context);
+    for language in Language::ALL {
+        editor.set_language(Some(language));
+        assert_eq!(editor.language(), Some(language));
+        assert_eq!(editor.language_name().unwrap(), language.name());
+        assert_eq!(Language::from_name(language.name()), Some(language));
+    }
+    assert_eq!(Language::from_name("julia"), None);
+    editor.set_language(None);
+    assert_eq!(editor.language(), None);
+}
+
+#[test]
+fn all_palette_slots_round_trip_through_the_native_editor() {
+    let context = Context::create();
+    let mut editor = TextEditor::create(&context);
+    assert_eq!(PaletteColor::COUNT, 33);
+    let colors = std::array::from_fn(|index| 0xff00_0000 | index as u32);
+    editor.set_palette(&Palette::from_colors(colors)).unwrap();
+    let palette = editor.palette();
+    assert_eq!(palette.colors(), &colors);
+    assert_eq!(palette.get(PaletteColor::CustomColor1), colors[24]);
+    assert_eq!(palette.get(PaletteColor::CustomColor9), colors[32]);
+}
+
+#[test]
+fn left_margin_moves_text_even_with_line_numbers_hidden() {
+    let mut context = render_context();
+    let mut editor = TextEditor::create(&context);
+    editor.set_text("ab").unwrap();
+    editor.set_show_line_numbers(false);
+    let mut origin = |margin| {
+        editor.set_left_margin(margin);
+        assert_eq!(editor.left_margin(), margin);
+        let ui = context.frame();
+        ui.text_editor(&mut editor, "margin")
+            .size([400.0, 200.0])
+            .build()
+            .unwrap();
+        let x = editor
+            .document_to_screen(ui, Position::new(0, 0))
+            .unwrap()
+            .unwrap()[0];
+        let next = editor
+            .document_to_screen(ui, Position::new(0, 1))
+            .unwrap()
+            .unwrap()[0];
+        drop(context.render_legacy());
+        (x, next - x)
+    };
+    let (x, width) = origin(1);
+    let (moved, _) = origin(4);
+    assert!(width > 0.0);
+    assert!((moved - x - 3.0 * width).abs() < 0.01);
 }
 
 #[test]
@@ -186,6 +261,26 @@ fn editing_navigation_diagnostics_and_undo_are_safe() {
     editor.scroll_to_line(2, Default::default()).unwrap();
     editor.set_cursor(Position::new(2, 5)).unwrap();
     assert_eq!(editor.current_cursor_position(), Position::new(2, 5));
+}
+
+#[test]
+fn inclusive_line_selection_includes_the_last_requested_line() {
+    let context = Context::create();
+    let mut editor = TextEditor::create(&context);
+    editor.set_text("first\nsecond\n最後").unwrap();
+
+    for (start, end, expected) in [
+        (1, 1, "second\n"),
+        (0, 1, "first\nsecond\n"),
+        (1, 2, "second\n最後"),
+        (2, 2, "最後"),
+    ] {
+        editor.select_lines(start, end).unwrap();
+        assert_eq!(editor.cursor_text(0).unwrap(), expected);
+    }
+    assert!(editor.select_lines(2, 1).is_err());
+    assert!(editor.select_lines(1, 3).is_err());
+    assert_eq!(editor.cursor_text(0).unwrap(), "最後");
 }
 
 #[test]

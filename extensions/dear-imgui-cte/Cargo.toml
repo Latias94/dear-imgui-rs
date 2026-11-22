@@ -6,7 +6,6 @@ rust-version.workspace = true
 description = "Preview safe Rust bindings for ImGuiColorTextEdit"
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 authors.workspace = true
 documentation = "https://docs.rs/dear-imgui-cte"
 categories.workspace = true

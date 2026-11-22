@@ -1160,7 +1160,23 @@ fn cte_binding_specs_cover_the_upstream_and_bridge_surfaces() {
             "TrieAutoComplete_TrieAutoComplete",
             "TextEditor_DocPos2ScreenPos",
             "Palette_Palette",
-            "Language_Cpp",
+            "TextEditor_LookupLanguage",
+            "TextEditor_LookupLanguageByExtension",
+            "TextEditor_SetLeftMargin",
+            "TextEditor_GetLeftMargin",
+            "TextEditor_SetSmoothScrollingEnabled",
+            "TextEditor_IsSmoothScrollingEnabled",
+            "AutoCompleteConfig_SetTriggerCharacters",
+            "AutoCompleteConfig_SetWordCharacters",
+            "AutoCompleteState_GetReplacementStart",
+            "AutoCompleteState_SetReplacementStart",
+            "AutoCompleteState_GetReplacementEnd",
+            "AutoCompleteState_SetReplacementEnd",
+            "AutoCompleteState_AddSuggestion",
+            "AutoCompleteState_GetSuggestionCount",
+            "AutoCompleteState_GetSuggestion",
+            "AutoCompleteState_GetLabel",
+            "TextEditor_SetAutoCompleteSuggestions_array",
             "CodePoint_write",
             "GetDejavu",
             "SetDejavu",
@@ -1172,6 +1188,7 @@ fn cte_binding_specs_cover_the_upstream_and_bridge_surfaces() {
             "dear_imgui_cte_clear_callbacks",
             "dear_imgui_cte_set_transaction_callback",
             "dear_imgui_cte_autocomplete_config_create",
+            "dear_imgui_cte_autocomplete_config_set_characters",
             "dear_imgui_cte_autocomplete_state_get_context",
         ] {
             assert!(spec.required_symbols.contains(&symbol));
@@ -1818,17 +1835,6 @@ fn cte_prebuilt_rejects_unpatched_unicode_range_lookup() {
     unpatched.field("schema", "extension-binding-identity-v1");
     unpatched.field("extension", "cte");
     unpatched.field("provenance", &binding.provenance().identity_hash());
-    assert_ne!(binding.deterministic_hash(), unpatched.finish());
-}
-
-#[test]
-fn cte_prebuilt_rejects_unpatched_text_diff_draw_flags() {
-    let binding = extension_identity(ExtensionBinding::Cte);
-    let mut unpatched = super::StableHash::new();
-    unpatched.field("schema", "extension-binding-identity-v1");
-    unpatched.field("extension", "cte");
-    unpatched.field("provenance", &binding.provenance().identity_hash());
-    unpatched.field("source_overlay", crate::CTE_TEXT_EDITOR_PATCH_VERSION);
     assert_ne!(binding.deterministic_hash(), unpatched.finish());
 }
 

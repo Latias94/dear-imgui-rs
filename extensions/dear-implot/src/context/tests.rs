@@ -26,6 +26,123 @@ fn prepare_imgui(imgui: &mut Context) {
 }
 
 #[test]
+fn hidden_item_query_survives_frames_and_last_item_resets_on_begin_plot() {
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    prepare_imgui(&mut imgui);
+    let plot = PlotContext::create(&imgui);
+
+    for was_hidden in [false, true] {
+        let frame = imgui.begin_frame();
+        {
+            let ui = plot.get_plot_ui(frame.ui());
+            let _token = ui.begin_plot("visibility").expect("plot must begin");
+            ui.with_bound_context(|| {
+                // SAFETY: Both contexts and the plot are active, and the label is a C literal.
+                unsafe {
+                    assert!(!sys::ImPlot_IsLastItemHidden());
+                    assert_eq!(sys::ImPlot_IsItemHidden(c"series".as_ptr()), was_hidden);
+                    sys::ImPlot_HideNextItem(true, sys::ImPlotCond_Always as _);
+                }
+                crate::DummyPlot::new("series").plot(&ui);
+                assert!(unsafe { sys::ImPlot_IsLastItemHidden() });
+            });
+        }
+        let _ = frame.render_legacy();
+    }
+}
+
+fn histogram_counts(ui: &crate::PlotUi<'_>) -> Vec<f64> {
+    ui.with_bound_context(|| unsafe {
+        // PlotHistogram2D fills TempDouble1 before drawing. Copy it before the next ImPlot call.
+        let bins = &(*sys::ImPlot_GetCurrentContext()).TempDouble1;
+        assert!(bins.Size > 0 && !bins.Data.is_null());
+        std::slice::from_raw_parts(bins.Data, bins.Size as usize).to_vec()
+    })
+}
+
+#[test]
+fn histogram_2d_bins_both_automatic_ranges_through_the_plot_ui() {
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    prepare_imgui(&mut imgui);
+    let plot = PlotContext::create(&imgui);
+    let frame = imgui.begin_frame();
+    let ui = plot.get_plot_ui(frame.ui());
+    let _token = ui.begin_plot("counts").expect("plot must begin");
+    let xs = [10.0, 11.0, 18.0, 20.0, 12.0];
+    let ys = [-7.0, 3.0, -6.0, 2.0, -7.0];
+
+    ui.histogram_2d_plot_with_bins(
+        "series",
+        &xs,
+        &ys,
+        crate::BinMethod::Sqrt,
+        crate::BinMethod::Rice,
+    )
+    .unwrap();
+    // Three X bins and four Y bins. Both maxima belong to the last bin on their axis.
+    assert_eq!(
+        histogram_counts(&ui),
+        [2., 0., 1., 0., 0., 0., 0., 0., 0., 1., 0., 1.]
+    );
+
+    ui.histogram_2d_plot("default", &xs, &ys).unwrap();
+    assert_eq!(
+        histogram_counts(&ui),
+        [
+            2., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 1.
+        ]
+    );
+}
+
+#[test]
+fn histogram_2d_scott_matches_native_bins_for_large_offset_samples() {
+    use crate::{BinMethod, Histogram2DPlot, Plot};
+
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    prepare_imgui(&mut imgui);
+    let plot = PlotContext::create(&imgui);
+    let frame = imgui.begin_frame();
+    let ui = plot.get_plot_ui(frame.ui());
+    let base = (1_u64 << 52) as f64;
+    let xs = [base, base, base + 2.0, base + 3.0, base + 5.0];
+    let ys = [0.0, 1.0, 2.0, 3.0, 4.0];
+    ui.set_next_x_axis_limits(XAxis::X1, base, base + 5.0, PlotCond::Always);
+    let _token = ui.begin_plot("Scott").expect("plot must begin");
+    let range = sys::ImPlotRect {
+        X: sys::ImPlotRange {
+            Min: base,
+            Max: base + 5.0,
+        },
+        Y: sys::ImPlotRange { Min: 0.0, Max: 4.0 },
+    };
+
+    Histogram2DPlot::new("safe", &xs, &ys)
+        .with_bins(BinMethod::Scott, 2usize)
+        .plot(&ui);
+    let safe = histogram_counts(&ui);
+    assert_eq!(safe, [2., 3.]);
+
+    let native_peak = ui.with_bound_context(|| unsafe {
+        // Explicit bounds isolate native CalculateBins from the upstream automatic X-range typo.
+        sys::ImPlot_PlotHistogram2D_doublePtr(
+            c"reference".as_ptr(),
+            xs.as_ptr(),
+            ys.as_ptr(),
+            5,
+            BinMethod::Scott as i32,
+            2,
+            range,
+            crate::plots::default_plot_spec(),
+        )
+    });
+    assert_eq!(native_peak, 3.0);
+    assert_eq!(histogram_counts(&ui), safe);
+}
+
+#[test]
 fn nested_plot_bindings_restore_imgui_and_implot_contexts() {
     let _guard = test_guard();
     let imgui_a = Context::create();
@@ -156,16 +273,21 @@ fn dead_plot_binding_never_enters_the_native_scope() {
 
 #[test]
 fn axis_ticks_range_count_is_checked_before_ffi() {
-    assert_eq!(axis_tick_count_to_i32("test", 1), 1);
-    assert_eq!(axis_tick_count_to_i32("test", i32::MAX as usize), i32::MAX);
+    assert_eq!(axis_tick_count_to_i32("test", 1, false), 1);
+    assert_eq!(axis_tick_count_to_i32("test", 2, true), 2);
+    assert!(std::panic::catch_unwind(|| axis_tick_count_to_i32("test", 1, true)).is_err());
+    assert_eq!(
+        axis_tick_count_to_i32("test", i32::MAX as usize, false),
+        i32::MAX
+    );
 
     assert!(
-        std::panic::catch_unwind(|| axis_tick_count_to_i32("test", 0)).is_err(),
+        std::panic::catch_unwind(|| axis_tick_count_to_i32("test", 0, false)).is_err(),
         "zero tick counts must not cross the safe API boundary"
     );
     assert!(
         std::panic::catch_unwind(|| {
-            axis_tick_count_to_i32("test", i32::MAX as usize + 1);
+            axis_tick_count_to_i32("test", i32::MAX as usize + 1, false);
         })
         .is_err(),
         "oversized tick counts must not cross the safe API boundary"

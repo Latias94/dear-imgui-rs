@@ -33,9 +33,9 @@ regeneration is explicitly requested. `wasm` uses import bindings for the fixed
 `imgui-sys-v1` provider and skips C++ compilation in Cargo; build the provider
 separately with Emscripten.
 
-Native and WebAssembly providers share the `imnodes-imgui-193-v1` adaptation for
-Dear ImGui 1.93 corner flags and its file-handle API. Source-drift checks reject
-unexpected upstream changes, and artifact identity includes this adaptation.
+Native and WebAssembly providers use Dear ImGui's file helpers when saving editor
+state. The `imnodes-file-handles-v1` adaptation is part of the artifact identity.
+Upstream ImNodes selects the drawing flags for Dear ImGui 1.93.
 
 This crate supports three ways to obtain the native `dear_imnodes` static library:
 

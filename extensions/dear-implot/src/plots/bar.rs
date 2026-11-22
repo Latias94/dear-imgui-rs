@@ -112,7 +112,7 @@ impl<'a> Plot for BarPlot<'a> {
         if self.validate().is_err() {
             return; // Skip plotting if data is invalid
         }
-        let Ok(count) = i32::try_from(self.values.len()) else {
+        let Some(count) = self.layout.sample_count(self.values.len()) else {
             return;
         };
 

@@ -40,8 +40,8 @@ state that the sys API is the intended unsafe route.
 ## ImGuiColorTextEdit API family ledger
 
 This is a family-level semantic ledger over the checked-in native and WASM cimCTE binding
-snapshots at wrapper revision `3333a9bd3b7b881a0c34d8abbd97c8ab2c60ea3f` and nested
-ImGuiColorTextEdit revision `b12d713e77e8edddff1e69973f67085ac9cfaf74`. It is not a second
+snapshots at wrapper revision `dbf2abe4841b9dd8a3f1f1864038ac9d60155c5e` and nested
+ImGuiColorTextEdit revision `7515d1c765f8f9d47cd704fd3fbd20eb03fcc304`. It is not a second
 declaration inventory, does not infer safety from symbol names, and does not parse Rust source.
 
 The canonical binding specification owns the generated family allowlist. Its static required-symbol
@@ -53,9 +53,9 @@ human ownership review; a symbol-presence check is not proof of safe coverage.
 | --- | --- |
 | `TextEditor_*` document, configuration, render, navigation, search, and diagnostics | Safe ergonomic subset on context-bound `TextEditor` and `TextEditorRenderer`; strings are owned copies and indices are validated. Process-current Context mutation and raw line-break configuration remain sys-only. |
 | `DocPos_*`, `DocSelection_*`, `VisPos_*` | Copied Rust `Position`, `Selection`, and `VisualPosition` values; native heap constructors are unnecessary in safe code. |
-| `Language_*`, `Palette_*` | Closed `Language` values plus copied, bounds-checked `Palette`; raw language pointers remain borrowed static values. |
+| Registry-backed languages and `Palette_*` | Closed 13-language `Language` values with name and extension lookup plus copied, bounds-checked 33-slot `Palette`; raw language pointers remain borrowed static values. |
 | `dear_imgui_cte_*` callback, transaction, iteration, and filter bridge | Editor-owned typed closures with length-aware UTF-8, callback-scoped views, complete-batch validation, explicit clear/replace ordering, reentry policy, and abort-on-panic no-unwind behavior. |
-| `TrieAutoComplete_*` and `dear_imgui_cte_*autocomplete*` | Editor-owned Trie attachment or custom autocomplete with callback-scoped `AutocompleteRequest`; exclusive upstream callback slots are represented as conflicts. |
+| `TrieAutoComplete_*`, `AutoComplete*`, and `dear_imgui_cte_*autocomplete*` | Editor-owned Trie attachment or custom autocomplete with callback-scoped `AutocompleteRequest`, trigger and word characters, replacement ranges, labeled suggestions, and render-thread asynchronous updates; exclusive upstream callback slots are represented as conflicts. |
 | `TextDiff_*` | Context-bound `TextDiff` with copied configuration and a `Ui`-checked render builder. |
 | `Glyph_*`, `Iterator_*`, `CodePoint_*` | Sys-only. Their native pointer/iterator graph has no stable ownership benefit over the copied editor values exposed by the safe layer. |
 | `CustomLineNumber` and line-number callback configuration | Editor-owned typed callbacks receive copied `LineNumberEvent` geometry and the active `Ui`; the native draw-list pointer remains sys-only. |
@@ -72,7 +72,7 @@ ownership, pointer-lifetime, Context, and wrapper invariant before returning to 
 - `ImFont::AddRemapCodepoint` and `AddRemapCodepointToGlyphIndex` remain sys-only: source/glyph indices and already-baked glyph invalidation require a separate validated mapping lifecycle. Custom font-loader tables remain unsafe native interop and must use the new glyph-index callback ABI.
 - Internal pixel-density setters, window-flag mutation helpers, tessellation routines, and native allocation helpers remain sys-only. Backends obtain density through viewport framebuffer scale.
 - CTE document-to-screen conversion returns a copied coordinate only after a visible render in the same frame with unchanged layout. Node background draw lists return `Option` after node submission completes.
-- CTE's shared native/WASM source transforms preserve bounded Unicode range lookups and adapt TextDiff's three scrollbar corner flags; native artifact identities include both corrections.
+- CTE's shared native/WASM source transform preserves bounded Unicode range lookups. Native and WASM compile the pinned upstream `TextDiff.cpp` directly, so its current scrollbar corner implementation is part of the source pin and native artifact identity includes the remaining Unicode correction.
 
 ## Reviewing an upstream update
 

@@ -74,6 +74,8 @@ impl CteState {
             callback_count.set(callback_count.get().saturating_add(1));
         })?;
         let autocomplete = AutocompleteConfig::new()
+            .trigger_characters(":")
+            .word_characters(":")
             .trigger_delay(Duration::ZERO)
             .suggestion_width(32);
         primary.set_autocomplete(&autocomplete, |request| {

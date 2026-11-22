@@ -2,6 +2,7 @@ use crate::{Plot3DUi, sys};
 use std::borrow::Cow;
 
 /// One-shot array-backed item style overrides for the next ImPlot3D submission.
+/// An empty slice uses the native scalar style for that property.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Plot3DItemArrayStyle<'a> {
     line_colors: Option<Cow<'a, [u32]>>,
@@ -50,23 +51,28 @@ impl<'a> Plot3DItemArrayStyle<'a> {
     fn apply_to_spec(&self, spec: &mut sys::ImPlot3DSpec_c) {
         spec.LineColors = self
             .line_colors
-            .as_ref()
+            .as_deref()
+            .filter(|values| !values.is_empty())
             .map_or(std::ptr::null_mut(), |colors| colors.as_ptr() as *mut _);
         spec.FillColors = self
             .fill_colors
-            .as_ref()
+            .as_deref()
+            .filter(|values| !values.is_empty())
             .map_or(std::ptr::null_mut(), |colors| colors.as_ptr() as *mut _);
         spec.MarkerSizes = self
             .marker_sizes
-            .as_ref()
+            .as_deref()
+            .filter(|values| !values.is_empty())
             .map_or(std::ptr::null_mut(), |sizes| sizes.as_ptr() as *mut _);
         spec.MarkerLineColors = self
             .marker_line_colors
-            .as_ref()
+            .as_deref()
+            .filter(|values| !values.is_empty())
             .map_or(std::ptr::null_mut(), |colors| colors.as_ptr() as *mut _);
         spec.MarkerFillColors = self
             .marker_fill_colors
-            .as_ref()
+            .as_deref()
+            .filter(|values| !values.is_empty())
             .map_or(std::ptr::null_mut(), |colors| colors.as_ptr() as *mut _);
     }
 }

@@ -19,7 +19,7 @@ typedef enum DearImGuiCteStatus_ {
 } DearImGuiCteStatus;
 
 typedef struct DearImGuiCteAutocompleteConfig DearImGuiCteAutocompleteConfig;
-typedef struct DearImGuiCteAutocompleteState DearImGuiCteAutocompleteState;
+typedef AutoCompleteState DearImGuiCteAutocompleteState;
 
 typedef struct DearImGuiCteAutocompleteContextView {
     bool in_identifier;
@@ -156,6 +156,10 @@ CIMGUI_API DearImGuiCteStatus dear_imgui_cte_autocomplete_config_set_triggers(
 CIMGUI_API DearImGuiCteStatus dear_imgui_cte_autocomplete_config_set_shortcut(
     DearImGuiCteAutocompleteConfig* config,
     ImGuiKeyChord shortcut) DEAR_IMGUI_CTE_NOEXCEPT;
+CIMGUI_API DearImGuiCteStatus dear_imgui_cte_autocomplete_config_set_characters(
+    DearImGuiCteAutocompleteConfig* config,
+    const char* trigger_characters,
+    const char* word_characters) DEAR_IMGUI_CTE_NOEXCEPT;
 CIMGUI_API DearImGuiCteStatus dear_imgui_cte_autocomplete_config_set_auto_insert_single(
     DearImGuiCteAutocompleteConfig* config,
     bool enabled) DEAR_IMGUI_CTE_NOEXCEPT;

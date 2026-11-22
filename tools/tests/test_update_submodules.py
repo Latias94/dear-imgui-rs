@@ -220,8 +220,11 @@ class RepositoryScriptContractTests(unittest.TestCase):
             / "binding"
             / "spec.rs"
         ).read_text(encoding="utf-8")
-        dependency = tomllib.loads(xtask_manifest)["dependencies"]["bindgen"]
-        version = dependency if isinstance(dependency, str) else dependency["version"]
+        self.assertTrue(tomllib.loads(xtask_manifest)["dependencies"]["bindgen"]["workspace"])
+        workspace = tomllib.loads(
+            (REPO_ROOT / "Cargo.toml").read_text(encoding="utf-8")
+        )["workspace"]
+        version = workspace["dependencies"]["bindgen"]["version"]
         contract = re.search(
             r'CANONICAL_BINDGEN_VERSION: &str = "([0-9.]+)"', binding_spec
         )

@@ -39,7 +39,16 @@ pub const lineNumber: Color = 20;
 pub const currentLineNumber: Color = 21;
 pub const currentLineHighlight: Color = 22;
 pub const currentLineHighlightBorder: Color = 23;
-pub const count: Color = 24;
+pub const customColor1: Color = 24;
+pub const customColor2: Color = 25;
+pub const customColor3: Color = 26;
+pub const customColor4: Color = 27;
+pub const customColor5: Color = 28;
+pub const customColor6: Color = 29;
+pub const customColor7: Color = 30;
+pub const customColor8: Color = 31;
+pub const customColor9: Color = 32;
+pub const count: Color = 33;
 
 pub type BreakOption = ::std::os::raw::c_char;
 pub const mustBreak: BreakOption = 0;

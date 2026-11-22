@@ -1,5 +1,5 @@
 use dear_imgui_rs::{Context, FramePrepareOptions};
-use dear_imnodes::{ImNodesExt, NodeId, PinId, PinShape};
+use dear_imnodes::{ImNodesExt, LinkId, NodeId, PinId, PinShape};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Mutex, OnceLock};
 
@@ -41,6 +41,82 @@ fn queued_unsubmitted_node_options_do_not_touch_native_node_bookkeeping() {
             // No native setter is invoked because node 900 is never submitted.
             let _ = setup.begin_nodes().end();
         });
+    assert!(imgui.end_frame());
+}
+
+#[test]
+fn selection_tracks_submitted_nodes_and_links() {
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    prepare_imgui(&mut imgui);
+    let nodes = dear_imnodes::Context::create(&imgui);
+    let graph = nodes.create_editor_context();
+    let keep = NodeId::new(1);
+    let remove = NodeId::new(2);
+    let output = PinId::new(10);
+    let input = PinId::new(20);
+    let link = LinkId::new(30);
+
+    let ui = imgui.frame();
+    let first = ui
+        .window("Initial graph")
+        .size([400.0, 300.0], dear_imgui_rs::Condition::Always)
+        .build(|| {
+            let editor = ui.imnodes(&nodes).editor(Some(&graph)).begin_nodes();
+            let node = editor.node(keep);
+            let attr = node.output_attr(output, PinShape::CircleFilled);
+            ui.text("out");
+            attr.end();
+            node.end();
+            let node = editor.node(remove);
+            let attr = node.input_attr(input, PinShape::CircleFilled);
+            ui.text("in");
+            attr.end();
+            node.end();
+            editor.link(link, output, input);
+            editor.end()
+        })
+        .unwrap();
+
+    for _ in 0..2 {
+        assert!(first.select_node(remove));
+        assert!(first.select_link(link));
+    }
+    assert_eq!(first.selected_nodes(), [remove]);
+    assert_eq!(first.selected_links(), [link]);
+    for _ in 0..2 {
+        assert!(first.clear_node_selection_of(remove));
+        assert!(first.clear_link_selection_of(link));
+    }
+    assert!(first.selected_nodes().is_empty());
+    assert!(first.selected_links().is_empty());
+    assert!(first.select_node(keep));
+    assert!(first.select_node(remove));
+    assert!(first.select_link(link));
+
+    ui.window("Independent graph")
+        .size([400.0, 300.0], dear_imgui_rs::Condition::Always)
+        .build(|| {
+            ui.imnodes(&nodes).editor(None).end();
+        })
+        .unwrap();
+    assert!(first.is_node_selected(remove));
+    assert!(first.is_link_selected(link));
+
+    ui.window("Updated graph")
+        .size([400.0, 300.0], dear_imgui_rs::Condition::Always)
+        .build(|| {
+            let editor = ui.imnodes(&nodes).editor(Some(&graph)).begin_nodes();
+            editor.node(keep).end();
+            // Implicit EndNodeEditor must retire removed IDs as well.
+        })
+        .unwrap();
+    assert!(!first.select_node(remove));
+    assert!(!first.select_link(link));
+    assert!(!first.center_on_submitted_node(remove));
+    assert_eq!(first.selected_nodes(), [keep]);
+    assert!(first.selected_links().is_empty());
+    drop(first);
     assert!(imgui.end_frame());
 }
 

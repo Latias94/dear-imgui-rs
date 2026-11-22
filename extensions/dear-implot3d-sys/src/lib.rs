@@ -23,6 +23,12 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 #[doc(hidden)]
 pub mod surface_test_probe {
     unsafe extern "C" {
+        pub fn dear_implot3d_probe_vertices(
+            context: *mut super::ImPlot3DContext,
+            start: i32,
+            output: *mut super::ImDrawVert,
+            capacity: i32,
+        ) -> i32;
         pub fn dear_implot3d_legend_probe_frame(
             plot_context: *mut super::ImPlot3DContext,
             covered: bool,

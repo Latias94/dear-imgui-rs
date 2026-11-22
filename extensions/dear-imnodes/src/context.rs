@@ -20,6 +20,7 @@ pub struct Context {
     imgui_binding: ContextBinding,
     alive: Rc<()>,
     frame_active: Cell<bool>,
+    default_editor_submission: RefCell<Rc<SubmittedObjects>>,
 }
 
 /// An editor context allows multiple independent editors
@@ -32,6 +33,13 @@ struct EditorContextInner {
     bound_ctx_raw: *mut sys::ImNodesContext,
     bound_ctx_alive: ImNodesContextAliveToken,
     imgui_binding: ContextBinding,
+    last_submission: RefCell<Rc<SubmittedObjects>>,
+}
+
+#[derive(Default)]
+struct SubmittedObjects {
+    nodes: BTreeSet<crate::NodeId>,
+    links: BTreeSet<crate::LinkId>,
 }
 
 #[derive(Clone)]
@@ -44,7 +52,7 @@ pub(crate) struct ImNodesScope {
     editor_raw: Option<*mut sys::ImNodesEditorContext>,
     // Keep an explicit editor context alive for as long as any frame/post-frame scope can use it.
     // If a token is intentionally forgotten, the native context leaks instead of becoming dangling.
-    _editor_lease: Option<Rc<EditorContextInner>>,
+    editor_lease: Option<Rc<EditorContextInner>>,
 }
 
 #[must_use = "dropping the guard restores the previous ImNodes and editor contexts"]
@@ -56,6 +64,14 @@ pub(crate) struct ImNodesScopeGuard {
 }
 
 impl ImNodesScope {
+    fn last_submission<'a>(&'a self, ctx: &'a Context) -> &'a RefCell<Rc<SubmittedObjects>> {
+        self.editor_lease
+            .as_ref()
+            .map_or(&ctx.default_editor_submission, |editor| {
+                &editor.last_submission
+            })
+    }
+
     #[inline]
     pub(crate) fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
         assert!(
@@ -341,7 +357,7 @@ mod tests {
             ctx_alive: nodes_a.alive_token(),
             _ctx_lease: nodes_a.alive.clone(),
             editor_raw: Some(raw_editor_a),
-            _editor_lease: Some(editor_a.inner.clone()),
+            editor_lease: Some(editor_a.inner.clone()),
         };
         let suspended_a = imgui_a.suspend_or_panic();
 

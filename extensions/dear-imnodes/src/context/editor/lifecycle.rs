@@ -1,9 +1,10 @@
 use super::super::{
     Context, EditorContext, EditorScope, ImNodesScope, NodeEditor, NodeEditorSetup,
-    tokens::close_node_scope,
+    SubmittedObjects, tokens::close_node_scope,
 };
 use crate::sys;
 use dear_imgui_rs::Ui;
+use std::rc::Rc;
 
 impl<'ui> NodeEditorSetup<'ui> {
     pub(crate) fn begin(ui: &'ui Ui, ctx: &'ui Context, editor: Option<&EditorContext>) -> Self {
@@ -86,7 +87,28 @@ impl<'ui> NodeEditor<'ui> {
             return;
         }
         close_node_scope(&self.scope, &self.state);
-        self.with_bound_context(|| unsafe { sys::imnodes_EndNodeEditor() });
+        let submitted = SubmittedObjects {
+            nodes: std::mem::take(self.submitted_nodes.get_mut()),
+            links: std::mem::take(self.submitted_links.get_mut()),
+        };
+        let last = self.scope.last_submission(self._ctx);
+        self.with_bound_context(|| unsafe {
+            // EndNodeEditor recycles missing objects' pool slots. Selection stores slot
+            // indices, so remove those entries while the previous IDs still resolve.
+            let previous = last.borrow();
+            for id in previous.nodes.difference(&submitted.nodes) {
+                if sys::imnodes_IsNodeSelected(id.raw()) {
+                    sys::imnodes_ClearNodeSelection_Int(id.raw());
+                }
+            }
+            for id in previous.links.difference(&submitted.links) {
+                if sys::imnodes_IsLinkSelected(id.raw()) {
+                    sys::imnodes_ClearLinkSelection_Int(id.raw());
+                }
+            }
+            sys::imnodes_EndNodeEditor();
+        });
+        last.replace(Rc::new(submitted));
         self.ended = true;
         self.state.set(EditorScope::Ended);
         self.frame_active.set(false);

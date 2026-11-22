@@ -484,13 +484,12 @@ def expected_extension_binding_identity(source_root: Path, spec: ExtensionSpec) 
     identity.field("provenance", provenance.finish())
     if spec.extension_id == "cte":
         identity.field("source_overlay", "cte-text-editor-v1")
-        identity.field("text_diff_source_overlay", "cte-text-diff-draw-flags-v1")
     if spec.extension_id == "implot3d":
         identity.field("source_overlay", "implot3d-draw-flags-v2")
     if spec.extension_id == "imnodes":
-        identity.field("source_overlay", "imnodes-imgui-193-v1")
+        identity.field("source_overlay", "imnodes-file-handles-v1")
     if spec.extension_id == "implot":
-        identity.field("source_overlay", "implot-imgui-193-v2")
+        identity.field("source_overlay", "implot-imgui-193-v3")
     return identity.finish()
 
 

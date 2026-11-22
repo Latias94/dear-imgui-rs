@@ -36,6 +36,20 @@ pub enum ColorElement {
     MiniMapCanvasOutline = sys::ImNodesCol_MiniMapCanvasOutline as u32,
 }
 
+impl ColorElement {
+    /// Returns the ImNodes name of this color. Can be called without an editor or context.
+    #[doc(alias = "GetStyleColorName")]
+    #[doc(alias = "imnodes_GetStyleColorName")]
+    pub fn name(self) -> &'static str {
+        // SAFETY: Every variant maps to a valid ImNodesCol. ImNodes returns a
+        // NUL-terminated string literal for each color, independent of context state.
+        let name = unsafe {
+            std::ffi::CStr::from_ptr(sys::imnodes_GetStyleColorName(self as sys::ImNodesCol))
+        };
+        name.to_str().expect("ImNodes color names are ASCII")
+    }
+}
+
 pub struct ColorToken<'a> {
     scope: ImNodesScope,
     _phantom: PhantomData<&'a crate::Context>,
@@ -159,7 +173,18 @@ pub fn abgr_u32_to_rgba(col: u32) -> [f32; 4] {
 
 #[cfg(test)]
 mod tests {
-    use super::{abgr_u32_to_rgba, rgba_to_abgr_u32};
+    use super::{ColorElement, abgr_u32_to_rgba, rgba_to_abgr_u32};
+
+    #[test]
+    fn native_color_names_are_available_without_a_context() {
+        let background: &'static str = ColorElement::NodeBackground.name();
+        assert_eq!(ColorElement::GridLinePrimary.name(), "GridLinePrimary");
+        assert_eq!(
+            ColorElement::MiniMapCanvasOutline.name(),
+            "MiniMapCanvasOutline"
+        );
+        assert_eq!(background, "NodeBackground");
+    }
 
     #[test]
     fn color_conversion_matches_default_imgui_packing() {

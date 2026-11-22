@@ -24,6 +24,7 @@ fn validate_grid_counts(
         .ok_or_else(|| PlotError::InvalidData(format!("{caller} rows * cols overflowed usize")))?;
     let _ = heatmap_count_to_i32(caller, "rows", rows)?;
     let _ = heatmap_count_to_i32(caller, "cols", cols)?;
+    let _ = heatmap_count_to_i32(caller, "rows * cols", expected_size)?;
 
     if values_len != expected_size {
         return Err(PlotError::DataLengthMismatch {
@@ -489,7 +490,7 @@ impl<'ui> crate::PlotUi<'ui> {
 
 #[cfg(test)]
 mod tests {
-    use super::{HeatmapPlot, HeatmapPlotF32};
+    use super::{HeatmapPlot, HeatmapPlotF32, validate_grid_counts};
     use crate::PlotError;
 
     fn invalid_data_message(err: PlotError) -> String {
@@ -533,5 +534,12 @@ mod tests {
             .validate()
             .expect_err("oversized column count must be rejected");
         assert!(invalid_data_message(err).contains("cols exceeded ImPlot's i32 range"));
+    }
+
+    #[test]
+    fn heatmap_rejects_a_cell_count_outside_native_index_range() {
+        let cols = i32::MAX as usize / 2 + 1;
+        let err = validate_grid_counts("heatmap", 2, cols, 2 * cols).unwrap_err();
+        assert!(invalid_data_message(err).contains("rows * cols exceeded ImPlot's i32 range"));
     }
 }

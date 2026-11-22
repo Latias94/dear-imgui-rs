@@ -6,7 +6,6 @@ rust-version.workspace = true
 description = "Low-level FFI bindings for ImPlot3D via cimplot3d (C API)"
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 authors.workspace = true
 categories.workspace = true
 keywords.workspace = true
@@ -23,7 +22,7 @@ exclude = [
 ]
 
 [package.metadata.dear-imgui-binding]
-source-revision = "c7f3d8cc091d39ad55c0233580e6e06774321791"
+source-revision = "c7b527f318c1e18cfe4c05b3cd666ce44175779e"
 
 [package.metadata.docs.rs]
 no-default-features = true

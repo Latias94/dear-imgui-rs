@@ -7,7 +7,7 @@ use crate::{
 };
 use dear_imgui_rs::{Key, KeyChord, KeyMods};
 use std::{
-    ffi::{c_char, c_void},
+    ffi::{CStr, c_char, c_void},
     marker::PhantomData,
     ptr::{self, NonNull},
     slice, str,
@@ -24,6 +24,8 @@ pub struct AutocompleteConfig {
     trigger_on_shortcut: bool,
     trigger_in_comments: bool,
     trigger_in_strings: bool,
+    trigger_characters: String,
+    word_characters: String,
     shortcut: KeyChord,
     auto_insert_single_suggestion: bool,
     trigger_delay: Duration,
@@ -43,6 +45,8 @@ impl Default for AutocompleteConfig {
             trigger_on_shortcut: true,
             trigger_in_comments: false,
             trigger_in_strings: false,
+            trigger_characters: String::new(),
+            word_characters: String::new(),
             shortcut: KeyChord::new(Key::Space).with_mods(modifier),
             auto_insert_single_suggestion: false,
             trigger_delay: Duration::from_millis(200),
@@ -74,6 +78,18 @@ impl AutocompleteConfig {
 
     pub fn trigger_in_strings(mut self, enabled: bool) -> Self {
         self.trigger_in_strings = enabled;
+        self
+    }
+
+    /// Adds UTF-8 characters that trigger completion when typed, such as `.`.
+    pub fn trigger_characters(mut self, characters: impl Into<String>) -> Self {
+        self.trigger_characters = characters.into();
+        self
+    }
+
+    /// Adds UTF-8 characters to the search term's word characters, such as `\\`.
+    pub fn word_characters(mut self, characters: impl Into<String>) -> Self {
+        self.word_characters = characters.into();
         self
     }
 
@@ -133,6 +149,7 @@ pub struct AutocompleteContext {
 /// ```
 pub struct AutocompleteRequest<'callback> {
     raw: NonNull<sys::DearImGuiCteAutocompleteState>,
+    editor: *mut sys::TextEditor,
     _callback: PhantomData<&'callback mut sys::DearImGuiCteAutocompleteState>,
 }
 
@@ -157,6 +174,7 @@ impl AutocompleteRequest<'_> {
         })
     }
 
+    /// Returns the search term from its first glyph to the cursor.
     pub fn range(&self) -> CteResult<Selection> {
         const OPERATION: &str = "AutocompleteRequest::range";
         let mut start = sys::DocPos_c::default();
@@ -173,6 +191,42 @@ impl AutocompleteRequest<'_> {
             Position::from_raw(start),
             Position::from_raw(end),
         ))
+    }
+
+    /// Returns the glyph range that accepting the suggestion will replace.
+    pub fn replacement_range(&self) -> Selection {
+        unsafe {
+            Selection::new(
+                Position::from_raw(sys::AutoCompleteState_GetReplacementStart(
+                    self.raw.as_ptr(),
+                )),
+                Position::from_raw(sys::AutoCompleteState_GetReplacementEnd(self.raw.as_ptr())),
+            )
+        }
+    }
+
+    /// Replaces a half-open glyph range on the cursor's line when a suggestion is accepted.
+    /// The cursor must lie between the endpoints, inclusively.
+    pub fn set_replacement_range(&mut self, range: Selection) -> CteResult<()> {
+        const OPERATION: &str = "AutocompleteRequest::set_replacement_range";
+        let cursor = unsafe { sys::AutoCompleteState_GetSearchTermEnd(self.raw.as_ptr()) };
+        if range.start.line != cursor.line
+            || range.end.line != cursor.line
+            || range.start.column > cursor.index
+            || range.end.column < cursor.index
+        {
+            return Err(CteError::InvalidValue {
+                operation: OPERATION,
+                parameter: "range",
+                requirement: "on the cursor's line and enclosing the cursor",
+            });
+        }
+        unsafe {
+            crate::text_editor::validate_position(self.editor, OPERATION, range.end)?;
+            sys::AutoCompleteState_SetReplacementStart(self.raw.as_ptr(), range.start.into_raw());
+            sys::AutoCompleteState_SetReplacementEnd(self.raw.as_ptr(), range.end.into_raw());
+        }
+        Ok(())
     }
 
     pub fn context(&self) -> CteResult<AutocompleteContext> {
@@ -198,6 +252,44 @@ impl AutocompleteRequest<'_> {
         check_status(OPERATION, status)
     }
 
+    pub fn suggestion_count(&self) -> usize {
+        unsafe { sys::AutoCompleteState_GetSuggestionCount(self.raw.as_ptr()) }
+    }
+
+    /// Borrows the insertion text at `index` for the current callback.
+    pub fn suggestion(&self, index: usize) -> CteResult<Option<&str>> {
+        self.suggestion_text(
+            index,
+            "AutocompleteRequest::suggestion",
+            sys::AutoCompleteState_GetSuggestion,
+        )
+    }
+
+    /// Borrows the popup label if the batch has labels and the index exists.
+    pub fn suggestion_label(&self, index: usize) -> CteResult<Option<&str>> {
+        self.suggestion_text(
+            index,
+            "AutocompleteRequest::suggestion_label",
+            sys::AutoCompleteState_GetLabel,
+        )
+    }
+
+    fn suggestion_text(
+        &self,
+        index: usize,
+        operation: &'static str,
+        get: unsafe extern "C" fn(*mut sys::AutoCompleteState, usize) -> *const c_char,
+    ) -> CteResult<Option<&str>> {
+        let text = unsafe { get(self.raw.as_ptr(), index) };
+        if text.is_null() {
+            return Ok(None);
+        }
+        unsafe { CStr::from_ptr(text) }
+            .to_str()
+            .map(Some)
+            .map_err(|source| CteError::InvalidUtf8 { operation, source })
+    }
+
     pub fn add_suggestion(&mut self, suggestion: &str) -> CteResult<()> {
         const OPERATION: &str = "AutocompleteRequest::add_suggestion";
         let suggestion = c_string(OPERATION, suggestion)?;
@@ -209,6 +301,21 @@ impl AutocompleteRequest<'_> {
             )
         };
         check_status(OPERATION, status)
+    }
+
+    /// Shows `label` in the popup and inserts `suggestion` when accepted.
+    pub fn add_labeled_suggestion(&mut self, suggestion: &str, label: &str) -> CteResult<()> {
+        const OPERATION: &str = "AutocompleteRequest::add_labeled_suggestion";
+        let suggestion = c_string(OPERATION, suggestion)?;
+        let label = c_string(OPERATION, label)?;
+        unsafe {
+            sys::AutoCompleteState_AddSuggestion(
+                self.raw.as_ptr(),
+                suggestion.as_ptr(),
+                label.as_ptr(),
+            )
+        };
+        Ok(())
     }
 
     pub fn set_suggestions<I, S>(&mut self, suggestions: I) -> CteResult<()>
@@ -275,7 +382,11 @@ impl TrieAutocomplete<'_> {
 
 impl TextEditor {
     /// Installs custom autocomplete and keeps its callback alive with this editor.
-    pub fn set_autocomplete<F>(&mut self, config: &AutocompleteConfig, callback: F) -> CteResult<()>
+    pub fn set_autocomplete<F>(
+        &mut self,
+        config: &AutocompleteConfig,
+        mut callback: F,
+    ) -> CteResult<()>
     where
         F: for<'a> FnMut(&mut AutocompleteRequest<'a>) + 'static,
     {
@@ -291,9 +402,26 @@ impl TextEditor {
         }
         let delay_ms = delay_ms as u64;
         let label = c_string(OPERATION, &config.no_suggestions_label)?;
+        let triggers = c_string(OPERATION, &config.trigger_characters)?;
+        let words = c_string(OPERATION, &config.word_characters)?;
 
-        let slot = CallbackSlot::new(Box::new(callback) as Box<AutocompleteCallback>);
+        // The editor owns this slot and unregisters it before dropping its native handle.
+        let editor = self.raw_ptr();
+        let slot = CallbackSlot::new(Box::new(move |raw| {
+            callback(&mut AutocompleteRequest {
+                raw,
+                editor,
+                _callback: PhantomData,
+            });
+        }) as Box<AutocompleteCallback>);
         let native = NativeAutocompleteConfig::create()?;
+        check_status(OPERATION, unsafe {
+            sys::dear_imgui_cte_autocomplete_config_set_characters(
+                native.raw(),
+                triggers.as_ptr(),
+                words.as_ptr(),
+            )
+        })?;
         check_status(OPERATION, unsafe {
             sys::dear_imgui_cte_autocomplete_config_set_triggers(
                 native.raw(),
@@ -389,6 +517,41 @@ impl TextEditor {
             )
         })?;
         check_status(OPERATION, status)
+    }
+
+    /// Supplies asynchronous `(insertion text, display label)` pairs on the render thread.
+    pub fn set_labeled_autocomplete_suggestions<I, S, L>(&mut self, suggestions: I) -> CteResult<()>
+    where
+        I: IntoIterator<Item = (S, L)>,
+        S: AsRef<str>,
+        L: AsRef<str>,
+    {
+        const OPERATION: &str = "TextEditor::set_labeled_autocomplete_suggestions";
+        self.reject_trie_conflict(OPERATION)?;
+        let pairs = suggestions
+            .into_iter()
+            .map(|(value, label)| {
+                Ok((
+                    c_string(OPERATION, value.as_ref())?,
+                    c_string(OPERATION, label.as_ref())?,
+                ))
+            })
+            .collect::<CteResult<Vec<_>>>()?;
+        if pairs.is_empty() {
+            return self.set_autocomplete_suggestions(std::iter::empty::<&str>());
+        }
+        let (mut values, mut labels): (Vec<_>, Vec<_>) = pairs
+            .iter()
+            .map(|(value, label)| (value.as_ptr(), label.as_ptr()))
+            .unzip();
+        self.try_with_context(OPERATION, |raw| unsafe {
+            sys::TextEditor_SetAutoCompleteSuggestions_array(
+                raw,
+                values.as_mut_ptr(),
+                labels.as_mut_ptr(),
+                pairs.len(),
+            )
+        })
     }
 
     /// Connects the built-in identifier Trie, replacing an existing Trie attachment.
@@ -527,11 +690,7 @@ unsafe extern "C" fn autocomplete_trampoline(
         return;
     };
     abort_on_panic("dear-imgui-cte: panic in autocomplete callback", || {
-        let mut request = AutocompleteRequest {
-            raw,
-            _callback: PhantomData,
-        };
-        slot.invoke((), |callback| callback(&mut request));
+        slot.invoke((), |callback| callback(raw));
     });
 }
 

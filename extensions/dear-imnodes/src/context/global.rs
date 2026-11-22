@@ -122,6 +122,7 @@ impl Context {
             imgui_binding,
             alive: Rc::new(()),
             frame_active: Cell::new(false),
+            default_editor_submission: Default::default(),
         })
     }
 
@@ -168,6 +169,7 @@ impl Context {
                 bound_ctx_raw: self.raw,
                 bound_ctx_alive: self.alive_token(),
                 imgui_binding: self.imgui_binding.clone(),
+                last_submission: Default::default(),
             }),
         })
     }
@@ -206,7 +208,7 @@ impl Context {
             ctx_alive: self.alive_token(),
             _ctx_lease: self.alive.clone(),
             editor_raw: editor_lease.as_ref().map(|editor| editor.raw),
-            _editor_lease: editor_lease,
+            editor_lease,
         }
     }
 

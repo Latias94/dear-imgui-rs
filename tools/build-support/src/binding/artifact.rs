@@ -205,10 +205,6 @@ pub fn core_source_contract_hash() -> String {
                 "patch-cte-text-editor",
                 crate::CTE_TEXT_EDITOR_PATCH_VERSION,
             ),
-            ProviderTransform::PatchCteTextDiffDrawFlags => (
-                "patch-cte-text-diff-draw-flags",
-                crate::CTE_TEXT_DIFF_DRAW_FLAGS_PATCH_VERSION,
-            ),
             ProviderTransform::PatchImplot3dDrawFlags => (
                 "patch-implot3d-draw-flags",
                 crate::IMPLOT3D_DRAW_FLAGS_PATCH_VERSION,

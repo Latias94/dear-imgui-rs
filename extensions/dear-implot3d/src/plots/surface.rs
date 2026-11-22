@@ -62,6 +62,20 @@ impl SurfaceGridShape {
         })
     }
 
+    pub(crate) fn validate_wireframe(self, flags: Surface3DFlags) -> Result<Self, Plot3DError> {
+        if !flags.contains(Surface3DFlags::NO_LINES) {
+            let x = i64::from(self.x_count);
+            let y = i64::from(self.y_count);
+            // GetterSurfaceLines stores two endpoints per horizontal and vertical edge in int.
+            if 2 * ((x - 1) * y + (y - 1) * x) > i64::from(i32::MAX) {
+                return Err(Plot3DError::NativeCountOutOfRange {
+                    what: "surface wireframe endpoints",
+                });
+            }
+        }
+        Ok(self)
+    }
+
     fn validate_z_len(self, z_len: usize) -> Result<Self, Plot3DError> {
         if z_len == self.point_count {
             Ok(self)
@@ -97,8 +111,11 @@ impl<'a> SurfaceGrid<'a> {
         xs: &'a [f32],
         ys: &'a [f32],
         zs: &'a [f32],
+        flags: Surface3DFlags,
     ) -> Result<Self, Plot3DError> {
-        let shape = SurfaceGridShape::checked(xs.len(), ys.len())?.validate_z_len(zs.len())?;
+        let shape = SurfaceGridShape::checked(xs.len(), ys.len())?
+            .validate_z_len(zs.len())?
+            .validate_wireframe(flags)?;
         let mut xs_flat = Vec::with_capacity(shape.point_count());
         let mut ys_flat = Vec::with_capacity(shape.point_count());
 
@@ -123,8 +140,11 @@ impl<'a> SurfaceGrid<'a> {
         zs: &'a [f32],
         x_count: usize,
         y_count: usize,
+        flags: Surface3DFlags,
     ) -> Result<Self, Plot3DError> {
-        let shape = SurfaceGridShape::checked(x_count, y_count)?.validate_z_len(zs.len())?;
+        let shape = SurfaceGridShape::checked(x_count, y_count)?
+            .validate_z_len(zs.len())?
+            .validate_wireframe(flags)?;
         validate_coordinate_len(xs.len(), shape.point_count(), "surface x coordinates")?;
         validate_coordinate_len(ys.len(), shape.point_count(), "surface y coordinates")?;
 
@@ -169,6 +189,17 @@ fn validate_coordinate_len(
     }
 }
 
+fn surface_scale(min: f64, max: f64) -> Result<(f64, f64), Plot3DError> {
+    if min.is_finite() && max.is_finite() {
+        Ok((min, max))
+    } else if min.is_nan() && max.is_nan() {
+        // Earlier Rust builders used a pair of NaNs for automatic scaling.
+        Ok((0.0, 0.0))
+    } else {
+        Err(Plot3DError::InvalidSurfaceScale)
+    }
+}
+
 pub(crate) fn submit_surface_grid(
     ui: &Plot3DUi<'_>,
     label: SurfaceLabel<'_>,
@@ -176,7 +207,8 @@ pub(crate) fn submit_surface_grid(
     scale_min: f64,
     scale_max: f64,
     make_spec: impl FnOnce() -> sys::ImPlot3DSpec_c,
-) {
+) -> Result<(), Plot3DError> {
+    let (scale_min, scale_max) = surface_scale(scale_min, scale_max)?;
     let label = label.as_str();
     let (x_count, y_count) = grid.shape().counts_i32();
 
@@ -210,6 +242,7 @@ pub(crate) fn submit_surface_grid(
             );
         });
     });
+    Ok(())
 }
 
 pub(crate) unsafe fn submit_surface_raw(
@@ -223,7 +256,8 @@ pub(crate) unsafe fn submit_surface_raw(
     scale_max: f64,
     flags: Surface3DFlags,
     layout: Plot3DDataLayout,
-) {
+) -> Result<(), Plot3DError> {
+    let (scale_min, scale_max) = surface_scale(scale_min, scale_max)?;
     let label = label.as_str();
     let (x_count, y_count) = shape.counts_i32();
 
@@ -244,6 +278,7 @@ pub(crate) unsafe fn submit_surface_raw(
             );
         });
     });
+    Ok(())
 }
 
 /// A surface whose X and Y inputs describe grid axes.
@@ -277,12 +312,13 @@ impl<'a> Surface3D<'a> {
             xs,
             ys,
             zs,
-            scale_min: f64::NAN,
-            scale_max: f64::NAN,
+            scale_min: 0.0,
+            scale_max: 0.0,
             flags: Surface3DFlags::NONE,
         }
     }
 
+    /// Set the color range. Two zeros (the default) or two NaNs select the grid's Z range.
     pub fn scale(mut self, min: f64, max: f64) -> Self {
         self.scale_min = min;
         self.scale_max = max;
@@ -302,11 +338,10 @@ impl<'a> Plot3D for Surface3D<'a> {
 
     fn try_plot(&self, ui: &Plot3DUi<'_>) -> Result<(), Plot3DError> {
         let label = SurfaceLabel::checked(self.label)?;
-        let grid = SurfaceGrid::from_axes(self.xs, self.ys, self.zs)?;
+        let grid = SurfaceGrid::from_axes(self.xs, self.ys, self.zs, self.flags)?;
         submit_surface_grid(ui, label, &grid, self.scale_min, self.scale_max, || {
             plot3d_spec_from(self.flags.bits(), Plot3DDataLayout::DEFAULT)
-        });
-        Ok(())
+        })
     }
 }
 
@@ -318,7 +353,7 @@ mod tests {
     use std::sync::{Mutex, OnceLock};
 
     use super::{Plot3D, Surface3D, SurfaceGrid, SurfaceGridShape, SurfaceLabel};
-    use crate::{plots::Plot3DError, sys};
+    use crate::{Surface3DFlags, plots::Plot3DError, sys};
 
     #[test]
     fn axis_grid_flattens_in_row_major_order() {
@@ -326,7 +361,7 @@ mod tests {
         let ys = [1.0, 2.0];
         let zs = [11.0, 21.0, 12.0, 22.0];
 
-        let grid = SurfaceGrid::from_axes(&xs, &ys, &zs).unwrap();
+        let grid = SurfaceGrid::from_axes(&xs, &ys, &zs, Surface3DFlags::NONE).unwrap();
 
         assert_eq!(grid.xs(), &[10.0, 20.0, 10.0, 20.0]);
         assert_eq!(grid.ys(), &[1.0, 1.0, 2.0, 2.0]);
@@ -396,7 +431,7 @@ mod tests {
         let ys = [1.0, 2.0, 3.0];
         let zs = [4.0, 5.0, 6.0];
 
-        let grid = SurfaceGrid::from_axes(&xs, &ys, &zs).unwrap();
+        let grid = SurfaceGrid::from_axes(&xs, &ys, &zs, Surface3DFlags::NONE).unwrap();
 
         assert_eq!(grid.xs(), &[3.0, 3.0, 3.0]);
         assert_eq!(grid.ys(), &ys);
@@ -410,9 +445,30 @@ mod tests {
     }
 
     #[test]
+    fn surface_wireframe_counts_both_endpoints_of_each_grid_edge() {
+        let shape = SurfaceGridShape::checked(32_768, 32_768).unwrap();
+        assert!(matches!(
+            shape.validate_wireframe(Surface3DFlags::NONE),
+            Err(Plot3DError::NativeCountOutOfRange { .. })
+        ));
+        assert_eq!(
+            shape.validate_wireframe(Surface3DFlags::NO_LINES),
+            Ok(shape)
+        );
+        let narrow = SurfaceGridShape::checked(1, 32_768).unwrap();
+        assert_eq!(narrow.validate_wireframe(Surface3DFlags::NONE), Ok(narrow));
+    }
+
+    #[test]
     fn axis_grid_rejects_z_length_mismatch() {
         assert_eq!(
-            SurfaceGrid::from_axes(&[0.0, 1.0], &[0.0, 1.0], &[0.0, 1.0, 2.0]).unwrap_err(),
+            SurfaceGrid::from_axes(
+                &[0.0, 1.0],
+                &[0.0, 1.0],
+                &[0.0, 1.0, 2.0],
+                Surface3DFlags::NONE
+            )
+            .unwrap_err(),
             Plot3DError::GridSizeMismatch {
                 x_count: 2,
                 y_count: 2,
@@ -451,7 +507,15 @@ mod tests {
 
     #[test]
     fn flattened_grid_requires_all_coordinate_arrays_to_match() {
-        let error = SurfaceGrid::from_flattened(&[0.0; 4], &[0.0; 3], &[0.0; 4], 2, 2).unwrap_err();
+        let error = SurfaceGrid::from_flattened(
+            &[0.0; 4],
+            &[0.0; 3],
+            &[0.0; 4],
+            2,
+            2,
+            Surface3DFlags::NONE,
+        )
+        .unwrap_err();
 
         assert_eq!(
             error,
@@ -468,7 +532,7 @@ mod tests {
         let xs = [0.0; 4];
         let ys = [0.0; 4];
         let zs = [0.0; 4];
-        let grid = SurfaceGrid::from_flattened(&xs, &ys, &zs, 2, 2).unwrap();
+        let grid = SurfaceGrid::from_flattened(&xs, &ys, &zs, 2, 2, Surface3DFlags::NONE).unwrap();
 
         assert!(matches!(grid.xs, Cow::Borrowed(_)));
         assert!(matches!(grid.ys, Cow::Borrowed(_)));
@@ -476,9 +540,18 @@ mod tests {
 
     #[test]
     fn axis_and_flattened_inputs_share_z_shape_errors() {
-        let axis_error = SurfaceGrid::from_axes(&[0.0, 1.0], &[0.0, 1.0], &[0.0; 3]).unwrap_err();
-        let flat_error =
-            SurfaceGrid::from_flattened(&[0.0; 4], &[0.0; 4], &[0.0; 3], 2, 2).unwrap_err();
+        let axis_error =
+            SurfaceGrid::from_axes(&[0.0, 1.0], &[0.0, 1.0], &[0.0; 3], Surface3DFlags::NONE)
+                .unwrap_err();
+        let flat_error = SurfaceGrid::from_flattened(
+            &[0.0; 4],
+            &[0.0; 4],
+            &[0.0; 3],
+            2,
+            2,
+            Surface3DFlags::NONE,
+        )
+        .unwrap_err();
 
         assert_eq!(axis_error, flat_error);
     }

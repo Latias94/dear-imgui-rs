@@ -8,6 +8,9 @@
       html, body { margin: 0; padding: 0; height: 100%; background: #111; }
       #wasm-canvas { display: block; width: 100vw; height: 100vh; }
     </style>
+    <script type="importmap">
+      { "imports": { "imgui-sys-v1": "./imgui-sys-v1-wrapper.js" } }
+    </script>
   </head>
   <body>
     <canvas id="wasm-canvas"></canvas>
@@ -36,7 +39,7 @@
     </script>
     <script type="module">
       import init from './dear-imgui-web-demo.js';
-      init().catch(e => {
+      init({ memory: globalThis.__imgui_shared_memory }).catch(e => {
         const msg = String(e && (e.message || e));
         // Winit on web may throw to control flow; ignore this benign exception
         if (msg.includes("Using exceptions for control flow")) return;

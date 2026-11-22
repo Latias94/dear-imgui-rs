@@ -6,7 +6,6 @@ rust-version.workspace = true
 description = "High-level Rust bindings for ImGuizmo (C API) with Dear ImGui integration"
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 authors.workspace = true
 documentation = "https://docs.rs/dear-imguizmo"
 categories.workspace = true

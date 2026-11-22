@@ -5,6 +5,53 @@ use super::{
 };
 use crate::{BarGroupsFlags, ItemFlags, sys};
 
+fn bar_group_flags(flags: BarGroupsFlags, item_flags: ItemFlags) -> BarGroupsFlags {
+    BarGroupsFlags::from_bits_retain(flags.bits() | item_flags.bits())
+}
+
+fn bar_group_value_count(
+    item_count: usize,
+    group_count: usize,
+    flags: BarGroupsFlags,
+) -> Result<usize, PlotError> {
+    if item_count == 0 || group_count == 0 {
+        return Err(PlotError::EmptyData);
+    }
+    // PlotBarGroups indexes the data and sizes its four stacked scratch rows using int.
+    if flags.contains(BarGroupsFlags::STACKED) && group_count > i32::MAX as usize / 4 {
+        return Err(PlotError::InvalidData(
+            "stacked bar group scratch size exceeded ImPlot's i32 range".into(),
+        ));
+    }
+    item_count
+        .checked_mul(group_count)
+        .filter(|&count| count <= i32::MAX as usize)
+        .ok_or_else(|| {
+            PlotError::InvalidData("bar group value count exceeded ImPlot's i32 range".into())
+        })
+}
+
+fn validate_bar_groups(
+    label_count: usize,
+    values_len: usize,
+    item_count: usize,
+    group_count: usize,
+    flags: BarGroupsFlags,
+) -> Result<(), PlotError> {
+    if label_count != item_count {
+        return Err(PlotError::InvalidData(format!(
+            "Label count ({label_count}) must match item count ({item_count})"
+        )));
+    }
+    let expected = bar_group_value_count(item_count, group_count, flags)?;
+    if values_len != expected {
+        return Err(PlotError::InvalidData(format!(
+            "Values length ({values_len}) must equal item_count * group_count ({expected})"
+        )));
+    }
+    Ok(())
+}
+
 /// Builder for bar groups plots with extensive customization options
 pub struct BarGroupsPlot<'a> {
     label_ids: Vec<&'a str>,
@@ -95,40 +142,13 @@ impl<'a> BarGroupsPlot<'a> {
 
     /// Validate the plot data
     pub fn validate(&self) -> Result<(), PlotError> {
-        if self.label_ids.len() != self.item_count {
-            return Err(PlotError::InvalidData(format!(
-                "Label count ({}) must match item count ({})",
-                self.label_ids.len(),
-                self.item_count
-            )));
-        }
-
-        let expected_values = self
-            .item_count
-            .checked_mul(self.group_count)
-            .ok_or_else(|| {
-                PlotError::InvalidData("item_count * group_count overflowed usize".to_string())
-            })?;
-        if self.values.len() != expected_values {
-            return Err(PlotError::InvalidData(format!(
-                "Values length ({}) must equal item_count * group_count ({})",
-                self.values.len(),
-                expected_values
-            )));
-        }
-
-        if self.item_count == 0 || self.group_count == 0 {
-            return Err(PlotError::EmptyData);
-        }
-
-        let _ = i32::try_from(self.item_count).map_err(|_| {
-            PlotError::InvalidData("item_count exceeded ImPlot's i32 range".to_string())
-        })?;
-        let _ = i32::try_from(self.group_count).map_err(|_| {
-            PlotError::InvalidData("group_count exceeded ImPlot's i32 range".to_string())
-        })?;
-
-        Ok(())
+        validate_bar_groups(
+            self.label_ids.len(),
+            self.values.len(),
+            self.item_count,
+            self.group_count,
+            bar_group_flags(self.flags, self.item_flags),
+        )
     }
 
     /// Plot the bar groups
@@ -146,7 +166,7 @@ impl<'a> BarGroupsPlot<'a> {
             with_plot_str_slice(&self.label_ids, |label_ptrs| unsafe {
                 let spec = plot_spec_with_style(
                     self.style,
-                    self.flags.bits() | self.item_flags.bits(),
+                    bar_group_flags(self.flags, self.item_flags).bits(),
                     PlotDataLayout::DEFAULT,
                 );
                 sys::ImPlot_PlotBarGroups_doublePtr(
@@ -257,40 +277,13 @@ impl<'a> BarGroupsPlotF32<'a> {
 
     /// Validate the plot data
     pub fn validate(&self) -> Result<(), PlotError> {
-        if self.label_ids.len() != self.item_count {
-            return Err(PlotError::InvalidData(format!(
-                "Label count ({}) must match item count ({})",
-                self.label_ids.len(),
-                self.item_count
-            )));
-        }
-
-        let expected_values = self
-            .item_count
-            .checked_mul(self.group_count)
-            .ok_or_else(|| {
-                PlotError::InvalidData("item_count * group_count overflowed usize".to_string())
-            })?;
-        if self.values.len() != expected_values {
-            return Err(PlotError::InvalidData(format!(
-                "Values length ({}) must equal item_count * group_count ({})",
-                self.values.len(),
-                expected_values
-            )));
-        }
-
-        if self.item_count == 0 || self.group_count == 0 {
-            return Err(PlotError::EmptyData);
-        }
-
-        let _ = i32::try_from(self.item_count).map_err(|_| {
-            PlotError::InvalidData("item_count exceeded ImPlot's i32 range".to_string())
-        })?;
-        let _ = i32::try_from(self.group_count).map_err(|_| {
-            PlotError::InvalidData("group_count exceeded ImPlot's i32 range".to_string())
-        })?;
-
-        Ok(())
+        validate_bar_groups(
+            self.label_ids.len(),
+            self.values.len(),
+            self.item_count,
+            self.group_count,
+            bar_group_flags(self.flags, self.item_flags),
+        )
     }
 
     /// Plot the bar groups
@@ -308,7 +301,7 @@ impl<'a> BarGroupsPlotF32<'a> {
             with_plot_str_slice(&self.label_ids, |label_ptrs| unsafe {
                 let spec = plot_spec_with_style(
                     self.style,
-                    self.flags.bits() | self.item_flags.bits(),
+                    bar_group_flags(self.flags, self.item_flags).bits(),
                     PlotDataLayout::DEFAULT,
                 );
                 sys::ImPlot_PlotBarGroups_FloatPtr(
@@ -356,7 +349,8 @@ impl<'a> SimpleBarGroupsPlot<'a> {
     ///
     /// # Arguments
     /// * `labels` - Labels for each series
-    /// * `data` - Vector of vectors, where each inner vector is a series
+    /// * `data` - One row per series. The first row determines the number of groups.
+    ///   Shorter rows are padded with zeros and longer rows are truncated.
     pub fn new(labels: Vec<&'a str>, data: Vec<Vec<f64>>) -> Self {
         Self {
             labels,
@@ -406,24 +400,14 @@ impl<'a> SimpleBarGroupsPlot<'a> {
 
     /// Plot the bar groups
     pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
-        if self.data.is_empty() || self.labels.is_empty() {
+        if self.labels.len() != self.data.len() {
             return;
         }
-
         let item_count = self.data.len();
-        let group_count = self.data[0].len();
-
-        // Flatten data into row-major order
-        let mut flattened_data = Vec::with_capacity(item_count * group_count);
-        for group_idx in 0..group_count {
-            for item_idx in 0..item_count {
-                if group_idx < self.data[item_idx].len() {
-                    flattened_data.push(self.data[item_idx][group_idx]);
-                } else {
-                    flattened_data.push(0.0); // Fill missing data with zeros
-                }
-            }
-        }
+        let group_count = self.data.first().map_or(0, Vec::len);
+        let Ok(flattened_data) = self.flattened_values(group_count) else {
+            return;
+        };
 
         let plot = BarGroupsPlot::new(self.labels, &flattened_data, item_count, group_count)
             .with_style(self.style)
@@ -432,5 +416,48 @@ impl<'a> SimpleBarGroupsPlot<'a> {
             .with_item_flags(self.item_flags);
 
         plot.plot(plot_ui);
+    }
+
+    fn flattened_values(&self, group_count: usize) -> Result<Vec<f64>, PlotError> {
+        let count = bar_group_value_count(
+            self.data.len(),
+            group_count,
+            bar_group_flags(self.flags, self.item_flags),
+        )?;
+        let mut values = vec![0.0; count];
+        for (row, series) in values.chunks_exact_mut(group_count).zip(&self.data) {
+            let len = series.len().min(group_count);
+            row[..len].copy_from_slice(&series[..len]);
+        }
+        Ok(values)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn simple_bar_groups_keep_each_series_in_one_row() {
+        let plot = SimpleBarGroupsPlot::new(
+            vec!["A", "B", "C"],
+            vec![vec![1.0, 2.0], vec![3.0], vec![4.0, 5.0, 6.0]],
+        );
+        assert_eq!(
+            plot.flattened_values(2).unwrap(),
+            [1.0, 2.0, 3.0, 0.0, 4.0, 5.0]
+        );
+    }
+
+    #[test]
+    fn bar_group_counts_fit_native_indices_and_stacked_scratch_rows() {
+        let max = i32::MAX as usize;
+        assert!(bar_group_value_count(2, max / 2 + 1, BarGroupsFlags::NONE).is_err());
+        assert!(bar_group_value_count(1, max / 4 + 1, BarGroupsFlags::STACKED).is_err());
+        assert_eq!(bar_group_value_count(1, max, BarGroupsFlags::NONE), Ok(max));
+        assert_eq!(
+            bar_group_value_count(1, 0, BarGroupsFlags::NONE),
+            Err(PlotError::EmptyData)
+        );
     }
 }

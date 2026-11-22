@@ -1,7 +1,7 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "implot3d.h"
-#include "implot3d-imgui-193-internal.h"
+#include "implot3d_internal.h"
 #include "cimplot3d.h"
 
 namespace {
@@ -93,6 +93,27 @@ extern "C" int dear_implot3d_surface_probe_read(
     return capture.point_count;
 }
 
+
+// Read vertices appended by the production item renderer while its plot is still open.
+extern "C" int dear_implot3d_probe_vertices(ImPlot3DContext* context, int start, ImDrawVert* output, int capacity) {
+    if (!context || start < 0 || capacity < 0)
+        return -1;
+    auto* previous = ImPlot3D::GetCurrentContext();
+    ImPlot3D::SetCurrentContext(context);
+    auto* plot = ImPlot3D::GetCurrentPlot();
+    ImPlot3D::SetCurrentContext(previous);
+    if (!plot || start > plot->DrawList.VtxBuffer.Size)
+        return -1;
+    const auto& vertices = plot->DrawList.VtxBuffer;
+    const int count = vertices.Size - start;
+    if (output) {
+        if (count > capacity)
+            return -1;
+        for (int i = 0; i < count; ++i)
+            output[i] = vertices[start + i];
+    }
+    return count;
+}
 
 // Exercise the production PlotLine renderer, rather than a second copy of its sampler helper.
 extern "C" int dear_implot3d_line_probe_plot(

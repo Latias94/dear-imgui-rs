@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use crate::builder::Plot3DBuilder;
+use crate::plots::primitive_vertex_count;
 use crate::{
     Line3DFlags, Plot3DDataLayout, Plot3DFlags, Quad3DFlags, Scatter3DFlags, Triangle3DFlags,
     len_i32, plot3d_spec_from, sys,
@@ -114,6 +115,9 @@ impl<'ui> Plot3DUi<'ui> {
             }
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
                 let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
+                if count == i32::MAX && (spec.Flags as u32 & Line3DFlags::LOOP.bits()) != 0 {
+                    return;
+                }
                 sys::ImPlot3D_PlotLine_FloatPtr(
                     label_ptr,
                     xs.as_ptr(),
@@ -145,7 +149,7 @@ impl<'ui> Plot3DUi<'ui> {
             if xs.len() != ys.len() || ys.len() != zs.len() {
                 return;
             }
-            let Some(count) = len_i32(xs.len()) else {
+            let Some(count) = layout.sample_count(xs.len()) else {
                 return;
             };
             let label = label.as_ref();
@@ -154,6 +158,9 @@ impl<'ui> Plot3DUi<'ui> {
             }
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
                 let spec = plot3d_spec_from(flags.bits(), layout);
+                if count == i32::MAX && (spec.Flags as u32 & Line3DFlags::LOOP.bits()) != 0 {
+                    return;
+                }
                 sys::ImPlot3D_PlotLine_FloatPtr(
                     label_ptr,
                     xs.as_ptr(),
@@ -188,6 +195,9 @@ impl<'ui> Plot3DUi<'ui> {
             }
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
                 let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
+                if count == i32::MAX && (spec.Flags as u32 & Line3DFlags::LOOP.bits()) != 0 {
+                    return;
+                }
                 sys::ImPlot3D_PlotLine_doublePtr(
                     label_ptr,
                     xs.as_ptr(),
@@ -219,7 +229,7 @@ impl<'ui> Plot3DUi<'ui> {
             if xs.len() != ys.len() || ys.len() != zs.len() {
                 return;
             }
-            let Some(count) = len_i32(xs.len()) else {
+            let Some(count) = layout.sample_count(xs.len()) else {
                 return;
             };
             let label = label.as_ref();
@@ -228,6 +238,9 @@ impl<'ui> Plot3DUi<'ui> {
             }
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
                 let spec = plot3d_spec_from(flags.bits(), layout);
+                if count == i32::MAX && (spec.Flags as u32 & Line3DFlags::LOOP.bits()) != 0 {
+                    return;
+                }
                 sys::ImPlot3D_PlotLine_doublePtr(
                     label_ptr,
                     xs.as_ptr(),
@@ -293,7 +306,7 @@ impl<'ui> Plot3DUi<'ui> {
             if xs.len() != ys.len() || ys.len() != zs.len() {
                 return;
             }
-            let Some(count) = len_i32(xs.len()) else {
+            let Some(count) = layout.sample_count(xs.len()) else {
                 return;
             };
             let label = label.as_ref();
@@ -367,7 +380,7 @@ impl<'ui> Plot3DUi<'ui> {
             if xs.len() != ys.len() || ys.len() != zs.len() {
                 return;
             }
-            let Some(count) = len_i32(xs.len()) else {
+            let Some(count) = layout.sample_count(xs.len()) else {
                 return;
             };
             let label = label.as_ref();
@@ -397,29 +410,8 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f32],
         flags: Triangle3DFlags,
     ) {
-        self.with_bound_context(|| {
-            if xs.len() != ys.len() || ys.len() != zs.len() {
-                return;
-            }
-            let Some(count) = len_i32(xs.len()) else {
-                return;
-            };
-            let label = label.as_ref();
-            if label.contains('\0') {
-                return;
-            }
-            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
-                sys::ImPlot3D_PlotTriangle_FloatPtr(
-                    label_ptr,
-                    xs.as_ptr(),
-                    ys.as_ptr(),
-                    zs.as_ptr(),
-                    count,
-                    spec,
-                );
-            })
-        })
+        // The default stride addresses one element of each slice per vertex.
+        unsafe { self.plot_triangles_f32_raw(label, xs, ys, zs, flags, Plot3DDataLayout::DEFAULT) }
     }
 
     /// Plot f32 triangle coordinates with an explicit data layout.
@@ -441,7 +433,13 @@ impl<'ui> Plot3DUi<'ui> {
             if xs.len() != ys.len() || ys.len() != zs.len() {
                 return;
             }
-            let Some(count) = len_i32(xs.len()) else {
+            let Ok(count) = primitive_vertex_count(
+                xs.len(),
+                3,
+                "triangles",
+                layout,
+                !flags.contains(Triangle3DFlags::NO_LINES),
+            ) else {
                 return;
             };
             let label = label.as_ref();
@@ -471,29 +469,8 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f32],
         flags: Quad3DFlags,
     ) {
-        self.with_bound_context(|| {
-            if xs.len() != ys.len() || ys.len() != zs.len() {
-                return;
-            }
-            let Some(count) = len_i32(xs.len()) else {
-                return;
-            };
-            let label = label.as_ref();
-            if label.contains('\0') {
-                return;
-            }
-            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
-                sys::ImPlot3D_PlotQuad_FloatPtr(
-                    label_ptr,
-                    xs.as_ptr(),
-                    ys.as_ptr(),
-                    zs.as_ptr(),
-                    count,
-                    spec,
-                );
-            })
-        })
+        // The default stride addresses one element of each slice per vertex.
+        unsafe { self.plot_quads_f32_raw(label, xs, ys, zs, flags, Plot3DDataLayout::DEFAULT) }
     }
 
     /// Plot f32 quad coordinates with an explicit data layout.
@@ -515,7 +492,13 @@ impl<'ui> Plot3DUi<'ui> {
             if xs.len() != ys.len() || ys.len() != zs.len() {
                 return;
             }
-            let Some(count) = len_i32(xs.len()) else {
+            let Ok(count) = primitive_vertex_count(
+                xs.len(),
+                4,
+                "quads",
+                layout,
+                !flags.contains(Quad3DFlags::NO_LINES),
+            ) else {
                 return;
             };
             let label = label.as_ref();
@@ -545,29 +528,8 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f64],
         flags: Triangle3DFlags,
     ) {
-        self.with_bound_context(|| {
-            if xs.len() != ys.len() || ys.len() != zs.len() {
-                return;
-            }
-            let Some(count) = len_i32(xs.len()) else {
-                return;
-            };
-            let label = label.as_ref();
-            if label.contains('\0') {
-                return;
-            }
-            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
-                sys::ImPlot3D_PlotTriangle_doublePtr(
-                    label_ptr,
-                    xs.as_ptr(),
-                    ys.as_ptr(),
-                    zs.as_ptr(),
-                    count,
-                    spec,
-                );
-            })
-        })
+        // The default stride addresses one element of each slice per vertex.
+        unsafe { self.plot_triangles_f64_raw(label, xs, ys, zs, flags, Plot3DDataLayout::DEFAULT) }
     }
 
     /// Plot f64 triangle coordinates with an explicit data layout.
@@ -589,7 +551,13 @@ impl<'ui> Plot3DUi<'ui> {
             if xs.len() != ys.len() || ys.len() != zs.len() {
                 return;
             }
-            let Some(count) = len_i32(xs.len()) else {
+            let Ok(count) = primitive_vertex_count(
+                xs.len(),
+                3,
+                "triangles",
+                layout,
+                !flags.contains(Triangle3DFlags::NO_LINES),
+            ) else {
                 return;
             };
             let label = label.as_ref();
@@ -619,29 +587,8 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f64],
         flags: Quad3DFlags,
     ) {
-        self.with_bound_context(|| {
-            if xs.len() != ys.len() || ys.len() != zs.len() {
-                return;
-            }
-            let Some(count) = len_i32(xs.len()) else {
-                return;
-            };
-            let label = label.as_ref();
-            if label.contains('\0') {
-                return;
-            }
-            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
-                sys::ImPlot3D_PlotQuad_doublePtr(
-                    label_ptr,
-                    xs.as_ptr(),
-                    ys.as_ptr(),
-                    zs.as_ptr(),
-                    count,
-                    spec,
-                );
-            })
-        })
+        // The default stride addresses one element of each slice per vertex.
+        unsafe { self.plot_quads_f64_raw(label, xs, ys, zs, flags, Plot3DDataLayout::DEFAULT) }
     }
 
     /// Plot f64 quad coordinates with an explicit data layout.
@@ -663,7 +610,13 @@ impl<'ui> Plot3DUi<'ui> {
             if xs.len() != ys.len() || ys.len() != zs.len() {
                 return;
             }
-            let Some(count) = len_i32(xs.len()) else {
+            let Ok(count) = primitive_vertex_count(
+                xs.len(),
+                4,
+                "quads",
+                layout,
+                !flags.contains(Quad3DFlags::NO_LINES),
+            ) else {
                 return;
             };
             let label = label.as_ref();

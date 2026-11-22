@@ -89,7 +89,7 @@ impl<'a> Plot for InfLinesPlot<'a> {
         if self.validate().is_err() {
             return;
         }
-        let Ok(count) = i32::try_from(self.positions.len()) else {
+        let Some(count) = self.layout.sample_count(self.positions.len()) else {
             return;
         };
         plot_ui.with_bound_context(|| {

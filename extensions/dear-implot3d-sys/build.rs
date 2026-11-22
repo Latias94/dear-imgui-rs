@@ -391,7 +391,7 @@ fn build_with_cc(
         let source = sources
             .file(file_id)
             .unwrap_or_else(|error| panic!("dear-implot3d-sys: {error}"));
-        if matches!(file_id, "core" | "items" | "demo") {
+        if matches!(file_id, "core" | "items") {
             let staged = build_support::stage_implot3d_draw_flags(&source, &cfg.out_dir)
                 .unwrap_or_else(|error| panic!("dear-implot3d-sys: {error}"));
             build.file(staged);
@@ -415,13 +415,6 @@ fn build_surface_test_probe(
     imgui_src: &Path,
     cimgui_root: &Path,
 ) {
-    // The source-built probe must use the same internal header as maintained native sources,
-    // even when the library itself is selected from a prebuilt artifact.
-    build_support::stage_implot3d_draw_flags(
-        &cimplot3d_root.join("implot3d/implot3d.cpp"),
-        &cfg.out_dir,
-    )
-    .unwrap_or_else(|error| panic!("dear-implot3d-sys: {error}"));
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
     build_support::configure_cpp_runtime_linkage(
@@ -436,7 +429,6 @@ fn build_surface_test_probe(
     native_binding_spec().apply_extension_binding_defines(&mut build, env::vars());
     build.define("IMGUI_DEFINE_MATH_OPERATORS", Some("1"));
     build
-        .include(&cfg.out_dir)
         .include(imgui_src)
         .include(cimgui_root)
         .include(cimplot3d_root)

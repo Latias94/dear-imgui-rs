@@ -59,6 +59,12 @@ impl<'a> Plot3D for Line3D<'a> {
             validate_nonempty(x)?;
             validate_lengths(x, y, "x/y")?;
             validate_lengths(y, z, "y/z")?;
+            self.layout
+                .sample_count(x.len())
+                .filter(|&n| n != i32::MAX || !self.flags.contains(Line3DFlags::LOOP))
+                .ok_or(Plot3DError::NativeCountOutOfRange {
+                    what: "line samples",
+                })?;
             unsafe {
                 // High-level plots keep the automatic contiguous stride; offset is normalized by
                 // ImPlot3D within the validated slice count.
@@ -69,6 +75,12 @@ impl<'a> Plot3D for Line3D<'a> {
             validate_nonempty(x)?;
             validate_lengths(x, y, "x/y")?;
             validate_lengths(y, z, "y/z")?;
+            self.layout
+                .sample_count(x.len())
+                .filter(|&n| n != i32::MAX || !self.flags.contains(Line3DFlags::LOOP))
+                .ok_or(Plot3DError::NativeCountOutOfRange {
+                    what: "line samples",
+                })?;
             unsafe {
                 // High-level plots keep the automatic contiguous stride; offset is normalized by
                 // ImPlot3D within the validated slice count.

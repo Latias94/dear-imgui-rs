@@ -58,13 +58,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "dtl.h",
         "TextDiff.h",
         "TextEditor.h",
+        "TextEditorLanguages.h",
         "example/dejavu.h",
+        "example/notosans.h",
         "extras/TrieAutoComplete.h",
     ] {
         append_file(
             &mut archive,
             &text_editor_root.join(relative),
             &format!("include/ImGuiColorTextEdit/{relative}"),
+        )?;
+    }
+    archive.append_dir_all(
+        "include/ImGuiColorTextEdit/languages",
+        text_editor_root.join("languages"),
+    )?;
+    for font in ["dejavu", "notosans"] {
+        append_file(
+            &mut archive,
+            &text_editor_root.join(format!("example/{font}.lic")),
+            &format!("licenses/{font}.lic"),
         )?;
     }
 

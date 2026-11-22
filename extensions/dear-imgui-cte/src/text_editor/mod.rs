@@ -238,7 +238,7 @@ impl TextEditor {
         self.binding.try_with_bound_context(operation, || f(raw))
     }
 
-    fn raw_ptr(&self) -> *mut sys::TextEditor {
+    pub(crate) fn raw_ptr(&self) -> *mut sys::TextEditor {
         self.raw.as_ptr()
     }
 
@@ -320,7 +320,7 @@ unsafe fn validate_cursor(
     Ok(())
 }
 
-unsafe fn validate_position(
+pub(crate) unsafe fn validate_position(
     raw: *mut sys::TextEditor,
     operation: &'static str,
     position: Position,

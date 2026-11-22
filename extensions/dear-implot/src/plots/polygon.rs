@@ -118,7 +118,7 @@ impl<'a> Plot for PolygonPlot<'a> {
         if self.validate().is_err() {
             return;
         }
-        let Ok(count) = i32::try_from(self.x_data.len()) else {
+        let Some(count) = self.layout.sample_count(self.x_data.len()) else {
             return;
         };
 

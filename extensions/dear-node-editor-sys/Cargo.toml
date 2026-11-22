@@ -6,7 +6,6 @@ rust-version.workspace = true
 description = "Low-level FFI bindings for imgui-node-editor via cimnodes_editor"
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 authors.workspace = true
 categories.workspace = true
 keywords.workspace = true
@@ -24,7 +23,7 @@ exclude = [
 ]
 
 [package.metadata.dear-imgui-binding]
-source-revision = "e28b18dc38bcc0f0ec8a46eb891bf61e11817c93"
+source-revision = "917728f58869efafb67386099a1c77e153284f49"
 
 [package.metadata.docs.rs]
 no-default-features = true

@@ -155,8 +155,7 @@ Prerequisites:
 
 - `rustup target add wasm32-unknown-unknown`
 - a `wasm-bindgen-cli` version matching `Cargo.lock` (`0.2.130` for the 0.22.0 lockfile)
-- `wasm-tools`
-- Emscripten SDK for the provider build
+- Emscripten SDK for the provider build (CI uses 7.0.1)
 
 Re-read the lockfile after dependency updates before installing `wasm-bindgen-cli`; the lockfile is the version source of truth rather than a separately maintained script constant.
 
@@ -176,17 +175,17 @@ cargo run -p xtask -- build-cimgui-provider
 python3 -m http.server -d target/web-demo 8080
 ```
 
-Open `http://127.0.0.1:8080`. The provider command emits
-`imgui-sys-v1.wasm`, its JavaScript loader, a shared-memory wrapper, and the
-import map used by the web demo.
+Open `http://127.0.0.1:8080`. The provider command emits `imgui-sys-v1.wasm`,
+its JavaScript loader and a shared-memory wrapper. The demo page's import map
+resolves `imgui-sys-v1` to that wrapper.
 
 ## Runtime model
 
 The Rust and C++ modules share one `WebAssembly.Memory`:
 
 1. The page creates `globalThis.__imgui_shared_memory`.
-2. `xtask web-demo` patches the wasm-bindgen module to import and re-export
-   `env.memory`.
+2. `xtask web-demo` links the Rust module with imported memory. The page passes
+   the shared memory to wasm-bindgen through `init({ memory })`.
 3. `xtask build-cimgui-provider` builds cimgui with imported memory and passes
    the same object to the Emscripten module.
 4. The browser resolves all generated cimgui imports through `imgui-sys-v1`.
@@ -212,9 +211,9 @@ requests.
   WASI and Emscripten targets require different imports/runtime contracts and
   are intentionally not aliases for this provider ABI.
 - `Failed to resolve import imgui-sys-v1`: build the provider and verify the
-  generated import map points to `imgui-sys-v1-wrapper.js`.
-- `env.memory` or callable import errors: install `wasm-tools`, rebuild the web
-  demo, then rebuild the provider so both artifacts use the same memory wiring.
+  page's import map points to `imgui-sys-v1-wrapper.js`.
+- For memory or callable import errors, rebuild the web demo and the provider
+  from the same checkout and pass the provider's memory to wasm-bindgen.
 - Browser module MIME errors: serve `.js` as JavaScript and `.wasm` as
   `application/wasm`.
 - Stale binding errors: run `xtask verify-bindings`; only use `--update` after

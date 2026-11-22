@@ -35,8 +35,13 @@ pub(super) fn assert_axis_zoom_range(caller: &str, min: f64, max: f64) {
     assert!(min <= max, "{caller} min must be <= max");
 }
 
-pub(crate) fn axis_tick_count_to_i32(caller: &str, n_ticks: usize) -> i32 {
+pub(super) fn axis_tick_count_to_i32(caller: &str, n_ticks: usize, has_labels: bool) -> i32 {
     assert!(n_ticks > 0, "{caller} n_ticks must be positive");
+    // The range overload generates at least two tick positions before reading labels.
+    assert!(
+        !has_labels || n_ticks >= 2,
+        "{caller} n_ticks must be at least 2 when labels are provided"
+    );
     i32::try_from(n_ticks)
         .unwrap_or_else(|_| panic!("{caller} n_ticks exceeded ImPlot's i32 range"))
 }

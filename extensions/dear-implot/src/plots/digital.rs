@@ -97,7 +97,10 @@ impl<'a> DigitalPlot<'a> {
 
     /// Plot the digital signal
     pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
-        let Ok(count) = i32::try_from(self.x_data.len()) else {
+        if self.validate().is_err() {
+            return;
+        }
+        let Some(count) = self.layout.sample_count(self.x_data.len()) else {
             return;
         };
         plot_ui.with_bound_context(|| {
@@ -192,6 +195,9 @@ impl<'a> DigitalPlotF32<'a> {
 
     /// Plot the digital signal
     pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+        if self.validate().is_err() {
+            return;
+        }
         let Ok(count) = i32::try_from(self.x_data.len()) else {
             return;
         };
@@ -295,6 +301,9 @@ impl<'a> SimpleDigitalPlot<'a> {
 
     /// Plot the digital signal
     pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+        if self.validate().is_err() {
+            return;
+        }
         let Ok(count) = i32::try_from(self.y_data.len()) else {
             return;
         };
@@ -395,6 +404,9 @@ impl<'a> BooleanDigitalPlot<'a> {
 
     /// Plot the digital signal
     pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+        if self.validate().is_err() {
+            return;
+        }
         let Ok(count) = i32::try_from(self.x_data.len()) else {
             return;
         };
