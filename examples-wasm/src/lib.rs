@@ -114,13 +114,14 @@ struct App {
 }
 
 impl AppWindow {
-    // Complete async GPU setup given an already-created window + surface.
-    async fn new_with_window(
-        window: Arc<Window>,
-        surface: wgpu::Surface<'static>,
-        instance: wgpu::Instance,
-    ) -> Result<Self, JsValue> {
-        // Request adapter and device
+    async fn new_with_window(window: Arc<Window>) -> Result<Self, JsValue> {
+        let instance = wgpu::util::new_instance_with_webgpu_detection(
+            wgpu::InstanceDescriptor::new_without_display_handle(),
+        )
+        .await;
+        let surface = instance
+            .create_surface(window.clone())
+            .map_err(|error| JsValue::from_str(&format!("create_surface: {error}")))?;
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
@@ -709,9 +710,7 @@ impl ApplicationHandler for App {
             return;
         }
 
-        // Create window + surface synchronously, then finish GPU init asynchronously.
         use winit::platform::web::WindowAttributesExtWebSys;
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
 
         // Acquire target canvas from the page
         let win = web_sys::window().expect("no window");
@@ -733,14 +732,10 @@ impl ApplicationHandler for App {
                 .expect("create_window"),
         );
 
-        let surface = instance
-            .create_surface(window.clone())
-            .expect("create_surface");
-
         // Finish GPU init on the JS task queue
         let window_for_redraw = window.clone();
         wasm_bindgen_futures::spawn_local(async move {
-            match AppWindow::new_with_window(window, surface, instance).await {
+            match AppWindow::new_with_window(window).await {
                 Ok(appwin) => {
                     APP_READY.with(|cell| *cell.borrow_mut() = Some(appwin));
                     window_for_redraw.request_redraw();

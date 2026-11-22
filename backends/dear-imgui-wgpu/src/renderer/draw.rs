@@ -507,6 +507,7 @@ impl WgpuRenderer {
         mut raw_callback: impl FnMut(RawCallbackCommand<'draw>) -> RendererResult<()>,
     ) -> RendererResult<()> {
         Self::setup_prepared_render_state(render_pass, extent, state);
+        let mut bound_vertex_offset = 0;
         for command in prepared.commands {
             match command {
                 PreparedDrawCommand::Elements {
@@ -515,12 +516,29 @@ impl WgpuRenderer {
                     indices,
                     base_vertex,
                 } => {
+                    // WebGL2 has no base-vertex draw. Each ImGui index is relative to
+                    // its command's vertex range, so bind the range at slot zero instead.
+                    let base_vertex = if cfg!(target_arch = "wasm32") {
+                        if base_vertex != bound_vertex_offset {
+                            let buffer = state.vertex_buffer.as_ref().ok_or_else(|| {
+                                RendererError::InvalidRenderState("Missing vertex buffer".into())
+                            })?;
+                            let offset = base_vertex as u64
+                                * size_of::<dear_imgui_rs::render::DrawVert>() as u64;
+                            render_pass.set_vertex_buffer(0, buffer.slice(offset..));
+                            bound_vertex_offset = base_vertex;
+                        }
+                        0
+                    } else {
+                        base_vertex
+                    };
                     render_pass.set_bind_group(1, &image_bind_group, &[]);
                     render_pass.set_scissor_rect(scissor[0], scissor[1], scissor[2], scissor[3]);
                     render_pass.draw_indexed(indices, base_vertex, 0..1);
                 }
                 PreparedDrawCommand::ResetRenderState => {
-                    Self::setup_prepared_render_state(render_pass, extent, state)
+                    Self::setup_prepared_render_state(render_pass, extent, state);
+                    bound_vertex_offset = 0;
                 }
                 PreparedDrawCommand::SetSampler(sampler) => {
                     let bind_group = match sampler {
