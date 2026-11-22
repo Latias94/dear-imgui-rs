@@ -132,8 +132,8 @@ impl std::error::Error for Plot3DError {}
 /// Common trait for 3D plot elements
 pub trait Plot3D {
     fn label(&self) -> &str;
-    fn try_plot(&self, ui: &crate::Plot3DUi<'_>) -> Result<(), Plot3DError>;
-    fn plot(&self, ui: &crate::Plot3DUi<'_>) {
+    fn try_plot(&self, ui: &crate::Plot3DScope<'_>) -> Result<(), Plot3DError>;
+    fn plot(&self, ui: &crate::Plot3DScope<'_>) {
         let _ = self.try_plot(ui);
     }
 }

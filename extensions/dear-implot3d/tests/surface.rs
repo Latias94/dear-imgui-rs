@@ -34,37 +34,35 @@ fn safe_surface_paths_submit_to_a_real_context() {
 
     let frame = imgui.begin_frame();
     let plot_ui = plot_context.get_plot_ui(frame.ui());
-    let _plot = plot_ui
+    plot_ui
         .begin_plot("surface native probe")
-        .build()
+        .build(|plot| {
+            let xs = [0.0, 1.0];
+            let ys = [0.0, 1.0];
+            let zs = [0.0, 1.0, 1.0, 2.0];
+            let xs_flat = [0.0, 1.0, 0.0, 1.0];
+            let ys_flat = [0.0, 0.0, 1.0, 1.0];
+
+            Surface3D::new("Surface3D", &xs, &ys, &zs)
+                .try_plot(plot)
+                .unwrap();
+            plot.surface_f32("Surface3DBuilder", &xs, &ys, &zs)
+                .plot()
+                .unwrap();
+            plot.surface_f32_flat(
+                "flattened surface",
+                &xs_flat,
+                &ys_flat,
+                &zs,
+                2,
+                2,
+                0.0,
+                0.0,
+                Surface3DFlags::NONE,
+            )
+            .unwrap();
+        })
         .expect("surface probe plot should begin");
-
-    let xs = [0.0, 1.0];
-    let ys = [0.0, 1.0];
-    let zs = [0.0, 1.0, 1.0, 2.0];
-    let xs_flat = [0.0, 1.0, 0.0, 1.0];
-    let ys_flat = [0.0, 0.0, 1.0, 1.0];
-
-    Surface3D::new("Surface3D", &xs, &ys, &zs)
-        .try_plot(&plot_ui)
-        .unwrap();
-    plot_ui
-        .surface_f32("Surface3DBuilder", &xs, &ys, &zs)
-        .plot()
-        .unwrap();
-    plot_ui
-        .surface_f32_flat(
-            "flattened surface",
-            &xs_flat,
-            &ys_flat,
-            &zs,
-            2,
-            2,
-            0.0,
-            0.0,
-            Surface3DFlags::NONE,
-        )
-        .unwrap();
 }
 
 #[test]
@@ -75,47 +73,51 @@ fn every_surface_entry_point_rejects_nul_before_shape_work() {
 
     let frame = imgui.begin_frame();
     let plot_ui = plot_context.get_plot_ui(frame.ui());
-    let expected = Err(Plot3DError::StringConversion("surface label contains NUL"));
+    plot_ui
+        .begin_plot("invalid inputs")
+        .build(|plot| {
+            let expected = Err(Plot3DError::StringConversion("surface label contains NUL"));
 
-    assert_eq!(
-        Surface3D::new("invalid\0surface", &[0.0], &[0.0], &[]).try_plot(&plot_ui),
-        expected
-    );
-    assert_eq!(
-        plot_ui
-            .surface_f32("invalid\0builder", &[0.0], &[0.0], &[])
-            .plot(),
-        expected
-    );
-    assert_eq!(
-        plot_ui.surface_f32_flat(
-            "invalid\0flat",
-            &[],
-            &[],
-            &[],
-            usize::MAX,
-            2,
-            0.0,
-            0.0,
-            Surface3DFlags::NONE,
-        ),
-        expected
-    );
+            assert_eq!(
+                Surface3D::new("invalid\0surface", &[0.0], &[0.0], &[]).try_plot(plot),
+                expected
+            );
+            assert_eq!(
+                plot.surface_f32("invalid\0builder", &[0.0], &[0.0], &[])
+                    .plot(),
+                expected
+            );
+            assert_eq!(
+                plot.surface_f32_flat(
+                    "invalid\0flat",
+                    &[],
+                    &[],
+                    &[],
+                    usize::MAX,
+                    2,
+                    0.0,
+                    0.0,
+                    Surface3DFlags::NONE,
+                ),
+                expected
+            );
 
-    // SAFETY: The invalid label is rejected before shape validation or pointer access.
-    let raw_result = unsafe {
-        plot_ui.surface_f32_raw(
-            "invalid\0raw",
-            &[],
-            &[],
-            &[],
-            usize::MAX,
-            2,
-            0.0,
-            0.0,
-            Surface3DFlags::NONE,
-            Plot3DDataLayout::DEFAULT,
-        )
-    };
-    assert_eq!(raw_result, expected);
+            // SAFETY: The invalid label is rejected before shape validation or pointer access.
+            let raw_result = unsafe {
+                plot.surface_f32_raw(
+                    "invalid\0raw",
+                    &[],
+                    &[],
+                    &[],
+                    usize::MAX,
+                    2,
+                    0.0,
+                    0.0,
+                    Surface3DFlags::NONE,
+                    Plot3DDataLayout::DEFAULT,
+                )
+            };
+            assert_eq!(raw_result, expected);
+        })
+        .unwrap();
 }

@@ -1,11 +1,4 @@
-use crate::sys;
-use dear_imgui_rs::{ContextBinding, ContextBindingError};
-
-#[derive(Clone)]
-pub(crate) struct Plot3DContextBinding {
-    pub(crate) plot_ctx_raw: *mut sys::ImPlot3DContext,
-    pub(crate) imgui_binding: ContextBinding,
-}
+use crate::{Plot3DContext, sys};
 
 #[must_use = "dropping the guard restores the previous ImPlot3D context"]
 struct Plot3DContextGuard {
@@ -13,22 +6,15 @@ struct Plot3DContextGuard {
     restore_plot: bool,
 }
 
-impl Plot3DContextBinding {
+impl Plot3DContext {
     pub(crate) fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
-        self.imgui_binding.with_bound_context(|| {
-            let _guard = Plot3DContextGuard::bind(self.plot_ctx_raw);
-            f()
-        })
+        self.imgui_binding
+            .with_bound_context(|| self.with_plot_context(f))
     }
 
-    pub(crate) fn try_with_bound_context<R>(
-        &self,
-        f: impl FnOnce() -> R,
-    ) -> Result<R, ContextBindingError> {
-        self.imgui_binding.try_with_bound_context(|| {
-            let _guard = Plot3DContextGuard::bind(self.plot_ctx_raw);
-            f()
-        })
+    pub(crate) fn with_plot_context<R>(&self, f: impl FnOnce() -> R) -> R {
+        let _guard = Plot3DContextGuard::bind(self.raw);
+        f()
     }
 }
 

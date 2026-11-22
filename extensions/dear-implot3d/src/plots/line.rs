@@ -1,5 +1,5 @@
 use super::{Plot3D, Plot3DError, validate_lengths, validate_nonempty};
-use crate::{Line3DFlags, Plot3DDataLayout, Plot3DDataOffset, Plot3DUi};
+use crate::{Line3DFlags, Plot3DDataLayout, Plot3DDataOffset, Plot3DScope};
 
 pub struct Line3D<'a> {
     pub label: &'a str,
@@ -54,7 +54,7 @@ impl<'a> Plot3D for Line3D<'a> {
     fn label(&self) -> &str {
         self.label
     }
-    fn try_plot(&self, ui: &Plot3DUi<'_>) -> Result<(), Plot3DError> {
+    fn try_plot(&self, ui: &Plot3DScope<'_>) -> Result<(), Plot3DError> {
         if let (Some(x), Some(y), Some(z)) = (self.xs_f32, self.ys_f32, self.zs_f32) {
             validate_nonempty(x)?;
             validate_lengths(x, y, "x/y")?;

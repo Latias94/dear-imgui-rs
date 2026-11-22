@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::Cell;
 
 use crate::{imgui_sys, sys};
 
@@ -13,10 +13,6 @@ pub(crate) fn axis_tick_count_to_i32(caller: &str, count: usize) -> i32 {
 }
 
 pub(crate) const IMPLOT3D_AUTO: i32 = -1;
-
-thread_local! {
-    static NEXT_PLOT3D_SPEC: RefCell<Option<sys::ImPlot3DSpec_c>> = RefCell::new(None);
-}
 
 /// Sample-index offset used by ImPlot3D item data access.
 ///
@@ -140,23 +136,69 @@ impl Plot3DDataLayout {
     }
 }
 
-pub(crate) fn update_next_plot3d_spec(f: impl FnOnce(&mut sys::ImPlot3DSpec_c)) {
-    NEXT_PLOT3D_SPEC.with(|cell| {
-        let mut guard = cell.borrow_mut();
-        let mut spec = guard.take().unwrap_or_else(default_plot3d_spec);
-        f(&mut spec);
-        *guard = Some(spec);
-    })
+/// One-shot overrides for submissions to a single open plot. Borrowed array pointers are
+/// installed only by `scoped` and cannot be carried across plots or into another context.
+#[derive(Default)]
+pub(crate) struct NextItemStyle {
+    pending: Cell<Option<sys::ImPlot3DSpec_c>>,
+    consumed: Cell<u64>,
 }
 
-pub(crate) fn take_next_plot3d_spec() -> Option<sys::ImPlot3DSpec_c> {
-    NEXT_PLOT3D_SPEC.with(|cell| cell.borrow_mut().take())
+impl NextItemStyle {
+    pub(crate) fn update(&self, change: impl FnOnce(&mut sys::ImPlot3DSpec_c)) {
+        let mut spec = self.pending.get().unwrap_or_else(default_plot3d_spec);
+        change(&mut spec);
+        self.pending.set(Some(spec));
+    }
+
+    pub(crate) fn scoped<R>(
+        &self,
+        change: impl FnOnce(&mut sys::ImPlot3DSpec_c),
+        f: impl FnOnce() -> R,
+    ) -> R {
+        let _restore = RestoreUnused {
+            next: self,
+            previous: self.pending.get(),
+            consumed: self.consumed.get(),
+        };
+        self.update(change);
+        f()
+    }
+
+    pub(crate) fn spec(&self, flags: u32, layout: Plot3DDataLayout) -> sys::ImPlot3DSpec_c {
+        let mut spec = match self.pending.get() {
+            Some(spec) => {
+                self.consumed.set(
+                    self.consumed
+                        .get()
+                        .checked_add(1)
+                        .expect("ImPlot3D submission counter overflow"),
+                );
+                self.pending.set(None);
+                spec
+            }
+            None => default_plot3d_spec(),
+        };
+        spec.Flags = ((spec.Flags as u32) | flags) as sys::ImPlot3DItemFlags;
+        spec.Offset = layout.raw_offset();
+        spec.Stride = layout.raw_stride();
+        spec
+    }
 }
 
-pub(crate) fn set_next_plot3d_spec(spec: Option<sys::ImPlot3DSpec_c>) {
-    NEXT_PLOT3D_SPEC.with(|cell| {
-        *cell.borrow_mut() = spec;
-    })
+struct RestoreUnused<'a> {
+    next: &'a NextItemStyle,
+    previous: Option<sys::ImPlot3DSpec_c>,
+    consumed: u64,
+}
+
+impl Drop for RestoreUnused<'_> {
+    fn drop(&mut self) {
+        // A submission consumes all contributing scopes. Keep any new style queued afterwards.
+        if self.next.consumed.get() == self.consumed {
+            self.next.pending.set(self.previous);
+        }
+    }
 }
 
 pub(crate) fn default_plot3d_spec() -> sys::ImPlot3DSpec_c {
@@ -185,14 +227,6 @@ pub(crate) fn default_plot3d_spec() -> sys::ImPlot3DSpec_c {
         Stride: IMPLOT3D_AUTO,
         Flags: sys::ImPlot3DItemFlags_None as _,
     }
-}
-
-pub(crate) fn plot3d_spec_from(flags: u32, layout: Plot3DDataLayout) -> sys::ImPlot3DSpec_c {
-    let mut spec = take_next_plot3d_spec().unwrap_or_else(default_plot3d_spec);
-    spec.Flags = ((spec.Flags as u32) | flags) as sys::ImPlot3DItemFlags;
-    spec.Offset = layout.raw_offset();
-    spec.Stride = layout.raw_stride();
-    spec
 }
 
 pub(crate) trait ImVec2Ctor {
@@ -240,14 +274,13 @@ pub(crate) fn imvec4<T: ImVec4Ctor>(x: f32, y: f32, z: f32, w: f32) -> T {
 #[cfg(test)]
 mod tests {
     use super::{
-        Plot3DDataLayout, Plot3DDataOffset, Plot3DDataStride, axis_tick_count_to_i32,
-        plot3d_spec_from,
+        NextItemStyle, Plot3DDataLayout, Plot3DDataOffset, Plot3DDataStride, axis_tick_count_to_i32,
     };
 
     #[test]
     fn data_layout_allows_signed_sample_offsets() {
         let layout = Plot3DDataLayout::DEFAULT.with_offset(Plot3DDataOffset::samples(-8));
-        let spec = plot3d_spec_from(0, layout);
+        let spec = NextItemStyle::default().spec(0, layout);
         assert_eq!(spec.Offset, -8);
         assert_eq!(spec.Stride, super::IMPLOT3D_AUTO);
     }
@@ -267,7 +300,7 @@ mod tests {
     fn data_stride_bytes_are_positive() {
         let stride = Plot3DDataStride::bytes(16);
         let layout = Plot3DDataLayout::DEFAULT.with_stride(stride);
-        let spec = plot3d_spec_from(0, layout);
+        let spec = NextItemStyle::default().spec(0, layout);
         assert_eq!(spec.Stride, 16);
     }
 

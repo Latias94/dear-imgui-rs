@@ -5,10 +5,9 @@ use crate::sys;
 
 /// A logical image source accepted by safe Dear ImGui drawing APIs.
 ///
-/// A texture reference contains no borrowed user-texture pointer. Legacy [`TextureId`] values are
-/// forwarded directly, while managed handles are resolved through the `Ui`'s owning Context only
-/// for the duration of the native call. Font-atlas references are created internally together with
-/// an owner-backed atlas lease.
+/// Legacy [`TextureId`] values are forwarded directly. The `Ui` resolves managed handles through
+/// its owning Context when submitting a draw command. The Context retains those textures for
+/// the resulting frame. Font-atlas references borrow the atlas through their originating owner.
 ///
 /// ```compile_fail
 /// # use dear_imgui_rs::texture::{OwnedTextureData, TextureFormat, TextureRef};

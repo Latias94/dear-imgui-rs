@@ -69,7 +69,7 @@ Notes:
 
 - **Safe, idiomatic Rust API** - Type-safe wrappers over the C API
 - **Builder pattern** - Fluent API for configuring plots
-- **RAII tokens** - Automatic cleanup with `Plot3DToken`
+- **Scoped plots** - Separate setup and drawing closures with automatic native cleanup
 - **Type-safe flags** - Using `bitflags!` for compile-time safety
 - **Modular plot types** - Separate modules for each plot type
 - **f32/f64 support** - Separate functions for different numeric types
@@ -79,32 +79,32 @@ Notes:
 
 ## Quick Start
 
-Create `Plot3DContext` once alongside your ImGui context and drop it before its
-owner. Call this draw function from an initialized platform and renderer frame;
-it is a UI fragment, not a standalone window application:
+Create `Plot3DContext` once alongside your ImGui context. Call the drawing function from an initialized frame.
 
 ```rust
 use dear_imgui_rs::Ui;
 use dear_implot3d::*;
 
-fn draw(ui: &Ui, plot3d_ctx: &Plot3DContext) {
-    let plot_ui = plot3d_ctx.get_plot_ui(ui);
-    if let Some(_token) = plot_ui.begin_plot("3D Demo")
-        .size([600.0, 400.0])
-        .build()
-    {
-        plot_ui.setup_axes("X", "Y", "Z",
-            Axis3DFlags::NONE,
-            Axis3DFlags::NONE,
-            Axis3DFlags::NONE);
-
-        let xs = [0.0, 1.0, 2.0];
-        let ys = [0.0, 1.0, 0.0];
-        let zs = [0.0, 0.5, 1.0];
-        plot_ui.plot_line_f32("Line", &xs, &ys, &zs, Line3DFlags::NONE);
-    }
+fn draw(ui: &Ui, context: &Plot3DContext) {
+    let plot_ui = context.get_plot_ui(ui);
+    plot_ui.begin_plot("3D Demo").size([600.0, 400.0]).build_with_setup(
+        |setup| {
+            setup.setup_axes("X", "Y", "Z", Axis3DFlags::NONE, Axis3DFlags::NONE, Axis3DFlags::NONE);
+        },
+        |plot| {
+            let xs = [0.0, 1.0, 2.0];
+            let ys = [0.0, 1.0, 0.0];
+            let zs = [0.0, 0.5, 1.0];
+            plot.plot_line_f32("Line", &xs, &ys, &zs, Line3DFlags::NONE);
+        },
+    );
 }
 ```
+
+Use `.build(|plot| { ... })` for a plot with default axes. With `.build_with_setup`, the first
+closure receives `&Plot3DSetup` and the second receives `&Plot3DScope`. Submit each `Plot3D`
+item with `.plot(plot)` or `.try_plot(plot)`. Both builders return `None` when the plot is skipped.
+The builder ends each open plot in its original window and table cell, including on unwind.
 
 ## Examples
 
@@ -126,10 +126,10 @@ The `meshes` module provides ready-to-use mesh data:
 use dear_implot3d::meshes::*;
 
 // Cube (8 vertices, 36 indices)
-plot_ui.mesh("Cube", CUBE_VERTICES, CUBE_INDICES).plot();
+plot.mesh("Cube", CUBE_VERTICES, CUBE_INDICES).plot();
 
 // Sphere (162 vertices, 960 indices)
-plot_ui.mesh("Sphere", SPHERE_VERTICES, SPHERE_INDICES).plot();
+plot.mesh("Sphere", SPHERE_VERTICES, SPHERE_INDICES).plot();
 ```
 
 ## Mint Support
@@ -144,7 +144,7 @@ let points = vec![
     Point3 { x: 1.0, y: 1.0, z: 1.0 },
 ];
 
-plot_ui.plot_line_mint("Line", &points, Line3DFlags::NONE);
+plot.plot_line_mint("Line", &points, Line3DFlags::NONE);
 ```
 
 ## Item Styling
@@ -163,9 +163,9 @@ let line = Line3D::f32("Line", &xs, &ys, &zs)
     .with_marker_size(4.0)
     .with_item_flags(Item3DFlags::NO_LEGEND);
 
-line.plot(&plot_ui);
+line.plot(plot);
 
-plot_ui
+plot
     .surface_f32("Surface", &grid_x, &grid_y, &grid_z)
     .with_fill_alpha(0.35)
     .with_line_color([0.95, 0.95, 0.95, 1.0])
@@ -178,8 +178,10 @@ order. For callers that already own contiguous per-vertex arrays, use the alloca
 `surface_f32_flat` path. Custom offsets and strides are available only through the explicitly
 `unsafe` `surface_f32_raw` escape hatch.
 
-The legacy `set_next_*_style()` helpers remain available for immediate-mode
-paths that still plot directly without a builder value.
+`plot.set_next_line_style`, `set_next_fill_style`, and `set_next_marker_style` apply to the next
+item in that open plot. Use `plot_ui.with_style_vars(&[Plot3DStyleVar::FillAlpha(0.5)], || { ... })`,
+`with_style_colors`, or `with_colormap` to override context style across several submissions or plots.
+These closures restore all pushed values on return or unwind.
 
 ## Notes
 

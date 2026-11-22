@@ -1,3 +1,4 @@
+use crate::layout::NextItemStyle;
 use crate::plots::Plot3D;
 use crate::{Plot3DDataLayout, sys};
 use dear_imgui_rs::texture::TextureRef;
@@ -107,57 +108,14 @@ impl Plot3DItemStyle {
 }
 
 pub(crate) fn plot3d_spec_with_style(
+    next: &NextItemStyle,
     style: Plot3DItemStyle,
     flags: u32,
     layout: Plot3DDataLayout,
 ) -> sys::ImPlot3DSpec_c {
-    let mut spec = crate::plot3d_spec_from(flags, layout);
+    let mut spec = next.spec(flags, layout);
     style.apply_to_spec(&mut spec);
     spec
-}
-
-struct ScopedNextPlot3DSpec {
-    previous: Option<sys::ImPlot3DSpec_c>,
-    active: bool,
-}
-
-impl ScopedNextPlot3DSpec {
-    fn restore_if_unused(&mut self) {
-        if !self.active {
-            return;
-        }
-
-        if crate::take_next_plot3d_spec().is_some() {
-            crate::set_next_plot3d_spec(self.previous.take());
-        }
-        self.active = false;
-    }
-}
-
-impl Drop for ScopedNextPlot3DSpec {
-    fn drop(&mut self) {
-        self.restore_if_unused();
-    }
-}
-
-fn with_scoped_next_plot3d_spec<R>(
-    style: Plot3DItemStyle,
-    item_flags: crate::Item3DFlags,
-    f: impl FnOnce() -> R,
-) -> R {
-    let previous = crate::take_next_plot3d_spec();
-    let mut spec = previous.unwrap_or_else(crate::default_plot3d_spec);
-    style.apply_to_spec(&mut spec);
-    spec.Flags = ((spec.Flags as u32) | item_flags.bits()) as sys::ImPlot3DItemFlags;
-    crate::set_next_plot3d_spec(Some(spec));
-
-    let mut guard = ScopedNextPlot3DSpec {
-        previous,
-        active: true,
-    };
-    let out = f();
-    guard.restore_if_unused();
-    out
 }
 
 /// Shared ImPlot3D item-style builder methods for plot builders backed by `ImPlot3DSpec`.
@@ -281,8 +239,14 @@ where
         self.inner.label()
     }
 
-    fn try_plot(&self, ui: &crate::Plot3DUi<'_>) -> Result<(), crate::plots::Plot3DError> {
-        with_scoped_next_plot3d_spec(self.style, self.item_flags, || self.inner.try_plot(ui))
+    fn try_plot(&self, ui: &crate::Plot3DScope<'_>) -> Result<(), crate::plots::Plot3DError> {
+        ui.next_item.scoped(
+            |spec| {
+                self.style.apply_to_spec(spec);
+                spec.Flags |= self.item_flags.bits() as sys::ImPlot3DItemFlags;
+            },
+            || self.inner.try_plot(ui),
+        )
     }
 }
 
@@ -464,11 +428,8 @@ impl_builder_plot3d_item_flagged!(crate::Mesh3DBuilder<'_>);
 
 #[cfg(test)]
 mod tests {
-    use super::{Plot3DItemStyle, plot3d_spec_with_style, with_scoped_next_plot3d_spec};
-    use crate::{
-        Item3DFlags, Marker3D, Plot3DDataLayout, Plot3DDataOffset, Plot3DDataStride,
-        default_plot3d_spec, set_next_plot3d_spec, take_next_plot3d_spec,
-    };
+    use super::{NextItemStyle, Plot3DItemStyle, plot3d_spec_with_style};
+    use crate::{Marker3D, Plot3DDataLayout, Plot3DDataOffset, Plot3DDataStride};
 
     #[test]
     fn plot3d_item_style_applies_fields() {
@@ -484,7 +445,7 @@ mod tests {
 
         let layout =
             Plot3DDataLayout::new(Plot3DDataOffset::samples(7), Plot3DDataStride::bytes(16));
-        let spec = plot3d_spec_with_style(style, 0, layout);
+        let spec = plot3d_spec_with_style(&NextItemStyle::default(), style, 0, layout);
 
         assert_eq!(spec.LineColor.x, 0.1);
         assert_eq!(spec.LineColor.y, 0.2);
@@ -505,103 +466,27 @@ mod tests {
     }
 
     #[test]
-    fn scoped_next_spec_restores_previous_when_not_consumed() {
-        set_next_plot3d_spec(None);
-
-        let mut previous = default_plot3d_spec();
-        previous.FillAlpha = 0.25;
-        set_next_plot3d_spec(Some(previous));
-
-        let out = with_scoped_next_plot3d_spec(
-            Plot3DItemStyle::new().with_line_weight(2.0),
-            Item3DFlags::NONE,
-            || "no-plot",
-        );
-
-        assert_eq!(out, "no-plot");
-
-        let restored = take_next_plot3d_spec().expect("previous next spec should be restored");
-        assert_eq!(restored.FillAlpha, 0.25);
-        assert_eq!(restored.LineWeight, 1.0);
-
-        set_next_plot3d_spec(None);
-    }
-
-    #[test]
-    fn scoped_next_spec_merges_with_previous_when_consumed() {
-        set_next_plot3d_spec(None);
-
-        let mut previous = default_plot3d_spec();
-        previous.FillAlpha = 0.25;
-        set_next_plot3d_spec(Some(previous));
-
-        let consumed = with_scoped_next_plot3d_spec(
-            Plot3DItemStyle::new()
-                .with_line_weight(3.0)
-                .with_marker(Marker3D::Auto),
-            Item3DFlags::NO_LEGEND,
-            || {
-                let layout = Plot3DDataLayout::new(
-                    Plot3DDataOffset::samples(5),
-                    Plot3DDataStride::bytes(12),
-                );
-                crate::plot3d_spec_from(0, layout)
-            },
-        );
-
-        assert_eq!(consumed.FillAlpha, 0.25);
-        assert_eq!(consumed.LineWeight, 3.0);
-        assert_eq!(consumed.Marker, crate::sys::ImPlot3DMarker_Auto as _);
-        assert_eq!(consumed.Flags as u32, Item3DFlags::NO_LEGEND.bits(),);
-        assert_eq!(consumed.Offset, 5);
-        assert_eq!(consumed.Stride, 12);
-        assert!(take_next_plot3d_spec().is_none());
-    }
-
-    #[test]
-    fn scoped_next_spec_item_flags_merge_with_plot_flags() {
-        set_next_plot3d_spec(None);
-
-        let consumed = with_scoped_next_plot3d_spec(
-            Plot3DItemStyle::default(),
-            Item3DFlags::NO_LEGEND,
-            || {
-                crate::plot3d_spec_from(
-                    crate::Line3DFlags::SEGMENTS.bits(),
-                    Plot3DDataLayout::DEFAULT.with_stride(Plot3DDataStride::bytes(4)),
-                )
-            },
-        );
-
-        assert_eq!(
-            consumed.Flags as u32,
-            Item3DFlags::NO_LEGEND.bits() | crate::Line3DFlags::SEGMENTS.bits(),
-        );
-        assert!(take_next_plot3d_spec().is_none());
-    }
-
-    #[test]
-    fn scoped_next_spec_restores_previous_if_closure_panics() {
-        set_next_plot3d_spec(None);
-
-        let mut previous = default_plot3d_spec();
-        previous.FillAlpha = 0.25;
-        set_next_plot3d_spec(Some(previous));
-
-        let result = std::panic::catch_unwind(|| {
-            with_scoped_next_plot3d_spec(
-                Plot3DItemStyle::new().with_line_weight(2.0),
-                Item3DFlags::NO_LEGEND,
-                || panic!("boom"),
-            );
+    fn scoped_style_consumes_outer_overrides_once_and_preserves_the_next_submission() {
+        let next = NextItemStyle::default();
+        let layout = Plot3DDataLayout::DEFAULT;
+        next.update(|s| {
+            s.FillAlpha = 0.25;
+            s.Flags = crate::Item3DFlags::NO_LEGEND.bits() as _;
         });
-
-        assert!(result.is_err());
-
-        let restored = take_next_plot3d_spec().expect("previous next spec should be restored");
-        assert_eq!(restored.FillAlpha, 0.25);
-        assert_eq!(restored.LineWeight, 1.0);
-
-        set_next_plot3d_spec(None);
+        next.scoped(
+            |s| s.LineWeight = 3.0,
+            || {
+                let submitted = next.spec(crate::Line3DFlags::SEGMENTS.bits(), layout);
+                assert_eq!((submitted.FillAlpha, submitted.LineWeight), (0.25, 3.0));
+                assert_eq!(
+                    submitted.Flags as u32,
+                    crate::Item3DFlags::NO_LEGEND.bits() | crate::Line3DFlags::SEGMENTS.bits()
+                );
+                next.update(|s| s.MarkerSize = 9.0);
+            },
+        );
+        let following = next.spec(0, layout);
+        assert_eq!(following.MarkerSize, 9.0);
+        assert_eq!(following.FillAlpha, -1.0);
     }
 }

@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use super::{Plot3D, Plot3DError};
-use crate::{Plot3DDataLayout, Plot3DUi, Surface3DFlags, debug_before_plot, plot3d_spec_from, sys};
+use crate::{Plot3DDataLayout, Plot3DScope, Surface3DFlags, sys};
 
 const SURFACE_LABEL_ERROR: &str = "surface label contains NUL";
 
@@ -223,7 +223,7 @@ fn surface_scale(min: f64, max: f64) -> Result<(f64, f64), Plot3DError> {
 }
 
 pub(crate) fn submit_surface_grid(
-    ui: &Plot3DUi<'_>,
+    ui: &Plot3DScope<'_>,
     label: SurfaceLabel<'_>,
     grid: &SurfaceGrid<'_>,
     scale_min: f64,
@@ -235,7 +235,6 @@ pub(crate) fn submit_surface_grid(
     let (x_count, y_count) = grid.shape().counts_i32();
 
     ui.with_bound_context(|| {
-        debug_before_plot();
         let spec = make_spec();
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -268,7 +267,7 @@ pub(crate) fn submit_surface_grid(
 }
 
 pub(crate) unsafe fn submit_surface_raw(
-    ui: &Plot3DUi<'_>,
+    ui: &Plot3DScope<'_>,
     label: SurfaceLabel<'_>,
     xs: &[f32],
     ys: &[f32],
@@ -291,8 +290,7 @@ pub(crate) unsafe fn submit_surface_raw(
     let (x_count, y_count) = shape.counts_i32();
 
     ui.with_bound_context(|| {
-        debug_before_plot();
-        let spec = plot3d_spec_from(flags.bits(), layout);
+        let spec = ui.next_item.spec(flags.bits(), layout);
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
             sys::ImPlot3D_PlotSurface_FloatPtr(
                 label_ptr,
@@ -313,7 +311,7 @@ pub(crate) unsafe fn submit_surface_raw(
 /// A surface whose X and Y inputs describe grid axes. Filled surfaces require finite Z samples.
 ///
 /// Custom offsets are intentionally unavailable on this safe type. Use the unsafe
-/// [`Plot3DUi::surface_f32_raw`] escape hatch for arbitrary native layouts.
+/// [`Plot3DScope::surface_f32_raw`] escape hatch for arbitrary native layouts.
 ///
 /// ```compile_fail
 /// use dear_implot3d::{Plot3DDataOffset, Surface3D};
@@ -365,11 +363,12 @@ impl<'a> Plot3D for Surface3D<'a> {
         self.label
     }
 
-    fn try_plot(&self, ui: &Plot3DUi<'_>) -> Result<(), Plot3DError> {
+    fn try_plot(&self, ui: &Plot3DScope<'_>) -> Result<(), Plot3DError> {
         let label = SurfaceLabel::checked(self.label)?;
         let grid = SurfaceGrid::from_axes(self.xs, self.ys, self.zs, self.flags)?;
         submit_surface_grid(ui, label, &grid, self.scale_min, self.scale_max, || {
-            plot3d_spec_from(self.flags.bits(), Plot3DDataLayout::DEFAULT)
+            ui.next_item
+                .spec(self.flags.bits(), Plot3DDataLayout::DEFAULT)
         })
     }
 }
@@ -419,39 +418,39 @@ mod tests {
         let plot_context = crate::Plot3DContext::create(&imgui);
         let frame = imgui.begin_frame();
         let plot_ui = plot_context.get_plot_ui(frame.ui());
-        let _plot = plot_ui
+        plot_ui
             .begin_plot("surface C++ capture")
-            .build()
+            .build(|plot| {
+                let xs = [10.0, 20.0];
+                let ys = [1.0, 2.0];
+                let zs = [11.0, 21.0, 12.0, 22.0];
+                unsafe { sys::surface_test_probe::dear_implot3d_surface_probe_reset() };
+                Surface3D::new("captured surface", &xs, &ys, &zs)
+                    .try_plot(plot)
+                    .unwrap();
+
+                let mut captured_xs = [0.0; 4];
+                let mut captured_ys = [0.0; 4];
+                let mut captured_zs = [0.0; 4];
+                let mut x_count = 0;
+                let mut y_count = 0;
+                let point_count = unsafe {
+                    sys::surface_test_probe::dear_implot3d_surface_probe_read(
+                        captured_xs.as_mut_ptr(),
+                        captured_ys.as_mut_ptr(),
+                        captured_zs.as_mut_ptr(),
+                        captured_xs.len() as i32,
+                        &mut x_count,
+                        &mut y_count,
+                    )
+                };
+
+                assert_eq!((x_count, y_count, point_count), (2, 2, 4));
+                assert_eq!(captured_xs, [10.0, 20.0, 10.0, 20.0]);
+                assert_eq!(captured_ys, [1.0, 1.0, 2.0, 2.0]);
+                assert_eq!(captured_zs, zs);
+            })
             .expect("surface capture plot should begin");
-
-        let xs = [10.0, 20.0];
-        let ys = [1.0, 2.0];
-        let zs = [11.0, 21.0, 12.0, 22.0];
-        unsafe { sys::surface_test_probe::dear_implot3d_surface_probe_reset() };
-        Surface3D::new("captured surface", &xs, &ys, &zs)
-            .try_plot(&plot_ui)
-            .unwrap();
-
-        let mut captured_xs = [0.0; 4];
-        let mut captured_ys = [0.0; 4];
-        let mut captured_zs = [0.0; 4];
-        let mut x_count = 0;
-        let mut y_count = 0;
-        let point_count = unsafe {
-            sys::surface_test_probe::dear_implot3d_surface_probe_read(
-                captured_xs.as_mut_ptr(),
-                captured_ys.as_mut_ptr(),
-                captured_zs.as_mut_ptr(),
-                captured_xs.len() as i32,
-                &mut x_count,
-                &mut y_count,
-            )
-        };
-
-        assert_eq!((x_count, y_count, point_count), (2, 2, 4));
-        assert_eq!(captured_xs, [10.0, 20.0, 10.0, 20.0]);
-        assert_eq!(captured_ys, [1.0, 1.0, 2.0, 2.0]);
-        assert_eq!(captured_zs, zs);
     }
 
     #[test]

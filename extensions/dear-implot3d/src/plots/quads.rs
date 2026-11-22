@@ -1,5 +1,5 @@
 use super::{Plot3D, Plot3DError, primitive_vertex_count, validate_lengths};
-use crate::{Plot3DDataLayout, Plot3DDataOffset, Plot3DUi, Quad3DFlags};
+use crate::{Plot3DDataLayout, Plot3DDataOffset, Plot3DScope, Quad3DFlags};
 
 pub struct Quads3D<'a> {
     pub label: &'a str,
@@ -90,7 +90,7 @@ impl<'a> Plot3D for Quads3D<'a> {
     fn label(&self) -> &str {
         self.label
     }
-    fn try_plot(&self, ui: &Plot3DUi<'_>) -> Result<(), Plot3DError> {
+    fn try_plot(&self, ui: &Plot3DScope<'_>) -> Result<(), Plot3DError> {
         if let Some(pts) = self.points_f32 {
             primitive_vertex_count(
                 pts.len(),

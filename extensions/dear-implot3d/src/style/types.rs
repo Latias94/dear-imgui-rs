@@ -20,22 +20,49 @@ pub enum Plot3DColorElement {
     AxisBgActive = sys::ImPlot3DCol_AxisBgActive as i32,
 }
 
-/// ImPlot3D style variables.
-#[repr(i32)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+/// A context style variable and its native value type.
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Plot3DStyleVar {
-    LineWeight = sys::ImPlot3DStyleVar_LineWeight as i32,
-    Marker = sys::ImPlot3DStyleVar_Marker as i32,
-    MarkerSize = sys::ImPlot3DStyleVar_MarkerSize as i32,
-    FillAlpha = sys::ImPlot3DStyleVar_FillAlpha as i32,
-    PlotDefaultSize = sys::ImPlot3DStyleVar_PlotDefaultSize as i32,
-    PlotMinSize = sys::ImPlot3DStyleVar_PlotMinSize as i32,
-    PlotPadding = sys::ImPlot3DStyleVar_PlotPadding as i32,
-    LabelPadding = sys::ImPlot3DStyleVar_LabelPadding as i32,
-    ViewScaleFactor = sys::ImPlot3DStyleVar_ViewScaleFactor as i32,
-    LegendPadding = sys::ImPlot3DStyleVar_LegendPadding as i32,
-    LegendInnerPadding = sys::ImPlot3DStyleVar_LegendInnerPadding as i32,
-    LegendSpacing = sys::ImPlot3DStyleVar_LegendSpacing as i32,
+    LineWeight(f32),
+    MarkerSize(f32),
+    FillAlpha(f32),
+    ViewScaleFactor(f32),
+    Marker(crate::Marker3D),
+    PlotDefaultSize([f32; 2]),
+    PlotMinSize([f32; 2]),
+    PlotPadding([f32; 2]),
+    LabelPadding([f32; 2]),
+    LegendPadding([f32; 2]),
+    LegendInnerPadding([f32; 2]),
+    LegendSpacing([f32; 2]),
+}
+
+impl Plot3DStyleVar {
+    // The caller has bound the ImPlot3D context. Each variant selects the overload named by
+    // its entry in the native GPlot3DStyleVarInfo table.
+    pub(super) unsafe fn push(self) {
+        use Plot3DStyleVar::*;
+        let scalar = |idx, value| unsafe { sys::ImPlot3D_PushStyleVar_Float(idx, value) };
+        let vec2 = |idx, [x, y]: [f32; 2]| unsafe {
+            sys::ImPlot3D_PushStyleVar_Vec2(idx, crate::imvec2(x, y))
+        };
+        match self {
+            LineWeight(v) => scalar(sys::ImPlot3DStyleVar_LineWeight as _, v),
+            MarkerSize(v) => scalar(sys::ImPlot3DStyleVar_MarkerSize as _, v),
+            FillAlpha(v) => scalar(sys::ImPlot3DStyleVar_FillAlpha as _, v),
+            ViewScaleFactor(v) => scalar(sys::ImPlot3DStyleVar_ViewScaleFactor as _, v),
+            Marker(v) => unsafe {
+                sys::ImPlot3D_PushStyleVar_Int(sys::ImPlot3DStyleVar_Marker as _, v as _)
+            },
+            PlotDefaultSize(v) => vec2(sys::ImPlot3DStyleVar_PlotDefaultSize as _, v),
+            PlotMinSize(v) => vec2(sys::ImPlot3DStyleVar_PlotMinSize as _, v),
+            PlotPadding(v) => vec2(sys::ImPlot3DStyleVar_PlotPadding as _, v),
+            LabelPadding(v) => vec2(sys::ImPlot3DStyleVar_LabelPadding as _, v),
+            LegendPadding(v) => vec2(sys::ImPlot3DStyleVar_LegendPadding as _, v),
+            LegendInnerPadding(v) => vec2(sys::ImPlot3DStyleVar_LegendInnerPadding as _, v),
+            LegendSpacing(v) => vec2(sys::ImPlot3DStyleVar_LegendSpacing as _, v),
+        }
+    }
 }
 
 /// Built-in ImPlot3D colormaps.

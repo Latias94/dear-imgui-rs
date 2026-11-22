@@ -1,60 +1,80 @@
-use std::marker::PhantomData;
+use crate::{Plot3DContext, Plot3DFlags, Plot3DScope, Plot3DSetup, Plot3DUi, imvec2, sys};
 
-use crate::ui::{Plot3DContextBinding, Plot3DToken};
-use crate::{Plot3DFlags, debug_begin_plot, imvec2, sys};
-use dear_imgui_rs::Ui;
-
-/// Plot builder for configuring the 3D plot
+/// Configures a 3D plot in the current ImGui window and table cell.
 pub struct Plot3DBuilder<'ui> {
-    pub(crate) binding: Plot3DContextBinding,
-    pub(crate) ui: &'ui Ui,
+    pub(crate) ui: Plot3DUi<'ui>,
     pub(crate) title: String,
-    pub(crate) size: Option<[f32; 2]>,
+    pub(crate) size: [f32; 2],
     pub(crate) flags: Plot3DFlags,
-    pub(crate) _lifetime: PhantomData<&'ui Ui>,
 }
 
-impl<'ui> Plot3DBuilder<'ui> {
+impl Plot3DBuilder<'_> {
     pub fn size(mut self, size: [f32; 2]) -> Self {
-        self.size = Some(size);
+        self.size = size;
         self
     }
+
     pub fn flags(mut self, flags: Plot3DFlags) -> Self {
         self.flags = flags;
         self
     }
-    pub fn build(self) -> Option<Plot3DToken<'ui>> {
-        self.binding.with_bound_context(|| {
-            if self.title.contains('\0') {
+
+    /// Draws a plot with the default setup. Returns `None` if the plot is skipped.
+    pub fn build<R>(self, draw: impl FnOnce(&Plot3DScope<'_>) -> R) -> Option<R> {
+        self.build_with_setup(|_| {}, draw)
+    }
+
+    /// Configures the axes, finishes native setup, and draws the plot. A skipped plot runs
+    /// neither closure. Both closures can use other ImGui windows and must return to the host
+    /// window and table cell to operate on this plot.
+    ///
+    /// # Panics
+    ///
+    /// Starting a second plot on this ImPlot3D context while one is open panics before BeginPlot.
+    pub fn build_with_setup<R>(
+        self,
+        setup: impl FnOnce(&Plot3DSetup<'_>),
+        draw: impl FnOnce(&Plot3DScope<'_>) -> R,
+    ) -> Option<R> {
+        if self.title.is_empty() || self.title.contains('\0') {
+            return None;
+        }
+        let ui = self.ui;
+        let _exclusive = ui.context.enter_plot();
+        ui.imgui.with_native_window_scope(|host| {
+            let began = ui.with_bound_context(|| {
+                dear_imgui_rs::with_scratch_txt(&self.title, |title| unsafe {
+                    sys::ImPlot3D_BeginPlot(
+                        title,
+                        imvec2(self.size[0], self.size[1]),
+                        self.flags.bits() as i32,
+                    )
+                })
+            });
+            if !began {
                 return None;
             }
-            let title = self.title;
-            let size = self.size.unwrap_or([0.0, 0.0]);
-            let ok = dear_imgui_rs::with_scratch_txt(&title, |title_ptr| unsafe {
-                // Defensive: ensure style.Colormap is in range before plotting
-                let style = sys::ImPlot3D_GetStyle();
-                if !style.is_null() {
-                    let count = sys::ImPlot3D_GetColormapCount();
-                    if count > 0 && ((*style).Colormap < 0 || (*style).Colormap >= count) {
-                        (*style).Colormap = 0;
-                    }
-                }
-                sys::ImPlot3D_BeginPlot(
-                    title_ptr,
-                    imvec2(size[0], size[1]),
-                    self.flags.bits() as i32,
-                )
-            });
-            if ok {
-                debug_begin_plot();
-                Some(Plot3DToken {
-                    binding: self.binding.clone(),
-                    ui: self.ui,
-                    _lifetime: PhantomData,
-                })
-            } else {
-                None
-            }
+            let _end = EndPlot(ui.context);
+            let plot = Plot3DScope {
+                ui,
+                host,
+                next_item: Default::default(),
+            };
+            host.run(|| setup(&Plot3DSetup { plot: &plot }));
+
+            // GetPlotRectPos calls SetupLock, which pushes a second native clip rect. Install it
+            // after all setup-closure scopes have closed and before application drawing begins.
+            ui.with_bound_context(|| unsafe { sys::ImPlot3D_GetPlotRectPos() });
+            Some(host.run(|| draw(&plot)))
         })
+    }
+}
+
+struct EndPlot<'a>(&'a Plot3DContext);
+
+impl Drop for EndPlot<'_> {
+    fn drop(&mut self) {
+        self.0
+            .with_bound_context(|| unsafe { sys::ImPlot3D_EndPlot() });
     }
 }

@@ -1,5 +1,5 @@
 use super::{Plot3D, Plot3DError};
-use crate::{Image3DFlags, Plot3DUi};
+use crate::{Image3DFlags, Plot3DScope};
 use dear_imgui_rs::texture::TextureRef;
 
 pub struct Image3DByAxes<'a, T: Into<TextureRef<'a>> + Copy> {
@@ -69,7 +69,7 @@ impl<'a, T: Into<TextureRef<'a>> + Copy> Plot3D for Image3DByAxes<'a, T> {
     fn label(&self) -> &str {
         self.label
     }
-    fn try_plot(&self, ui: &Plot3DUi<'_>) -> Result<(), Plot3DError> {
+    fn try_plot(&self, ui: &Plot3DScope<'_>) -> Result<(), Plot3DError> {
         ui.image_by_axes(self.label, self.tex, self.center, self.axis_u, self.axis_v)
             .uv(self.uv0, self.uv1)
             .tint(self.tint)
@@ -148,7 +148,7 @@ impl<'a, T: Into<TextureRef<'a>> + Copy> Plot3D for Image3DByCorners<'a, T> {
     fn label(&self) -> &str {
         self.label
     }
-    fn try_plot(&self, ui: &Plot3DUi<'_>) -> Result<(), Plot3DError> {
+    fn try_plot(&self, ui: &Plot3DScope<'_>) -> Result<(), Plot3DError> {
         ui.image_by_corners(self.label, self.tex, self.p0, self.p1, self.p2, self.p3)
             .uvs(self.uv0, self.uv1, self.uv2, self.uv3)
             .tint(self.tint)

@@ -3,7 +3,7 @@
 use dear_imgui_rs::Context;
 use dear_implot3d::{
     Line3DFlags, Mesh3D, Plot3D, Plot3DCond, Plot3DContext, Plot3DDataLayout, Plot3DDataOffset,
-    Plot3DDataStride, Plot3DError, Plot3DUi, Quad3DFlags, Quads3D, Surface3D, Surface3DFlags,
+    Plot3DDataStride, Plot3DError, Plot3DScope, Quad3DFlags, Quads3D, Surface3D, Surface3DFlags,
     Triangle3DFlags, Triangles3D,
 };
 use dear_implot3d_sys::{ImDrawVert, surface_test_probe::dear_implot3d_probe_vertices};
@@ -64,7 +64,7 @@ fn strided_surface_uses_only_coordinate_fields_and_wraps_the_vertex_offset() {
     });
 }
 
-fn with_plot(test: impl FnOnce(&Plot3DContext, &Plot3DUi<'_>)) {
+fn with_plot(test: impl FnOnce(&Plot3DContext, &Plot3DScope<'_>)) {
     static GUARD: Mutex<()> = Mutex::new(());
     let _guard = GUARD
         .lock()
@@ -80,9 +80,12 @@ fn with_plot(test: impl FnOnce(&Plot3DContext, &Plot3DUi<'_>)) {
     let plot = Plot3DContext::create(&imgui);
     let frame = imgui.begin_frame();
     let ui = plot.get_plot_ui(frame.ui());
-    let _token = ui.begin_plot("primitive submission").build().unwrap();
-    ui.setup_axes_limits(0.0, 1.0, 0.0, 1.0, 0.0, 1.0, Plot3DCond::Always);
-    test(&plot, &ui);
+    ui.begin_plot("primitive submission")
+        .build_with_setup(
+            |setup| setup.setup_axes_limits(0.0, 1.0, 0.0, 1.0, 0.0, 1.0, Plot3DCond::Always),
+            |active| test(&plot, active),
+        )
+        .unwrap();
 }
 
 #[test]

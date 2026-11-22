@@ -72,12 +72,15 @@ impl Ui {
         }
     }
 
-    /// Resolve a logical texture for an adjacent extension FFI call.
+    /// Resolve a logical texture for submission to this frame's native draw lists.
     ///
     /// # Safety
     ///
-    /// A returned managed pointer is valid only for an immediate native call while this `Ui` and
-    /// its frame remain borrowed. It must not be stored, sent, or used after the call returns.
+    /// Use the reference on the owning context's thread. An extension may queue it until the
+    /// end of its drawing scope to emit commands into this same ImGui frame. The context keeps
+    /// managed and atlas textures alive for the resulting draw data. Limit the extension's own
+    /// copy to this submission and consume the resulting frame through its renderer API.
+    /// For a legacy texture ID, the caller supplies the renderer binding and its lifetime.
     #[doc(hidden)]
     pub unsafe fn resolve_texture_ref_raw(
         &self,

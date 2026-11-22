@@ -2,13 +2,11 @@ use std::borrow::Cow;
 
 use crate::item_style::{Plot3DItemStyle, plot3d_spec_with_style};
 use crate::plots::{Plot3DError, primitive_vertex_count};
-use crate::{
-    Item3DFlags, Mesh3DFlags, Plot3DDataLayout, Plot3DUi, debug_before_plot, len_i32, sys,
-};
+use crate::{Item3DFlags, Mesh3DFlags, Plot3DDataLayout, Plot3DScope, len_i32, sys};
 
 /// Mesh plot builder
 pub struct Mesh3DBuilder<'ui> {
-    pub(crate) _ui: &'ui Plot3DUi<'ui>,
+    pub(crate) _ui: &'ui Plot3DScope<'ui>,
     pub(crate) label: Cow<'ui, str>,
     pub(crate) vertices: &'ui [[f32; 3]],
     pub(crate) indices: &'ui [u32],
@@ -44,8 +42,8 @@ impl<'ui> Mesh3DBuilder<'ui> {
             let label = self.label.as_ref();
             let label = if label.contains('\0') { "mesh" } else { label };
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                debug_before_plot();
                 let spec = plot3d_spec_with_style(
+                    &self._ui.next_item,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     Plot3DDataLayout::DEFAULT,
@@ -96,7 +94,7 @@ fn mesh_counts(
     Ok((vertices, count))
 }
 
-impl<'ui> Plot3DUi<'ui> {
+impl<'ui> Plot3DScope<'ui> {
     /// Start a mesh plot from vertices (x,y,z) and triangle indices
     pub fn mesh(
         &'ui self,
@@ -104,7 +102,7 @@ impl<'ui> Plot3DUi<'ui> {
         vertices: &'ui [[f32; 3]],
         indices: &'ui [u32],
     ) -> Mesh3DBuilder<'ui> {
-        self.with_bound_context(|| Mesh3DBuilder {
+        Mesh3DBuilder {
             _ui: self,
             label: label.into(),
             vertices,
@@ -112,6 +110,6 @@ impl<'ui> Plot3DUi<'ui> {
             flags: Mesh3DFlags::NONE,
             item_flags: Item3DFlags::NONE,
             style: Plot3DItemStyle::default(),
-        })
+        }
     }
 }

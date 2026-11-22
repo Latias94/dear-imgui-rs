@@ -49,26 +49,31 @@ impl Application for ImPlot3dMinimal {
                     self.z[index] = progress * 2.0 - 1.0;
                 }
 
-                if let Some(_plot) = plot_ui.begin_plot("Helix").size([-1.0, 390.0]).build() {
-                    plot_ui.setup_axes(
-                        "x",
-                        "y",
-                        "z",
-                        Axis3DFlags::NONE,
-                        Axis3DFlags::NONE,
-                        Axis3DFlags::NONE,
+                plot_ui
+                    .begin_plot("Helix")
+                    .size([-1.0, 390.0])
+                    .build_with_setup(
+                        |setup| {
+                            setup.setup_axes(
+                                "x",
+                                "y",
+                                "z",
+                                Axis3DFlags::NONE,
+                                Axis3DFlags::NONE,
+                                Axis3DFlags::NONE,
+                            );
+                            setup.setup_axes_limits(
+                                -1.25,
+                                1.25,
+                                -1.25,
+                                1.25,
+                                -1.25,
+                                1.25,
+                                Plot3DCond::Once,
+                            );
+                        },
+                        |plot| Line3D::f32("helix", &self.x, &self.y, &self.z).plot(plot),
                     );
-                    plot_ui.setup_axes_limits(
-                        -1.25,
-                        1.25,
-                        -1.25,
-                        1.25,
-                        -1.25,
-                        1.25,
-                        Plot3DCond::Once,
-                    );
-                    Line3D::f32("helix", &self.x, &self.y, &self.z).plot(&plot_ui);
-                }
             });
 
         Ok(())

@@ -1,6 +1,6 @@
 use crate::{Line3DFlags, Scatter3DFlags};
 
-use super::core::Plot3DUi;
+use crate::Plot3DScope;
 
 /// Optional mint support for inputs
 ///
@@ -16,20 +16,21 @@ use super::core::Plot3DUi;
 /// use dear_implot3d::*;
 /// use mint::Point3;
 ///
-/// # let plot_ui: Plot3DUi = todo!();
+/// # fn draw(plot_ui: &Plot3DUi<'_>) {
 /// let points = vec![
 ///     Point3 { x: 0.0, y: 0.0, z: 0.0 },
 ///     Point3 { x: 1.0, y: 1.0, z: 1.0 },
 ///     Point3 { x: 2.0, y: 0.0, z: 2.0 },
 /// ];
 ///
-/// if let Some(_token) = plot_ui.begin_plot("Mint Example").build() {
-///     plot_ui.plot_line_mint("Line", &points, Line3DFlags::NONE);
-/// }
+/// plot_ui.begin_plot("Mint Example").build(|plot| {
+///     plot.plot_line_mint("Line", &points, Line3DFlags::NONE);
+/// });
+/// # }
 /// # }
 /// ```
 #[cfg(feature = "mint")]
-impl<'ui> Plot3DUi<'ui> {
+impl<'ui> Plot3DScope<'ui> {
     /// Plot a 3D line using `mint::Point3<f32>` points
     ///
     /// This is a convenience function that converts mint points to separate x, y, z arrays.

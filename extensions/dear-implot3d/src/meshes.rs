@@ -1,7 +1,7 @@
 //! Predefined mesh data for common 3D shapes
 //!
 //! This module provides vertex and index data for common 3D meshes that can be used
-//! with `Plot3DUi::mesh()`. These meshes are exported from the upstream ImPlot3D library.
+//! with `Plot3DScope::mesh()`. These meshes are exported from the upstream ImPlot3D library.
 //!
 //! # Example
 //!
@@ -9,15 +9,12 @@
 //! use dear_implot3d::*;
 //! use dear_implot3d::meshes::*;
 //!
-//! # let plot_ui: Plot3DUi = todo!();
-//! if let Some(_token) = plot_ui.begin_plot("Mesh Demo").build() {
-//!     plot_ui.setup_axes_limits(-1.5, 1.5, -1.5, 1.5, -1.5, 1.5, Plot3DCond::Once);
-//!     
-//!     // Plot a cube mesh
-//!     plot_ui.mesh("Cube", CUBE_VERTICES, CUBE_INDICES)
-//!         .flags(Mesh3DFlags::NONE)
-//!         .plot();
-//! }
+//! # fn draw(plot_ui: &Plot3DUi<'_>) {
+//! plot_ui.begin_plot("Mesh Demo").build_with_setup(
+//!     |setup| setup.setup_axes_limits(-1.5, 1.5, -1.5, 1.5, -1.5, 1.5, Plot3DCond::Once),
+//!     |plot| plot.mesh("Cube", CUBE_VERTICES, CUBE_INDICES).plot(),
+//! );
+//! # }
 //! ```
 
 /// Cube mesh vertices (8 vertices)

@@ -5,11 +5,11 @@ use crate::plots::{
     Plot3DError, SurfaceGrid, SurfaceGridShape, SurfaceLabel, submit_surface_grid,
     submit_surface_raw,
 };
-use crate::{Item3DFlags, Plot3DDataLayout, Plot3DUi, Surface3DFlags, plot3d_spec_from};
+use crate::{Item3DFlags, Plot3DDataLayout, Plot3DScope, Surface3DFlags};
 
 /// Surface (grid) plot builder (f32 variant).
 pub struct Surface3DBuilder<'ui> {
-    pub(crate) _ui: &'ui Plot3DUi<'ui>,
+    pub(crate) _ui: &'ui Plot3DScope<'ui>,
     pub(crate) label: Cow<'ui, str>,
     pub(crate) xs: &'ui [f32],
     pub(crate) ys: &'ui [f32],
@@ -54,6 +54,7 @@ impl<'ui> Surface3DBuilder<'ui> {
         let grid = SurfaceGrid::from_axes(xs, ys, zs, flags)?;
         submit_surface_grid(_ui, label, &grid, scale_min, scale_max, || {
             plot3d_spec_with_style(
+                &_ui.next_item,
                 style,
                 flags.bits() | item_flags.bits(),
                 Plot3DDataLayout::DEFAULT,
@@ -62,7 +63,7 @@ impl<'ui> Surface3DBuilder<'ui> {
     }
 }
 
-impl<'ui> Plot3DUi<'ui> {
+impl<'ui> Plot3DScope<'ui> {
     /// Start a surface plot (f32) from X/Y grid axes. Filled surfaces require finite Z samples.
     pub fn surface_f32(
         &'ui self,
@@ -71,7 +72,7 @@ impl<'ui> Plot3DUi<'ui> {
         ys: &'ui [f32],
         zs: &'ui [f32],
     ) -> Surface3DBuilder<'ui> {
-        self.with_bound_context(|| Surface3DBuilder {
+        Surface3DBuilder {
             _ui: self,
             label: label.into(),
             xs,
@@ -82,7 +83,7 @@ impl<'ui> Plot3DUi<'ui> {
             flags: Surface3DFlags::NONE,
             item_flags: Item3DFlags::NONE,
             style: Plot3DItemStyle::default(),
-        })
+        }
     }
 
     /// Submit a surface from already flattened, contiguous per-vertex arrays.
@@ -93,9 +94,9 @@ impl<'ui> Plot3DUi<'ui> {
     /// Filled surfaces require finite Z samples. Pass two zeros for automatic color scaling over their range.
     ///
     /// ```no_run
-    /// use dear_implot3d::{Plot3DError, Plot3DUi, Surface3DFlags};
+    /// use dear_implot3d::{Plot3DError, Plot3DScope, Surface3DFlags};
     ///
-    /// fn submit(plot_ui: &Plot3DUi<'_>) -> Result<(), Plot3DError> {
+    /// fn submit(plot_ui: &Plot3DScope<'_>) -> Result<(), Plot3DError> {
     ///     let xs = [0.0, 1.0, 0.0, 1.0];
     ///     let ys = [0.0, 0.0, 1.0, 1.0];
     ///     let zs = [0.0, 1.0, 1.0, 2.0];
@@ -128,7 +129,7 @@ impl<'ui> Plot3DUi<'ui> {
         let label = SurfaceLabel::checked(label.as_ref())?;
         let grid = SurfaceGrid::from_flattened(xs_flat, ys_flat, zs, x_count, y_count, flags)?;
         submit_surface_grid(self, label, &grid, scale_min, scale_max, || {
-            plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT)
+            self.next_item.spec(flags.bits(), Plot3DDataLayout::DEFAULT)
         })
     }
 
@@ -145,9 +146,9 @@ impl<'ui> Plot3DUi<'ui> {
     /// Calling this arbitrary-layout API without an `unsafe` block is rejected:
     ///
     /// ```compile_fail
-    /// use dear_implot3d::{Plot3DDataLayout, Plot3DUi, Surface3DFlags};
+    /// use dear_implot3d::{Plot3DDataLayout, Plot3DScope, Surface3DFlags};
     ///
-    /// fn submit(plot_ui: &Plot3DUi<'_>) {
+    /// fn submit(plot_ui: &Plot3DScope<'_>) {
     ///     let values = [0.0; 4];
     ///     let _ = plot_ui.surface_f32_raw(
     ///         "surface",
