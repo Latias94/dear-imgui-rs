@@ -17,7 +17,7 @@ impl<'ui> NodeEditorFrame<'ui> {
     /// groups and pins opened inside the node before ending it, including on unwind.
     pub unsafe fn begin_node<'a>(&'a self, node: NodeId) -> NodeToken<'a> {
         self.require_scope(None, "NodeEditorFrame::begin_node()");
-        self.with_current("NodeEditorFrame::begin_node()", || unsafe {
+        self.with_canvas("NodeEditorFrame::begin_node()", || unsafe {
             sys::dne_begin_node(node.raw())
         });
         NodeToken {
@@ -46,7 +46,7 @@ impl<'ui> NodeEditorFrame<'ui> {
     /// hint until it ends. [`Self::group_hint`] owns these boundaries during drawing and unwind.
     pub unsafe fn begin_group_hint<'a>(&'a self, node: NodeId) -> Option<GroupHintToken<'a>> {
         self.require_scope(None, "NodeEditorFrame::begin_group_hint()");
-        self.with_current("NodeEditorFrame::begin_group_hint()", || unsafe {
+        self.with_canvas("NodeEditorFrame::begin_group_hint()", || unsafe {
             sys::dne_begin_group_hint(node.raw())
         })
         .then(|| GroupHintToken {
@@ -61,7 +61,7 @@ impl<'ui> NodeEditorFrame<'ui> {
     pub fn node_background_draw_list(&self, node: NodeId) -> Option<DrawListMut<'_>> {
         self.require_scope(None, "NodeEditorFrame::node_background_draw_list()");
         let draw_list = self
-            .with_current("NodeEditorFrame::node_background_draw_list()", || unsafe {
+            .with_canvas("NodeEditorFrame::node_background_draw_list()", || unsafe {
                 sys::dne_get_node_background_draw_list(node.raw())
             });
         // Upstream selects a channel on the host window's draw list.
@@ -70,13 +70,13 @@ impl<'ui> NodeEditorFrame<'ui> {
 
     #[doc(alias = "GetStyle")]
     pub fn style(&self) -> NodeEditorStyle {
-        self.with_current("NodeEditorFrame::style()", NodeEditorStyle::current)
+        self.with_canvas("NodeEditorFrame::style()", NodeEditorStyle::current)
     }
 
     pub fn group(&self, size: [f32; 2]) {
         assert_non_negative_finite_vec2("NodeEditorFrame::group()", "size", size);
         self.require_scope(Some(ScopeKind::Node), "NodeEditorFrame::group()");
-        self.with_current("NodeEditorFrame::group()", || unsafe {
+        self.with_canvas("NodeEditorFrame::group()", || unsafe {
             sys::dne_group(vec2(size))
         });
         self.mark_group();
@@ -84,7 +84,7 @@ impl<'ui> NodeEditorFrame<'ui> {
 
     pub fn set_group_size(&self, node: NodeId, size: [f32; 2]) {
         assert_non_negative_finite_vec2("NodeEditorFrame::set_group_size()", "size", size);
-        self.with_current("NodeEditorFrame::set_group_size()", || unsafe {
+        self.with_canvas("NodeEditorFrame::set_group_size()", || unsafe {
             sys::dne_set_group_size(node.raw(), vec2(size))
         });
     }
@@ -103,7 +103,7 @@ impl<'ui> NodeEditorFrame<'ui> {
     ) -> bool {
         assert_finite_vec4("NodeEditorFrame::link_colored()", "color", color);
         assert_non_negative_finite_f32("NodeEditorFrame::link_colored()", "thickness", thickness);
-        self.with_current("NodeEditorFrame::link_colored()", || unsafe {
+        self.with_canvas("NodeEditorFrame::link_colored()", || unsafe {
             sys::dne_link(
                 link.raw(),
                 start_pin.raw(),
@@ -115,7 +115,7 @@ impl<'ui> NodeEditorFrame<'ui> {
     }
 
     pub fn flow(&self, link: LinkId, direction: FlowDirection) {
-        self.with_current("NodeEditorFrame::flow()", || unsafe {
+        self.with_canvas("NodeEditorFrame::flow()", || unsafe {
             sys::dne_flow(link.raw(), direction.raw())
         });
     }
@@ -126,7 +126,7 @@ impl<'ui> NodeEditorFrame<'ui> {
         value: [f32; 4],
     ) -> StyleColorToken<'a> {
         assert_finite_vec4("NodeEditorFrame::push_style_color()", "value", value);
-        self.with_current("NodeEditorFrame::push_style_color()", || unsafe {
+        self.with_canvas("NodeEditorFrame::push_style_color()", || unsafe {
             sys::dne_push_style_color(color.raw(), vec4(value))
         });
         StyleColorToken {
@@ -141,7 +141,7 @@ impl<'ui> NodeEditorFrame<'ui> {
             StyleVarType::Float,
         );
         assert_finite_f32("NodeEditorFrame::push_style_var_float()", "value", value);
-        self.with_current("NodeEditorFrame::push_style_var_float()", || unsafe {
+        self.with_canvas("NodeEditorFrame::push_style_var_float()", || unsafe {
             sys::dne_push_style_var_float(var.raw(), value)
         });
         StyleVarToken {
@@ -156,7 +156,7 @@ impl<'ui> NodeEditorFrame<'ui> {
             StyleVarType::Vec2,
         );
         assert_finite_vec2("NodeEditorFrame::push_style_var_vec2()", "value", value);
-        self.with_current("NodeEditorFrame::push_style_var_vec2()", || unsafe {
+        self.with_canvas("NodeEditorFrame::push_style_var_vec2()", || unsafe {
             sys::dne_push_style_var_vec2(var.raw(), vec2(value))
         });
         StyleVarToken {
@@ -171,7 +171,7 @@ impl<'ui> NodeEditorFrame<'ui> {
             StyleVarType::Vec4,
         );
         assert_finite_vec4("NodeEditorFrame::push_style_var_vec4()", "value", value);
-        self.with_current("NodeEditorFrame::push_style_var_vec4()", || unsafe {
+        self.with_canvas("NodeEditorFrame::push_style_var_vec4()", || unsafe {
             sys::dne_push_style_var_vec4(var.raw(), vec4(value))
         });
         StyleVarToken {
@@ -188,7 +188,7 @@ impl<'ui> NodeEditorFrame<'ui> {
     /// Balance host draw-list scopes around this suspension. Resume in the same window,
     /// table cell and draw channel after nested UI has closed. See [`Self::with_suspended`].
     pub unsafe fn suspend<'a>(&'a self) -> SuspensionToken<'a> {
-        self.with_current("NodeEditorFrame::suspend()", || unsafe {
+        self.with_canvas("NodeEditorFrame::suspend()", || unsafe {
             sys::dne_suspend()
         });
         SuspensionToken {
@@ -197,7 +197,7 @@ impl<'ui> NodeEditorFrame<'ui> {
     }
 
     pub fn is_suspended(&self) -> bool {
-        self.with_current("NodeEditorFrame::is_suspended()", || unsafe {
+        self.with_canvas("NodeEditorFrame::is_suspended()", || unsafe {
             sys::dne_is_suspended()
         })
     }
@@ -219,7 +219,7 @@ impl NodeToken<'_> {
     pub unsafe fn begin_pin<'a>(&'a self, pin: PinId, kind: PinKind) -> PinToken<'a> {
         let frame = self.scope.frame;
         frame.require_scope(Some(ScopeKind::Node), "NodeToken::begin_pin()");
-        frame.with_current("NodeToken::begin_pin()", || unsafe {
+        frame.with_canvas("NodeToken::begin_pin()", || unsafe {
             assert!(
                 frame.submitted_pins.borrow_mut().insert(pin),
                 "NodeToken::begin_pin() requires each pin ID to be submitted only once per editor frame"
@@ -249,18 +249,16 @@ impl PinToken<'_> {
 
     pub fn rect(&self, min: [f32; 2], max: [f32; 2]) {
         assert_finite_rect("PinToken::rect()", min, max);
-        self.scope
-            .frame
-            .with_current("PinToken::rect()", || unsafe {
-                sys::dne_pin_rect(vec2(min), vec2(max))
-            });
+        self.scope.frame.with_canvas("PinToken::rect()", || unsafe {
+            sys::dne_pin_rect(vec2(min), vec2(max))
+        });
     }
 
     pub fn pivot_rect(&self, min: [f32; 2], max: [f32; 2]) {
         assert_finite_rect("PinToken::pivot_rect()", min, max);
         self.scope
             .frame
-            .with_current("PinToken::pivot_rect()", || unsafe {
+            .with_canvas("PinToken::pivot_rect()", || unsafe {
                 sys::dne_pin_pivot_rect(vec2(min), vec2(max))
             });
     }
@@ -269,7 +267,7 @@ impl PinToken<'_> {
         assert_non_negative_finite_vec2("PinToken::pivot_size()", "size", size);
         self.scope
             .frame
-            .with_current("PinToken::pivot_size()", || unsafe {
+            .with_canvas("PinToken::pivot_size()", || unsafe {
                 sys::dne_pin_pivot_size(vec2(size))
             });
     }
@@ -278,7 +276,7 @@ impl PinToken<'_> {
         assert_finite_vec2("PinToken::pivot_scale()", "scale", scale);
         self.scope
             .frame
-            .with_current("PinToken::pivot_scale()", || unsafe {
+            .with_canvas("PinToken::pivot_scale()", || unsafe {
                 sys::dne_pin_pivot_scale(vec2(scale))
             });
     }
@@ -287,7 +285,7 @@ impl PinToken<'_> {
         assert_finite_vec2("PinToken::pivot_alignment()", "alignment", alignment);
         self.scope
             .frame
-            .with_current("PinToken::pivot_alignment()", || unsafe {
+            .with_canvas("PinToken::pivot_alignment()", || unsafe {
                 sys::dne_pin_pivot_alignment(vec2(alignment))
             });
     }
@@ -299,13 +297,13 @@ pub struct GroupHintToken<'a> {
 
 impl<'a> GroupHintToken<'a> {
     pub fn min(&self) -> [f32; 2] {
-        self.scope.frame.with_current("GroupHintToken::min()", || {
+        self.scope.frame.with_canvas("GroupHintToken::min()", || {
             from_vec2(unsafe { sys::dne_get_group_min() })
         })
     }
 
     pub fn max(&self) -> [f32; 2] {
-        self.scope.frame.with_current("GroupHintToken::max()", || {
+        self.scope.frame.with_canvas("GroupHintToken::max()", || {
             from_vec2(unsafe { sys::dne_get_group_max() })
         })
     }
@@ -313,7 +311,7 @@ impl<'a> GroupHintToken<'a> {
     pub fn foreground_draw_list(&self) -> DrawListMut<'_> {
         self.scope
             .frame
-            .with_current("GroupHintToken::foreground_draw_list()", || unsafe {
+            .with_canvas("GroupHintToken::foreground_draw_list()", || unsafe {
                 sys::dne_get_hint_foreground_draw_list()
             });
         self.scope.frame._ui.get_window_draw_list()
@@ -322,7 +320,7 @@ impl<'a> GroupHintToken<'a> {
     pub fn background_draw_list(&self) -> DrawListMut<'_> {
         self.scope
             .frame
-            .with_current("GroupHintToken::background_draw_list()", || unsafe {
+            .with_canvas("GroupHintToken::background_draw_list()", || unsafe {
                 sys::dne_get_hint_background_draw_list()
             });
         self.scope.frame._ui.get_window_draw_list()

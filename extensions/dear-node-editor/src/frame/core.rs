@@ -90,22 +90,24 @@ impl Drop for FrameToken<'_> {
     fn drop(&mut self) {
         let stack = self.frame.stack(self.kind);
         stack.borrow_mut().release(self.index);
-        self.frame
-            ._editor
-            .with_current("node-editor scope end", || {
-                if self.frame.at_host() {
-                    self.frame.flush_released(stack);
-                } else {
-                    self.frame.deferred.set(true);
-                }
-            });
+        self.frame.editor.with_current("node-editor scope end", || {
+            if self.frame.at_host() {
+                self.frame.flush_released(stack);
+            } else {
+                self.frame.deferred.set(true);
+            }
+        });
     }
 }
 
 /// RAII token for an active node-editor frame.
+///
+/// A [`Ui::popup`] inside [`Self::with_suspended`] can access this editor's selection,
+/// inspect nodes and links, and queue deletion requests. Drawing and interaction
+/// sessions use the original canvas.
 pub struct NodeEditorFrame<'ui> {
     pub(super) _ui: &'ui Ui,
-    pub(super) _editor: &'ui EditorContext,
+    editor: &'ui EditorContext,
     host: Option<&'ui NativeWindowScope<'ui>>,
     deferred: Cell<bool>,
     build_scopes: RefCell<ScopeStack>,
@@ -139,7 +141,7 @@ impl<'ui> NodeEditorFrame<'ui> {
         });
         Self {
             _ui: ui,
-            _editor: editor,
+            editor,
             host,
             deferred: Cell::new(false),
             build_scopes: RefCell::default(),
@@ -149,9 +151,16 @@ impl<'ui> NodeEditorFrame<'ui> {
         }
     }
 
+    // Editor-owned data is accessible while a popup is current. Native scope ends wait
+    // for the canvas because they can touch the host draw list and clip stack.
     #[inline]
-    pub(super) fn with_current<R>(&self, caller: &str, f: impl FnOnce() -> R) -> R {
-        self._editor.with_current(caller, || {
+    pub(super) fn with_editor<R>(&self, caller: &str, f: impl FnOnce() -> R) -> R {
+        self.editor.with_current(caller, f)
+    }
+
+    #[inline]
+    pub(super) fn with_canvas<R>(&self, caller: &str, f: impl FnOnce() -> R) -> R {
+        self.with_editor(caller, || {
             assert!(
                 self.at_host(),
                 "{caller} requires its original window, table cell and innermost node editor canvas"
@@ -238,7 +247,7 @@ impl<'ui> NodeEditorFrame<'ui> {
 
 impl Drop for NodeEditorFrame<'_> {
     fn drop(&mut self) {
-        self._editor
+        self.editor
             .with_current("NodeEditorFrame::end()", || unsafe {
                 assert!(
                     self.at_host(),
@@ -257,7 +266,7 @@ impl Drop for NodeEditorFrame<'_> {
                 }
                 sys::dne_end();
             });
-        self._editor.frame_active.set(false);
+        self.editor.frame_active.set(false);
     }
 }
 

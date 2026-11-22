@@ -647,21 +647,59 @@ mod tests {
         let context = EditorContext::create(&imgui);
         let first = NodeId::new(1);
         let second = NodeId::new(2);
+        let output = PinId::new(11);
+        let input = PinId::new(21);
+        let link_to_delete = LinkId::new(100);
+        let pin_to_disconnect = PinId::new(31);
+        let node_to_disconnect = NodeId::new(4);
+        let connections = [
+            (second, input, link_to_delete),
+            (NodeId::new(3), pin_to_disconnect, LinkId::new(101)),
+            (node_to_disconnect, PinId::new(41), LinkId::new(102)),
+        ];
         for frame_index in 0..2 {
             let ui = imgui.frame();
             ui.window("delete-candidate-contract")
                 .size([500.0, 350.0], dear_imgui_rs::Condition::Always)
                 .build(|| {
                     ui.with_node_editor(&context, "delete", [400.0, 260.0], |frame| {
-                        frame.node(first, |_| ui.text("First"));
-                        frame.node(second, |_| ui.text("Second"));
+                        frame.node(first, |node| {
+                            node.pin(output, PinKind::Output, |_| ui.text("Output"));
+                        });
+                        for (target, pin, link) in connections {
+                            frame.node(target, |node| {
+                                node.pin(pin, PinKind::Input, |_| ui.text("Input"));
+                            });
+                            assert!(frame.link(link, output, pin));
+                        }
                         if frame_index == 0 {
-                            assert!(frame.delete_node(first));
-                            assert!(frame.delete_node(second));
+                            frame.with_suspended(|| {
+                                ui.open_popup("Graph actions");
+                                ui.popup("Graph actions", || {
+                                    frame.select_node(first);
+                                    frame.add_node_to_selection(second);
+                                    frame.add_link_to_selection(link_to_delete);
+                                    assert!(frame.node_has_any_links(first));
+                                    assert!(frame.pin_has_any_links(input));
+                                    assert_eq!(
+                                        frame.link_pins(link_to_delete),
+                                        Some((output, input))
+                                    );
+                                    for selected in frame.selected_nodes() {
+                                        assert!(frame.delete_node(selected));
+                                    }
+                                    for selected in frame.selected_links() {
+                                        assert!(frame.delete_link(selected));
+                                    }
+                                    assert_eq!(frame.break_pin_links(pin_to_disconnect), 1);
+                                    assert_eq!(frame.break_node_links(node_to_disconnect), 1);
+                                    ui.close_current_popup();
+                                });
+                            });
                         } else {
                             let delete = frame
                                 .begin_delete()
-                                .expect("queued nodes should be offered");
+                                .expect("deletion requests from the popup should be offered");
                             assert!(
                                 catch_unwind(AssertUnwindSafe(|| delete.accept_deleted_item(true)))
                                     .is_err()
@@ -674,7 +712,8 @@ mod tests {
                                 catch_unwind(AssertUnwindSafe(|| frame.begin_delete())).is_err()
                             );
                             assert_eq!(delete.query_deleted_node(), Some(first));
-                            assert!(delete.accept_deleted_item(true));
+                            // Only the popup's explicit requests should queue the links.
+                            assert!(delete.accept_deleted_item(false));
                             assert!(
                                 catch_unwind(AssertUnwindSafe(|| delete.accept_deleted_item(true)))
                                     .is_err()
@@ -694,12 +733,23 @@ mod tests {
                                 catch_unwind(AssertUnwindSafe(|| delete.reject_deleted_item()))
                                     .is_err()
                             );
+                            let mut deleted_links = Vec::new();
+                            while let Some(candidate) = delete.query_deleted_link() {
+                                deleted_links.push(candidate);
+                                assert!(delete.accept_deleted_item(false));
+                            }
+                            deleted_links.sort_unstable();
+                            assert_eq!(
+                                deleted_links,
+                                connections.map(|(_, pin, link)| (link, output, pin))
+                            );
                             delete.end();
                         }
                         assert!(frame.with_create([1.0; 4], 1.0, |_, _| ()).is_none());
                         assert!(frame.with_create([1.0; 4], 1.0, |_, _| ()).is_none());
                     });
-                });
+                })
+                .expect("visible editor window");
             drop(imgui.render_legacy());
         }
     }
@@ -858,9 +908,12 @@ mod tests {
                 frame.with_suspended(|| {
                     let local = frame.push_style_var_float(StyleVar::LinkStrength, 0.5);
                     ui.window("nested editor host").build(|| {
-                        // A query with no drawing side effects exercises host validation.
+                        // The suspension belongs to the original canvas.
                         assert!(catch_unwind(AssertUnwindSafe(|| frame.is_suspended())).is_err());
                         drop(local);
+                        // Reading the model leaves the style pop pending on its host.
+                        assert_eq!(frame.selected_object_count(), 0);
+                        assert_eq!(editor_a.style().link_strength, 0.5);
                     });
                     assert_eq!(frame.style().link_strength, original);
                 });

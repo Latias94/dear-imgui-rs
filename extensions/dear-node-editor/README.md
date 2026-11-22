@@ -83,6 +83,14 @@ manual `unsafe` entry point requires the caller to balance the native canvas in
 the same window and drawing channel. Use `editor.with_suspended(|| ...)` for
 screen-space popups. Suspensions can nest inside a node or pin.
 
+Call `show_node_context_menu` or `show_link_context_menu` on the suspended canvas
+before opening `ui.popup`. A successful query moves the host window's cursor.
+Store the returned ID until the user chooses a menu item. Inside the popup you
+can read or change the editor's selection, inspect link endpoints, and queue a
+`delete_node` or `delete_link` request. `break_node_links` and `break_pin_links`
+queue the live links attached to a node or pin. On a later frame, call
+`begin_delete` on the canvas and update your graph for each accepted ID.
+
 If an application stores `dear_imgui_rs::Context` and `EditorContext` in the same owner struct,
 declare `EditorContext` before the ImGui context so the editor is dropped first. Native
 `imgui-node-editor` state is tied to the owning ImGui context. Its native owner

@@ -45,12 +45,12 @@ impl<'ui> NodeEditorFrame<'ui> {
         assert_finite_vec4("NodeEditorFrame::begin_create()", "color", color);
         assert_non_negative_finite_f32("NodeEditorFrame::begin_create()", "thickness", thickness);
         self.require_scope(None, "NodeEditorFrame::begin_create()");
-        let active = self.with_current("NodeEditorFrame::begin_create()", || unsafe {
+        let active = self.with_canvas("NodeEditorFrame::begin_create()", || unsafe {
             sys::dne_begin_create(vec4(color), thickness)
         });
         // Upstream enters its create interaction even when no item is offered.
         if !active {
-            self.with_current("NodeEditorFrame::begin_create()", || unsafe {
+            self.with_canvas("NodeEditorFrame::begin_create()", || unsafe {
                 sys::dne_end_create()
             });
             return None;
@@ -64,7 +64,7 @@ impl<'ui> NodeEditorFrame<'ui> {
 
     pub fn begin_delete<'a>(&'a self) -> Option<DeleteSession<'a>> {
         self.require_scope(None, "NodeEditorFrame::begin_delete()");
-        self.with_current("NodeEditorFrame::begin_delete()", || unsafe {
+        self.with_canvas("NodeEditorFrame::begin_delete()", || unsafe {
             sys::dne_begin_delete()
         })
         .then(|| DeleteSession {
@@ -75,7 +75,7 @@ impl<'ui> NodeEditorFrame<'ui> {
 
     pub fn begin_shortcut<'a>(&'a self) -> Option<ShortcutSession<'a>> {
         self.require_scope(None, "NodeEditorFrame::begin_shortcut()");
-        self.with_current("NodeEditorFrame::begin_shortcut()", || unsafe {
+        self.with_canvas("NodeEditorFrame::begin_shortcut()", || unsafe {
             sys::dne_begin_shortcut()
         })
         .then(|| ShortcutSession {
@@ -105,7 +105,7 @@ impl CreateSession<'_> {
         self.response
             .scope
             .frame
-            .with_current("CreateSession::query_new_link()", || {
+            .with_canvas("CreateSession::query_new_link()", || {
                 let mut start = 0usize;
                 let mut end = 0usize;
                 unsafe { sys::dne_query_new_link(&mut start, &mut end) }
@@ -123,7 +123,7 @@ impl CreateSession<'_> {
         self.response
             .scope
             .frame
-            .with_current("CreateSession::query_new_link_styled()", || {
+            .with_canvas("CreateSession::query_new_link_styled()", || {
                 let mut start = 0usize;
                 let mut end = 0usize;
                 unsafe {
@@ -137,7 +137,7 @@ impl CreateSession<'_> {
         self.response
             .scope
             .frame
-            .with_current("CreateSession::query_new_node()", || {
+            .with_canvas("CreateSession::query_new_node()", || {
                 let mut pin = 0usize;
                 unsafe { sys::dne_query_new_node(&mut pin) }.then_some(PinId(pin))
             })
@@ -153,7 +153,7 @@ impl CreateSession<'_> {
         self.response
             .scope
             .frame
-            .with_current("CreateSession::query_new_node_styled()", || {
+            .with_canvas("CreateSession::query_new_node_styled()", || {
                 let mut pin = 0usize;
                 unsafe { sys::dne_query_new_node_styled(&mut pin, vec4(color), thickness) }
                     .then_some(PinId(pin))
@@ -179,7 +179,7 @@ impl CreateResponse<'_> {
     pub fn accept_new_item(&self) -> bool {
         self.scope
             .frame
-            .with_current("CreateSession::accept_new_item()", || unsafe {
+            .with_canvas("CreateSession::accept_new_item()", || unsafe {
                 sys::dne_accept_new_item()
             })
     }
@@ -193,7 +193,7 @@ impl CreateResponse<'_> {
         );
         self.scope
             .frame
-            .with_current("CreateSession::accept_new_item_styled()", || unsafe {
+            .with_canvas("CreateSession::accept_new_item_styled()", || unsafe {
                 sys::dne_accept_new_item_styled(vec4(color), thickness)
             })
     }
@@ -201,7 +201,7 @@ impl CreateResponse<'_> {
     pub fn reject_new_item(&self) {
         self.scope
             .frame
-            .with_current("CreateSession::reject_new_item()", || unsafe {
+            .with_canvas("CreateSession::reject_new_item()", || unsafe {
                 sys::dne_reject_new_item()
             });
     }
@@ -215,7 +215,7 @@ impl CreateResponse<'_> {
         );
         self.scope
             .frame
-            .with_current("CreateSession::reject_new_item_styled()", || unsafe {
+            .with_canvas("CreateSession::reject_new_item_styled()", || unsafe {
                 sys::dne_reject_new_item_styled(vec4(color), thickness)
             });
     }
@@ -231,7 +231,7 @@ impl DeleteSession<'_> {
         let result =
             self.scope
                 .frame
-                .with_current("DeleteSession::query_deleted_link()", || {
+                .with_canvas("DeleteSession::query_deleted_link()", || {
                     let mut link = 0usize;
                     let mut start = 0usize;
                     let mut end = 0usize;
@@ -246,7 +246,7 @@ impl DeleteSession<'_> {
         let result = self
             .scope
             .frame
-            .with_current("DeleteSession::query_deleted_node()", || {
+            .with_canvas("DeleteSession::query_deleted_node()", || {
                 let mut node = 0usize;
                 unsafe { sys::dne_query_deleted_node(&mut node) }.then_some(NodeId(node))
             });
@@ -261,7 +261,7 @@ impl DeleteSession<'_> {
     pub fn accept_deleted_item(&self, delete_dependencies: bool) -> bool {
         self.scope
             .frame
-            .with_current("DeleteSession::accept_deleted_item()", || unsafe {
+            .with_canvas("DeleteSession::accept_deleted_item()", || unsafe {
                 assert!(
                     self.candidate.replace(false),
                     "DeleteSession::accept_deleted_item() requires an unconsumed item returned by the latest query"
@@ -276,7 +276,7 @@ impl DeleteSession<'_> {
     pub fn reject_deleted_item(&self) {
         self.scope
             .frame
-            .with_current("DeleteSession::reject_deleted_item()", || unsafe {
+            .with_canvas("DeleteSession::reject_deleted_item()", || unsafe {
                 assert!(
                     self.candidate.replace(false),
                     "DeleteSession::reject_deleted_item() requires an unconsumed item returned by the latest query"
@@ -296,7 +296,7 @@ impl ShortcutSession<'_> {
     pub fn accept_cut(&self) -> bool {
         self.scope
             .frame
-            .with_current("ShortcutSession::accept_cut()", || unsafe {
+            .with_canvas("ShortcutSession::accept_cut()", || unsafe {
                 sys::dne_accept_cut()
             })
     }
@@ -304,7 +304,7 @@ impl ShortcutSession<'_> {
     pub fn accept_copy(&self) -> bool {
         self.scope
             .frame
-            .with_current("ShortcutSession::accept_copy()", || unsafe {
+            .with_canvas("ShortcutSession::accept_copy()", || unsafe {
                 sys::dne_accept_copy()
             })
     }
@@ -312,7 +312,7 @@ impl ShortcutSession<'_> {
     pub fn accept_paste(&self) -> bool {
         self.scope
             .frame
-            .with_current("ShortcutSession::accept_paste()", || unsafe {
+            .with_canvas("ShortcutSession::accept_paste()", || unsafe {
                 sys::dne_accept_paste()
             })
     }
@@ -320,7 +320,7 @@ impl ShortcutSession<'_> {
     pub fn accept_duplicate(&self) -> bool {
         self.scope
             .frame
-            .with_current("ShortcutSession::accept_duplicate()", || unsafe {
+            .with_canvas("ShortcutSession::accept_duplicate()", || unsafe {
                 sys::dne_accept_duplicate()
             })
     }
@@ -328,7 +328,7 @@ impl ShortcutSession<'_> {
     pub fn accept_create_node(&self) -> bool {
         self.scope
             .frame
-            .with_current("ShortcutSession::accept_create_node()", || unsafe {
+            .with_canvas("ShortcutSession::accept_create_node()", || unsafe {
                 sys::dne_accept_create_node()
             })
     }
@@ -336,7 +336,7 @@ impl ShortcutSession<'_> {
     pub fn action_context_size(&self) -> usize {
         self.scope
             .frame
-            .with_current("ShortcutSession::action_context_size()", || unsafe {
+            .with_canvas("ShortcutSession::action_context_size()", || unsafe {
                 sys::dne_get_action_context_size()
             })
             .max(0) as usize
@@ -346,7 +346,7 @@ impl ShortcutSession<'_> {
         let count = self.action_context_size();
         self.scope
             .frame
-            .with_current("ShortcutSession::action_context_nodes()", || {
+            .with_canvas("ShortcutSession::action_context_nodes()", || {
                 collect_node_ids(count, |ptr, len| unsafe {
                     sys::dne_get_action_context_nodes(ptr, len)
                 })
@@ -357,7 +357,7 @@ impl ShortcutSession<'_> {
         let count = self.action_context_size();
         self.scope
             .frame
-            .with_current("ShortcutSession::action_context_links()", || {
+            .with_canvas("ShortcutSession::action_context_links()", || {
                 collect_link_ids(count, |ptr, len| unsafe {
                     sys::dne_get_action_context_links(ptr, len)
                 })
