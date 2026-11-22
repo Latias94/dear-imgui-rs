@@ -58,6 +58,8 @@ pub(super) struct SnapshotHub {
     sender: Sender<SnapshotMessage>,
     receiver: Receiver<SnapshotMessage>,
     phase: ConsumerPhase,
+    // A renderer may have uploaded a request even when its completion was lost.
+    texture_owner: Option<NonZeroU64>,
     next_consumer_generation: Option<NonZeroU64>,
     next_epoch: Option<NonZeroU64>,
     completion_watermark: u64,
@@ -74,6 +76,7 @@ impl SnapshotHub {
             sender,
             receiver,
             phase: ConsumerPhase::Unbound,
+            texture_owner: None,
             next_consumer_generation: Some(NonZeroU64::MIN),
             next_epoch: Some(NonZeroU64::MIN),
             completion_watermark: 0,
@@ -96,10 +99,14 @@ impl SnapshotHub {
     }
 
     #[cfg(feature = "multi-viewport")]
-    pub(super) fn is_synchronous_frame_reconciled(&self, native_frame_count: i32) -> bool {
+    pub(super) fn is_synchronous_frame_reconciled(&mut self, native_frame_count: i32) -> bool {
+        // The application may have dropped the renderer after reconciling the main viewport.
+        self.drain_messages();
         self.synchronous_frame.is_some_and(|frame| {
             frame.native_frame_count == native_frame_count
-                && frame.epoch.is_some()
+                && frame.epoch.is_some_and(|epoch| {
+                    self.phase == ConsumerPhase::Active(epoch.consumer_generation_raw())
+                })
                 && frame.status == SynchronousFrameStatus::Reconciled
         })
     }
@@ -172,6 +179,9 @@ impl SnapshotHub {
             }
         }
         let (snapshot, expected) = pending.into_frame(requests, epoch, self.sender.clone());
+        if !expected.is_empty() {
+            self.texture_owner = Some(generation);
+        }
         let previous = self.outstanding.insert(
             sequence.get(),
             OutstandingEpoch {
@@ -203,6 +213,9 @@ impl SnapshotHub {
             }
         }
         let (requests, expected) = finalize_texture_requests(pending, epoch);
+        if !expected.is_empty() {
+            self.texture_owner = Some(generation);
+        }
         self.outstanding.insert(
             sequence.get(),
             OutstandingEpoch {
@@ -298,6 +311,17 @@ impl SnapshotHub {
         &self,
         consumer: &impl RendererConsumerCapability,
     ) -> Result<NonZeroU64, RendererConsumerError> {
+        let generation = self.validate_consumer_identity(consumer)?;
+        if self.texture_owner.is_some_and(|owner| owner != generation) {
+            return Err(RendererConsumerError::RendererTextureResetRequired);
+        }
+        Ok(generation)
+    }
+
+    fn validate_consumer_identity(
+        &self,
+        consumer: &impl RendererConsumerCapability,
+    ) -> Result<NonZeroU64, RendererConsumerError> {
         if consumer.context_id() != self.context {
             return Err(RendererConsumerError::ForeignContext {
                 expected: self.context,
@@ -315,19 +339,6 @@ impl SnapshotHub {
             }
             ConsumerPhase::Active(generation) => Ok(generation),
         }
-    }
-
-    pub(super) fn validate_idle_consumer(
-        &self,
-        consumer: &impl RendererConsumerCapability,
-    ) -> Result<(), RendererConsumerError> {
-        self.validate_consumer(consumer)?;
-        if !self.outstanding.is_empty() {
-            return Err(RendererConsumerError::OutstandingEpochs {
-                count: self.outstanding.len(),
-            });
-        }
-        Ok(())
     }
 
     pub(super) fn poll(
@@ -537,6 +548,8 @@ impl Context {
     /// before it can enter managed renderer mode. If multiple contexts still share the atlas, this
     /// returns [`RendererConsumerError::SharedFontAtlasRequiresExclusiveContext`]. Multiple-context
     /// shared atlases remain available to legacy renderer-managed texture handling.
+    /// When replacing a renderer that issued texture requests, release its resources and commit
+    /// [`Self::prepare_renderer_texture_reset`] before rendering with the replacement.
     pub fn create_synchronous_renderer_consumer(
         &mut self,
     ) -> Result<SynchronousRendererConsumer, RendererConsumerError> {
@@ -553,6 +566,8 @@ impl Context {
     ///
     /// The generation is fixed to pointer-free snapshot rendering when it is created. Dropping the
     /// capability begins draining any outstanding snapshot epochs.
+    /// If its predecessor issued texture requests, release the old renderer's resources and
+    /// commit [`Self::prepare_renderer_texture_reset`] before capturing with the replacement.
     pub fn create_detached_renderer_consumer(
         &mut self,
     ) -> Result<DetachedRendererConsumer, RendererConsumerError> {
@@ -668,9 +683,14 @@ impl Context {
         consumer: &impl RendererConsumerCapability,
     ) -> Result<u64, RendererConsumerError> {
         self.assert_current_context("Context::prepare_renderer_texture_reset()");
+        self.snapshot_hub.validate_consumer_identity(consumer)?;
         let atlas = self.font_atlas_snapshot_target();
         let _ = self.poll_snapshot_completions_with_target(&atlas)?;
-        self.snapshot_hub.validate_idle_consumer(consumer)?;
+        if !self.snapshot_hub.outstanding.is_empty() {
+            return Err(RendererConsumerError::OutstandingEpochs {
+                count: self.snapshot_hub.outstanding.len(),
+            });
+        }
         Ok(self.snapshot_hub.completion_watermark())
     }
 
@@ -685,6 +705,8 @@ impl Context {
         self.texture_registry
             .borrow_mut()
             .reset_renderer_bindings(watermark);
+        self.snapshot_hub.texture_owner = None;
+        self.snapshot_hub.synchronous_frame = None;
     }
 
     pub(super) fn capture_main_snapshot(

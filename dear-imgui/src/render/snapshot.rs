@@ -753,6 +753,9 @@ pub enum RendererConsumerError {
     SharedFontAtlasRendererReleasePending,
     #[error("the previous renderer consumer is still draining outstanding epochs")]
     ConsumerDraining,
+    /// The previous renderer's texture resources must be released before this generation draws.
+    #[error("release the previous renderer's texture resources and commit a renderer texture reset")]
+    RendererTextureResetRequired,
     #[error("this Context has no active renderer consumer")]
     NoActiveConsumer,
     #[error("{caller} requires a renderer that advertises RENDERER_HAS_TEXTURES")]

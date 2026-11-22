@@ -191,6 +191,50 @@ fn abandoned_managed_frame_cannot_enter_default_platform_renderer_callbacks() {
     });
 }
 
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn resetting_textures_or_dropping_the_renderer_revokes_the_reconciled_viewport_frame() {
+    let _guard = test_guard();
+    enum Action {
+        CancelReset,
+        CommitReset,
+        DropRenderer,
+    }
+    for action in [
+        Action::CancelReset,
+        Action::CommitReset,
+        Action::DropRenderer,
+    ] {
+        let mut ctx = imgui::Context::create();
+        prepare_context(&mut ctx);
+        let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
+        unsafe {
+            ctx.platform_io_mut()
+                .set_renderer_render_window_raw(Some(test_platform_renderer_callback))
+        };
+        drop(reconcile_test_frame(
+            ctx.begin_frame().render(&consumer),
+            &[],
+        ));
+        ctx.update_platform_windows();
+        match action {
+            Action::CancelReset => {
+                drop(ctx.prepare_renderer_texture_reset(&consumer).unwrap());
+                ctx.render_platform_windows_default();
+                continue;
+            }
+            Action::CommitReset => ctx
+                .prepare_renderer_texture_reset(&consumer)
+                .unwrap()
+                .commit(),
+            Action::DropRenderer => drop(consumer),
+        }
+        assert_panics!({
+            ctx.render_platform_windows_default();
+        });
+    }
+}
+
 #[test]
 fn an_engine_owned_frame_can_retry_synchronous_render_with_its_own_consumer() {
     let _guard = test_guard();
@@ -740,6 +784,9 @@ fn renderer_consumer_kind_is_selected_at_creation() {
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
     drop(pending.reconcile_texture_feedback(feedback).unwrap());
+    ctx.prepare_renderer_texture_reset(&consumer)
+        .unwrap()
+        .commit();
     drop(consumer);
     ctx.poll_snapshot_completions().unwrap();
 
