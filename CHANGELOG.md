@@ -19,6 +19,11 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 - CTE palettes now have 33 entries, including nine custom colors. For fixed arrays passed to `Palette::from_colors`, use `PaletteColor::COUNT` or start with a built-in palette and set individual entries. `Language::ALL` now includes Julia and WGSL.
 - Custom provider builders should use `ProviderTransform::PatchCteTextEditor` for `TextEditor.cpp` and compile `TextDiff.cpp` directly. The old CTE Unicode-range and TextDiff draw-flag transform variants have been removed.
 - Rebuild the browser application and `imgui-sys-v1` provider together. Browser applications use `WasmProviderAllocator`, import the provider's function table, and pass its memory to wasm-bindgen. See the [browser migration instructions](docs/WASM.md#runtime-model).
+- `Ui::font_atlas_texture()` returns `Option<TextureRef<'_>>`. Pass the handle directly to image and plotting APIs. Legacy renderers can read CPU pixels through `LegacyFontAtlas::tex_data()` between frames. Keep the CPU copy for glyph repacking. To discard the atlas, call `FontAtlas::clear()` and rebuild it from its sources.
+- Typed callbacks passed to `set_platform_set_window_pos`, `set_platform_set_window_size` and `set_renderer_set_window_size` now receive `&ImVec2`. Custom native core archives must be rebuilt for the updated platform hook contract. See the [custom backend guide](docs/CUSTOM_BACKENDS.md).
+- Build node-editor UIs with `ui.with_node_editor(&editor, id, size, |frame| { ... })`. Use `node`, `pin`, `group_hint`, `with_create` and `with_suspended` for nested scopes. Their manually balanced counterparts now require `unsafe`. Exhaustive matches on `NodeEditorError` must handle `ThreadLease`. See the [node-editor migration examples](extensions/dear-node-editor/README.md).
+- `Plot3DContext::get_plot_ui` borrows the plot context and the `Ui` for the lifetime of the returned view. Keep the plot owner alive until drawing finishes.
+- Custom renderers must release the previous renderer's texture resources and commit a renderer texture reset when taking over its Context. A replacement consumer reports `RendererTextureResetRequired` until this handoff is complete.
 
 ### Changed
 
@@ -28,6 +33,10 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ### Fixed
 
+- Removing a managed texture immediately revokes the application handle and preserves the pixels and binding needed by commands already submitted to the current frame. The same frame can still be captured for a second viewport pass before retirement begins.
+- Live draw commands and snapshots use the standard callback identities recorded when their owning Context rendered the frame. Removing the renderer or switching to another Context keeps those commands readable. Engine-owned frames stay open when `try_render` or snapshot capture rejects a foreign renderer, allowing the correct renderer to retry the same frame.
+- Standalone native textures, text filters, selections, and state storage retain the allocator's thread through destruction. CTE and plot contexts can release their native objects after their ImGui Context is dropped. An ImNodes editor selection is restored on the context that owned it before the operation.
+- Winit and Bevy detect callbacks replaced behind a shared C++ hook. SDL3 preserves application DPI, viewport-change and work-area callbacks during shutdown and restores their previous values after failed initialization. A detached Test Engine now keeps its allocator on its owner thread until native destruction succeeds.
 - Text inputs reuse their `String` allocation across frames, keep labels and hints alive through callbacks, and handle edits that grow the native buffer. Text filters respect the end of the requested byte range.
 - Restore scoped state storage on its original window when a closure changes the current window.
 - Preserve outer widget labels and clipboard text when callbacks make nested UI calls. Typed drag-and-drop checks the stored type before reading the value.

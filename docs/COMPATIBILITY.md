@@ -8,6 +8,18 @@ The SDL3 backend on `main` accepts windows and events from `sdl3` 0.22.1. Applic
 
 Development and publishing use Rust 1.100.0. The core MSRV is Rust 1.95, the Bevy backend requires Rust 1.97.1, and binding generation uses Rust 1.95.0 with LLVM 14.
 
+### Native resources and frame lifetimes
+
+`Ui::font_atlas_texture()` returns a frame-borrowed `TextureRef`. Pass it directly to `ui.image`, an ImPlot image builder, or a draw list. A legacy renderer that needs upload bytes can borrow `LegacyFontAtlas::tex_data()` between frames and release the borrow before the next frame. Keep those pixels for future atlas repacking. To replace the contents, call `FontAtlas::clear()`, add the font sources again and rebuild.
+
+`Context::remove_texture` revokes the handle immediately. A frame already being built or captured can finish using its texture, including when the renderer captures the platform viewports after the main viewport. During that interval, access through the removed handle returns `ManagedTextureError::Retiring`. A renderer should keep servicing texture requests until it receives and acknowledges the destroy operation.
+
+Dear ImGui's native allocator consults process-wide state. Release owned native resources, including shared font atlases, before moving Dear ImGui to a different OS thread. An extension that allocates through Dear ImGui and can outlive its Context can acquire `ContextThreadLease` before allocation and keep it through native destruction. An isolated `ContextBinding` remains a weak reference to its original Context.
+
+Custom multi-viewport backends should accept `&ImVec2` in typed window position and size setters. Raw setters retain their `*const ImVec2` signature. The native core now checks both framebuffer-scale values in its C++ hook and only reports a successful conditional uninstall when it owned the installed slot. Rebuild custom native archives and their manifests together. See the [PlatformIO callback ABI](CUSTOM_BACKENDS.md#aggregate-callback-abi).
+
+When replacing a custom renderer that has received texture requests, release its GPU resources and commit a reset prepared with `Context::prepare_renderer_texture_reset`. A replacement consumer returns `RendererConsumerError::RendererTextureResetRequired` until that reset completes. Its first capture can then upload the complete textures for its own device. Committing the reset also expires the previous frame's permission to render secondary viewports.
+
 ### Native sources on `main`
 
 These wrapper revisions determine the C headers and the native source each extension builds. Rebuild custom native archives and the browser provider when upgrading a checkout across these revisions.

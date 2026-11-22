@@ -66,8 +66,14 @@ fn drop_clears_native_callbacks_before_releasing_rust_state_in_either_owner_orde
             editor: unsafe { editor.as_raw() },
             observed: Rc::clone(&observed),
         };
-        editor.set_line_decorator(1, move |_, _| { let _ = &probe; }).unwrap();
-        if owner_first { drop(context); }
+        editor
+            .set_line_decorator(1, move |_, _| {
+                let _ = &probe;
+            })
+            .unwrap();
+        if owner_first {
+            drop(context);
+        }
         drop(editor);
         assert_eq!(observed.get(), Some(true));
     }
