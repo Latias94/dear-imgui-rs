@@ -3,7 +3,7 @@ use super::payload::{
     DragDropPayload, DragDropPayloadEmpty, DragDropPayloadPod, PayloadIsWrongType,
     decode_typed_payload,
 };
-use super::validation::validate_payload_type_name;
+use super::validation::{validate_payload_type_name, validate_typed_payload_name};
 use crate::{Ui, sys};
 
 /// Drag drop target for accepting payloads
@@ -50,6 +50,7 @@ impl<'ui> DragDropTarget<'ui> {
     ///
     /// Attempts to accept a payload with the specified type.
     /// Returns `Ok(payload)` if the type matches, `Err(PayloadIsWrongType)` if not.
+    /// Names starting with `_` are reserved for native payloads and rejected before the FFI call.
     ///
     /// # Arguments
     /// * `name` - Payload type name (must match source name)
@@ -62,6 +63,8 @@ impl<'ui> DragDropTarget<'ui> {
         name: Name,
         flags: DragDropTargetFlags,
     ) -> Option<Result<DragDropPayloadPod<T>, PayloadIsWrongType>> {
+        let name = name.as_ref();
+        validate_typed_payload_name(name);
         let output = unsafe { self.accept_payload_unchecked(name, flags) };
 
         output.map(decode_typed_payload)
@@ -82,7 +85,8 @@ impl<'ui> DragDropTarget<'ui> {
         name: impl AsRef<str>,
         flags: DragDropTargetFlags,
     ) -> Option<DragDropPayload> {
-        validate_payload_type_name(name.as_ref(), "DragDropTarget::accept_payload_unchecked()");
+        let name = name.as_ref();
+        validate_payload_type_name(name, "DragDropTarget::accept_payload_unchecked()");
         validate_drag_drop_target_flags("DragDropTarget::accept_payload_unchecked()", flags);
         let name = self.0.scratch_txt(name);
         let inner = self.0.run_with_bound_context(|| unsafe {

@@ -25,5 +25,23 @@ fn drag_drop_payload_query_no_panic() {
     let ui = ctx.frame();
 
     // No drag operation in this headless test, but the query should be safe.
-    let _ = ui.drag_drop_payload();
+    assert!(ui.drag_drop_payload().is_none());
+
+    struct PayloadName<'a>(&'a std::cell::Cell<usize>);
+    impl AsRef<str> for PayloadName<'_> {
+        fn as_ref(&self) -> &str {
+            self.0.set(self.0.get() + 1);
+            "APP_ITEM"
+        }
+    }
+
+    let conversions = std::cell::Cell::new(0);
+    let source = ui
+        .drag_drop_source_config(PayloadName(&conversions))
+        .flags(imgui::DragDropSourceFlags::EXTERN | imgui::DragDropSourceFlags::NO_PREVIEW_TOOLTIP)
+        .begin_payload(42_u32)
+        .expect("external source");
+    assert_eq!(conversions.get(), 1);
+    assert!(ui.drag_drop_payload().is_some());
+    source.end();
 }

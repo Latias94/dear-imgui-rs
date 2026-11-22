@@ -257,7 +257,7 @@ impl SuspendedContext {
             log_filename: None,
             platform_name: None,
             renderer_name: None,
-            clipboard_ctx: Box::new(ClipboardContext::dummy()),
+            clipboard_ctx: Box::new(ClipboardContext::dummy(ui.scratch_buffers.clone())),
             ui,
         };
 

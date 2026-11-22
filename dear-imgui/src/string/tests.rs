@@ -51,10 +51,20 @@ fn ui_buffer_text_range_preserves_bytes_and_appends_readable_nul() {
 }
 
 #[test]
-fn tls_scratch_txt_is_nul_terminated() {
-    let ptr = tls_scratch_txt("hello");
-    let s = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap();
-    assert_eq!(s, "hello");
+fn scoped_scratch_strings_survive_nested_queries_and_unwind() {
+    with_scratch_txt("outer", |outer| {
+        let result = std::panic::catch_unwind(|| {
+            with_scratch_txt("inner", |inner| {
+                assert_eq!(unsafe { CStr::from_ptr(inner) }, c"inner");
+                panic!("leave nested scratch scope");
+            });
+        });
+        assert!(result.is_err());
+        with_scratch_txt("next", |next| {
+            assert_eq!(unsafe { CStr::from_ptr(next) }, c"next");
+        });
+        assert_eq!(unsafe { CStr::from_ptr(outer) }, c"outer");
+    });
 }
 
 #[test]

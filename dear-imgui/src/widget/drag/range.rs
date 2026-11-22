@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::ffi::c_char;
 
 use crate::internal::DataTypeKind;
 use crate::sys;
@@ -111,6 +112,26 @@ where
         self.flags = flags;
         self
     }
+
+    fn scratch_labels(&self, ui: &Ui) -> (*const c_char, *const c_char, *const c_char) {
+        let label = self.label.as_ref();
+        let format = self.display_format.as_ref().map(AsRef::as_ref);
+        let max_format = self.max_display_format.as_ref().map(AsRef::as_ref);
+        ui.with_scratch_buffer(|buffer| {
+            buffer.refresh_buffer();
+            let label = buffer.push(label);
+            let format = format.map(|value| buffer.push(value));
+            let max_format = max_format.map(|value| buffer.push(value));
+            // Resolve offsets only after all strings have been appended.
+            unsafe {
+                (
+                    buffer.offset(label),
+                    format.map_or(std::ptr::null(), |offset| buffer.offset(offset)),
+                    max_format.map_or(std::ptr::null(), |offset| buffer.offset(offset)),
+                )
+            }
+        })
+    }
 }
 
 impl<L, F, M> DragRange<f32, L, F, M>
@@ -126,21 +147,7 @@ where
     pub fn build(self, ui: &Ui, min: &mut f32, max: &mut f32) -> bool {
         validate_drag_flags("DragRange::build()", self.flags);
         ui.run_with_bound_context(|| unsafe {
-            let buffer = &mut *ui.scratch_buffer().get();
-            buffer.refresh_buffer();
-
-            let label_start = buffer.push(self.label);
-            let display_format = self.display_format.as_ref().map(|v| buffer.push(v));
-            let max_display_format = self.max_display_format.as_ref().map(|v| buffer.push(v));
-
-            let label = buffer.offset(label_start);
-            let display_format = display_format
-                .map(|v| buffer.offset(v))
-                .unwrap_or_else(std::ptr::null);
-            let max_display_format = max_display_format
-                .map(|v| buffer.offset(v))
-                .unwrap_or_else(std::ptr::null);
-
+            let (label, display_format, max_display_format) = self.scratch_labels(ui);
             sys::igDragFloatRange2(
                 label,
                 min as *mut f32,
@@ -169,21 +176,7 @@ where
     pub fn build(self, ui: &Ui, min: &mut i32, max: &mut i32) -> bool {
         validate_drag_flags("DragRange::build()", self.flags);
         ui.run_with_bound_context(|| unsafe {
-            let buffer = &mut *ui.scratch_buffer().get();
-            buffer.refresh_buffer();
-
-            let label_start = buffer.push(self.label);
-            let display_format = self.display_format.as_ref().map(|v| buffer.push(v));
-            let max_display_format = self.max_display_format.as_ref().map(|v| buffer.push(v));
-
-            let label = buffer.offset(label_start);
-            let display_format = display_format
-                .map(|v| buffer.offset(v))
-                .unwrap_or_else(std::ptr::null);
-            let max_display_format = max_display_format
-                .map(|v| buffer.offset(v))
-                .unwrap_or_else(std::ptr::null);
-
+            let (label, display_format, max_display_format) = self.scratch_labels(ui);
             sys::igDragIntRange2(
                 label,
                 min as *mut i32,

@@ -1,23 +1,40 @@
 use crate::sys;
 use std::ffi::c_int;
+use std::mem;
 
-pub(super) fn make_string_input_buffer(buf: &String, capacity_hint: Option<usize>) -> Vec<u8> {
-    let spare_hint = capacity_hint.unwrap_or(0);
-    let desired = buf
-        .capacity()
-        .saturating_add(1)
-        .max(buf.len().saturating_add(spare_hint).saturating_add(1))
-        .max(1);
+pub(super) fn validate_input_buffer_size(size: usize) {
+    // InputTextEx takes an int and allocates its internal TextA with buf_size + 1.
     assert!(
-        desired <= i32::MAX as usize,
-        "InputText buffer exceeds Dear ImGui's i32 callback range"
+        size < i32::MAX as usize,
+        "InputText buffer exceeds Dear ImGui's i32 size range"
     );
+}
 
-    let mut buffer = Vec::with_capacity(desired);
-    buffer.extend_from_slice(buf.as_bytes());
-    buffer.push(0);
-    buffer.resize(desired, 0);
-    buffer
+pub(super) struct StringInputBuffer<'a> {
+    target: &'a mut String,
+    pub(super) bytes: Vec<u8>,
+}
+
+impl<'a> StringInputBuffer<'a> {
+    pub(super) fn new(target: &'a mut String, capacity_hint: Option<usize>) -> Self {
+        let needed = target
+            .len()
+            .saturating_add(capacity_hint.unwrap_or(0))
+            .saturating_add(1);
+        let size = target.capacity().max(needed);
+        validate_input_buffer_size(size);
+
+        target.reserve_exact(size - target.len());
+        let mut bytes = mem::take(target).into_bytes();
+        bytes.resize(size, 0);
+        Self { target, bytes }
+    }
+}
+
+impl Drop for StringInputBuffer<'_> {
+    fn drop(&mut self) {
+        finish_string_input_buffer(self.target, mem::take(&mut self.bytes));
+    }
 }
 
 pub(super) unsafe fn resize_string_input_buffer(

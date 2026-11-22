@@ -1,6 +1,6 @@
 use super::flags::{DragDropPayloadCond, DragDropSourceFlags, validate_drag_drop_source_flags};
-use super::payload::{TypedPayload, make_typed_payload};
-use super::validation::validate_payload_submission;
+use super::payload::{TypedPayload, write_typed_payload};
+use super::validation::{validate_payload_submission, validate_typed_payload_name};
 use crate::{Ui, sys};
 use std::ffi;
 
@@ -52,7 +52,7 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
     /// Begin drag source with typed payload
     ///
     /// The payload data will be copied and managed by ImGui.
-    /// The data must be `Copy + 'static` for safety.
+    /// The data must be `Copy + 'static`. Names starting with `_` are reserved for native payloads.
     ///
     /// # Arguments
     /// * `payload` - Data to transfer (must be Copy + 'static)
@@ -64,16 +64,16 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
         self,
         payload: P,
     ) -> Option<DragDropSourceTooltip<'ui>> {
-        unsafe {
-            let payload_size = std::mem::size_of::<TypedPayload<P>>();
-            assert!(
-                payload_size <= i32::MAX as usize,
-                "DragDropSource::begin_payload() payload size exceeds Dear ImGui's i32 payload range"
-            );
-
-            let payload = make_typed_payload(payload);
-            self.begin_payload_unchecked(&payload as *const _ as *const ffi::c_void, payload_size)
-        }
+        let name = self.name.as_ref();
+        validate_typed_payload_name(name);
+        let payload_size = std::mem::size_of::<TypedPayload<P>>();
+        assert!(
+            payload_size <= i32::MAX as usize,
+            "DragDropSource::begin_payload() payload size exceeds Dear ImGui's i32 payload range"
+        );
+        let mut storage = std::mem::MaybeUninit::uninit();
+        write_typed_payload(&mut storage, payload);
+        unsafe { self.submit_payload(name, storage.as_ptr().cast(), payload_size) }
     }
 
     /// Begin drag source with raw payload data (unsafe)
@@ -81,8 +81,9 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
     /// # Safety
     /// The caller must ensure:
     /// - `ptr` points to valid data of `size` bytes
-    /// - The data remains valid for the duration of the drag operation
-    /// - The data layout matches what targets expect
+    /// - The data remains readable until this call returns; Dear ImGui copies it on submission
+    /// - The bytes match every target's layout for this name. Use a distinct name for raw
+    ///   data when typed Rust targets expect a type header and value.
     ///
     /// # Arguments
     /// * `ptr` - Pointer to payload data
@@ -92,23 +93,22 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
         ptr: *const ffi::c_void,
         size: usize,
     ) -> Option<DragDropSourceTooltip<'ui>> {
-        validate_payload_submission(
-            self.name.as_ref(),
-            ptr,
-            size,
-            "DragDropSource::begin_payload_unchecked()",
-        );
+        unsafe { self.submit_payload(self.name.as_ref(), ptr, size) }
+    }
+
+    unsafe fn submit_payload(
+        &self,
+        name: &str,
+        ptr: *const ffi::c_void,
+        size: usize,
+    ) -> Option<DragDropSourceTooltip<'ui>> {
+        validate_payload_submission(name, ptr, size, "DragDropSource::begin_payload_unchecked()");
         validate_drag_drop_source_flags("DragDropSource::begin_payload_unchecked()", self.flags);
         self.ui.run_with_bound_context(|| unsafe {
             let should_begin = sys::igBeginDragDropSource(self.flags.bits() as i32);
 
             if should_begin {
-                sys::igSetDragDropPayload(
-                    self.ui.scratch_txt(self.name.as_ref()),
-                    ptr,
-                    size,
-                    self.cond as i32,
-                );
+                sys::igSetDragDropPayload(self.ui.scratch_txt(name), ptr, size, self.cond as i32);
 
                 Some(DragDropSourceTooltip::new(self.ui))
             } else {

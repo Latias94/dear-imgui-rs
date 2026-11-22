@@ -101,6 +101,30 @@ fn nested_state_storage_overrides_restore_lifo() {
 }
 
 #[test]
+fn override_restores_its_window_while_a_list_box_is_current() {
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let ui = ctx.frame();
+    ui.window("storage owner")
+        .size([320.0, 240.0], imgui::Condition::Always)
+        .build(|| {
+            let current_storage = || ui.with_current_state_storage(|storage| storage.as_raw());
+            let parent_storage = current_storage();
+            let mut replacement = imgui::OwnedStateStorage::new();
+            let (list, list_storage) = ui.with_state_storage(&mut replacement, |_| {
+                let list = ui.list_box_config("items").begin(ui).expect("visible list");
+                (list, current_storage())
+            });
+            let after_override = current_storage();
+            list.end();
+            assert_eq!(after_override, list_storage);
+            assert_eq!(current_storage(), parent_storage);
+        })
+        .expect("visible window");
+}
+
+#[test]
 fn nested_state_storage_overrides_restore_after_panic() {
     let _guard = test_guard();
 

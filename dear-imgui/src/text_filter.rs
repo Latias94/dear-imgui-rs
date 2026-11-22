@@ -33,9 +33,9 @@
 //!
 //! Exclusions take precedence over inclusions.
 
+use crate::context::binding::CTX_MUTEX;
 use crate::{Ui, sys};
 use std::ops::Range;
-use std::os::raw::c_char;
 use std::ptr;
 
 /// Helper to parse and apply text filters
@@ -98,14 +98,15 @@ impl TextFilter {
     /// ```
     pub fn new_with_filter(label: impl Into<String>, filter: impl AsRef<str>) -> Self {
         let label = label.into();
-        let filter_ptr = crate::string::tls_scratch_txt(filter);
-        unsafe {
-            let raw = sys::ImGuiTextFilter_ImGuiTextFilter(filter_ptr);
-            if raw.is_null() {
-                panic!("ImGuiTextFilter_ImGuiTextFilter() returned null");
-            }
-            Self { label, raw }
+        let raw = crate::string::with_scratch_txt(filter, |filter_ptr| {
+            // Even standalone filters use ImGui's allocator, which updates the current context.
+            let _guard = CTX_MUTEX.lock();
+            unsafe { sys::ImGuiTextFilter_ImGuiTextFilter(filter_ptr) }
+        });
+        if raw.is_null() {
+            panic!("ImGuiTextFilter_ImGuiTextFilter() returned null");
         }
+        Self { label, raw }
     }
 
     /// Builds the TextFilter with its current filter pattern.
@@ -128,6 +129,7 @@ impl TextFilter {
     /// }
     /// ```
     pub fn build(&mut self) {
+        let _guard = CTX_MUTEX.lock();
         unsafe {
             sys::ImGuiTextFilter_Build(self.raw);
         }
@@ -209,8 +211,9 @@ impl TextFilter {
     /// assert!(!filter.pass_filter("example string"));
     /// ```
     pub fn pass_filter(&self, text: &str) -> bool {
-        let text_ptr = crate::string::tls_scratch_txt(text);
-        unsafe { sys::ImGuiTextFilter_PassFilter(self.raw, text_ptr, ptr::null()) }
+        crate::string::with_scratch_txt(text, |text_ptr| unsafe {
+            sys::ImGuiTextFilter_PassFilter(self.raw, text_ptr, ptr::null())
+        })
     }
 
     /// Returns true if a substring range matches the filter.
@@ -220,16 +223,17 @@ impl TextFilter {
     ///
     /// `range` is in bytes and must lie on UTF-8 char boundaries.
     pub fn pass_filter_range(&self, text: &str, range: Range<usize>) -> bool {
-        if range.start > range.end || range.end > text.len() {
+        let Some(text) = text.get(range) else {
             return false;
+        };
+        if !self.is_active() {
+            return true;
         }
-        if !text.is_char_boundary(range.start) || !text.is_char_boundary(range.end) {
-            return false;
-        }
-
-        let start_ptr = unsafe { text.as_ptr().add(range.start) as *const c_char };
-        let end_ptr = unsafe { text.as_ptr().add(range.end) as *const c_char };
-        unsafe { sys::ImGuiTextFilter_PassFilter(self.raw, start_ptr, end_ptr) }
+        // ImStristr bounds candidate starts by text_end but stops each comparison at a mismatch.
+        // A NUL sentinel ends a partial match while the explicit range preserves interior NULs.
+        crate::string::with_scratch_txt_range(text, |range| unsafe {
+            sys::ImGuiTextFilter_PassFilter(self.raw, range.start, range.end)
+        })
     }
 
     /// Clears the filter pattern.
@@ -250,16 +254,14 @@ impl TextFilter {
     /// assert!(!filter.is_active());
     /// ```
     pub fn clear(&mut self) {
-        // Clear() is an inline method: InputBuf[0] = 0; Build();
-        unsafe {
-            (*self.raw).InputBuf[0] = 0;
-            sys::ImGuiTextFilter_Build(self.raw);
-        }
+        unsafe { (*self.raw).InputBuf[0] = 0 };
+        self.build();
     }
 }
 
 impl Drop for TextFilter {
     fn drop(&mut self) {
+        let _guard = CTX_MUTEX.lock();
         unsafe { sys::ImGuiTextFilter_destroy(self.raw) }
     }
 }
@@ -378,6 +380,9 @@ mod tests {
         filter.build();
 
         let text = "hello test world";
+        assert!(!filter.pass_filter_range(text, 6..8));
+        assert!(filter.pass_filter_range(text, 6..10));
+        assert!(filter.pass_filter_range("x\0test", 0..6));
         assert_eq!(
             filter.pass_filter(text),
             filter.pass_filter_range(text, 0..text.len())

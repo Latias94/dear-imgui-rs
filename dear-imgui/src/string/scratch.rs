@@ -2,27 +2,57 @@ use super::UiBuffer;
 use std::cell::RefCell;
 use std::os::raw::c_char;
 
-thread_local! {
-    static TLS_SCRATCH: RefCell<UiBuffer> = RefCell::new(UiBuffer::new(1024));
+const SCRATCH_LIMIT: usize = 1024;
+
+#[derive(Debug, Default)]
+pub(crate) struct ScratchBuffers(RefCell<Vec<UiBuffer>>);
+
+struct ScratchBuffer<'a> {
+    pool: &'a ScratchBuffers,
+    buffer: UiBuffer,
 }
 
-/// Creates a temporary, NUL-terminated C string pointer backed by a thread-local scratch buffer.
-///
-/// The returned pointer is only valid until the next scratch-string call on the same thread.
-///
-/// This API is **not re-entrant**: any nested call to `tls_scratch_txt`/`with_scratch_txt` (or `Ui::scratch_txt`)
-/// on the same thread will overwrite the backing buffer and invalidate previously returned pointers.
-pub(crate) fn tls_scratch_txt(txt: impl AsRef<str>) -> *const c_char {
-    TLS_SCRATCH.with(|buf| buf.borrow_mut().scratch_txt(txt))
+impl Drop for ScratchBuffer<'_> {
+    fn drop(&mut self) {
+        let buffer = std::mem::replace(&mut self.buffer, UiBuffer::new(SCRATCH_LIMIT));
+        self.pool.0.borrow_mut().push(buffer);
+    }
+}
+
+impl ScratchBuffers {
+    // The most recently returned buffer contains the caller's staged labels. Keep it off the
+    // stack during user code so AsRef, Drop, or native callbacks can use another allocation.
+    pub(crate) fn with<R>(&self, f: impl FnOnce(&mut UiBuffer) -> R) -> R {
+        let buffer = self
+            .0
+            .borrow_mut()
+            .pop()
+            .unwrap_or_else(|| UiBuffer::new(SCRATCH_LIMIT));
+        let mut scratch = ScratchBuffer { pool: self, buffer };
+        f(&mut scratch.buffer)
+    }
+}
+
+thread_local! {
+    static TLS_SCRATCH: ScratchBuffers = const { ScratchBuffers(RefCell::new(Vec::new())) };
+}
+
+fn with_tls_scratch<R>(f: impl FnOnce(&mut UiBuffer) -> R) -> R {
+    TLS_SCRATCH.with(|pool| pool.with(f))
+}
+
+pub(crate) fn with_scratch_txt_range<R>(
+    text: &str,
+    f: impl FnOnce(std::ops::Range<*const c_char>) -> R,
+) -> R {
+    with_tls_scratch(|buf| f(buf.scratch_txt_range(text)))
 }
 
 /// Calls `f` with a temporary, NUL-terminated C string pointer backed by a thread-local scratch buffer.
 ///
-/// The pointer is only valid for the duration of the call (and will be overwritten by subsequent
-/// scratch-string operations on the same thread). Like `tls_scratch_txt`, this is not re-entrant.
+/// The pointer is valid throughout `f`, including nested scratch-string calls on this thread.
 pub fn with_scratch_txt<R>(txt: impl AsRef<str>, f: impl FnOnce(*const c_char) -> R) -> R {
-    TLS_SCRATCH.with(|buf| {
-        let mut buf = buf.borrow_mut();
+    with_tls_scratch(|buf| {
         let ptr = buf.scratch_txt(txt);
         f(ptr)
     })
@@ -30,15 +60,13 @@ pub fn with_scratch_txt<R>(txt: impl AsRef<str>, f: impl FnOnce(*const c_char) -
 
 /// Calls `f` with two temporary, NUL-terminated C string pointers backed by a thread-local scratch buffer.
 ///
-/// Both pointers are valid together for the duration of the call (and will be overwritten by
-/// subsequent scratch-string operations on the same thread).
+/// Both pointers are valid throughout `f`, including nested scratch-string calls.
 pub fn with_scratch_txt_two<R>(
     txt_0: impl AsRef<str>,
     txt_1: impl AsRef<str>,
     f: impl FnOnce(*const c_char, *const c_char) -> R,
 ) -> R {
-    TLS_SCRATCH.with(|buf| {
-        let mut buf = buf.borrow_mut();
+    with_tls_scratch(|buf| {
         let (a, b) = buf.scratch_txt_two(txt_0, txt_1);
         f(a, b)
     })
@@ -46,16 +74,14 @@ pub fn with_scratch_txt_two<R>(
 
 /// Calls `f` with three temporary, NUL-terminated C string pointers backed by a thread-local scratch buffer.
 ///
-/// All pointers are valid together for the duration of the call (and will be overwritten by
-/// subsequent scratch-string operations on the same thread).
+/// All pointers are valid throughout `f`, including nested scratch-string calls.
 pub fn with_scratch_txt_three<R>(
     txt_0: impl AsRef<str>,
     txt_1: impl AsRef<str>,
     txt_2: impl AsRef<str>,
     f: impl FnOnce(*const c_char, *const c_char, *const c_char) -> R,
 ) -> R {
-    TLS_SCRATCH.with(|buf| {
-        let mut buf = buf.borrow_mut();
+    with_tls_scratch(|buf| {
         buf.refresh_buffer();
         let o0 = buf.push(txt_0);
         let o1 = buf.push(txt_1);
@@ -66,11 +92,9 @@ pub fn with_scratch_txt_three<R>(
 
 /// Calls `f` with a list of temporary, NUL-terminated C string pointers backed by a thread-local scratch buffer.
 ///
-/// The pointers are only valid for the duration of the call (and will be overwritten by subsequent
-/// scratch-string operations on the same thread).
+/// The pointers are valid throughout `f`, including nested scratch-string calls.
 pub fn with_scratch_txt_slice<R>(txts: &[&str], f: impl FnOnce(&[*const c_char]) -> R) -> R {
-    TLS_SCRATCH.with(|buf| {
-        let mut buf = buf.borrow_mut();
+    with_tls_scratch(|buf| {
         buf.refresh_buffer();
 
         let total_bytes: usize = txts.iter().map(|s| s.len() + 1).sum();
@@ -93,15 +117,13 @@ pub fn with_scratch_txt_slice<R>(txts: &[&str], f: impl FnOnce(&[*const c_char])
 /// Calls `f` with a list of temporary, NUL-terminated C string pointers and one optional pointer backed by
 /// a thread-local scratch buffer.
 ///
-/// The returned pointers are only valid for the duration of the call (and will be overwritten by subsequent
-/// scratch-string operations on the same thread).
+/// The pointers are valid throughout `f`, including nested scratch-string calls.
 pub fn with_scratch_txt_slice_with_opt<R>(
     txts: &[&str],
     txt_opt: Option<&str>,
     f: impl FnOnce(&[*const c_char], *const c_char) -> R,
 ) -> R {
-    TLS_SCRATCH.with(|buf| {
-        let mut buf = buf.borrow_mut();
+    with_tls_scratch(|buf| {
         buf.refresh_buffer();
 
         let total_bytes: usize = txts.iter().map(|s| s.len() + 1).sum::<usize>()

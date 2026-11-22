@@ -1,4 +1,4 @@
-use super::buffers::{finish_string_input_buffer, make_string_input_buffer};
+use super::buffers::{StringInputBuffer, validate_input_buffer_size};
 use super::callback_bridge::{
     StringCallbackState, StringResizeCallbackState, im_string_multiline_resize_callback,
     string_multiline_callback_router, string_multiline_resize_callback,
@@ -59,14 +59,14 @@ impl<'ui, 'p> InputTextMultilineImStr<'ui, 'p> {
         self
     }
     pub fn build(self) -> bool {
+        validate_input_multiline_flags("InputTextMultilineImStr::build()", self.flags);
         let label_ptr = self.ui.scratch_txt(self.label.as_ref());
-        let buf_size = self.buf.capacity_with_nul().max(1);
-        self.buf.ensure_buf_size(buf_size);
+        let buf_size = self.buf.len() + 1;
+        validate_input_buffer_size(buf_size);
         let buf_ptr = self.buf.as_mut_ptr();
         let user_ptr = self.buf as *mut ImString as *mut c_void;
         let size_vec: sys::ImVec2 = self.size.into();
 
-        validate_input_multiline_flags("InputTextMultilineImStr::build()", self.flags);
         let flags = self.flags.raw() | sys::ImGuiInputTextFlags_CallbackResize as i32;
         let result = self.ui.run_input_widget(label_ptr, || unsafe {
             sys::igInputTextMultiline(
@@ -123,19 +123,19 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
 
     /// Builds the multiline text input widget
     pub fn build(self) -> bool {
+        validate_input_multiline_flags("InputTextMultiline::build()", self.flags);
         let label_ptr = self.ui.scratch_txt(self.label.as_ref());
 
-        let mut input_buffer = make_string_input_buffer(self.buf, self.capacity_hint);
-        let capacity = input_buffer.len();
-        let buf_ptr = input_buffer.as_mut_ptr() as *mut std::os::raw::c_char;
+        let mut input_buffer = StringInputBuffer::new(self.buf, self.capacity_hint);
+        let capacity = input_buffer.bytes.len();
+        let buf_ptr = input_buffer.bytes.as_mut_ptr().cast();
 
-        let mut callback_state = StringResizeCallbackState::new(&mut input_buffer);
+        let mut callback_state = StringResizeCallbackState::new(&mut input_buffer.bytes);
         let user_ptr = callback_state.user_ptr();
 
         let size_vec: sys::ImVec2 = self.size.into();
-        validate_input_multiline_flags("InputTextMultiline::build()", self.flags);
         let flags = self.flags.raw() | sys::ImGuiInputTextFlags_CallbackResize as i32;
-        let result = self.ui.run_input_widget(label_ptr, || unsafe {
+        self.ui.run_input_widget(label_ptr, || unsafe {
             sys::igInputTextMultiline(
                 label_ptr,
                 buf_ptr,
@@ -145,10 +145,7 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
                 Some(string_multiline_resize_callback),
                 user_ptr,
             )
-        });
-
-        finish_string_input_buffer(self.buf, input_buffer);
-        result
+        })
     }
 
     /// Enable ImGui callbacks for this multiline input and attach a handler.
@@ -200,19 +197,19 @@ pub struct InputTextMultilineWithCb<'ui, 'p, T> {
 
 impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> {
     pub fn build(self) -> bool {
+        validate_input_multiline_flags("InputTextMultilineWithCb::build()", self.flags);
         let label_ptr = self.ui.scratch_txt(self.label.as_ref());
 
-        let mut input_buffer = make_string_input_buffer(self.buf, self.capacity_hint);
-        let capacity = input_buffer.len();
-        let buf_ptr = input_buffer.as_mut_ptr() as *mut std::os::raw::c_char;
+        let mut input_buffer = StringInputBuffer::new(self.buf, self.capacity_hint);
+        let capacity = input_buffer.bytes.len();
+        let buf_ptr = input_buffer.bytes.as_mut_ptr().cast();
 
-        let mut callback_state = StringCallbackState::new(&mut input_buffer, self.handler);
+        let mut callback_state = StringCallbackState::new(&mut input_buffer.bytes, self.handler);
         let user_ptr = callback_state.user_ptr();
 
         let size_vec: sys::ImVec2 = self.size.into();
-        validate_input_multiline_flags("InputTextMultilineWithCb::build()", self.flags);
         let flags = self.flags.raw() | sys::ImGuiInputTextFlags_CallbackResize as i32;
-        let result = self.ui.run_input_widget(label_ptr, || unsafe {
+        self.ui.run_input_widget(label_ptr, || unsafe {
             sys::igInputTextMultiline(
                 label_ptr,
                 buf_ptr,
@@ -222,9 +219,6 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
                 Some(string_multiline_callback_router::<T>),
                 user_ptr,
             )
-        });
-
-        finish_string_input_buffer(self.buf, input_buffer);
-        result
+        })
     }
 }

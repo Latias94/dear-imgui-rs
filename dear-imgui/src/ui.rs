@@ -28,10 +28,10 @@ use crate::draw::DrawListMut;
 use crate::input::MouseCursor;
 use crate::internal::RawWrapper;
 use crate::scope::NativeScopeTracker;
-use crate::string::UiBuffer;
+use crate::string::{ScratchBuffers, UiBuffer};
 use crate::sys;
 use crate::texture::TextureRef;
-use std::cell::{RefCell, UnsafeCell};
+use std::cell::RefCell;
 
 /// Represents the Dear ImGui user interface for one frame
 #[derive(Debug)]
@@ -42,6 +42,6 @@ pub struct Ui {
     pub(crate) texture_registry: SharedTextureRegistry,
     pub(crate) ime: std::rc::Rc<RefCell<crate::context::ime::ImeState>>,
     pub(crate) native_scopes: RefCell<NativeScopeTracker>,
-    /// Internal buffer for string operations
-    buffer: UnsafeCell<UiBuffer>,
+    /// Reused in stack order so nested label conversions and callbacks have independent storage.
+    pub(crate) scratch_buffers: std::rc::Rc<ScratchBuffers>,
 }

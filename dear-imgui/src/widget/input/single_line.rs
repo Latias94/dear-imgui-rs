@@ -1,4 +1,4 @@
-use super::buffers::{finish_string_input_buffer, make_string_input_buffer};
+use super::buffers::{StringInputBuffer, validate_input_buffer_size};
 use super::callback_bridge::{
     StringCallbackState, im_string_resize_callback, string_callback_router,
 };
@@ -85,16 +85,16 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
     }
 
     pub fn build(self) -> bool {
+        validate_input_text_flags("InputTextImStr::build()", self.flags);
         let (label_ptr, hint_ptr) = self.ui.scratch_txt_with_opt(
             self.label.as_ref(),
             self.hint.as_ref().map(|hint| hint.as_ref()),
         );
-        let buf_size = self.buf.capacity_with_nul().max(1);
-        self.buf.ensure_buf_size(buf_size);
+        let buf_size = self.buf.len() + 1;
+        validate_input_buffer_size(buf_size);
         let buf_ptr = self.buf.as_mut_ptr();
         let user_ptr = self.buf as *mut ImString as *mut c_void;
 
-        validate_input_text_flags("InputTextImStr::build()", self.flags);
         let flags = self.flags.raw() | sys::ImGuiInputTextFlags_CallbackResize as i32;
         let result = self.ui.run_input_widget(label_ptr, || unsafe {
             if hint_ptr.is_null() {
@@ -248,21 +248,22 @@ where
 {
     /// Builds the text input widget
     pub fn build(self) -> bool {
+        validate_input_text_flags("InputText::build()", self.flags);
         let (label_ptr, hint_ptr) = self.ui.scratch_txt_with_opt(
             self.label.as_ref(),
             self.hint.as_ref().map(|hint| hint.as_ref()),
         );
 
-        let mut input_buffer = make_string_input_buffer(self.buf, self.capacity_hint);
-        let capacity = input_buffer.len();
-        let buf_ptr = input_buffer.as_mut_ptr() as *mut std::os::raw::c_char;
+        let mut input_buffer = StringInputBuffer::new(self.buf, self.capacity_hint);
+        let capacity = input_buffer.bytes.len();
+        let buf_ptr = input_buffer.bytes.as_mut_ptr().cast();
 
-        let mut callback_state = StringCallbackState::new(&mut input_buffer, self.callback_handler);
+        let mut callback_state =
+            StringCallbackState::new(&mut input_buffer.bytes, self.callback_handler);
         let user_ptr = callback_state.user_ptr();
 
-        validate_input_text_flags("InputText::build()", self.flags);
         let flags = self.flags.raw() | sys::ImGuiInputTextFlags_CallbackResize as i32;
-        let result = self.ui.run_input_widget(label_ptr, || unsafe {
+        self.ui.run_input_widget(label_ptr, || unsafe {
             if hint_ptr.is_null() {
                 sys::igInputText(
                     label_ptr,
@@ -283,9 +284,6 @@ where
                     user_ptr,
                 )
             }
-        });
-
-        finish_string_input_buffer(self.buf, input_buffer);
-        result
+        })
     }
 }

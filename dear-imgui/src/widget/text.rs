@@ -174,8 +174,13 @@ impl Ui {
     /// Returns true when clicked.
     #[doc(alias = "TextLinkOpenURL")]
     pub fn text_link_open_url(&self, label: impl AsRef<str>, url: impl AsRef<str>) -> bool {
-        let (label_ptr, url_ptr) = self.scratch_txt_two(label, url);
-        self.run_with_bound_context(|| unsafe { sys::igTextLinkOpenURL(label_ptr, url_ptr) })
+        self.run_with_bound_context(|| {
+            self.with_scratch_buffer(|buffer| {
+                let (label, url) = buffer.scratch_txt_two(label, url);
+                // Dear ImGui uses the URL for its tooltip after Platform_OpenInShellFn returns.
+                unsafe { sys::igTextLinkOpenURL(label, url) }
+            })
+        })
     }
 }
 

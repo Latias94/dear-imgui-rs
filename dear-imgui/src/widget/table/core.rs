@@ -250,11 +250,11 @@ impl Ui {
             init_width_or_weight.is_finite(),
             "Ui::table_setup_column_with_indent_and_user_data() width or weight must be finite"
         );
-        let label_ptr = self.scratch_txt(label);
         let raw_flags = flags.bits()
             | width.map_or(0, TableColumnWidth::raw_flags)
             | indent.map_or(0, TableColumnIndent::raw_flags);
         let user_data = user_data.into().get();
+        let label_ptr = self.scratch_txt(label);
         self.run_with_bound_context(|| {
             let table = assert_current_table("Ui::table_setup_column_with_indent_and_user_data()");
             assert!(
@@ -446,7 +446,8 @@ impl Ui {
         })
     }
 
-    /// Return the name of a column by index.
+    /// Return an owned copy of a column's name. It remains valid after further column setup
+    /// and after the table or frame ends.
     ///
     /// Returns an empty string when no table is current.
     ///
@@ -454,7 +455,7 @@ impl Ui {
     ///
     /// Panics when a table is current and the requested/current column is invalid.
     #[doc(alias = "TableGetColumnName")]
-    pub fn table_get_column_name(&self, column: impl Into<TableColumnRef>) -> &str {
+    pub fn table_get_column_name(&self, column: impl Into<TableColumnRef>) -> String {
         let column = column.into();
         let column_n = match column {
             TableColumnRef::Current => -1,
@@ -467,9 +468,9 @@ impl Ui {
             unsafe {
                 let ptr = sys::igTableGetColumnName_Int(column_n);
                 if ptr.is_null() {
-                    ""
+                    String::new()
                 } else {
-                    CStr::from_ptr(ptr).to_str().unwrap_or("")
+                    CStr::from_ptr(ptr).to_str().unwrap_or("").to_owned()
                 }
             }
         })

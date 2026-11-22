@@ -19,6 +19,36 @@ fn setup_context() -> crate::Context {
     ctx
 }
 
+#[test]
+fn column_name_survives_its_table_and_context() {
+    struct ColumnId<'a>(&'a crate::Ui);
+    impl From<ColumnId<'_>> for TableColumnUserData {
+        fn from(id: ColumnId<'_>) -> Self {
+            Self::new(id.0.get_id("column id").raw())
+        }
+    }
+
+    let name: String = {
+        let mut ctx = setup_context();
+        let ui = ctx.frame();
+        ui.window("column names")
+            .position([0.0, 0.0], crate::Condition::Always)
+            .size([120.0, 120.0], crate::Condition::Always)
+            .build(|| {
+                let _table = ui.begin_table("names", 1).expect("visible table");
+                ui.table_setup_column_with_user_data(
+                    "Name",
+                    TableColumnFlags::NONE,
+                    None,
+                    ColumnId(ui),
+                );
+                ui.table_get_column_name(0)
+            })
+            .expect("visible window")
+    };
+    assert_eq!(name, "Name");
+}
+
 fn panic_message(payload: Box<dyn Any + Send>) -> String {
     match payload.downcast::<String>() {
         Ok(message) => *message,

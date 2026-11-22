@@ -179,13 +179,12 @@ unsafe fn route_string_callback<T: InputTextCallbackHandler>(
     let Some(state) = (unsafe { state.as_mut() }) else {
         return 0;
     };
-    let Some(buffer) = (unsafe { state.buffer.as_mut() }) else {
-        return 0;
-    };
-
     let event_flag = unsafe { (*data).EventFlag as i32 };
     match event_flag {
         value if value == sys::ImGuiInputTextFlags_CallbackResize as i32 => unsafe {
+            let Some(buffer) = state.buffer.as_mut() else {
+                return 0;
+            };
             debug_assert_eq!(buffer.as_ptr() as *const _, (*data).Buf);
             resize_string_input_buffer(buffer, (*data).BufSize, data)
         },

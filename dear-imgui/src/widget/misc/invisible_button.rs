@@ -193,10 +193,10 @@ impl Ui {
         size: impl Into<[f32; 2]>,
         flags: i32,
     ) -> bool {
-        let id_ptr = self.scratch_txt(str_id);
         let size = size.into();
         assert_finite_vec2("Ui::invisible_button()", "size", size);
         let size_vec: sys::ImVec2 = size.into();
+        let id_ptr = self.scratch_txt(str_id);
         self.run_with_bound_context(|| unsafe { sys::igInvisibleButton(id_ptr, size_vec, flags) })
     }
 

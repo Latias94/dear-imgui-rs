@@ -290,13 +290,9 @@ impl<'ui> Window<'ui> {
         let name = self.name;
         let name_ptr = match &name {
             WindowLabel::Plain(title) => self.ui.scratch_txt(title),
-            WindowLabel::Keyed { key, title } => unsafe {
-                (&mut *self.ui.scratch_buffer().get()).scratch_txt_concat(&[
-                    title,
-                    "###",
-                    key.stable_id(),
-                ])
-            },
+            WindowLabel::Keyed { key, title } => self.ui.with_scratch_buffer(|buffer| {
+                buffer.scratch_txt_concat(&[title, "###", key.stable_id()])
+            }),
         };
         validate_window_flags("Window::begin()", self.flags);
 

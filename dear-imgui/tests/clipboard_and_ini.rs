@@ -39,6 +39,39 @@ fn clipboard_helpers_work_with_backend() {
 
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
+fn clipboard_setter_owns_the_text_passed_to_user_code() {
+    use std::{cell::Cell, rc::Rc};
+
+    struct Setter {
+        native_text: *const u8,
+        observed: Rc<Cell<Option<bool>>>,
+    }
+
+    impl imgui::ClipboardBackend for Setter {
+        fn get(&mut self) -> Option<String> {
+            None
+        }
+
+        fn set(&mut self, text: &str) {
+            self.observed
+                .set(Some(text == "copy me" && text.as_ptr() != self.native_text));
+        }
+    }
+
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    let text = c"copy me";
+    let observed = Rc::new(Cell::new(None));
+    ctx.set_clipboard_backend(Setter {
+        native_text: text.as_ptr().cast(),
+        observed: observed.clone(),
+    });
+    unsafe { imgui::sys::igSetClipboardText(text.as_ptr()) };
+    assert_eq!(observed.get(), Some(true));
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn clipboard_callbacks_use_passed_context_not_current_context() {
     let _guard = test_guard();
 

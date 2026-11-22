@@ -13,14 +13,17 @@ pub(super) struct TypedPayload<T: Copy> {
     pub(super) data: T,
 }
 
-pub(super) fn make_typed_payload<T: Copy + 'static>(data: T) -> TypedPayload<T> {
-    // Ensure we do not pass uninitialized padding bytes across the C++ boundary.
-    let mut out = std::mem::MaybeUninit::<TypedPayload<T>>::zeroed();
+pub(super) fn write_typed_payload<T: Copy + 'static>(
+    out: &mut std::mem::MaybeUninit<TypedPayload<T>>,
+    data: T,
+) {
+    // Initialize wrapper padding in the allocation that C++ will copy. Moving a TypedPayload
+    // by value could discard that padding. Any padding inside T remains opaque to the decoder.
+    let ptr = out.as_mut_ptr();
     unsafe {
-        let ptr = out.as_mut_ptr();
+        ptr.write_bytes(0, 1);
         std::ptr::addr_of_mut!((*ptr).type_id).write(any::TypeId::of::<T>());
         std::ptr::addr_of_mut!((*ptr).data).write(data);
-        out.assume_init()
     }
 }
 
@@ -93,17 +96,16 @@ pub(super) fn decode_typed_payload<T: 'static + Copy>(
         return Err(PayloadIsWrongType);
     }
 
-    // Dear ImGui stores payload data in an unaligned byte buffer, so always read unaligned.
-    let typed_payload: TypedPayload<T> =
-        unsafe { std::ptr::read_unaligned(payload.data as *const TypedPayload<T>) };
-
-    if typed_payload.type_id == any::TypeId::of::<T>() {
-        Ok(DragDropPayloadPod {
-            data: typed_payload.data,
-            preview: payload.preview,
-            delivery: payload.delivery,
-        })
-    } else {
-        Err(PayloadIsWrongType)
+    // Every repr(C) typed payload starts with the same header. The body is a T only after
+    // this check, even when a different producer type has the same size.
+    let type_id = unsafe { payload.data.cast::<any::TypeId>().read_unaligned() };
+    if type_id != any::TypeId::of::<T>() {
+        return Err(PayloadIsWrongType);
     }
+    let typed = payload.data.cast::<TypedPayload<T>>();
+    Ok(DragDropPayloadPod {
+        data: unsafe { (&raw const (*typed).data).read_unaligned() },
+        preview: payload.preview,
+        delivery: payload.delivery,
+    })
 }

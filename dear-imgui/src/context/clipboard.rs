@@ -45,7 +45,10 @@ impl Context {
     pub fn set_clipboard_backend<T: ClipboardBackend>(&mut self, backend: T) {
         let _guard = CTX_MUTEX.lock();
 
-        let clipboard_ctx = Box::new(ClipboardContext::new(backend));
+        let clipboard_ctx = Box::new(ClipboardContext::new(
+            backend,
+            self.ui.scratch_buffers.clone(),
+        ));
 
         // On native/desktop targets, register clipboard callbacks in ImGui PlatformIO
         // so ImGui can call back into Rust for copy/paste.
