@@ -1,57 +1,24 @@
 use crate::sys;
 
-use super::super::core::assert_platform_io_aggregate_hooks_available;
-use super::super::{PlatformIo, Viewport, trampolines};
+use super::super::{PlatformIo, Viewport, callback_abi};
 
 impl PlatformIo {
     /// Set platform get window position callback (raw)
     ///
-    /// This uses this crate's out-parameter shim internally instead of writing
-    /// `ImGuiPlatformIO::Platform_GetWindowPos` directly. The shim stores a C-compatible
-    /// out-parameter callback in `dear-imgui-sys` storage and installs a C++ thunk that returns
-    /// `ImVec2` by value, which avoids exposing the fragile direct small-aggregate callback ABI
-    /// on MSVC.
+    /// The C++ shim stores this exact callback for the receiving `PlatformIo` and supplies the
+    /// output pointer when Dear ImGui requests the value.
     ///
     /// # Safety
     ///
     /// See [`Self::set_platform_create_window_raw`]. The output pointer is non-null and valid
-    /// only for the duration of the callback; the callback must initialize it.
+    /// for the duration of the callback. The callback must initialize it.
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_platform_get_window_pos_raw(
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2)>,
     ) {
-        use trampolines::*;
-
-        self.assert_current_context_platform_io_for_callbacks();
-        if callback.is_some() {
-            assert_platform_io_aggregate_hooks_available("Platform_GetWindowPos");
-        }
-
-        match callback {
-            Some(cb) => {
-                self.store_current_context_cb(&PLATFORM_GET_WINDOW_POS_RAW_CB, Some(cb));
-                self.store_current_context_cb(&PLATFORM_GET_WINDOW_POS_CB, None);
-            }
-            None => {
-                self.clear_current_context_cb(&PLATFORM_GET_WINDOW_POS_RAW_CB);
-                self.clear_current_context_cb(&PLATFORM_GET_WINDOW_POS_CB);
-            }
-        }
-
         unsafe {
-            match callback {
-                Some(_) => sys::ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(
-                    self.as_raw_mut(),
-                    Some(
-                        trampolines::platform_get_window_pos_out
-                            as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
-                    ),
-                ),
-                None => {
-                    sys::ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(self.as_raw_mut(), None)
-                }
-            }
+            sys::ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(self.as_raw_mut(), callback)
         }
     }
 
@@ -68,46 +35,13 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut Viewport, *mut sys::ImVec2)>,
     ) {
-        use trampolines::*;
-        self.assert_current_context_platform_io_for_callbacks();
-        if callback.is_some() {
-            assert_platform_io_aggregate_hooks_available("Platform_GetWindowPos");
-        }
-
-        match callback {
-            Some(cb) => {
-                self.store_current_context_cb(&PLATFORM_GET_WINDOW_POS_RAW_CB, None);
-                self.store_current_context_cb(&PLATFORM_GET_WINDOW_POS_CB, Some(cb));
-            }
-            None => {
-                self.clear_current_context_cb(&PLATFORM_GET_WINDOW_POS_RAW_CB);
-                self.clear_current_context_cb(&PLATFORM_GET_WINDOW_POS_CB);
-            }
-        }
-
-        unsafe {
-            match callback {
-                Some(_) => sys::ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(
-                    self.as_raw_mut(),
-                    Some(
-                        trampolines::platform_get_window_pos_out
-                            as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
-                    ),
-                ),
-                None => {
-                    sys::ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(self.as_raw_mut(), None)
-                }
-            }
-        }
+        unsafe { self.set_platform_get_window_pos_raw(callback_abi::vec2_output(callback)) }
     }
 
     /// Set platform get window size callback (raw)
     ///
-    /// This uses this crate's out-parameter shim internally instead of writing
-    /// `ImGuiPlatformIO::Platform_GetWindowSize` directly. The shim stores a C-compatible
-    /// out-parameter callback in `dear-imgui-sys` storage and installs a C++ thunk that returns
-    /// `ImVec2` by value, which avoids exposing the fragile direct small-aggregate callback ABI
-    /// on MSVC.
+    /// The C++ shim stores this exact callback for the receiving `PlatformIo` and supplies the
+    /// output pointer when Dear ImGui requests the value.
     ///
     /// # Safety
     ///
@@ -117,38 +51,8 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2)>,
     ) {
-        use trampolines::*;
-
-        self.assert_current_context_platform_io_for_callbacks();
-        if callback.is_some() {
-            assert_platform_io_aggregate_hooks_available("Platform_GetWindowSize");
-        }
-
-        match callback {
-            Some(cb) => {
-                self.store_current_context_cb(&PLATFORM_GET_WINDOW_SIZE_RAW_CB, Some(cb));
-                self.store_current_context_cb(&PLATFORM_GET_WINDOW_SIZE_CB, None);
-            }
-            None => {
-                self.clear_current_context_cb(&PLATFORM_GET_WINDOW_SIZE_RAW_CB);
-                self.clear_current_context_cb(&PLATFORM_GET_WINDOW_SIZE_CB);
-            }
-        }
-
         unsafe {
-            match callback {
-                Some(_) => sys::ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(
-                    self.as_raw_mut(),
-                    Some(
-                        trampolines::platform_get_window_size_out
-                            as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
-                    ),
-                ),
-                None => sys::ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(
-                    self.as_raw_mut(),
-                    None,
-                ),
-            }
+            sys::ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(self.as_raw_mut(), callback)
         }
     }
 
@@ -165,47 +69,13 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut Viewport, *mut sys::ImVec2)>,
     ) {
-        use trampolines::*;
-        self.assert_current_context_platform_io_for_callbacks();
-        if callback.is_some() {
-            assert_platform_io_aggregate_hooks_available("Platform_GetWindowSize");
-        }
-
-        match callback {
-            Some(cb) => {
-                self.store_current_context_cb(&PLATFORM_GET_WINDOW_SIZE_RAW_CB, None);
-                self.store_current_context_cb(&PLATFORM_GET_WINDOW_SIZE_CB, Some(cb));
-            }
-            None => {
-                self.clear_current_context_cb(&PLATFORM_GET_WINDOW_SIZE_RAW_CB);
-                self.clear_current_context_cb(&PLATFORM_GET_WINDOW_SIZE_CB);
-            }
-        }
-
-        unsafe {
-            match callback {
-                Some(_) => sys::ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(
-                    self.as_raw_mut(),
-                    Some(
-                        trampolines::platform_get_window_size_out
-                            as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
-                    ),
-                ),
-                None => sys::ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(
-                    self.as_raw_mut(),
-                    None,
-                ),
-            }
-        }
+        unsafe { self.set_platform_get_window_size_raw(callback_abi::vec2_output(callback)) }
     }
 
     /// Set platform get window framebuffer scale callback (raw)
     ///
-    /// This uses this crate's out-parameter shim internally instead of writing
-    /// `ImGuiPlatformIO::Platform_GetWindowFramebufferScale` directly. The shim stores a
-    /// C-compatible out-parameter callback in `dear-imgui-sys` storage and installs a C++ thunk
-    /// that returns `ImVec2` by value, which avoids exposing the fragile direct small-aggregate
-    /// callback ABI on MSVC.
+    /// The C++ shim stores this exact callback for the receiving `PlatformIo` and supplies the
+    /// output pointer when Dear ImGui requests the value.
     ///
     /// # Safety
     ///
@@ -217,41 +87,11 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2)>,
     ) {
-        use trampolines::*;
-
-        self.assert_current_context_platform_io_for_callbacks();
-        if callback.is_some() {
-            assert_platform_io_aggregate_hooks_available("Platform_GetWindowFramebufferScale");
-        }
-
-        match callback {
-            Some(cb) => {
-                self.store_current_context_cb(
-                    &PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_RAW_CB,
-                    Some(cb),
-                );
-                self.store_current_context_cb(&PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_CB, None);
-            }
-            None => {
-                self.clear_current_context_cb(&PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_RAW_CB);
-                self.clear_current_context_cb(&PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_CB);
-            }
-        }
-
         unsafe {
-            match callback {
-                Some(_) => sys::ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(
-                    self.as_raw_mut(),
-                    Some(
-                        trampolines::platform_get_window_framebuffer_scale_out
-                            as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
-                    ),
-                ),
-                None => sys::ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(
-                    self.as_raw_mut(),
-                    None,
-                ),
-            }
+            sys::ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(
+                self.as_raw_mut(),
+                callback,
+            )
         }
     }
 
@@ -269,47 +109,15 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut Viewport, *mut sys::ImVec2)>,
     ) {
-        use trampolines::*;
-        self.assert_current_context_platform_io_for_callbacks();
-        if callback.is_some() {
-            assert_platform_io_aggregate_hooks_available("Platform_GetWindowFramebufferScale");
-        }
-
-        match callback {
-            Some(cb) => {
-                self.store_current_context_cb(&PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_RAW_CB, None);
-                self.store_current_context_cb(&PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_CB, Some(cb));
-            }
-            None => {
-                self.clear_current_context_cb(&PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_RAW_CB);
-                self.clear_current_context_cb(&PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_CB);
-            }
-        }
-
         unsafe {
-            match callback {
-                Some(_) => sys::ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(
-                    self.as_raw_mut(),
-                    Some(
-                        trampolines::platform_get_window_framebuffer_scale_out
-                            as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
-                    ),
-                ),
-                None => sys::ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(
-                    self.as_raw_mut(),
-                    None,
-                ),
-            }
+            self.set_platform_get_window_framebuffer_scale_raw(callback_abi::vec2_output(callback))
         }
     }
 
     /// Set platform get window work area insets callback (raw)
     ///
-    /// This uses this crate's out-parameter shim internally instead of writing
-    /// `ImGuiPlatformIO::Platform_GetWindowWorkAreaInsets` directly. The shim stores a
-    /// C-compatible out-parameter callback in `dear-imgui-sys` storage and installs a C++ thunk
-    /// that returns `ImVec4` by value, which avoids exposing the fragile direct aggregate callback
-    /// ABI.
+    /// The C++ shim stores this exact callback for the receiving `PlatformIo` and supplies the
+    /// output pointer when Dear ImGui requests the value.
     ///
     /// # Safety
     ///
@@ -319,41 +127,11 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec4)>,
     ) {
-        use trampolines::*;
-
-        self.assert_current_context_platform_io_for_callbacks();
-        if callback.is_some() {
-            assert_platform_io_aggregate_hooks_available("Platform_GetWindowWorkAreaInsets");
-        }
-
-        match callback {
-            Some(cb) => {
-                self.store_current_context_cb(
-                    &PLATFORM_GET_WINDOW_WORK_AREA_INSETS_RAW_CB,
-                    Some(cb),
-                );
-                self.store_current_context_cb(&PLATFORM_GET_WINDOW_WORK_AREA_INSETS_CB, None);
-            }
-            None => {
-                self.clear_current_context_cb(&PLATFORM_GET_WINDOW_WORK_AREA_INSETS_RAW_CB);
-                self.clear_current_context_cb(&PLATFORM_GET_WINDOW_WORK_AREA_INSETS_CB);
-            }
-        }
-
         unsafe {
-            match callback {
-                Some(_) => sys::ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(
-                    self.as_raw_mut(),
-                    Some(
-                        trampolines::platform_get_window_work_area_insets_out
-                            as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec4),
-                    ),
-                ),
-                None => sys::ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(
-                    self.as_raw_mut(),
-                    None,
-                ),
-            }
+            sys::ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(
+                self.as_raw_mut(),
+                callback,
+            )
         }
     }
 
@@ -370,37 +148,8 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut Viewport, *mut sys::ImVec4)>,
     ) {
-        use trampolines::*;
-        self.assert_current_context_platform_io_for_callbacks();
-        if callback.is_some() {
-            assert_platform_io_aggregate_hooks_available("Platform_GetWindowWorkAreaInsets");
-        }
-
-        match callback {
-            Some(cb) => {
-                self.store_current_context_cb(&PLATFORM_GET_WINDOW_WORK_AREA_INSETS_RAW_CB, None);
-                self.store_current_context_cb(&PLATFORM_GET_WINDOW_WORK_AREA_INSETS_CB, Some(cb));
-            }
-            None => {
-                self.clear_current_context_cb(&PLATFORM_GET_WINDOW_WORK_AREA_INSETS_RAW_CB);
-                self.clear_current_context_cb(&PLATFORM_GET_WINDOW_WORK_AREA_INSETS_CB);
-            }
-        }
-
         unsafe {
-            match callback {
-                Some(_) => sys::ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(
-                    self.as_raw_mut(),
-                    Some(
-                        trampolines::platform_get_window_work_area_insets_out
-                            as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec4),
-                    ),
-                ),
-                None => sys::ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(
-                    self.as_raw_mut(),
-                    None,
-                ),
-            }
+            self.set_platform_get_window_work_area_insets_raw(callback_abi::vec4_output(callback))
         }
     }
 
@@ -416,22 +165,9 @@ impl PlatformIo {
         &mut self,
         callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
     ) -> bool {
-        use trampolines::*;
-        let owned =
-            trampolines::load_cb_for_platform_io(self.as_raw(), &PLATFORM_GET_WINDOW_POS_RAW_CB)
-                .is_some_and(|installed| std::ptr::fn_addr_eq(installed, callback));
-        if !owned {
-            return false;
+        unsafe {
+            sys::ImGuiPlatformIO_ClearPlatformGetWindowPosIfOutParam(self.as_raw_mut(), callback)
         }
-
-        let cleared = unsafe {
-            sys::ImGuiPlatformIO_ClearPlatformGetWindowPosIfOutParam(
-                self.as_raw_mut(),
-                platform_get_window_pos_out,
-            )
-        };
-        self.clear_platform_io_cb(&PLATFORM_GET_WINDOW_POS_RAW_CB);
-        cleared
     }
 
     /// Release `Platform_GetWindowSize` only if `callback` is still the registered raw handler.
@@ -445,22 +181,9 @@ impl PlatformIo {
         &mut self,
         callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
     ) -> bool {
-        use trampolines::*;
-        let owned =
-            trampolines::load_cb_for_platform_io(self.as_raw(), &PLATFORM_GET_WINDOW_SIZE_RAW_CB)
-                .is_some_and(|installed| std::ptr::fn_addr_eq(installed, callback));
-        if !owned {
-            return false;
+        unsafe {
+            sys::ImGuiPlatformIO_ClearPlatformGetWindowSizeIfOutParam(self.as_raw_mut(), callback)
         }
-
-        let cleared = unsafe {
-            sys::ImGuiPlatformIO_ClearPlatformGetWindowSizeIfOutParam(
-                self.as_raw_mut(),
-                platform_get_window_size_out,
-            )
-        };
-        self.clear_platform_io_cb(&PLATFORM_GET_WINDOW_SIZE_RAW_CB);
-        cleared
     }
 
     /// Release `Platform_GetWindowFramebufferScale` only if `callback` is still registered.
@@ -474,24 +197,12 @@ impl PlatformIo {
         &mut self,
         callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
     ) -> bool {
-        use trampolines::*;
-        let owned = trampolines::load_cb_for_platform_io(
-            self.as_raw(),
-            &PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_RAW_CB,
-        )
-        .is_some_and(|installed| std::ptr::fn_addr_eq(installed, callback));
-        if !owned {
-            return false;
-        }
-
-        let cleared = unsafe {
+        unsafe {
             sys::ImGuiPlatformIO_ClearPlatformGetWindowFramebufferScaleIfOutParam(
                 self.as_raw_mut(),
-                platform_get_window_framebuffer_scale_out,
+                callback,
             )
-        };
-        self.clear_platform_io_cb(&PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_RAW_CB);
-        cleared
+        }
     }
 
     /// Release `Platform_GetWindowWorkAreaInsets` only if `callback` is still registered.
@@ -505,23 +216,11 @@ impl PlatformIo {
         &mut self,
         callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec4),
     ) -> bool {
-        use trampolines::*;
-        let owned = trampolines::load_cb_for_platform_io(
-            self.as_raw(),
-            &PLATFORM_GET_WINDOW_WORK_AREA_INSETS_RAW_CB,
-        )
-        .is_some_and(|installed| std::ptr::fn_addr_eq(installed, callback));
-        if !owned {
-            return false;
-        }
-
-        let cleared = unsafe {
+        unsafe {
             sys::ImGuiPlatformIO_ClearPlatformGetWindowWorkAreaInsetsIfOutParam(
                 self.as_raw_mut(),
-                platform_get_window_work_area_insets_out,
+                callback,
             )
-        };
-        self.clear_platform_io_cb(&PLATFORM_GET_WINDOW_WORK_AREA_INSETS_RAW_CB);
-        cleared
+        }
     }
 }

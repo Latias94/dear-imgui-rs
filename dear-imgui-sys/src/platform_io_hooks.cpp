@@ -1,6 +1,9 @@
 #include "../third-party/cimgui/imgui/imgui.h"
 #include "../third-party/cimgui/imgui/imgui_internal.h"
 
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -270,6 +273,12 @@ static ImVec2 DearImguiRsPlatformGetWindowFramebufferScaleHook(ImGuiViewport* vp
     if (DearImguiRsPlatformIoHookStorage* storage = DearImguiRsGetCurrentPlatformIoHookStorage())
         if (storage->Platform_GetWindowFramebufferScale != nullptr)
             storage->Platform_GetWindowFramebufferScale(vp, &scale);
+    if (!std::isfinite(scale.x) || !std::isfinite(scale.y) || scale.x <= 0.0f || scale.y <= 0.0f)
+    {
+        std::fputs("dear-imgui-rs: Platform_GetWindowFramebufferScale must return finite positive values on both axes\n", stderr);
+        std::fflush(stderr);
+        std::abort();
+    }
     return scale;
 }
 
@@ -641,11 +650,12 @@ extern "C" int dear_imgui_rs_platform_io_clear_renderer_set_window_size_if_point
     if (platform_io == nullptr || storage == nullptr || storage->Renderer_SetWindowSize != user_callback)
         return 0;
 
+    const bool owned_slot = platform_io->Renderer_SetWindowSize == DearImguiRsRendererSetWindowSizeHook;
     storage->Renderer_SetWindowSize = nullptr;
-    if (platform_io->Renderer_SetWindowSize == DearImguiRsRendererSetWindowSizeHook)
+    if (owned_slot)
         platform_io->Renderer_SetWindowSize = nullptr;
     DearImguiRsPrunePlatformIoHookStorageIfEmpty(platform_io);
-    return 1;
+    return owned_slot ? 1 : 0;
 }
 
 extern "C" int dear_imgui_rs_platform_io_probe_aggregate_callbacks(
@@ -655,14 +665,16 @@ extern "C" int dear_imgui_rs_platform_io_probe_aggregate_callbacks(
     if (platform_io == nullptr || out_result == nullptr || platform_io->Platform_SetWindowPos == nullptr || platform_io->Platform_GetWindowPos == nullptr || platform_io->Platform_SetWindowSize == nullptr || platform_io->Platform_GetWindowSize == nullptr || platform_io->Platform_GetWindowFramebufferScale == nullptr || platform_io->Platform_GetWindowWorkAreaInsets == nullptr || platform_io->Renderer_SetWindowSize == nullptr)
         return 0;
 
-    ImGuiViewport viewport = {};
-    platform_io->Platform_SetWindowPos(&viewport, ImVec2(1.0f, 2.0f));
-    platform_io->Platform_SetWindowSize(&viewport, ImVec2(3.0f, 4.0f));
-    out_result->PlatformGetWindowPos = platform_io->Platform_GetWindowPos(&viewport);
-    out_result->PlatformGetWindowSize = platform_io->Platform_GetWindowSize(&viewport);
-    out_result->PlatformGetWindowFramebufferScale = platform_io->Platform_GetWindowFramebufferScale(&viewport);
-    out_result->PlatformGetWindowWorkAreaInsets = platform_io->Platform_GetWindowWorkAreaInsets(&viewport);
-    platform_io->Renderer_SetWindowSize(&viewport, ImVec2(15.0f, 16.0f));
+    if (ImGui::GetCurrentContext() == nullptr || &ImGui::GetPlatformIO() != platform_io)
+        return 0;
+    ImGuiViewport* viewport = ImGui::GetMainViewport();
+    platform_io->Platform_SetWindowPos(viewport, ImVec2(1.0f, 2.0f));
+    platform_io->Platform_SetWindowSize(viewport, ImVec2(3.0f, 4.0f));
+    out_result->PlatformGetWindowPos = platform_io->Platform_GetWindowPos(viewport);
+    out_result->PlatformGetWindowSize = platform_io->Platform_GetWindowSize(viewport);
+    out_result->PlatformGetWindowFramebufferScale = platform_io->Platform_GetWindowFramebufferScale(viewport);
+    out_result->PlatformGetWindowWorkAreaInsets = platform_io->Platform_GetWindowWorkAreaInsets(viewport);
+    platform_io->Renderer_SetWindowSize(viewport, ImVec2(15.0f, 16.0f));
     return 1;
 }
 

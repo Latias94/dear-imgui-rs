@@ -1,13 +1,14 @@
 use crate::sys;
 use std::cell::UnsafeCell;
 
-#[cfg(feature = "multi-viewport")]
-use super::trampolines;
-
 /// Platform IO structure for multi-viewport support
 ///
 /// This is a transparent wrapper around `ImGuiPlatformIO` that provides
 /// safe access to platform-specific functionality.
+///
+/// Callback setters and clear operations act on this table, including while another Context is
+/// bound. Invoke installed callbacks with the owning Context current and its live viewport. The
+/// C++ aggregate hooks find the receiver's callback storage through that current Context.
 #[repr(transparent)]
 pub struct PlatformIo {
     pub(super) raw: UnsafeCell<sys::ImGuiPlatformIO>,
@@ -20,36 +21,9 @@ const _: [(); std::mem::align_of::<sys::ImGuiPlatformIO>()] =
     [(); std::mem::align_of::<PlatformIo>()];
 
 #[cfg(feature = "multi-viewport")]
-pub(crate) fn clear_typed_callbacks_for_context(ctx: *mut sys::ImGuiContext) {
-    trampolines::clear_callbacks_for_context(ctx);
-}
-
-#[cfg(not(feature = "multi-viewport"))]
-pub(crate) fn clear_typed_callbacks_for_context(_ctx: *mut sys::ImGuiContext) {}
-
-#[cfg(feature = "multi-viewport")]
-pub(crate) unsafe fn clear_platform_aggregate_callbacks_for_current_context() {
-    let pio = unsafe { sys::igGetPlatformIO_Nil() };
-    if pio.is_null() {
-        return;
-    }
-    unsafe {
-        sys::ImGuiPlatformIO_Set_Platform_SetWindowPos_PointerParam(pio, None);
-        sys::ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(pio, None);
-        sys::ImGuiPlatformIO_Set_Platform_SetWindowSize_PointerParam(pio, None);
-        sys::ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(pio, None);
-        sys::ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(pio, None);
-        sys::ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(pio, None);
-    }
-}
-
-#[cfg(feature = "multi-viewport")]
 pub(super) unsafe fn clear_platform_aggregate_callbacks_for_platform_io(
     pio: *mut sys::ImGuiPlatformIO,
 ) {
-    if pio.is_null() {
-        return;
-    }
     unsafe {
         sys::ImGuiPlatformIO_Set_Platform_SetWindowPos_PointerParam(pio, None);
         sys::ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(pio, None);
@@ -57,14 +31,6 @@ pub(super) unsafe fn clear_platform_aggregate_callbacks_for_platform_io(
         sys::ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(pio, None);
         sys::ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(pio, None);
         sys::ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(pio, None);
-    }
-}
-
-#[cfg(feature = "multi-viewport")]
-pub(crate) unsafe fn clear_renderer_aggregate_callbacks_for_current_context() {
-    let pio = unsafe { sys::igGetPlatformIO_Nil() };
-    if !pio.is_null() {
-        unsafe { sys::ImGuiPlatformIO_Set_Renderer_SetWindowSize_PointerParam(pio, None) }
     }
 }
 
@@ -72,30 +38,20 @@ pub(crate) unsafe fn clear_renderer_aggregate_callbacks_for_current_context() {
 pub(super) unsafe fn clear_renderer_aggregate_callbacks_for_platform_io(
     pio: *mut sys::ImGuiPlatformIO,
 ) {
-    if !pio.is_null() {
-        unsafe { sys::ImGuiPlatformIO_Set_Renderer_SetWindowSize_PointerParam(pio, None) }
-    }
+    unsafe { sys::ImGuiPlatformIO_Set_Renderer_SetWindowSize_PointerParam(pio, None) }
 }
 
 #[cfg(feature = "multi-viewport")]
 pub(crate) unsafe fn clear_aggregate_callbacks_for_current_context() {
     unsafe {
-        clear_platform_aggregate_callbacks_for_current_context();
-        clear_renderer_aggregate_callbacks_for_current_context();
+        let pio = sys::igGetPlatformIO_Nil();
+        clear_platform_aggregate_callbacks_for_platform_io(pio);
+        clear_renderer_aggregate_callbacks_for_platform_io(pio);
     }
 }
 
 #[cfg(not(feature = "multi-viewport"))]
 pub(crate) unsafe fn clear_aggregate_callbacks_for_current_context() {}
-
-#[cfg(feature = "multi-viewport")]
-pub(super) fn assert_platform_io_aggregate_hooks_available(callback_name: &str) {
-    assert!(
-        sys::HAS_PLATFORM_IO_AGGREGATE_HOOKS,
-        "dear-imgui-sys was built without PlatformIO aggregate ABI hooks; \
-         rebuild without IMGUI_SYS_SKIP_CC to install {callback_name} callbacks"
-    );
-}
 
 impl PlatformIo {
     #[inline]
@@ -133,6 +89,8 @@ impl PlatformIo {
     /// - The platform IO outlives the returned reference (e.g. it belongs to the
     ///   currently active ImGui context).
     /// - No other references (shared or mutable) to the same platform IO are alive.
+    /// - If the table is managed through raw FFI, uninstall any aggregate callbacks installed
+    ///   through this wrapper before freeing it. [`crate::Context`] handles its own teardown.
     pub unsafe fn from_raw_mut<'a>(raw: *mut sys::ImGuiPlatformIO) -> &'a mut Self {
         unsafe { &mut *(raw as *mut Self) }
     }
@@ -145,46 +103,5 @@ impl PlatformIo {
     /// Get the raw mutable pointer to the underlying `ImGuiPlatformIO`
     pub fn as_raw_mut(&mut self) -> *mut sys::ImGuiPlatformIO {
         self.raw.get()
-    }
-
-    #[cfg(feature = "multi-viewport")]
-    fn is_current_context_platform_io(&self) -> bool {
-        unsafe {
-            if sys::igGetCurrentContext().is_null() {
-                return false;
-            }
-
-            let current = sys::igGetPlatformIO_Nil();
-            !current.is_null() && std::ptr::addr_eq(current.cast_const(), self.as_raw())
-        }
-    }
-
-    #[cfg(feature = "multi-viewport")]
-    pub(super) fn assert_current_context_platform_io_for_callbacks(&self) {
-        assert!(
-            self.is_current_context_platform_io(),
-            "PlatformIo typed/out-parameter callback setters must be called on the active ImGui context's PlatformIo"
-        );
-    }
-
-    #[cfg(feature = "multi-viewport")]
-    pub(super) fn store_current_context_cb<T: Copy>(
-        &self,
-        slot: &trampolines::CallbackSlot<T>,
-        callback: Option<T>,
-    ) {
-        self.assert_current_context_platform_io_for_callbacks();
-        trampolines::store_cb(slot, callback);
-    }
-
-    #[cfg(feature = "multi-viewport")]
-    pub(super) fn clear_current_context_cb<T: Copy>(&self, slot: &trampolines::CallbackSlot<T>) {
-        self.assert_current_context_platform_io_for_callbacks();
-        trampolines::clear_cb_for_current_context(slot);
-    }
-
-    #[cfg(feature = "multi-viewport")]
-    pub(super) fn clear_platform_io_cb<T: Copy>(&self, slot: &trampolines::CallbackSlot<T>) {
-        trampolines::clear_cb_for_platform_io(self.as_raw(), slot);
     }
 }

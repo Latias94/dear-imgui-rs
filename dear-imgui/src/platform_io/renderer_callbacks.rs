@@ -2,18 +2,14 @@ use std::ffi::c_void;
 
 use crate::sys;
 
-use super::core::{
-    assert_platform_io_aggregate_hooks_available,
-    clear_renderer_aggregate_callbacks_for_platform_io,
-};
-use super::{PlatformIo, Viewport, trampolines};
+use super::core::clear_renderer_aggregate_callbacks_for_platform_io;
+use super::{PlatformIo, Viewport, callback_abi};
 
 impl PlatformIo {
     /// Clear all renderer backend handlers.
     ///
     /// This resets the `Renderer_*` callback table stored in `ImGuiPlatformIO`.
-    /// This also clears Rust typed renderer callback storage and aggregate ABI shim state for this
-    /// `PlatformIo`'s context.
+    /// This also releases the aggregate callback storage belonging to this `PlatformIo`.
     ///
     /// # Safety
     ///
@@ -21,10 +17,8 @@ impl PlatformIo {
     /// viewport state must already have been released.
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn clear_renderer_handlers(&mut self) {
-        unsafe { sys::ImGuiPlatformIO_ClearRendererHandlers(self.as_raw_mut()) }
-
-        trampolines::clear_renderer_callbacks_for_platform_io(self.as_raw());
         unsafe {
+            sys::ImGuiPlatformIO_ClearRendererHandlers(self.as_raw_mut());
             clear_renderer_aggregate_callbacks_for_platform_io(self.as_raw_mut());
         }
     }
@@ -43,7 +37,6 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport)>,
     ) {
         self.inner_mut().Renderer_CreateWindow = callback;
-        self.clear_platform_io_cb(&trampolines::RENDERER_CREATE_WINDOW_CB);
     }
 
     /// Return the raw `Renderer_CreateWindow` callback.
@@ -66,14 +59,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut Viewport)>,
     ) {
-        self.assert_current_context_platform_io_for_callbacks();
-        use trampolines::*;
-        unsafe {
-            self.set_renderer_create_window_raw(callback.map(|_| {
-                trampolines::renderer_create_window as unsafe extern "C" fn(*mut sys::ImGuiViewport)
-            }));
-        }
-        self.store_current_context_cb(&RENDERER_CREATE_WINDOW_CB, callback);
+        unsafe { self.set_renderer_create_window_raw(callback_abi::window(callback)) }
     }
 
     /// Set renderer destroy window callback (raw).
@@ -87,7 +73,6 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport)>,
     ) {
         self.inner_mut().Renderer_DestroyWindow = callback;
-        self.clear_platform_io_cb(&trampolines::RENDERER_DESTROY_WINDOW_CB);
     }
 
     /// Return the raw `Renderer_DestroyWindow` callback.
@@ -109,15 +94,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut Viewport)>,
     ) {
-        self.assert_current_context_platform_io_for_callbacks();
-        use trampolines::*;
-        unsafe {
-            self.set_renderer_destroy_window_raw(callback.map(|_| {
-                trampolines::renderer_destroy_window
-                    as unsafe extern "C" fn(*mut sys::ImGuiViewport)
-            }));
-        }
-        self.store_current_context_cb(&RENDERER_DESTROY_WINDOW_CB, callback);
+        unsafe { self.set_renderer_destroy_window_raw(callback_abi::window(callback)) }
     }
 
     /// Set renderer set window size callback through the aggregate ABI shim.
@@ -134,12 +111,6 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *const sys::ImVec2)>,
     ) {
-        self.assert_current_context_platform_io_for_callbacks();
-        if callback.is_some() {
-            assert_platform_io_aggregate_hooks_available("Renderer_SetWindowSize");
-        }
-
-        self.clear_current_context_cb(&trampolines::RENDERER_SET_WINDOW_SIZE_CB);
         unsafe {
             sys::ImGuiPlatformIO_Set_Renderer_SetWindowSize_PointerParam(
                 self.as_raw_mut(),
@@ -148,7 +119,7 @@ impl PlatformIo {
         }
     }
 
-    /// Set renderer set window size callback (typed Viewport).
+    /// Set the renderer window size callback. The vector is borrowed for the call.
     ///
     /// # Safety
     ///
@@ -156,17 +127,9 @@ impl PlatformIo {
     #[cfg(feature = "multi-viewport")]
     pub unsafe fn set_renderer_set_window_size(
         &mut self,
-        callback: Option<unsafe extern "C" fn(*mut Viewport, sys::ImVec2)>,
+        callback: Option<unsafe extern "C" fn(*mut Viewport, &sys::ImVec2)>,
     ) {
-        self.assert_current_context_platform_io_for_callbacks();
-        use trampolines::*;
-        unsafe {
-            self.set_renderer_set_window_size_raw(callback.map(|_| {
-                trampolines::renderer_set_window_size
-                    as unsafe extern "C" fn(*mut sys::ImGuiViewport, *const sys::ImVec2)
-            }));
-        }
-        self.store_current_context_cb(&RENDERER_SET_WINDOW_SIZE_CB, callback);
+        unsafe { self.set_renderer_set_window_size_raw(callback_abi::vec2_input(callback)) }
     }
 
     /// Set renderer render window callback (raw).
@@ -181,7 +144,6 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void)>,
     ) {
         self.inner_mut().Renderer_RenderWindow = callback;
-        self.clear_platform_io_cb(&trampolines::RENDERER_RENDER_WINDOW_CB);
     }
 
     /// Return the raw `Renderer_RenderWindow` callback.
@@ -203,15 +165,7 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut Viewport, *mut c_void)>,
     ) {
-        self.assert_current_context_platform_io_for_callbacks();
-        use trampolines::*;
-        unsafe {
-            self.set_renderer_render_window_raw(callback.map(|_| {
-                trampolines::renderer_render_window
-                    as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void)
-            }));
-        }
-        self.store_current_context_cb(&RENDERER_RENDER_WINDOW_CB, callback);
+        unsafe { self.set_renderer_render_window_raw(callback_abi::render(callback)) }
     }
 
     /// Set renderer swap buffers callback (raw).
@@ -226,7 +180,6 @@ impl PlatformIo {
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void)>,
     ) {
         self.inner_mut().Renderer_SwapBuffers = callback;
-        self.clear_platform_io_cb(&trampolines::RENDERER_SWAP_BUFFERS_CB);
     }
 
     /// Return the raw `Renderer_SwapBuffers` callback.
@@ -267,6 +220,9 @@ impl PlatformIo {
 
     /// Clear `Renderer_SetWindowSize` only when it is still owned by an aggregate pointer callback.
     ///
+    /// Returns `true` when the live slot was cleared. The shim also releases saved storage for
+    /// the departing callback if a native backend has already replaced the slot.
+    ///
     /// # Safety
     ///
     /// Dear ImGui must no longer be able to invoke this callback, and all backend state it
@@ -277,16 +233,12 @@ impl PlatformIo {
         &mut self,
         callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *const sys::ImVec2),
     ) -> bool {
-        let cleared = unsafe {
+        unsafe {
             sys::ImGuiPlatformIO_ClearRendererSetWindowSizeIfPointerParam(
                 self.as_raw_mut(),
                 callback,
             )
-        };
-        if cleared {
-            self.clear_platform_io_cb(&trampolines::RENDERER_SET_WINDOW_SIZE_CB);
         }
-        cleared
     }
 
     /// Set renderer swap buffers callback (typed Viewport).
@@ -299,14 +251,6 @@ impl PlatformIo {
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut Viewport, *mut c_void)>,
     ) {
-        self.assert_current_context_platform_io_for_callbacks();
-        use trampolines::*;
-        unsafe {
-            self.set_renderer_swap_buffers_raw(callback.map(|_| {
-                trampolines::renderer_swap_buffers
-                    as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void)
-            }));
-        }
-        self.store_current_context_cb(&RENDERER_SWAP_BUFFERS_CB, callback);
+        unsafe { self.set_renderer_swap_buffers_raw(callback_abi::render(callback)) }
     }
 }

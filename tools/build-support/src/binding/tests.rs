@@ -734,7 +734,7 @@ fn core_artifact_profile_hash_has_a_cross_language_test_vector() {
 
 #[test]
 fn core_source_contract_hash_covers_versioned_maintained_transforms() {
-    assert_eq!(core_source_contract_hash(), "fnv1a64:7ae7d563bf1926b4");
+    assert_eq!(core_source_contract_hash(), "fnv1a64:d0af92d1989b9a0d");
 }
 
 #[test]

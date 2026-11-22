@@ -121,10 +121,15 @@ The high-level layer already models the major ownership-sensitive surfaces:
 Only the core Context binding implementation may switch native `GImGui`. Backends and extensions
 must use the scoped Context APIs instead of calling `igSetCurrentContext` in production code.
 
-Dear ImGui platform callbacks that pass `ImVec2` or `ImVec4` by value are compiler-ABI-sensitive.
-Repository-owned C++ shims translate those slots to pointer or out-parameter callbacks. Changes to
-these callbacks require the existing native ABI probes on MSVC and the affected backend runtime
-tests; source-text scanning is not an ABI test.
+Dear ImGui passes or returns `ImVec2` and `ImVec4` by value in seven platform and renderer callback
+slots. C++ owns that aggregate ABI. On the Rust side, typed position and size setters borrow an
+`&ImVec2`, raw setters receive a `*const ImVec2`, and getters write to an output pointer. The
+framebuffer scale hook accepts only finite, strictly positive values on both axes.
+
+Registration targets the receiving `PlatformIo`. A backend can save the exact pointer behind an
+aggregate hook and reinstall it after replacing the slot. Invoke callbacks with the owning Context
+bound. Changes to these contracts require the MSVC native ABI probes and affected backend runtime
+tests.
 
 ## Adding a wrapper
 

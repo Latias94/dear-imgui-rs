@@ -435,22 +435,27 @@ The work-area getter is identical to the getter form except that its out
 parameter is `*mut dear_imgui_sys::ImVec4`. The pointers are valid only for the
 duration of the callback, and callbacks must not unwind.
 
-Prefer the typed `PlatformIo::set_platform_*` and
-`PlatformIo::set_renderer_set_window_size` methods unless a backend genuinely
-needs sys pointers. The typed input setters still install the C++ thunk, so
-their by-value `ImVec2` callbacks never occupy the C++ slot directly; typed
-getters retain the out-parameter form. Installation must target the active
-context's `PlatformIo`. `clear_platform_handlers`,
-`clear_renderer_handlers`, and `Context` destruction clear both Rust callback
-registries and the shim's per-`PlatformIo` storage.
+The typed setters use `*mut Viewport` for the viewport. The position and size
+input callbacks installed by `set_platform_set_window_pos`,
+`set_platform_set_window_size`, and `set_renderer_set_window_size` take an
+`&ImVec2` borrowed for the call. A backend migrating a by-value callback can
+copy `*value` if it needs to keep the vector. Typed getters use the same output
+pointers as their raw counterparts. The framebuffer scale callback must write
+finite, strictly positive values on both axes. The C++ hook aborts if either
+axis violates this contract, including in release builds.
+
+Installation and clearing target the receiving `PlatformIo`, even inside a
+different Context's binding scope. Keep the owning Context current when
+invoking a saved callback with one of its live viewports. The platform and
+renderer bulk clear methods release their respective aggregate callbacks.
+`Context` releases its remaining aggregate callback storage during teardown.
 
 A backend that wraps an existing aggregate callback must keep a pure pass-through
 in C++ or use the repository-owned C++ invocation bridge for the saved native
-callback; Rust must not invoke the captured by-value slot directly. The shared
-C++ shim address is not sufficient callback identity: a replacement installed
-through the pointer setter keeps that same address while changing the shim's
-stored pointer callback. Ownership-aware teardown must snapshot and restore
-that stored callback as well as the raw slot.
+callback. When a slot uses the shared C++ hook, capture the pointer or
+out-parameter function stored behind it. That pointer identifies the actual
+implementation for both raw and typed setters and can be reinstalled through
+the corresponding raw setter while the backend state it uses is still live.
 
 The bulk clear methods are appropriate only when the caller owns the complete
 corresponding table. A composable renderer shutdown must compare every
