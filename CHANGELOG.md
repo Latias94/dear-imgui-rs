@@ -13,9 +13,12 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 - `dear-imgui-wgpu` adds `GammaMode::Srgb` to decode sRGB fragment colors to linear light before blending. Downstream exhaustive matches on `GammaMode` must handle the new variant. The default `Auto` mode retains its existing behavior. Contributed by [@acfrazier](https://github.com/acfrazier) in [PR #100](https://github.com/Latias94/dear-imgui-rs/pull/100).
 - Update direct dependencies on `sdl3` to `"0.22.1"` when passing SDL windows, events, or renderer objects to the SDL3 backend. The workspace now uses `sdl3-sys` 0.7.3 and SDL 3.4.20.
 - `OwnedStateStorage::as_mut` now requires `unsafe` because the returned native storage contains the allocation that its destructor frees. Use `Ui::with_state_storage` for scoped access to storage values.
-- `Ui::table_get_column_name` returns an owned `String` that remains valid after the table changes. Typed drag-and-drop names must start with a character other than `_`, which Dear ImGui reserves for native payloads.
+- `Ui::table_get_column_name` returns an owned `String` that remains valid after the table changes.
+- Rust typed drag-and-drop payloads use a private native tag. Use `begin_payload_unchecked` and `accept_payload_unchecked` for C/C++ payload layouts. Rust application names accept 1–32 bytes and must start with a character other than `_`.
+- Exhaustive matches on `Plot3DError` must handle `NativeCountOutOfRange`, `MeshIndexOutOfBounds`, `InvalidSurfaceScale` and `NonFiniteSurfaceHeight`.
 - CTE palettes now have 33 entries, including nine custom colors. For fixed arrays passed to `Palette::from_colors`, use `PaletteColor::COUNT` or start with a built-in palette and set individual entries. `Language::ALL` now includes Julia and WGSL.
 - Custom provider builders should use `ProviderTransform::PatchCteTextEditor` for `TextEditor.cpp` and compile `TextDiff.cpp` directly. The old CTE Unicode-range and TextDiff draw-flag transform variants have been removed.
+- Rebuild the browser application and `imgui-sys-v1` provider together. Browser applications use `WasmProviderAllocator`, import the provider's function table, and pass its memory to wasm-bindgen. See the [browser migration instructions](docs/WASM.md#runtime-model).
 
 ### Changed
 
@@ -28,13 +31,14 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 - Text inputs reuse their `String` allocation across frames, keep labels and hints alive through callbacks, and handle edits that grow the native buffer. Text filters respect the end of the requested byte range.
 - Restore scoped state storage on its original window when a closure changes the current window.
 - Preserve outer widget labels and clipboard text when callbacks make nested UI calls. Typed drag-and-drop checks the stored type before reading the value.
-- ImPlot preserves series order in grouped bars and checks tick counts and plot dimensions before calling native code. CTE line selections include the final requested line. ImNodes clears selections before reusing node and link slots.
+- ImPlot preserves series order in grouped bars, plots interleaved error bars, and handles constant histogram samples. Heatmaps and surfaces validate their color inputs before calling native code. CTE line selections include the final requested line. ImNodes clears selections before reusing node and link slots.
 - ImPlot3D applies offsets to packed triangles and quads, checks mesh indices and surface wireframe sizes, and uses the upstream automatic color range for surfaces. `Mesh3DBuilder::try_plot` reports invalid mesh input.
-- The Test Engine runner preserves pending results and stays ready after it rejects an invalid request.
+- The Test Engine runner preserves pending results and stays ready after it rejects an invalid request. Top-level runs reject flags that require a parent test context.
 - File dialogs honor an explicit ImGui backend in the async entry point and report failures to check a save target before confirming it.
-- File-browser paste protects ancestor directories and preserves native filenames. Cross-device moves copy the whole tree before cleaning up the source and leave newly created source entries in place. Filesystems with symbolic links should implement `FileSystem::inspect_entry` to identify the link itself.
-- SDL renderers upload the dirty texture regions and preserve proxy pixels after a failed update. Winit adjusts queued pointer positions after a DPI change. `dear-app` skips main-surface acquisition when the window has zero drawable area.
-- The web demo passes one memory object to both wasm-bindgen and the Emscripten provider. Building either half preserves the other half's output. The provider builds with Emscripten 7.0.1.
+- File-browser navigation, save and paste preserve native filenames. Overwrite rollback retains the backup if another writer claims the target name. Cross-device cuts install the complete destination before source cleanup, and retrying a batch skips completed items. Shared filesystem backends can implement `FileSystem::rename_noreplace` and `inspect_move_source` for atomic renames and stable entry identity. Backends with symbolic links should implement `inspect_entry` to identify the link itself.
+- SDL renderers report native texture upload failures, preserve proxy pixels for retries, and acknowledge operations that succeeded earlier in the batch. Winit rescales queued pointer events and click origins when DPI changes. `dear-app` checks drawable area before each main-surface acquisition, including recovery retries.
+- The web demo shares its allocator and function table with C++ so native widgets can call Rust callbacks. Building either half preserves the other half's output. The provider builds with Emscripten 7.0.1.
+- Prebuilt ImPlot3D archives include the internal header used to compile the library. Node Editor source builds compile with LLVM-MinGW's current C++ standard library.
 - The WGPU `tracing` feature reports framebuffer-size mismatches and device-object invalidation. SDL3 native self-tests also link in debug profiles with debug symbols disabled.
 
 ## [0.22.0] - 2026-11-01
