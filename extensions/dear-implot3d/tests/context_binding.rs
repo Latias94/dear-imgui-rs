@@ -94,6 +94,80 @@ fn style_editor_reverts_to_the_current_plot_contexts_first_style() {
 }
 
 #[test]
+fn surface_demo_keeps_the_selected_colormap_per_plot_context() {
+    use dear_imgui_rs::sys;
+    use std::ffi::CStr;
+
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    imgui.set_ini_filename::<std::path::PathBuf>(None).unwrap();
+    prepare_imgui(&mut imgui);
+    let binding = imgui.binding();
+    let a = Plot3DContext::create(&imgui);
+    let b = Plot3DContext::create(&imgui);
+
+    let mut draw = |owner: &Plot3DContext| {
+        let frame = imgui.begin_frame();
+        let ui = frame.ui();
+        ui.window("Surface demo")
+            .position([10.0, 10.0], Condition::Always)
+            .size([760.0, 570.0], Condition::Always)
+            .build(|| {
+                // Both plot contexts use exactly the same window, tab, tree and combo IDs.
+                let combo = {
+                    let _bar = ui.push_id("ImPlot3DDemoTabs");
+                    let _tab = ui.push_id("Plots");
+                    let header = ui.get_id("Surface Plots");
+                    ui.with_current_state_storage(|mut storage| storage.set_bool(header, true));
+                    let _surface = ui.push_id("Surface Plots");
+                    ui.get_id("##SurfaceColormap")
+                };
+                ui.with_bound_context(|| unsafe { sys::igLogToBuffer(0) });
+                owner.get_plot_ui(ui).show_all_demos();
+                let text = ui.with_bound_context(|| unsafe {
+                    // Copy the rendered widget text before LogFinish clears its buffer.
+                    let buffer = &raw mut (*sys::igGetCurrentContext()).LogBuffer;
+                    CStr::from_ptr(sys::ImGuiTextBuffer_c_str(buffer))
+                        .to_string_lossy()
+                        .into_owned()
+                });
+                ui.log_finish();
+                (combo, text)
+            })
+            .expect("visible surface demo window")
+    };
+
+    draw(&a); // Let ImGui select the first tab.
+    let (combo, initial) = draw(&a);
+    assert!(
+        initial.contains("{ Jet }"),
+        "initial combo preview: {initial}"
+    );
+    binding.with_bound_context(|| unsafe { sys::igActivateItemByID(combo.raw()) });
+    draw(&a);
+    binding.with_bound_context(|| unsafe {
+        let popup = sys::igFindWindowByName(c"##Combo_00".as_ptr());
+        assert!(
+            !popup.is_null() && (*popup).Active,
+            "surface combo must open"
+        );
+        // ImGui::Combo scopes each selectable by its item index; Hot is the third entry.
+        let row = sys::ImGuiWindow_GetID_Int(popup, 2);
+        let hot = sys::igGetIDWithSeed_Str(c"Hot".as_ptr(), ptr::null(), row);
+        sys::igActivateItemByID(hot);
+    });
+    draw(&a); // The selectable updates the value after the combo drew its preview.
+
+    for (owner, expected) in [(&a, "{ Hot }"), (&b, "{ Jet }"), (&a, "{ Hot }")] {
+        let (_, text) = draw(owner);
+        assert!(
+            text.contains(expected),
+            "expected combo preview {expected}: {text}"
+        );
+    }
+}
+
+#[test]
 fn plot3d_binding_restores_imgui_and_plot_contexts_after_panic() {
     let _guard = test_guard();
     let mut imgui = Context::create();
