@@ -326,6 +326,12 @@ fn build_with_cc(
 ) {
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
+    // Upstream crude_json.cpp calls std::terminate without including <exception>.
+    if cfg.is_msvc() {
+        build.flag("/FIexception");
+    } else {
+        build.flag("-include").flag("exception");
+    }
     build_support::configure_cpp_runtime_linkage(
         &mut build,
         &cfg.target_os,
