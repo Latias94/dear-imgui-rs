@@ -26,6 +26,7 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 - Submit ImPlot items inside `PlotUi::with_plot` or `with_plot_size`. For axis configuration, call `with_plot_setup` and use its separate setup and drawing closures. In ImPlot3D, pass the drawing closure to `begin_plot(...).build(...)` or use `build_with_setup` to configure axes first.
 - In ImNodes, `setup.with_nodes(|editor| { ... })` returns the completed editor's `PostEditor`. Submit nodes and attributes through their closures. Read minimap hover events from `post.minimap_hovered_nodes()` after the canvas closes.
 - Rebuild custom ImPlot, ImPlot3D, ImNodes and ImGuizmo archives and the browser provider. The ImGuizmo wrapper uses the new `ImGuizmo_ResetInteraction` entry point when switching ImGui contexts.
+- Use `dear_imguizmo::Color::COUNT` for the palette length. Every `Color` enum variant now names a usable style slot.
 - Custom renderers must release the previous renderer's texture resources and commit a renderer texture reset when taking over its Context. A replacement consumer reports `RendererTextureResetRequired` until this handoff is complete.
 
 ### Changed
