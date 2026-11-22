@@ -1148,6 +1148,54 @@ fn callback_install_rejects_foreign_name_and_main_viewport_handles_without_mutat
 }
 
 #[test]
+fn direct_callback_checks_the_registered_aggregate_getter_before_dispatch() {
+    unsafe extern "C" fn replacement(_: *mut sys::ImGuiViewport, out: *mut sys::ImVec2) {
+        unsafe { out.write(sys::ImVec2::new(2.0, 3.0)) };
+    }
+
+    macro_rules! check {
+        ($slot:ident, $set:ident, $clear:ident) => {{
+            let mut context = imgui::Context::create();
+            let bridge = ImguiViewportBridge::default();
+            let keepalive = bridge.keepalive();
+            unsafe { install_owned_platform_callbacks(&mut context, &keepalive).unwrap() };
+            let viewport = context.main_viewport().as_raw_mut();
+            context.binding().with_bound_context(|| unsafe {
+                context.platform_io_mut().$set(Some(replacement));
+                (*context.platform_io().as_raw())
+                    .Platform_ShowWindow
+                    .unwrap()(viewport);
+            });
+            let error = ImguiViewportCallbackOwnershipError::PlatformCallbackReplaced {
+                slot: stringify!($slot),
+            };
+            assert_eq!(
+                bridge.callback_error(),
+                Some(ImguiViewportRuntimeError::CallbackOwnership(error))
+            );
+            assert!(bridge.commands().is_empty());
+            assert_eq!(detach_owned_bridge(&mut context, &keepalive), Err(error));
+            assert!(unsafe { context.platform_io_mut().$clear(replacement) });
+        }};
+    }
+    check!(
+        Platform_GetWindowPos,
+        set_platform_get_window_pos_raw,
+        clear_platform_get_window_pos_if_raw_callback
+    );
+    check!(
+        Platform_GetWindowSize,
+        set_platform_get_window_size_raw,
+        clear_platform_get_window_size_if_raw_callback
+    );
+    check!(
+        Platform_GetWindowFramebufferScale,
+        set_platform_get_window_framebuffer_scale_raw,
+        clear_platform_get_window_framebuffer_scale_if_raw_callback
+    );
+}
+
+#[test]
 fn direct_callback_validates_every_platform_callback_slot_before_dispatch() {
     macro_rules! assert_removed_slot_drift {
         ($slot:ident) => {{

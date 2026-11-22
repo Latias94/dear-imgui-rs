@@ -217,6 +217,18 @@ pub(super) struct PlatformCallbacks {
 }
 
 impl PlatformCallbacks {
+    // SDL3 leaves these three slots to the application, but its native shutdown calls
+    // ClearPlatformHandlers(). That call clears the live slots and leaves any work-area
+    // out-parameter function in the per-PlatformIO shim storage intact.
+    unsafe fn restore_unclaimed_viewport_callbacks(&self, platform_io: *mut sys::ImGuiPlatformIO) {
+        unsafe {
+            (*platform_io).Platform_GetWindowDpiScale = self.raw.Platform_GetWindowDpiScale;
+            (*platform_io).Platform_OnChangedViewport = self.raw.Platform_OnChangedViewport;
+            (*platform_io).Platform_GetWindowWorkAreaInsets =
+                self.raw.Platform_GetWindowWorkAreaInsets;
+        }
+    }
+
     unsafe fn capture(raw: *const sys::ImGuiPlatformIO) -> Self {
         let platform_io = raw.cast_mut();
         let raw = unsafe { std::ptr::read(raw) };
@@ -1103,6 +1115,9 @@ pub(super) unsafe fn restore_baseline_after_failed_initialization(baseline: Plat
                 };
             }
             for_each_platform_service_callback!(restore_service_callback);
+            baseline
+                .callbacks
+                .restore_unclaimed_viewport_callbacks(platform_io);
             baseline.callbacks.install_window_callbacks(platform_io);
             macro_rules! restore_renderer_callback {
                 ($field:ident) => {

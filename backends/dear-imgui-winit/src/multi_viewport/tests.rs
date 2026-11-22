@@ -2443,6 +2443,63 @@ fn shutdown_preserves_a_replaced_aggregate_callback() {
 }
 
 #[test]
+fn renderer_owner_detects_replacement_behind_each_aggregate_hook() {
+    use dear_imgui_rs::sys;
+
+    unsafe extern "C" fn foreign_set(_: *mut sys::ImGuiViewport, _: *const sys::ImVec2) {}
+
+    let _guard = lock_context();
+    macro_rules! check {
+        ($slot:ident, $set:ident, $clear:ident, $callback:ident) => {{
+            let mut context = Context::create();
+            let mut runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
+            runtime.validate_renderer_owner(&context).unwrap();
+            unsafe { context.platform_io_mut().$set(Some($callback)) };
+            let error = WinitPlatformError::PlatformCallbackReplaced {
+                callback: stringify!($slot),
+            };
+            assert_eq!(
+                runtime.validate_renderer_owner(&context),
+                Err(error.clone())
+            );
+            assert_eq!(runtime.shutdown(&mut context), Err(error));
+            assert!(unsafe { (*context.platform_io().as_raw()).Platform_ShowWindow }.is_none());
+            assert!(unsafe { context.platform_io_mut().$clear($callback) });
+        }};
+    }
+    check!(
+        Platform_SetWindowPos,
+        set_platform_set_window_pos_raw,
+        clear_platform_set_window_pos_if_pointer_callback,
+        foreign_set
+    );
+    check!(
+        Platform_GetWindowPos,
+        set_platform_get_window_pos_raw,
+        clear_platform_get_window_pos_if_raw_callback,
+        foreign_get_vec2
+    );
+    check!(
+        Platform_SetWindowSize,
+        set_platform_set_window_size_raw,
+        clear_platform_set_window_size_if_pointer_callback,
+        foreign_set
+    );
+    check!(
+        Platform_GetWindowSize,
+        set_platform_get_window_size_raw,
+        clear_platform_get_window_size_if_raw_callback,
+        foreign_get_vec2
+    );
+    check!(
+        Platform_GetWindowFramebufferScale,
+        set_platform_get_window_framebuffer_scale_raw,
+        clear_platform_get_window_framebuffer_scale_if_raw_callback,
+        foreign_get_vec2
+    );
+}
+
+#[test]
 fn shutdown_reports_a_direct_aggregate_slot_replacement() {
     let _guard = lock_context();
     let mut context = Context::create();

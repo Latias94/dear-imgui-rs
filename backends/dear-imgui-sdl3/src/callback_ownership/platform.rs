@@ -282,6 +282,9 @@ impl PlatformCallbackOwnership {
                 };
             }
             for_each_platform_service_callback!(restore_service_callback);
+            restore
+                .callbacks
+                .restore_unclaimed_viewport_callbacks(platform_io);
 
             if PlatformCallbackSlot::ALL.into_iter().all(|slot| {
                 self.installed

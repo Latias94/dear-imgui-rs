@@ -61,8 +61,12 @@ pub(super) struct PlatformCallbackContract {
 }
 
 impl PlatformCallbackContract {
-    unsafe fn capture(raw: *const dear_imgui_rs::sys::ImGuiPlatformIO) -> Option<Self> {
-        let raw = unsafe { raw.as_ref() }?;
+    unsafe fn capture(platform_io: *const dear_imgui_rs::sys::ImGuiPlatformIO) -> Option<Self> {
+        use dear_imgui_rs::sys;
+        let raw = unsafe { platform_io.as_ref() }?;
+        // Winit installs these five slots through the aggregate shim. Its read-only queries also
+        // check the live C++ slot, so a native replacement or removal relinquishes our ownership.
+        let platform_io = platform_io.cast_mut();
         Some(Self {
             slots: [
                 raw.Platform_CreateWindow
@@ -71,16 +75,18 @@ impl PlatformCallbackContract {
                     .map_or(0, |callback| callback as usize),
                 raw.Platform_ShowWindow
                     .map_or(0, |callback| callback as usize),
-                raw.Platform_SetWindowPos
+                unsafe { sys::ImGuiPlatformIO_PlatformSetWindowPosPointerParam(platform_io) }
                     .map_or(0, |callback| callback as usize),
-                raw.Platform_GetWindowPos
+                unsafe { sys::ImGuiPlatformIO_PlatformGetWindowPosOutParam(platform_io) }
                     .map_or(0, |callback| callback as usize),
-                raw.Platform_SetWindowSize
+                unsafe { sys::ImGuiPlatformIO_PlatformSetWindowSizePointerParam(platform_io) }
                     .map_or(0, |callback| callback as usize),
-                raw.Platform_GetWindowSize
+                unsafe { sys::ImGuiPlatformIO_PlatformGetWindowSizeOutParam(platform_io) }
                     .map_or(0, |callback| callback as usize),
-                raw.Platform_GetWindowFramebufferScale
-                    .map_or(0, |callback| callback as usize),
+                unsafe {
+                    sys::ImGuiPlatformIO_PlatformGetWindowFramebufferScaleOutParam(platform_io)
+                }
+                .map_or(0, |callback| callback as usize),
                 raw.Platform_SetWindowFocus
                     .map_or(0, |callback| callback as usize),
                 raw.Platform_GetWindowFocus
