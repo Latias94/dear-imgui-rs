@@ -45,7 +45,7 @@ ash-winit-multi-viewport = [
 ash-dynamic-rendering = ["dear-imgui-ash/dynamic-rendering"]
 
 # Compile the private Ash Vulkan validation policy and evidence adapter.
-ash-validation-smoke = []
+ash-validation-smoke = ["dep:serde_json"]
 
 # Enable dear-app's owning Winit/WGPU route for the texture inspector only.
 texture-inspector-multi-viewport = ["dear-app/multi-viewport"]
@@ -414,7 +414,7 @@ winit = { workspace = true }
 glam = { workspace = true }
 tracing.workspace = true
 tracing-subscriber.workspace = true
-serde_json = "1"
+serde_json = { workspace = true, optional = true }
 env_logger = { workspace = true }
 pollster = { workspace = true }
 glow = { workspace = true }
