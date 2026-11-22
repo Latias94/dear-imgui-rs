@@ -51,7 +51,7 @@ fn cpp_backend_uses_the_generated_imgui_io_layout() {
 }
 
 #[test]
-#[cfg(debug_assertions)]
+#[cfg(sdl3_native_self_test)]
 fn native_viewport_transactions_fail_closed_and_restore_state() {
     let _guard = test_guard();
     let failed_scenarios = unsafe { ffi::dear_imgui_sdl3_native_contract_self_test() };

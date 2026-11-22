@@ -47,7 +47,6 @@ rust-version = "1.95"
 authors = ["Mingzhen Zhuang <superfrankie621@gmail.com>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Latias94/dear-imgui-rs"
-homepage = "https://github.com/Latias94/dear-imgui-rs"
 documentation = "https://docs.rs/dear-imgui-rs"
 categories = ["gui", "api-bindings"]
 keywords = ["imgui", "ui", "graphics", "docking", "multiview"]
@@ -107,13 +106,15 @@ glow = "0.18"
 glutin = "0.32"
 glutin-winit = "0.5"
 raw-window-handle = "0.6"
+sdl3 = "0.22.1"
+sdl3-sys = "0.7.3"
 image = "0.25"
 windows-sys = "0.61.2"
 x11-dl = "2.21"
 
 # Build dependencies
 bindgen = { version = "=0.73.2", default-features = false, features = ["logging", "runtime"] }
-cc = "1.10"
+cc = "1.11"
 pkg-config = "0.3"
 vcpkg = "0.2.15"
 

@@ -168,7 +168,7 @@ fn pump_platform_windows(
     }
 
     #[cfg(not(feature = "multi-viewport"))]
-    let _ = (frame, enabled);
+    let _ = (runtime, frame, enabled);
 }
 
 #[cfg(any(feature = "opengl3-renderer", feature = "sdlgpu3-renderer"))]

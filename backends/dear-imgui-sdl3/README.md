@@ -73,7 +73,7 @@ dear-imgui-sdl3 = { version = "0.22", features = ["sdlgpu3-renderer"] }
 
 ## Compatibility
 
-The `0.22` release train requires Rust 1.95 or newer. Upgrade all workspace crates together. See the [0.22 migration notes](../../docs/COMPATIBILITY.md#022-release-train).
+The published `0.22.0` backend requires Rust 1.95 or newer and uses the versions below. When using the backend from Git `main`, select `sdl3 = "0.22.1"` in your application. See the [compatibility notes](../../docs/COMPATIBILITY.md#unreleased).
 
 | Item          | Version  |
 |---------------|----------|

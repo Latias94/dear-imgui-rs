@@ -69,7 +69,7 @@ fn framebuffer_scale_callback_rejects_invalid_density_before_native_geometry() {
     feature = "sdlrenderer3-renderer",
     feature = "sdlgpu3-renderer"
 ))]
-#[cfg(debug_assertions)]
+#[cfg(sdl3_native_self_test)]
 #[test]
 fn real_imgui_destroy_platform_windows_restores_foreign_viewport_state_after_core_cleanup() {
     let _guard = crate::tests::test_guard();

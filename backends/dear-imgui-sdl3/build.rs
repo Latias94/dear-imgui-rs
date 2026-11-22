@@ -109,8 +109,11 @@ fn main() {
 
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
-    if env::var("DEBUG").as_deref() == Ok("true") {
+    // The test declarations must match the native archive, even with debuginfo disabled.
+    println!("cargo:rustc-check-cfg=cfg(sdl3_native_self_test)");
+    if env::var("PROFILE").as_deref() == Ok("debug") {
         build.define("DEAR_IMGUI_SDL3_NATIVE_SELF_TEST", None);
+        println!("cargo:rustc-cfg=sdl3_native_self_test");
     }
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
