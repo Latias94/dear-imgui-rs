@@ -67,6 +67,20 @@ env:
     -A clippy::wrong_self_convention
 
 jobs:
+  workflow-lint:
+    name: Workflow checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Enforce workflow portability policy
+        run: python3 -B tools/ci/workflow_policy.py
+
+      - name: Lint GitHub Actions workflows and shell commands
+        run: |
+          shellcheck --version
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
   build:
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -86,13 +100,16 @@ jobs:
           tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with: &nextest
+          tool: cargo-nextest@0.9.152
+          fallback: none
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
 
@@ -333,7 +350,7 @@ jobs:
         run: >-
           python3 tools/ci/run_contract.py expect-failure
           --label package-test-engine
-          --contains 'feature `test-engine` is source-only and cannot be packaged as a prebuilt core artifact'
+          --contains "feature \`test-engine\` is source-only and cannot be packaged as a prebuilt core artifact"
           -- cargo check -p dear-imgui-sys --no-default-features --features package-bin,test-engine
 
   test-engine-sanitizers:
@@ -349,10 +366,11 @@ jobs:
         run: python3 tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with: *nextest
 
       - name: Refresh native package metadata
         run: sudo apt-get update
@@ -411,7 +429,7 @@ jobs:
   test-engine-runtime-retry:
     name: Test Engine native runtime retry
     needs: test-engine-runtime
-    if: ${{ always() && needs.test-engine-runtime.outputs.retry_eligible == 'true' }}
+    if: needs.test-engine-runtime.outputs.retry_eligible == 'true'
     uses: ./.github/workflows/native-runtime.yml
     with:
       candidate_sha: ${{ github.sha }}
@@ -429,7 +447,7 @@ jobs:
   multi-viewport-runtime-retry:
     name: Winit/WGPU multi-viewport runtime retry
     needs: multi-viewport-runtime
-    if: ${{ always() && needs.multi-viewport-runtime.outputs.retry_eligible == 'true' }}
+    if: needs.multi-viewport-runtime.outputs.retry_eligible == 'true'
     uses: ./.github/workflows/native-runtime.yml
     with:
       candidate_sha: ${{ github.sha }}
@@ -447,7 +465,7 @@ jobs:
   ash-vulkan-validation-runtime-retry:
     name: Winit/Ash Vulkan validation runtime retry
     needs: ash-vulkan-validation-runtime
-    if: ${{ always() && needs.ash-vulkan-validation-runtime.outputs.retry_eligible == 'true' }}
+    if: needs.ash-vulkan-validation-runtime.outputs.retry_eligible == 'true'
     uses: ./.github/workflows/native-runtime.yml
     with:
       candidate_sha: ${{ github.sha }}
@@ -465,7 +483,7 @@ jobs:
   sdl3-glow-multi-viewport-runtime-retry:
     name: SDL3/Glow multi-viewport runtime retry
     needs: sdl3-glow-multi-viewport-runtime
-    if: ${{ always() && needs.sdl3-glow-multi-viewport-runtime.outputs.retry_eligible == 'true' }}
+    if: needs.sdl3-glow-multi-viewport-runtime.outputs.retry_eligible == 'true'
     uses: ./.github/workflows/native-runtime.yml
     with:
       candidate_sha: ${{ github.sha }}
@@ -488,13 +506,11 @@ jobs:
         run: python3 tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          toolchain: '1.95.0'
-          components: rustfmt
+        run: rustup toolchain install ${{ env.RUSTUP_TOOLCHAIN }} --profile minimal --no-self-update --component rustfmt
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with: *nextest
 
       - name: Install fixed LLVM toolchain
         run: >-
@@ -502,7 +518,7 @@ jobs:
           --destination "${{ runner.temp }}/llvm"
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
           key: binding-contract
@@ -519,31 +535,14 @@ jobs:
       - name: Regenerate and verify every maintained binding profile
         env:
           LIBCLANG_PATH: ${{ runner.temp }}/llvm/lib
-        run: cargo run -p xtask -- verify-bindings --allow-dirty
-
-      - name: Assert checked-in bindings did not drift
-        run: >-
-          git diff --exit-code --
-          dear-imgui-sys/src/bindings_pregenerated.rs
-          dear-imgui-sys/src/bindings_pregenerated_windows.rs
-          dear-imgui-sys/src/wasm_bindings_pregenerated.rs
-          extensions/dear-imgui-test-engine-sys/src/bindings_pregenerated.rs
-          extensions/dear-implot-sys/src/bindings_pregenerated.rs
-          extensions/dear-implot-sys/src/wasm_bindings_pregenerated.rs
-          extensions/dear-implot3d-sys/src/bindings_pregenerated.rs
-          extensions/dear-implot3d-sys/src/wasm_bindings_pregenerated.rs
-          extensions/dear-imnodes-sys/src/bindings_pregenerated.rs
-          extensions/dear-imnodes-sys/src/wasm_bindings_pregenerated.rs
-          extensions/dear-node-editor-sys/src/bindings_pregenerated.rs
-          extensions/dear-imguizmo-sys/src/bindings_pregenerated.rs
-          extensions/dear-imguizmo-sys/src/wasm_bindings_pregenerated.rs
-          extensions/dear-imguizmo-quat-sys/src/bindings_pregenerated.rs
-          extensions/dear-imguizmo-quat-sys/src/wasm_bindings_pregenerated.rs
+        run: cargo run -p xtask -- verify-bindings
 
   source-contracts:
     name: MSRV and public API documentation contracts
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      RUSTUP_TOOLCHAIN: '1.95.0'
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -554,12 +553,10 @@ jobs:
         run: python3 tools/ci/update_submodules.py
 
       - name: Install declared MSRV toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          toolchain: '1.95.0'
+        run: rustup toolchain install ${{ env.RUSTUP_TOOLCHAIN }} --profile minimal --no-self-update
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: 'false'
           key: source-contracts
@@ -578,37 +575,37 @@ jobs:
 
       - name: Check publishable non-Bevy crates at the declared MSRV
         run: >-
-          cargo +1.95.0 check --workspace
+          cargo check --workspace
           --exclude dear-imgui-bevy
           --exclude dear-imgui-examples
           --exclude dear-imgui-web-demo
           --exclude xtask
 
       - name: Test core public API documentation
-        run: cargo +1.95.0 test --doc -p dear-imgui-rs --features multi-viewport
+        run: cargo test --doc -p dear-imgui-rs --features multi-viewport
 
       - name: Test Winit public API documentation
-        run: cargo +1.95.0 test --doc -p dear-imgui-winit --features multi-viewport
+        run: cargo test --doc -p dear-imgui-winit --features multi-viewport
 
       - name: Test WGPU public API documentation
-        run: cargo +1.95.0 test --doc -p dear-imgui-wgpu --features multi-viewport-winit
+        run: cargo test --doc -p dear-imgui-wgpu --features multi-viewport-winit
 
       - name: Test Glow public API documentation
-        run: cargo +1.95.0 test --doc -p dear-imgui-glow --features multi-viewport
+        run: cargo test --doc -p dear-imgui-glow --features multi-viewport
 
       - name: Test Ash public API documentation
-        run: cargo +1.95.0 test --doc -p dear-imgui-ash --features multi-viewport-winit
+        run: cargo test --doc -p dear-imgui-ash --features multi-viewport-winit
 
       - name: Test SDL3 public API documentation
-        run: cargo +1.95.0 test --doc -p dear-imgui-sdl3 --features multi-viewport
+        run: cargo test --doc -p dear-imgui-sdl3 --features multi-viewport
 
       - name: Test SDL3 OpenGL public API documentation
         if: runner.os == 'Linux'
-        run: cargo +1.95.0 test --doc -p dear-imgui-sdl3 --features "opengl3-renderer,multi-viewport"
+        run: cargo test --doc -p dear-imgui-sdl3 --features "opengl3-renderer,multi-viewport"
 
       - name: Test SDL3 GPU public API documentation
         if: runner.os == 'Linux'
-        run: cargo +1.95.0 test --doc -p dear-imgui-sdl3 --features "sdlgpu3-renderer,multi-viewport"
+        run: cargo test --doc -p dear-imgui-sdl3 --features "sdlgpu3-renderer,multi-viewport"
 
   wgpu-routes:
     name: WGPU ${{ matrix.wgpu }} + ${{ matrix.platform }}
@@ -647,15 +644,14 @@ jobs:
         run: python3 tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          components: clippy
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with: *nextest
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
           key: wgpu-${{ matrix.wgpu }}-${{ matrix.platform }}
@@ -742,15 +738,14 @@ jobs:
         run: python3 tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          components: clippy
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with: *nextest
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
           key: ash-${{ matrix.platform }}-${{ matrix.rendering }}
@@ -826,10 +821,10 @@ jobs:
         run: python3 tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
           key: feature-conflict-contracts
@@ -864,10 +859,10 @@ jobs:
         run: python3 tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
           key: node-editor-normal
@@ -913,13 +908,14 @@ jobs:
         run: python3 tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with: *nextest
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
           key: stack-layout-${{ matrix.profile }}
@@ -984,12 +980,10 @@ jobs:
         run: python3 tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          components: clippy
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
           key: clippy-default
@@ -1033,12 +1027,10 @@ jobs:
         run: python3 tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          components: clippy
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
           key: clippy-focused
@@ -1079,6 +1071,8 @@ jobs:
   bevy-backend:
     name: Bevy backend gates
     runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: stable
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1089,13 +1083,14 @@ jobs:
         run: python3 tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        run: rustup toolchain install ${{ env.RUSTUP_TOOLCHAIN }} --profile minimal --no-self-update --component rustfmt,clippy
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with: *nextest
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
 
@@ -1112,64 +1107,64 @@ jobs:
           mesa-common-dev mesa-vulkan-drivers libgl1-mesa-dev cmake
 
       - name: Add wasm32 target
-        run: rustup target add --toolchain stable wasm32-unknown-unknown
+        run: rustup target add wasm32-unknown-unknown
 
       - name: Check formatting
-        run: cargo +stable fmt --all --check
+        run: cargo fmt --all --check
 
       - name: Run Bevy backend headless tests
-        run: cargo +stable nextest run -p dear-imgui-bevy --no-default-features
+        run: cargo nextest run -p dear-imgui-bevy --no-default-features
 
       - name: Run Bevy backend default tests
-        run: cargo +stable nextest run -p dear-imgui-bevy
+        run: cargo nextest run -p dear-imgui-bevy
 
       - name: Check Bevy backend render-only targets
-        run: cargo +stable check -p dear-imgui-bevy --all-targets --no-default-features --features render
+        run: cargo check -p dear-imgui-bevy --all-targets --no-default-features --features render
 
       - name: Check Bevy backend native multi-viewport implication
-        run: cargo +stable check -p dear-imgui-bevy --all-targets --no-default-features --features multi-viewport
+        run: cargo check -p dear-imgui-bevy --all-targets --no-default-features --features multi-viewport
 
       - name: Run Bevy backend native multi-viewport tests
-        run: cargo +stable nextest run -p dear-imgui-bevy --features multi-viewport
+        run: cargo nextest run -p dear-imgui-bevy --features multi-viewport
 
       - name: Lint Bevy backend native targets
-        run: cargo +stable clippy -p dear-imgui-bevy --all-targets --features multi-viewport --no-deps -- -D warnings
+        run: cargo clippy -p dear-imgui-bevy --all-targets --features multi-viewport --no-deps -- -D warnings
 
       - name: Check Bevy backend default examples
-        run: cargo +stable check -p dear-imgui-bevy --examples
+        run: cargo check -p dear-imgui-bevy --examples
 
       - name: Check Bevy backend native multi-viewport examples
-        run: cargo +stable check -p dear-imgui-bevy --examples --features multi-viewport
+        run: cargo check -p dear-imgui-bevy --examples --features multi-viewport
 
       - name: Check Bevy backend rustdoc examples
-        run: cargo +stable test --doc -p dear-imgui-bevy --features multi-viewport
+        run: cargo test --doc -p dear-imgui-bevy --features multi-viewport
 
       - name: Inspect Bevy backend package contents
-        run: cargo +stable package -p dear-imgui-bevy --list
+        run: cargo package -p dear-imgui-bevy --list
 
       - name: Check Bevy backend wasm (headless)
-        run: cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features --features wasm
+        run: cargo check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features --features wasm
 
       - name: Check Bevy backend wasm (default)
-        run: cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --features wasm
+        run: cargo check -p dear-imgui-bevy --target wasm32-unknown-unknown --features wasm
 
       - name: Reject Bevy multi-viewport through the core WASM contract
         run: >-
           python3 tools/ci/run_contract.py expect-failure
           --label bevy-wasm-multi-viewport
-          --contains 'The `multi-viewport` feature is not supported on wasm32 targets yet.'
-          -- cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown
+          --contains "The \`multi-viewport\` feature is not supported on wasm32 targets yet."
+          -- cargo check -p dear-imgui-bevy --target wasm32-unknown-unknown
           --no-default-features --features wasm,multi-viewport
 
       - name: Run Bevy GPU composition tests
-        run: cargo +stable nextest run -j 1 -p dear-imgui-bevy --no-default-features --features render,bevy-ui --test render_composition
+        run: cargo nextest run -j 1 -p dear-imgui-bevy --no-default-features --features render,bevy-ui --test render_composition
         env:
           DEAR_IMGUI_BEVY_GPU_TESTS: "1"
           WGPU_BACKEND: vulkan
           WGPU_FORCE_FALLBACK_ADAPTER: "1"
 
       - name: Run Bevy image bind-group GPU contracts
-        run: cargo +stable nextest run -j 1 -p dear-imgui-bevy --lib --features multi-viewport --run-ignored ignored-only bevy_image_texture_bind_groups
+        run: cargo nextest run -j 1 -p dear-imgui-bevy --lib --features multi-viewport --run-ignored ignored-only bevy_image_texture_bind_groups
         env:
           DEAR_IMGUI_BEVY_GPU_HARNESS: "1"
           WGPU_BACKEND: vulkan
@@ -1178,6 +1173,8 @@ jobs:
   windows-platform-io-abi:
     name: PlatformIO C++ ABI (MSVC ${{ matrix.crt }})
     runs-on: windows-latest
+    env:
+      RUSTUP_TOOLCHAIN: stable
     strategy:
       fail-fast: false
       matrix:
@@ -1196,31 +1193,32 @@ jobs:
         run: python tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        run: rustup toolchain install ${{ env.RUSTUP_TOOLCHAIN }} --profile minimal --no-self-update
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with: *nextest
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
           key: platform-io-${{ matrix.crt }}
 
       - name: Run exact C++ aggregate callback ABI probe
-        run: cargo +stable nextest run -p dear-imgui-rs --features multi-viewport cpp_platform_io_probe_round_trips_all_aggregate_slots
+        run: cargo nextest run -p dear-imgui-rs --features multi-viewport cpp_platform_io_probe_round_trips_all_aggregate_slots
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
           RUSTFLAGS: ${{ matrix.rustflags }}
 
       - name: Compare public C++ aggregate layouts with Rust
-        run: cargo +stable nextest run -j 1 -p dear-imgui-rs --features multi-viewport,abi-probe cpp_public_aggregate_layout_probe_matches_rust public_aggregate_layout_probe_rejects_an_abi_mismatch
+        run: cargo nextest run -j 1 -p dear-imgui-rs --features multi-viewport,abi-probe cpp_public_aggregate_layout_probe_matches_rust public_aggregate_layout_probe_rejects_an_abi_mismatch
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
           RUSTFLAGS: ${{ matrix.rustflags }}
 
       - name: Run exact aggregate callback lifecycle sentinel
-        run: cargo +stable nextest run -p dear-imgui-rs --features multi-viewport context_drop_clears_aggregate_callback_storage
+        run: cargo nextest run -p dear-imgui-rs --features multi-viewport context_drop_clears_aggregate_callback_storage
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
           RUSTFLAGS: ${{ matrix.rustflags }}
@@ -1276,6 +1274,7 @@ jobs:
     env:
       CARGO_TARGET_DIR: ${{ matrix.target_dir }}
       CI_TARGET: ${{ matrix.target }}
+      RUSTUP_TOOLCHAIN: '1.95.0'
       RUSTFLAGS: ${{ matrix.rustflags }}
       IMGUI_SYS_FORCE_BUILD: "1"
       IMPLOT_SYS_FORCE_BUILD: "1"
@@ -1294,10 +1293,7 @@ jobs:
         run: python tools/ci/update_submodules.py
 
       - name: Install Rust 1.95.0 and target standard library
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          toolchain: '1.95.0'
-          targets: ${{ matrix.target }}
+        run: rustup toolchain install ${{ env.RUSTUP_TOOLCHAIN }} --profile minimal --no-self-update --target ${{ matrix.target }}
 
       - name: Enter the Arm64 MSVC developer environment
         if: matrix.msvc == true
@@ -1307,27 +1303,30 @@ jobs:
 
       - name: Install cargo-nextest
         if: matrix.runtime_path_policy != 'none'
-        uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with: *nextest
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
           key: windows-source-abi-${{ matrix.lane }}
 
-      - name: Download and verify llvm-mingw 20260616
+      - name: Download and verify llvm-mingw
         run: |
-          $archive = Join-Path $env:RUNNER_TEMP 'llvm-mingw-20260616-ucrt-x86_64.zip'
-          $extractRoot = Join-Path $env:RUNNER_TEMP 'llvm-mingw-20260616'
+          $version = '20261117'
+          $asset = "llvm-mingw-$version-ucrt-x86_64.zip"
+          $archive = Join-Path $env:RUNNER_TEMP $asset
+          $extractRoot = Join-Path $env:RUNNER_TEMP "llvm-mingw-$version"
           Invoke-WebRequest `
-            -Uri 'https://github.com/mstorsjo/llvm-mingw/releases/download/20260616/llvm-mingw-20260616-ucrt-x86_64.zip' `
+            -Uri "https://github.com/mstorsjo/llvm-mingw/releases/download/$version/$asset" `
             -OutFile $archive `
             -ConnectionTimeoutSeconds 30 `
             -OperationTimeoutSeconds 600 `
             -MaximumRetryCount 2 `
             -RetryIntervalSec 5
 
-          $expectedSha256 = 'b9b68a4d276e16fa25802aaba458e4638f64b3884c290aaccdc2d87083b6ca35'
+          $expectedSha256 = '4d002e330a0f703625aa5ccbc37e96f8f824413e163bfc7336774aabd2c3a412'
           $actualSha256 = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
           if ($actualSha256 -ne $expectedSha256) {
             throw "llvm-mingw SHA-256 mismatch: expected $expectedSha256, got $actualSha256"
@@ -1382,7 +1381,7 @@ jobs:
             )
           }
           foreach ($sentinel in $sentinels) {
-            cargo +1.95.0 test `
+            cargo test `
               -p $sentinel.package `
               --test $sentinel.test `
               --target "$env:CI_TARGET" `
@@ -1465,7 +1464,7 @@ jobs:
             }
           }
 
-          cargo +1.95.0 nextest run -j 1 `
+          cargo nextest run -j 1 `
             --target "$env:CI_TARGET" `
             -p dear-imgui-sys `
             --test numeric_contract
@@ -1473,7 +1472,7 @@ jobs:
             exit $LASTEXITCODE
           }
 
-          cargo +1.95.0 nextest run -j 1 `
+          cargo nextest run -j 1 `
             --target "$env:CI_TARGET" `
             -p dear-imgui-rs `
             --features multi-viewport,abi-probe `
@@ -1487,7 +1486,7 @@ jobs:
 
       - name: Retain Windows PE evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-source-abi-${{ matrix.lane }}
           path: target/ci-evidence/windows-source-abi/${{ matrix.lane }}/
@@ -1502,13 +1501,14 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with: *nextest
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
 
@@ -1566,7 +1566,7 @@ jobs:
         run: >-
           python3 tools/ci/run_contract.py expect-failure
           --label regen-without-bindgen
-          --contains 'regenerating bindings requires the `bindgen` feature'
+          --contains "regenerating bindings requires the \`bindgen\` feature"
           --contains='--features bindgen'
           -- cargo check -p dear-imgui-sys
 
@@ -1574,7 +1574,7 @@ jobs:
         run: >-
           python3 tools/ci/run_contract.py expect-failure
           --label package-bin-abi-probe
-          --contains 'feature `abi-probe` is CI-only and cannot be packaged as a prebuilt core artifact'
+          --contains "feature \`abi-probe\` is CI-only and cannot be packaged as a prebuilt core artifact"
           -- cargo check -p dear-imgui-sys --no-default-features --features package-bin,abi-probe
 
       - name: Reject the ABI probe when native compilation is disabled
@@ -1583,7 +1583,7 @@ jobs:
         run: >-
           python3 tools/ci/run_contract.py expect-failure
           --label abi-probe-without-native-build
-          --contains 'feature `abi-probe` requires a native source build and cannot be combined with WASM or IMGUI_SYS_SKIP_CC'
+          --contains "feature \`abi-probe\` requires a native source build and cannot be combined with WASM or IMGUI_SYS_SKIP_CC"
           -- cargo check -p dear-imgui-sys --no-default-features --features abi-probe
 
   windows-vcpkg-native-deps:
@@ -1598,18 +1598,24 @@ jobs:
       - name: Init required nested submodules (selective)
         run: python tools/ci/update_submodules.py
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - &install-consumer-toolchain
+        name: Install workspace Rust toolchain for standalone consumers
+        shell: bash
+        run: |
+          rustup toolchain install --profile minimal --no-self-update
+          # Temporary consumer crates live outside the scope of rust-toolchain.toml.
+          active=$(rustup show active-toolchain)
+          echo "RUSTUP_TOOLCHAIN=${active%% *}" >> "$GITHUB_ENV"
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
 
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11.6
         with:
-          vcpkgGitCommitId: 9a98f93671f984351377044210854900bfd73171
+          vcpkgGitCommitId: 9eec002df1cd109f8f104cd966a763daf9751489 # 2026.10.16
           runVcpkgInstall: false
 
       - name: Install native deps through vcpkg
@@ -1654,15 +1660,15 @@ jobs:
         run: python tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
 
       - name: Setup MSYS2 (mingw64)
-        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
+        uses: msys2/setup-msys2@3c51bf698df1e37b2261f53cb67797b97761185c # v2.34.0
         id: msys2
         with:
           msystem: MINGW64
@@ -1713,10 +1719,10 @@ jobs:
         run: python3 tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
 
@@ -1746,10 +1752,10 @@ jobs:
         run: python3 tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
           shared-key: android-native
@@ -1780,10 +1786,10 @@ jobs:
         run: python3 tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
 
@@ -1837,14 +1843,13 @@ jobs:
       - name: Init required nested submodules (selective)
         run: python3 tools/ci/update_submodules.py
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - *install-consumer-toolchain
 
       - name: Set up pinned Emscripten provider toolchain
         uses: emscripten-core/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984 # v16
-        with:
-          version: 5.0.1
-          emsdk-version: 5.0.5
+        with: &provider-emsdk
+          version: 7.0.1
+          emsdk-version: 7.0.1
 
       - name: Refresh Linux package metadata
         run: sudo apt-get update
@@ -1857,12 +1862,6 @@ jobs:
           libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev
           libxkbcommon-dev libwayland-dev libudev-dev
           mesa-common-dev libgl1-mesa-dev cmake
-
-      - name: Enforce workflow portability policy
-        run: python3 -B tools/ci/workflow_policy.py
-
-      - name: Lint GitHub Actions workflows
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -ignore 'SC2016:'
 
       - name: Test release tooling and source provenance
         run: python3 -B -m unittest discover -s tools/tests -p 'test_*.py' -v
@@ -1881,9 +1880,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          components: rustfmt
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -1901,13 +1898,14 @@ jobs:
         run: python3 tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@4f74fa8a3d358e568049b7b1a7fbb4fceabda454 # nextest
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with: *nextest
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
 
@@ -1916,9 +1914,7 @@ jobs:
 
       - name: Set up pinned Emscripten provider toolchain
         uses: emscripten-core/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984 # v16
-        with:
-          version: 5.0.1
-          emsdk-version: 5.0.5
+        with: *provider-emsdk
 
       - name: Reject WASI and Emscripten in the pure target resolver
         run: cargo nextest run -p dear-imgui-build-support --features binding-spec wasm_target_requires_the_explicit_provider_feature
@@ -1942,14 +1938,14 @@ jobs:
         run: >-
           python3 tools/ci/run_contract.py expect-failure
           --label wasm-missing-feature
-          --contains 'wasm32-unknown-unknown requires the explicit `wasm` feature'
+          --contains "wasm32-unknown-unknown requires the explicit \`wasm\` feature"
           -- cargo check -p dear-imgui-sys --target wasm32-unknown-unknown --no-default-features
 
       - name: Reject native stack-layout injection on WASM
         run: >-
           python3 tools/ci/run_contract.py expect-failure
           --label wasm-stack-layout
-          --contains 'feature `stack-layout` is native-only and cannot be combined with WASM'
+          --contains "feature \`stack-layout\` is native-only and cannot be combined with WASM"
           -- cargo check -p dear-imgui-rs --target wasm32-unknown-unknown
           --no-default-features --features wasm,stack-layout
 
@@ -1965,7 +1961,7 @@ jobs:
         run: >-
           python3 tools/ci/run_contract.py expect-failure
           --label wasm-test-engine
-          --contains 'feature `test-engine` is native source-only and cannot be combined with WASM'
+          --contains "feature \`test-engine\` is native source-only and cannot be combined with WASM"
           -- cargo check -p dear-imgui-rs --target wasm32-unknown-unknown
           --no-default-features --features wasm,test-engine
 
@@ -1973,7 +1969,7 @@ jobs:
         run: >-
           python3 tools/ci/run_contract.py expect-failure
           --label wasm-abi-probe
-          --contains 'feature `abi-probe` requires a native source build and cannot be combined with WASM or IMGUI_SYS_SKIP_CC'
+          --contains "feature \`abi-probe\` requires a native source build and cannot be combined with WASM or IMGUI_SYS_SKIP_CC"
           -- cargo check -p dear-imgui-sys --target wasm32-unknown-unknown
           --no-default-features --features wasm,abi-probe
 
@@ -1981,12 +1977,12 @@ jobs:
         run: >-
           python3 tools/ci/run_contract.py expect-failure
           --label wasm-prebuilt
-          --contains 'feature `prebuilt` is native-only and cannot be combined with WASM'
+          --contains "feature \`prebuilt\` is native-only and cannot be combined with WASM"
           -- cargo check -p dear-imgui-rs --target wasm32-unknown-unknown
           --no-default-features --features wasm,prebuilt
 
       - name: Validate checked-in extension WASM binding provenance
-        run: cargo run -p xtask -- verify-bindings --check-only --allow-dirty
+        run: cargo run -p xtask -- verify-bindings --check-only
 
       - name: Check generated compatibility symbols on WASM
         run: >-
@@ -2000,8 +1996,25 @@ jobs:
           --no-default-features
           --features dear-implot-sys/wasm,dear-implot3d-sys/wasm,dear-imnodes-sys/wasm,dear-imgui-cte-sys/wasm
 
-      - name: Build web demo crate for wasm32-unknown-unknown (core + extensions)
-        run: cargo build -p dear-imgui-web-demo --target wasm32-unknown-unknown --no-default-features --features "web-backends,implot,implot3d,imnodes,imguizmo,imguizmo-quat,cte"
+      - name: Read the wasm-bindgen CLI version from Cargo.lock
+        id: wasm-bindgen
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import tomllib
+          with open("Cargo.lock", "rb") as lock:
+              packages = tomllib.load(lock)["package"]
+          version, = (p["version"] for p in packages if p["name"] == "wasm-bindgen")
+          print(f"version={version}")
+          PY
+
+      - name: Install matching wasm-bindgen CLI
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: wasm-bindgen@${{ steps.wasm-bindgen.outputs.version }}
+          fallback: none
+
+      - name: Build the web demo and generate its JavaScript bindings
+        run: cargo run --locked -p xtask -- web-demo implot,implot3d,imnodes,imguizmo,imguizmo-quat,cte
 
       - name: Build and structurally verify the Emscripten provider
         run: python3 -B tools/ci/verify_wasm_provider.py

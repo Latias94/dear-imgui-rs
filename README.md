@@ -423,7 +423,7 @@ Extensions
 | dear-imgui-test-engine | 0.22.0 | 0.22.0 | dear-imgui-test-engine-sys 0.22.0 | UI automation and test runner |
 | dear-imgui-reflect  | 0.22.0 | 0.22.0 | —                              | Session-owned reflection UI              |
 
-The workspace and core MSRV is Rust 1.95, raised for the private `parking_lot` 0.13 dependency. The experimental Bevy backend requires Rust 1.97.1 because Bevy 0.20 does. The development toolchain is Rust 1.99. Select exactly one WGPU major; `dear-app` follows the WGPU 30 default.
+The workspace and core MSRV is Rust 1.95. The experimental Bevy backend requires Rust 1.97.1. Development on `main` uses Rust 1.100.0 and `sdl3` 0.22.1. See the [unreleased compatibility notes](docs/COMPATIBILITY.md#unreleased).
 
 Maintenance rules
 
@@ -524,7 +524,7 @@ Quick start:
 ```bash
 rustup target add wasm32-unknown-unknown
 
-# Install wasm-bindgen-cli at the version recorded in Cargo.lock, plus wasm-tools.
+# Install wasm-bindgen-cli at the version recorded in Cargo.lock.
 cargo run -p xtask -- web-demo
 cargo run -p xtask -- build-cimgui-provider
 

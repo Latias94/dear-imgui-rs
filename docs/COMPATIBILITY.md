@@ -2,6 +2,28 @@
 
 This document tracks compatibility across the workspace crates, upstream Dear ImGui, and key external dependencies. The root README shows the latest recommendations; this file keeps version history and compatibility policy.
 
+## Unreleased
+
+The SDL3 backend on `main` accepts windows and events from `sdl3` 0.22.1. Applications using this backend from Git should update their direct `sdl3` dependency to `"0.22.1"`. Its `sdl3-sys` 0.7.3 bindings target SDL 3.4.20. The published 0.22.0 backend uses `sdl3` 0.20.
+
+Development and publishing use Rust 1.100.0. The core MSRV is Rust 1.95, the Bevy backend requires Rust 1.97.1, and binding generation uses Rust 1.95.0 with LLVM 14.
+
+### Native sources on `main`
+
+These wrapper revisions determine the C headers and the native source each extension builds. Rebuild custom native archives and the browser provider when upgrading a checkout across these revisions.
+
+| Extension | Wrapper | Nested native source |
+| --- | --- | --- |
+| ImPlot | `cimplot` `c809ff29c8` | `72de27832d` (1.2 WIP) |
+| ImPlot3D | `cimplot3d` `c7b527f318` | `c54525f8d4` (0.6 WIP) |
+| ImNodes | `cimnodes` `712f574082` | `2d0c280b07` |
+| Color Text Edit | `cimCTE` `dbf2abe484` | `7515d1c765` |
+| Node Editor | `cimnodes_editor` `917728f588` | `1e0e494f1a` |
+| ImGuizmo | `cimguizmo` `566ff53a4a` | `105e4fde45` |
+| ImGuIZMO.quat | `cimguizmo_quat` `91499ef659` | `df0927ea22` |
+
+Dear ImGui uses the docking-enabled `d88f238d` source through `cimgui` at `5d7cc7e1`. The newer `cimgui` commit `2a6a93fc` omits the docking and platform-window entry points required by the workspace. The native Test Engine uses `10a5c08e78`. Its docking suite builds against the visible-tab field supplied by the selected core headers.
+
 ## 0.22.0 Native Build Policy
 
 The 0.22 release train introduces a breaking native environment policy for the core and seven prebuilt-capable extension sys crates. They share `<PREFIX>_BUILD_MODE=auto|source|prebuilt|bindings-only`. The default remains source-capable with downloads opt-in. Strict prebuilt mode never falls back to compiling that library; enabled core backend shims still compile locally. Only bindings-only intentionally omits native symbols, and it is not a supported external-provider contract.

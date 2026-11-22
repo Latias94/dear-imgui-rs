@@ -16,25 +16,25 @@ The repository workflow token defaults to read-only. The protected crates.io job
 
 Preparation intentionally changes the worktree; validation requires the resulting commit to be clean.
 
-Install both the development/publishing toolchain (Rust 1.99.0) and the
+Install both the development/publishing toolchain (Rust 1.100.0) and the
 canonical binding toolchain before preparing or validating a release:
 
 ```bash
-rustup toolchain install 1.99.0 --profile minimal --component rustfmt --component clippy
+rustup toolchain install 1.100.0 --profile minimal --component rustfmt --component clippy
 rustup toolchain install 1.95.0 --profile minimal --component rustfmt
 ```
 
 The binding updater and pre-publication checks explicitly run Rust 1.95.0
 and its rustfmt, independently of the workspace development toolchain or a
 parent `RUSTUP_TOOLCHAIN` setting. Keep the canonical LLVM version available
-through `LIBCLANG_PATH` when regenerating bindings (LLVM 14.0.6 in CI).
+through `LIBCLANG_PATH` when regenerating bindings (LLVM 14.0.0 in Linux CI).
 Install `cargo-nextest`, add the `wasm32-unknown-unknown` target, and activate
-Emscripten 5.0.1 for the packaged WASM-provider gate:
+Emscripten 7.0.1 for the packaged WASM-provider gate:
 
 ```bash
 cargo install cargo-nextest --locked
 rustup target add wasm32-unknown-unknown
-# In an emsdk checkout, install and activate 5.0.1, then load its environment.
+# In an emsdk checkout, install and activate 7.0.1, then load its environment.
 ```
 
 When testing with Rust 1.100 or newer, use cargo-nextest 0.9.143 or newer. Earlier
