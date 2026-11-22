@@ -1392,6 +1392,7 @@ jobs:
           }
 
       - name: Inspect linked PE machine types and runtime imports
+        id: inspect_pe
         run: |
           $deps = Join-Path $env:CARGO_TARGET_DIR "$env:CI_TARGET\debug\deps"
           $evidence = "target\ci-evidence\windows-source-abi\${{ matrix.lane }}\pe.txt"
@@ -1485,7 +1486,7 @@ jobs:
           }
 
       - name: Retain Windows PE evidence
-        if: always()
+        if: ${{ !cancelled() && steps.inspect_pe.outcome != 'skipped' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-source-abi-${{ matrix.lane }}
