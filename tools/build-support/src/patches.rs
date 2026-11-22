@@ -1199,8 +1199,8 @@ pub fn patch_cte_text_editor(source: &str) -> Result<String, String> {
     Ok(restore_cpp_newlines(patched, newline))
 }
 
-/// Source contract for ImPlot3D's Dear ImGui 1.93 flags and line-texture selection.
-pub const IMPLOT3D_DRAW_FLAGS_PATCH_VERSION: &str = "implot3d-draw-flags-v2";
+/// Source contract for ImPlot3D rendering, legend hover and literal axis menu labels.
+pub const IMPLOT3D_DRAW_FLAGS_PATCH_VERSION: &str = "implot3d-draw-flags-v3";
 
 /// Source contract for ImPlot drawing, axis menus and metrics with Dear ImGui 1.93.
 pub const IMPLOT_IMGUI_PATCH_VERSION: &str = "implot-imgui-193-v4";
@@ -1327,7 +1327,7 @@ pub fn patch_implot_cpp_for_imgui(source: &str, file_name: &str) -> Result<Strin
     Ok(restore_cpp_newlines(patched, newline))
 }
 
-/// Stage the ImPlot3D sources that need Dear ImGui window-hover and device-pixel corrections.
+/// Stage ImPlot3D's rendering, window-hover and axis menu corrections for native and WASM.
 pub fn stage_implot3d_draw_flags(
     source_path: &std::path::Path,
     out_dir: &std::path::Path,
@@ -1340,12 +1340,20 @@ pub fn stage_implot3d_draw_flags(
         .map_err(|error| format!("read {}: {error}", source_path.display()))?;
     let (source, newline) = normalize_cpp_source(&source);
     let patched = match file_name {
-        "implot3d.cpp" => replace_cpp_source_once(
-            &source,
-            "legend.Hovered = legend.Hovered || legend.RectClamped.Contains(IO.MousePos);",
-            "legend.Hovered = legend.Hovered || (ImGui::IsWindowHovered() && legend.RectClamped.Contains(IO.MousePos));",
-            "ImPlot3D legend window hover ownership",
-        )?,
+        "implot3d.cpp" => {
+            let source = replace_cpp_source_once(
+                &source,
+                "legend.Hovered = legend.Hovered || legend.RectClamped.Contains(IO.MousePos);",
+                "legend.Hovered = legend.Hovered || (ImGui::IsWindowHovered() && legend.RectClamped.Contains(IO.MousePos));",
+                "ImPlot3D legend window hover ownership",
+            )?;
+            replace_cpp_source_once(
+                &source,
+                r#"ImGui::Text(axis.HasLabel() ? axis.GetLabel() : "%c-Axis", 'X' + i);"#,
+                "ImGui::TextUnformatted(axis.HasLabel() ? axis.GetLabel() : axis_labels[i]);",
+                "ImPlot3D literal axis menu label",
+            )?
+        }
         "implot3d_items.cpp" => {
             // Upstream selects the correct parent's atlas and supplies the fringe. Match the
             // core primitive's minimum logical width and convert to device pixels for selection.
@@ -1553,6 +1561,11 @@ mod tests {
                 "implot3d.cpp",
                 "ImGui::IsWindowHovered() && legend.RectClamped.Contains(IO.MousePos)",
                 "legend.Hovered || legend.RectClamped",
+            ),
+            (
+                "implot3d.cpp",
+                "ImGui::TextUnformatted(axis.HasLabel() ? axis.GetLabel() : axis_labels[i]);",
+                "ImGui::Text(axis.HasLabel()",
             ),
             (
                 "implot3d_items.cpp",

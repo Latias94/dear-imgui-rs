@@ -485,7 +485,7 @@ def expected_extension_binding_identity(source_root: Path, spec: ExtensionSpec) 
     if spec.extension_id == "cte":
         identity.field("source_overlay", "cte-text-editor-v1")
     if spec.extension_id == "implot3d":
-        identity.field("source_overlay", "implot3d-draw-flags-v2")
+        identity.field("source_overlay", "implot3d-draw-flags-v3")
     if spec.extension_id == "imnodes":
         identity.field("source_overlay", "imnodes-file-handles-v1")
     if spec.extension_id == "implot":
