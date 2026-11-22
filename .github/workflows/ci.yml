@@ -2019,3 +2019,15 @@ jobs:
 
       - name: Build and structurally verify the Emscripten provider
         run: python3 -B tools/ci/verify_wasm_provider.py
+
+      - name: Run the browser provider and editor regression on WebGL2
+        shell: bash
+        run: |
+          npm install --prefix "$RUNNER_TEMP/provider-test" --no-audit --no-fund @playwright/cli@0.1.14
+          cli="$RUNNER_TEMP/provider-test/node_modules/.bin/playwright-cli"
+          python3 -m http.server 4173 --bind 127.0.0.1 --directory target/web-demo > "$RUNNER_TEMP/web-demo.log" 2>&1 &
+          server=$!
+          trap '"$cli" -s=provider-abi close; kill "$server"' EXIT
+          curl --fail --silent --retry 10 --retry-connrefused --retry-delay 1 http://127.0.0.1:4173/ > /dev/null
+          "$cli" -s=provider-abi open 'http://127.0.0.1:4173/?webgl2' --config=examples-wasm/tests/chrome-software-gl.json
+          "$cli" -s=provider-abi --json run-code --filename=examples-wasm/tests/provider-abi.js | tee "$RUNNER_TEMP/provider-abi.json" | jq -e '.result == "true"'

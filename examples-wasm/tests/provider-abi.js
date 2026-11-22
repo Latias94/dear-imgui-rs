@@ -1,9 +1,16 @@
 // Run with playwright-cli on a demo built with CTE (see docs/WASM.md).
 async page => {
   await page.setViewportSize({ width: 1280, height: 800 });
+  const webgl2 = await page.evaluate(() => new URL(location.href).searchParams.has('webgl2'));
+  if (webgl2) {
+    await page.addInitScript(() => Object.defineProperty(navigator, 'gpu', { value: undefined }));
+  }
   await page.reload();
   const provider = await page.evaluateHandle(() => import('imgui-sys-v1'));
   await page.waitForFunction(p => p.igGetCurrentContext() && p.igGetFrameCount() > 2, provider);
+  if (webgl2 && !await page.locator('#wasm-canvas').evaluate(canvas => !!canvas.getContext('webgl2'))) {
+    throw new Error('Expected the WebGL2 canvas backend');
+  }
   const waitForRender = async () => {
     const frame = await provider.evaluate(p => p.igGetFrameCount());
     await page.waitForFunction(({ p, frame }) => p.igGetFrameCount() > frame + 2,

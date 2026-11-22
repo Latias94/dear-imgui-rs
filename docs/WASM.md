@@ -190,9 +190,7 @@ playwright-cli -s=imgui-provider-abi run-code --filename=examples-wasm/tests/pro
 playwright-cli -s=imgui-provider-abi close
 ```
 
-For CI, use a runner with a working WebGPU adapter. With `@playwright/cli`
-0.1.14, use `--json run-code` and pipe the response to `jq -e '.result == "true"'`.
-This CLI version can return exit code zero for a browser assertion failure.
+The WASM CI job opens `/?webgl2` in headless Chrome with the software GL configuration in `examples-wasm/tests/chrome-software-gl.json`. The test verifies the fallback backend and edits the CTE document through the shared provider. With `@playwright/cli` 0.1.14, use `--json run-code` and check `.result == "true"`. The CLI can return exit code zero for a browser assertion failure.
 
 ## Runtime model
 
