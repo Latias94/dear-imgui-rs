@@ -97,6 +97,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("WARN: cimguizmo.h not found: {}", cimguizmo_h.display());
     }
 
+    let mut extra = fs::File::open(manifest_dir.join("shim/imguizmo_extra.h"))?;
+    tar.append_file("include/cimguizmo/imguizmo_extra.h", &mut extra)?;
+
     // Licenses (project + third-party)
     let workspace_root = manifest_dir.parent().and_then(|p| p.parent()).unwrap();
     append_license_if_exists(

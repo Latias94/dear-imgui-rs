@@ -490,6 +490,8 @@ def expected_extension_binding_identity(source_root: Path, spec: ExtensionSpec) 
         identity.field("source_overlay", "imnodes-ini-state-v2")
     if spec.extension_id == "implot":
         identity.field("source_overlay", "implot-imgui-193-v4")
+    if spec.extension_id == "imguizmo":
+        identity.field("source_overlay", "imguizmo-interaction-v1")
     return identity.finish()
 
 

@@ -1862,6 +1862,24 @@ fn implot3d_binding_identity_matches_the_python_consumer_test_vector() {
 }
 
 #[test]
+fn imguizmo_binding_identity_matches_the_python_consumer_test_vector() {
+    let vector: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/imguizmo_binding_identity.json"
+    ))
+    .unwrap();
+    let provenance = CrateBindingProvenance::parse(vector["provenance"].as_str().unwrap()).unwrap();
+    let binding = ExtensionBindingIdentity::new(
+        ExtensionBinding::ImGuizmo,
+        extension_spec(ExtensionBinding::ImGuizmo),
+        provenance,
+    )
+    .unwrap();
+    let identity = binding.deterministic_hash();
+    assert_eq!(identity, vector["identity"].as_str().unwrap());
+    assert_ne!(identity, vector["unpatched_identity"].as_str().unwrap());
+}
+
+#[test]
 fn imnodes_binding_identity_matches_the_python_consumer_test_vector() {
     let vector: serde_json::Value = serde_json::from_str(include_str!(
         "../../tests/fixtures/imnodes_binding_identity.json"

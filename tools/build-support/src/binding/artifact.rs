@@ -193,6 +193,9 @@ pub fn core_source_contract_hash() -> String {
         match transform {
             ProviderTransform::Direct => ("direct", "v1"),
             ProviderTransform::PatchImguiCore => ("patch-imgui-core", "safe-demo-boundary-v1"),
+            ProviderTransform::PatchImguizmo => {
+                ("patch-imguizmo", crate::IMGUIZMO_INTERACTION_PATCH_VERSION)
+            }
             ProviderTransform::PatchImguiDemo => ("patch-imgui-demo", "safe-demo-boundary-v1"),
             ProviderTransform::PatchImguiWidgetsNumericConversions => (
                 "patch-imgui-widgets-numeric-conversions",

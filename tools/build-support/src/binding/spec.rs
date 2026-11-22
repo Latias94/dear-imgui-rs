@@ -934,6 +934,9 @@ impl ExtensionBindingIdentity {
         if self.extension == ExtensionBinding::ImPlot {
             hash.field("source_overlay", crate::IMPLOT_IMGUI_PATCH_VERSION);
         }
+        if self.extension == ExtensionBinding::ImGuizmo {
+            hash.field("source_overlay", crate::IMGUIZMO_INTERACTION_PATCH_VERSION);
+        }
         hash.finish()
     }
 }
@@ -1589,7 +1592,7 @@ const NODE_EDITOR_PROFILE: CrateBindgenProfile = crate_profile(
 );
 const NODE_EDITOR_SYMBOLS: &[&str] = &["dne_create_editor", "dne_pin_rect"];
 
-const IMGUIZMO_INPUTS: &[&str] = &["third-party/cimguizmo/cimguizmo.h"];
+const IMGUIZMO_INPUTS: &[&str] = &["third-party/cimguizmo/cimguizmo.h", "shim/imguizmo_extra.h"];
 const IMGUIZMO_INCLUDES: &[CrateBindingInclude] = &[
     CrateBindingInclude {
         root: CrateBindingIncludeRoot::CoreCimgui,
@@ -1632,7 +1635,11 @@ const IMGUIZMO_PROFILE: CrateBindgenProfile = crate_profile(
     DEFAULT_CRATE_DERIVES,
     true,
 );
-const IMGUIZMO_SYMBOLS: &[&str] = &["ImGuizmo_BeginFrame", "ImGuizmo_Manipulate"];
+const IMGUIZMO_SYMBOLS: &[&str] = &[
+    "ImGuizmo_BeginFrame",
+    "ImGuizmo_Manipulate",
+    "ImGuizmo_ResetInteraction",
+];
 
 const IMGUIZMO_QUAT_INPUTS: &[&str] = &["third-party/cimguizmo_quat/cimguizmo_quat.h"];
 const IMGUIZMO_QUAT_INCLUDES: &[CrateBindingInclude] = &[

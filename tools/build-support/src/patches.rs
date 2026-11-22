@@ -1563,6 +1563,39 @@ fn patch_plot_line_coverage(source: &str, three_dimensional: bool) -> Result<Str
     Ok(patched)
 }
 
+/// Native and WASM contract for handing ImGuizmo interactions between ImGui contexts.
+pub const IMGUIZMO_INTERACTION_PATCH_VERSION: &str = "imguizmo-interaction-v1";
+
+pub fn patch_imguizmo_cpp(source: &str) -> Result<String, String> {
+    let (source, newline) = normalize_cpp_source(source);
+    let source = replace_cpp_source_once(
+        &source,
+        "ImGuiWindow* window = ImGui::FindWindowByName(gContext.mDrawList->_OwnerName);",
+        "const char* owner = gContext.mDrawList->_OwnerName;\n      ImGuiWindow* window = owner ? ImGui::FindWindowByName(owner) : nullptr;\n      if (window && window->DrawList != gContext.mDrawList)\n         window = nullptr; // A viewport layer can share a debug name with a window.",
+        "ImGuizmo draw list hover owner",
+    )?;
+    let source = replace_cpp_source_once(
+        &source,
+        "int mInterpolationFrames = 0;",
+        "int mInterpolationFrames = 0;\n      int mClickedBox = -1;",
+        "ImGuizmo per-ID view state",
+    )?;
+    let source = replace_cpp_source_once(
+        &source,
+        "static int overBox = -1;",
+        "int& overBox = vms.mClickedBox;",
+        "ImGuizmo view manipulator clicked face",
+    )?;
+    let mut source = replace_cpp_source_once(
+        &source,
+        "if (!gContext.mIsOrthographic && camSpacePosition.z < 0.001f && !gContext.mbUsing)\n      {\n         return false;",
+        "if (!gContext.mIsOrthographic && camSpacePosition.z < 0.001f && !gContext.mbUsing)\n      {\n         gContext.mDrawList->PopClipRect();\n         return false;",
+        "ImGuizmo culled manipulation clip rectangle",
+    )?;
+    source.push_str("\n#include \"imguizmo_reset.inc\"\n");
+    Ok(restore_cpp_newlines(source, newline))
+}
+
 fn normalize_cpp_source(source: &str) -> (String, &'static str) {
     let newline = if source.contains("\r\n") {
         "\r\n"
@@ -1603,6 +1636,20 @@ mod tests {
         patch_implot_cpp_for_imgui, patch_test_engine_capture_cpp_for_defined_geometry,
         patch_test_engine_cpp_for_presentation_abort, stage_implot3d_draw_flags,
     };
+
+    #[test]
+    fn imguizmo_interaction_patch_matches_upstream_and_rejects_drift() {
+        let source = include_str!(concat!(
+            "../../../extensions/dear-imguizmo-sys/third-party/cimguizmo/",
+            "ImGuizmo/src/ImGuizmo.cpp"
+        ));
+        let patched = super::patch_imguizmo_cpp(source).unwrap();
+        assert!(patched.contains("int& overBox = vms.mClickedBox;"));
+        assert!(patched.contains("#include \"imguizmo_reset.inc\""));
+        assert!(super::patch_imguizmo_cpp(&patched).is_err());
+        let drifted = source.replace("camSpacePosition.z < 0.001f", "camSpacePosition.z <= 0.f");
+        assert!(super::patch_imguizmo_cpp(&drifted).is_err());
+    }
 
     #[test]
     fn implot_line_texture_patch_matches_upstream_and_rejects_drift() {

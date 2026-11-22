@@ -25,7 +25,7 @@ separately with Emscripten.
 This crate supports three ways to obtain the native `dear_imguizmo` static library:
 
 - Source build (default)
-  - Compiles `cimguizmo.cpp` and upstream `ImGuizmo/src/ImGuizmo.cpp` with `cc`
+  - Compiles `cimguizmo.cpp` and the adapted `ImGuizmo/src/ImGuizmo.cpp` with `cc`
     (falling back to the legacy `ImGuizmo/ImGuizmo.cpp` layout when present).
   - Inherits include paths and preprocessor defines from `dear-imgui-sys`.
 - System/prebuilt library
@@ -93,3 +93,7 @@ URL override before switching back to automatic release lookup or source builds.
 - MSVC (Windows) builds align CRT and exception flags with `dear-imgui-sys`.
 - `docs.rs` builds use checked-in bindings and export include paths for downstream crates.
 - Higher-level Rust APIs live in `extensions/dear-imguizmo/`. See that crate and `examples/03-features/imguizmo_minimal.rs` for a copy-ready integration.
+
+## Interaction handoff
+
+The native archive and the `imgui-sys-v1` WASM provider both export `ImGuizmo_ResetInteraction` from `imguizmo_extra.h`. Call it on the owner thread before `ImGuizmo_BeginFrame` when a different ImGui context takes over. It clears transient camera, hover, drag, bounds, ID and view-cube state. It preserves the global style, enablement, rectangle, orthographic mode, axis options and gizmo size. The safe crate handles this transition using the ImGui context generation.

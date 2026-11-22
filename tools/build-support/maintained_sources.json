@@ -176,15 +176,17 @@
       "source_root": "third-party/cimguizmo",
       "files": [
         { "id": "wrapper", "canonical": "third-party/cimguizmo/cimguizmo.cpp", "alternates": [], "provider_transform": "direct" },
-        { "id": "implementation", "canonical": "third-party/cimguizmo/ImGuizmo/src/ImGuizmo.cpp", "alternates": ["third-party/cimguizmo/ImGuizmo/ImGuizmo.cpp"], "provider_transform": "direct" }
+        { "id": "implementation", "canonical": "third-party/cimguizmo/ImGuizmo/src/ImGuizmo.cpp", "alternates": ["third-party/cimguizmo/ImGuizmo/ImGuizmo.cpp"], "provider_transform": "patch-imguizmo" },
+        { "id": "reset-header", "canonical": "shim/imguizmo_extra.h", "alternates": [], "provider_transform": null },
+        { "id": "reset-implementation", "canonical": "shim/imguizmo_reset.inc", "alternates": [], "provider_transform": null }
       ],
-      "native_required_files": ["wrapper", "implementation"],
-      "archive_sentinels": ["wrapper", "implementation"],
+      "native_required_files": ["wrapper", "implementation", "reset-header", "reset-implementation"],
+      "archive_sentinels": ["wrapper", "implementation", "reset-header", "reset-implementation"],
       "provider": {
         "wasm_bindings": "src/wasm_bindings_pregenerated.rs",
         "symbol_prefixes": ["ImGuizmo_", "Style_"],
-        "required_exports": ["ImGuizmo_ComputeMouseRay"],
-        "include_dirs": ["third-party/cimguizmo", "third-party/cimguizmo/ImGuizmo", "third-party/cimguizmo/ImGuizmo/src"],
+        "required_exports": ["ImGuizmo_ComputeMouseRay", "ImGuizmo_ResetInteraction"],
+        "include_dirs": ["third-party/cimguizmo", "third-party/cimguizmo/ImGuizmo", "third-party/cimguizmo/ImGuizmo/src", "shim"],
         "source_files": ["wrapper", "implementation"]
       }
     },

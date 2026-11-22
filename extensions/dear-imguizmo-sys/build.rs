@@ -201,6 +201,11 @@ fn generate_bindings(
 
     let builder = bindgen::Builder::default()
         .header(cimguizmo_root.join("cimguizmo.h").to_string_lossy())
+        .header(
+            cfg.manifest_dir
+                .join("shim/imguizmo_extra.h")
+                .to_string_lossy(),
+        )
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .allowlist_function("ImGuizmo_.*")
         .allowlist_function("Style_.*")
@@ -333,16 +338,23 @@ fn build_with_cc(
     build.include(cimguizmo_root);
     build.include(cimguizmo_root.join("ImGuizmo"));
     build.include(cimguizmo_root.join("ImGuizmo/src"));
+    build.include(cfg.manifest_dir.join("shim"));
     build.file(
         sources
             .file("wrapper")
             .unwrap_or_else(|error| panic!("dear-imguizmo-sys: {error}")),
     );
-    build.file(
-        sources
-            .file("implementation")
-            .unwrap_or_else(|error| panic!("dear-imguizmo-sys: {error}")),
-    );
+    let implementation = sources
+        .file("implementation")
+        .unwrap_or_else(|error| panic!("dear-imguizmo-sys: {error}"));
+    let contents = std::fs::read_to_string(&implementation)
+        .unwrap_or_else(|error| panic!("read {}: {error}", implementation.display()));
+    let patched = build_support::patch_imguizmo_cpp(&contents)
+        .unwrap_or_else(|error| panic!("dear-imguizmo-sys: {error}"));
+    let output = cfg.out_dir.join("ImGuizmo-patched.cpp");
+    std::fs::write(&output, patched)
+        .unwrap_or_else(|error| panic!("write {}: {error}", output.display()));
+    build.file(output);
 
     if cfg.is_msvc() && cfg.is_windows() {
         build.flag("/EHsc");
@@ -376,6 +388,7 @@ fn main() {
 
     // Rerun hints
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=shim");
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
     println!("cargo:rerun-if-env-changed=IMGUIZMO_SYS_LIB_DIR");

@@ -1185,6 +1185,7 @@ fn prepare_wasm_provider_inputs(
                     );
                 }
                 ProviderTransform::PatchImguiCore
+                | ProviderTransform::PatchImguizmo
                 | ProviderTransform::PatchImguiDemo
                 | ProviderTransform::PatchImguiWidgetsNumericConversions
                 | ProviderTransform::PatchImnodes
@@ -1197,6 +1198,9 @@ fn prepare_wasm_provider_inputs(
                     let patched = match provider_source.transform {
                         ProviderTransform::PatchImguiCore => {
                             build_support::patch_imgui_cpp_for_safe_demo(&contents)
+                        }
+                        ProviderTransform::PatchImguizmo => {
+                            build_support::patch_imguizmo_cpp(&contents)
                         }
                         ProviderTransform::PatchImguiDemo => {
                             build_support::patch_imgui_demo_cpp_for_safe_demo(&contents)
@@ -1492,6 +1496,7 @@ mod tests {
         assert_eq!(inputs.cpp_standard, CrateBindingLanguage::Cxx20);
         assert!(inputs.exports.contains("dear_imgui_cte_clear_callbacks"));
         assert!(inputs.exports.contains("ImGuizmo_ComputeMouseRay"));
+        assert!(inputs.exports.contains("ImGuizmo_ResetInteraction"));
         assert!(
             inputs
                 .exports
@@ -1527,7 +1532,7 @@ mod tests {
             inputs
                 .source_files
                 .iter()
-                .any(|path| { path.ends_with("third-party/cimguizmo/ImGuizmo/src/ImGuizmo.cpp") })
+                .any(|path| path.ends_with("provider-imguizmo-implementation-patched.cpp"))
         );
         assert!(
             inputs
