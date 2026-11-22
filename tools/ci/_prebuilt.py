@@ -157,7 +157,7 @@ EXTENSION_SPECS = (
         "dear_imguizmo",
         "IMGUIZMO_SYS",
         ("normal", "freetype"),
-        "ImGuizmo_BeginFrame",
+        "ImGuizmo_ResetInteraction",
     ),
     ExtensionSpec(
         "imguizmo-quat",
@@ -898,6 +898,12 @@ fn main() {
 """
 
 
+def _rust_symbol_probe(spec: ExtensionSpec) -> str:
+    # A Rust function item is zero-sized. Keeping its address forces a native symbol reference.
+    sys_module = spec.sys_crate.replace("-", "_")
+    return f"std::hint::black_box({sys_module}::{spec.symbol} as *const ());"
+
+
 def write_extension_prebuilt_consumer(
     destination: Path,
     source_root: Path,
@@ -946,19 +952,15 @@ def write_extension_prebuilt_consumer(
         encoding="utf-8",
     )
     safe_module = spec.safe_crate.replace("-", "_")
-    sys_module = spec.sys_crate.replace("-", "_")
     source_dir.joinpath("main.rs").write_text(
         CTE_PREBUILT_CONSUMER if spec.extension_id == "cte" else f"""use {safe_module} as _;
 
 fn main() {{
-    let _extension_symbol = {sys_module}::{spec.symbol};
-    assert!(!"{spec.safe_crate}".is_empty());
+    {_rust_symbol_probe(spec)}
 }}
 """,
         encoding="utf-8",
     )
-    # The direct matching sys dependency is intentional; it proves that Cargo selected and
-    # linked the exact artifact rather than only compiling the high-level crate transitively.
     _copy_consumer_lockfile(destination, source_root)
 
 
@@ -1013,10 +1015,7 @@ def write_extension_route_consumer(
         statements.extend(
             (
                 f"    use {spec.safe_crate.replace('-', '_')} as _;",
-                (
-                    "    std::hint::black_box("
-                    f"{spec.sys_crate.replace('-', '_')}::{spec.symbol} as *const ());"
-                ),
+                f"    {_rust_symbol_probe(spec)}",
             )
         )
     destination.joinpath("Cargo.toml").write_text(

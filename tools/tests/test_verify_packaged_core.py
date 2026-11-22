@@ -1114,7 +1114,22 @@ class ConsumerContractTests(unittest.TestCase):
             self.assertNotIn("features", sys_dependency)
             source = destination.joinpath("src/main.rs").read_text(encoding="utf-8")
             self.assertIn("use dear_node_editor as _;", source)
-            self.assertIn("dear_node_editor_sys::dne_create_editor", source)
+            self.assertIn(
+                "std::hint::black_box(dear_node_editor_sys::dne_create_editor as *const ());",
+                source,
+            )
+
+    def test_imguizmo_prebuilt_consumer_links_interaction_reset(self):
+        with TemporaryDirectory() as temporary:
+            destination = Path(temporary)
+            PREBUILT.write_extension_prebuilt_consumer(
+                destination, REPO_ROOT, PREBUILT.EXTENSION_BY_ID["imguizmo"], "normal"
+            )
+            source = (destination / "src/main.rs").read_text(encoding="utf-8")
+            self.assertIn(
+                "std::hint::black_box(dear_imguizmo_sys::ImGuizmo_ResetInteraction as *const ());",
+                source,
+            )
 
     def test_cte_consumer_runs_wide_glyph_layout_and_both_diff_views(self):
         with TemporaryDirectory() as temporary:
