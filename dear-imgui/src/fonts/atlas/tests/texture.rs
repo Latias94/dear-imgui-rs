@@ -1,3 +1,44 @@
+use super::reconcile_with_retry;
+
+#[test]
+fn frame_atlas_image_supports_managed_text_and_image_submission() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut ctx = crate::Context::create();
+    let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
+    ctx.prepare_frame(
+        crate::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0).renderer_has_textures(),
+    );
+
+    let ui = ctx.frame();
+    let image: crate::TextureRef<'_> = ui.font_atlas_texture().unwrap();
+    ui.text("Draw text before submitting the atlas image");
+    ui.image(image, [16.0, 16.0]);
+    assert!(reconcile_with_retry(ctx.render(&consumer)).valid());
+}
+
+#[test]
+fn legacy_atlas_pixels_can_be_borrowed_after_ending_the_frame() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut ctx = crate::Context::create();
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .unwrap()
+        .build();
+    ctx.prepare_frame(crate::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
+    ctx.frame();
+
+    let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let legacy = ctx.font_atlas().try_claim_legacy_renderer().unwrap();
+        let _ = legacy.tex_data();
+    }));
+    assert!(rejected.is_err());
+    assert!(ctx.end_frame());
+
+    let legacy = ctx.font_atlas().try_claim_legacy_renderer().unwrap();
+    let texture = legacy.tex_data().unwrap();
+    assert!(!texture.pixels().unwrap().is_empty());
+}
+
 #[test]
 fn set_texture_id_preserves_legacy_tex_data_reference() {
     let ctx = crate::Context::create();
@@ -85,27 +126,22 @@ fn forgotten_texture_lease_blocks_frame_advance_before_ffi() {
 }
 
 #[test]
-fn legacy_clear_cpu_texture_data_discards_pixels_without_removing_fonts() {
+fn cleared_legacy_atlas_rebuilds_uploadable_pixels() {
+    let _guard = crate::test_support::imgui_context_guard();
     let ctx = crate::Context::create();
     let atlas = ctx.font_atlas();
     let legacy = atlas
         .try_claim_legacy_renderer()
         .expect("the test requires a legacy font atlas");
     legacy.build();
-    assert!(legacy.is_built());
-    let source_count = unsafe { (*atlas.raw()).Sources.Size };
-    assert!(
-        legacy
-            .tex_data()
-            .is_some_and(|texture| texture.pixels().is_some())
-    );
 
-    legacy.clear_cpu_texture_data();
+    atlas.clear();
+    let font = atlas.add_font(&[crate::FontSource::default_bitmap()]);
+    legacy.build();
 
-    assert_eq!(unsafe { (*atlas.raw()).Sources.Size }, source_count);
-    assert!(
-        legacy
-            .tex_data()
-            .is_some_and(|texture| texture.pixels().is_none())
-    );
+    assert!(font.is_loaded());
+    let texture = legacy.tex_data().unwrap();
+    let pixels = texture.pixels().unwrap();
+    assert!(!pixels.is_empty());
+    assert_eq!(pixels.len(), texture.pitch() * texture.height() as usize);
 }

@@ -22,13 +22,14 @@ impl FontAtlas {
     /// Creates a shared font-atlas view from a raw pointer.
     ///
     /// # Safety
-    /// The pointer must remain valid and immutable for the returned lifetime.
-    pub(crate) unsafe fn from_raw<'a>(raw: *const sys::ImFontAtlas) -> &'a Self {
+    /// The owner must keep the atlas alive on this thread for `'a`. Native mutation must honor
+    /// the atlas's frame and texture borrows throughout that lifetime.
+    pub(crate) unsafe fn from_raw<'a>(raw: *mut sys::ImFontAtlas) -> &'a Self {
         assert!(
             !raw.is_null(),
             "FontAtlas::from_raw() requires non-null pointer"
         );
-        font_atlas_state(raw.cast_mut());
+        font_atlas_state(raw);
         unsafe { &*raw.cast::<Self>() }
     }
 

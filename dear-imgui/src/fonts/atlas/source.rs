@@ -207,9 +207,9 @@ impl<'a> FontSource<'a> {
 }
 
 pub(super) fn assert_stb_truetype_config(config: &FontConfig, caller: &str) {
-    let stb_loader = FontLoader::stb_truetype().as_ptr();
     assert!(
-        config.raw.FontLoader.is_null() || config.raw.FontLoader == stb_loader,
+        config.raw.FontLoader.is_null()
+            || config.raw.FontLoader == FontLoader::stb_truetype().as_ptr(),
         "{caller} cannot override a validated stb_truetype source with another font loader"
     );
     assert_eq!(

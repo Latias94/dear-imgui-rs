@@ -878,11 +878,10 @@ fn demo_axis_constraints(ui: &Ui, plot_ui: &Plot3DUi) {
 }
 
 fn demo_image_plots(ui: &Ui, plot_ui: &Plot3DUi) {
-    let Some(font_texture) = ui.font_atlas_texture() else {
+    let Some(tex) = ui.font_atlas_texture() else {
         ui.text("Font atlas texture not ready yet.");
         return;
     };
-    let tex = font_texture.texture_ref();
 
     // Controls/info
     ui.bullet_text("Using font atlas texture for demo");

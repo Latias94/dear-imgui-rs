@@ -48,6 +48,21 @@ impl<'atlas> LegacyFontAtlas<'atlas> {
     /// Pixel slices borrowed from this view remain valid until the lease is dropped. While it is
     /// alive, safe atlas mutation and frame advancement reject operations that could invalidate
     /// the texture.
+    ///
+    /// Keep the CPU copy after uploading. Dear ImGui uses it to copy resident glyphs during
+    /// repacking. To discard the atlas contents, use [`FontAtlas::clear`] and repopulate the
+    /// atlas before rebuilding.
+    ///
+    /// ```compile_fail,E0599
+    /// fn discard_pixels(atlas: &dear_imgui_rs::LegacyFontAtlas<'_>) {
+    ///     atlas.clear_cpu_texture_data();
+    /// }
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if a context using this atlas has an open frame. During drawing, use
+    /// [`Ui::font_atlas_texture`](crate::Ui::font_atlas_texture).
     pub fn tex_data(&self) -> Option<crate::fonts::FontAtlasTexture<'atlas>> {
         self.atlas.tex_data_internal()
     }
@@ -56,11 +71,5 @@ impl<'atlas> LegacyFontAtlas<'atlas> {
 impl FontAtlas {
     pub(crate) fn texture_id_internal(&self) -> crate::texture::TextureId {
         unsafe { crate::texture::effective_texture_id(&(*self.raw()).TexRef) }
-    }
-
-    pub(crate) fn tex_data_internal(&self) -> Option<crate::fonts::FontAtlasTexture<'_>> {
-        let raw = self.raw();
-        let texture = unsafe { (*raw).TexData };
-        unsafe { crate::fonts::FontAtlasTexture::from_raw(raw, texture) }
     }
 }

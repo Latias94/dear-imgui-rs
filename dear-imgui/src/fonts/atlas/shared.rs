@@ -2,6 +2,8 @@ use std::cell::Cell;
 use std::ptr::NonNull;
 use std::rc::Rc;
 
+use crate::context::binding::ContextThreadLease;
+use crate::error::{ImGuiError, ImGuiResult};
 use crate::sys;
 
 use super::state::{font_atlas_state, forget_font_atlas_generation};
@@ -10,6 +12,8 @@ use super::state::{font_atlas_state, forget_font_atlas_generation};
 struct SharedFontAtlasInner {
     raw: NonNull<sys::ImFontAtlas>,
     next_frame: Cell<i32>,
+    // ImGui's allocator accesses GImGui even when this atlas has no registered contexts.
+    _thread_lease: ContextThreadLease,
 }
 
 impl Drop for SharedFontAtlasInner {
@@ -32,8 +36,9 @@ impl Drop for SharedFontAtlasInner {
 
 /// A shared font atlas that can be used across multiple contexts.
 ///
-/// The final Rust owner destroys the native atlas. Contexts that use the atlas unregister from it
-/// before native context shutdown, so Dear ImGui never races this owner or destroys it twice.
+/// The atlas and all its contexts belong to one OS thread. An atlas kept alive between contexts
+/// retains that thread's ownership of Dear ImGui through native atlas destruction. Drop all
+/// clones before transferring Dear ImGui ownership to another thread.
 ///
 /// Multiple contexts may share the atlas only while they use legacy renderer-managed texture
 /// handling. Attaching a managed renderer with
@@ -52,19 +57,25 @@ impl Drop for SharedFontAtlasInner {
 pub struct SharedFontAtlas(Rc<SharedFontAtlasInner>);
 
 impl SharedFontAtlas {
-    /// Creates a new shared font atlas
-    pub fn create() -> SharedFontAtlas {
-        unsafe {
-            let raw_atlas = sys::ImFontAtlas_ImFontAtlas();
-            if raw_atlas.is_null() {
-                panic!("ImFontAtlas_ImFontAtlas() returned null");
-            }
-            font_atlas_state(raw_atlas);
-            SharedFontAtlas(Rc::new(SharedFontAtlasInner {
-                raw: NonNull::new_unchecked(raw_atlas),
-                next_frame: Cell::new(0),
-            }))
-        }
+    /// Creates a shared font atlas on this OS thread.
+    ///
+    /// Returns [`ImGuiError::ContextThreadConflict`] if another thread owns Dear ImGui.
+    pub fn try_create() -> ImGuiResult<Self> {
+        let thread_lease = ContextThreadLease::acquire()?;
+        let raw = NonNull::new(unsafe { sys::ImFontAtlas_ImFontAtlas() })
+            .ok_or_else(|| ImGuiError::resource_allocation("shared font atlas"))?;
+        let atlas = Self(Rc::new(SharedFontAtlasInner {
+            raw,
+            next_frame: Cell::new(0),
+            _thread_lease: thread_lease,
+        }));
+        font_atlas_state(raw.as_ptr());
+        Ok(atlas)
+    }
+
+    /// Creates a shared font atlas, panicking if [`Self::try_create`] fails.
+    pub fn create() -> Self {
+        Self::try_create().expect("Failed to create shared Dear ImGui font atlas")
     }
 
     pub(crate) fn as_ptr(&self) -> *mut sys::ImFontAtlas {

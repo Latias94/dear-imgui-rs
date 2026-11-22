@@ -243,7 +243,8 @@ impl FontAtlas {
         exists
     }
 
-    /// Query the rectangle's current placement.
+    /// Query the rectangle's placement between frames and lease its texture until the snapshot
+    /// is dropped. During a frame, query it through [`Ui::custom_rect`].
     #[doc(alias = "GetCustomRect")]
     pub fn custom_rect(&self, id: CustomRectId) -> Option<CustomRectSnapshot<'_>> {
         let atlas = self.raw();
