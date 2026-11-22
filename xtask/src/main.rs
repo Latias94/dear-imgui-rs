@@ -841,6 +841,13 @@ fn generate_maintained_wasm_binding(owner: BindingOwner) -> Result<()> {
     Ok(())
 }
 
+// Rust's System allocator can bypass #[global_allocator] inside std. Its initial
+// arena ends at GLOBAL_BASE. Fixed physical memory makes any later memory.grow fail.
+const PROVIDER_GLOBAL_BASE: u32 = 64 * 1024 * 1024;
+const SHARED_MEMORY_SIZE: u32 = 256 * 1024 * 1024;
+const RUST_TABLE_BASE: u32 = 4096;
+const SHARED_TABLE_SIZE: u32 = 16384;
+
 fn build_web_demo(features: Option<&str>) -> Result<()> {
     use std::fs;
     use std::process::Command;
@@ -908,9 +915,15 @@ fn build_web_demo(features: Option<&str>) -> Result<()> {
             "-C",
             "link-arg=--export-memory",
             "-C",
-            "link-arg=--initial-memory=134217728",
+            &format!("link-arg=--initial-memory={PROVIDER_GLOBAL_BASE}"),
             "-C",
-            "link-arg=--max-memory=268435456",
+            &format!("link-arg=--max-memory={SHARED_MEMORY_SIZE}"),
+            "-C",
+            "link-arg=--import-table",
+            "-C",
+            "link-arg=--growable-table",
+            "-C",
+            &format!("link-arg=--table-base={RUST_TABLE_BASE}"),
         ])
         .status()?;
     if !status.success() {
@@ -1285,8 +1298,8 @@ fn build_cimgui_provider(options: BuildProviderOptions) -> Result<()> {
     let out_js = out_dir.join(format!("{module_name}.js"));
 
     // Emscripten expects C exports with the JavaScript ABI underscore prefix.
-    let exported = names
-        .iter()
+    let required_exports = || names.iter().map(String::as_str).chain(["memalign", "free"]);
+    let exported = required_exports()
         .map(|name| format!("_{name}"))
         .collect::<Vec<_>>();
     let exports_json = format!(
@@ -1312,13 +1325,17 @@ fn build_cimgui_provider(options: BuildProviderOptions) -> Result<()> {
         .arg("-s")
         .arg("ENVIRONMENT=web")
         .arg("-s")
-        .arg("GLOBAL_BASE=67108864") // Place provider static data high to avoid overlap with main module
+        .arg(format!("GLOBAL_BASE={PROVIDER_GLOBAL_BASE}"))
         .arg("-s")
         .arg("IMPORTED_MEMORY=1")
         .arg("-s")
-        .arg("ALLOW_MEMORY_GROWTH=1")
+        .arg("ALLOW_MEMORY_GROWTH=0")
         .arg("-s")
-        .arg("INITIAL_MEMORY=134217728")
+        .arg(format!("INITIAL_MEMORY={SHARED_MEMORY_SIZE}"))
+        .arg("-s")
+        .arg("ABORTING_MALLOC=0")
+        .arg("-s")
+        .arg("ALLOW_TABLE_GROWTH=1")
         .arg("-s")
         .arg("FILESYSTEM=0")
         .arg("-s")
@@ -1330,7 +1347,7 @@ fn build_cimgui_provider(options: BuildProviderOptions) -> Result<()> {
         .arg("-s")
         .arg("STACK_SIZE=1048576")
         .arg("-s")
-        .arg("EXPORTED_RUNTIME_METHODS=[\"ccall\",\"cwrap\",\"stackSave\",\"stackRestore\",\"stackAlloc\",\"UTF8ToString\",\"stringToUTF8\",\"lengthBytesUTF8\"]")
+        .arg("EXPORTED_RUNTIME_METHODS=[\"wasmTable\",\"ccall\",\"cwrap\",\"stackSave\",\"stackRestore\",\"stackAlloc\",\"UTF8ToString\",\"stringToUTF8\",\"lengthBytesUTF8\"]")
         .arg("-s")
         .arg(format!(
             "EXPORTED_FUNCTIONS=@{}",
@@ -1393,7 +1410,7 @@ fn build_cimgui_provider(options: BuildProviderOptions) -> Result<()> {
         .with_context(|| format!("parse provider exports from {}", emscripten_wasm.display()))?;
     build_support::source_inventory::verify_emscripten_wasm_exports(
         &actual_exports,
-        names.iter().map(String::as_str),
+        required_exports(),
     )
     .with_context(|| {
         format!(
@@ -1405,33 +1422,26 @@ fn build_cimgui_provider(options: BuildProviderOptions) -> Result<()> {
     // Create wrapper module
     let wrapper_name = format!("{module_name}-wrapper.js");
     let js_path = out_dir.join(&wrapper_name);
-    let mut js = String::new();
-    js.push_str(&format!(
-        "// Auto-generated wrapper for {module_name} provider\n"
-    ));
-    js.push_str(&format!("import createModule from './{module_name}.js';\n"));
-    js.push('\n');
-    js.push_str("// Use shared memory if available\n");
-    js.push_str("const memory = globalThis.__imgui_shared_memory ??= new WebAssembly.Memory({initial:2048, maximum:4096});\n");
-    js.push('\n');
-    js.push_str("// Initialize the module with shared memory\n");
-    js.push_str("const Module = await createModule({\n");
-    js.push_str("  wasmMemory: memory,\n");
-    js.push_str(&format!(
-        "  printErr: (text) => console.warn('[{module_name}]', text),\n"
-    ));
-    js.push_str(&format!(
-        "  print: (text) => console.log('[{module_name}]', text),\n"
-    ));
-    js.push_str("});\n");
-    js.push_str(&format!(
-        "console.log('[{module_name}] Shared memory pages=', (memory.buffer.byteLength>>>16));\n"
-    ));
-    js.push_str(&format!(
-        "console.log('[{module_name}] Module.wasmMemory===memory', Module.wasmMemory===memory);\n"
-    ));
-    js.push('\n');
-    js.push_str("// Export all the functions\n");
+    let mut js = format!(
+        r#"// Generated by xtask for {module_name}.
+import createModule from './{module_name}.js';
+
+if ('__imgui_shared_memory' in globalThis) {{
+  throw new Error('Legacy Dear ImGui bootstrap: rebuild both modules and pass the wrapper memory to init({{ memory }})');
+}}
+export const memory = new WebAssembly.Memory({{ initial: {pages}, maximum: {pages} }});
+const Module = await createModule({{ wasmMemory: memory }});
+export const __indirect_function_table = Module.wasmTable;
+if (__indirect_function_table.length > {RUST_TABLE_BASE}) {{
+  throw new RangeError(`{module_name} uses ${{__indirect_function_table.length}} table slots; Rust starts at {RUST_TABLE_BASE}`);
+}}
+__indirect_function_table.grow({SHARED_TABLE_SIZE} - __indirect_function_table.length);
+
+export const dear_imgui_wasm_memalign = Module._memalign;
+export const dear_imgui_wasm_free = Module._free;
+"#,
+        pages = SHARED_MEMORY_SIZE / 65536,
+    );
     for n in &names {
         js.push_str(&format!(
             "export const {} = Module._{} || Module.{};\n",

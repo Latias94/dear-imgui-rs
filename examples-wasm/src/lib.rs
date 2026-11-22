@@ -28,6 +28,9 @@ use winit::{
     window::{Window, WindowId},
 };
 
+#[global_allocator]
+static ALLOCATOR: sys::WasmProviderAllocator = sys::WasmProviderAllocator;
+
 #[cfg(feature = "cte")]
 struct CteWebState {
     editor: TextEditor,

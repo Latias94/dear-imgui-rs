@@ -9,20 +9,15 @@
       #wasm-canvas { display: block; width: 100vw; height: 100vh; }
     </style>
     <script type="importmap">
-      { "imports": { "imgui-sys-v1": "./imgui-sys-v1-wrapper.js" } }
+      { "imports": {
+        "imgui-sys-v1": "./imgui-sys-v1-wrapper.js",
+        "env": "./imgui-sys-v1-wrapper.js"
+      } }
     </script>
   </head>
   <body>
     <canvas id="wasm-canvas"></canvas>
     <script>
-      // Prepare a shared memory for both provider (cimgui) and main (wasm-bindgen) modules
-      // 2048 pages (128MiB) initial, growable up to 4096 pages (256MiB)
-      if (!globalThis.__imgui_shared_memory) {
-        // Use a larger initial heap so provider static data placed high (GLOBAL_BASE) fits
-        // 2048 pages = 128MiB
-        globalThis.__imgui_shared_memory = new WebAssembly.Memory({ initial: 2048, maximum: 4096 });
-      }
-
       // Ensure canvas drawing buffer matches CSS size * devicePixelRatio
       const canvas = document.getElementById('wasm-canvas');
       function resizeCanvasToDisplaySize() {
@@ -39,7 +34,8 @@
     </script>
     <script type="module">
       import init from './dear-imgui-web-demo.js';
-      init({ memory: globalThis.__imgui_shared_memory }).catch(e => {
+      import { memory } from 'imgui-sys-v1';
+      init({ memory }).catch(e => {
         const msg = String(e && (e.message || e));
         // Winit on web may throw to control flow; ignore this benign exception
         if (msg.includes("Using exceptions for control flow")) return;

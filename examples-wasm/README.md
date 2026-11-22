@@ -2,14 +2,15 @@
 
 This directory contains the `dear-imgui-web-demo` package. Start with the
 [local demo instructions](../docs/WASM.md#local-demo) for the required Rust target,
-matching `wasm-bindgen-cli`, `wasm-tools`, Emscripten SDK, build commands, and local
+matching `wasm-bindgen-cli`, Emscripten SDK, build commands, and local
 HTTP server.
 
 The browser integration has three entry points:
 
 - [`src/lib.rs`](src/lib.rs) owns the Winit/WGPU application and UI. Optional
   extensions are selected through the features in [`Cargo.toml`](Cargo.toml).
-- [`web/index.html`](web/index.html) provides the canvas and shared memory.
+- [`web/index.html`](web/index.html) provides the canvas, maps both ABI imports to
+  the provider wrapper, and passes its memory to wasm-bindgen.
 - [`xtask`](../xtask/src/main.rs) builds the Rust module and native import provider
   into `target/web-demo/`.
 
