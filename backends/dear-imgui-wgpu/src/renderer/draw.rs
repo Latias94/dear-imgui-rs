@@ -707,6 +707,27 @@ mod tests {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
+    fn render_callback_frame<'ctx>(
+        context: &'ctx mut Context,
+        consumer: &dear_imgui_rs::render::SynchronousRendererConsumer,
+        draw: impl FnOnce(&dear_imgui_rs::DrawListMut<'_>),
+    ) -> dear_imgui_rs::render::ReconciledFrame<'ctx> {
+        context.prepare_frame(
+            dear_imgui_rs::FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0)
+                .renderer_has_textures(),
+        );
+        let frame = context.begin_frame();
+        draw(&frame.ui().get_background_draw_list());
+        let pending = frame.render(consumer);
+        let feedback: Vec<_> = pending
+            .texture_requests()
+            .iter()
+            .map(|r| r.retry())
+            .collect();
+        pending.reconcile_texture_feedback(feedback).unwrap()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn only_non_standard_callbacks_make_draw_dependencies_incomplete() -> RendererResult<()> {
         let Some((device, queue)) = request_test_device() else {
@@ -728,24 +749,7 @@ mod tests {
             _command: *const sys::ImDrawCmd,
         ) {
         }
-        let mut commands = [
-            sys::ImDrawCmd {
-                UserCallback: Some(reset),
-                ..Default::default()
-            },
-            sys::ImDrawCmd {
-                UserCallback: Some(linear),
-                ..Default::default()
-            },
-            sys::ImDrawCmd {
-                UserCallback: Some(nearest),
-                ..Default::default()
-            },
-            sys::ImDrawCmd {
-                UserCallback: Some(unknown),
-                ..Default::default()
-            },
-        ];
+        let consumer = context.create_synchronous_renderer_consumer().unwrap();
         let manager = WgpuTextureManager::new();
         let mut backend = WgpuBackendData::new(WgpuInitInfo::new(
             device,
@@ -753,24 +757,30 @@ mod tests {
             wgpu::TextureFormat::Rgba8Unorm,
         ));
         for (count, expected_unknown) in [(3, false), (4, true)] {
-            with_draw_commands(&mut commands[..count], |draw_data| {
-                let prepared = WgpuRenderer::prepare_draw_data(
-                    &manager,
-                    &None,
-                    draw_data,
-                    FramebufferExtent::new(64, 64),
-                    &mut backend,
-                )?;
-                assert!(prepared.dependencies().external_bindings.is_empty());
-                assert_eq!(prepared.commands.len(), count);
-                assert_eq!(
-                    prepared
-                        .dependencies()
-                        .contains_unknown_callback_dependencies,
-                    expected_unknown
-                );
-                Ok::<_, RendererError>(())
-            })?;
+            let frame = render_callback_frame(&mut context, &consumer, |list| {
+                // Both native callbacks are static and do not read user data.
+                unsafe { list.add_callback(reset, std::ptr::null_mut(), 0) };
+                list.set_sampler_linear();
+                list.set_sampler_nearest();
+                if expected_unknown {
+                    unsafe { list.add_callback(unknown, std::ptr::null_mut(), 0) };
+                }
+            });
+            let prepared = WgpuRenderer::prepare_draw_data(
+                &manager,
+                &None,
+                frame.draw_data(),
+                FramebufferExtent::new(64, 64),
+                &mut backend,
+            )?;
+            assert!(prepared.dependencies().external_bindings.is_empty());
+            assert_eq!(prepared.commands.len(), count);
+            assert_eq!(
+                prepared
+                    .dependencies()
+                    .contains_unknown_callback_dependencies,
+                expected_unknown
+            );
         }
         Ok(())
     }
@@ -793,28 +803,26 @@ mod tests {
                 .platform_io_mut()
                 .set_draw_callback_set_sampler_from_texture_raw(Some(texture_sampler));
         }
-        let mut commands = [sys::ImDrawCmd {
-            UserCallback: Some(texture_sampler),
-            ..Default::default()
-        }];
+        let consumer = context.create_synchronous_renderer_consumer().unwrap();
+        let frame = render_callback_frame(&mut context, &consumer, |list| {
+            list.set_sampler_from_texture()
+        });
         let manager = WgpuTextureManager::new();
         let mut backend = WgpuBackendData::new(WgpuInitInfo::new(
             device,
             queue,
             wgpu::TextureFormat::Rgba8Unorm,
         ));
-        with_draw_commands(&mut commands, |draw_data| {
-            assert!(matches!(
-                WgpuRenderer::prepare_draw_data(
-                    &manager,
-                    &None,
-                    draw_data,
-                    FramebufferExtent::new(64, 64),
-                    &mut backend,
-                ),
-                Err(RendererError::TextureSamplerUnsupported)
-            ));
-        });
+        assert!(matches!(
+            WgpuRenderer::prepare_draw_data(
+                &manager,
+                &None,
+                frame.draw_data(),
+                FramebufferExtent::new(64, 64),
+                &mut backend,
+            ),
+            Err(RendererError::TextureSamplerUnsupported)
+        ));
         Ok(())
     }
 

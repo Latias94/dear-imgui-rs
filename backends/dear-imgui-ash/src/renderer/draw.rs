@@ -668,9 +668,12 @@ mod tests {
 
     #[test]
     fn texture_owned_sampler_is_rejected_during_preparation() {
-        use dear_imgui_rs::{internal::RawCast, sys};
+        use dear_imgui_rs::{FramePrepareOptions, sys};
 
         let mut context = Context::create();
+        context.prepare_frame(
+            FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
+        );
         unsafe extern "C" fn texture_sampler(
             _list: *const sys::ImDrawList,
             _command: *const sys::ImDrawCmd,
@@ -682,31 +685,20 @@ mod tests {
                 .platform_io_mut()
                 .set_draw_callback_set_sampler_from_texture_raw(Some(texture_sampler));
         }
-        let mut command = sys::ImDrawCmd {
-            UserCallback: Some(texture_sampler),
-            ..Default::default()
-        };
-        let mut list = sys::ImDrawList::default();
-        list.CmdBuffer.Size = 1;
-        list.CmdBuffer.Capacity = 1;
-        list.CmdBuffer.Data = &mut command;
-        let mut list_ptr = &mut list as *mut sys::ImDrawList;
-        let mut raw = sys::ImDrawData::default();
-        raw.Valid = true;
-        raw.CmdLists.Size = 1;
-        raw.CmdLists.Capacity = 1;
-        raw.CmdLists.Data = &mut list_ptr;
-        raw.DisplaySize = sys::ImVec2 { x: 64.0, y: 64.0 };
-        raw.FramebufferScale = sys::ImVec2 { x: 1.0, y: 1.0 };
-        // SAFETY: native vectors borrow initialized stack data until preparation returns.
-        let draw_data = unsafe { dear_imgui_rs::render::DrawData::from_raw(&raw) };
+        let consumer = context.create_synchronous_renderer_consumer().unwrap();
+        let frame = context.begin_frame();
+        frame
+            .ui()
+            .get_background_draw_list()
+            .set_sampler_from_texture();
+        let frame = complete_initial_texture_requests(frame.render(&consumer));
         assert!(matches!(
             prepare_draw_commands(
                 &TextureManager::new(),
                 0,
                 vk::DescriptorSet::null(),
                 vk::DescriptorSet::null(),
-                draw_data,
+                frame.draw_data(),
                 64,
                 64,
             ),
@@ -714,7 +706,6 @@ mod tests {
         ));
     }
 
-    #[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
     fn complete_initial_texture_requests(frame: PendingFrame<'_>) -> ReconciledFrame<'_> {
         let feedback = frame
             .texture_requests()
