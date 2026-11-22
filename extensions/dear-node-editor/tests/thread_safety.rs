@@ -9,6 +9,7 @@ fn thread_safety_node_editor_context_and_scope_tokens_not_send_sync() {
     assert_not_impl_any!(dear_node_editor::GroupHintToken<'static>: Send, Sync);
     assert_not_impl_any!(dear_node_editor::SuspensionToken<'static>: Send, Sync);
     assert_not_impl_any!(dear_node_editor::CreateSession<'static>: Send, Sync);
+    assert_not_impl_any!(dear_node_editor::CreateResponse<'static>: Send, Sync);
     assert_not_impl_any!(dear_node_editor::DeleteSession<'static>: Send, Sync);
     assert_not_impl_any!(dear_node_editor::ShortcutSession<'static>: Send, Sync);
     assert_not_impl_any!(dear_node_editor::StyleColorToken<'static>: Send, Sync);

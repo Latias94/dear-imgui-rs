@@ -9,8 +9,8 @@ use dear_imgui_rs::*;
 use dear_imgui_wgpu::{FramebufferExtent, GammaMode, WgpuInitInfo, WgpuRenderer};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform};
 use dear_node_editor::{
-    CanvasSizeMode, EditorConfig, EditorContext, FlowDirection, LinkId, NodeEditorFrame,
-    NodeEditorUiExt, NodeId, PinId, PinKind, StyleColor,
+    CanvasSizeMode, CreateCandidate, EditorConfig, EditorContext, FlowDirection, LinkId,
+    NodeEditorFrame, NodeEditorUiExt, NodeId, PinId, PinKind, StyleColor,
 };
 use node_editor_blueprint::{BlueprintNodeBuilder, IconType};
 use std::{ffi::c_void, path::PathBuf, sync::Arc, time::Instant};
@@ -717,63 +717,63 @@ fn draw_editor_pane(
     header_background_size: [f32; 2],
     graph: &mut GraphState,
 ) {
-    let editor = ui.node_editor(node_editor, "blueprints_editor", [0.0, 610.0]);
-    editor.set_shortcuts_enabled(graph.shortcuts_enabled);
+    let summary = ui.with_node_editor(node_editor, "blueprints_editor", [0.0, 610.0], |editor| {
+        editor.set_shortcuts_enabled(graph.shortcuts_enabled);
 
-    if !graph.positions_initialized {
-        initialize_graph_layout(&editor);
-        graph.positions_initialized = true;
-    }
-    if graph.pending_select_flow {
-        editor.clear_selection();
-        for node in [NODE_INPUT, NODE_BRANCH, NODE_PRINT, NODE_OUTPUT] {
-            editor.add_node_to_selection(node);
+        if !graph.positions_initialized {
+            initialize_graph_layout(editor);
+            graph.positions_initialized = true;
         }
-        for link in &graph.links {
-            if let Some(start) = pin_spec(link.start_pin) {
-                if start.ty == PinType::Flow {
-                    editor.add_link_to_selection(link.id);
+        if graph.pending_select_flow {
+            editor.clear_selection();
+            for node in [NODE_INPUT, NODE_BRANCH, NODE_PRINT, NODE_OUTPUT] {
+                editor.add_node_to_selection(node);
+            }
+            for link in &graph.links {
+                if let Some(start) = pin_spec(link.start_pin) {
+                    if start.ty == PinType::Flow {
+                        editor.add_link_to_selection(link.id);
+                    }
                 }
             }
+            graph.pending_select_flow = false;
+            graph.last_action = "Selected flow path".to_owned();
         }
-        graph.pending_select_flow = false;
-        graph.last_action = "Selected flow path".to_owned();
-    }
-    if graph.pending_fit_content {
-        editor.navigate_to_content(0.35);
-        graph.pending_fit_content = false;
-        graph.last_action = "Navigated to content".to_owned();
-    }
-
-    for node in &NODES {
-        draw_blueprint_node(
-            &editor,
-            ui,
-            graph,
-            node,
-            header_background,
-            header_background_size,
-        );
-    }
-    draw_comment_node(&editor, ui);
-
-    for link in &graph.links {
-        let color = pin_spec(link.start_pin)
-            .map(|pin| pin.ty.color())
-            .unwrap_or([1.0, 1.0, 1.0, 1.0]);
-        editor.link_colored(link.id, link.start_pin, link.end_pin, color, 2.0);
-        if graph.animate_flow {
-            editor.flow(link.id, FlowDirection::Forward);
+        if graph.pending_fit_content {
+            editor.navigate_to_content(0.35);
+            graph.pending_fit_content = false;
+            graph.last_action = "Navigated to content".to_owned();
         }
-    }
 
-    draw_comment_hint(&editor);
-    handle_create_session(&editor, graph);
-    handle_delete_session(&editor, graph);
-    handle_shortcuts(&editor, graph);
-    handle_context_popups(ui, &editor, graph);
-    let summary = collect_summary(&editor, ui, graph);
-    editor.end();
+        for node in &NODES {
+            draw_blueprint_node(
+                editor,
+                ui,
+                graph,
+                node,
+                header_background,
+                header_background_size,
+            );
+        }
+        draw_comment_node(editor, ui);
+
+        for link in &graph.links {
+            let color = pin_spec(link.start_pin)
+                .map(|pin| pin.ty.color())
+                .unwrap_or([1.0, 1.0, 1.0, 1.0]);
+            editor.link_colored(link.id, link.start_pin, link.end_pin, color, 2.0);
+            if graph.animate_flow {
+                editor.flow(link.id, FlowDirection::Forward);
+            }
+        }
+
+        draw_comment_hint(editor);
+        handle_create_session(editor, graph);
+        handle_delete_session(editor, graph);
+        handle_shortcuts(editor, graph);
+        handle_context_popups(ui, editor, graph);
+        collect_summary(editor, ui, graph)
+    });
 
     if graph.show_inspector {
         ui.separator();
@@ -799,17 +799,18 @@ fn draw_comment_node(editor: &NodeEditorFrame<'_>, ui: &Ui) {
     let _node_border =
         editor.push_style_color(StyleColor::NodeBorder, [1.0, 1.0, 1.0, 64.0 / 255.0]);
 
-    let node = editor.begin_node(COMMENT_NODE);
-    let _id = ui.push_id(COMMENT_NODE.raw() as *const c_void);
-    let content = ui.begin_vertical("content", [0.0, 0.0], -1.0);
-    let horizontal = ui.begin_horizontal("horizontal", [0.0, 0.0], -1.0);
-    ui.spring(1.0, -1.0);
-    ui.text("Input Action Pipeline");
-    ui.spring(1.0, -1.0);
-    horizontal.end();
-    editor.group([1130.0, 380.0]);
-    content.end();
-    node.end();
+    editor.node(COMMENT_NODE, |_| {
+        let id = ui.push_id(COMMENT_NODE.raw() as *const c_void);
+        let content = ui.begin_vertical("content", [0.0, 0.0], -1.0);
+        let horizontal = ui.begin_horizontal("horizontal", [0.0, 0.0], -1.0);
+        ui.spring(1.0, -1.0);
+        ui.text("Input Action Pipeline");
+        ui.spring(1.0, -1.0);
+        horizontal.end();
+        editor.group([1130.0, 380.0]);
+        content.end();
+        id.end();
+    });
 }
 
 fn draw_blueprint_node(
@@ -832,52 +833,57 @@ fn draw_blueprint_node(
     let _node_border = editor.push_style_color(StyleColor::NodeBorder, node.color);
 
     let is_simple = node.kind == NodeKind::Simple;
-    let mut builder = BlueprintNodeBuilder::begin(editor, ui, node.id);
-
-    if !is_simple {
-        builder.header(node.color, || {
-            ui.spring(0.0, -1.0);
-            ui.text(node.name);
-            ui.spring(1.0, -1.0);
-            ui.dummy([0.0, 28.0]);
-            ui.spring(0.0, -1.0);
-        });
-        builder.end_header();
-    }
-
-    for input in node.inputs {
-        builder.input(input.id, |pin_token| {
-            draw_pin_icon(ui, graph, *input);
-            ui.spring(0.0, -1.0);
-            if !input.name.is_empty() {
-                ui.text(input.name);
-                ui.spring(0.0, -1.0);
+    BlueprintNodeBuilder::draw(
+        editor,
+        ui,
+        node.id,
+        header_background,
+        header_background_size,
+        |builder, token| {
+            if !is_simple {
+                builder.header(node.color, || {
+                    ui.spring(0.0, -1.0);
+                    ui.text(node.name);
+                    ui.spring(1.0, -1.0);
+                    ui.dummy([0.0, 28.0]);
+                    ui.spring(0.0, -1.0);
+                });
+                builder.end_header();
             }
-            pin_token.pivot_size([0.0, 0.0]);
-        });
-    }
 
-    if is_simple {
-        builder.middle(|| {
-            ui.spring(1.0, 0.0);
-            ui.text(node.name);
-            ui.spring(1.0, 0.0);
-        });
-    }
-
-    for output in node.outputs {
-        builder.output(output.id, |pin_token| {
-            if !output.name.is_empty() {
-                ui.spring(0.0, -1.0);
-                ui.text(output.name);
+            for input in node.inputs {
+                builder.input(token, input.id, |pin_token| {
+                    draw_pin_icon(ui, graph, *input);
+                    ui.spring(0.0, -1.0);
+                    if !input.name.is_empty() {
+                        ui.text(input.name);
+                        ui.spring(0.0, -1.0);
+                    }
+                    pin_token.pivot_size([0.0, 0.0]);
+                });
             }
-            ui.spring(0.0, -1.0);
-            draw_pin_icon(ui, graph, *output);
-            pin_token.pivot_size([0.0, 0.0]);
-        });
-    }
 
-    builder.end(header_background, header_background_size);
+            if is_simple {
+                builder.middle(|| {
+                    ui.spring(1.0, 0.0);
+                    ui.text(node.name);
+                    ui.spring(1.0, 0.0);
+                });
+            }
+
+            for output in node.outputs {
+                builder.output(token, output.id, |pin_token| {
+                    if !output.name.is_empty() {
+                        ui.spring(0.0, -1.0);
+                        ui.text(output.name);
+                    }
+                    ui.spring(0.0, -1.0);
+                    draw_pin_icon(ui, graph, *output);
+                    pin_token.pivot_size([0.0, 0.0]);
+                });
+            }
+        },
+    );
 }
 
 fn pin_is_connected(graph: &GraphState, pin: PinId) -> bool {
@@ -901,7 +907,7 @@ fn draw_pin_icon(ui: &Ui, graph: &GraphState, pin: PinSpec) {
 }
 
 fn draw_comment_hint(editor: &NodeEditorFrame<'_>) {
-    if let Some(hint) = editor.begin_group_hint(COMMENT_NODE) {
+    editor.group_hint(COMMENT_NODE, |hint| {
         let min = hint.min();
         let label_min = [min[0] + 12.0, min[1] - 24.0];
         let label_max = [label_min[0] + 176.0, label_min[1] + 22.0];
@@ -915,14 +921,15 @@ fn draw_comment_hint(editor: &NodeEditorFrame<'_>) {
             [0.72, 0.83, 0.92, 1.0],
             "Blueprint comment",
         );
-        hint.end();
-    }
+    });
 }
 
 fn handle_create_session(editor: &NodeEditorFrame<'_>, graph: &mut GraphState) {
-    if let Some(create) = editor.begin_create([1.0, 1.0, 1.0, 1.0], 2.0) {
-        if let Some((a, b)) = create.query_new_link_styled([0.55, 0.82, 1.0, 1.0], 2.0) {
-            match normalize_link(a, b) {
+    editor.with_create(
+        [0.55, 0.82, 1.0, 1.0],
+        2.0,
+        |candidate, create| match candidate {
+            CreateCandidate::Link { start: a, end: b } => match normalize_link(a, b) {
                 Some((start_pin, end_pin))
                     if !graph
                         .links
@@ -941,12 +948,13 @@ fn handle_create_session(editor: &NodeEditorFrame<'_>, graph: &mut GraphState) {
                     }
                 }
                 _ => create.reject_new_item_styled([0.95, 0.24, 0.25, 1.0], 2.0),
+            },
+            CreateCandidate::Node { pin } => {
+                create.reject_new_item_styled([0.95, 0.65, 0.24, 1.0], 2.0);
+                graph.last_action = format!("New-node request from pin {} rejected", pin.raw());
             }
-        } else if let Some(pin) = create.query_new_node_styled([0.95, 0.65, 0.24, 1.0], 2.0) {
-            create.reject_new_item_styled([0.95, 0.65, 0.24, 1.0], 2.0);
-            graph.last_action = format!("New-node request from pin {} rejected", pin.raw());
-        }
-    }
+        },
+    );
 }
 
 fn handle_delete_session(editor: &NodeEditorFrame<'_>, graph: &mut GraphState) {
@@ -990,24 +998,24 @@ fn handle_shortcuts(editor: &NodeEditorFrame<'_>, graph: &mut GraphState) {
 }
 
 fn handle_context_popups(ui: &Ui, editor: &NodeEditorFrame<'_>, graph: &mut GraphState) {
-    let suspension = editor.suspend();
-    if let Some(node) = editor.show_node_context_menu() {
-        graph.context_popup = Some(ContextPopup::Node(node));
-        ui.open_popup("Blueprint Context");
-    } else if let Some(pin) = editor.show_pin_context_menu() {
-        graph.context_popup = Some(ContextPopup::Pin(pin));
-        ui.open_popup("Blueprint Context");
-    } else if let Some(link) = editor.show_link_context_menu() {
-        graph.context_popup = Some(ContextPopup::Link(link));
-        ui.open_popup("Blueprint Context");
-    } else if editor.show_background_context_menu() {
-        graph.context_popup = Some(ContextPopup::Background);
-        ui.open_popup("Blueprint Context");
-    }
+    editor.with_suspended(|| {
+        if let Some(node) = editor.show_node_context_menu() {
+            graph.context_popup = Some(ContextPopup::Node(node));
+            ui.open_popup("Blueprint Context");
+        } else if let Some(pin) = editor.show_pin_context_menu() {
+            graph.context_popup = Some(ContextPopup::Pin(pin));
+            ui.open_popup("Blueprint Context");
+        } else if let Some(link) = editor.show_link_context_menu() {
+            graph.context_popup = Some(ContextPopup::Link(link));
+            ui.open_popup("Blueprint Context");
+        } else if editor.show_background_context_menu() {
+            graph.context_popup = Some(ContextPopup::Background);
+            ui.open_popup("Blueprint Context");
+        }
 
-    draw_context_popup(ui, graph);
-    debug_assert!(editor.is_suspended());
-    suspension.resume();
+        draw_context_popup(ui, graph);
+        debug_assert!(editor.is_suspended());
+    });
 }
 
 fn draw_context_popup(ui: &Ui, graph: &mut GraphState) {

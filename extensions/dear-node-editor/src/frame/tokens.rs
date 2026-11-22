@@ -1,99 +1,85 @@
-use super::core::{BuildPhase, NodeEditorFrame};
+use super::core::{FrameToken, NodeEditorFrame, ScopeKind};
 use super::validation::{
     assert_finite_f32, assert_finite_rect, assert_finite_vec2, assert_finite_vec4,
     assert_non_negative_finite_f32, assert_non_negative_finite_vec2, assert_style_var_type,
 };
 use crate::{
-    EditorContext, FlowDirection, LinkId, NodeEditorStyle, NodeId, PinId, PinKind, StyleColor,
-    StyleVar, StyleVarType, from_vec2, sys, vec2, vec4,
+    FlowDirection, LinkId, NodeEditorStyle, NodeId, PinId, PinKind, StyleColor, StyleVar,
+    StyleVarType, from_vec2, sys, vec2, vec4,
 };
-use dear_imgui_rs::{DrawListMut, Ui};
-use std::{
-    cell::{Cell, RefCell},
-    collections::HashSet,
-    marker::PhantomData,
-    rc::Rc,
-};
+use dear_imgui_rs::DrawListMut;
 
 impl<'ui> NodeEditorFrame<'ui> {
-    pub fn begin_node<'a>(&'a self, node: NodeId) -> NodeToken<'a> {
-        assert!(
-            self.phase.get() == BuildPhase::Idle,
-            "NodeEditorFrame::begin_node() requires the current node or group hint to be ended"
-        );
+    /// Begins a manually balanced node. See [`Self::node`] for scoped drawing.
+    ///
+    /// # Safety
+    /// Keep the host's surrounding ImGui groups and drawing channels active. End all
+    /// groups and pins opened inside the node before ending it, including on unwind.
+    pub unsafe fn begin_node<'a>(&'a self, node: NodeId) -> NodeToken<'a> {
+        self.require_scope(None, "NodeEditorFrame::begin_node()");
         self.with_current("NodeEditorFrame::begin_node()", || unsafe {
             sys::dne_begin_node(node.raw())
         });
-        self.phase.set(BuildPhase::Node);
         NodeToken {
-            editor: self._editor,
-            phase: &self.phase,
-            submitted_pins: &self.submitted_pins,
-            ended: false,
-            _not_send_sync: PhantomData,
+            scope: self.entered(ScopeKind::Node),
         }
     }
 
     pub fn node<R>(&self, node: NodeId, f: impl FnOnce(&NodeToken<'_>) -> R) -> R {
-        let token = self.begin_node(node);
-        let result = f(&token);
-        token.end();
-        result
+        self.scoped(|| unsafe { self.begin_node(node) }, f)
     }
 
-    pub fn begin_group_hint<'a>(&'a self, node: NodeId) -> Option<GroupHintToken<'a>> {
-        assert!(
-            self.phase.get() == BuildPhase::Idle,
-            "NodeEditorFrame::begin_group_hint() requires the current node or group hint to be ended"
-        );
+    /// Draws the group hint when upstream offers one at the current zoom level.
+    pub fn group_hint<R>(
+        &self,
+        node: NodeId,
+        f: impl FnOnce(&GroupHintToken<'_>) -> R,
+    ) -> Option<R> {
+        self.scoped(
+            || unsafe { self.begin_group_hint(node) },
+            |hint| hint.as_ref().map(f),
+        )
+    }
+
+    /// # Safety
+    /// Keep the host's style, clip and drawing scopes properly nested around the returned
+    /// hint until it ends. [`Self::group_hint`] owns these boundaries during drawing and unwind.
+    pub unsafe fn begin_group_hint<'a>(&'a self, node: NodeId) -> Option<GroupHintToken<'a>> {
+        self.require_scope(None, "NodeEditorFrame::begin_group_hint()");
         self.with_current("NodeEditorFrame::begin_group_hint()", || unsafe {
             sys::dne_begin_group_hint(node.raw())
         })
-        .then(|| {
-            self.phase.set(BuildPhase::GroupHint);
-            GroupHintToken {
-                editor: self._editor,
-                ui: self._ui,
-                phase: &self.phase,
-                ended: false,
-                _not_send_sync: PhantomData,
-            }
+        .then(|| GroupHintToken {
+            scope: self.entered(ScopeKind::GroupHint),
         })
     }
 
     /// Returns a node's background draw list after that node has been ended.
     ///
     /// Returns `None` when the node was not submitted in this frame or the host
-    /// window skips rendering. Panics while a node or group hint is being built.
+    /// window skips rendering. Requires the editor canvas outside a build or suspension scope.
     pub fn node_background_draw_list(&self, node: NodeId) -> Option<DrawListMut<'_>> {
-        assert!(
-            self.phase.get() == BuildPhase::Idle,
-            "NodeEditorFrame::node_background_draw_list() requires the current node or group hint to be ended"
-        );
+        self.require_scope(None, "NodeEditorFrame::node_background_draw_list()");
         let draw_list = self
             .with_current("NodeEditorFrame::node_background_draw_list()", || unsafe {
                 sys::dne_get_node_background_draw_list(node.raw())
             });
-        (!draw_list.is_null())
-            .then(|| unsafe { DrawListMut::from_raw_mut(self._ui, draw_list.cast()) })
+        // Upstream selects a channel on the host window's draw list.
+        (!draw_list.is_null()).then(|| self._ui.get_window_draw_list())
     }
 
     #[doc(alias = "GetStyle")]
     pub fn style(&self) -> NodeEditorStyle {
-        self._editor.style()
+        self.with_current("NodeEditorFrame::style()", NodeEditorStyle::current)
     }
 
     pub fn group(&self, size: [f32; 2]) {
         assert_non_negative_finite_vec2("NodeEditorFrame::group()", "size", size);
-        assert_eq!(
-            self.phase.get(),
-            BuildPhase::Node,
-            "NodeEditorFrame::group() requires an active node with no pin or previous group"
-        );
+        self.require_scope(Some(ScopeKind::Node), "NodeEditorFrame::group()");
         self.with_current("NodeEditorFrame::group()", || unsafe {
             sys::dne_group(vec2(size))
         });
-        self.phase.set(BuildPhase::Group);
+        self.mark_group();
     }
 
     pub fn set_group_size(&self, node: NodeId, size: [f32; 2]) {
@@ -144,10 +130,7 @@ impl<'ui> NodeEditorFrame<'ui> {
             sys::dne_push_style_color(color.raw(), vec4(value))
         });
         StyleColorToken {
-            editor: self._editor,
-            count: 1,
-            popped: false,
-            _not_send_sync: PhantomData,
+            _scope: self.entered(ScopeKind::StyleColor),
         }
     }
 
@@ -162,10 +145,7 @@ impl<'ui> NodeEditorFrame<'ui> {
             sys::dne_push_style_var_float(var.raw(), value)
         });
         StyleVarToken {
-            editor: self._editor,
-            count: 1,
-            popped: false,
-            _not_send_sync: PhantomData,
+            _scope: self.entered(ScopeKind::StyleVar),
         }
     }
 
@@ -180,10 +160,7 @@ impl<'ui> NodeEditorFrame<'ui> {
             sys::dne_push_style_var_vec2(var.raw(), vec2(value))
         });
         StyleVarToken {
-            editor: self._editor,
-            count: 1,
-            popped: false,
-            _not_send_sync: PhantomData,
+            _scope: self.entered(ScopeKind::StyleVar),
         }
     }
 
@@ -198,42 +175,36 @@ impl<'ui> NodeEditorFrame<'ui> {
             sys::dne_push_style_var_vec4(var.raw(), vec4(value))
         });
         StyleVarToken {
-            editor: self._editor,
-            count: 1,
-            popped: false,
-            _not_send_sync: PhantomData,
+            _scope: self.entered(ScopeKind::StyleVar),
         }
     }
 
-    pub fn suspend<'a>(&'a self) -> SuspensionToken<'a> {
-        assert!(
-            !self.suspended.replace(true),
-            "NodeEditorFrame::suspend() cannot be called while the editor is already suspended"
-        );
+    /// Draws screen-space UI while the canvas is suspended. Suspensions can nest inside a pin.
+    pub fn with_suspended<R>(&self, draw: impl FnOnce() -> R) -> R {
+        self.scoped(|| unsafe { self.suspend() }, |_| draw())
+    }
+
+    /// # Safety
+    /// Balance host draw-list scopes around this suspension. Resume in the same window,
+    /// table cell and draw channel after nested UI has closed. See [`Self::with_suspended`].
+    pub unsafe fn suspend<'a>(&'a self) -> SuspensionToken<'a> {
         self.with_current("NodeEditorFrame::suspend()", || unsafe {
             sys::dne_suspend()
         });
         SuspensionToken {
-            editor: self._editor,
-            suspended: &self.suspended,
-            resumed: false,
+            _scope: self.entered(ScopeKind::Suspension),
         }
     }
 
     pub fn is_suspended(&self) -> bool {
-        self.suspended.get()
-            || self.with_current("NodeEditorFrame::is_suspended()", || unsafe {
-                sys::dne_is_suspended()
-            })
+        self.with_current("NodeEditorFrame::is_suspended()", || unsafe {
+            sys::dne_is_suspended()
+        })
     }
 }
 
 pub struct NodeToken<'a> {
-    editor: &'a EditorContext,
-    phase: &'a Cell<BuildPhase>,
-    submitted_pins: &'a RefCell<HashSet<PinId>>,
-    ended: bool,
-    _not_send_sync: PhantomData<Rc<()>>,
+    scope: FrameToken<'a>,
 }
 
 impl NodeToken<'_> {
@@ -241,78 +212,54 @@ impl NodeToken<'_> {
     ///
     /// Panics before FFI if another pin is active, this node is a group, or the ID
     /// was already submitted. IDs can be reused after the editor frame ends.
-    pub fn begin_pin<'a>(&'a self, pin: PinId, kind: PinKind) -> PinToken<'a> {
-        assert_eq!(
-            self.phase.get(),
-            BuildPhase::Node,
-            "NodeToken::begin_pin() requires a node with no active pin or group"
-        );
-        assert!(
-            self.submitted_pins.borrow_mut().insert(pin),
-            "NodeToken::begin_pin() requires each pin ID to be submitted only once per editor frame"
-        );
-        self.editor
-            .with_current("NodeToken::begin_pin()", || unsafe {
-                sys::dne_begin_pin(pin.raw(), kind.raw())
-            });
-        self.phase.set(BuildPhase::Pin);
+    ///
+    /// # Safety
+    /// Keep enclosing ImGui groups and drawing scopes active until the pin ends. Balance
+    /// scopes opened inside the pin first, including on unwind. See [`Self::pin`].
+    pub unsafe fn begin_pin<'a>(&'a self, pin: PinId, kind: PinKind) -> PinToken<'a> {
+        let frame = self.scope.frame;
+        frame.require_scope(Some(ScopeKind::Node), "NodeToken::begin_pin()");
+        frame.with_current("NodeToken::begin_pin()", || unsafe {
+            assert!(
+                frame.submitted_pins.borrow_mut().insert(pin),
+                "NodeToken::begin_pin() requires each pin ID to be submitted only once per editor frame"
+            );
+            sys::dne_begin_pin(pin.raw(), kind.raw())
+        });
         PinToken {
-            editor: self.editor,
-            phase: self.phase,
-            ended: false,
-            _not_send_sync: PhantomData,
+            scope: frame.entered(ScopeKind::Pin),
         }
     }
 
     pub fn pin<R>(&self, pin: PinId, kind: PinKind, f: impl FnOnce(&PinToken<'_>) -> R) -> R {
-        let token = self.begin_pin(pin, kind);
-        let result = f(&token);
-        token.end();
-        result
+        self.scope
+            .frame
+            .scoped(|| unsafe { self.begin_pin(pin, kind) }, f)
     }
 
-    pub fn end(mut self) {
-        self.end_inner();
-    }
-
-    fn end_inner(&mut self) {
-        if !self.ended {
-            self.editor
-                .with_current("NodeToken::end()", || unsafe { sys::dne_end_node() });
-            self.phase.set(BuildPhase::Idle);
-            self.ended = true;
-        }
-    }
-}
-
-impl Drop for NodeToken<'_> {
-    fn drop(&mut self) {
-        self.end_inner();
-    }
+    pub fn end(self) {}
 }
 
 pub struct PinToken<'a> {
-    editor: &'a EditorContext,
-    phase: &'a Cell<BuildPhase>,
-    ended: bool,
-    _not_send_sync: PhantomData<Rc<()>>,
+    scope: FrameToken<'a>,
 }
 
 impl PinToken<'_> {
-    pub fn end(mut self) {
-        self.end_inner();
-    }
+    pub fn end(self) {}
 
     pub fn rect(&self, min: [f32; 2], max: [f32; 2]) {
         assert_finite_rect("PinToken::rect()", min, max);
-        self.editor.with_current("PinToken::rect()", || unsafe {
-            sys::dne_pin_rect(vec2(min), vec2(max))
-        });
+        self.scope
+            .frame
+            .with_current("PinToken::rect()", || unsafe {
+                sys::dne_pin_rect(vec2(min), vec2(max))
+            });
     }
 
     pub fn pivot_rect(&self, min: [f32; 2], max: [f32; 2]) {
         assert_finite_rect("PinToken::pivot_rect()", min, max);
-        self.editor
+        self.scope
+            .frame
             .with_current("PinToken::pivot_rect()", || unsafe {
                 sys::dne_pin_pivot_rect(vec2(min), vec2(max))
             });
@@ -320,7 +267,8 @@ impl PinToken<'_> {
 
     pub fn pivot_size(&self, size: [f32; 2]) {
         assert_non_negative_finite_vec2("PinToken::pivot_size()", "size", size);
-        self.editor
+        self.scope
+            .frame
             .with_current("PinToken::pivot_size()", || unsafe {
                 sys::dne_pin_pivot_size(vec2(size))
             });
@@ -328,7 +276,8 @@ impl PinToken<'_> {
 
     pub fn pivot_scale(&self, scale: [f32; 2]) {
         assert_finite_vec2("PinToken::pivot_scale()", "scale", scale);
-        self.editor
+        self.scope
+            .frame
             .with_current("PinToken::pivot_scale()", || unsafe {
                 sys::dne_pin_pivot_scale(vec2(scale))
             });
@@ -336,169 +285,74 @@ impl PinToken<'_> {
 
     pub fn pivot_alignment(&self, alignment: [f32; 2]) {
         assert_finite_vec2("PinToken::pivot_alignment()", "alignment", alignment);
-        self.editor
+        self.scope
+            .frame
             .with_current("PinToken::pivot_alignment()", || unsafe {
                 sys::dne_pin_pivot_alignment(vec2(alignment))
             });
     }
-
-    fn end_inner(&mut self) {
-        if !self.ended {
-            self.editor
-                .with_current("PinToken::end()", || unsafe { sys::dne_end_pin() });
-            self.phase.set(BuildPhase::Node);
-            self.ended = true;
-        }
-    }
-}
-
-impl Drop for PinToken<'_> {
-    fn drop(&mut self) {
-        self.end_inner();
-    }
 }
 
 pub struct GroupHintToken<'a> {
-    editor: &'a EditorContext,
-    ui: &'a Ui,
-    phase: &'a Cell<BuildPhase>,
-    ended: bool,
-    _not_send_sync: PhantomData<Rc<()>>,
+    scope: FrameToken<'a>,
 }
 
 impl<'a> GroupHintToken<'a> {
     pub fn min(&self) -> [f32; 2] {
-        self.editor.with_current("GroupHintToken::min()", || {
+        self.scope.frame.with_current("GroupHintToken::min()", || {
             from_vec2(unsafe { sys::dne_get_group_min() })
         })
     }
 
     pub fn max(&self) -> [f32; 2] {
-        self.editor.with_current("GroupHintToken::max()", || {
+        self.scope.frame.with_current("GroupHintToken::max()", || {
             from_vec2(unsafe { sys::dne_get_group_max() })
         })
     }
 
     pub fn foreground_draw_list(&self) -> DrawListMut<'_> {
-        let draw_list = self
-            .editor
+        self.scope
+            .frame
             .with_current("GroupHintToken::foreground_draw_list()", || unsafe {
                 sys::dne_get_hint_foreground_draw_list()
             });
-        unsafe { DrawListMut::from_raw_mut(self.ui, draw_list.cast()) }
+        self.scope.frame._ui.get_window_draw_list()
     }
 
     pub fn background_draw_list(&self) -> DrawListMut<'_> {
-        let draw_list = self
-            .editor
+        self.scope
+            .frame
             .with_current("GroupHintToken::background_draw_list()", || unsafe {
                 sys::dne_get_hint_background_draw_list()
             });
-        unsafe { DrawListMut::from_raw_mut(self.ui, draw_list.cast()) }
+        self.scope.frame._ui.get_window_draw_list()
     }
 
-    pub fn end(mut self) {
-        self.end_inner();
-    }
-
-    fn end_inner(&mut self) {
-        if !self.ended {
-            self.editor
-                .with_current("GroupHintToken::end()", || unsafe {
-                    sys::dne_end_group_hint()
-                });
-            self.phase.set(BuildPhase::Idle);
-            self.ended = true;
-        }
-    }
-}
-
-impl Drop for GroupHintToken<'_> {
-    fn drop(&mut self) {
-        self.end_inner();
-    }
+    pub fn end(self) {}
 }
 
 pub struct SuspensionToken<'a> {
-    editor: &'a EditorContext,
-    suspended: &'a Cell<bool>,
-    resumed: bool,
+    _scope: FrameToken<'a>,
 }
 
 impl SuspensionToken<'_> {
-    pub fn resume(mut self) {
-        self.resume_inner();
-    }
-
-    fn resume_inner(&mut self) {
-        if !self.resumed {
-            self.editor
-                .with_current("SuspensionToken::resume()", || unsafe { sys::dne_resume() });
-            self.suspended.set(false);
-            self.resumed = true;
-        }
-    }
+    pub fn resume(self) {}
 }
 
-impl Drop for SuspensionToken<'_> {
-    fn drop(&mut self) {
-        self.resume_inner();
-    }
-}
-
+/// A scoped style color. An early pop takes effect after the colors above it are popped.
 pub struct StyleColorToken<'a> {
-    editor: &'a EditorContext,
-    count: i32,
-    popped: bool,
-    _not_send_sync: PhantomData<Rc<()>>,
+    _scope: FrameToken<'a>,
 }
 
 impl StyleColorToken<'_> {
-    pub fn pop(mut self) {
-        self.pop_inner();
-    }
-
-    fn pop_inner(&mut self) {
-        if !self.popped {
-            self.editor
-                .with_current("StyleColorToken::pop()", || unsafe {
-                    sys::dne_pop_style_color(self.count)
-                });
-            self.popped = true;
-        }
-    }
+    pub fn pop(self) {}
 }
 
-impl Drop for StyleColorToken<'_> {
-    fn drop(&mut self) {
-        self.pop_inner();
-    }
-}
-
+/// A scoped style variable. An early pop takes effect after the variables above it are popped.
 pub struct StyleVarToken<'a> {
-    editor: &'a EditorContext,
-    count: i32,
-    popped: bool,
-    _not_send_sync: PhantomData<Rc<()>>,
+    _scope: FrameToken<'a>,
 }
 
 impl StyleVarToken<'_> {
-    pub fn pop(mut self) {
-        self.pop_inner();
-    }
-
-    fn pop_inner(&mut self) {
-        if !self.popped {
-            self.editor.with_current("StyleVarToken::pop()", || unsafe {
-                sys::dne_pop_style_var(self.count)
-            });
-            self.popped = true;
-        }
-    }
-}
-
-impl Drop for StyleVarToken<'_> {
-    fn drop(&mut self) {
-        self.pop_inner();
-    }
+    pub fn pop(self) {}
 }

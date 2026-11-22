@@ -54,23 +54,24 @@ fn extensions_compose_inside_one_engine_managed_imgui_frame() {
     imnodes.link(dear_imnodes::LinkId::new(100), output, input);
     let _ = imnodes.end();
 
-    let node_editor = ui.node_editor(
+    ui.with_node_editor(
         &node_editor_ctx,
         "bevy-shared-frame-node-editor",
         [240.0, 160.0],
+        |node_editor| {
+            let node_a = dear_node_editor::NodeId::new(1);
+            let node_b = dear_node_editor::NodeId::new(2);
+            let pin_a = dear_node_editor::PinId::new(11);
+            let pin_b = dear_node_editor::PinId::new(21);
+            node_editor.node(node_a, |node| {
+                node.pin(pin_a, dear_node_editor::PinKind::Output, |_| ui.text("out"));
+            });
+            node_editor.node(node_b, |node| {
+                node.pin(pin_b, dear_node_editor::PinKind::Input, |_| ui.text("in"));
+            });
+            let _ = node_editor.link(dear_node_editor::LinkId::new(100), pin_a, pin_b);
+        },
     );
-    let node_a = dear_node_editor::NodeId::new(1);
-    let node_b = dear_node_editor::NodeId::new(2);
-    let pin_a = dear_node_editor::PinId::new(11);
-    let pin_b = dear_node_editor::PinId::new(21);
-    node_editor.node(node_a, |node| {
-        node.pin(pin_a, dear_node_editor::PinKind::Output, |_| ui.text("out"));
-    });
-    node_editor.node(node_b, |node| {
-        node.pin(pin_b, dear_node_editor::PinKind::Input, |_| ui.text("in"));
-    });
-    let _ = node_editor.link(dear_node_editor::LinkId::new(100), pin_a, pin_b);
-    node_editor.end();
 
     let gizmo = ui.guizmo();
     gizmo.set_drawlist(DrawListTarget::Foreground);

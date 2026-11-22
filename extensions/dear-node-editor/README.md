@@ -62,29 +62,31 @@ fn setup(imgui: &dear_imgui_rs::Context) -> EditorContext {
 }
 
 fn draw(ui: &dear_imgui_rs::Ui, editor_ctx: &EditorContext) {
-    let editor = ui.node_editor(editor_ctx, "node-editor", [0.0, 400.0]);
-
-    editor.node(NodeId::new(1), |node| {
-        ui.text("Node A");
-        node.pin(PinId::new(11), PinKind::Output, |_pin| {
-            ui.text("out");
+    ui.with_node_editor(editor_ctx, "node-editor", [0.0, 400.0], |editor| {
+        editor.node(NodeId::new(1), |node| {
+            ui.text("Node A");
+            node.pin(PinId::new(11), PinKind::Output, |_pin| ui.text("out"));
         });
-    });
 
-    editor.node(NodeId::new(2), |node| {
-        node.pin(PinId::new(21), PinKind::Input, |_pin| {
-            ui.text("in");
+        editor.node(NodeId::new(2), |node| {
+            node.pin(PinId::new(21), PinKind::Input, |_pin| ui.text("in"));
         });
+        editor.link(LinkId::new(100), PinId::new(11), PinId::new(21));
     });
-
-    editor.link(LinkId::new(100), PinId::new(11), PinId::new(21));
-    editor.end();
 }
 ```
 
+To migrate from `ui.node_editor(...)`, move the statements up to `editor.end()`
+inside `ui.with_node_editor(..., |editor| { ... })`. Return any result from the
+closure. It owns the editor frame through normal return and unwinding. The
+manual `unsafe` entry point requires the caller to balance the native canvas in
+the same window and drawing channel. Use `editor.with_suspended(|| ...)` for
+screen-space popups. Suspensions can nest inside a node or pin.
+
 If an application stores `dear_imgui_rs::Context` and `EditorContext` in the same owner struct,
 declare `EditorContext` before the ImGui context so the editor is dropped first. Native
-`imgui-node-editor` state is tied to the owning ImGui context.
+`imgui-node-editor` state is tied to the owning ImGui context. Its native owner
+holds the allocator thread until the editor has been destroyed.
 
 ```rust
 struct UiState {
@@ -102,18 +104,19 @@ fn inspect(editor: &dear_node_editor::EditorContext) {
 }
 ```
 
-The lower-level RAII tokens are still available when manual scoping is clearer:
+The corresponding scoped and manual entry points are:
 
-```rust
-fn draw_manual(ui: &dear_imgui_rs::Ui, editor: &dear_node_editor::NodeEditorFrame<'_>) {
-    let node = editor.begin_node(NodeId::new(1));
-    ui.text("Node A");
-    let pin = node.begin_pin(PinId::new(11), PinKind::Output);
-    ui.text("out");
-    pin.end();
-    node.end();
-}
-```
+| Operation | Scoped entry point | Unsafe manual entry point |
+| --- | --- | --- |
+| Editor | `ui.with_node_editor` | `ui.node_editor` |
+| Node and pin | `editor.node`, `node.pin` | `editor.begin_node`, `node.begin_pin` |
+| Group hint | `editor.group_hint` | `editor.begin_group_hint` |
+| Creation preview | `editor.with_create` | `editor.begin_create` |
+| Screen-space drawing | `editor.with_suspended` | `editor.suspend` |
+
+`with_create` supplies a `CreateCandidate` and a response handle. Match on the
+candidate and use the response to accept or reject it. The initial color and
+thickness style the preview, and the styled response methods can override them.
 
 Run the repository examples:
 

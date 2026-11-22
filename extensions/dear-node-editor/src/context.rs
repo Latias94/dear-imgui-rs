@@ -1,12 +1,18 @@
 use crate::{EditorConfig, EditorConfigSnapshot, NodeEditorStyle, StyleColor, sys};
-use dear_imgui_rs::{Context as ImGuiContext, ContextBinding, ContextId};
-use std::{cell::Cell, ffi::c_void, ptr};
+use dear_imgui_rs::{Context as ImGuiContext, ContextBinding, ContextId, ContextThreadLease};
+use std::{
+    cell::{Cell, RefCell},
+    ffi::c_void,
+    ptr,
+};
 
 /// Errors returned by the node-editor safe layer.
 #[derive(Debug, thiserror::Error)]
 pub enum NodeEditorError {
     #[error("imgui-node-editor CreateEditor returned null")]
     CreateEditorFailed,
+    #[error(transparent)]
+    ThreadLease(#[from] dear_imgui_rs::ImGuiError),
 }
 
 /// Owned imgui-node-editor context.
@@ -17,6 +23,7 @@ pub struct EditorContext {
     _settings_file: Option<std::ffi::CString>,
     _callbacks: Option<Box<crate::config::CallbackState>>,
     pub(crate) frame_active: Cell<bool>,
+    _thread_lease: ContextThreadLease,
 }
 
 impl EditorContext {
@@ -34,6 +41,7 @@ impl EditorContext {
         imgui: &ImGuiContext,
         mut config: EditorConfig,
     ) -> Result<Self, NodeEditorError> {
+        let thread_lease = ContextThreadLease::acquire()?;
         let imgui_binding = imgui.binding();
         let config_snapshot = config.snapshot();
         let raw_config = config.as_sys();
@@ -50,6 +58,7 @@ impl EditorContext {
             _settings_file: config.settings_file.take(),
             _callbacks: config.callbacks.take(),
             frame_active: Cell::new(false),
+            _thread_lease: thread_lease,
         })
     }
 
@@ -122,33 +131,52 @@ impl Drop for EditorContext {
         }
 
         let raw = std::mem::replace(&mut self.raw, ptr::null_mut());
-        if self
-            .imgui_binding
-            .try_with_bound_context(|| unsafe { sys::dne_destroy_editor(raw) })
-            .is_err()
-        {
-            // The owning ImGui context is no longer enterable. The node-editor shim owns
-            // this handle and can release it without switching the dead ImGui context.
+        let destroy = || {
+            // DestroyEditor runs settings callbacks. Bind its target first so Rust
+            // owns any restoration, including if a callback drops the previous editor.
+            let _current = CurrentEditorGuard::bind(raw);
+            let native = unsafe { sys::dne_editor_context_raw(raw) };
+            SAVED_EDITORS.with_borrow_mut(|stack| {
+                for previous in stack.iter_mut().filter(|previous| **previous == native) {
+                    *previous = ptr::null_mut();
+                }
+            });
             unsafe { sys::dne_destroy_editor(raw) };
+        };
+        if self.imgui_binding.try_with_bound_context(destroy).is_err() {
+            // The shim owns the handle even after Dear ImGui teardown.
+            destroy();
         }
     }
 }
 
+thread_local! {
+    static SAVED_EDITORS: RefCell<Vec<*mut c_void>> = const { RefCell::new(Vec::new()) };
+}
+
 struct CurrentEditorGuard {
-    previous: *mut c_void,
+    restore: bool,
 }
 
 impl CurrentEditorGuard {
     fn bind(editor: *mut sys::DneEditorContext) -> Self {
         let previous = unsafe { sys::dne_get_current_editor_raw() };
-        unsafe { sys::dne_set_current_editor(editor) };
-        Self { previous }
+        let target = unsafe { sys::dne_editor_context_raw(editor) };
+        let restore = previous != target;
+        if restore {
+            SAVED_EDITORS.with_borrow_mut(|stack| stack.push(previous));
+            unsafe { sys::dne_set_current_editor_raw(target) };
+        }
+        Self { restore }
     }
 }
 
 impl Drop for CurrentEditorGuard {
     fn drop(&mut self) {
-        unsafe { sys::dne_set_current_editor_raw(self.previous) };
+        if self.restore {
+            let previous = SAVED_EDITORS.with_borrow_mut(|stack| stack.pop().unwrap());
+            unsafe { sys::dne_set_current_editor_raw(previous) };
+        }
     }
 }
 
@@ -210,6 +238,21 @@ mod tests {
     }
 
     #[test]
+    fn nested_binding_does_not_restore_a_released_editor() {
+        let _guard = test_guard();
+        let imgui = ImGuiContext::create();
+        let previous = EditorContext::create(&imgui);
+        let current = EditorContext::create(&imgui);
+        let target = current.as_raw_native();
+        unsafe { sys::dne_set_current_editor_raw(previous.as_raw_native()) };
+        current.with_current("settings callback binding", || {
+            drop(previous);
+            assert_eq!(unsafe { sys::dne_get_current_editor_raw() }, target);
+        });
+        assert!(unsafe { sys::dne_get_current_editor_raw() }.is_null());
+    }
+
+    #[test]
     fn binding_identity_matches_owning_imgui_context() {
         let _guard = test_guard();
         let imgui = ImGuiContext::create();
@@ -268,7 +311,11 @@ mod tests {
 
         let result = catch_unwind(AssertUnwindSafe(|| editor.style()));
         assert!(result.is_err());
-
+        assert!(
+            std::thread::spawn(|| ContextThreadLease::acquire().is_err())
+                .join()
+                .unwrap()
+        );
         drop(editor);
     }
 
@@ -355,7 +402,7 @@ mod tests {
         let ui = imgui_b.frame();
 
         let result = catch_unwind(AssertUnwindSafe(|| {
-            let _ = ui.node_editor(&editor, "wrong-context", [320.0, 240.0]);
+            ui.with_node_editor(&editor, "wrong-context", [320.0, 240.0], |_| ());
         }));
         assert!(result.is_err());
         drop(imgui_b.render_legacy());
@@ -405,78 +452,71 @@ mod tests {
 
         let ui = imgui.frame();
         ui.window("node-editor-frame-api").build(|| {
-            let editor = ui.node_editor(&editor_context, "frame-api", [320.0, 240.0]);
+            ui.with_node_editor(&editor_context, "frame-api", [320.0, 240.0], |editor| {
+                assert!(!editor.is_suspended());
+                editor.with_suspended(|| assert!(editor.is_suspended()));
+                assert!(!editor.is_suspended());
 
-            assert!(!editor.is_suspended());
-            {
-                let suspension = editor.suspend();
-                assert!(editor.is_suspended());
-                suspension.resume();
-            }
-            assert!(!editor.is_suspended());
+                editor.set_shortcuts_enabled(false);
+                assert!(!editor.shortcuts_enabled());
+                editor.set_shortcuts_enabled(true);
 
-            editor.set_shortcuts_enabled(false);
-            assert!(!editor.shortcuts_enabled());
-            editor.set_shortcuts_enabled(true);
+                editor.set_node_position(node_a, [20.0, 30.0]);
+                editor.set_node_z_position(node_a, 2.0);
+                let _ = editor.node_z_position(node_a);
+                editor.restore_node_state(node_a);
 
-            editor.set_node_position(node_a, [20.0, 30.0]);
-            editor.set_node_z_position(node_a, 2.0);
-            let _ = editor.node_z_position(node_a);
-            editor.restore_node_state(node_a);
+                editor.node(node_a, |node| {
+                    node.pin(output_pin, PinKind::Output, |pin| {
+                        ui.text("out");
+                        let cursor = ui.cursor_screen_pos();
+                        pin.rect(cursor, [cursor[0] + 8.0, cursor[1] + 8.0]);
+                        pin.pivot_rect(cursor, [cursor[0] + 8.0, cursor[1] + 8.0]);
+                        pin.pivot_size([8.0, 8.0]);
+                        pin.pivot_scale([1.0, 1.0]);
+                        pin.pivot_alignment([0.5, 0.5]);
+                        editor.with_suspended(|| {
+                            editor.with_suspended(|| assert!(editor.is_suspended()));
+                            assert!(editor.is_suspended());
+                        });
+                        assert!(!editor.is_suspended());
+                    });
+                });
+                editor.node(node_b, |node| {
+                    node.pin(input_pin, PinKind::Input, |_| ui.text("in"));
+                });
 
-            {
-                let node = editor.begin_node(node_a);
-                let pin = node.begin_pin(output_pin, PinKind::Output);
-                ui.text("out");
-                let cursor = ui.cursor_screen_pos();
-                pin.rect(cursor, [cursor[0] + 8.0, cursor[1] + 8.0]);
-                pin.pivot_rect(cursor, [cursor[0] + 8.0, cursor[1] + 8.0]);
-                pin.pivot_size([8.0, 8.0]);
-                pin.pivot_scale([1.0, 1.0]);
-                pin.pivot_alignment([0.5, 0.5]);
-                pin.end();
-                node.end();
-            }
-            {
-                let node = editor.begin_node(node_b);
-                let pin = node.begin_pin(input_pin, PinKind::Input);
-                ui.text("in");
-                pin.end();
-                node.end();
-            }
+                editor.group_hint(node_a, |_| ());
+                let _ = editor.node_background_draw_list(node_a);
+                let _ = editor.link(link, output_pin, input_pin);
+                let _ = editor.link_pins(link);
+                let _ = editor.node_has_any_links(node_a);
+                let _ = editor.pin_has_any_links(output_pin);
+                let _ = editor.pin_had_any_links(output_pin);
 
-            let _ = editor.begin_group_hint(node_a);
-            let _ = editor.node_background_draw_list(node_a);
-            let _ = editor.link(link, output_pin, input_pin);
-            let _ = editor.link_pins(link);
-            let _ = editor.node_has_any_links(node_a);
-            let _ = editor.pin_has_any_links(output_pin);
-            let _ = editor.pin_had_any_links(output_pin);
+                editor.select_node(node_a);
+                editor.add_node_to_selection(node_b);
+                let _ = editor.is_node_selected(node_a);
+                editor.deselect_node(node_a);
+                editor.select_link(link);
+                editor.add_link_to_selection(link);
+                let _ = editor.is_link_selected(link);
+                editor.deselect_link(link);
+                editor.clear_selection();
 
-            editor.select_node(node_a);
-            editor.add_node_to_selection(node_b);
-            let _ = editor.is_node_selected(node_a);
-            editor.deselect_node(node_a);
-            editor.select_link(link);
-            editor.add_link_to_selection(link);
-            let _ = editor.is_link_selected(link);
-            editor.deselect_link(link);
-            editor.clear_selection();
-
-            let _ = editor.has_selection_changed();
-            let _ = editor.selected_object_count();
-            let _ = editor.is_active();
-            let _ = editor.is_background_clicked();
-            let _ = editor.is_background_double_clicked();
-            let _ = editor.background_click_button();
-            let _ = editor.background_double_click_button();
-            let _ = editor.screen_size();
-            let _ = editor.screen_to_canvas([10.0, 10.0]);
-            let _ = editor.canvas_to_screen([10.0, 10.0]);
-            let _ = editor.node_count();
-            let _ = editor.ordered_node_ids();
-
-            editor.end();
+                let _ = editor.has_selection_changed();
+                let _ = editor.selected_object_count();
+                let _ = editor.is_active();
+                let _ = editor.is_background_clicked();
+                let _ = editor.is_background_double_clicked();
+                let _ = editor.background_click_button();
+                let _ = editor.background_double_click_button();
+                let _ = editor.screen_size();
+                let _ = editor.screen_to_canvas([10.0, 10.0]);
+                let _ = editor.canvas_to_screen([10.0, 10.0]);
+                let _ = editor.node_count();
+                let _ = editor.ordered_node_ids();
+            });
         });
         drop(imgui.render_legacy());
     }
@@ -500,27 +540,27 @@ mod tests {
             ui.window("node-background-contract")
                 .size([500.0, 350.0], dear_imgui_rs::Condition::Always)
                 .build(|| {
-                    let frame = ui.node_editor(&context, "background", [400.0, 260.0]);
-                    assert!(frame.node_background_draw_list(node_id).is_none());
-                    if frame_index == 0 {
-                        let node = frame.begin_node(node_id);
-                        ui.text("Node");
-                        assert!(
-                            catch_unwind(AssertUnwindSafe(|| {
-                                let _ = frame.node_background_draw_list(node_id);
-                            }))
-                            .is_err()
-                        );
-                        assert!(
-                            catch_unwind(AssertUnwindSafe(|| {
-                                let _ = frame.begin_group_hint(node_id);
-                            }))
-                            .is_err()
-                        );
-                        node.end();
-                        assert!(frame.node_background_draw_list(node_id).is_some());
-                    }
-                    frame.end();
+                    ui.with_node_editor(&context, "background", [400.0, 260.0], |frame| {
+                        assert!(frame.node_background_draw_list(node_id).is_none());
+                        if frame_index == 0 {
+                            frame.node(node_id, |_| {
+                                ui.text("Node");
+                                assert!(
+                                    catch_unwind(AssertUnwindSafe(|| {
+                                        let _ = frame.node_background_draw_list(node_id);
+                                    }))
+                                    .is_err()
+                                );
+                                assert!(
+                                    catch_unwind(AssertUnwindSafe(|| {
+                                        frame.group_hint(node_id, |_| ());
+                                    }))
+                                    .is_err()
+                                );
+                            });
+                            assert!(frame.node_background_draw_list(node_id).is_some());
+                        }
+                    });
                 });
             drop(imgui.render_legacy());
         }
@@ -553,44 +593,42 @@ mod tests {
         ui.window("group-hint-contract")
             .size([500.0, 350.0], dear_imgui_rs::Condition::Always)
             .build(|| {
-                let frame = ui.node_editor(&context, "hints", [400.0, 260.0]);
-                // Upstream reports the inverse of the persisted canvas scale.
-                assert!((frame.current_zoom() - 2.0).abs() < 0.001);
-                assert!(frame.begin_group_hint(NodeId::new(999)).is_none());
-                let node = frame.begin_node(node_id);
-                frame.group([100.0, 80.0]);
-                node.end();
+                ui.with_node_editor(&context, "hints", [400.0, 260.0], |frame| {
+                    // Upstream reports the inverse of the persisted canvas scale.
+                    assert!((frame.current_zoom() - 2.0).abs() < 0.001);
+                    assert!(frame.group_hint(NodeId::new(999), |_| ()).is_none());
+                    frame.node(node_id, |_| frame.group([100.0, 80.0]));
 
-                let hint = frame
-                    .begin_group_hint(node_id)
-                    .expect("zoomed-out group has a hint");
-                let min = hint.min();
-                let max = hint.max();
-                assert!(
-                    catch_unwind(AssertUnwindSafe(|| {
-                        let _ = frame.begin_group_hint(node_id);
-                    }))
-                    .is_err()
-                );
-                assert!(
-                    catch_unwind(AssertUnwindSafe(|| {
-                        let _ = frame.begin_node(NodeId::new(2));
-                    }))
-                    .is_err()
-                );
-                assert!(
-                    catch_unwind(AssertUnwindSafe(|| {
-                        let _ = frame.node_background_draw_list(node_id);
-                    }))
-                    .is_err()
-                );
-                assert_eq!(hint.min(), min);
-                assert_eq!(hint.max(), max);
-                hint.end();
+                    frame
+                        .group_hint(node_id, |hint| {
+                            let min = hint.min();
+                            let max = hint.max();
+                            assert!(
+                                catch_unwind(AssertUnwindSafe(|| {
+                                    frame.group_hint(node_id, |_| ());
+                                }))
+                                .is_err()
+                            );
+                            assert!(
+                                catch_unwind(AssertUnwindSafe(|| {
+                                    frame.node(NodeId::new(2), |_| ());
+                                }))
+                                .is_err()
+                            );
+                            assert!(
+                                catch_unwind(AssertUnwindSafe(|| {
+                                    let _ = frame.node_background_draw_list(node_id);
+                                }))
+                                .is_err()
+                            );
+                            assert_eq!(hint.min(), min);
+                            assert_eq!(hint.max(), max);
+                        })
+                        .expect("zoomed-out group has a hint");
 
-                frame.begin_group_hint(node_id).unwrap().end();
-                frame.begin_node(NodeId::new(2)).end();
-                frame.end();
+                    frame.group_hint(node_id, |_| ()).unwrap();
+                    frame.node(NodeId::new(2), |_| ());
+                });
             });
         drop(imgui.render_legacy());
     }
@@ -614,51 +652,53 @@ mod tests {
             ui.window("delete-candidate-contract")
                 .size([500.0, 350.0], dear_imgui_rs::Condition::Always)
                 .build(|| {
-                    let frame = ui.node_editor(&context, "delete", [400.0, 260.0]);
-                    frame.node(first, |_| ui.text("First"));
-                    frame.node(second, |_| ui.text("Second"));
-                    if frame_index == 0 {
-                        assert!(frame.delete_node(first));
-                        assert!(frame.delete_node(second));
-                    } else {
-                        let delete = frame
-                            .begin_delete()
-                            .expect("queued nodes should be offered");
-                        assert!(
-                            catch_unwind(AssertUnwindSafe(|| delete.accept_deleted_item(true)))
-                                .is_err()
-                        );
-                        assert!(
-                            catch_unwind(AssertUnwindSafe(|| delete.reject_deleted_item()))
-                                .is_err()
-                        );
-                        assert!(catch_unwind(AssertUnwindSafe(|| frame.begin_delete())).is_err());
-                        assert_eq!(delete.query_deleted_node(), Some(first));
-                        assert!(delete.accept_deleted_item(true));
-                        assert!(
-                            catch_unwind(AssertUnwindSafe(|| delete.accept_deleted_item(true)))
-                                .is_err()
-                        );
-                        assert_eq!(delete.query_deleted_node(), Some(second));
-                        delete.reject_deleted_item();
-                        assert!(
-                            catch_unwind(AssertUnwindSafe(|| delete.reject_deleted_item()))
-                                .is_err()
-                        );
-                        assert_eq!(delete.query_deleted_node(), None);
-                        assert!(
-                            catch_unwind(AssertUnwindSafe(|| delete.accept_deleted_item(true)))
-                                .is_err()
-                        );
-                        assert!(
-                            catch_unwind(AssertUnwindSafe(|| delete.reject_deleted_item()))
-                                .is_err()
-                        );
-                        delete.end();
-                    }
-                    assert!(frame.begin_create([1.0; 4], 1.0).is_none());
-                    assert!(frame.begin_create([1.0; 4], 1.0).is_none());
-                    frame.end();
+                    ui.with_node_editor(&context, "delete", [400.0, 260.0], |frame| {
+                        frame.node(first, |_| ui.text("First"));
+                        frame.node(second, |_| ui.text("Second"));
+                        if frame_index == 0 {
+                            assert!(frame.delete_node(first));
+                            assert!(frame.delete_node(second));
+                        } else {
+                            let delete = frame
+                                .begin_delete()
+                                .expect("queued nodes should be offered");
+                            assert!(
+                                catch_unwind(AssertUnwindSafe(|| delete.accept_deleted_item(true)))
+                                    .is_err()
+                            );
+                            assert!(
+                                catch_unwind(AssertUnwindSafe(|| delete.reject_deleted_item()))
+                                    .is_err()
+                            );
+                            assert!(
+                                catch_unwind(AssertUnwindSafe(|| frame.begin_delete())).is_err()
+                            );
+                            assert_eq!(delete.query_deleted_node(), Some(first));
+                            assert!(delete.accept_deleted_item(true));
+                            assert!(
+                                catch_unwind(AssertUnwindSafe(|| delete.accept_deleted_item(true)))
+                                    .is_err()
+                            );
+                            assert_eq!(delete.query_deleted_node(), Some(second));
+                            delete.reject_deleted_item();
+                            assert!(
+                                catch_unwind(AssertUnwindSafe(|| delete.reject_deleted_item()))
+                                    .is_err()
+                            );
+                            assert_eq!(delete.query_deleted_node(), None);
+                            assert!(
+                                catch_unwind(AssertUnwindSafe(|| delete.accept_deleted_item(true)))
+                                    .is_err()
+                            );
+                            assert!(
+                                catch_unwind(AssertUnwindSafe(|| delete.reject_deleted_item()))
+                                    .is_err()
+                            );
+                            delete.end();
+                        }
+                        assert!(frame.with_create([1.0; 4], 1.0, |_, _| ()).is_none());
+                        assert!(frame.with_create([1.0; 4], 1.0, |_, _| ()).is_none());
+                    });
                 });
             drop(imgui.render_legacy());
         }
@@ -683,42 +723,51 @@ mod tests {
                 .size([500.0, 350.0], dear_imgui_rs::Condition::Always)
                 .build(|| {
                     for _ in 0..2 {
-                        let frame = ui.node_editor(&context, "pins", [200.0, 100.0]);
-                        assert!(
-                            catch_unwind(AssertUnwindSafe(|| {
-                                let _ = ui.node_editor(&context, "nested", [20.0, 20.0]);
-                            }))
-                            .is_err()
-                        );
-                        let node = frame.begin_node(NodeId::new(1));
-                        let pin = node.begin_pin(pin_id, PinKind::Output);
-                        ui.text("Output");
-                        assert!(
-                            catch_unwind(AssertUnwindSafe(
-                                || node.begin_pin(PinId::new(12), PinKind::Output)
-                            ))
-                            .is_err()
-                        );
-                        assert!(
-                            catch_unwind(AssertUnwindSafe(|| frame.group([20.0, 20.0]))).is_err()
-                        );
-                        pin.end();
-                        assert!(
-                            catch_unwind(AssertUnwindSafe(
-                                || node.begin_pin(pin_id, PinKind::Output)
-                            ))
-                            .is_err()
-                        );
-                        node.end();
-                        let second = frame.begin_node(NodeId::new(2));
-                        assert!(
-                            catch_unwind(AssertUnwindSafe(
-                                || second.begin_pin(pin_id, PinKind::Input)
-                            ))
-                            .is_err()
-                        );
-                        second.end();
-                        frame.end();
+                        ui.with_node_editor(&context, "pins", [200.0, 100.0], |frame| {
+                            assert!(
+                                catch_unwind(AssertUnwindSafe(|| {
+                                    ui.with_node_editor(&context, "nested", [20.0, 20.0], |_| ());
+                                }))
+                                .is_err()
+                            );
+                            frame.node(NodeId::new(1), |node| {
+                                node.pin(pin_id, PinKind::Output, |_| {
+                                    ui.text("Output");
+                                    assert!(
+                                        catch_unwind(AssertUnwindSafe(|| node.pin(
+                                            PinId::new(12),
+                                            PinKind::Output,
+                                            |_| ()
+                                        )))
+                                        .is_err()
+                                    );
+                                    assert!(
+                                        catch_unwind(
+                                            AssertUnwindSafe(|| frame.group([20.0, 20.0]))
+                                        )
+                                        .is_err()
+                                    );
+                                });
+                                assert!(
+                                    catch_unwind(AssertUnwindSafe(|| node.pin(
+                                        pin_id,
+                                        PinKind::Output,
+                                        |_| ()
+                                    )))
+                                    .is_err()
+                                );
+                            });
+                            frame.node(NodeId::new(2), |second| {
+                                assert!(
+                                    catch_unwind(AssertUnwindSafe(|| second.pin(
+                                        pin_id,
+                                        PinKind::Input,
+                                        |_| ()
+                                    )))
+                                    .is_err()
+                                );
+                            });
+                        });
                     }
                 });
             drop(imgui.render_legacy());
@@ -744,25 +793,33 @@ mod tests {
                 for reject_frame_reentry in [true, false] {
                     assert!(
                         catch_unwind(AssertUnwindSafe(|| {
-                            let frame = ui.node_editor(&context, "unwind", [200.0, 80.0]);
-                            let node = frame.begin_node(NodeId::new(1));
-                            let _pin = node.begin_pin(PinId::new(11), PinKind::Output);
-                            ui.text("Output");
-                            if reject_frame_reentry {
-                                let _ = ui.node_editor(&context, "nested", [20.0, 20.0]);
-                            } else {
-                                let _ = frame.begin_delete();
-                            }
+                            ui.with_node_editor(&context, "unwind", [200.0, 80.0], |frame| {
+                                frame.node(NodeId::new(1), |node| {
+                                    node.pin(PinId::new(11), PinKind::Output, |_| {
+                                        ui.text("Output");
+                                        if reject_frame_reentry {
+                                            ui.with_node_editor(
+                                                &context,
+                                                "nested",
+                                                [20.0, 20.0],
+                                                |_| (),
+                                            );
+                                        } else {
+                                            let _ = frame.begin_delete();
+                                        }
+                                    });
+                                });
+                            });
                         }))
                         .is_err()
                     );
                     assert!(!context.frame_active.get());
                 }
-                let frame = ui.node_editor(&context, "unwind", [200.0, 80.0]);
-                let node = frame.begin_node(NodeId::new(1));
-                node.begin_pin(PinId::new(11), PinKind::Output).end();
-                node.end();
-                frame.end();
+                ui.with_node_editor(&context, "unwind", [200.0, 80.0], |frame| {
+                    frame.node(NodeId::new(1), |node| {
+                        node.pin(PinId::new(11), PinKind::Output, |_| ());
+                    });
+                });
                 assert!(!context.frame_active.get());
             });
         drop(imgui.render_legacy());
@@ -783,32 +840,43 @@ mod tests {
 
         let editor_a = EditorContext::create(&imgui);
         let editor_b = EditorContext::create(&imgui);
-        let raw_a = editor_a.as_raw_native();
         let raw_b = editor_b.as_raw_native();
 
         let ui = imgui.frame();
         ui.window("node-editor-token-context").build(|| {
-            let frame = ui.node_editor(&editor_a, "token-context", [320.0, 240.0]);
+            ui.with_node_editor(&editor_a, "token-context", [320.0, 240.0], |frame| {
+                let original = frame.style().link_strength;
+                let outer = frame.push_style_var_float(StyleVar::LinkStrength, 0.75);
+                let inner = frame.push_style_var_float(StyleVar::LinkStrength, 0.5);
+                unsafe { sys::dne_set_current_editor_raw(raw_b) };
+                outer.pop();
+                assert_eq!(frame.style().link_strength, 0.5);
+                drop(inner);
+                assert_eq!(frame.style().link_strength, original);
+                assert_eq!(unsafe { sys::dne_get_current_editor_raw() }, raw_b);
 
-            let style = frame.push_style_var_float(StyleVar::LinkStrength, 0.75);
-            unsafe { sys::dne_set_current_editor_raw(raw_b) };
-            drop(style);
-            assert_eq!(unsafe { sys::dne_get_current_editor_raw() }, raw_b);
+                frame.with_suspended(|| {
+                    let local = frame.push_style_var_float(StyleVar::LinkStrength, 0.5);
+                    ui.window("nested editor host").build(|| {
+                        // A query with no drawing side effects exercises host validation.
+                        assert!(catch_unwind(AssertUnwindSafe(|| frame.is_suspended())).is_err());
+                        drop(local);
+                    });
+                    assert_eq!(frame.style().link_strength, original);
+                });
+                assert!(!frame.is_suspended());
+                frame.node(NodeId::new(1), |_| unsafe {
+                    sys::dne_set_current_editor_raw(raw_b)
+                });
+                assert_eq!(unsafe { sys::dne_get_current_editor_raw() }, raw_b);
 
-            let node = frame.begin_node(NodeId::new(1));
-            unsafe { sys::dne_set_current_editor_raw(raw_b) };
-            drop(node);
-            assert_eq!(unsafe { sys::dne_get_current_editor_raw() }, raw_b);
-
-            unsafe { sys::dne_set_current_editor_raw(raw_b) };
-            drop(frame);
+                unsafe { sys::dne_set_current_editor_raw(raw_b) };
+            });
             assert_eq!(unsafe { sys::dne_get_current_editor_raw() }, raw_b);
         });
         drop(imgui.render_legacy());
 
         unsafe { sys::dne_set_current_editor_raw(ptr::null_mut()) };
-
-        let _ = raw_a;
     }
 
     #[test]

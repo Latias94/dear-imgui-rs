@@ -5,7 +5,9 @@ mod tokens;
 mod validation;
 
 pub use core::NodeEditorFrame;
-pub use sessions::{CreateSession, DeleteSession, ShortcutSession};
+pub use sessions::{
+    CreateCandidate, CreateResponse, CreateSession, DeleteSession, ShortcutSession,
+};
 pub use tokens::{
     GroupHintToken, NodeToken, PinToken, StyleColorToken, StyleVarToken, SuspensionToken,
 };

@@ -48,29 +48,30 @@ impl Application for NodeEditorMinimal {
                 ui.separator();
 
                 let available = ui.content_region_avail();
-                let editor = ui.node_editor(
+                ui.with_node_editor(
                     editor_context,
                     "node_editor_minimal",
                     [available[0].max(1.0), available[1].max(1.0)],
-                );
-                if initialize_layout {
-                    editor.set_node_position(SOURCE_NODE, [40.0, 80.0]);
-                    editor.set_node_position(TARGET_NODE, [340.0, 120.0]);
-                }
+                    |editor| {
+                        if initialize_layout {
+                            editor.set_node_position(SOURCE_NODE, [40.0, 80.0]);
+                            editor.set_node_position(TARGET_NODE, [340.0, 120.0]);
+                        }
 
-                editor.node(SOURCE_NODE, |node| {
-                    ui.text("Source");
-                    node.pin(SOURCE_OUTPUT, PinKind::Output, |_| ui.text("value"));
-                });
-                editor.node(TARGET_NODE, |node| {
-                    ui.text("Target");
-                    node.pin(TARGET_INPUT, PinKind::Input, |_| ui.text("value"));
-                });
-                editor.link(LINK, SOURCE_OUTPUT, TARGET_INPUT);
-                if initialize_layout {
-                    editor.navigate_to_content(0.0);
-                }
-                editor.end();
+                        editor.node(SOURCE_NODE, |node| {
+                            ui.text("Source");
+                            node.pin(SOURCE_OUTPUT, PinKind::Output, |_| ui.text("value"));
+                        });
+                        editor.node(TARGET_NODE, |node| {
+                            ui.text("Target");
+                            node.pin(TARGET_INPUT, PinKind::Input, |_| ui.text("value"));
+                        });
+                        editor.link(LINK, SOURCE_OUTPUT, TARGET_INPUT);
+                        if initialize_layout {
+                            editor.navigate_to_content(0.0);
+                        }
+                    },
+                );
                 submitted = true;
             });
 
