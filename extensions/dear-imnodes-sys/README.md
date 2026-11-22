@@ -34,7 +34,8 @@ regeneration is explicitly requested. `wasm` uses import bindings for the fixed
 separately with Emscripten.
 
 Native and WebAssembly providers use Dear ImGui's file helpers when saving editor
-state. The `imnodes-file-handles-v1` adaptation is part of the artifact identity.
+state. Loading binds each node section to the target editor. A title-only node's
+bounds include its body origin. These changes share the `imnodes-ini-state-v2` artifact identity.
 Upstream ImNodes selects the drawing flags for Dear ImGui 1.93.
 
 This crate supports three ways to obtain the native `dear_imnodes` static library:

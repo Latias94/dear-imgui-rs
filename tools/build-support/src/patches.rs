@@ -1094,10 +1094,10 @@ bool ImGui::DataTypeApplyFromText(const char* buf, ImGuiDataType data_type, void
     Ok(restore_cpp_newlines(patched, newline))
 }
 
-/// Source contract for ImNodes persistence through Dear ImGui's file helpers.
-pub const IMNODES_IMGUI_PATCH_VERSION: &str = "imnodes-file-handles-v1";
+/// Source contract for ImNodes node layout, file handles, and editor-local INI loading.
+pub const IMNODES_IMGUI_PATCH_VERSION: &str = "imnodes-ini-state-v2";
 
-/// Save ImNodes editor state using Dear ImGui's file-handle API.
+/// Finalize node bounds, use Dear ImGui file handles, and isolate each editor's INI load.
 ///
 /// Upstream ImNodes currently assigns `ImFileOpen()` to `FILE*` and calls the
 /// C runtime directly. That is incompatible with `IMGUI_DISABLE_FILE_FUNCTIONS`,
@@ -1107,6 +1107,16 @@ pub fn patch_imnodes_cpp_for_imgui(source: &str) -> Result<String, String> {
     let (source, newline) = normalize_cpp_source(source);
     let patched = replace_cpp_source_once(
         &source,
+        "    // The node's rectangle depends on the ImGui UI group size.\n    ImGui::EndGroup();",
+        r#"    // EndNodeTitleBar moves to the body origin even when there is no body item.
+    const ImGuiWindowTempData& dc = ImGui::GetCurrentWindowRead()->DC;
+    if (dc.IsSetPos && (dc.CursorPos.x > dc.CursorMaxPos.x || dc.CursorPos.y > dc.CursorMaxPos.y))
+        ImGui::Dummy(ImVec2(0.0f, 0.0f));
+    ImGui::EndGroup();"#,
+        "ImNodes node group layout",
+    )?;
+    let patched = replace_cpp_source_once(
+        &patched,
         concat!(
             "    size_t      data_size = 0u;\n",
             "    const char* data = SaveEditorStateToIniString(editor, &data_size);\n",
@@ -1130,6 +1140,99 @@ pub fn patch_imnodes_cpp_for_imgui(source: &str) -> Result<String, String> {
             "    ImFileClose(file);"
         ),
         "ImNodes save-state file operations",
+    )?;
+    let patched = replace_cpp_source_once(
+        &patched,
+        "#include <limits.h>",
+        "#include <errno.h>\n#include <limits.h>",
+        "ImNodes INI integer range check",
+    )?;
+    let patched = replace_cpp_source_once(
+        &patched,
+        r#"void NodeLineHandler(ImNodesEditorContext& editor, const char* const line)
+{
+    int id;
+    int x, y;
+    if (sscanf(line, "[node.%i", &id) == 1)
+    {
+        const int node_idx = ObjectPoolFindOrCreateIndex(editor.Nodes, id);
+        GImNodes->CurrentNodeIdx = node_idx;
+        ImNodeData& node = editor.Nodes.Pool[node_idx];
+        node.Id = id;
+    }
+    else if (sscanf(line, "origin=%i,%i", &x, &y) == 2)
+    {
+        ImNodeData& node = editor.Nodes.Pool[GImNodes->CurrentNodeIdx];
+        node.Origin = SnapOriginToGrid(ImVec2((float)x, (float)y));
+    }
+}"#,
+        r#"int ReadIniNodeHeader(ImNodesEditorContext& editor, const char* line, const char* line_end)
+{
+    const char prefix[] = "[node.";
+    if (strncmp(line, prefix, sizeof(prefix) - 1) != 0 || line_end[-1] != ']')
+        return -1;
+
+    const char* first = line + sizeof(prefix) - 1;
+    char* end = NULL;
+    errno = 0;
+    const long id = strtol(first, &end, 0);
+    if (end == first || end != line_end - 1 || errno == ERANGE || id < INT_MIN || id > INT_MAX)
+        return -1;
+    return ObjectPoolFindOrCreateIndex(editor.Nodes, static_cast<int>(id));
+}"#,
+        "ImNodes INI node section reader",
+    )?;
+    let patched = replace_cpp_source_once(
+        &patched,
+        "    void (*line_handler)(ImNodesEditorContext&, const char*);\n    line_handler = NULL;",
+        r#"    // Node-pool insertion also updates the current editor's depth order.
+    struct RestoreEditor
+    {
+        ImNodesEditorContext* previous;
+        ~RestoreEditor() { EditorContextSet(previous); }
+    } restore_editor{GImNodes->EditorCtx};
+    EditorContextSet(&editor);
+
+    int node_idx = -1;
+    bool editor_section = false;"#,
+        "ImNodes INI load-local editor and section",
+    )?;
+    let patched = replace_cpp_source_once(
+        &patched,
+        r#"        if (line[0] == '[' && line_end[-1] == ']')
+        {
+            line_end[-1] = 0;
+            if (strncmp(line + 1, "node", 4) == 0)
+            {
+                line_handler = NodeLineHandler;
+            }
+            else if (strcmp(line + 1, "editor") == 0)
+            {
+                line_handler = EditorLineHandler;
+            }
+        }
+
+        if (line_handler != NULL)
+        {
+            line_handler(editor, line);
+        }"#,
+        r#"        if (*line == '[')
+        {
+            node_idx = ReadIniNodeHeader(editor, line, line_end);
+            editor_section = static_cast<size_t>(line_end - line) == sizeof("[editor]") - 1 &&
+                             strcmp(line, "[editor]") == 0;
+        }
+        else if (node_idx >= 0)
+        {
+            int x, y;
+            if (sscanf(line, "origin=%i,%i", &x, &y) == 2)
+                editor.Nodes.Pool[node_idx].Origin = SnapOriginToGrid(ImVec2((float)x, (float)y));
+        }
+        else if (editor_section)
+        {
+            EditorLineHandler(editor, line);
+        }"#,
+        "ImNodes INI section dispatch",
     )?;
 
     Ok(restore_cpp_newlines(patched, newline))
