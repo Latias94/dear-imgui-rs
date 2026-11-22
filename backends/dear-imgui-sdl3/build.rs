@@ -14,6 +14,7 @@ fn main() {
     println!("cargo:rerun-if-changed=wrapper.cpp");
     println!("cargo:rerun-if-changed=native_bridge.h");
     println!("cargo:rerun-if-changed=imgui_impl_sdl3_adapter.cpp");
+    println!("cargo:rerun-if-changed=imgui_impl_sdlrenderer3_adapter.cpp");
     println!("cargo:rerun-if-changed=imgui_impl_sdlgpu3_adapter.cpp");
     println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_IMGUI_BACKENDS_PATH");
     println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_THIRD_PARTY");
@@ -181,7 +182,7 @@ fn main() {
     build.file("imgui_impl_sdl3_adapter.cpp");
     if enable_sdlrenderer3 {
         build.define("DEAR_IMGUI_SDL3_ENABLE_SDLRENDERER3", None);
-        build.file(backends_root.join("imgui_impl_sdlrenderer3.cpp"));
+        build.file("imgui_impl_sdlrenderer3_adapter.cpp");
     }
     if enable_sdlgpu3 {
         build.define("DEAR_IMGUI_SDL3_ENABLE_SDLGPU3", None);

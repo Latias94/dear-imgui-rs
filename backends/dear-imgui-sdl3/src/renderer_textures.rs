@@ -31,6 +31,7 @@ impl std::fmt::Debug for RendererTextureStore {
 pub(super) struct ProcessedTextureRequests {
     pub(super) feedback: Vec<TextureFeedback>,
     pub(super) installed: Vec<SnapshotTextureId>,
+    pub(super) error: Option<Sdl3BackendError>,
 }
 
 struct RendererTexture {
@@ -78,87 +79,110 @@ impl RendererTextureStore {
         requests: &[TextureRequest],
         request_epoch: u64,
         mut update_texture: impl FnMut(&mut TextureData),
-    ) -> Result<ProcessedTextureRequests, Sdl3BackendError> {
-        let mut feedback = Vec::with_capacity(requests.len());
-        let mut installed = Vec::new();
-        for request in requests {
-            match request.operation() {
-                TextureOp::Create {
-                    format,
-                    width,
-                    height,
-                    row_pitch,
-                    pixels,
-                } => {
-                    let texture = request.texture();
-                    if self.destroyed.contains_key(&texture) {
-                        feedback.push(request.superseded());
-                        continue;
-                    }
-                    self.destroy_existing(texture, &mut update_texture)?;
-                    let pixels =
-                        copy_full_upload(texture, *format, *width, *height, *row_pitch, pixels)?;
-                    let data = OwnedTextureData::from_pixels(*format, *width, *height, &pixels)
-                        .map_err(|_| Sdl3BackendError::InvalidTextureRequest {
-                            texture,
-                            reason: "texture payload failed owned texture validation",
-                        })?;
-                    let mut proxy = RendererTexture {
-                        data,
-                        installed: false,
-                    };
-                    update_texture(&mut proxy.data);
-                    ensure_upload_completed(texture, &proxy.data)?;
-                    let texture_id = proxy.data.tex_id();
-                    self.textures.insert(texture, proxy);
-                    feedback.push(request.uploaded(texture_id)?);
-                    installed.push(texture);
-                }
-                TextureOp::Update {
-                    format,
-                    width,
-                    height,
-                    rects,
-                } => {
-                    let texture = request.texture();
-                    if self.destroyed.contains_key(&texture) {
-                        feedback.push(request.superseded());
-                        continue;
-                    }
-                    let proxy = self
-                        .textures
-                        .get_mut(&texture)
-                        .ok_or(Sdl3BackendError::ManagedTextureNotCreated { texture })?;
-                    if proxy.data.format() != *format
-                        || proxy.data.width() != *width
-                        || proxy.data.height() != *height
-                    {
-                        return Err(Sdl3BackendError::InvalidTextureRequest {
-                            texture,
-                            reason: "update metadata does not match the renderer allocation",
-                        });
-                    }
-                    upload_rects(texture, &mut proxy.data, rects, &mut update_texture)?;
-                    feedback.push(request.uploaded(proxy.data.tex_id())?);
-                    installed.push(texture);
-                }
-                TextureOp::Destroy => {
-                    let texture = request.texture();
-                    self.destroyed
-                        .entry(texture)
-                        .and_modify(|destroy_epoch| {
-                            *destroy_epoch = (*destroy_epoch).max(request_epoch);
-                        })
-                        .or_insert(request_epoch);
-                    self.destroy_existing(texture, &mut update_texture)?;
-                    feedback.push(request.destroyed()?);
+    ) -> ProcessedTextureRequests {
+        let mut processed = ProcessedTextureRequests {
+            feedback: Vec::with_capacity(requests.len()),
+            installed: Vec::new(),
+            error: None,
+        };
+        let mut requests = requests.iter();
+        while let Some(request) = requests.next() {
+            match self.process_request(
+                request,
+                request_epoch,
+                &mut update_texture,
+                &mut processed.installed,
+            ) {
+                Ok(feedback) => processed.feedback.push(feedback),
+                Err(error) => {
+                    // Earlier destroys already freed their native IDs. Commit their feedback
+                    // before returning the error so teardown cannot destroy those IDs again.
+                    processed.error = Some(error);
+                    processed.feedback.push(request.retry());
+                    processed
+                        .feedback
+                        .extend(requests.map(TextureRequest::retry));
+                    break;
                 }
             }
         }
-        Ok(ProcessedTextureRequests {
-            feedback,
-            installed,
-        })
+        processed
+    }
+
+    fn process_request(
+        &mut self,
+        request: &TextureRequest,
+        request_epoch: u64,
+        update_texture: &mut impl FnMut(&mut TextureData),
+        installed: &mut Vec<SnapshotTextureId>,
+    ) -> Result<TextureFeedback, Sdl3BackendError> {
+        let texture = request.texture();
+        if self.destroyed.contains_key(&texture)
+            && !matches!(request.operation(), TextureOp::Destroy)
+        {
+            return Ok(request.superseded());
+        }
+        let id = match request.operation() {
+            TextureOp::Create {
+                format,
+                width,
+                height,
+                row_pitch,
+                pixels,
+            } => {
+                let pixels =
+                    copy_full_upload(texture, *format, *width, *height, *row_pitch, pixels)?;
+                let mut data = OwnedTextureData::from_pixels(*format, *width, *height, &pixels)
+                    .map_err(|_| Sdl3BackendError::InvalidTextureRequest {
+                        texture,
+                        reason: "texture payload failed owned texture validation",
+                    })?;
+                self.destroy_existing(texture, update_texture)?;
+                update_texture(&mut data);
+                ensure_upload_completed(texture, &data)?;
+                let id = data.tex_id();
+                self.textures.insert(
+                    texture,
+                    RendererTexture {
+                        data,
+                        installed: false,
+                    },
+                );
+                id
+            }
+            TextureOp::Update {
+                format,
+                width,
+                height,
+                rects,
+            } => {
+                let proxy = self
+                    .textures
+                    .get_mut(&texture)
+                    .ok_or(Sdl3BackendError::ManagedTextureNotCreated { texture })?;
+                if proxy.data.format() != *format
+                    || proxy.data.width() != *width
+                    || proxy.data.height() != *height
+                {
+                    return Err(Sdl3BackendError::InvalidTextureRequest {
+                        texture,
+                        reason: "update metadata does not match the renderer allocation",
+                    });
+                }
+                upload_rects(texture, &mut proxy.data, rects, update_texture)?;
+                proxy.data.tex_id()
+            }
+            TextureOp::Destroy => {
+                self.destroyed
+                    .entry(texture)
+                    .and_modify(|epoch| *epoch = (*epoch).max(request_epoch))
+                    .or_insert(request_epoch);
+                self.destroy_existing(texture, update_texture)?;
+                return Ok(request.destroyed()?);
+            }
+        };
+        installed.push(texture);
+        Ok(request.uploaded(id)?)
     }
 
     /// Mark request-created proxies as visible to Context after feedback was reconciled.
@@ -465,17 +489,17 @@ mod tests {
                 feedback.push(request.superseded());
                 continue;
             }
-            let processed = store.process_requests(
-                std::slice::from_ref(request),
+            feedback.push(store.process_request(
+                request,
                 request_epoch,
                 &mut update_texture,
-            )?;
-            feedback.extend(processed.feedback);
-            installed.extend(processed.installed);
+                &mut installed,
+            )?);
         }
         Ok(ProcessedTextureRequests {
             feedback,
             installed,
+            error: None,
         })
     }
 
@@ -600,13 +624,12 @@ mod tests {
             request.texture() == SnapshotTextureId::User(texture_id)
                 && request.kind() == TextureRequestKind::Create
         }));
-        let processed = store
-            .process_requests(
-                pending.texture_requests(),
-                pending.epoch().sequence(),
-                fake_update,
-            )
-            .unwrap();
+        let processed = store.process_requests(
+            pending.texture_requests(),
+            pending.epoch().sequence(),
+            fake_update,
+        );
+        assert!(processed.error.is_none(), "{:?}", processed.error);
         let reconciled = pending
             .reconcile_texture_feedback(processed.feedback)
             .unwrap();
@@ -636,30 +659,29 @@ mod tests {
             frame.ui().image(texture_id, [4.0, 2.0]);
             let pending = frame.render(&consumer);
             let mut uploaded = false;
-            let processed = store
-                .process_requests(
-                    pending.texture_requests(),
-                    pending.epoch().sequence(),
-                    |proxy| {
-                        if (proxy.width(), proxy.height()) == (4, 2) {
-                            let rect = TextureRect { x, y, w: 1, h: 1 };
-                            assert_eq!(proxy.status(), TextureStatus::WantUpdates);
-                            assert_eq!(
-                                proxy.update_rect(),
-                                rect,
-                                "SDLGPU3 uploads this bounding box"
-                            );
-                            assert!(
-                                proxy.updates().eq([rect]),
-                                "SDLRenderer3 and OpenGL3 upload these rectangles"
-                            );
-                            assert_eq!(proxy.pixels().unwrap(), expected_pixels);
-                            uploaded = true;
-                        }
-                        fake_update(proxy);
-                    },
-                )
-                .unwrap();
+            let processed = store.process_requests(
+                pending.texture_requests(),
+                pending.epoch().sequence(),
+                |proxy| {
+                    if (proxy.width(), proxy.height()) == (4, 2) {
+                        let rect = TextureRect { x, y, w: 1, h: 1 };
+                        assert_eq!(proxy.status(), TextureStatus::WantUpdates);
+                        assert_eq!(
+                            proxy.update_rect(),
+                            rect,
+                            "SDLGPU3 uploads this bounding box"
+                        );
+                        assert!(
+                            proxy.updates().eq([rect]),
+                            "SDLRenderer3 and OpenGL3 upload these rectangles"
+                        );
+                        assert_eq!(proxy.pixels().unwrap(), expected_pixels);
+                        uploaded = true;
+                    }
+                    fake_update(proxy);
+                },
+            );
+            assert!(processed.error.is_none(), "{:?}", processed.error);
             assert!(uploaded);
             let reconciled = pending
                 .reconcile_texture_feedback(processed.feedback)
@@ -674,13 +696,12 @@ mod tests {
             request.texture() == SnapshotTextureId::User(texture_id)
                 && request.kind() == TextureRequestKind::Destroy
         }));
-        let processed = store
-            .process_requests(
-                pending.texture_requests(),
-                pending.epoch().sequence(),
-                fake_update,
-            )
-            .unwrap();
+        let processed = store.process_requests(
+            pending.texture_requests(),
+            pending.epoch().sequence(),
+            fake_update,
+        );
+        assert!(processed.error.is_none(), "{:?}", processed.error);
         let reconciled = pending
             .reconcile_texture_feedback(processed.feedback)
             .unwrap();
@@ -690,6 +711,93 @@ mod tests {
             !store
                 .textures
                 .contains_key(&SnapshotTextureId::User(texture_id))
+        );
+    }
+
+    #[test]
+    fn failed_batch_acknowledges_completed_destroys_before_retry() {
+        let _guard = crate::tests::test_guard();
+        let mut context = dear_imgui_rs::Context::create();
+        context.prepare_frame(
+            dear_imgui_rs::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0)
+                .renderer_has_textures(),
+        );
+        let consumer = context.create_synchronous_renderer_consumer().unwrap();
+        let mut store = RendererTextureStore::default();
+        let ids = [1, 2].map(|v| {
+            context.register_texture(
+                OwnedTextureData::from_pixels(TextureFormat::RGBA32, 1, 1, &[v; 4]).unwrap(),
+            )
+        });
+        let frame = context.begin_frame();
+        for id in ids {
+            frame.ui().image(id, [1.0, 1.0]);
+        }
+        let pending = frame.render(&consumer);
+        let processed = store.process_requests(
+            pending.texture_requests(),
+            pending.epoch().sequence(),
+            fake_update,
+        );
+        assert!(processed.error.is_none());
+        drop(
+            pending
+                .reconcile_texture_feedback(processed.feedback)
+                .unwrap(),
+        );
+        store.mark_reconciled(&processed.installed);
+        for id in ids {
+            context.remove_texture(id).unwrap();
+        }
+        let pending = context.begin_frame().render(&consumer);
+        let destroys: Vec<_> = pending
+            .texture_requests()
+            .iter()
+            .filter(|request| request.kind() == TextureRequestKind::Destroy)
+            .map(TextureRequest::texture)
+            .collect();
+        assert_eq!(destroys.len(), 2);
+        let mut destroyed_one = false;
+        let processed = store.process_requests(
+            pending.texture_requests(),
+            pending.epoch().sequence(),
+            |proxy| {
+                if proxy.status() == TextureStatus::WantDestroy {
+                    if destroyed_one {
+                        return;
+                    }
+                    destroyed_one = true;
+                }
+                fake_update(proxy);
+            },
+        );
+        assert!(
+            matches!(processed.error, Some(Sdl3BackendError::TextureOperationFailed { texture, .. }) if texture == destroys[1])
+        );
+        drop(
+            pending
+                .reconcile_texture_feedback(processed.feedback)
+                .unwrap(),
+        );
+
+        let retry = context.begin_frame().render(&consumer);
+        let remaining: Vec<_> = retry
+            .texture_requests()
+            .iter()
+            .filter(|request| request.kind() == TextureRequestKind::Destroy)
+            .map(TextureRequest::texture)
+            .collect();
+        assert_eq!(remaining, [destroys[1]]);
+        let processed = store.process_requests(
+            retry.texture_requests(),
+            retry.epoch().sequence(),
+            fake_update,
+        );
+        assert!(processed.error.is_none());
+        drop(
+            retry
+                .reconcile_texture_feedback(processed.feedback)
+                .unwrap(),
         );
     }
 
@@ -783,11 +891,10 @@ mod tests {
         let mut store = RendererTextureStore::default();
         store.destroyed.insert(snapshot_id, 5);
 
-        let processed = store
-            .process_requests(std::slice::from_ref(request), 3, |_| {
-                panic!("retired upload reached the native updater")
-            })
-            .unwrap();
+        let processed = store.process_requests(std::slice::from_ref(request), 3, |_| {
+            panic!("retired upload reached the native updater")
+        });
+        assert!(processed.error.is_none(), "{:?}", processed.error);
         assert_eq!(processed.feedback.len(), 1);
         assert!(processed.installed.is_empty());
         assert!(store.textures.is_empty());
@@ -987,7 +1094,8 @@ mod tests {
                     fake_update(texture);
                 },
             )
-            .unwrap_err();
+            .error
+            .unwrap();
 
         assert!(matches!(
             error,

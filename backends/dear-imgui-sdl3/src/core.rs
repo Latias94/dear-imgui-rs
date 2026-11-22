@@ -47,6 +47,10 @@ pub(super) mod ffi {
         pub fn dear_imgui_sdl3_backend_sizeof_imgui_io() -> usize;
         #[cfg(all(test, sdl3_native_self_test))]
         pub fn dear_imgui_sdl3_native_contract_self_test() -> u64;
+        #[cfg(all(test, sdl3_native_self_test, feature = "sdlrenderer3-renderer"))]
+        pub fn dear_imgui_sdl3_backend_sdlrenderer3_texture_self_test() -> bool;
+        #[cfg(all(test, sdl3_native_self_test, feature = "sdlgpu3-renderer"))]
+        pub fn dear_imgui_sdl3_backend_sdlgpu3_texture_self_test() -> bool;
         #[cfg(all(
             test,
             sdl3_native_self_test,

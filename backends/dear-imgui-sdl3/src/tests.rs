@@ -63,6 +63,20 @@ fn native_viewport_transactions_fail_closed_and_restore_state() {
 }
 
 #[test]
+#[cfg(all(
+    sdl3_native_self_test,
+    any(feature = "sdlrenderer3-renderer", feature = "sdlgpu3-renderer")
+))]
+fn native_failed_texture_upload_stays_pending_until_retry_succeeds() {
+    let _guard = test_guard();
+    let _context = dear_imgui_rs::Context::create();
+    #[cfg(feature = "sdlrenderer3-renderer")]
+    assert!(unsafe { ffi::dear_imgui_sdl3_backend_sdlrenderer3_texture_self_test() });
+    #[cfg(feature = "sdlgpu3-renderer")]
+    assert!(unsafe { ffi::dear_imgui_sdl3_backend_sdlgpu3_texture_self_test() });
+}
+
+#[test]
 fn delayed_mouse_leave_remains_due_after_its_target_frame() {
     let _guard = test_guard();
     unsafe {

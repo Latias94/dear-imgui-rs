@@ -696,7 +696,7 @@ impl RuntimeControl {
         &self,
         requests: &[TextureRequest],
         request_epoch: u64,
-    ) -> Result<ProcessedTextureRequests, Sdl3BackendError> {
+    ) -> ProcessedTextureRequests {
         let update_texture = self
             .lifecycle
             .renderer_texture_update

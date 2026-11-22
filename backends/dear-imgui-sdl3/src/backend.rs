@@ -201,7 +201,7 @@ fn reconcile_renderer_frame<'ctx>(
         runtime
             .control()
             .process_texture_requests(frame.texture_requests(), request_epoch)
-    })??;
+    })?;
     let frame = frame.reconcile_texture_feedback(processed.feedback)?;
     runtime
         .control()
@@ -209,6 +209,9 @@ fn reconcile_renderer_frame<'ctx>(
     runtime
         .control()
         .prune_destroyed_textures(frame.completion_progress().watermark());
+    if let Some(error) = processed.error {
+        return Err(error);
+    }
     entry.finish()?;
     Ok(frame)
 }
