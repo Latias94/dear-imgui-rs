@@ -86,7 +86,8 @@ screen-space popups. Suspensions can nest inside a node or pin.
 Call `show_node_context_menu` or `show_link_context_menu` on the suspended canvas
 before opening `ui.popup`. A successful query moves the host window's cursor.
 Store the returned ID until the user chooses a menu item. Inside the popup you
-can read or change the editor's selection, inspect link endpoints, and queue a
+can position a newly created node with `set_node_position`, change its Z order,
+read or change the editor's selection, inspect link endpoints, and queue a
 `delete_node` or `delete_link` request. `break_node_links` and `break_pin_links`
 queue the live links attached to a node or pin. On a later frame, call
 `begin_delete` on the canvas and update your graph for each accepted ID.

@@ -6,7 +6,7 @@ use dear_imgui_rs::MouseButton;
 impl<'ui> NodeEditorFrame<'ui> {
     pub fn set_node_position(&self, node: NodeId, position: [f32; 2]) {
         assert_finite_vec2("NodeEditorFrame::set_node_position()", "position", position);
-        self.with_canvas("NodeEditorFrame::set_node_position()", || unsafe {
+        self.with_editor("NodeEditorFrame::set_node_position()", || unsafe {
             sys::dne_set_node_position(node.raw(), vec2(position))
         });
     }
@@ -25,7 +25,7 @@ impl<'ui> NodeEditorFrame<'ui> {
 
     pub fn set_node_z_position(&self, node: NodeId, z: f32) {
         assert_finite_f32("NodeEditorFrame::set_node_z_position()", "z", z);
-        self.with_canvas("NodeEditorFrame::set_node_z_position()", || unsafe {
+        self.with_editor("NodeEditorFrame::set_node_z_position()", || unsafe {
             sys::dne_set_node_z_position(node.raw(), z)
         });
     }
@@ -37,7 +37,7 @@ impl<'ui> NodeEditorFrame<'ui> {
     }
 
     pub fn restore_node_state(&self, node: NodeId) {
-        self.with_canvas("NodeEditorFrame::restore_node_state()", || unsafe {
+        self.with_editor("NodeEditorFrame::restore_node_state()", || unsafe {
             sys::dne_restore_node_state(node.raw())
         });
     }

@@ -84,7 +84,7 @@ impl<'ui> NodeEditorFrame<'ui> {
 
     pub fn set_group_size(&self, node: NodeId, size: [f32; 2]) {
         assert_non_negative_finite_vec2("NodeEditorFrame::set_group_size()", "size", size);
-        self.with_canvas("NodeEditorFrame::set_group_size()", || unsafe {
+        self.with_editor("NodeEditorFrame::set_group_size()", || unsafe {
             sys::dne_set_group_size(node.raw(), vec2(size))
         });
     }

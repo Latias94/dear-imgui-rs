@@ -650,6 +650,7 @@ mod tests {
         let output = PinId::new(11);
         let input = PinId::new(21);
         let link_to_delete = LinkId::new(100);
+        let new_node = NodeId::new(5);
         let pin_to_disconnect = PinId::new(31);
         let node_to_disconnect = NodeId::new(4);
         let connections = [
@@ -676,6 +677,8 @@ mod tests {
                             frame.with_suspended(|| {
                                 ui.open_popup("Graph actions");
                                 ui.popup("Graph actions", || {
+                                    frame.set_node_position(new_node, [42.0, 84.0]);
+                                    frame.set_node_z_position(new_node, 3.0);
                                     frame.select_node(first);
                                     frame.add_node_to_selection(second);
                                     frame.add_link_to_selection(link_to_delete);
@@ -696,6 +699,8 @@ mod tests {
                                     ui.close_current_popup();
                                 });
                             });
+                            assert_eq!(frame.node_position(new_node), [42.0, 84.0]);
+                            assert_eq!(frame.node_z_position(new_node), 3.0);
                         } else {
                             let delete = frame
                                 .begin_delete()
