@@ -160,6 +160,29 @@ fn ordinary_copy_rename_and_cross_device_move_preserve_contents() {
 }
 
 #[test]
+fn vanished_child_prevents_copy_and_cross_device_cut_from_replacing_the_target() {
+    for op in [ClipboardOp::Copy, ClipboardOp::Cut] {
+        let temp = TempDir::new();
+        let source = temp.path().join("source");
+        let target = temp.path().join("target");
+        fs::create_dir(&source).unwrap();
+        fs::write(source.join("moving"), b"original").unwrap();
+        fs::write(source.join("survivor"), b"still here").unwrap();
+        fs::write(&target, b"previous").unwrap();
+        let mut filesystem = MoveFs::cross_device(&source);
+        filesystem.after_listing = |dir| fs::rename(dir.join("moving"), dir.join("moved"));
+
+        assert!(matches!(
+            paste(&filesystem, op, &source, &target, true),
+            Err(PasteError::Transfer(e)) if e.kind() == ErrorKind::NotFound
+        ));
+        assert_eq!(fs::read(&target).unwrap(), b"previous");
+        assert_eq!(fs::read(source.join("moved")).unwrap(), b"original");
+        assert_eq!(fs::read(source.join("survivor")).unwrap(), b"still here");
+    }
+}
+
+#[test]
 fn checks_both_directions_of_ancestry_before_a_transfer() {
     let temp = TempDir::new();
     let dir = temp.path().join("folder");

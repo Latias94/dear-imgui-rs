@@ -162,7 +162,7 @@ filesystem for one frame, so a worker cannot outlive caller-owned data.
 
 On native targets, `FileDialogState::new` owns an
 `Arc<dyn FileSystem + Send + Sync>` and selects `ScanPolicy::tuned_background()`.
-The worker invokes `FileSystem::visit_dir` directly and sends bounded raw-entry
+The worker invokes `FileSystem::visit_dir_for_scan` and sends bounded raw-entry
 batches to the UI thread. Scan hooks, filtering, sorting, selection reconciliation,
 and rendering remain on the UI thread. During a partial scan, the projector filters
 only the newly accepted batch, then inserts visible entries into an ordered index.
@@ -621,7 +621,9 @@ their normal semantics.
 
 ### Copying and moving files on a custom filesystem
 
-Return directory enumeration errors from `visit_dir` so a partial listing cannot be mistaken for a complete copy. Implement `inspect_entry` when your backend supports links or cross-device moves. It must describe the named entry itself and provide a size or modification timestamp for files that will be removed after copying. Return `ErrorKind::CrossesDevices` when a rename crosses filesystems.
+Return directory enumeration errors from `visit_dir` so a partial listing cannot be mistaken for a complete copy. Browser scans use `visit_dir_for_scan`, which delegates to `visit_dir` by default. On Unix, a native scan skips a child if its metadata lookup returns `NotFound`. On Windows, browsing uses cached directory-entry metadata, so a file renamed during a scan can appear under its earlier name until the next refresh. Copies and cross-device moves on both platforms look up each child and report missing entries.
+
+Implement `inspect_entry` when your backend supports links or cross-device moves. It must describe the named entry itself and provide a size or modification timestamp for files that will be removed after copying. Return `ErrorKind::CrossesDevices` when a rename crosses filesystems.
 
 If other writers can change your filesystem during a paste, implement `rename_noreplace` with an atomic destination check and return a stable object ID from `inspect_move_source`. The defaults support single-writer adapters. The native backend uses exclusive rename on Windows, Linux, Android and Apple platforms. After installing a cross-device move, the browser claims each source entry in a temporary directory on the source volume. It checks the claimed object's volume and file ID on Windows or device and inode on Unix before deleting it. If a changed entry cannot be restored because the original name has been reused, the error reports its recovery path.
 

@@ -91,20 +91,29 @@ pub enum ScanVisit {
 /// background scan can stop a cooperative filesystem between entries without
 /// constructing an eager directory snapshot on the UI thread.
 pub trait FileSystem {
-    /// Visit entries of a directory one at a time.
+    /// Visit entries of a directory one at a time. Copies and cross-device moves
+    /// require an error if an entry cannot be enumerated or classified.
     ///
-    /// Implementations must stop when `visit` returns [`ScanVisit::Stop`] and
-    /// should return promptly afterward. The visitor is invoked on the scan
-    /// worker for background scans and on the caller thread for
-    /// [`crate::ScanPolicy::Blocking`] scans. Destroying a background dialog
-    /// waits for its worker to return after cancellation. Return an error if an
-    /// entry cannot be enumerated or classified, since callers also use this
-    /// method to copy directory contents.
+    /// Stop promptly when `visit` returns [`ScanVisit::Stop`].
     fn visit_dir(
         &self,
         dir: &Path,
         visit: &mut dyn FnMut(FsEntry) -> ScanVisit,
     ) -> std::io::Result<()>;
+    /// Visit entries for display. A backend may skip an enumerated child that
+    /// disappears before its metadata is read. Directory and other lookup errors
+    /// should be returned. The default delegates to [`Self::visit_dir`].
+    ///
+    /// The visitor runs on the scan worker for background scans and on the caller
+    /// thread for [`crate::ScanPolicy::Blocking`]. Stop promptly on [`ScanVisit::Stop`]
+    /// because destroying a background dialog waits for its worker to return.
+    fn visit_dir_for_scan(
+        &self,
+        dir: &Path,
+        visit: &mut dyn FnMut(FsEntry) -> ScanVisit,
+    ) -> io::Result<()> {
+        self.visit_dir(dir, visit)
+    }
     /// Resolve an existing path to its canonical absolute path, including links.
     fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf>;
     /// Fetch minimal metadata for a path.
@@ -168,26 +177,63 @@ pub trait FileSystem {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct StdFileSystem;
 
+#[derive(PartialEq, Eq)]
+enum ListingMode {
+    Browse,
+    Strict,
+}
+
+fn visit_native_entries(
+    entries: impl Iterator<Item = io::Result<std::fs::DirEntry>>,
+    mode: ListingMode,
+    visit: &mut dyn FnMut(FsEntry) -> ScanVisit,
+) -> io::Result<()> {
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        // Windows supplies metadata with the directory listing. Only strict enumeration
+        // needs to check that the name still exists. Unix DirEntry::metadata already does so.
+        let metadata = if cfg!(windows) && mode == ListingMode::Strict {
+            std::fs::symlink_metadata(&path)
+        } else {
+            entry.metadata()
+        };
+        let metadata = match metadata {
+            Ok(metadata) => metadata,
+            Err(e) if mode == ListingMode::Browse && e.kind() == io::ErrorKind::NotFound => {
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
+        let mut entry = FsEntry::from_metadata(path, metadata);
+        if entry.is_symlink
+            && let Ok(target) = std::fs::metadata(&entry.path)
+        {
+            entry.is_dir = target.is_dir();
+            entry.size = target.is_file().then_some(target.len());
+        }
+        if visit(entry) == ScanVisit::Stop {
+            break;
+        }
+    }
+    Ok(())
+}
+
 impl FileSystem for StdFileSystem {
     fn visit_dir(
         &self,
         dir: &Path,
         visit: &mut dyn FnMut(FsEntry) -> ScanVisit,
     ) -> std::io::Result<()> {
-        for e in std::fs::read_dir(dir)? {
-            let e = e?;
-            let mut entry = FsEntry::from_metadata(e.path(), e.metadata()?);
-            if entry.is_symlink
-                && let Ok(target) = std::fs::metadata(&entry.path)
-            {
-                entry.is_dir = target.is_dir();
-                entry.size = target.is_file().then_some(target.len());
-            }
-            if visit(entry) == ScanVisit::Stop {
-                break;
-            }
-        }
-        Ok(())
+        visit_native_entries(std::fs::read_dir(dir)?, ListingMode::Strict, visit)
+    }
+
+    fn visit_dir_for_scan(
+        &self,
+        dir: &Path,
+        visit: &mut dyn FnMut(FsEntry) -> ScanVisit,
+    ) -> io::Result<()> {
+        visit_native_entries(std::fs::read_dir(dir)?, ListingMode::Browse, visit)
     }
 
     fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
@@ -277,5 +323,53 @@ impl FileSystem for StdFileSystem {
             ));
         }
         std::fs::copy(from, to)
+    }
+}
+
+#[cfg(all(test, any(unix, windows)))]
+mod tests {
+    use super::*;
+    use crate::fs_ops::tests::TempDir;
+    use std::fs;
+
+    #[test]
+    fn native_scan_and_strict_enumeration_handle_a_vanished_child() {
+        let temp = TempDir::new();
+        let dir = temp.path();
+        for name in ["before", "moving", "survivor"] {
+            fs::write(dir.join(name), name).unwrap();
+        }
+        let entries = || {
+            let mut entries = fs::read_dir(dir)
+                .unwrap()
+                .collect::<io::Result<Vec<_>>>()
+                .unwrap();
+            entries.sort_by_key(fs::DirEntry::file_name);
+            entries.into_iter().map(Ok)
+        };
+        // Both readers have seen the same names. Rename one before processing either list.
+        let scan = entries();
+        let transfer = entries();
+        fs::rename(dir.join("moving"), dir.join("moved")).unwrap();
+
+        let mut seen = Vec::new();
+        visit_native_entries(scan, ListingMode::Browse, &mut |entry| {
+            seen.push(entry.name);
+            ScanVisit::Continue
+        })
+        .unwrap();
+        #[cfg(windows)]
+        assert_eq!(seen, ["before", "moving", "survivor"]);
+        #[cfg(unix)]
+        assert_eq!(seen, ["before", "survivor"]);
+
+        let mut seen = Vec::new();
+        let error = visit_native_entries(transfer, ListingMode::Strict, &mut |entry| {
+            seen.push(entry.name);
+            ScanVisit::Continue
+        })
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert_eq!(seen, ["before"]);
     }
 }
