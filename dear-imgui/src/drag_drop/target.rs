@@ -32,7 +32,8 @@ impl<'ui> DragDropTarget<'ui> {
     /// * `name` - Payload type name (must match source name)
     /// * `flags` - Accept flags
     ///
-    /// Returns payload info if accepted, `None` otherwise.
+    /// Returns payload info if accepted, `None` otherwise, including after the target's
+    /// enclosing native window scope has closed it.
     pub fn accept_payload_empty(
         &self,
         name: impl AsRef<str>,
@@ -58,7 +59,8 @@ impl<'ui> DragDropTarget<'ui> {
     /// * `name` - Payload type name (must match source name)
     /// * `flags` - Accept flags
     ///
-    /// Returns `Some(Result<payload, error>)` if payload exists, `None` otherwise.
+    /// Returns `Some(Result<payload, error>)` if payload exists, `None` otherwise, including
+    /// after the enclosing native window scope has ended this target.
     #[doc(alias = "AcceptDragDropPayload")]
     pub fn accept_payload<T: 'static + Copy, Name: AsRef<str>>(
         &self,
@@ -70,7 +72,7 @@ impl<'ui> DragDropTarget<'ui> {
         self.0.run_with_bound_context(|| unsafe {
             // AcceptDragDropPayload records the target even during preview. Check the logical
             // name before asking ImGui to accept this drag.
-            if !name.matches(sys::igGetDragDropPayload()) {
+            if self.1.is_finished() || !name.matches(sys::igGetDragDropPayload()) {
                 return None;
             }
             let payload =
@@ -101,7 +103,11 @@ impl<'ui> DragDropTarget<'ui> {
         validate_drag_drop_target_flags("DragDropTarget::accept_payload_unchecked()", flags);
         let name = self.0.scratch_txt(name);
         let inner = self.0.run_with_bound_context(|| unsafe {
-            sys::igAcceptDragDropPayload(name, flags.bits() as i32)
+            if self.1.is_finished() {
+                std::ptr::null()
+            } else {
+                sys::igAcceptDragDropPayload(name, flags.bits() as i32)
+            }
         });
 
         if inner.is_null() {

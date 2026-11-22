@@ -33,6 +33,8 @@ use crate::sys;
 use crate::texture::TextureRef;
 use std::cell::RefCell;
 
+pub use crate::scope::NativeWindowScope;
+
 /// Represents the Dear ImGui user interface for one frame
 #[derive(Debug)]
 pub struct Ui {

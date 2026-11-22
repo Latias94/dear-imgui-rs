@@ -86,6 +86,11 @@ unsafe fn try_current_scope(ui: &Ui) -> Option<ClipperScope> {
         return None;
     }
     let scope = ui.current_native_scope();
+    // End can seek the cursor and close a table row. Release native storage without changing
+    // layout when an outer clipper is dropped from inside an extension using that row.
+    if ui.native_window_scope_holds_table(scope.table()) {
+        return None;
+    }
     Some(ClipperScope {
         context,
         window: scope.window()?,
@@ -95,6 +100,7 @@ unsafe fn try_current_scope(ui: &Ui) -> Option<ClipperScope> {
 
 pub(super) unsafe fn assert_can_begin(ui: &Ui, caller: &str) {
     let scope = unsafe { current_scope(ui, caller) };
+    ui.assert_host_table_can_change(scope.table, caller);
     let context = scope.context;
     CLIPPERS.with(|registry| {
         let registry = registry.borrow();
@@ -179,6 +185,16 @@ pub(super) unsafe fn assert_current(
         );
         entry.ptr
     })
+}
+
+pub(super) unsafe fn assert_can_seek(
+    ui: &Ui,
+    handle: ClipperHandle,
+    caller: &str,
+) -> *mut sys::ImGuiListClipper {
+    let ptr = unsafe { assert_current(ui, handle, caller) };
+    ui.assert_host_table_can_change(ui.current_native_scope().table(), caller);
+    ptr
 }
 
 pub(super) unsafe fn complete(ui: &Ui, handle: ClipperHandle) {

@@ -58,7 +58,7 @@ impl Ui {
     pub fn table_angled_headers_row(&self) {
         self.run_with_bound_context(|| {
             assert_table_before_first_row("Ui::table_angled_headers_row()");
-            self.assert_no_active_table_channel("Ui::table_angled_headers_row()");
+            self.assert_table_cell_can_change("Ui::table_angled_headers_row()");
             unsafe { sys::igTableAngledHeadersRow() };
         });
     }
@@ -110,7 +110,7 @@ impl Ui {
         self.run_with_bound_context(|| {
             let table =
                 assert_table_before_first_row("Ui::table_angled_headers_row_ex_with_data()");
-            self.assert_no_active_table_channel(
+            self.assert_table_cell_can_change(
                 "Ui::table_angled_headers_row_ex_with_data()",
             );
             let columns = unsafe { (*table).Columns.Data };
@@ -161,7 +161,8 @@ impl Ui {
     ///
     /// # Panics
     ///
-    /// Panics if there is no current table cell or another table channel is active.
+    /// Panics if there is no current table cell, another table channel is active, or this
+    /// cell hosts a native extension.
     #[doc(
         alias = "TablePushBackgroundChannel",
         alias = "TablePopBackgroundChannel"
@@ -169,7 +170,7 @@ impl Ui {
     pub fn with_table_background_channel<R>(&self, f: impl FnOnce() -> R) -> R {
         self.run_with_bound_context(|| {
             assert_current_table_cell("Ui::with_table_background_channel()");
-            self.assert_no_active_table_channel("Ui::with_table_background_channel()");
+            self.assert_table_cell_can_change("Ui::with_table_background_channel()");
             unsafe { sys::igTablePushBackgroundChannel() };
         });
         let guard = TableChannelGuard::background(self);
@@ -185,8 +186,8 @@ impl Ui {
     ///
     /// # Panics
     ///
-    /// Panics if there is no current table cell, `column` is invalid, or another table channel is
-    /// active.
+    /// Panics if there is no current table cell, `column` is invalid, another table channel is
+    /// active, or this cell hosts a native extension.
     #[doc(alias = "TablePushColumnChannel", alias = "TablePopColumnChannel")]
     pub fn with_table_column_channel<R>(
         &self,
@@ -196,7 +197,7 @@ impl Ui {
         let column = column.into();
         self.run_with_bound_context(|| {
             assert_current_table_cell("Ui::with_table_column_channel()");
-            self.assert_no_active_table_channel("Ui::with_table_column_channel()");
+            self.assert_table_cell_can_change("Ui::with_table_column_channel()");
             let column_n = assert_valid_table_column(column, "Ui::with_table_column_channel()");
             unsafe { sys::igTablePushColumnChannel(column_n) };
         });

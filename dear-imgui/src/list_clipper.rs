@@ -160,11 +160,11 @@ impl<'ui> ActiveListClipper<'ui> {
     }
 
     fn step(&mut self, caller: &str) -> bool {
-        self.stepped = true;
         let has_range = self.ui.run_with_bound_context(|| unsafe {
-            let ptr = registry::assert_current(self.ui, self.handle, caller);
+            let ptr = registry::assert_can_seek(self.ui, self.handle, caller);
             sys::ImGuiListClipper_Step(ptr)
         });
+        self.stepped = true;
         if !has_range {
             self.ended = true;
             if !self.retain_registration_after_exhaustion {
@@ -180,7 +180,7 @@ impl<'ui> ActiveListClipper<'ui> {
     fn end(&mut self, caller: &str) {
         if !self.ended {
             self.ui.run_with_bound_context(|| unsafe {
-                let ptr = registry::assert_current(self.ui, self.handle, caller);
+                let ptr = registry::assert_can_seek(self.ui, self.handle, caller);
                 sys::ImGuiListClipper_End(ptr);
             });
             self.ended = true;
@@ -435,7 +435,7 @@ impl UnknownCountListClipperToken<'_> {
             "UnknownCountListClipperToken::finish() could not determine a positive item height"
         );
         self.active.ui.run_with_bound_context(|| unsafe {
-            let ptr = registry::assert_current(
+            let ptr = registry::assert_can_seek(
                 self.active.ui,
                 self.active.handle,
                 "UnknownCountListClipperToken::finish()",

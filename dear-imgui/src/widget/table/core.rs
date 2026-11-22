@@ -109,7 +109,7 @@ impl Ui {
         let column_count = table_column_count_to_i32(column_count);
 
         let should_render = self.run_with_bound_context(|| {
-            self.assert_no_active_table_channel("Ui::begin_table_with_sizing()");
+            self.assert_can_begin_table();
             unsafe {
                 sys::igBeginTable(
                     str_id_ptr,
@@ -301,12 +301,13 @@ impl Ui {
     ///
     /// # Panics
     ///
-    /// Panics outside a table or while a table draw-channel scope is active.
+    /// Panics outside a table, while a table draw-channel scope is active, or while this cell
+    /// hosts a native extension.
     #[doc(alias = "TableHeadersRow")]
     pub fn table_headers_row(&self) {
         self.run_with_bound_context(|| {
             assert_current_table("Ui::table_headers_row()");
-            self.assert_no_active_table_channel("Ui::table_headers_row()");
+            self.assert_table_cell_can_change("Ui::table_headers_row()");
             unsafe {
                 sys::igTableHeadersRow();
             }
@@ -320,11 +321,11 @@ impl Ui {
     ///
     /// # Panics
     ///
-    /// Panics while a table draw-channel scope is active.
+    /// Panics while a table draw-channel scope is active or this cell hosts a native extension.
     #[doc(alias = "TableNextColumn")]
     pub fn table_next_column(&self) -> bool {
         self.run_with_bound_context(|| {
-            self.assert_no_active_table_channel("Ui::table_next_column()");
+            self.assert_table_cell_can_change("Ui::table_next_column()");
             unsafe { sys::igTableNextColumn() }
         })
     }
@@ -335,14 +336,14 @@ impl Ui {
     ///
     /// # Panics
     ///
-    /// Panics if `column` is outside the current table or while a table draw-channel scope is
-    /// active.
+    /// Panics if `column` is outside the current table, a table draw-channel scope is active,
+    /// or this cell hosts a native extension.
     #[doc(alias = "TableSetColumnIndex")]
     pub fn table_set_column_index(&self, column: impl Into<TableColumnIndex>) -> bool {
         let column = column.into();
         let column_n = column.into_i32("Ui::table_set_column_index()");
         self.run_with_bound_context(|| {
-            self.assert_no_active_table_channel("Ui::table_set_column_index()");
+            self.assert_table_cell_can_change("Ui::table_set_column_index()");
             if let Some(table) = current_table_if_any() {
                 assert_valid_table_column_raw_in(table, column_n, "Ui::table_set_column_index()");
             }
@@ -354,7 +355,8 @@ impl Ui {
     ///
     /// # Panics
     ///
-    /// Panics outside a table or while a table draw-channel scope is active.
+    /// Panics outside a table, while a table draw-channel scope is active, or while this cell
+    /// hosts a native extension.
     #[doc(alias = "TableNextRow")]
     pub fn table_next_row(&self) {
         self.table_next_row_with_flags(TableRowFlags::NONE, 0.0);
@@ -364,8 +366,8 @@ impl Ui {
     ///
     /// # Panics
     ///
-    /// Panics outside a table, while a table draw-channel scope is active, or when
-    /// `min_row_height` is negative or non-finite.
+    /// Panics outside a table, while a table draw-channel scope is active, while this cell
+    /// hosts a native extension, or when `min_row_height` is negative or non-finite.
     pub fn table_next_row_with_flags(&self, flags: TableRowFlags, min_row_height: f32) {
         assert_non_negative_finite_f32(
             "Ui::table_next_row_with_flags()",
@@ -374,7 +376,7 @@ impl Ui {
         );
         self.run_with_bound_context(|| {
             assert_current_table("Ui::table_next_row_with_flags()");
-            self.assert_no_active_table_channel("Ui::table_next_row_with_flags()");
+            self.assert_table_cell_can_change("Ui::table_next_row_with_flags()");
             unsafe { sys::igTableNextRow(flags.bits(), min_row_height) };
         });
     }

@@ -11,6 +11,12 @@ use std::fmt;
 use crate::sys;
 use crate::ui::Ui;
 
+mod window;
+#[cfg(test)]
+mod window_tests;
+pub use window::NativeWindowScope;
+use window::WindowBoundary;
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct WindowScope {
     frame: i32,
@@ -508,6 +514,7 @@ pub(crate) struct NativeScopeTracker {
     next_id: u64,
     stacks: HashMap<NativeScopeKey, NativeScopeStack>,
     entries: HashMap<u64, NativeScopeEntry>,
+    window_boundaries: Vec<WindowBoundary>,
     pending_recovery: bool,
 }
 
@@ -570,15 +577,19 @@ impl NativeScopeTracker {
         label: &'static str,
         raw_current: ScopeSnapshot,
     ) -> Result<bool, ScopeOrderError> {
-        let current = self.resolve_scope(raw_current);
-        let Some(entry) = self.entries.get(&id).copied() else {
-            self.pending_recovery = true;
-            return Err(ScopeOrderError {
-                label,
-                reason: "was ended more than once".to_owned(),
-            });
+        let first = self.first_unprotected_id();
+        let Some(entry) = self.entries.get_mut(&id) else {
+            // A lexical window scope already ran this token's native cleanup.
+            // IDs are unique for the lifetime of the Ui.
+            return Ok(false);
         };
         debug_assert_eq!(entry.keys, keys);
+        if id < first {
+            entry.abandoned = true;
+            return Ok(false);
+        }
+        let entry = *entry;
+        let current = self.resolve_scope(raw_current);
         if let Some(reason) = self.violation(entry, current) {
             self.entries
                 .get_mut(&id)
@@ -679,7 +690,6 @@ impl NativeScopeTracker {
     }
 
     fn assert_no_table_channel(&self, current: ScopeSnapshot, operation: &'static str) {
-        let current = self.resolve_scope(current);
         let Some(table) = current.table else {
             return;
         };
@@ -732,10 +742,12 @@ impl NativeScopeTracker {
 
     fn take_ready_abandoned(&mut self, raw_current: ScopeSnapshot) -> Option<NativeScopePop> {
         let current = self.resolve_scope(raw_current);
+        let first = self.first_unprotected_id();
         let ready = self
             .entries
             .values()
-            .filter(|entry| entry.abandoned && self.violation(**entry, current).is_none())
+            .filter(|entry| entry.id >= first && entry.abandoned)
+            .filter(|entry| self.violation(**entry, current).is_none())
             .max_by_key(|entry| entry.id)
             .copied()?;
         self.remove_ready(ready);
@@ -744,10 +756,22 @@ impl NativeScopeTracker {
     }
 
     fn refresh_pending_recovery(&mut self) {
-        self.pending_recovery = self
-            .entries
-            .values()
-            .any(|entry| entry.abandoned && entry.order == NativeScopeOrder::StrictLifo);
+        let first = self.first_unprotected_id();
+        self.pending_recovery = self.entries.values().any(|entry| {
+            entry.id >= first && entry.abandoned && entry.order == NativeScopeOrder::StrictLifo
+        });
+    }
+
+    fn first_unprotected_id(&self) -> u64 {
+        let Some(boundary) = self.window_boundaries.last() else {
+            return 0;
+        };
+        // BeginWindow and BeginTable can themselves push IDs, widths, or clip rects without
+        // creating Rust tokens. Keep scopes below those containers intact until their End.
+        [NativeScopeKey::WindowStack, NativeScopeKey::TableStack]
+            .into_iter()
+            .filter_map(|key| self.stacks.get(&key)?.last())
+            .fold(boundary.first_id, u64::max)
     }
 
     fn assert_usable(&self) {
@@ -842,18 +866,7 @@ impl<'ui> NativeScopeToken<'ui> {
             }
 
             current_pop();
-            loop {
-                let current = unsafe { ScopeSnapshot::current_raw(self.ui) };
-                let Some(pop) = self
-                    .ui
-                    .native_scopes
-                    .borrow_mut()
-                    .take_ready_abandoned(current)
-                else {
-                    break;
-                };
-                unsafe { pop.run() };
-            }
+            self.ui.finish_abandoned_native_scopes();
         });
     }
 
@@ -870,7 +883,8 @@ impl<'ui> NativeScopeToken<'ui> {
     }
 
     pub(crate) fn is_finished(&self) -> bool {
-        self.finished
+        let tracker = self.ui.native_scopes.borrow();
+        self.finished || !tracker.entries.contains_key(&self.id)
     }
 
     pub(crate) fn finish(&mut self) {
@@ -880,6 +894,22 @@ impl<'ui> NativeScopeToken<'ui> {
 }
 
 impl Ui {
+    // Called with this Ui's context current. An End may change the current window or table,
+    // so obtain a fresh snapshot after each pop and release the registry borrow before FFI.
+    fn finish_abandoned_native_scopes(&self) {
+        loop {
+            let current = unsafe { ScopeSnapshot::current_raw(self) };
+            let Some(pop) = self
+                .native_scopes
+                .borrow_mut()
+                .take_ready_abandoned(current)
+            else {
+                break;
+            };
+            unsafe { pop.run() };
+        }
+    }
+
     pub(crate) fn begin_native_scope(
         &self,
         pop: NativeScopePop,
@@ -904,11 +934,19 @@ impl Ui {
         self.native_scopes.borrow().pending_recovery
     }
 
-    pub(crate) fn assert_no_active_table_channel(&self, operation: &'static str) {
-        let current = unsafe { ScopeSnapshot::current_raw(self) };
+    pub(crate) fn assert_table_cell_can_change(&self, operation: &'static str) {
+        let current = self.current_native_scope();
+        self.assert_host_table_can_change(current.table, operation);
         self.native_scopes
             .borrow()
             .assert_no_table_channel(current, operation);
+    }
+
+    pub(crate) fn assert_can_begin_table(&self) {
+        let current = self.current_native_scope();
+        self.native_scopes
+            .borrow()
+            .assert_no_table_channel(current, "Ui::begin_table_with_sizing()");
     }
 
     pub(crate) fn current_native_scope(&self) -> ScopeSnapshot {
