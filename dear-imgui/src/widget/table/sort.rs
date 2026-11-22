@@ -43,7 +43,7 @@ pub struct TableColumnSortSpec {
 pub struct TableSortSpecs {
     specs: Box<[TableColumnSortSpec]>,
     dirty: bool,
-    source_context: *mut sys::ImGuiContext,
+    source_context: crate::ContextId,
     source_scope: crate::scope::TableScope,
 }
 
@@ -56,15 +56,15 @@ impl TableSortSpecs {
         raw: *mut sys::ImGuiTableSortSpecs,
     ) -> Self {
         debug_assert_eq!(unsafe { sys::igGetCurrentTable() }, table);
-        let (dirty, specs) = unsafe { copy_table_sort_specs(raw) };
+        let raw = unsafe { raw.as_ref() }.expect("table sort specs pointer must not be null");
         let source_scope = ui
             .current_native_scope()
             .table()
             .expect("TableSortSpecs::from_raw() requires a current table");
         Self {
-            specs,
-            dirty,
-            source_context: ui.context_raw(),
+            specs: unsafe { sort_columns(raw) }.collect(),
+            dirty: raw.SpecsDirty,
+            source_context: ui.context_id(),
             source_scope,
         }
     }
@@ -76,17 +76,22 @@ impl TableSortSpecs {
 
     /// Clear the native dirty flag after applying this snapshot.
     ///
+    /// Returns `true` when the snapshot was already clean or its sort order was acknowledged.
+    /// If the table now requests a different order, returns `false` and leaves that request
+    /// pending. Use [`Ui::table_get_sort_specs`] to read the current order.
+    ///
     /// # Panics
     ///
     /// Panics if `ui` belongs to another Context or if the exact frame, window `Begin`, and table
     /// instance that produced the snapshot is no longer current. The snapshot data itself remains
     /// readable after any of those conditions; only native acknowledgement is table-scoped.
-    pub fn clear_dirty(&mut self, ui: &Ui) {
+    pub fn clear_dirty(&mut self, ui: &Ui) -> bool {
         if !self.dirty {
-            return;
+            return true;
         }
-        assert!(
-            std::ptr::eq(ui.context_raw(), self.source_context),
+        assert_eq!(
+            ui.context_id(),
+            self.source_context,
             "TableSortSpecs::clear_dirty() requires the Ui that produced this snapshot"
         );
         ui.run_with_bound_context(|| unsafe {
@@ -95,14 +100,16 @@ impl TableSortSpecs {
                 Some(self.source_scope),
                 "TableSortSpecs::clear_dirty() source table is no longer current"
             );
-            let raw = sys::igTableGetSortSpecs();
-            assert!(
-                !raw.is_null(),
-                "TableSortSpecs::clear_dirty() current table has no sort specifications"
-            );
-            (*raw).SpecsDirty = false;
-        });
-        self.dirty = false;
+            let raw = sys::igTableGetSortSpecs()
+                .as_mut()
+                .expect("TableSortSpecs::clear_dirty() current table has no sort specifications");
+            if !sort_columns(raw).eq(self.specs.iter().copied()) {
+                return false;
+            }
+            raw.SpecsDirty = false;
+            self.dirty = false;
+            true
+        })
     }
 
     /// Number of column specs.
@@ -120,26 +127,25 @@ impl TableSortSpecs {
     }
 }
 
-pub(super) unsafe fn copy_table_sort_specs(
-    raw: *mut sys::ImGuiTableSortSpecs,
-) -> (bool, Box<[TableColumnSortSpec]>) {
-    assert!(!raw.is_null(), "table sort specs pointer must not be null");
-    let count = usize::try_from(unsafe { (*raw).SpecsCount })
+// The caller keeps the native columns alive and unchanged for the duration of iteration.
+pub(super) unsafe fn sort_columns(
+    raw: &sys::ImGuiTableSortSpecs,
+) -> impl ExactSizeIterator<Item = TableColumnSortSpec> + '_ {
+    let count = usize::try_from(raw.SpecsCount)
         .expect("Dear ImGui returned a negative table sort specification count");
-    let source = unsafe { (*raw).Specs };
+    let source = raw.Specs;
     assert!(
         count == 0 || !source.is_null(),
         "Dear ImGui returned null table sort specification data for a non-empty snapshot"
     );
-    let mut specs = Vec::with_capacity(count);
-    for index in 0..count {
+    (0..count).map(move |index| {
         let spec = unsafe { &*source.add(index) };
         let direction = match spec.SortDirection as u8 {
             value if value == sys::ImGuiSortDirection_Ascending as u8 => SortDirection::Ascending,
             value if value == sys::ImGuiSortDirection_Descending as u8 => SortDirection::Descending,
             _ => SortDirection::None,
         };
-        specs.push(TableColumnSortSpec {
+        TableColumnSortSpec {
             column_user_data: TableColumnUserData::new(spec.ColumnUserID),
             column_index: TableColumnIndex::from_imgui_column_idx(
                 spec.ColumnIndex,
@@ -147,7 +153,6 @@ pub(super) unsafe fn copy_table_sort_specs(
             ),
             sort_order: spec.SortOrder,
             sort_direction: direction,
-        });
-    }
-    (unsafe { (*raw).SpecsDirty }, specs.into_boxed_slice())
+        }
+    })
 }

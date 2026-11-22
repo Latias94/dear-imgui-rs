@@ -1,7 +1,7 @@
 use super::*;
 use crate::draw::ImColor32;
 use crate::widget::TableColumnFlags;
-use crate::widget::table::sort::copy_table_sort_specs;
+use crate::widget::table::sort::sort_columns;
 use std::any::Any;
 
 fn setup_context() -> crate::Context {
@@ -83,14 +83,14 @@ fn table_column_user_data_preserves_every_raw_value() {
             SortOrder: 0,
             SortDirection: sys::ImGuiSortDirection_Ascending,
         };
-        let mut raw_specs = sys::ImGuiTableSortSpecs {
+        let raw_specs = sys::ImGuiTableSortSpecs {
             Specs: &mut raw_column,
             SpecsCount: 1,
             SpecsDirty: true,
         };
-        let (dirty, specs) = unsafe { copy_table_sort_specs(&mut raw_specs) };
-        assert!(dirty);
-        let spec = specs.first().expect("one sort specification");
+        let spec = unsafe { sort_columns(&raw_specs) }
+            .next()
+            .expect("one sort specification");
         assert_eq!(spec.column_user_data, user_data);
     }
 }
@@ -379,6 +379,36 @@ fn table_sort_specs_are_owned_but_native_acknowledgement_stays_table_scoped() {
         });
         assert_eq!(specs.iter().copied().collect::<Vec<_>>(), copied);
     });
+}
+
+#[test]
+fn acknowledging_a_sort_snapshot_preserves_a_newer_order() {
+    let mut context = setup_context();
+    let ui = context.frame();
+    ui.window("sort edits")
+        .build(|| {
+            let _table = ui
+                .begin_table_with_flags("records", 1, TableFlags::SORTABLE)
+                .unwrap();
+            ui.table_setup_column("value", TableColumnFlags::NONE, None);
+            let mut original = ui.table_get_sort_specs().unwrap();
+            assert_eq!(
+                original.iter().next().unwrap().sort_direction,
+                SortDirection::Ascending
+            );
+
+            ui.table_set_column_sort_direction(0, SortDirection::Descending, false);
+            assert!(!original.clear_dirty(ui));
+            let mut current = ui.table_get_sort_specs().unwrap();
+            assert!(current.is_dirty());
+            assert_eq!(
+                current.iter().next().unwrap().sort_direction,
+                SortDirection::Descending
+            );
+            assert!(current.clear_dirty(ui));
+            assert!(!ui.table_get_sort_specs().unwrap().is_dirty());
+        })
+        .expect("visible sort test window");
 }
 
 #[test]
