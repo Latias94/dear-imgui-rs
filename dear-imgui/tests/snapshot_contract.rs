@@ -1168,7 +1168,7 @@ fn foreign_consumer_is_rejected_before_capture() {
 
     let mut context_b = imgui::Context::create();
     prepare_context(&mut context_b);
-    let _consumer_b = context_b.create_detached_renderer_consumer().unwrap();
+    let consumer_b = context_b.create_detached_renderer_consumer().unwrap();
     let texture_id = context_b.register_texture(owned_texture());
     let frame = context_b.begin_frame();
     frame.ui().image(texture_id, [16.0, 16.0]);
@@ -1178,18 +1178,40 @@ fn foreign_consumer_is_rejected_before_capture() {
             imgui::render::RendererConsumerError::ForeignContext { .. }
         ))
     ));
+    assert_eq!(
+        context_b.frame_lifecycle_state(),
+        imgui::FrameLifecycleState::Idle
+    );
+    context_b.frame().image(texture_id, [16.0, 16.0]);
+    assert!(matches!(
+        context_b.render_snapshot(&consumer_a),
+        Err(imgui::render::SnapshotError::Consumer(
+            imgui::render::RendererConsumerError::ForeignContext { .. }
+        ))
+    ));
+    #[cfg(feature = "multi-viewport")]
+    assert!(matches!(
+        context_b.render_platform_viewport_snapshot(&consumer_a),
+        Err(imgui::render::SnapshotError::Consumer(
+            imgui::render::RendererConsumerError::ForeignContext { .. }
+        ))
+    ));
+    assert_eq!(
+        context_b.frame_lifecycle_state(),
+        imgui::FrameLifecycleState::InFrame
+    );
     context_b
         .with_texture(texture_id, |texture| {
             assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
             assert!(texture.texture_id().is_null());
         })
         .unwrap();
-    context_b.remove_texture(texture_id).unwrap();
-    drop(context_b.begin_frame());
-    assert_eq!(
-        context_b.with_texture(texture_id, |_| ()),
-        Err(imgui::ManagedTextureError::AlreadyRemoved(texture_id))
-    );
+    let snapshot = context_b.render_snapshot(&consumer_b).unwrap();
+    assert!(matches!(
+        request_for(&snapshot, texture_id).operation(),
+        imgui::render::TextureOp::Create { .. }
+    ));
+    drop(snapshot);
     drop(context_b);
     drop(suspended_a.activate().unwrap());
 }

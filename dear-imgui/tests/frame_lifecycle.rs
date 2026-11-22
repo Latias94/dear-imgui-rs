@@ -192,6 +192,28 @@ fn abandoned_managed_frame_cannot_enter_default_platform_renderer_callbacks() {
 }
 
 #[test]
+fn an_engine_owned_frame_can_retry_synchronous_render_with_its_own_consumer() {
+    let _guard = test_guard();
+    let mut other = imgui::Context::create();
+    let foreign = other.create_synchronous_renderer_consumer().unwrap();
+    let _other = other.suspend_or_panic();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
+    ctx.frame().text("one frame");
+    let stamp = ctx.frame_lifecycle_stamp();
+    assert!(matches!(
+        ctx.try_render(&foreign),
+        Err(imgui::render::SnapshotError::Consumer(
+            imgui::render::RendererConsumerError::ForeignContext { .. }
+        ))
+    ));
+    assert_eq!(ctx.frame_lifecycle_stamp(), stamp);
+    assert!(reconcile_test_frame(ctx.try_render(&consumer).unwrap(), &[]).valid());
+}
+
+#[test]
 fn context_can_snapshot_an_engine_owned_main_viewport_frame() {
     let _guard = test_guard();
 

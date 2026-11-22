@@ -316,11 +316,13 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     }
 
     /// Render a managed-texture frame while returning capture or consumer failures.
+    /// A rejected consumer leaves the frame open so the owning renderer can retry.
     pub fn try_render(
         &mut self,
         consumer: &crate::render::SynchronousRendererConsumer,
     ) -> Result<crate::render::PendingFrame<'_>, crate::render::SnapshotError> {
         self.require_managed_renderer("Context::try_render()")?;
+        self.snapshot_hub.validate_consumer(consumer)?;
         let draw_data = self.render_raw();
         let (epoch, requests) =
             self.begin_synchronous_render(consumer, draw_data.as_ptr().cast_const())?;
@@ -397,11 +399,13 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     /// This Context-level entry point supports engine schedules that open and close the native
     /// frame in separate systems and therefore cannot retain a [`FrameToken`]. The snapshot is
     /// still bound to the supplied renderer consumer, Context, generation, and ordered epoch.
+    /// A rejected consumer leaves the frame open for another render attempt.
     pub fn render_snapshot(
         &mut self,
         consumer: &crate::render::snapshot::DetachedRendererConsumer,
     ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
     {
+        self.snapshot_hub.validate_consumer(consumer)?;
         let draw_data = self.render_raw();
         self.capture_main_snapshot(consumer, draw_data.as_ptr())
     }
@@ -421,8 +425,10 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         consumer: &crate::render::snapshot::DetachedRendererConsumer,
     ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
     {
+        let _guard = CTX_MUTEX.lock();
+        self.snapshot_hub.validate_consumer(consumer)?;
         let _ = self.render_raw();
-        self.platform_viewport_snapshot(consumer)
+        self.capture_platform_snapshot(consumer)
     }
 
     /// Build a thread-safe snapshot from the current platform viewport draw data.
@@ -444,6 +450,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
                 "Context::platform_viewport_snapshot() called before rendering the current frame"
             );
         }
+        self.snapshot_hub.validate_consumer(consumer)?;
         self.capture_platform_snapshot(consumer)
     }
 
@@ -537,10 +544,7 @@ impl<'ctx> FrameToken<'ctx> {
         consumer: &crate::render::snapshot::DetachedRendererConsumer,
     ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
     {
-        let ctx = self.ctx as *mut Context;
-        let draw_data = unsafe { (&mut *ctx).render_raw().as_ptr() };
-        std::mem::forget(self);
-        unsafe { (&mut *ctx).capture_main_snapshot(consumer, draw_data) }
+        self.ctx.render_snapshot(consumer)
     }
 
     /// Render this frame and build a thread-safe snapshot for all platform viewports.
@@ -550,10 +554,7 @@ impl<'ctx> FrameToken<'ctx> {
         consumer: &crate::render::snapshot::DetachedRendererConsumer,
     ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
     {
-        let ctx = self.ctx as *mut Context;
-        let snapshot = unsafe { (&mut *ctx).render_platform_viewport_snapshot(consumer) };
-        std::mem::forget(self);
-        snapshot
+        self.ctx.render_platform_viewport_snapshot(consumer)
     }
 }
 
