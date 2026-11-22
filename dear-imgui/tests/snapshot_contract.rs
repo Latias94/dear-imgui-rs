@@ -1059,6 +1059,78 @@ fn stale_feedback_cannot_mutate_a_texture_in_a_reused_slot() {
 }
 
 #[test]
+fn removal_during_a_frame_keeps_submitted_geometry_and_pixels_until_the_next_frame() {
+    use imgui::render::{DrawCmdSnapshot, SnapshotTextureId, TextureBinding, TextureOp};
+
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let consumer = ctx.create_detached_renderer_consumer().unwrap();
+    let id = ctx.register_texture(owned_texture());
+    ctx.frame().get_foreground_draw_list().add_image(
+        id,
+        [0.0, 0.0],
+        [16.0, 16.0],
+        [0.0, 0.0],
+        [1.0, 1.0],
+        imgui::Color::WHITE,
+    );
+    ctx.remove_texture(id).unwrap();
+    assert_eq!(
+        ctx.with_texture(id, |_| ()),
+        Err(imgui::ManagedTextureError::Retiring(id))
+    );
+    assert_eq!(
+        ctx.remove_texture(id),
+        Err(imgui::ManagedTextureError::AlreadyRetiring(id))
+    );
+
+    let first = ctx.render_snapshot(&consumer).unwrap();
+    assert!(
+        matches!(request_for(&first, id).operation(), TextureOp::Create { pixels, .. } if pixels.len() == 16)
+    );
+    assert!(first.draw_data().draw_lists.iter().flat_map(|list| &list.commands).any(|cmd| {
+        matches!(cmd, DrawCmdSnapshot::Elements { texture: TextureBinding::Managed(SnapshotTextureId::User(texture)), .. } if *texture == id)
+    }));
+    let uploaded = upload_user(&first, id, imgui::TextureId::new(33));
+    first.commit(uploaded).unwrap();
+    ctx.poll_snapshot_completions().unwrap();
+
+    let next = ctx.begin_frame().render_snapshot(&consumer).unwrap();
+    assert_eq!(request_for(&next, id).operation(), &TextureOp::Destroy);
+    let destroyed = destroy_user(&next, id);
+    next.commit(destroyed).unwrap();
+    ctx.poll_snapshot_completions().unwrap();
+    assert_eq!(
+        ctx.with_texture(id, |_| ()),
+        Err(imgui::ManagedTextureError::AlreadyRemoved(id))
+    );
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn removing_after_main_capture_preserves_uploads_for_the_same_platform_frame() {
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let consumer = ctx.create_detached_renderer_consumer().unwrap();
+    let id = ctx.register_texture(owned_texture());
+    let frame = ctx.begin_frame();
+    frame.ui().image(id, [16.0, 16.0]);
+    let main = frame.render_snapshot(&consumer).unwrap();
+    ctx.remove_texture(id).unwrap();
+    let platform = ctx.platform_viewport_snapshot(&consumer).unwrap();
+    assert_eq!(
+        request_for(&main, id).upload_identity(),
+        request_for(&platform, id).upload_identity()
+    );
+    assert!(matches!(
+        request_for(&platform, id).operation(),
+        imgui::render::TextureOp::Create { .. }
+    ));
+}
+
+#[test]
 fn remove_after_capture_waits_for_create_then_matching_destroy_completion() {
     let _guard = test_guard();
     let mut ctx = imgui::Context::create();
@@ -1113,6 +1185,7 @@ fn foreign_consumer_is_rejected_before_capture() {
         })
         .unwrap();
     context_b.remove_texture(texture_id).unwrap();
+    drop(context_b.begin_frame());
     assert_eq!(
         context_b.with_texture(texture_id, |_| ()),
         Err(imgui::ManagedTextureError::AlreadyRemoved(texture_id))

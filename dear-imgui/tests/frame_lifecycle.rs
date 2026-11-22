@@ -887,6 +887,7 @@ fn renderer_reset_acknowledges_retiring_textures_after_the_last_epoch() {
     ctx.remove_texture(texture_id).unwrap();
     let reset = ctx.prepare_renderer_texture_reset(&consumer).unwrap();
     reset.commit();
+    drop(ctx.begin_frame());
     assert_eq!(
         ctx.with_texture(texture_id, |_| ()),
         Err(imgui::ManagedTextureError::AlreadyRemoved(texture_id))
@@ -940,14 +941,14 @@ fn renderer_reset_handles_atlas_active_and_retiring_bindings_as_one_transaction(
         assert!(texture.texture_id().is_null());
     })
     .unwrap();
-    assert_eq!(
-        ctx.with_texture(retiring, |_| ()),
-        Err(imgui::ManagedTextureError::AlreadyRemoved(retiring))
-    );
-
     let frame = ctx.begin_frame();
     frame.ui().image(active, [16.0, 16.0]);
     let pending = frame.render(&consumer);
+    assert!(
+        pending.texture_requests().iter().all(|request| {
+            request.texture() != imgui::render::SnapshotTextureId::User(retiring)
+        })
+    );
     assert!(pending.texture_requests().iter().any(|request| {
         request.texture() == imgui::render::SnapshotTextureId::User(active)
             && matches!(request.operation(), imgui::render::TextureOp::Create { .. })
@@ -958,6 +959,11 @@ fn renderer_reset_handles_atlas_active_and_retiring_bindings_as_one_transaction(
             imgui::render::SnapshotTextureId::FontAtlas { .. }
         ) && matches!(request.operation(), imgui::render::TextureOp::Create { .. })
     }));
+    drop(pending);
+    assert_eq!(
+        ctx.with_texture(retiring, |_| ()),
+        Err(imgui::ManagedTextureError::AlreadyRemoved(retiring))
+    );
 }
 
 #[test]

@@ -179,11 +179,11 @@ impl Context {
             with_bound_context(self.raw, || {
                 let _ = crate::list_clipper::forget_context_clippers(self.raw);
                 sys::igEndFrame();
+                let mut registry = self.texture_registry.borrow_mut();
+                registry.observe_native_texture_list_refresh();
+                registry.finish_frame_removals(self.snapshot_hub.completion_watermark());
             });
         }
-        self.texture_registry
-            .borrow_mut()
-            .observe_native_texture_list_refresh();
         true
     }
 
@@ -259,6 +259,9 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
             if let Some(shared_font_atlas) = &self.shared_font_atlas {
                 shared_font_atlas.prepare_frame(renderer_has_textures);
             }
+            self.texture_registry
+                .borrow_mut()
+                .finish_frame_removals(self.snapshot_hub.completion_watermark());
             sys::igNewFrame();
         }
         Ok(&mut self.ui)
