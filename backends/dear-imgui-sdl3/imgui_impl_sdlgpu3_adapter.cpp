@@ -19,7 +19,8 @@ bool upload_texture_region(ImGui_ImplSDLGPU3_Data& bd, ImTextureData& tex, SDL_G
     SDL_GPUDevice* device = bd.InitInfo.Device;
     const Uint32 pitch = region.w * tex.BytesPerPixel;
     const Uint32 bytes = pitch * region.h; // Rust validates the entire CPU image fits in i32.
-    if (bd.TexTransferBufferSize < bytes) {
+    // DestroyDeviceObjects releases the transfer buffer but keeps its previous capacity.
+    if (!bd.TexTransferBuffer || bd.TexTransferBufferSize < bytes) {
         SDL_GPUTransferBufferCreateInfo info = {};
         info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
         info.size = bytes + 1024;
