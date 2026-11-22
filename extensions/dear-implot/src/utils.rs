@@ -385,7 +385,8 @@ impl PlotUi<'_> {
         self.with_bound_context(|| unsafe { sys::ImPlot_IsSubplotsHovered() })
     }
 
-    /// Show the native ImPlot demo when the `demo` feature is enabled.
+    /// Show the ImPlot demo when the `demo` feature is enabled. Its ImGui tools use
+    /// the core font-atlas filter.
     pub fn show_demo_window(&self, show: &mut bool) {
         self.with_idle_context(|| {
             #[cfg(feature = "demo")]

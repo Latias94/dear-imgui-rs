@@ -5,17 +5,7 @@ impl Plot3DUi<'_> {
     fn show_native_tool(&self, show: impl FnOnce()) {
         // Upstream demos can begin plots. The metrics and style tools can clear plot/item caches.
         let _exclusive = self.context.enter_plot();
-        self.with_bound_context(|| {
-            show();
-            // The native style editor shares its saved reference style across contexts. A
-            // restored custom colormap may belong to a different context's registry.
-            unsafe {
-                let style = sys::ImPlot3D_GetStyle();
-                if !(0..sys::ImPlot3D_GetColormapCount()).contains(&(*style).Colormap) {
-                    (*style).Colormap = sys::ImPlot3DColormap_Deep as _;
-                }
-            }
-        });
+        self.with_bound_context(show);
     }
 
     /// Show upstream ImPlot3D demos (from C++ demo).
@@ -26,7 +16,7 @@ impl Plot3DUi<'_> {
         self.show_native_tool(|| unsafe { sys::ImPlot3D_ShowAllDemos() })
     }
 
-    /// Show the main ImPlot3D demo window (C++ upstream).
+    /// Show the ImPlot3D demo. Its ImGui tools use the core font-atlas filter.
     ///
     /// This displays the main demo window with tabs for different plot types.
     pub fn show_demo_window(&self) {
@@ -38,7 +28,7 @@ impl Plot3DUi<'_> {
         self.show_native_tool(|| unsafe { sys::ImPlot3D_ShowDemoWindow(p_open as *mut bool) })
     }
 
-    /// Show the ImPlot3D style editor window.
+    /// Show the style editor with this plot context's saved reference and color preview.
     ///
     /// This displays a window for editing ImPlot3D style settings in real time.
     pub fn show_style_editor(&self) {

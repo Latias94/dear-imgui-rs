@@ -63,6 +63,37 @@ fn plot3d_ui_rejects_a_ui_from_another_context_by_identity() {
 }
 
 #[test]
+fn style_editor_reverts_to_the_current_plot_contexts_first_style() {
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    imgui.set_ini_filename::<std::path::PathBuf>(None).unwrap();
+    prepare_imgui(&mut imgui);
+    let a = Plot3DContext::create(&imgui);
+    let b = Plot3DContext::create(&imgui);
+    a.set_style_colormap(Colormap::Pink);
+    b.set_style_colormap(Colormap::Viridis);
+
+    for (owner, request_revert) in [(&a, false), (&b, true), (&b, false)] {
+        let frame = imgui.begin_frame();
+        let ui = frame.ui();
+        ui.window("3D style reference")
+            .size([600.0, 440.0], Condition::Always)
+            .build(|| {
+                owner.get_plot_ui(ui).show_style_editor();
+                if request_revert {
+                    b.set_style_colormap(Colormap::Deep);
+                    unsafe {
+                        dear_imgui_rs::sys::igActivateItemByID(ui.get_id("Revert Ref").raw())
+                    };
+                }
+            })
+            .unwrap();
+    }
+    assert_eq!(a.style_colormap_index(), Some(Colormap::Pink.index()));
+    assert_eq!(b.style_colormap_index(), Some(Colormap::Viridis.index()));
+}
+
+#[test]
 fn plot3d_binding_restores_imgui_and_plot_contexts_after_panic() {
     let _guard = test_guard();
     let mut imgui = Context::create();

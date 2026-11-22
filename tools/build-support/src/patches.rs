@@ -1302,16 +1302,91 @@ pub fn patch_cte_text_editor(source: &str) -> Result<String, String> {
     Ok(restore_cpp_newlines(patched, newline))
 }
 
-/// Source contract for ImPlot3D rendering, legend hover and literal axis menu labels.
-pub const IMPLOT3D_DRAW_FLAGS_PATCH_VERSION: &str = "implot3d-draw-flags-v3";
+/// Source contract for ImPlot3D rendering and context-owned demo tools.
+pub const IMPLOT3D_DRAW_FLAGS_PATCH_VERSION: &str = "implot3d-draw-flags-v4";
 
-/// Source contract for ImPlot drawing, axis menus and metrics with Dear ImGui 1.93.
-pub const IMPLOT_IMGUI_PATCH_VERSION: &str = "implot-imgui-193-v4";
+/// Source contract for ImPlot drawing, inspectors and context-owned demo tools.
+pub const IMPLOT_IMGUI_PATCH_VERSION: &str = "implot-imgui-193-v5";
+
+// implot_demo.cpp includes the internal header again next to its custom plotter example.
+// Match the opening include block shared by the core and demo of each library.
+const IMPLOT_TOOL_INCLUDES: &str =
+    "\n#include \"implot.h\"\n#ifndef IMGUI_DISABLE\n#include \"implot_internal.h\"\n";
+const IMPLOT3D_TOOL_INCLUDES: &str =
+    "\n#include \"implot3d.h\"\n#include \"implot3d_internal.h\"\n";
+
+fn add_plot_tool_state(source: &str, includes: &str) -> Result<String, String> {
+    let state = include_str!("plot_demo_state.hpp").replace("\r\n", "\n");
+    replace_cpp_source_once(
+        source,
+        includes,
+        &format!("{includes}{state}"),
+        "plot demo context state",
+    )
+}
+
+fn patch_plot_style_reference(source: &str, plot: &str) -> Result<String, String> {
+    let comment = if plot == "ImPlot" {
+        "    // Default to using internal storage as reference\n"
+    } else {
+        ""
+    };
+    let original = format!(
+        "    static {plot}Style ref_saved_style;
+{comment}    static bool init = true;
+    if (init && ref == nullptr)
+        ref_saved_style = style;
+    init = false;"
+    );
+    let replacement = format!(
+        "    auto& tools = DearImGuiRs::{plot}Tools::Get(&gp);
+    if (!tools.reference)
+        tools.reference.emplace(style);
+    auto& ref_saved_style = *tools.reference;"
+    );
+    replace_cpp_source_once(
+        source,
+        &original,
+        &replacement,
+        "plot style editor reference",
+    )
+}
+
+fn filter_plot_demo_imgui_tools(source: &str) -> Result<String, String> {
+    // These are the same C entry points used by dear-imgui-rs. Its filtered demo
+    // also routes its own nested metrics and style windows through the safe variants.
+    let mut source = source.to_owned();
+    for (call, filtered) in [
+        (
+            "ImGui::ShowStyleEditor();",
+            "dear_imgui_rs_show_style_editor_without_font_atlas(nullptr);",
+        ),
+        (
+            "ImGui::ShowMetricsWindow(&show_imgui_metrics);",
+            "dear_imgui_rs_show_metrics_window_without_font_atlas(&show_imgui_metrics);",
+        ),
+        (
+            "ImGui::ShowDemoWindow(&show_imgui_demo);",
+            "dear_imgui_rs_show_demo_window_without_font_atlas(&show_imgui_demo);",
+        ),
+    ] {
+        source = replace_cpp_source_once(&source, call, filtered, "plot demo ImGui tool")?;
+    }
+    Ok(source)
+}
 
 /// Adapt ImPlot rendering and establish the plot ID scope for item visibility queries.
 pub fn patch_implot_cpp_for_imgui(source: &str, file_name: &str) -> Result<String, String> {
     let (source, newline) = normalize_cpp_source(source);
     if file_name == "implot.cpp" {
+        let source = add_plot_tool_state(&source, IMPLOT_TOOL_INCLUDES)?;
+        let source = replace_cpp_source_once(
+            &source,
+            "    IM_DELETE(ctx);",
+            "    DearImGuiRs::ImPlotTools::Forget(ctx);\n    IM_DELETE(ctx);",
+            "ImPlot tool state destruction",
+        )?;
+        let source = patch_plot_style_reference(&source, "ImPlot")?;
         let source = replace_cpp_source_once(
             &source,
             r#"ImGui::Text(x_axis.HasLabel() ? plot.GetAxisLabel(x_axis) :  i == 0 ? "X-Axis" : "X-Axis %d", i + 1);"#,
@@ -1348,6 +1423,26 @@ pub fn patch_implot_cpp_for_imgui(source: &str, file_name: &str) -> Result<Strin
         return Ok(restore_cpp_newlines(source, newline));
     }
     if file_name == "implot_demo.cpp" {
+        let source = add_plot_tool_state(&source, IMPLOT_TOOL_INCLUDES)?;
+        let source = filter_plot_demo_imgui_tools(&source)?;
+        let source = replace_cpp_source_once(
+            &source,
+            "static ImPlotColormap Liars = -1;",
+            "ImPlotColormap Liars = ImPlot::GetColormapIndex(\"Liars\");",
+            "stacked bar demo colormap registration",
+        )?;
+        let source = replace_cpp_source_once(
+            &source,
+            "static ImPlotColormap map = ImPlotColormap_Viridis;",
+            "auto& map = DearImGuiRs::ImPlotTools::Get(ImPlot::GetCurrentContext()).heatmap_colormap;",
+            "heatmap demo colormap selection",
+        )?;
+        let source = replace_cpp_source_once(
+            &source,
+            "static int cmap = ImPlotColormap_Viridis;",
+            "auto& cmap = DearImGuiRs::ImPlotTools::Get(ImPlot::GetCurrentContext()).widget_colormap;",
+            "colormap widget demo selection",
+        )?;
         let source = replace_cpp_source_once(
             &source,
             "ImPlot::AddLineV(draw_list, (float)xs[i], (float)lows[i], (float)highs[i], color);",
@@ -1430,7 +1525,7 @@ pub fn patch_implot_cpp_for_imgui(source: &str, file_name: &str) -> Result<Strin
     Ok(restore_cpp_newlines(patched, newline))
 }
 
-/// Stage ImPlot3D's rendering, window-hover and axis menu corrections for native and WASM.
+/// Stage ImPlot3D's drawing, inspectors and demo tools for native and WASM.
 pub fn stage_implot3d_draw_flags(
     source_path: &std::path::Path,
     out_dir: &std::path::Path,
@@ -1444,6 +1539,13 @@ pub fn stage_implot3d_draw_flags(
     let (source, newline) = normalize_cpp_source(&source);
     let patched = match file_name {
         "implot3d.cpp" => {
+            let source = add_plot_tool_state(&source, IMPLOT3D_TOOL_INCLUDES)?;
+            let source = replace_cpp_source_once(
+                &source,
+                "    IM_DELETE(ctx);",
+                "    DearImGuiRs::ImPlot3DTools::Forget(ctx);\n    IM_DELETE(ctx);",
+                "ImPlot3D tool state destruction",
+            )?;
             let source = replace_cpp_source_once(
                 &source,
                 "legend.Hovered = legend.Hovered || legend.RectClamped.Contains(IO.MousePos);",
@@ -1467,6 +1569,27 @@ pub fn stage_implot3d_draw_flags(
                 "ImPlot3D device-pixel line width",
             )?;
             patch_plot_line_coverage(&source, true)?
+        }
+        "implot3d_demo.cpp" => {
+            let source = add_plot_tool_state(&source, IMPLOT3D_TOOL_INCLUDES)?;
+            let source = filter_plot_demo_imgui_tools(&source)?;
+            let source = patch_plot_style_reference(&source, "ImPlot3D")?;
+            let source = replace_cpp_source_once(
+                &source,
+                "    static float flash_color_time = 0.5f;
+    static ImPlot3DCol flash_color_idx = ImPlot3DCol_COUNT;
+    static ImVec4 flash_color_backup = ImVec4(0, 0, 0, 0);",
+                "    auto& flash_color_time = tools.flash_color_time;
+    auto& flash_color_idx = tools.flash_color_idx;
+    auto& flash_color_backup = tools.flash_color_backup;",
+                "ImPlot3D style color preview",
+            )?;
+            replace_cpp_source_once(
+                &source,
+                "static ImPlot3DColormap cmap = ImPlot3DColormap_Viridis;",
+                "auto& cmap = DearImGuiRs::ImPlot3DTools::Get(ImPlot3D::GetCurrentContext()).marker_colormap;",
+                "ImPlot3D per-point color demo selection",
+            )?
         }
         _ => return Err(format!("unsupported ImPlot3D source {file_name}")),
     };
@@ -1693,6 +1816,13 @@ mod tests {
                 .contains("AddRectFilled(ImMin(open_pos, close_pos), ImMax(open_pos, close_pos),")
         );
         assert!(patch_implot_cpp_for_imgui(&patched_demo, "implot_demo.cpp").is_err());
+        // The custom plotter's later include cannot supply declarations to the earlier demos.
+        let missing_opening_include = demo.replacen(
+            "#include \"implot_internal.h\"",
+            "// #include \"implot_internal.h\"",
+            1,
+        );
+        assert!(patch_implot_cpp_for_imgui(&missing_opening_include, "implot_demo.cpp").is_err());
         let drifted_demo = demo.replacen(
             "draw_list->AddRectFilled(open_pos, close_pos, color);",
             "ChangedDrawRect();",
@@ -1721,6 +1851,11 @@ mod tests {
                 "implot3d_items.cpp",
                 "ApplyLineCoverage(ColGetter(prim), LineCoverage)",
                 "const float screen_thickness = half_weight * 2.0f;",
+            ),
+            (
+                "implot3d_demo.cpp",
+                "auto& flash_color_backup = tools.flash_color_backup;",
+                "static ImVec4 flash_color_backup =",
             ),
         ] {
             let path = source_root.join(name);

@@ -26,6 +26,45 @@ fn prepare_imgui(imgui: &mut Context) {
 }
 
 #[test]
+fn style_editor_saves_and_reverts_each_plot_context_independently() {
+    use crate::Colormap;
+
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    imgui.set_ini_filename::<std::path::PathBuf>(None).unwrap();
+    prepare_imgui(&mut imgui);
+    let a = PlotContext::create(&imgui);
+    let b = PlotContext::create(&imgui);
+    let mut show = |owner: &PlotContext, next_button: Option<&str>| {
+        let frame = imgui.begin_frame();
+        let ui = frame.ui();
+        ui.window("Plot style reference")
+            .size([600.0, 440.0], dear_imgui_rs::Condition::Always)
+            .build(|| {
+                owner.get_plot_ui(ui).show_style_editor();
+                if let Some(button) = next_button {
+                    // Activate the editor's ordinary button on the following frame.
+                    unsafe { dear_imgui_rs::sys::igActivateItemByID(ui.get_id(button).raw()) };
+                }
+            })
+            .unwrap();
+    };
+    a.set_style_colormap(Colormap::Hot);
+    b.set_style_colormap(Colormap::Cool);
+    show(&a, Some("Save Ref"));
+    a.set_style_colormap(Colormap::Viridis);
+    show(&a, None);
+    show(&b, None);
+    a.set_style_colormap(Colormap::Dark);
+    b.set_style_colormap(Colormap::Deep);
+    show(&b, Some("Revert Ref"));
+    show(&b, Some("Revert Ref"));
+    assert_eq!(b.style_colormap_index(), Some(Colormap::Cool.index()));
+    show(&a, None);
+    assert_eq!(a.style_colormap_index(), Some(Colormap::Viridis.index()));
+}
+
+#[test]
 fn hidden_item_query_survives_frames_and_last_item_resets_on_begin_plot() {
     let _guard = test_guard();
     let mut imgui = Context::create();

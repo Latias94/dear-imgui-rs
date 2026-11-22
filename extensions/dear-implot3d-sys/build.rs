@@ -391,7 +391,7 @@ fn build_with_cc(
         let source = sources
             .file(file_id)
             .unwrap_or_else(|error| panic!("dear-implot3d-sys: {error}"));
-        if matches!(file_id, "core" | "items") {
+        if matches!(file_id, "core" | "items" | "demo") {
             let staged = build_support::stage_implot3d_draw_flags(&source, &cfg.out_dir)
                 .unwrap_or_else(|error| panic!("dear-implot3d-sys: {error}"));
             build.file(staged);

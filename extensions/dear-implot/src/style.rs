@@ -621,7 +621,7 @@ impl PlotContext {
 }
 
 impl PlotUi<'_> {
-    /// Show the ImPlot style editor window for this context.
+    /// Show the style editor with this plot context's saved reference, shared with its demo.
     pub fn show_style_editor(&self) {
         self.with_idle_context(|| unsafe { sys::ImPlot_ShowStyleEditor(std::ptr::null_mut()) })
     }

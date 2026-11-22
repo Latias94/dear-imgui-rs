@@ -485,11 +485,11 @@ def expected_extension_binding_identity(source_root: Path, spec: ExtensionSpec) 
     if spec.extension_id == "cte":
         identity.field("source_overlay", "cte-text-editor-v1")
     if spec.extension_id == "implot3d":
-        identity.field("source_overlay", "implot3d-draw-flags-v3")
+        identity.field("source_overlay", "implot3d-draw-flags-v4")
     if spec.extension_id == "imnodes":
         identity.field("source_overlay", "imnodes-ini-state-v2")
     if spec.extension_id == "implot":
-        identity.field("source_overlay", "implot-imgui-193-v4")
+        identity.field("source_overlay", "implot-imgui-193-v5")
     if spec.extension_id == "imguizmo":
         identity.field("source_overlay", "imguizmo-interaction-v1")
     return identity.finish()

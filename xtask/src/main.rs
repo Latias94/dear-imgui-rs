@@ -1587,8 +1587,23 @@ mod tests {
         );
     }
 
+    fn assert_filtered_plot_demo(source: &std::path::Path) {
+        let demo = std::fs::read_to_string(source).unwrap();
+        for call in [
+            "dear_imgui_rs_show_style_editor_without_font_atlas(nullptr);",
+            "dear_imgui_rs_show_metrics_window_without_font_atlas(&show_imgui_metrics);",
+            "dear_imgui_rs_show_demo_window_without_font_atlas(&show_imgui_demo);",
+        ] {
+            assert!(
+                demo.contains(call),
+                "{} is missing {call}",
+                source.display()
+            );
+        }
+    }
+
     #[test]
-    fn implot3d_provider_patches_geometry_and_compiles_the_upstream_demo() {
+    fn implot3d_provider_stages_geometry_and_demo_tools() {
         let mut inventory = SourceInventory::embedded().clone();
         inventory
             .sources
@@ -1598,7 +1613,7 @@ mod tests {
             prepare_wasm_provider_inputs(&inventory, &project_root(), output.path()).unwrap();
         let source_root =
             project_root().join("extensions/dear-implot3d-sys/third-party/cimplot3d/implot3d");
-        for name in ["implot3d.cpp", "implot3d_items.cpp"] {
+        for name in ["implot3d.cpp", "implot3d_items.cpp", "implot3d_demo.cpp"] {
             assert!(!inputs.source_files.contains(&source_root.join(name)));
             assert!(
                 inputs
@@ -1606,11 +1621,6 @@ mod tests {
                     .contains(&output.path().join(format!("imgui-193-{name}")))
             );
         }
-        assert!(
-            inputs
-                .source_files
-                .contains(&source_root.join("implot3d_demo.cpp"))
-        );
         let plot = std::fs::read_to_string(output.path().join("imgui-193-implot3d.cpp")).unwrap();
         assert!(plot.contains(
             "ImGui::TextUnformatted(axis.HasLabel() ? axis.GetLabel() : axis_labels[i]);"
@@ -1618,6 +1628,7 @@ mod tests {
         let items =
             std::fs::read_to_string(output.path().join("imgui-193-implot3d_items.cpp")).unwrap();
         assert!(items.contains("_ParentDrawList->_SelectLineTexture(screen_thickness,"));
+        assert_filtered_plot_demo(&output.path().join("imgui-193-implot3d_demo.cpp"));
     }
 
     #[test]
@@ -1644,6 +1655,7 @@ mod tests {
         );
         let demo = output.path().join("provider-implot-demo-patched.cpp");
         assert!(inputs.source_files.contains(&demo));
+        assert_filtered_plot_demo(&demo);
         assert!(
             std::fs::read_to_string(demo)
                 .unwrap()

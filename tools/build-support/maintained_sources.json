@@ -96,7 +96,7 @@
         { "id": "core", "canonical": "third-party/cimplot3d/implot3d/implot3d.cpp", "alternates": [], "provider_transform": "patch-implot3d-draw-flags" },
         { "id": "items", "canonical": "third-party/cimplot3d/implot3d/implot3d_items.cpp", "alternates": [], "provider_transform": "patch-implot3d-draw-flags" },
         { "id": "meshes", "canonical": "third-party/cimplot3d/implot3d/implot3d_meshes.cpp", "alternates": [], "provider_transform": "direct" },
-        { "id": "demo", "canonical": "third-party/cimplot3d/implot3d/implot3d_demo.cpp", "alternates": [], "provider_transform": "direct" }
+        { "id": "demo", "canonical": "third-party/cimplot3d/implot3d/implot3d_demo.cpp", "alternates": [], "provider_transform": "patch-implot3d-draw-flags" }
       ],
       "native_required_files": ["wrapper", "core", "items", "meshes", "demo"],
       "archive_sentinels": ["wrapper", "core"],

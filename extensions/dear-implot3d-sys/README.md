@@ -21,7 +21,7 @@ regeneration is explicitly requested. `wasm` uses import bindings for the fixed
 `imgui-sys-v1` provider and skips C++ compilation in Cargo; build the provider
 separately with Emscripten.
 
-Native and WebAssembly builds use the upstream `implot3d_internal.h` supplied in the prebuilt archive. The shared `implot3d-draw-flags-v3` source adaptation delegates line texture selection to Dear ImGui, preserves fractional widths and framebuffer density, and keeps the original alpha coverage when widening a line to one physical pixel. Axis menus display application labels such as `CPU (%)` verbatim. The adaptation is part of the artifact identity.
+Native and WebAssembly builds use the upstream `implot3d_internal.h` supplied in the prebuilt archive. The shared `implot3d-draw-flags-v4` source adaptation delegates line texture selection to Dear ImGui, preserves fractional widths and framebuffer density, and keeps the original alpha coverage when widening a line to one physical pixel. Axis menus display application labels such as `CPU (%)` verbatim. The demo uses the core's font-atlas-filtered ImGui tools. Saved styles, color previews and demo colormap selections belong to the plot context. The adaptation is part of the artifact identity.
 Legend scrolling also requires the plot's window to be hovered, so overlapping windows retain input.
 
 This crate supports multiple ways to obtain the native `dear_implot3d` static library:
