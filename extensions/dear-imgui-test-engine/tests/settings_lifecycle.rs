@@ -5,8 +5,8 @@ use std::fs;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use dear_imgui_rs::{
-    Condition, Context, ContextLifecycle, FrameToken, SuspendedContext, TableColumnIndex,
-    TableFlags, render::ReconciledFrame,
+    Condition, Context, ContextLifecycle, ContextThreadLease, FrameToken, ImGuiError,
+    SuspendedContext, TableColumnIndex, TableFlags, render::ReconciledFrame,
 };
 use dear_imgui_test_engine::{
     AttachmentState, BuiltInTestSuite, CaptureOutput, FrameDriverError, MainRenderOutcome,
@@ -311,6 +311,101 @@ fn one_context_accepts_one_engine_and_start_failure_rolls_back_the_slot() {
 }
 
 #[test]
+fn detached_engine_holds_its_thread_until_native_shutdown_succeeds() {
+    let _guard = test_lock();
+    reset_counters();
+    let mut engine = TestEngine::create().unwrap();
+    std::thread::spawn(|| {
+        assert!(matches!(
+            TestEngine::create(),
+            Err(TestEngineError::ThreadLease(
+                ImGuiError::ContextThreadConflict
+            ))
+        ));
+        assert!(matches!(
+            Context::try_create(),
+            Err(ImGuiError::ContextThreadConflict)
+        ));
+    })
+    .join()
+    .unwrap();
+    assert_eq!(counters().EnginesCreated, 1);
+
+    inject(raw::ImGuiTestEngineExceptionPoint_UpstreamCall);
+    assert_eq!(
+        engine.shutdown().unwrap_err().status(),
+        Some(TestEngineStatus::Exception)
+    );
+    assert_eq!(counters().EnginesDestroyed, 0);
+    std::thread::spawn(|| {
+        assert!(matches!(
+            ContextThreadLease::acquire(),
+            Err(ImGuiError::ContextThreadConflict)
+        ));
+    })
+    .join()
+    .unwrap();
+
+    engine.shutdown().unwrap();
+    assert_eq!(counters().EnginesDestroyed, 1);
+    std::thread::spawn(|| drop(TestEngine::create().unwrap()))
+        .join()
+        .unwrap();
+    engine.shutdown().unwrap();
+    assert_eq!(counters().EnginesDestroyed, 2);
+}
+
+#[test]
+fn failed_native_engine_creation_releases_the_thread() {
+    let _guard = test_lock();
+    inject(raw::ImGuiTestEngineExceptionPoint_EngineAllocation);
+    assert_eq!(
+        TestEngine::create().err().unwrap().status(),
+        Some(TestEngineStatus::Exception)
+    );
+    std::thread::spawn(|| drop(TestEngine::create().unwrap()))
+        .join()
+        .unwrap();
+}
+
+#[test]
+fn dropping_the_engine_during_context_teardown_releases_the_last_native_owner() {
+    use dear_imgui_rs::{
+        ContextAttachment, ContextAttachmentRole, ContextAttachmentTeardownError, ContextTeardown,
+    };
+    use std::{cell::RefCell, rc::Rc};
+
+    struct EngineHolder(RefCell<Option<TestEngine>>);
+    impl ContextAttachment for EngineHolder {
+        fn release_renderer_resources(
+            &self,
+            _: &ContextTeardown<'_>,
+        ) -> Result<(), ContextAttachmentTeardownError> {
+            // All attachments have been quiesced, and the Context still owns the engine's hooks.
+            drop(self.0.borrow_mut().take());
+            Ok(())
+        }
+    }
+
+    let _guard = test_lock();
+    reset_counters();
+    let mut context = context();
+    let mut engine = TestEngine::create().unwrap();
+    engine.start(&mut context).unwrap();
+    let _attachment = context
+        .register_attachment::<EngineHolder>(
+            ContextAttachmentRole::Extension,
+            Rc::new(EngineHolder(RefCell::new(Some(engine)))),
+        )
+        .unwrap();
+    drop(context);
+    assert_eq!(counters().EnginesDestroyed, 1);
+    std::thread::spawn(|| drop(ContextThreadLease::acquire().unwrap()))
+        .join()
+        .unwrap();
+}
+
+#[test]
 fn engine_first_and_context_first_shutdown_destroy_exactly_once() {
     let _guard = test_lock();
     reset_counters();
@@ -339,6 +434,14 @@ fn engine_first_and_context_first_shutdown_destroy_exactly_once() {
         second_engine.attachment_state(),
         AttachmentState::ContextDestroyed
     );
+    std::thread::spawn(|| {
+        assert!(matches!(
+            ContextThreadLease::acquire(),
+            Err(ImGuiError::ContextThreadConflict)
+        ));
+    })
+    .join()
+    .unwrap();
     second_engine.shutdown().expect("destroy detached engine");
     second_engine
         .shutdown()

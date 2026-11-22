@@ -6,11 +6,11 @@ use std::rc::Rc;
 
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole, ContextBinding,
-    ContextId, FrameToken, Ui, with_scratch_txt, with_scratch_txt_two,
+    ContextId, ContextThreadLease, FrameToken, Ui, with_scratch_txt, with_scratch_txt_two,
 };
 use dear_imgui_test_engine_sys as sys;
 
-use crate::attachment::{AttachmentControl, TestEngineAttachmentMarker};
+use crate::attachment::{AttachmentControl, TestEngineAttachmentMarker, drop_native_engine};
 use crate::error::ffi_status;
 use crate::results::RunCompletion;
 use crate::{
@@ -133,8 +133,12 @@ impl Drop for ActivePresentation<'_> {
 }
 
 impl TestEngine {
-    /// Creates a detached native Test Engine.
+    /// Creates a detached native Test Engine on the Dear ImGui owner thread.
+    ///
+    /// The engine reserves the thread before native allocation and retains it until native
+    /// destruction, including if its attached Context is destroyed first.
     pub fn create() -> TestEngineResult<Self> {
+        let thread_lease = ContextThreadLease::acquire().map_err(TestEngineError::ThreadLease)?;
         let mut raw = std::ptr::null_mut();
         let status = unsafe { sys::imgui_test_engine_create_context(&mut raw) };
         ffi_status("imgui_test_engine_create_context", status)?;
@@ -147,18 +151,18 @@ impl TestEngine {
         let mut raw_engine_id = 0;
         let id_status = unsafe { sys::imgui_test_engine_get_engine_id(raw, &mut raw_engine_id) };
         if let Err(error) = ffi_status("imgui_test_engine_get_engine_id", id_status) {
-            let _ = unsafe { sys::imgui_test_engine_destroy_context(raw) };
+            drop_native_engine(raw, thread_lease);
             return Err(error);
         }
         let Some(engine_id) = EngineId::from_raw(raw_engine_id) else {
-            let _ = unsafe { sys::imgui_test_engine_destroy_context(raw) };
+            drop_native_engine(raw, thread_lease);
             return Err(TestEngineError::InvalidNativeData {
                 operation: "imgui_test_engine_get_engine_id",
                 detail: "successful engine creation returned a zero identity",
             });
         };
         Ok(Self {
-            control: Rc::new(AttachmentControl::new(raw, engine_id)),
+            control: Rc::new(AttachmentControl::new(raw, engine_id, thread_lease)),
             lease: None,
             _not_send_sync: PhantomData,
         })
