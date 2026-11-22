@@ -1606,6 +1606,10 @@ mod tests {
                 .source_files
                 .contains(&source_root.join("implot3d_demo.cpp"))
         );
+        let plot = std::fs::read_to_string(output.path().join("imgui-193-implot3d.cpp")).unwrap();
+        assert!(plot.contains(
+            "ImGui::TextUnformatted(axis.HasLabel() ? axis.GetLabel() : axis_labels[i]);"
+        ));
         let items =
             std::fs::read_to_string(output.path().join("imgui-193-implot3d_items.cpp")).unwrap();
         assert!(items.contains("_ParentDrawList->_SelectLineTexture(screen_thickness,"));
