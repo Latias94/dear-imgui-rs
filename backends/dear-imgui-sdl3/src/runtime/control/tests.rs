@@ -267,24 +267,28 @@ unsafe extern "C" fn synthetic_update_window(_viewport: *mut sys::ImGuiViewport)
 
 unsafe extern "C" fn synthetic_set_window_pos(
     _viewport: *mut sys::ImGuiViewport,
-    _pos: sys::ImVec2_c,
+    _pos: *const sys::ImVec2,
 ) {
 }
 
-unsafe extern "C" fn synthetic_get_window_pos(_viewport: *mut sys::ImGuiViewport) -> sys::ImVec2_c {
-    sys::ImVec2_c { x: 1.0, y: 2.0 }
+unsafe extern "C" fn synthetic_get_window_pos(
+    _viewport: *mut sys::ImGuiViewport,
+    out_pos: *mut sys::ImVec2,
+) {
+    unsafe { out_pos.write(sys::ImVec2 { x: 1.0, y: 2.0 }) };
 }
 
 unsafe extern "C" fn synthetic_set_window_size(
     _viewport: *mut sys::ImGuiViewport,
-    _size: sys::ImVec2_c,
+    _size: *const sys::ImVec2,
 ) {
 }
 
 unsafe extern "C" fn synthetic_get_window_size(
     _viewport: *mut sys::ImGuiViewport,
-) -> sys::ImVec2_c {
-    sys::ImVec2_c { x: 3.0, y: 4.0 }
+    out_size: *mut sys::ImVec2,
+) {
+    unsafe { out_size.write(sys::ImVec2 { x: 3.0, y: 4.0 }) };
 }
 
 unsafe extern "C" fn synthetic_get_window_framebuffer_scale(
@@ -334,11 +338,23 @@ unsafe fn install_synthetic_platform_callback_inventory(
         (*platform_io).Platform_DestroyWindow = Some(synthetic_destroy_window);
         (*platform_io).Platform_ShowWindow = Some(synthetic_show_window);
         (*platform_io).Platform_UpdateWindow = Some(synthetic_update_window);
-        (*platform_io).Platform_SetWindowPos = Some(synthetic_set_window_pos);
-        (*platform_io).Platform_GetWindowPos = Some(synthetic_get_window_pos);
-        (*platform_io).Platform_SetWindowSize = Some(synthetic_set_window_size);
-        (*platform_io).Platform_GetWindowSize = Some(synthetic_get_window_size);
-        // ImVec2 has a C++ return ABI on MSVC; Rust callbacks use the pointer shim.
+        // Use the C-compatible shims when Dear ImGui passes or returns ImVec2.
+        sys::ImGuiPlatformIO_Set_Platform_SetWindowPos_PointerParam(
+            platform_io,
+            Some(synthetic_set_window_pos),
+        );
+        sys::ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(
+            platform_io,
+            Some(synthetic_get_window_pos),
+        );
+        sys::ImGuiPlatformIO_Set_Platform_SetWindowSize_PointerParam(
+            platform_io,
+            Some(synthetic_set_window_size),
+        );
+        sys::ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(
+            platform_io,
+            Some(synthetic_get_window_size),
+        );
         sys::ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(
             platform_io,
             Some(synthetic_get_window_framebuffer_scale),
@@ -704,6 +720,16 @@ fn synthetic_renderer_registration_with_pointer_callback(
         (*main_viewport).PlatformHandle = OWNED_VIEWPORT_HANDLE as *mut _;
     });
 
+    claim_synthetic_renderer_callbacks(context, &mut registration);
+    registration
+}
+
+#[cfg(any(
+    feature = "opengl3-renderer",
+    feature = "sdlrenderer3-renderer",
+    feature = "sdlgpu3-renderer"
+))]
+fn claim_synthetic_renderer_callbacks(context: &Context, registration: &mut RuntimeRegistration) {
     let baseline = registration.baseline.take().unwrap();
     let renderer_baseline = baseline.snapshot();
     let (platform, renderer) = context.binding().with_bound_context(|| unsafe {
@@ -726,7 +752,6 @@ fn synthetic_renderer_registration_with_pointer_callback(
         .replace(renderer);
     registration.control.platform_initialized.set(true);
     registration.control.renderer_initialized.set(true);
-    registration
 }
 
 fn registry_contains(key: usize) -> bool {
@@ -771,6 +796,8 @@ impl ContextAttachment for ActiveExternalRendererAttachment {}
 
 mod lifecycle;
 mod platform_ownership;
+#[cfg(all(feature = "sdlgpu3-renderer", feature = "multi-viewport"))]
+mod prepare;
 #[cfg(any(
     feature = "opengl3-renderer",
     feature = "sdlrenderer3-renderer",
