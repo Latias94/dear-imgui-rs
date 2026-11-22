@@ -19,8 +19,7 @@ editor support needs its own provider wiring before it can be exposed safely on
 wasm.
 
 The sys layer deliberately exposes `NodeId`, `PinId`, and `LinkId` as pointer-sized integer values
-instead of upstream C++ helper pointers. The safe layer wraps those values as Rust newtypes and uses
-RAII tokens for editor frames, nodes, pins, create/delete sessions, shortcuts, and style pushes.
+instead of upstream C++ helper pointers. The safe layer wraps those values as Rust newtypes. Draw the editor canvas, nodes, pins, and creation previews in closures. Deletion sessions, shortcuts, and style pushes use scope tokens.
 
 ## Upstream Relationship
 
@@ -44,21 +43,23 @@ layout compatibility notice.
 
 ## Compatibility
 
-The `0.22` release train requires Rust 1.95 or newer. Upgrade all workspace crates together. See the [0.22 migration notes](../../docs/COMPATIBILITY.md#022-release-train).
+Use Rust 1.95 or newer and keep all `dear-*` dependencies on the `0.23` release train. See the [0.23 migration notes](../../docs/COMPATIBILITY.md#023-release-train).
 
 | Item                 | Version |
 |----------------------|---------|
-| Crate                | 0.22.0  |
-| dear-imgui-rs        | 0.22.0  |
-| dear-node-editor-sys | 0.22.0  |
+| Crate                | 0.23.0  |
+| dear-imgui-rs        | 0.23.0  |
+| dear-node-editor-sys | 0.23.0  |
 
 ## Quick Start
 
 ```rust
-use dear_node_editor::{EditorContext, NodeEditorUiExt, NodeId, PinId, LinkId, PinKind};
+use dear_node_editor::{
+    EditorConfig, EditorContext, LinkId, NodeEditorError, NodeEditorUiExt, NodeId, PinId, PinKind,
+};
 
-fn setup(imgui: &dear_imgui_rs::Context) -> EditorContext {
-    EditorContext::create(imgui)
+fn setup(imgui: &dear_imgui_rs::Context) -> Result<EditorContext, NodeEditorError> {
+    EditorContext::try_create_with_config(imgui, EditorConfig::default())
 }
 
 fn draw(ui: &dear_imgui_rs::Ui, editor_ctx: &EditorContext) {
@@ -96,6 +97,7 @@ If an application stores `dear_imgui_rs::Context` and `EditorContext` in the sam
 declare `EditorContext` before the ImGui context so the editor is dropped first. Native
 `imgui-node-editor` state is tied to the owning ImGui context. Its native owner
 holds the allocator thread until the editor has been destroyed.
+Add `NodeEditorError::ThreadLease` to exhaustive matches on fallible editor creation.
 
 ```rust
 struct UiState {

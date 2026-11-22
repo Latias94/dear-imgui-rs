@@ -67,7 +67,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! dear-imgui-sys = { version = "0.22", features = ["backend-shim-android", "backend-shim-opengl3"] }
+//! dear-imgui-sys = { version = "0.23", features = ["backend-shim-android", "backend-shim-opengl3"] }
 //! ```
 //!
 //! Recommended split of responsibilities:

@@ -13,7 +13,7 @@ length-aware filters, transactions, and autocomplete configuration.
 
 ## Compatibility and Provenance
 
-This Preview `-sys` crate uses the `0.22` release train and requires Rust 1.95 or newer. It must use the same release train, workspace checkout, or Git revision as `dear-imgui-sys` and `dear-imgui-cte`. It shares the Dear ImGui and cimgui core supplied by `dear-imgui-sys`; upstream CMake files are not used because they compile a second core.
+This Preview crate requires Rust 1.95 or newer. Use `dear-imgui-cte-sys`, `dear-imgui-cte`, and `dear-imgui-sys` from the same `0.23` release train or Git revision. The source build links the Dear ImGui and cimgui core supplied by `dear-imgui-sys`.
 
 The checked-in binding and source identity is:
 
@@ -113,7 +113,7 @@ against both generated snapshots by the canonical binding specification. This
 is an ABI-presence check, not proof that a safe Rust wrapper is sound.
 
 The semantic safe/sys disposition is recorded in
-[`docs/API_COVERAGE.md`](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/API_COVERAGE.md#imguicolortextedit-api-family-ledger).
+[`docs/API_COVERAGE.md`](../../docs/API_COVERAGE.md#imguicolortextedit-api-family-ledger).
 
 ## Safety and Ownership
 

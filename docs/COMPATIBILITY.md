@@ -2,9 +2,9 @@
 
 This document tracks compatibility across the workspace crates, upstream Dear ImGui, and key external dependencies. The root README shows the latest recommendations; this file keeps version history and compatibility policy.
 
-## Unreleased
+## 0.23 Release Train
 
-The SDL3 backend on `main` accepts windows and events from `sdl3` 0.22.1. Applications using this backend from Git should update their direct `sdl3` dependency to `"0.22.1"`. Its `sdl3-sys` 0.7.3 bindings target SDL 3.4.20. The published 0.22.0 backend uses `sdl3` 0.20.
+All 29 publishable crates share version `0.23.0`. Upgrade their requirements to `"0.23"` together. Applications passing SDL windows or events to the backend should also use `sdl3 = "0.22.1"`. Its `sdl3-sys` 0.7.3 bindings target SDL 3.4.20. The 0.22.0 backend uses `sdl3` 0.20.
 
 Development and publishing use Rust 1.100.0. The core MSRV is Rust 1.95, the Bevy backend requires Rust 1.97.1, and binding generation uses Rust 1.95.0 with LLVM 14.
 
@@ -43,7 +43,7 @@ For ImNodes, configure positions on `ui.imnodes_editor(&nodes, Some(&graph))`, t
 
 ImGuizmo starts its native overlay once per frame. A gesture belongs to one ImGui context, so switching the active gizmo to a different context cancels the drag or view transition. Repeated operations on the same context preserve it. Custom native archives and browser providers must include `ImGuizmo_ResetInteraction` along with the updated ImPlot, ImPlot3D and ImNodes source adaptations.
 
-### Native sources on `main`
+### Native sources in 0.23
 
 These wrapper revisions determine the C headers and the native source each extension builds. Rebuild custom native archives and the browser provider when upgrading a checkout across these revisions.
 
@@ -82,7 +82,8 @@ paths, see [the Apple platform guide](workstreams/apple-platform-support.md).
 ## Versioning Policy
 
 - Unified release train: all published `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
-- Current release train: unified `v0.22.0` (use `version = "0.22"`; Git dependencies must use the same revision across workspace crates).
+- Current release train: unified `v0.23.0` (use `version = "0.23"`; use the same revision for Git dependencies).
+- Previous stable train: unified `v0.22.0` (use `version = "0.22"`).
 - Published stable 0.21 train: unified `v0.21.0` (use `version = "0.21"`).
 - Previous stable 0.20 train: unified `v0.20.0` (use `version = "0.20"`).
 - Previous stable train: unified `v0.19.0` (use `version = "0.19"`).
@@ -98,7 +99,7 @@ paths, see [the Apple platform guide](workstreams/apple-platform-support.md).
 - Previous train: unified `v0.10.4` (use `version = "0.10"`).
 - Previous train: unified `v0.9.0` (use `version = "0.9"`).
 - Previous train: unified `v0.8.0` (use `version = "0.8"`).
-- Internal dependency constraints require at least the current full release version (`0.22.0`) and allow later compatible patches; prerelease trains use exact requirements. This prevents a lockfile from retaining older internal packages that lack newly used APIs. Consumer dependencies for the new train may use `"0.22"`. Mixing different release trains across our crates is unsupported.
+- Internal dependency constraints require at least the current full release version (`0.23.0`) and allow later compatible patches. Prerelease trains use exact requirements. Consumer applications may use `"0.23"` across the workspace crates.
 
 ## 0.22 Release Train
 

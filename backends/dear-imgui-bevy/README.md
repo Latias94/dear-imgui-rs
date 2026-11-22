@@ -10,27 +10,27 @@ The backend owns Dear ImGui Contexts on Bevy's main thread, routes Bevy window i
 | --- | --- |
 | Rust | `1.97.1` or newer |
 | Bevy | exactly `0.20.1` |
-| dear-imgui-rs | matching `0.22` release train |
+| dear-imgui-rs | matching `0.23` release train |
 
 `dear-imgui-bevy` defaults to the renderer plus deterministic Bevy UI ordering. Native multi-viewport is supported through an explicit feature and runtime opt-in. WASM supports the normal and headless feature sets but cannot create native platform windows.
 
 ## Installation
 
-The `0.22` release train targets Bevy exactly `0.20.1`. Version `0.21.0` and the `0.20` release train target Bevy `0.20.0`; the `0.19.0` backend targets Bevy `0.19.1`.
+Both the `0.23` and `0.22` release trains target Bevy exactly `0.20.1`. Backend `0.21.0` and the `0.20` train target Bevy `0.20.0`. Backend `0.19.0` targets Bevy `0.19.1`.
 
 ```toml
 [dependencies]
 bevy = "=0.20.1"
-dear-imgui-bevy = "0.22"
-dear-imgui-rs = "0.22"
+dear-imgui-bevy = "0.23"
+dear-imgui-rs = "0.23"
 ```
 
-Upgrade Bevy and its subcrates together, and use Rust 1.97.1 or newer. The Context, private UI pass, texture lease, and route APIs are unchanged by this backend upgrade. Upgrade all workspace crates together to `"0.22"` and review the shared [native build policy migration](../../docs/COMPATIBILITY.md#0220-native-build-policy). See the root changelog for earlier backend API migrations.
+Keep Bevy and its subcrates at `0.20.1` when upgrading `dear-*` dependencies from `0.22` to `0.23`. For older applications, see the [0.22 native build policy](../../docs/COMPATIBILITY.md#0220-native-build-policy) and the [0.23 migration notes](../../docs/COMPATIBILITY.md#023-release-train).
 
 For a headless integration that drives private UI passes without installing the Bevy renderer:
 
 ```toml
-dear-imgui-bevy = { version = "0.22", default-features = false }
+dear-imgui-bevy = { version = "0.23", default-features = false }
 ```
 
 ## Quick Start
@@ -79,6 +79,8 @@ The plugin opens and closes each frame around a private, runner-owned pass. UI s
 | Native multi-viewport | `features = ["multi-viewport"]` | Implies `render` and `bevy_winit`; runtime opt-in is still required. |
 | WASM default | `features = ["wasm"]` | Default renderer/UI feature set using the explicit WASM core route. |
 | WASM headless | `default-features = false, features = ["wasm"]` | Headless WASM integration. |
+
+For a browser build, enable `wasm` on direct `dear-imgui-rs` dependencies as well. Build and deploy the Rust application and its `imgui-sys-v1` provider together. See the [browser runtime setup](../../docs/WASM.md#runtime-model).
 
 `multi-viewport` is native-only and intentionally fails to compile with `wasm32`. ImPlot, ImNodes, ImGuizmo, and other `Ui`-based extensions are normal application dependencies rather than backend features.
 

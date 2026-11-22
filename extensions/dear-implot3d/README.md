@@ -20,50 +20,33 @@ the ergonomics of `dear-implot`.
 
 ## Compatibility
 
-The `0.22` release train requires Rust 1.95 or newer. Upgrade all workspace crates together. See the [0.22 migration notes](../../docs/COMPATIBILITY.md#022-release-train).
+Use Rust 1.95 or newer and keep all `dear-*` dependencies on the `0.23` release train. See the [0.23 migration notes](../../docs/COMPATIBILITY.md#023-release-train).
 
 | Item               | Version |
 |--------------------|---------|
-| Crate              | 0.22.0  |
-| dear-imgui-rs      | 0.22.0  |
-| dear-implot3d-sys  | 0.22.0  |
-
-See also: docs/COMPATIBILITY.md in the workspace for the full matrix.
+| Crate              | 0.23.0  |
+| dear-imgui-rs      | 0.23.0  |
+| dear-implot3d-sys  | 0.23.0  |
 
 ### WASM (WebAssembly) support
 
-This crate has **experimental** support for `wasm32-unknown-unknown` targets via the same
-import-style design used by the core ImGui bindings and other extensions:
+For the experimental `wasm32-unknown-unknown` target, enable `wasm` on both direct dependencies.
 
-- `dear-implot3d` and `dear-implot3d-sys` expose a `wasm` feature which:
-  - Enables import-style FFI that links against the shared `imgui-sys-v1` provider module.
-  - Avoids compiling C/C++ during the Rust build for wasm.
-- The provider module (`imgui-sys-v1`) is built once using Emscripten and contains:
-  - Dear ImGui + cimgui (from `dear-imgui-sys`)
-  - ImPlot3D + cimplot3d (from `dear-implot3d-sys`)
+```toml
+[dependencies]
+dear-imgui-rs = { version = "0.23", features = ["wasm"] }
+dear-implot3d = { version = "0.23", features = ["wasm"] }
+```
 
-To try the web demo with ImPlot3D enabled:
+From the matching workspace checkout, build the demo and its `imgui-sys-v1` provider with the checked-in bindings.
 
 ```bash
-# 1) Generate pregenerated wasm bindings (Dear ImGui core + ImPlot3D)
-cargo run -p xtask -- wasm-bindgen
-cargo run -p xtask -- wasm-bindgen-implot3d
-
-# 2) Build the main wasm + JS (includes ImPlot3D demo window)
 cargo run -p xtask -- web-demo implot3d
-
-# 3) Build the provider (Emscripten imgui-sys-v1 with ImGui + ImPlot3D)
 cargo run -p xtask -- build-cimgui-provider
-
-# 4) Serve and open in a browser
 python -m http.server -d target/web-demo 8080
 ```
 
-Notes:
-- The `dear-imgui-web-demo` crate in `examples-wasm` enables the `implot3d` feature when
-  you pass `implot3d` to `xtask web-demo`, which shows an “ImPlot3D (Web)” window when
-  ImPlot3D bindings + provider are available.
-- This is an early, experimental path in the current 0.22 release train; API and build steps may evolve. For production use, pin to a specific compatible release and follow changes in `docs/WASM.md`.
+The 0.23 browser application uses `WasmProviderAllocator` and imports the provider's memory and function table. Rebuild and deploy both modules together when upgrading from 0.22. See the [tool versions and local demo](../../docs/WASM.md#local-demo) and [application setup](../../docs/WASM.md#runtime-model).
 
 ## Features
 
@@ -120,17 +103,18 @@ cargo run -p dear-imgui-examples --bin implot3d_showcase --features implot3d
 
 ## Predefined Meshes
 
-The `meshes` module provides ready-to-use mesh data:
+The `meshes` module provides ready-to-use mesh data. Submit it inside the plot's drawing closure.
 
 ```rust
 use dear_implot3d::meshes::*;
 
-// Cube (8 vertices, 36 indices)
-plot.mesh("Cube", CUBE_VERTICES, CUBE_INDICES).plot();
-
-// Sphere (162 vertices, 960 indices)
-plot.mesh("Sphere", SPHERE_VERTICES, SPHERE_INDICES).plot();
+plot_ui.begin_plot("Meshes").build(|plot| {
+    plot.mesh("Cube", CUBE_VERTICES, CUBE_INDICES).plot();
+    plot.mesh("Sphere", SPHERE_VERTICES, SPHERE_INDICES).plot();
+});
 ```
+
+For application-supplied indices, `plot.mesh(label, vertices, indices).try_plot()` returns a `Plot3DError` if the mesh cannot be submitted.
 
 ## Mint Support
 

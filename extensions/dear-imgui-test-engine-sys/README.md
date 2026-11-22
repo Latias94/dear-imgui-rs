@@ -2,9 +2,9 @@
 
 Low-level FFI bindings for Dear ImGui Test Engine via a small C shim over the upstream C++ API.
 
-This crate pairs with `dear-imgui-sys` and is intended for advanced users. Most applications should use `dear-imgui-test-engine`.
+Pair this crate with `dear-imgui-sys` from the `0.23` release train. Applications can use the [safe Test Engine wrapper](../dear-imgui-test-engine/README.md).
 
-- Upstream: https://github.com/ocornut/imgui_test_engine
+- The 0.23.0 source build uses [Dear ImGui Test Engine at `10a5c08e78`](https://github.com/ocornut/imgui_test_engine/tree/10a5c08e78619274e3c943d69a5765ac2132b7a4).
 - Submodule path: `extensions/dear-imgui-test-engine-sys/third-party/imgui_test_engine`
 
 ## ABI Contract

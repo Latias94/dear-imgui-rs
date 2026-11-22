@@ -31,12 +31,14 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
 
 ## Compatibility
 
-The `0.22` release train requires Rust 1.95 or newer. Upgrade all workspace crates together. See the [0.22 migration notes](../../docs/COMPATIBILITY.md#022-release-train).
+Use Rust 1.95 or newer and keep all `dear-*` dependencies on the `0.23` release train. See the [0.23 migration notes](../../docs/COMPATIBILITY.md#023-release-train).
 
 | Item          | Version |
 |---------------|---------|
-| Crate         | 0.22.0  |
-| dear-imgui-rs | 0.22.0  |
+| Crate         | 0.23.0  |
+| dear-imgui-rs | 0.23.0  |
+| Native dialogs (`native-rfd`) | rfd 0.18 |
+| Local file dates (`imgui`) | Jiff 1.0.2 |
 
 ## Features
 
@@ -572,7 +574,7 @@ Optional decoder (`thumbnails-image` feature):
 
 ```rust
 // Cargo.toml:
-// dear-file-browser = { version = "0.22", features = ["thumbnails-image"] }
+// dear-file-browser = { version = "0.23", features = ["thumbnails-image"] }
 
 use dear_file_browser::ImageThumbnailProvider;
 
@@ -584,10 +586,14 @@ let mut provider = ImageThumbnailProvider::default();
 
 - The path-based `native-rfd` adapter is desktop-only. Its `Selection` stores
   `PathBuf` values, while browser `rfd` pickers return file handles without host
-  paths. Disable default features and enable `imgui` for the in-UI route on WASM:
+  paths. For the in-UI browser, enable `imgui` on `dear-file-browser` and `wasm`
+  on its matching core dependency. Build the application and provider together
+  as described in the [browser runtime setup](../../docs/WASM.md#runtime-model).
 
   ```toml
-  dear-file-browser = { version = "0.22", default-features = false, features = ["imgui"] }
+  [dependencies]
+  dear-file-browser = { version = "0.23", default-features = false, features = ["imgui"] }
+  dear-imgui-rs = { version = "0.23", features = ["wasm"] }
   ```
 
   For a browser file picker, use `rfd::AsyncFileDialog` directly and retain its

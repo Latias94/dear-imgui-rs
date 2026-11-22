@@ -15,11 +15,11 @@ revision instead of renaming its files or remapping it under the v1 module name.
 
 ## Feature contract
 
-WASM support is explicit and target-specific. The only supported Rust target is `wasm32-unknown-unknown`, and every dependency path to the core crate must enable the `wasm` feature. The examples below target the `0.22` release train and require Rust 1.95 or newer; upgrade all workspace crates together. Use matching requirements:
+WASM support is explicit and target-specific. The only supported Rust target is `wasm32-unknown-unknown`, and every dependency path to the core crate must enable the `wasm` feature. The examples below target the `0.23` release train and require Rust 1.95 or newer; upgrade all workspace crates together. Use matching requirements:
 
 ```toml
 [dependencies]
-dear-imgui-rs = { version = "0.22", features = ["wasm"] }
+dear-imgui-rs = { version = "0.23", features = ["wasm"] }
 ```
 
 For Bevy, enable `wasm` alongside the features needed by the application and take both packages from the same release train. The Bevy backend requires Bevy exactly 0.20.1 and Rust 1.97.1 or newer:
@@ -27,8 +27,8 @@ For Bevy, enable `wasm` alongside the features needed by the application and tak
 ```toml
 [dependencies]
 bevy = "=0.20.1"
-dear-imgui-bevy = { version = "0.22", features = ["render", "wasm"] }
-dear-imgui-rs = { version = "0.22", features = ["wasm"] }
+dear-imgui-bevy = { version = "0.23", features = ["render", "wasm"] }
+dear-imgui-rs = { version = "0.23", features = ["wasm"] }
 ```
 
 Six published safe native extensions expose the same `wasm` feature and forward it to
@@ -154,7 +154,7 @@ CTE's native and WASM profiles are maintained by the repository-wide
 Prerequisites:
 
 - `rustup target add wasm32-unknown-unknown`
-- a `wasm-bindgen-cli` version matching `Cargo.lock` (`0.2.130` for the 0.22.0 lockfile)
+- a `wasm-bindgen-cli` version matching `Cargo.lock` (`0.2.130` for the 0.23.0 lockfile)
 - Emscripten SDK for the provider build (CI uses 7.0.1)
 
 Re-read the lockfile after dependency updates before installing `wasm-bindgen-cli`; the lockfile is the version source of truth rather than a separately maintained script constant.

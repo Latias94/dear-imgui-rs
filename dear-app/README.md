@@ -7,11 +7,11 @@
 
 ## Quick Start
 
-The `0.22` release train requires Rust 1.95 or newer. Upgrade all workspace crates together and review the [native build policy migration](../docs/COMPATIBILITY.md#0220-native-build-policy). Create a binary crate and add the matching release:
+Create a binary crate using Rust 1.95 or newer and add `dear-app` from the `0.23` release train. Its runtime uses Winit 0.30.13 and WGPU 30. Upgrade any `dear-*` extensions together with the runtime. See the [0.23 migration notes](../docs/COMPATIBILITY.md#023-release-train) and, for build settings carried forward from 0.21, the [0.22 native build policy](../docs/COMPATIBILITY.md#0220-native-build-policy).
 
 ```toml
 [dependencies]
-dear-app = "0.22"
+dear-app = "0.23"
 ```
 
 Then use `dear_app::run_ui` for applications that only need persistent UI state:

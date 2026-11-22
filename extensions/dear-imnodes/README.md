@@ -22,15 +22,15 @@ Safe, idiomatic Rust bindings for [ImNodes](https://github.com/Nelarius/imnodes)
 
 ## Compatibility
 
-The `0.22` release train requires Rust 1.95 or newer. Upgrade all workspace crates together. See the [0.22 migration notes](../../docs/COMPATIBILITY.md#022-release-train).
+Use Rust 1.95 or newer and keep all `dear-*` dependencies on the `0.23` release train. See the [0.23 migration notes](../../docs/COMPATIBILITY.md#023-release-train).
 
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.22.0  |
-| dear-imgui-rs     | 0.22.0  |
-| dear-imnodes-sys  | 0.22.0  |
+| Crate             | 0.23.0  |
+| dear-imgui-rs     | 0.23.0  |
+| dear-imnodes-sys  | 0.23.0  |
 
-See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
+On `wasm32-unknown-unknown`, enable `wasm` on `dear-imnodes` and direct `dear-imgui-rs` dependencies. Rebuild the application and its `imgui-sys-v1` provider together. See the [browser runtime setup](../../docs/WASM.md#runtime-model).
 
 ## Quick Start
 
@@ -78,7 +78,7 @@ fn draw(ui: &Ui, nodes: &Context, graph: &EditorContext, first_frame: bool) {
 
 Replace `setup.begin_nodes()` and `editor.end()` with `let post = setup.with_nodes(|editor| { ... });`. Put each node's contents inside `editor.node(id, |node| { ... })`. Use `node.title_bar(|| ...)`, `node.input_attr(id, shape, || ...)`, `node.output_attr(id, shape, || ...)`, and `node.static_attr(id, || ...)`. The closure owns the matching native `End`, including during panic unwinding. Use `setup.end()` when you intend to submit an empty graph.
 
-Each drawing handle belongs to its current node or editor canvas. Render a nested window inside the closure and return to the canvas before submitting another node. Call `editor.minimap()` after submitting the nodes and links. Replace `minimap_with_callback` with `post.minimap_hovered_nodes()` to handle all hovered IDs in native draw order after the minimap window closes.
+Each drawing handle belongs to its current node or editor canvas. Render a nested window inside the closure and return to the canvas before submitting another node. Call `editor.minimap(0.25, MiniMapLocation::TopRight)` after submitting nodes and links. Replace `minimap_with_callback` with `post.minimap_hovered_nodes()` to handle all hovered IDs in native draw order after the minimap window closes.
 
 ### IO and interaction
 

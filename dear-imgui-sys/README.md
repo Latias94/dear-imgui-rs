@@ -6,7 +6,7 @@ Low-level Rust bindings for Dear ImGui via cimgui (C API) and checked-in pregene
 
 This crate provides unsafe Rust bindings to Dear ImGui v1.93.1 WIP (docking branch) using the [cimgui](https://github.com/cimgui/cimgui) C API. The core `ig*` API crosses a C ABI boundary. C++ backend integration and callback-bearing platform APIs use explicit repository-owned shims because their compiler ABI still matters, especially on MSVC.
 
-This README describes the `0.22` release train. Use Rust 1.95 or newer and upgrade all workspace crates together. Review the [native build policy migration](../docs/COMPATIBILITY.md#0220-native-build-policy) when carrying environment settings forward from 0.21.0.
+Use Rust 1.95 or newer and keep all `dear-*` crates on the `0.23` release train. Rebuild custom native archives for the 0.23 platform callback hooks, even when the upstream Dear ImGui revision matches an older build. For environment settings carried forward from 0.21, see the [0.22 native build policy migration](../docs/COMPATIBILITY.md#0220-native-build-policy).
 
 ## Key Features
 
@@ -61,7 +61,7 @@ export IMGUI_SYS_LIB_DIR=/path/to/extracted/dear-imgui-artifact/lib
 cargo build -p dear-imgui-sys
 
 # Option B: Use a package-tool-generated local archive or HTTP(S) URL.
-export IMGUI_SYS_PREBUILT_URL=/path/to/dear-imgui-prebuilt-0.22.0-<target>-static.tar.gz
+export IMGUI_SYS_PREBUILT_URL=/path/to/dear-imgui-prebuilt-0.23.0-x86_64-unknown-linux-gnu-static.tar.gz
 cargo build -p dear-imgui-sys --features prebuilt
 
 # Option C: Enable HTTP(S) downloads / auto-download from GitHub releases
@@ -215,7 +215,7 @@ WebAssembly support for Dear ImGui in this workspace follows the same **import-s
 
 - Rust code links against a WASM import module named `imgui-sys-v1` that provides the cimgui (C API) implementation.
 - The main application (Rust + winit + wgpu) targets `wasm32-unknown-unknown` and uses `wasm-bindgen`.
-- A separate provider module (`imgui-sys-v1`) is built once (currently via Emscripten) and contains Dear ImGui + cimgui and, optionally, selected extensions.
+- The Emscripten provider contains Dear ImGui, cimgui and the native extension code. In 0.23 the Rust application imports the provider's memory and function table and uses `WasmProviderAllocator` as its global allocator. Rebuild the application and provider together when upgrading from 0.22.
 
 Provider ABI v1 includes the repository's checked numeric formatting and
 parsing source transform. Older v0 providers are not compatible and must be
@@ -228,28 +228,20 @@ The provider name is fixed; generation commands do not accept an alternate
 import module. Enabling `wasm` on a native target is allowed and does not select
 the WASM binding profile.
 
-End users typically interact with the flow indirectly through:
-
-- `dear-imgui-rs` with the `wasm` feature enabled.
-- The `xtask` commands (`wasm-bindgen`, `web-demo`, `build-cimgui-provider`) that wire the main module and provider together.
-
-For a complete, up-to-date guide (including required tools, commands, and troubleshooting), see:
-
-- `docs/WASM.md` in this repository.
-- The [`dear-imgui-web-demo` package](../examples-wasm/README.md) in `examples-wasm/`, which demonstrates the web demo setup.
+Build the Rust module with `xtask web-demo` and the matching provider with `xtask build-cimgui-provider`. The 0.23.0 lockfile uses `wasm-bindgen` 0.2.130, so install `wasm-bindgen-cli` 0.2.130. CI builds the provider with Emscripten 7.0.1. See the [browser runtime setup](../docs/WASM.md#runtime-model) and the [web demo](../examples-wasm/README.md).
 
 ## Basic Usage
 
 This is a low-level sys crate providing unsafe FFI bindings. Most users should use the higher-level [`dear-imgui-rs`](https://crates.io/crates/dear-imgui-rs) crate instead, which provides safe Rust wrappers.
 
-Use a matching 0.22 requirement:
+Use the matching 0.23 dependency.
 
 ```toml
 [dependencies]
-dear-imgui-sys = "0.22"
+dear-imgui-sys = "0.23"
 
 # Alternatively, enable native FreeType (replace the preceding dependency entry).
-# dear-imgui-sys = { version = "0.22", features = ["freetype"] }
+# dear-imgui-sys = { version = "0.23", features = ["freetype"] }
 ```
 
 ### Direct FFI Usage (Advanced)
@@ -289,7 +281,7 @@ can expose optional backend shim modules behind `backend-shim-*` features:
 
 ```toml
 [dependencies]
-dear-imgui-sys = { version = "0.22", features = ["backend-shim-opengl3"] }
+dear-imgui-sys = { version = "0.23", features = ["backend-shim-opengl3"] }
 ```
 
 These features expose self-contained modules such as:
@@ -459,7 +451,7 @@ There are two first-class Android directions.
 
    ```toml
    [dependencies]
-   dear-imgui-sys = { version = "0.22", features = ["backend-shim-android", "backend-shim-opengl3"] }
+   dear-imgui-sys = { version = "0.23", features = ["backend-shim-android", "backend-shim-opengl3"] }
    ```
 
    Use the raw `dear-imgui-sys` context and frame API with
@@ -533,8 +525,8 @@ require both source submodules to be clean and to match the recorded revisions.
 
 ### Version Information
 
-- **Dear ImGui Version**: v1.93.1 WIP (docking branch)
-- **cimgui Version**: Pinned to the same revision as 0.21.0, generated against Dear ImGui v1.93.1 WIP
+- Dear ImGui 1.93.1 WIP (docking) at [`d88f238d1d`](https://github.com/ocornut/imgui/tree/d88f238d1d363ef387382b2e29ad12cf96f826ac)
+- cimgui `docking_inter` at [`5d7cc7e12d`](https://github.com/cimgui/cimgui/tree/5d7cc7e12de9a868bbecc00ce2ed74e58d266f1c), also used by 0.21.0 and 0.22.0
 - **Supported Features**: Docking, FreeType font rendering, and low-level PlatformIO/multi-viewport primitives; end-to-end status is documented per backend route
 
 ### Environment Variables

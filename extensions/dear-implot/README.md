@@ -5,7 +5,7 @@
 
 High-level Rust bindings for ImPlot, the immediate mode plotting library. This crate provides safe, idiomatic Rust bindings designed to work seamlessly with `dear-imgui-rs` (which uses cimgui C API) and `dear-implot-sys` (which uses cimplot C API).
 
-For native build/link options (source, system/prebuilt, remote prebuilt), see `extensions/dear-implot-sys/README.md`.
+For native source builds and matching prebuilt archives, see the [sys crate build modes](../dear-implot-sys/README.md#build-modes).
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/implot-basic.png" alt="ImPlot" width="75%"/>
@@ -19,48 +19,33 @@ For native build/link options (source, system/prebuilt, remote prebuilt), see `e
 
 ## Compatibility
 
-The `0.22` release train requires Rust 1.95 or newer. Upgrade all workspace crates together. See the [0.22 migration notes](../../docs/COMPATIBILITY.md#022-release-train).
+Use Rust 1.95 or newer and keep all `dear-*` dependencies on the `0.23` release train. See the [0.23 migration notes](../../docs/COMPATIBILITY.md#023-release-train).
 
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.22.0  |
-| dear-imgui-rs     | 0.22.0  |
-| dear-implot-sys   | 0.22.0  |
+| Crate             | 0.23.0  |
+| dear-imgui-rs     | 0.23.0  |
+| dear-implot-sys   | 0.23.0  |
 
 ### WASM (WebAssembly) support
 
-This crate has **experimental** support for `wasm32-unknown-unknown` targets via the same import-style design used by the core ImGui bindings:
+For the experimental `wasm32-unknown-unknown` target, enable `wasm` on both direct dependencies.
 
-- `dear-implot` + `dear-implot-sys` expose a `wasm` feature which:
-  - Enables import-style FFI that links against the shared `imgui-sys-v1` provider module.
-  - Avoids compiling C/C++ during the Rust build for wasm.
-- The provider module (`imgui-sys-v1`) is built once using Emscripten and contains:
-  - Dear ImGui + cimgui (from `dear-imgui-sys`)
-  - ImPlot + cimplot (from `dear-implot-sys`)
+```toml
+[dependencies]
+dear-imgui-rs = { version = "0.23", features = ["wasm"] }
+dear-implot = { version = "0.23", features = ["wasm"] }
+```
 
-To try the web demo with ImPlot enabled:
+From the matching workspace checkout, build the demo and its `imgui-sys-v1` provider with the checked-in bindings.
 
 ```bash
-# 1) Generate pregenerated wasm bindings (Dear ImGui core + ImPlot)
-cargo run -p xtask -- wasm-bindgen
-cargo run -p xtask -- wasm-bindgen-implot
-
-# 2) Build the main wasm + JS (includes ImPlot demo window)
 cargo run -p xtask -- web-demo implot
-
-# 3) Build the provider (Emscripten imgui-sys-v1 with ImGui + ImPlot)
 cargo run -p xtask -- build-cimgui-provider
-
-# 4) Serve and open in a browser
 python -m http.server -d target/web-demo 8080
 ```
 
-Notes:
-- The `dear-imgui-web-demo` crate in `examples-wasm` enables `implot` when passed to `xtask web-demo implot`; it is not a default feature.
-- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific compatible `0.22` release and follow changes in `docs/WASM.md`.
-
-See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
-
+The 0.23 browser application uses `WasmProviderAllocator` and imports the provider's memory and function table. Rebuild and deploy both modules together when upgrading from 0.22. See the [tool versions and local demo](../../docs/WASM.md#local-demo) and [application setup](../../docs/WASM.md#runtime-model).
 
 ## Integration Quickstart
 
@@ -70,8 +55,8 @@ Use compatible stable requirements:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.22"
-dear-implot = "0.22"
+dear-imgui-rs = "0.23"
+dear-implot = "0.23"
 ```
 
 ```rust
@@ -88,16 +73,13 @@ fn main() {
 
     // Build one CPU-only frame without a platform or GPU renderer.
     let ui = ctx.frame();
-    // Ui extension: obtain PlotUi from Ui + PlotContext
-    let plot_ui = ui.implot(&plot_ctx);
     ui.window("Plot Example").build(|| {
-        plot_ui.with_plot("Line", |plot| {
+        ui.implot(&plot_ctx).with_plot("Line", |plot| {
             let x = [0.0, 1.0, 2.0, 3.0];
             let y = [0.0, 1.0, 4.0, 9.0];
             LinePlot::new("y=x^2", &x, &y).plot(plot);
         });
     });
-    drop(plot_ui);
     drop(ctx.render_legacy());
 }
 ```
@@ -168,8 +150,8 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.22"
-dear-implot = "0.22"
+dear-imgui-rs = "0.23"
+dear-implot = "0.23"
 ```
 
 Basic usage:
@@ -188,13 +170,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // One CPU-only frame; use a renderer-driven loop in a visible application.
     let ui = ctx.frame();
-    // Or via Ui extension:
-    let plot_ui = ui.implot(&plot_ctx);
-
     ui.window("My Plots")
         .size([800.0, 600.0], Condition::FirstUseEver)
         .build(|| {
-            plot_ui.with_plot("Line Plot", |plot| {
+            ui.implot(&plot_ctx).with_plot("Line Plot", |plot| {
                 let x_data = [0.0, 1.0, 2.0, 3.0, 4.0];
                 let y_data = [0.0, 1.0, 4.0, 9.0, 16.0];
 
@@ -202,7 +181,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 LinePlot::new("Quadratic", &x_data, &y_data).plot(plot);
             });
         });
-    drop(plot_ui);
     drop(ctx.render_legacy());
     Ok(())
 }
@@ -368,6 +346,7 @@ multi_plot.build(&plot_ui, |plot| {
 plot_ui.with_plot_setup("Measurements", [-1.0, 0.0], |setup| {
     setup.setup_axes(Some("Time (s)"), Some("Value"), AxisFlags::NO_GRID_LINES, AxisFlags::NONE);
     setup.setup_x_axis_ticks_positions(XAxis::X1, &[0.0, 1.0, 2.0], Some(&["0s", "1s", "2s"]), true);
+    setup.setup_y_axis_scale(YAxis::Y1, AxisScale::SymLog);
     setup.setup_y_axis_format(YAxis::Y1, &AxisFormat::new("%.2f").unwrap());
     setup.setup_axes_limits(0.0, 3.0, -1.0, 1.0, PlotCond::Once);
 }, |plot| {
@@ -385,10 +364,12 @@ plot_ui.with_plot_setup("Measurements", [-1.0, 0.0], |setup| {
 plot.inf_lines_vertical("vlines", &[1.0, 2.0, 3.0])?;
 plot.inf_lines_horizontal("hlines", &[0.0])?;
 
-// Image plot (using ImTextureID)
-let bounds_min = ImPlotPoint { x: 0.0, y: 0.0 };
-let bounds_max = ImPlotPoint { x: 1.0, y: 1.0 };
-plot.plot_image("image", my_tex_id, bounds_min, bounds_max)?;
+// Pass the frame's borrowed atlas texture directly to the plot.
+if let Some(atlas) = ui.font_atlas_texture() {
+    let bounds_min = ImPlotPoint { x: 0.0, y: 0.0 };
+    let bounds_max = ImPlotPoint { x: 1.0, y: 1.0 };
+    plot.plot_image("Font atlas", atlas, bounds_min, bounds_max)?;
+}
 ```
 
 ### Universal Plot Builder
@@ -478,7 +459,7 @@ The build process automatically handles:
 This crate follows the same architectural patterns as `dear-imgui-rs`:
 
 - **Context Management**: Separate ImPlot context that works alongside Dear ImGui
-- **Lifetime Safety**: Plot tokens ensure proper begin/end pairing
+- Setup and drawing closures borrow the active plot until its native `EndPlot`.
 - **RAII**: Automatic cleanup of resources and style stacks
 - **Builder Patterns**: Fluent APIs for configuration
 - **Modular Design**: Each plot type is in its own module

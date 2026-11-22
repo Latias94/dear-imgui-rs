@@ -12,12 +12,12 @@ native and WebAssembly targets.
 
 ## Compatibility
 
-This Preview crate uses the `0.22` release train and requires Rust 1.95 or newer. Use it from the same release train as `dear-imgui-rs` and `dear-imgui-cte-sys`; mixing release trains is unsupported. The checked-in source identity is recorded in the sys crate README and Cargo metadata. See the [native build policy migration](../../docs/COMPATIBILITY.md#0220-native-build-policy).
+This Preview crate requires Rust 1.95 or newer. Use `dear-imgui-rs` and `dear-imgui-cte-sys` from the same `0.23` release train. Rebuild custom archives and browser providers with the [pinned CTE sources](../dear-imgui-cte-sys/README.md#compatibility-and-provenance). For build settings carried forward from 0.21, see the [0.22 native build policy migration](../../docs/COMPATIBILITY.md#0220-native-build-policy).
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.22"
-dear-imgui-cte = "0.22"
+dear-imgui-rs = "0.23"
+dear-imgui-cte = "0.23"
 ```
 
 ## Quick Start
@@ -91,13 +91,11 @@ including `.jl` (Julia) and `.wgsl` (WGSL). Palettes have 33 slots, including
 in glyph columns. It also moves the text when line numbers are hidden. Smooth
 scrolling is opt-in through `set_smooth_scrolling_enabled`.
 
-See the family-level disposition ledger in
-[`docs/API_COVERAGE.md`](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/API_COVERAGE.md#imguicolortextedit-api-family-ledger)
-for the small set of raw-only capabilities.
+For operations that require the raw API, see the [CTE API coverage table](../../docs/API_COVERAGE.md#imguicolortextedit-api-family-ledger).
 
 ## Breaking changes
 
-The selected `cimCTE` revision replaces the removed `Language_*` raw getters with
+The `cimCTE` revision shipped in 0.23 replaces the removed `Language_*` raw getters with
 registry lookup. Safe code should use the `Language` enum, `Language::from_name`,
 or `Language::from_extension`. The built-in set now contains Julia and WGSL.
 `PaletteColor::COUNT` is 33 and includes `CustomColor1` through `CustomColor9`.
@@ -112,7 +110,7 @@ the input strings only need to remain valid for that call.
 
 ## Migrating from 0.18
 
-The 0.22 source pin includes upstream wide-glyph column handling. Remove the
+Upstream already handled wide-glyph columns in the 0.22 source pin. Remove the
 `cte-wide-glyphs-v1` overlays and rebuild custom native archives and CTE-enabled
 WASM providers together with the matching core. Raw `Glyph` mirrors now use
 `columns: u8` and `squiggle: u32`; inspect the generated sys bindings before
@@ -161,6 +159,7 @@ and wrapper invariant before returning to safe methods.
 
 Source wins when Cargo unifies `build-from-source` and `prebuilt`. WASM requires
 the explicit `wasm` feature on the highest safe crate in every dependency path.
+Rebuild the Rust application and the `imgui-sys-v1` provider together when upgrading a CTE-enabled web application. See the [browser runtime setup](../../docs/WASM.md#runtime-model).
 
 ## Raw Access
 

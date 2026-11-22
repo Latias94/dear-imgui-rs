@@ -38,7 +38,7 @@ shim; they are not official Dear ImGui APIs.
   feature profile. In automatic mode, `build-from-source` forces source compilation even when `prebuilt` is also enabled; explicit prebuilt and bindings-only modes reject source-only requirements.
 - `wasm32` is intentionally unsupported in the first integration phase.
 
-The `0.22` release train requires Rust 1.95 or newer. Upgrade all workspace crates together and review the [native build policy migration](../../docs/COMPATIBILITY.md#0220-native-build-policy) before carrying environment settings forward from 0.21.0.
+Use Rust 1.95 or newer and pair this crate with the `0.23` core. Rebuild custom archives with the [0.23 native sources](../README.md). For build settings carried forward from 0.21, see the [0.22 native build policy migration](../../docs/COMPATIBILITY.md#0220-native-build-policy).
 
 ## WebAssembly Scope
 

@@ -41,49 +41,50 @@ Typical use cases:
 - `sdlgpu3-renderer`: enables this crate's official SDLGPU3 renderer shim.
 - `multi-viewport`: enables multi-viewport helpers (requires `dear-imgui-rs/multi-viewport`).
 
-Use the compatible stable requirement for the desired feature combination:
+The OpenGL3 quick start uses these dependencies.
 
 ```toml
-dear-imgui-sdl3 = { version = "0.22", features = ["opengl3-renderer"] }
+[dependencies]
+dear-imgui-rs = "0.23"
+dear-imgui-sdl3 = { version = "0.23", features = ["opengl3-renderer"] }
+sdl3 = "0.22.1"
 ```
 
 Platform-only usage (SDL3 + WGPU/Glow, no official OpenGL3 renderer):
 
 ```toml
-dear-imgui-sdl3 = { version = "0.22", default-features = false }
+dear-imgui-sdl3 = { version = "0.23", default-features = false }
 ```
 
 Enable the official OpenGL3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "0.22", features = ["opengl3-renderer"] }
+dear-imgui-sdl3 = { version = "0.23", features = ["opengl3-renderer"] }
 ```
 
 Enable the official SDLRenderer3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "0.22", features = ["sdlrenderer3-renderer"] }
+dear-imgui-sdl3 = { version = "0.23", features = ["sdlrenderer3-renderer"] }
 ```
 
 Enable the official SDLGPU3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "0.22", features = ["sdlgpu3-renderer"] }
+dear-imgui-sdl3 = { version = "0.23", features = ["sdlgpu3-renderer"] }
 ```
 
 ## Compatibility
 
-The published `0.22.0` backend requires Rust 1.95 or newer and uses the versions below. When using the backend from Git `main`, select `sdl3 = "0.22.1"` in your application. See the [compatibility notes](../../docs/COMPATIBILITY.md#unreleased).
+The `0.23` backend requires Rust 1.95 or newer. Use `sdl3 = "0.22.1"` in applications that pass SDL windows, events, or renderer objects to it. The 0.22.0 backend used `sdl3` 0.20.0 and `sdl3-sys` 0.7.2 for SDL 3.4.18. See the [0.22 baseline](../../docs/COMPATIBILITY.md#022-release-train) and the [0.23 migration notes](../../docs/COMPATIBILITY.md#023-release-train).
 
 | Item          | Version  |
 |---------------|----------|
-| Crate         | 0.22.0  |
-| dear-imgui-rs | 0.22.0  |
-| SDL3 crate    | 0.20.0   |
-| sdl3-sys      | 0.7.2    |
-
-See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md)
-for the full workspace matrix.
+| Crate         | 0.23.0  |
+| dear-imgui-rs | 0.23.0  |
+| sdl3          | 0.22.1   |
+| sdl3-sys      | 0.7.3    |
+| SDL native headers used by the bindings | 3.4.20 |
 
 ## Quick Start
 
@@ -179,7 +180,7 @@ style sizes still need a content-scale policy. The checkout's
 [`DpiStyle` helper](../../examples/src/sdl3_dpi.rs) scales from an unmodified theme using
 `window.display_scale() / window.pixel_density()` before the frame opens, which avoids applying
 Retina backing density twice. See the runnable
-[`SDL3 + OpenGL3 example](../../examples/02-docking/sdl3_opengl_multi_viewport.rs) for complete
+[SDL3 + OpenGL3 example](../../examples/02-docking/sdl3_opengl_multi_viewport.rs) for complete
 window, DPI, frame, and shutdown handling.
 
 ## Native window registrations
@@ -558,8 +559,8 @@ Example:
 
 ```toml
 [dependencies]
-dear-imgui-sdl3 = { version = "0.22", features = ["opengl3-renderer"] }
-sdl3 = { version = "0.20", features = ["build-from-source"] }
+dear-imgui-sdl3 = { version = "0.23", features = ["opengl3-renderer"] }
+sdl3 = { version = "0.22.1", features = ["build-from-source"] }
 ```
 
 On Android, that route usually also requires the standard SDL/NDK build

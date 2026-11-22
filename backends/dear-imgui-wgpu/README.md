@@ -384,28 +384,28 @@ replacements are preserved rather than overwritten.
 
 ## Selecting wgpu version
 
-The `0.22` release train defaults to WGPU 30 and requires Rust 1.95 or newer. Upgrade all workspace crates together and review the [0.22 migration notes](../../docs/COMPATIBILITY.md#022-release-train):
+The `0.23` release train defaults to WGPU 30 and requires Rust 1.95 or newer. Upgrade all `dear-*` dependencies together. See the [0.23 migration notes](../../docs/COMPATIBILITY.md#023-release-train).
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = "0.22"
+dear-imgui-wgpu = "0.23"
 ```
 
 If your ecosystem is pinned to `wgpu` v29, v28, or v27, select it explicitly:
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "0.22", default-features = false, features = ["wgpu-29"] }
+dear-imgui-wgpu = { version = "0.23", default-features = false, features = ["wgpu-29"] }
 ```
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "0.22", default-features = false, features = ["wgpu-28"] }
+dear-imgui-wgpu = { version = "0.23", default-features = false, features = ["wgpu-28"] }
 ```
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "0.22", default-features = false, features = ["wgpu-27"] }
+dear-imgui-wgpu = { version = "0.23", default-features = false, features = ["wgpu-27"] }
 ```
 
 ## What You Get
@@ -418,19 +418,20 @@ dear-imgui-wgpu = { version = "0.22", default-features = false, features = ["wgp
 
 - Default `GammaMode::Auto`: picks `gamma=2.2` for sRGB targets and `1.0` for linear targets.
 - You can force `Linear` (1.0) or `Gamma22` (2.2).
-- `GammaMode::Srgb` (unreleased) applies the IEC 61966-2-1 inverse transfer when the product of the vertex and sampled texture RGB is sRGB-encoded. Alpha stays linear. An sRGB target then encodes the blended RGB for storage. For fragment RGB that is already linear, such as a white tint over a hardware-decoded sRGB texture, use `Linear`.
+- `GammaMode::Srgb`, added in 0.23, applies the IEC 61966-2-1 inverse transfer when the product of the vertex and sampled texture RGB is sRGB-encoded. Alpha stays linear. An sRGB target then encodes the blended RGB for storage. For fragment RGB that is already linear, such as a white tint over a hardware-decoded sRGB texture, use `Linear`. Add a `Srgb` arm to exhaustive matches on `GammaMode`.
 - Pair this with your swapchain format to avoid double correction.
 
 ## Compatibility
 
 | Track | wgpu support |
 |-------|--------------|
+| `0.23.0` | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
 | `0.22.0` | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
 | `0.21.0` | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
 | `0.20.0` | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
 | `0.19.0` | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
 
-See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
+For the other backend and toolchain versions used with each WGPU release, see the [workspace compatibility matrix](../../docs/COMPATIBILITY.md).
 
 ## Notes
 
