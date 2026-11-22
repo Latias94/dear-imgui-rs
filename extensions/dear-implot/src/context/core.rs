@@ -1,15 +1,17 @@
 use super::ui::PlotUi;
 use crate::sys;
-use dear_imgui_rs::{Context as ImGuiContext, ContextBinding, ContextBindingError, Ui};
+use dear_imgui_rs::{
+    Context as ImGuiContext, ContextBinding, ContextBindingError, ContextThreadLease, Ui,
+};
 
 /// ImPlot context that manages the plotting state
 ///
-/// This context is separate from the Dear ImGui context but works alongside it.
-/// You need both contexts to create plots.
+/// Plotting requires the originating Dear ImGui context. The native plot allocation
+/// reserves its owner thread until this `PlotContext` is dropped.
 pub struct PlotContext {
     raw: *mut sys::ImPlotContext,
     imgui_binding: ContextBinding,
-    owns_context: bool,
+    _thread_lease: ContextThreadLease,
 }
 
 #[derive(Clone)]
@@ -75,6 +77,7 @@ impl PlotContext {
     /// This should be called after creating the Dear ImGui context.
     /// The ImPlot context will use the same Dear ImGui context internally.
     pub fn try_create(imgui_ctx: &ImGuiContext) -> dear_imgui_rs::ImGuiResult<Self> {
+        let thread_lease = ContextThreadLease::acquire()?;
         let imgui_binding = imgui_ctx.binding();
         let raw = imgui_binding.with_bound_context(|| unsafe {
             let prev_plot = sys::ImPlot_GetCurrentContext();
@@ -93,7 +96,7 @@ impl PlotContext {
         Ok(Self {
             raw,
             imgui_binding,
-            owns_context: true,
+            _thread_lease: thread_lease,
         })
     }
 
@@ -135,21 +138,16 @@ impl PlotContext {
 
 impl Drop for PlotContext {
     fn drop(&mut self) {
-        if !self.owns_context || self.raw.is_null() {
-            return;
+        // DestroyContext frees the plot's own allocations and clears GImPlot only if current.
+        // Attribute frees to the originating ImGui context while it is still available.
+        let raw = self.raw;
+        if self
+            .imgui_binding
+            .try_with_bound_context(|| unsafe { sys::ImPlot_DestroyContext(raw) })
+            .is_err()
+        {
+            // The thread lease still covers the allocator after the ImGui context has gone.
+            unsafe { sys::ImPlot_DestroyContext(raw) };
         }
-
-        let _ = self.imgui_binding.try_with_bound_context(|| unsafe {
-            let prev_plot = sys::ImPlot_GetCurrentContext();
-            let restore_plot = if prev_plot == self.raw {
-                std::ptr::null_mut()
-            } else {
-                prev_plot
-            };
-            sys::ImPlot_DestroyContext(self.raw);
-            sys::ImPlot_SetCurrentContext(restore_plot);
-        });
     }
 }
-
-// ImPlot context is tied to Dear ImGui and not thread-safe to send/share.

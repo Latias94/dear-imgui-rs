@@ -299,11 +299,12 @@ fn nested_plot_binding_never_restores_a_destroyed_outer_context() {
 }
 
 #[test]
-fn dead_plot_binding_never_enters_the_native_scope() {
+fn plot_owner_keeps_its_thread_and_destroys_the_native_plot_after_imgui_drops() {
     let _guard = test_guard();
     let imgui = Context::create();
     let plot = PlotContext::create(&imgui);
     let binding = plot.binding();
+    unsafe { sys::ImPlot_SetCurrentContext(plot.raw()) };
     drop(imgui);
 
     let entered = Cell::new(false);
@@ -312,8 +313,21 @@ fn dead_plot_binding_never_enters_the_native_scope() {
     assert!(matches!(result, Err(ContextBindingError::NativeDestroyed)));
     assert!(!entered.get());
 
+    std::thread::spawn(|| {
+        assert!(matches!(
+            dear_imgui_rs::ContextThreadLease::acquire(),
+            Err(dear_imgui_rs::ImGuiError::ContextThreadConflict)
+        ))
+    })
+    .join()
+    .unwrap();
     drop(plot);
-    assert!(!entered.get());
+    std::thread::spawn(|| {
+        let _lease = dear_imgui_rs::ContextThreadLease::acquire().unwrap();
+        assert!(unsafe { sys::ImPlot_GetCurrentContext() }.is_null());
+    })
+    .join()
+    .unwrap();
 }
 
 #[test]
