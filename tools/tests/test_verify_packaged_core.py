@@ -1455,6 +1455,22 @@ class PackageWorkspaceTests(unittest.TestCase):
             Path("repository"), "temporary workspace remained dirty"
         )
 
+    def test_local_submodule_url_requires_an_initialized_worktree(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "--quiet", root], check=True)
+            submodule = root / "vendor"
+            submodule.mkdir()
+            read_url = ["git", "-C", root, "config", "--local", "--get", "submodule.vendor.url"]
+
+            SOURCE_PACKAGES._configure_local_submodule(root, root, "vendor", "vendor")
+            self.assertEqual(subprocess.run(read_url, capture_output=True).returncode, 1)
+
+            subprocess.run(["git", "init", "--quiet", submodule], check=True)
+            SOURCE_PACKAGES._configure_local_submodule(root, root, "vendor", "vendor")
+            local_url = subprocess.check_output(read_url, text=True)
+            self.assertEqual(Path(local_url.rstrip("\r\n")), submodule)
+
     def test_package_submodules_follow_the_declared_nested_topology(self):
         nested = SOURCE_PACKAGES.PACKAGE_NESTED_SUBMODULES
         declarations = [{"top-level": "top-level-module"}]
