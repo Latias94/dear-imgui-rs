@@ -30,6 +30,9 @@ struct MainAdmission<'a> {
 
 impl SurfaceAdmissionBackend for MainAdmission<'_> {
     type Frame = wgpu::SurfaceTexture;
+    fn window_size(&self) -> winit::dpi::PhysicalSize<u32> {
+        self.window.window.inner_size()
+    }
     fn acquire(&mut self) -> SurfaceAcquisition<Self::Frame> {
         let Some(surface) = self.window.surface.as_ref() else {
             return SurfaceAcquisition::Validation;
@@ -102,8 +105,7 @@ impl MultiFrameDriver<'_> {
     }
 
     fn render_main(&mut self, prepared: WgpuPreparedMainFrame<'_>) -> Result<bool, RunError> {
-        let size = self.main.window.window.inner_size();
-        let admission = admit_surface_frame(size, &mut self.main)?;
+        let admission = admit_surface_frame(&mut self.main)?;
         let admitted = match admission {
             SurfaceAdmission::Skipped(reason) => {
                 self.skip = Some(reason);

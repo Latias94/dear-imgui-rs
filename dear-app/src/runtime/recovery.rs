@@ -426,6 +426,9 @@ mod tests {
         struct ValidationAdmission<'a>(&'a mut RuntimeGenerations<ProbeGeneration>);
         impl SurfaceAdmissionBackend for ValidationAdmission<'_> {
             type Frame = ();
+            fn window_size(&self) -> winit::dpi::PhysicalSize<u32> {
+                winit::dpi::PhysicalSize::new(640, 480)
+            }
             fn acquire(&mut self) -> SurfaceAcquisition<()> {
                 SurfaceAcquisition::Validation
             }
@@ -436,11 +439,7 @@ mod tests {
                 panic!("surface validation must await GPU callback evidence before recovery")
             }
         }
-        admit_surface_frame(
-            winit::dpi::PhysicalSize::new(640, 480),
-            &mut ValidationAdmission(generations),
-        )
-        .unwrap_err()
+        admit_surface_frame(&mut ValidationAdmission(generations)).unwrap_err()
     }
 
     #[test]

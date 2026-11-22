@@ -94,22 +94,34 @@ struct QueuedPlatformFault {
     terminal: bool,
 }
 
-fn invalidate_mouse_coordinate_cache(io: &mut dear_imgui_rs::Io) {
-    let unavailable = [-f32::MAX, -f32::MAX];
-    io.set_mouse_pos(unavailable);
-    io.add_mouse_pos_event(unavailable);
-    io.add_mouse_viewport_event(dear_imgui_rs::Id::default());
-}
-
 fn invalidate_raw_mouse_coordinate_cache(io: &mut dear_imgui_rs::sys::ImGuiIO) {
-    io.MousePos = dear_imgui_rs::sys::ImVec2 {
+    use dear_imgui_rs::sys;
+    io.MousePos = sys::ImVec2 {
         x: -f32::MAX,
         y: -f32::MAX,
     };
+    io.MousePosPrev = io.MousePos;
     io.MouseHoveredViewport = 0;
+    // A queued click can defer a trailing invalidation for a frame. Invalidate the old
+    // positions and viewport IDs in place while keeping buttons and other input in order.
+    // SAFETY: IO belongs to the live bound Context. Its queue is a disjoint ImVector, and
+    // each discriminant selects the initialized union member. The allocation stays in place.
     unsafe {
-        dear_imgui_rs::sys::ImGuiIO_AddMousePosEvent(io, -f32::MAX, -f32::MAX);
-        dear_imgui_rs::sys::ImGuiIO_AddMouseViewportEvent(io, 0);
+        let queue = dear_imgui_rs::internal::imvector_cast_mut::<sys::ImGuiInputEvent, _>(
+            &mut (*io.Ctx).InputEventsQueue,
+        );
+        for event in queue.as_slice_mut() {
+            match event.Type {
+                sys::ImGuiInputEventType_MousePos => {
+                    event.__bindgen_anon_1.MousePos.PosX = -f32::MAX;
+                    event.__bindgen_anon_1.MousePos.PosY = -f32::MAX;
+                }
+                sys::ImGuiInputEventType_MouseViewport => {
+                    event.__bindgen_anon_1.MouseViewport.HoveredViewportID = 0
+                }
+                _ => {}
+            }
+        }
     }
 }
 

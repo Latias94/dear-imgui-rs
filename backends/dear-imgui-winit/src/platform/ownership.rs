@@ -11,7 +11,6 @@ use web_time::Instant;
 
 #[cfg(feature = "multi-viewport")]
 use dear_imgui_rs::ContextPlatformWindowTeardown;
-use dear_imgui_rs::input::MouseSource;
 use dear_imgui_rs::{
     BackendFlags, Context, ContextAttachment, ContextAttachmentHandle, ContextAttachmentLease,
     ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding, ContextDestroyed,
@@ -132,7 +131,7 @@ pub(crate) struct WinitPlatformControl {
     pub(super) ime_event_source: Cell<Option<NativeWindowInstanceId>>,
     pub(super) active_touch: Cell<Option<u64>>,
     pub(super) hidpi_factor: Cell<f64>,
-    pub(super) last_local_pointer: Cell<Option<(PhysicalPosition<f64>, MouseSource)>>,
+    pub(super) last_local_pointer: Cell<Option<PhysicalPosition<f64>>>,
     pub(super) pointer_control: RefCell<Option<super::pointer_control::ActivePointerControl>>,
     pub(super) pointer_release_events: RefCell<VecDeque<super::WinitPointerReleaseReport>>,
     pub(super) terminal_fault: RefCell<Option<WinitPlatformError>>,
@@ -402,14 +401,19 @@ impl WinitPlatformControl {
     }
 
     fn owns_any_publication_or_callback_in_current_context(&self) -> bool {
-        if self.owns_base_publication_in_current_context() {
-            return true;
-        }
         #[cfg(feature = "multi-viewport")]
-        if let Some(runtime) = self.runtime.borrow().as_ref() {
-            return runtime.owns_any_platform_callback_in_current_context();
+        {
+            self.owns_base_publication_in_current_context()
+                || self
+                    .runtime
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|runtime| runtime.owns_any_platform_callback_in_current_context())
         }
-        false
+        #[cfg(not(feature = "multi-viewport"))]
+        {
+            self.owns_base_publication_in_current_context()
+        }
     }
 
     pub(crate) fn fail_current_contract(&self, error: WinitPlatformError) {

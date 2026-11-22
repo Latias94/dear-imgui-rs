@@ -3,9 +3,8 @@ use std::time::Instant;
 #[cfg(target_arch = "wasm32")]
 use web_time::Instant;
 
-use dear_imgui_rs::Context;
-use dear_imgui_rs::input::MouseSource;
-use winit::dpi::{LogicalPosition, LogicalSize, PhysicalSize};
+use dear_imgui_rs::{Context, sys};
+use winit::dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::window::{Window, WindowAttributes};
 
 use crate::sanitize;
@@ -82,17 +81,16 @@ impl WinitPlatform {
         size: PhysicalSize<u32>,
         hidpi: f64,
     ) {
-        let io = context.io_mut();
-        if self.control.hidpi_factor.replace(hidpi) != hidpi {
-            // MousePos can still refer to the previous frame when Winit delivers move and DPI
-            // events together. Reproject the last native position in input queue order.
-            if let Some((physical, source)) = self.control.last_local_pointer.get()
-                && let Some(logical) = sanitize::finite_position(physical.to_logical(hidpi))
-            {
-                io.add_mouse_source_event(source);
-                io.add_mouse_pos_event(logical);
-            }
+        let previous = self.control.hidpi_factor.replace(hidpi);
+        if previous != hidpi {
+            reproject_local_mouse(
+                context,
+                previous,
+                hidpi,
+                self.control.last_local_pointer.get(),
+            );
         }
+        let io = context.io_mut();
         io.set_display_size(sanitize::finite_non_negative_size(size.to_logical(hidpi)));
         io.set_display_framebuffer_scale(sanitize::framebuffer_scale(hidpi, 1.0));
     }
@@ -153,11 +151,10 @@ impl WinitPlatform {
             if let Some(pos) = sanitize::finite_position(logical_pos) {
                 let position = LogicalPosition::new(pos[0], pos[1]);
                 if window.set_cursor_position(position).is_ok() {
-                    self.control.last_local_pointer.set(Some((
+                    self.control.last_local_pointer.set(Some(
                         position
                             .to_physical(sanitize::positive_finite_or(window.scale_factor(), 1.0)),
-                        MouseSource::Mouse,
-                    )));
+                    ));
                 }
             }
         }
@@ -226,5 +223,59 @@ impl WinitPlatform {
         WindowAttributes::default()
             .with_title("Dear ImGui Window")
             .with_inner_size(LogicalSize::new(1024.0, 768.0))
+    }
+}
+
+fn reproject_local_mouse(
+    context: &mut Context,
+    old_scale: f64,
+    new_scale: f64,
+    last_physical: Option<PhysicalPosition<f64>>,
+) {
+    // Dear ImGui floors queued positions. Preserve the physical precision of the last Winit
+    // sample, including a stationary cursor when the new scale reveals a fractional pixel.
+    let last = last_physical.and_then(|physical| {
+        let at_scale = |scale| {
+            sanitize::finite_position(physical.to_logical(scale)).map(|p| p.map(f32::floor))
+        };
+        Some((at_scale(old_scale)?, at_scale(new_scale)?))
+    });
+    let reproject = |x: &mut f32, y: &mut f32| {
+        if *x == -f32::MAX || *y == -f32::MAX {
+            return;
+        }
+        let pos = [*x, *y];
+        [*x, *y] = if let Some((old, new)) = last
+            && pos == old
+        {
+            new
+        } else {
+            sanitize::finite_vec2_f64_to_f32(pos.map(|v| f64::from(v) * old_scale / new_scale))
+                .map(|p| p.map(f32::floor))
+                .unwrap_or([-f32::MAX; 2])
+        };
+    };
+    // SAFETY: the exclusively borrowed Context owns IO and its queue. Only MousePos events
+    // initialize this union member. No native calls or queue reallocations occur here.
+    unsafe {
+        let raw = &mut *context.as_raw();
+        let io = &mut raw.IO;
+        for pos in [&mut io.MousePos, &mut io.MousePosPrev]
+            .into_iter()
+            .chain(&mut io.MouseClickedPos)
+        {
+            reproject(&mut pos.x, &mut pos.y);
+        }
+        // A button can make Dear ImGui defer the next move to another frame. Each earlier
+        // position must be in the current display space when its associated click is consumed.
+        let queue = dear_imgui_rs::internal::imvector_cast_mut::<sys::ImGuiInputEvent, _>(
+            &mut raw.InputEventsQueue,
+        );
+        for event in queue.as_slice_mut() {
+            if event.Type == sys::ImGuiInputEventType_MousePos {
+                let pos = &mut event.__bindgen_anon_1.MousePos;
+                reproject(&mut pos.PosX, &mut pos.PosY);
+            }
+        }
     }
 }

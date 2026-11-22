@@ -465,7 +465,17 @@ fn shutdown_preserves_a_foreign_empty_monitor_replacement_without_double_free() 
 #[test]
 fn coordinate_contract_transition_restores_metrics_and_invalidates_pointer_cache() {
     let _guard = lock_context();
-    let context = Context::create();
+    let mut context = Context::create();
+    context.prepare_frame(
+        dear_imgui_rs::FramePrepareOptions::new([640.0, 480.0], 1.0 / 60.0).renderer_has_textures(),
+    );
+    let _consumer = context.create_synchronous_renderer_consumer().unwrap();
+    let left = dear_imgui_rs::input::MouseButton::Left;
+    context
+        .io_mut()
+        .add_mouse_viewport_event(dear_imgui_rs::Id::from(99));
+    context.io_mut().add_mouse_pos_event([360.0, 240.0]);
+    context.io_mut().add_mouse_button_event(left, true);
     let io = unsafe { &mut *dear_imgui_rs::sys::igGetIO_ContextPtr(context.as_raw()) };
     io.MousePos = dear_imgui_rs::sys::ImVec2 { x: 42.0, y: 27.0 };
     io.MouseHoveredViewport = 99;
@@ -479,6 +489,9 @@ fn coordinate_contract_transition_restores_metrics_and_invalidates_pointer_cache
     assert_eq!(io.MousePos.x, -f32::MAX);
     assert_eq!(io.MousePos.y, -f32::MAX);
     assert_eq!(io.MouseHoveredViewport, 0);
+    drop(context.begin_frame());
+    assert!(context.io().mouse_down(left));
+    assert_eq!(context.io().mouse_pos(), [-f32::MAX; 2]);
 }
 
 #[test]

@@ -41,7 +41,9 @@ pub(crate) fn finite_or_zero(value: f32) -> f32 {
 }
 
 pub(crate) fn positive_finite_or(value: f64, fallback: f64) -> f64 {
-    if value.is_finite() && value > 0.0 {
+    // DPI conversions require a normal f64 and Dear ImGui stores the same factor as f32.
+    let framebuffer_scale = value as f32;
+    if framebuffer_scale.is_finite() && framebuffer_scale > 0.0 {
         value
     } else {
         fallback
@@ -91,5 +93,7 @@ mod tests {
         assert_eq!(positive_finite_or(0.0, 1.0), 1.0);
         assert_eq!(positive_finite_or(f64::NAN, 1.0), 1.0);
         assert_eq!(positive_finite_or(f64::INFINITY, 1.0), 1.0);
+        assert_eq!(positive_finite_or(f64::from_bits(1), 1.0), 1.0);
+        assert_eq!(positive_finite_or(f64::MAX, 1.0), 1.0);
     }
 }

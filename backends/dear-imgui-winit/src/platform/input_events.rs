@@ -1,5 +1,4 @@
 use dear_imgui_rs::Context;
-use dear_imgui_rs::input::MouseSource;
 use winit::dpi::PhysicalPosition;
 use winit::event::{Event, WindowEvent};
 use winit::window::{Window, WindowId};
@@ -510,9 +509,7 @@ impl WinitPlatform {
         let logical = physical.to_logical::<f64>(self.hidpi_factor());
         let forwarded = events::handle_cursor_moved([logical.x, logical.y], context);
         if forwarded.pointer {
-            self.control
-                .last_local_pointer
-                .set(Some((physical, MouseSource::Mouse)));
+            self.control.last_local_pointer.set(Some(physical));
         }
         forwarded
     }
@@ -535,9 +532,7 @@ impl WinitPlatform {
             return WinitEventForwarding::default();
         };
         if position.is_some() {
-            self.control
-                .last_local_pointer
-                .set(Some((touch.location, MouseSource::TouchScreen)));
+            self.control.last_local_pointer.set(Some(touch.location));
         }
         events::handle_touch_event_at(action, position, None, context)
     }
@@ -547,10 +542,43 @@ impl WinitPlatform {
 mod tests {
     use super::*;
     use crate::test_util::test_sync::lock_context;
+    use dear_imgui_rs::input::{MouseButton, MouseSource};
     use winit::{
         dpi::PhysicalSize,
         event::{DeviceId, Touch, TouchPhase},
     };
+
+    #[test]
+    fn dpi_change_keeps_queued_click_at_its_own_position_and_preserves_drag_origin() {
+        let _guard = lock_context();
+        let mut context = Context::create();
+        context.prepare_frame(
+            dear_imgui_rs::FramePrepareOptions::new([640.0, 480.0], 1.0 / 60.0)
+                .renderer_has_textures(),
+        );
+        let _consumer = context.create_synchronous_renderer_consumer().unwrap();
+        let platform = WinitPlatform::new(&mut context).unwrap();
+        let size = PhysicalSize::new(640, 480);
+        platform.handle_local_cursor_moved(PhysicalPosition::new(120.0, 80.0), &mut context);
+        context
+            .io_mut()
+            .add_mouse_button_event(MouseButton::Left, true);
+        platform.handle_local_cursor_moved(PhysicalPosition::new(122.0, 82.0), &mut context);
+        platform.update_single_window_geometry(&mut context, size, 2.0);
+
+        drop(context.begin_frame());
+        assert!(context.io().mouse_down(MouseButton::Left));
+        assert_eq!(context.io().mouse_pos(), [60.0, 40.0]);
+        drop(context.begin_frame());
+        assert_eq!(context.io().mouse_pos(), [61.0, 41.0]);
+
+        // The same physical position across a second scale change must not start a drag.
+        platform.update_single_window_geometry(&mut context, size, 1.0);
+        let frame = context.begin_frame();
+        assert_eq!(frame.ui().io().mouse_pos(), [122.0, 82.0]);
+        assert_eq!(frame.ui().io().mouse_delta(), [0.0, 0.0]);
+        assert!(!frame.ui().is_mouse_dragging(MouseButton::Left));
+    }
 
     #[test]
     fn dpi_change_reprojects_queued_mouse_and_touch_in_physical_pixels() {
