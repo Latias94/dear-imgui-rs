@@ -64,6 +64,9 @@ pub enum Plot3DError {
         point_count: usize,
     },
     InvalidSurfaceScale,
+    NonFiniteSurfaceHeight {
+        index: usize,
+    },
     StringConversion(&'static str),
 }
 
@@ -116,6 +119,9 @@ impl std::fmt::Display for Plot3DError {
             Plot3DError::InvalidSurfaceScale => f.write_str(
                 "surface color scale endpoints must be finite or both NaN for automatic scaling",
             ),
+            Plot3DError::NonFiniteSurfaceHeight { index } => {
+                write!(f, "surface height at sample {index} must be finite")
+            }
             Plot3DError::StringConversion(what) => write!(f, "string conversion error: {}", what),
         }
     }

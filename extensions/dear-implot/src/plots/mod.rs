@@ -726,9 +726,9 @@ impl<'a> PlotBuilder<'a> {
                 values,
                 bins,
             } => {
-                let plot = histogram::HistogramPlot::new(label, values).with_bins(bins);
-                plot.validate()?;
-                plot.plot(plot_ui);
+                histogram::HistogramPlot::new(label, values)
+                    .with_bins(bins)
+                    .plot_checked(plot_ui)?;
             }
             PlotType::Heatmap {
                 label,
@@ -736,9 +736,7 @@ impl<'a> PlotBuilder<'a> {
                 rows,
                 cols,
             } => {
-                let plot = heatmap::HeatmapPlot::new(label, values, rows, cols);
-                plot.validate()?;
-                plot.plot(plot_ui);
+                heatmap::HeatmapPlot::new(label, values, rows, cols).plot_checked(plot_ui)?;
             }
             PlotType::PieChart {
                 labels,

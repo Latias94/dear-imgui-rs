@@ -708,6 +708,21 @@ fn rejected_runner_requests_preserve_ready_engines_and_unconsumed_runs() {
     ));
     assert_eq!(engine.run_state(), RunState::Ready);
 
+    for flag in [RunFlags::SHARE_TEST_CONTEXT, RunFlags::SHARE_VARS] {
+        let error = TestRunner::new(&mut engine)
+            .run_flags(flag)
+            .run_headless(&mut context, no_error)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            RunnerError::TestEngine(TestEngineError::InvalidInput {
+                argument: "run_flags",
+                ..
+            })
+        ));
+        assert_eq!(engine.run_state(), RunState::Ready);
+    }
+
     engine
         .queue_tests(TestGroup::Tests, Some("no matches"), RunFlags::NONE)
         .unwrap();

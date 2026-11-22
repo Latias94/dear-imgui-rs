@@ -62,6 +62,51 @@ fn histogram_counts(ui: &crate::PlotUi<'_>) -> Vec<f64> {
 }
 
 #[test]
+fn asymmetric_error_bars_fit_the_signed_endpoints() {
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    prepare_imgui(&mut imgui);
+    let plot = PlotContext::create(&imgui);
+    let frame = imgui.begin_frame();
+    let ui = plot.get_plot_ui(frame.ui());
+    ui.set_next_axes_to_fit();
+    let _token = ui.begin_plot("signed errors").unwrap();
+
+    // Both endpoints can be above the estimate: 10 - (-2) and 10 + 5.
+    ui.asymmetric_error_bars_plot("interval", &[1.0], &[10.0], &[-2.0], &[5.0])
+        .unwrap();
+    ui.with_bound_context(|| unsafe {
+        let plot = (*sys::ImPlot_GetCurrentContext()).CurrentPlot;
+        let fit = (*plot).Axes[YAxis::Y1 as usize].FitExtents;
+        assert_eq!((fit.Min, fit.Max), (12.0, 15.0));
+    });
+}
+
+#[test]
+fn histogram_1d_counts_constant_samples_in_a_finite_bin() {
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    prepare_imgui(&mut imgui);
+    let plot = PlotContext::create(&imgui);
+    let frame = imgui.begin_frame();
+    let ui = plot.get_plot_ui(frame.ui());
+    let _token = ui.begin_plot("constant samples").unwrap();
+
+    ui.histogram_plot_with_bins("sensor", &[7.0; 3], crate::BinMethod::Scott)
+        .unwrap();
+    ui.with_bound_context(|| unsafe {
+        // PlotHistogram stores its bin centers and counts in the two scratch vectors.
+        let ctx = &*sys::ImPlot_GetCurrentContext();
+        assert_eq!((ctx.TempDouble1.Size, ctx.TempDouble2.Size), (1, 1));
+        assert_eq!((*ctx.TempDouble1.Data, *ctx.TempDouble2.Data), (7.0, 3.0));
+    });
+    assert!(
+        ui.histogram_plot_with_bins("invalid", &[7.0], 0usize)
+            .is_err()
+    );
+}
+
+#[test]
 fn histogram_2d_bins_both_automatic_ranges_through_the_plot_ui() {
     let _guard = test_guard();
     let mut imgui = Context::create();

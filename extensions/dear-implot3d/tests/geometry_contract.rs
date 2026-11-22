@@ -2,8 +2,9 @@
 
 use dear_imgui_rs::Context;
 use dear_implot3d::{
-    Line3DFlags, Mesh3D, Plot3D, Plot3DCond, Plot3DContext, Plot3DDataOffset, Plot3DError,
-    Plot3DUi, Quad3DFlags, Quads3D, Surface3D, Surface3DFlags, Triangle3DFlags, Triangles3D,
+    Line3DFlags, Mesh3D, Plot3D, Plot3DCond, Plot3DContext, Plot3DDataLayout, Plot3DDataOffset,
+    Plot3DDataStride, Plot3DError, Plot3DUi, Quad3DFlags, Quads3D, Surface3D, Surface3DFlags,
+    Triangle3DFlags, Triangles3D,
 };
 use dear_implot3d_sys::{ImDrawVert, surface_test_probe::dear_implot3d_probe_vertices};
 use std::sync::Mutex;
@@ -22,6 +23,45 @@ fn appended_vertices<const N: usize>(
         unsafe { dear_implot3d_probe_vertices(raw, start, vertices.as_mut_ptr(), N as i32) };
     assert_eq!(count, N as i32);
     vertices
+}
+
+#[test]
+fn strided_surface_uses_only_coordinate_fields_and_wraps_the_vertex_offset() {
+    with_plot(|plot, ui| {
+        let points = [
+            [0.2, 0.2, 0.3, f32::NAN],
+            [0.8, 0.2, 0.5, f32::NAN],
+            [0.2, 0.8, 0.6, f32::NAN],
+            [0.8, 0.8, 0.4, f32::NAN],
+        ];
+        let pixels = points.map(|[x, y, z, _]| ui.plot_to_pixels([x, y, z]));
+        let data = points.as_flattened();
+        let layout = Plot3DDataLayout::new(
+            Plot3DDataOffset::samples(-1),
+            Plot3DDataStride::for_type::<[f32; 4]>(),
+        );
+        let vertices = appended_vertices::<4>(plot, || unsafe {
+            // Each slice covers its field in all four rows, including the last strided read.
+            ui.surface_f32_raw(
+                "strided",
+                data,
+                &data[1..],
+                &data[2..],
+                2,
+                2,
+                0.0,
+                0.0,
+                Surface3DFlags::NO_LINES | Surface3DFlags::NO_MARKERS,
+                layout,
+            )
+            .unwrap();
+        });
+        // The quad visits grid indices 0, 1, 3, 2 after applying the circular offset.
+        assert_eq!(
+            vertices.map(|v| [v.pos.x, v.pos.y]),
+            [pixels[3], pixels[0], pixels[2], pixels[1]]
+        );
+    });
 }
 
 fn with_plot(test: impl FnOnce(&Plot3DContext, &Plot3DUi<'_>)) {

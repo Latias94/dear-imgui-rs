@@ -395,16 +395,23 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
             sys::imgui_test_engine_queue_tests(engine, 99, c"".as_ptr(), 0, &mut run_id),
             sys::ImGuiTestEngineStatus_OutOfRange
         );
-        assert_eq!(
-            sys::imgui_test_engine_queue_tests(
-                engine,
-                sys::ImGuiTestEngineGroup_Tests,
-                c"".as_ptr(),
-                1 << 30,
-                &mut run_id,
-            ),
-            sys::ImGuiTestEngineStatus_OutOfRange
-        );
+        for flags in [
+            1 << 30,
+            sys::ImGuiTestEngineRunFlags_ShareVars,
+            sys::ImGuiTestEngineRunFlags_ShareTestContext,
+        ] {
+            assert_eq!(
+                sys::imgui_test_engine_queue_tests(
+                    engine,
+                    sys::ImGuiTestEngineGroup_Tests,
+                    c"".as_ptr(),
+                    flags,
+                    &mut run_id,
+                ),
+                sys::ImGuiTestEngineStatus_OutOfRange
+            );
+            assert_eq!(run_id, 0);
+        }
         assert_eq!(
             sys::imgui_test_engine_set_verbose_level(engine, 99),
             sys::ImGuiTestEngineStatus_OutOfRange

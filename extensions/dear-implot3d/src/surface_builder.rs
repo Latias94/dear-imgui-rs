@@ -63,7 +63,7 @@ impl<'ui> Surface3DBuilder<'ui> {
 }
 
 impl<'ui> Plot3DUi<'ui> {
-    /// Start a surface plot (f32) from X/Y grid axes.
+    /// Start a surface plot (f32) from X/Y grid axes. Filled surfaces require finite Z samples.
     pub fn surface_f32(
         &'ui self,
         label: impl Into<Cow<'ui, str>>,
@@ -90,7 +90,7 @@ impl<'ui> Plot3DUi<'ui> {
     /// `xs_flat`, `ys_flat`, and `zs` must each contain exactly `x_count * y_count` values. The
     /// contiguous path does not accept an offset or stride; use [`Self::surface_f32_raw`] when
     /// the native layout is intentionally non-contiguous.
-    /// Pass two zeros for automatic color scaling over the grid's Z range.
+    /// Filled surfaces require finite Z samples. Pass two zeros for automatic color scaling over their range.
     ///
     /// ```no_run
     /// use dear_implot3d::{Plot3DError, Plot3DUi, Surface3DFlags};
@@ -133,13 +133,14 @@ impl<'ui> Plot3DUi<'ui> {
     }
 
     /// Submit a surface with an explicitly arbitrary native data layout.
+    /// Filled surfaces require finite Z samples.
     ///
     /// # Safety
     ///
-    /// The caller must ensure that every coordinate read performed by ImPlot3D from `xs`, `ys`,
-    /// and `zs` using `layout`, `x_count`, and `y_count` addresses initialized, properly aligned,
-    /// live `f32` values. The slices need not be exactly `x_count * y_count` elements because a
-    /// custom stride or offset may address a larger allocation.
+    /// For each of the `x_count * y_count` samples, `layout` must address an initialized,
+    /// properly aligned, readable `f32` in each coordinate allocation for the duration of the
+    /// call. The slices need not be exactly `x_count * y_count` elements because a custom stride
+    /// may address a larger allocation.
     ///
     /// Calling this arbitrary-layout API without an `unsafe` block is rejected:
     ///
@@ -177,7 +178,7 @@ impl<'ui> Plot3DUi<'ui> {
         layout: Plot3DDataLayout,
     ) -> Result<(), Plot3DError> {
         let label = SurfaceLabel::checked(label.as_ref())?;
-        let shape = SurfaceGridShape::checked(x_count, y_count)?.validate_wireframe(flags)?;
+        let shape = SurfaceGridShape::checked(x_count, y_count)?.validate_layout(flags, layout)?;
         unsafe {
             submit_surface_raw(
                 self, label, xs, ys, zs, shape, scale_min, scale_max, flags, layout,

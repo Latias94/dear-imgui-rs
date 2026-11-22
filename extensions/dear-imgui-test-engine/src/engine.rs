@@ -754,11 +754,12 @@ impl TestEngine {
         if let Some(filter) = filter {
             validate_c_string(OPERATION, "filter", filter)?;
         }
-        if !RunFlags::all().contains(run_flags) {
+        let queue_flags = RunFlags::all() - (RunFlags::SHARE_VARS | RunFlags::SHARE_TEST_CONTEXT);
+        if !queue_flags.contains(run_flags) {
             return Err(TestEngineError::invalid_input(
                 OPERATION,
                 "run_flags",
-                "flags contain bits unknown to this Test Engine version",
+                "flags must be supported for a top-level test run",
             ));
         }
         Ok(())

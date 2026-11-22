@@ -62,7 +62,16 @@ impl SurfaceGridShape {
         })
     }
 
-    pub(crate) fn validate_wireframe(self, flags: Surface3DFlags) -> Result<Self, Plot3DError> {
+    pub(crate) fn validate_layout(
+        self,
+        flags: Surface3DFlags,
+        layout: Plot3DDataLayout,
+    ) -> Result<Self, Plot3DError> {
+        layout
+            .sample_count(self.point_count)
+            .ok_or(Plot3DError::NativeCountOutOfRange {
+                what: "surface samples",
+            })?;
         if !flags.contains(Surface3DFlags::NO_LINES) {
             let x = i64::from(self.x_count);
             let y = i64::from(self.y_count);
@@ -76,17 +85,34 @@ impl SurfaceGridShape {
         Ok(self)
     }
 
-    fn validate_z_len(self, z_len: usize) -> Result<Self, Plot3DError> {
-        if z_len == self.point_count {
-            Ok(self)
-        } else {
-            Err(Plot3DError::GridSizeMismatch {
+    fn validate_grid(self, zs: &[f32], flags: Surface3DFlags) -> Result<Self, Plot3DError> {
+        if zs.len() != self.point_count {
+            return Err(Plot3DError::GridSizeMismatch {
                 x_count: self.x_count as usize,
                 y_count: self.y_count as usize,
                 expected: self.point_count,
-                z_len,
-            })
+                z_len: zs.len(),
+            });
         }
+        self.validate_layout(flags, Plot3DDataLayout::DEFAULT)?;
+        self.validate_fill_heights(flags, zs.iter().copied())?;
+        Ok(self)
+    }
+
+    fn validate_fill_heights(
+        self,
+        flags: Surface3DFlags,
+        mut heights: impl Iterator<Item = f32>,
+    ) -> Result<(), Plot3DError> {
+        // The native fill renderer converts each normalized height into a colormap table index.
+        if self.x_count > 1
+            && self.y_count > 1
+            && !flags.contains(Surface3DFlags::NO_FILL)
+            && let Some(index) = heights.position(|z| !z.is_finite())
+        {
+            return Err(Plot3DError::NonFiniteSurfaceHeight { index });
+        }
+        Ok(())
     }
 
     pub(crate) const fn counts_i32(self) -> (i32, i32) {
@@ -113,9 +139,7 @@ impl<'a> SurfaceGrid<'a> {
         zs: &'a [f32],
         flags: Surface3DFlags,
     ) -> Result<Self, Plot3DError> {
-        let shape = SurfaceGridShape::checked(xs.len(), ys.len())?
-            .validate_z_len(zs.len())?
-            .validate_wireframe(flags)?;
+        let shape = SurfaceGridShape::checked(xs.len(), ys.len())?.validate_grid(zs, flags)?;
         let mut xs_flat = Vec::with_capacity(shape.point_count());
         let mut ys_flat = Vec::with_capacity(shape.point_count());
 
@@ -142,9 +166,7 @@ impl<'a> SurfaceGrid<'a> {
         y_count: usize,
         flags: Surface3DFlags,
     ) -> Result<Self, Plot3DError> {
-        let shape = SurfaceGridShape::checked(x_count, y_count)?
-            .validate_z_len(zs.len())?
-            .validate_wireframe(flags)?;
+        let shape = SurfaceGridShape::checked(x_count, y_count)?.validate_grid(zs, flags)?;
         validate_coordinate_len(xs.len(), shape.point_count(), "surface x coordinates")?;
         validate_coordinate_len(ys.len(), shape.point_count(), "surface y coordinates")?;
 
@@ -258,6 +280,13 @@ pub(crate) unsafe fn submit_surface_raw(
     layout: Plot3DDataLayout,
 ) -> Result<(), Plot3DError> {
     let (scale_min, scale_max) = surface_scale(scale_min, scale_max)?;
+    let stride = usize::try_from(layout.raw_stride()).unwrap_or(size_of::<f32>());
+    // A circular offset permutes the same samples. Walk them in storage order, skipping
+    // unrelated fields. The raw caller guarantees each strided address is readable and aligned.
+    shape.validate_fill_heights(
+        flags,
+        (0..shape.point_count()).map(|i| unsafe { zs.as_ptr().byte_add(i * stride).read() }),
+    )?;
     let label = label.as_str();
     let (x_count, y_count) = shape.counts_i32();
 
@@ -281,7 +310,7 @@ pub(crate) unsafe fn submit_surface_raw(
     Ok(())
 }
 
-/// A surface whose X and Y inputs describe grid axes.
+/// A surface whose X and Y inputs describe grid axes. Filled surfaces require finite Z samples.
 ///
 /// Custom offsets are intentionally unavailable on this safe type. Use the unsafe
 /// [`Plot3DUi::surface_f32_raw`] escape hatch for arbitrary native layouts.
@@ -353,7 +382,7 @@ mod tests {
     use std::sync::{Mutex, OnceLock};
 
     use super::{Plot3D, Surface3D, SurfaceGrid, SurfaceGridShape, SurfaceLabel};
-    use crate::{Surface3DFlags, plots::Plot3DError, sys};
+    use crate::{Plot3DDataLayout, Plot3DDataOffset, Surface3DFlags, plots::Plot3DError, sys};
 
     #[test]
     fn axis_grid_flattens_in_row_major_order() {
@@ -446,17 +475,33 @@ mod tests {
 
     #[test]
     fn surface_wireframe_counts_both_endpoints_of_each_grid_edge() {
+        let layout = Plot3DDataLayout::DEFAULT;
         let shape = SurfaceGridShape::checked(32_768, 32_768).unwrap();
         assert!(matches!(
-            shape.validate_wireframe(Surface3DFlags::NONE),
+            shape.validate_layout(Surface3DFlags::NONE, layout),
             Err(Plot3DError::NativeCountOutOfRange { .. })
         ));
         assert_eq!(
-            shape.validate_wireframe(Surface3DFlags::NO_LINES),
+            shape.validate_layout(Surface3DFlags::NO_LINES, layout),
             Ok(shape)
         );
         let narrow = SurfaceGridShape::checked(1, 32_768).unwrap();
-        assert_eq!(narrow.validate_wireframe(Surface3DFlags::NONE), Ok(narrow));
+        assert_eq!(
+            narrow.validate_layout(Surface3DFlags::NONE, layout),
+            Ok(narrow)
+        );
+    }
+
+    #[test]
+    fn large_surface_checks_circular_indices_even_with_lines_disabled() {
+        let shape = SurfaceGridShape::checked(40_000, 40_000).unwrap();
+        let offset = Plot3DDataLayout::DEFAULT.with_offset(Plot3DDataOffset::samples(-1));
+        assert_eq!(
+            shape.validate_layout(Surface3DFlags::NO_LINES, offset),
+            Err(Plot3DError::NativeCountOutOfRange {
+                what: "surface samples"
+            })
+        );
     }
 
     #[test]
@@ -554,6 +599,19 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(axis_error, flat_error);
+    }
+
+    #[test]
+    fn surface_validates_heights_before_the_native_colormap_lookup() {
+        let axis = [0.0, 1.0];
+        for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let zs = [0.0, invalid, 0.5, 1.0];
+            assert_eq!(
+                SurfaceGrid::from_axes(&axis, &axis, &zs, Surface3DFlags::NONE).unwrap_err(),
+                Plot3DError::NonFiniteSurfaceHeight { index: 1 }
+            );
+            assert!(SurfaceGrid::from_axes(&axis, &axis, &zs, Surface3DFlags::NO_FILL).is_ok());
+        }
     }
 
     #[test]
