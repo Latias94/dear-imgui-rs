@@ -2,6 +2,17 @@ use crate::sys;
 
 pub(crate) const IMPLOT_AUTO: i32 = -1;
 
+/// Built-in ImPlot axis scales. Time ticks are supported on horizontal axes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(i32)]
+pub enum AxisScale {
+    #[default]
+    Linear = sys::ImPlotScale_Linear as i32,
+    Time = sys::ImPlotScale_Time as i32,
+    Log10 = sys::ImPlotScale_Log10 as i32,
+    SymLog = sys::ImPlotScale_SymLog as i32,
+}
+
 /// Choice of Y axis for multi-axis plots
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]

@@ -3,7 +3,7 @@ use super::validation::{
     assert_finite_f64_slice, axis_tick_count_to_i32,
 };
 use super::{PlotSetup, PlotUi};
-use crate::{Axis, AxisFlags, AxisFormat, PlotCond, XAxis, YAxis, sys};
+use crate::{Axis, AxisFlags, AxisFormat, AxisScale, PlotCond, XAxis, YAxis, sys};
 use dear_imgui_rs::with_scratch_txt;
 use std::os::raw::c_char;
 
@@ -257,23 +257,29 @@ impl PlotSetup<'_> {
         });
     }
 
-    /// Setup scale for a specific X axis (pass sys::ImPlotScale variant)
-    pub fn setup_x_axis_scale(&self, axis: XAxis, scale: sys::ImPlotScale) {
-        self.plot.with_axes(&[axis as sys::ImAxis], || unsafe {
-            sys::ImPlot_SetupAxisScale_PlotScale(axis as sys::ImAxis, scale)
-        })
+    /// Set the built-in scale for an enabled X axis.
+    pub fn setup_x_axis_scale(&self, axis: XAxis, scale: AxisScale) {
+        self.scale(axis.into(), scale);
     }
 
-    /// Setup scale for a specific Y axis (pass sys::ImPlotScale variant)
-    pub fn setup_y_axis_scale(&self, axis: YAxis, scale: sys::ImPlotScale) {
+    /// Set the built-in scale for an enabled Y axis.
+    ///
+    /// # Panics
+    ///
+    /// ImPlot requires a horizontal axis for [`AxisScale::Time`].
+    pub fn setup_y_axis_scale(&self, axis: YAxis, scale: AxisScale) {
         assert_ne!(
             scale,
-            sys::ImPlotScale_Time,
+            AxisScale::Time,
             "time ticks require a horizontal axis"
         );
-        self.plot.with_axes(&[axis as sys::ImAxis], || unsafe {
-            sys::ImPlot_SetupAxisScale_PlotScale(axis as sys::ImAxis, scale)
-        })
+        self.scale(axis.into(), scale);
+    }
+
+    fn scale(&self, axis: Axis, scale: AxisScale) {
+        self.plot.with_axes(&[axis.to_sys()], || unsafe {
+            sys::ImPlot_SetupAxisScale_PlotScale(axis.to_sys(), scale as sys::ImPlotScale)
+        });
     }
 
     /// Setup axis limits constraints

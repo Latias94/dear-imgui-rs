@@ -60,7 +60,7 @@ mod utils;
 // New modular plot types
 pub mod plots;
 
-pub use axis_types::{Axis, XAxis, YAxis, YAxisChoice};
+pub use axis_types::{Axis, AxisScale, XAxis, YAxis, YAxisChoice};
 pub(crate) use axis_types::{IMPLOT_AUTO, y_axis_choice_option_to_i32};
 pub use colormap::Colormap;
 pub use colors::PlotColorElement;

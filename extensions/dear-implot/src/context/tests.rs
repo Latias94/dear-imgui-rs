@@ -781,6 +781,8 @@ fn implicit_axes_follow_the_current_pair_and_secondary_axes_require_setup() {
                 );
                 setup.setup_x_axis(XAxis::X2, None, crate::AxisFlags::NONE);
                 setup.setup_y_axis(YAxis::Y2, None, crate::AxisFlags::NONE);
+                setup.setup_x_axis_scale(XAxis::X2, crate::AxisScale::Log10);
+                setup.setup_y_axis_scale(YAxis::Y2, crate::AxisScale::SymLog);
                 setup.setup_y_axis_limits(YAxis::Y2, 30.0, 40.0, PlotCond::Always);
             },
             |plot| {
