@@ -68,8 +68,11 @@ pub(crate) fn assert_non_negative_finite_f32(caller: &str, name: &str, value: f3
     assert!(value >= 0.0, "{caller} {name} must be non-negative");
 }
 
-pub(crate) fn resolve_table_column(column: TableColumnRef, caller: &str) -> i32 {
-    let table = assert_current_table(caller);
+pub(crate) fn resolve_table_column(
+    table: *mut sys::ImGuiTable,
+    column: TableColumnRef,
+    caller: &str,
+) -> i32 {
     let column_n = match column {
         TableColumnRef::Current => unsafe { (*table).CurrentColumn },
         TableColumnRef::Index(index) => index.into_i32(caller),
@@ -78,13 +81,17 @@ pub(crate) fn resolve_table_column(column: TableColumnRef, caller: &str) -> i32 
     column_n
 }
 
-pub(crate) fn assert_current_table_has_flags(flags: TableFlags, caller: &str) {
+pub(crate) fn assert_current_table_has_flags(
+    flags: TableFlags,
+    caller: &str,
+) -> *mut sys::ImGuiTable {
     let table = assert_current_table(caller);
     let table_flags = TableFlags::from_bits_retain(unsafe { (*table).Flags });
     assert!(
         table_flags.contains(flags),
         "{caller} requires the current table to have {flags:?}"
     );
+    table
 }
 
 pub(crate) fn assert_table_setup_phase(caller: &str) {
@@ -116,12 +123,13 @@ pub(crate) fn assert_current_table_cell(caller: &str) {
     );
 }
 
-pub(crate) fn assert_current_table_row(caller: &str) {
+pub(crate) fn assert_current_table_row(caller: &str) -> *mut sys::ImGuiTable {
     let table = assert_current_table(caller);
     assert!(
         unsafe { (*table).CurrentRow } >= 0,
         "{caller} must be called while a table row is current"
     );
+    table
 }
 
 pub(crate) fn assert_table_before_first_row(caller: &str) -> *mut sys::ImGuiTable {

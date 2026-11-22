@@ -2,13 +2,6 @@ use std::ffi;
 
 pub(super) const MAX_PAYLOAD_TYPE_LEN: usize = 32;
 
-pub(super) fn validate_typed_payload_name(name: &str) {
-    assert!(
-        !name.starts_with('_'),
-        "typed drag-drop payload names starting with '_' are reserved for Dear ImGui"
-    );
-}
-
 pub(super) fn validate_payload_type_name(name: &str, caller: &str) {
     assert!(
         name.len() <= MAX_PAYLOAD_TYPE_LEN,

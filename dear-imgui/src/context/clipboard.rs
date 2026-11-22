@@ -7,10 +7,9 @@ use super::binding::{CTX_MUTEX, with_bound_context};
 impl Context {
     /// Returns the current clipboard text, if available.
     ///
-    /// This calls Dear ImGui's clipboard callbacks (configured via
-    /// [`Context::set_clipboard_backend`]). When no backend is installed, this returns `None`.
-    ///
-    /// Note: returned data is copied into a new `String`.
+    /// Copies the text returned by the current platform clipboard callback. This can be
+    /// Dear ImGui's default implementation, the platform backend, or a backend installed via
+    /// [`Context::set_clipboard_backend`]. Returns `None` if the callback or text is unavailable.
     #[doc(alias = "GetClipboardText")]
     pub fn clipboard_text(&self) -> Option<String> {
         let _guard = CTX_MUTEX.lock();
@@ -27,8 +26,8 @@ impl Context {
 
     /// Sets the clipboard text.
     ///
-    /// This calls Dear ImGui's clipboard callbacks (configured via
-    /// [`Context::set_clipboard_backend`]). If no backend is installed, this is a no-op.
+    /// Calls the current platform clipboard setter, including Dear ImGui's default or a
+    /// replacement installed via [`Context::set_clipboard_backend`].
     ///
     /// Interior NUL bytes are sanitized to `?` to match other scratch-string helpers.
     #[doc(alias = "SetClipboardText")]
@@ -41,7 +40,9 @@ impl Context {
         }
     }
 
-    /// Sets the clipboard backend used for clipboard operations
+    /// Sets the clipboard backend used for native clipboard operations.
+    ///
+    /// On WebAssembly the context retains the backend without installing its callbacks.
     pub fn set_clipboard_backend<T: ClipboardBackend>(&mut self, backend: T) {
         let _guard = CTX_MUTEX.lock();
 
@@ -50,14 +51,6 @@ impl Context {
             self.ui.scratch_buffers.clone(),
         ));
 
-        // On native/desktop targets, register clipboard callbacks in ImGui PlatformIO
-        // so ImGui can call back into Rust for copy/paste.
-        //
-        // On wasm32 (import-style build), function pointers cannot safely cross the
-        // module boundary between the Rust main module and the cimgui provider. We
-        // therefore keep the backend alive on the Rust side but do not hook it into
-        // ImGui's PlatformIO yet; clipboard integration for web will need a dedicated
-        // design using JS bindings.
         #[cfg(not(target_arch = "wasm32"))]
         unsafe {
             let platform_io = sys::igGetPlatformIO_ContextPtr(self.raw);

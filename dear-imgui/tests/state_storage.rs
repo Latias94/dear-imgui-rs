@@ -58,6 +58,25 @@ fn state_storage_helpers_no_panic() {
 }
 
 #[test]
+fn standalone_storage_keeps_its_values_when_bound_to_a_window() {
+    let _guard = test_guard();
+    let mut owned = imgui::OwnedStateStorage::new();
+    let key = imgui::Id::from(42);
+    {
+        let mut view = unsafe { imgui::StateStorage::from_raw(owned.as_raw_mut()) };
+        view.set_int(key, 17);
+        view.clear();
+        assert_eq!(view.get_int(key, -1), -1);
+        view.set_float(key, 2.5);
+    }
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let ui = ctx.frame();
+    ui.with_state_storage(&mut owned, |view| assert_eq!(view.get_float(key, 0.0), 2.5));
+}
+
+#[test]
 fn nested_state_storage_overrides_restore_lifo() {
     let _guard = test_guard();
 

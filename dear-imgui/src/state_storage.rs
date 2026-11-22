@@ -3,6 +3,7 @@
 //! Dear ImGui provides a per-window key/value storage (`ImGuiStorage`) that is
 //! used by many widgets and can also be used by custom widgets to persist state.
 //!
+use crate::context::binding::CTX_MUTEX;
 use crate::{Id, sys};
 use std::marker::PhantomData;
 use std::ptr::NonNull;
@@ -17,7 +18,8 @@ pub struct StateStorage<'ui> {
 impl<'ui> StateStorage<'ui> {
     /// # Safety
     /// `raw` must point to an initialized `ImGuiStorage` that remains live and accessible
-    /// on this thread for `'ui`, including through any copies of the returned view.
+    /// on this thread for `'ui`, including through any copies of the returned view. Its
+    /// allocation must remain exclusively owned by the storage and its keys must stay sorted.
     pub unsafe fn from_raw(raw: *mut sys::ImGuiStorage) -> Self {
         let raw = NonNull::new(raw).expect("StateStorage::from_raw() requires non-null pointer");
         Self {
@@ -33,6 +35,9 @@ impl<'ui> StateStorage<'ui> {
 
     /// Clears all storage entries.
     pub fn clear(&mut self) {
+        // Raw-created views may be used outside a bound Ui. Freeing or growing the native
+        // vector accesses the current context's allocator statistics even for standalone storage.
+        let _guard = CTX_MUTEX.lock();
         unsafe { sys::ImGuiStorage_Clear(self.raw.as_ptr()) }
     }
 
@@ -41,6 +46,7 @@ impl<'ui> StateStorage<'ui> {
     }
 
     pub fn set_int(&mut self, key: Id, value: i32) {
+        let _guard = CTX_MUTEX.lock();
         unsafe { sys::ImGuiStorage_SetInt(self.raw.as_ptr(), key.raw(), value) }
     }
 
@@ -49,7 +55,7 @@ impl<'ui> StateStorage<'ui> {
     }
 
     pub fn set_bool(&mut self, key: Id, value: bool) {
-        unsafe { sys::ImGuiStorage_SetBool(self.raw.as_ptr(), key.raw(), value) }
+        self.set_int(key, i32::from(value));
     }
 
     pub fn get_float(&self, key: Id, default: f32) -> f32 {
@@ -57,6 +63,7 @@ impl<'ui> StateStorage<'ui> {
     }
 
     pub fn set_float(&mut self, key: Id, value: f32) {
+        let _guard = CTX_MUTEX.lock();
         unsafe { sys::ImGuiStorage_SetFloat(self.raw.as_ptr(), key.raw(), value) }
     }
 }
@@ -106,9 +113,7 @@ impl OwnedStateStorage {
 
 impl Drop for OwnedStateStorage {
     fn drop(&mut self) {
-        // ImGui::MemFree can update the currently active context's allocation statistics.
-        let _guard = crate::context::binding::CTX_MUTEX.lock();
-        unsafe { sys::ImGuiStorage_Clear(self.as_raw_mut()) }
+        unsafe { StateStorage::from_raw(self.as_raw_mut()) }.clear();
     }
 }
 

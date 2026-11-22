@@ -2,19 +2,19 @@ use super::flags::{
     DragDropSourceFlags, DragDropTargetFlags, validate_drag_drop_source_flags,
     validate_drag_drop_target_flags,
 };
-use super::payload::{DragDropPayload, TypedPayload, decode_typed_payload, write_typed_payload};
-use super::validation::{
-    MAX_PAYLOAD_TYPE_LEN, validate_payload_submission, validate_typed_payload_name,
+use super::payload::{
+    DragDropPayload, TypedPayload, TypedPayloadName, decode_typed_payload, write_typed_payload,
 };
-use std::{any, ffi};
+use super::validation::{MAX_PAYLOAD_TYPE_LEN, validate_payload_submission};
+use std::{ffi, mem::MaybeUninit};
 
-fn payload_bytes(value: u8) -> Vec<u8> {
-    let mut payload = std::mem::MaybeUninit::uninit();
-    write_typed_payload(&mut payload, value);
+fn payload_bytes(value: u8) -> Vec<MaybeUninit<u8>> {
+    let mut payload = MaybeUninit::uninit();
+    write_typed_payload(&mut payload, TypedPayloadName::new("item"), value);
     let size = std::mem::size_of_val(&payload);
-    let mut out = vec![0u8; size];
+    let mut out = vec![MaybeUninit::uninit(); size];
     unsafe {
-        std::ptr::copy_nonoverlapping(payload.as_ptr().cast::<u8>(), out.as_mut_ptr(), size);
+        std::ptr::copy_nonoverlapping(payload.as_ptr().cast(), out.as_mut_ptr(), size);
     }
     out
 }
@@ -23,18 +23,28 @@ fn payload_bytes(value: u8) -> Vec<u8> {
 fn typed_payload_initializes_its_trailing_padding() {
     let bytes = payload_bytes(7);
     let end_of_data = std::mem::offset_of!(TypedPayload<u8>, data) + 1;
-    assert!(bytes[end_of_data..].iter().all(|&byte| byte == 0));
+    assert!(
+        bytes[end_of_data..]
+            .iter()
+            .all(|byte| unsafe { byte.assume_init() == 0 })
+    );
 }
 
 #[test]
 fn typed_payload_can_be_read_unaligned() {
     let bytes = payload_bytes(7u8);
-    let mut buf = vec![0u8; 1 + bytes.len()];
+    let mut buf = vec![MaybeUninit::uninit(); 1 + bytes.len()];
     buf[1..].copy_from_slice(&bytes);
-    let ptr = unsafe { buf.as_ptr().add(1) } as *const TypedPayload<u8>;
-    let decoded = unsafe { std::ptr::read_unaligned(ptr) };
-    assert_eq!(decoded.type_id, any::TypeId::of::<u8>());
+    let payload = DragDropPayload {
+        data: buf[1..].as_ptr().cast(),
+        size: bytes.len(),
+        preview: true,
+        delivery: false,
+    };
+    let decoded = unsafe { decode_typed_payload::<u8>(payload) }.unwrap();
     assert_eq!(decoded.data, 7u8);
+    assert!(decoded.preview);
+    assert!(!decoded.delivery);
 }
 
 #[test]
@@ -130,7 +140,7 @@ fn drag_drop_flag_domain_validation_rejects_wrong_domain_bits() {
 #[test]
 fn typed_payload_rejects_a_different_type_of_the_same_size() {
     let mut value = std::mem::MaybeUninit::uninit();
-    write_typed_payload(&mut value, 42_u32);
+    write_typed_payload(&mut value, TypedPayloadName::new("item"), 42_u32);
     let payload = DragDropPayload {
         data: value.as_ptr().cast(),
         size: std::mem::size_of_val(&value),
@@ -138,20 +148,25 @@ fn typed_payload_rejects_a_different_type_of_the_same_size() {
         delivery: true,
     };
     assert_eq!(payload.size, std::mem::size_of::<TypedPayload<i32>>());
-    assert!(decode_typed_payload::<i32>(payload).is_err());
+    assert!(unsafe { decode_typed_payload::<i32>(payload) }.is_err());
 }
 
 #[test]
 #[should_panic(expected = "reserved for Dear ImGui")]
 fn typed_payload_names_exclude_native_layouts() {
-    validate_typed_payload_name("_native");
+    TypedPayloadName::new("_native");
+}
+
+#[test]
+#[should_panic(expected = "must not be empty")]
+fn typed_payload_requires_a_name() {
+    TypedPayloadName::new("");
 }
 
 #[test]
 fn typed_accept_rejects_trailing_payload_bytes() {
-    let bytes = payload_bytes(7u8);
-    let mut buf = bytes.clone();
-    buf.push(0);
+    let mut buf = payload_bytes(7u8);
+    buf.push(MaybeUninit::new(0));
 
     let payload = DragDropPayload {
         data: buf.as_ptr().cast::<ffi::c_void>(),
@@ -161,5 +176,5 @@ fn typed_accept_rejects_trailing_payload_bytes() {
     };
 
     assert_ne!(payload.size, std::mem::size_of::<TypedPayload<u8>>());
-    assert!(decode_typed_payload::<u8>(payload).is_err());
+    assert!(unsafe { decode_typed_payload::<u8>(payload) }.is_err());
 }

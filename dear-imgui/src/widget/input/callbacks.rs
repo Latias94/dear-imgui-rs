@@ -335,9 +335,8 @@ impl<'cb> TextCallbackData<'cb> {
         &text[start..end]
     }
 
-    /// Pushes the given str to the end of this buffer. If this
-    /// would require the String to resize, it will be resized.
-    /// This is automatically handled.
+    /// Appends text using the same NUL and read-only capacity rules as [`Self::insert_chars`].
+    /// Editable buffers grow as needed.
     pub fn push_str(&mut self, text: &str) {
         let current_len = self.valid_text_len();
         self.insert_chars(current_len, text);

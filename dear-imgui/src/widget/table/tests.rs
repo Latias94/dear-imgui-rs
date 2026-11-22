@@ -408,6 +408,8 @@ fn table_index_queries_return_none_without_current_table_or_cell() {
     assert_eq!(ui.table_get_column_index(), None);
     assert_eq!(ui.table_get_row_index(), None);
     assert_eq!(ui.table_get_hovered_row(), TableHoveredRow::None);
+    assert!(ui.table_get_column_name(usize::MAX).is_empty());
+    assert!(ui.table_get_column_flags(usize::MAX).is_empty());
 
     let _ = ui.window("table_index_queries").build(|| {
         let _table = ui.begin_table("table", 2).unwrap();

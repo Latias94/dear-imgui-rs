@@ -1,5 +1,48 @@
+use super::validation::{MAX_PAYLOAD_TYPE_LEN, validate_payload_type_name};
 use crate::sys;
 use std::{any, ffi};
+
+// Native widgets also use ordinary application names, e.g. the Dear ImGui demo. Only this
+// tag identifies payloads with the Rust layout. The application name travels with the value.
+pub(super) const TYPED_PAYLOAD_TAG: &ffi::CStr = c"dear-imgui-rs/typed-v1";
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
+pub(super) struct TypedPayloadName([u8; MAX_PAYLOAD_TYPE_LEN]);
+
+impl TypedPayloadName {
+    pub(super) fn new(name: &str) -> Self {
+        validate_payload_type_name(name, "typed drag-drop");
+        assert!(
+            !name.is_empty(),
+            "typed drag-drop payload name must not be empty"
+        );
+        assert!(
+            !name.starts_with('_'),
+            "typed drag-drop payload names starting with '_' are reserved for Dear ImGui"
+        );
+        let mut bytes = [0; MAX_PAYLOAD_TYPE_LEN];
+        for (dst, src) in bytes.iter_mut().zip(name.bytes()) {
+            *dst = if src == 0 { b'?' } else { src };
+        }
+        Self(bytes)
+    }
+
+    /// `payload` must be null or the live payload of the bound context.
+    pub(super) unsafe fn matches(self, payload: *const sys::ImGuiPayload) -> bool {
+        if payload.is_null()
+            || !unsafe {
+                sys::ImGuiPayload_IsDataType(payload.cast_mut(), TYPED_PAYLOAD_TAG.as_ptr())
+            }
+        {
+            return false;
+        }
+        let payload = unsafe { &*payload };
+        !payload.Data.is_null()
+            && payload.DataSize >= size_of::<Self>() as i32
+            && unsafe { payload.Data.cast::<Self>().read_unaligned() } == self
+    }
+}
 
 /// Wrapper for typed payloads with runtime type checking.
 ///
@@ -7,14 +50,15 @@ use std::{any, ffi};
 /// Never take `&TypedPayload<T>` from the raw pointer returned by `AcceptDragDropPayload()`.
 /// Always copy out using `ptr::read_unaligned`.
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub(super) struct TypedPayload<T: Copy> {
-    pub(super) type_id: any::TypeId,
+    name: TypedPayloadName,
+    type_id: any::TypeId,
     pub(super) data: T,
 }
 
 pub(super) fn write_typed_payload<T: Copy + 'static>(
     out: &mut std::mem::MaybeUninit<TypedPayload<T>>,
+    name: TypedPayloadName,
     data: T,
 ) {
     // Initialize wrapper padding in the allocation that C++ will copy. Moving a TypedPayload
@@ -22,6 +66,7 @@ pub(super) fn write_typed_payload<T: Copy + 'static>(
     let ptr = out.as_mut_ptr();
     unsafe {
         ptr.write_bytes(0, 1);
+        std::ptr::addr_of_mut!((*ptr).name).write(name);
         std::ptr::addr_of_mut!((*ptr).type_id).write(any::TypeId::of::<T>());
         std::ptr::addr_of_mut!((*ptr).data).write(data);
     }
@@ -89,7 +134,8 @@ impl std::fmt::Display for PayloadIsWrongType {
 
 impl std::error::Error for PayloadIsWrongType {}
 
-pub(super) fn decode_typed_payload<T: 'static + Copy>(
+/// The data must be a live Rust typed payload for the duration of the copy.
+pub(super) unsafe fn decode_typed_payload<T: 'static + Copy>(
     payload: DragDropPayload,
 ) -> Result<DragDropPayloadPod<T>, PayloadIsWrongType> {
     if payload.data.is_null() || payload.size != std::mem::size_of::<TypedPayload<T>>() {
@@ -98,11 +144,11 @@ pub(super) fn decode_typed_payload<T: 'static + Copy>(
 
     // Every repr(C) typed payload starts with the same header. The body is a T only after
     // this check, even when a different producer type has the same size.
-    let type_id = unsafe { payload.data.cast::<any::TypeId>().read_unaligned() };
+    let typed = payload.data.cast::<TypedPayload<T>>();
+    let type_id = unsafe { (&raw const (*typed).type_id).read_unaligned() };
     if type_id != any::TypeId::of::<T>() {
         return Err(PayloadIsWrongType);
     }
-    let typed = payload.data.cast::<TypedPayload<T>>();
     Ok(DragDropPayloadPod {
         data: unsafe { (&raw const (*typed).data).read_unaligned() },
         preview: payload.preview,

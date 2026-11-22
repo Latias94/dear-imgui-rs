@@ -21,6 +21,23 @@ fn unchanged_string_input_reuses_its_allocation_across_frames() {
 }
 
 #[test]
+fn growing_input_amortizes_the_capacity_hint_across_edits() {
+    let mut text = String::new();
+    let mut reused = false;
+    for i in 0..16 {
+        let capacity = text.capacity();
+        {
+            let mut input = StringInputBuffer::new(&mut text, Some(64));
+            assert!(input.bytes.len() > i + 64);
+            input.bytes[i] = b'x';
+        }
+        reused |= text.capacity() == capacity;
+    }
+    assert_eq!(text, "x".repeat(16));
+    assert!(reused, "a capacity hint should amortize successive edits");
+}
+
+#[test]
 fn input_widget_retains_its_labels_across_callback_scratch_queries() {
     let mut ctx = crate::Context::create();
     ctx.set_ini_filename::<std::path::PathBuf>(None).unwrap();

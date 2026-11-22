@@ -1,9 +1,9 @@
 use super::flags::{DragDropTargetFlags, validate_drag_drop_target_flags};
 use super::payload::{
     DragDropPayload, DragDropPayloadEmpty, DragDropPayloadPod, PayloadIsWrongType,
-    decode_typed_payload,
+    TYPED_PAYLOAD_TAG, TypedPayloadName, decode_typed_payload,
 };
-use super::validation::{validate_payload_type_name, validate_typed_payload_name};
+use super::validation::validate_payload_type_name;
 use crate::{Ui, sys};
 
 /// Drag drop target for accepting payloads
@@ -11,8 +11,8 @@ use crate::{Ui, sys};
 /// This struct is created by [`Ui::drag_drop_target`] and provides
 /// methods for accepting different types of payloads.
 ///
-/// The target must finish after every nested drag-drop target and in its originating window
-/// `Begin` scope.
+/// The target must finish in its originating window `Begin` scope before another source or
+/// target can begin.
 #[derive(Debug)]
 #[must_use]
 #[doc(alias = "EndDragDropTarget")]
@@ -49,8 +49,10 @@ impl<'ui> DragDropTarget<'ui> {
     /// Accept a typed payload
     ///
     /// Attempts to accept a payload with the specified type.
-    /// Returns `Ok(payload)` if the type matches, `Err(PayloadIsWrongType)` if not.
-    /// Names starting with `_` are reserved for native payloads and rejected before the FFI call.
+    /// Returns `None` for a different application name or a native payload. For a matching
+    /// name, returns `Ok(payload)` if the Rust type matches or `Err(PayloadIsWrongType)` otherwise.
+    /// The application name must contain 1 to 32 bytes. Names starting with `_` are reserved
+    /// for native payloads.
     ///
     /// # Arguments
     /// * `name` - Payload type name (must match source name)
@@ -63,19 +65,28 @@ impl<'ui> DragDropTarget<'ui> {
         name: Name,
         flags: DragDropTargetFlags,
     ) -> Option<Result<DragDropPayloadPod<T>, PayloadIsWrongType>> {
-        let name = name.as_ref();
-        validate_typed_payload_name(name);
-        let output = unsafe { self.accept_payload_unchecked(name, flags) };
-
-        output.map(decode_typed_payload)
+        let name = TypedPayloadName::new(name.as_ref());
+        validate_drag_drop_target_flags("DragDropTarget::accept_payload()", flags);
+        self.0.run_with_bound_context(|| unsafe {
+            // AcceptDragDropPayload records the target even during preview. Check the logical
+            // name before asking ImGui to accept this drag.
+            if !name.matches(sys::igGetDragDropPayload()) {
+                return None;
+            }
+            let payload =
+                sys::igAcceptDragDropPayload(TYPED_PAYLOAD_TAG.as_ptr(), flags.bits() as i32);
+            payload
+                .as_ref()
+                .map(|payload| decode_typed_payload(DragDropPayload::from_raw(*payload)))
+        })
     }
 
     /// Accept raw payload data (unsafe)
     ///
     /// # Safety
-    /// The returned pointer and size are managed by ImGui and may become
-    /// invalid at any time. The caller must not access the data after
-    /// the drag operation completes.
+    /// Read the returned pointer only while this exact payload is active and use the layout
+    /// associated with its native name. Another submission can replace the bytes, and ending
+    /// the target after delivery releases them, even within the same frame.
     ///
     /// # Arguments
     /// * `name` - Payload type name

@@ -457,14 +457,11 @@ impl Ui {
     #[doc(alias = "TableGetColumnName")]
     pub fn table_get_column_name(&self, column: impl Into<TableColumnRef>) -> String {
         let column = column.into();
-        let column_n = match column {
-            TableColumnRef::Current => -1,
-            TableColumnRef::Index(index) => index.into_i32("Ui::table_get_column_name()"),
-        };
         self.run_with_bound_context(|| {
-            if current_table_if_any().is_some() {
-                resolve_table_column(column, "Ui::table_get_column_name()");
-            }
+            let Some(table) = current_table_if_any() else {
+                return String::new();
+            };
+            let column_n = resolve_table_column(table, column, "Ui::table_get_column_name()");
             unsafe {
                 let ptr = sys::igTableGetColumnName_Int(column_n);
                 if ptr.is_null() {
@@ -489,22 +486,11 @@ impl Ui {
         column: impl Into<TableColumnRef>,
     ) -> TableColumnStateFlags {
         let column = column.into();
-        let column_n = match column {
-            TableColumnRef::Current => -1,
-            TableColumnRef::Index(index) => index.into_i32("Ui::table_get_column_flags()"),
-        };
         self.run_with_bound_context(|| {
-            if let Some(table) = current_table_if_any() {
-                let column_count = unsafe { (*table).ColumnsCount };
-                let resolved_column = match column {
-                    TableColumnRef::Current => unsafe { (*table).CurrentColumn },
-                    TableColumnRef::Index(_) => column_n,
-                };
-                assert!(
-                    (0..column_count).contains(&resolved_column),
-                    "Ui::table_get_column_flags() column index {resolved_column} is outside the current table column range 0..{column_count}"
-                );
-            }
+            let Some(table) = current_table_if_any() else {
+                return TableColumnStateFlags::empty();
+            };
+            let column_n = resolve_table_column(table, column, "Ui::table_get_column_flags()");
             unsafe { TableColumnStateFlags::from_bits_retain(sys::igTableGetColumnFlags(column_n)) }
         })
     }
@@ -518,13 +504,12 @@ impl Ui {
     #[doc(alias = "TableSetColumnEnabled")]
     pub fn table_set_column_enabled(&self, column: impl Into<TableColumnRef>, enabled: bool) {
         let column = column.into();
-        let column_n = match column {
-            TableColumnRef::Current => -1,
-            TableColumnRef::Index(index) => index.into_i32("Ui::table_set_column_enabled()"),
-        };
         self.run_with_bound_context(|| {
-            assert_current_table_has_flags(TableFlags::HIDEABLE, "Ui::table_set_column_enabled()");
-            resolve_table_column(column, "Ui::table_set_column_enabled()");
+            let table = assert_current_table_has_flags(
+                TableFlags::HIDEABLE,
+                "Ui::table_set_column_enabled()",
+            );
+            let column_n = resolve_table_column(table, column, "Ui::table_set_column_enabled()");
             unsafe { sys::igTableSetColumnEnabled(column_n, enabled) }
         });
     }
@@ -579,13 +564,9 @@ impl Ui {
     #[doc(alias = "TableSetBgColor")]
     pub fn table_set_cell_bg_color_u32(&self, color: u32, column: impl Into<TableColumnRef>) {
         let column = column.into();
-        let column_n = match column {
-            TableColumnRef::Current => -1,
-            TableColumnRef::Index(index) => index.into_i32("Ui::table_set_cell_bg_color_u32()"),
-        };
         self.run_with_bound_context(|| {
-            assert_current_table_row("Ui::table_set_cell_bg_color_u32()");
-            resolve_table_column(column, "Ui::table_set_cell_bg_color_u32()");
+            let table = assert_current_table_row("Ui::table_set_cell_bg_color_u32()");
+            let column_n = resolve_table_column(table, column, "Ui::table_set_cell_bg_color_u32()");
             unsafe { sys::igTableSetBgColor(TableBgTarget::CellBg as i32, color, column_n) }
         });
     }

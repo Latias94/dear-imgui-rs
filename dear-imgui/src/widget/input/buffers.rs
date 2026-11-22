@@ -2,10 +2,12 @@ use crate::sys;
 use std::ffi::c_int;
 use std::mem;
 
+const MAX_INPUT_BUFFER_SIZE: usize = i32::MAX as usize - 1;
+
 pub(super) fn validate_input_buffer_size(size: usize) {
     // InputTextEx takes an int and allocates its internal TextA with buf_size + 1.
     assert!(
-        size < i32::MAX as usize,
+        size <= MAX_INPUT_BUFFER_SIZE,
         "InputText buffer exceeds Dear ImGui's i32 size range"
     );
 }
@@ -17,14 +19,18 @@ pub(super) struct StringInputBuffer<'a> {
 
 impl<'a> StringInputBuffer<'a> {
     pub(super) fn new(target: &'a mut String, capacity_hint: Option<usize>) -> Self {
-        let needed = target
-            .len()
-            .saturating_add(capacity_hint.unwrap_or(0))
-            .saturating_add(1);
-        let size = target.capacity().max(needed);
-        validate_input_buffer_size(size);
+        let spare = capacity_hint.unwrap_or(0);
+        let needed = target.len().saturating_add(spare).saturating_add(1);
+        validate_input_buffer_size(needed);
+        let size = target.capacity().min(MAX_INPUT_BUFFER_SIZE).max(needed);
 
-        target.reserve_exact(size - target.len());
+        if spare == 0 {
+            // A full String only needs a terminator to display its existing contents.
+            target.reserve_exact(1);
+        } else {
+            // Amortize the requested spare bytes as the field grows across frames.
+            target.reserve(spare + 1);
+        }
         let mut bytes = mem::take(target).into_bytes();
         bytes.resize(size, 0);
         Self { target, bytes }
