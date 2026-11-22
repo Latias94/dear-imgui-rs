@@ -24,6 +24,7 @@ fn validate_grid_counts(
         .ok_or_else(|| PlotError::InvalidData(format!("{caller} rows * cols overflowed usize")))?;
     let _ = heatmap_count_to_i32(caller, "rows", rows)?;
     let _ = heatmap_count_to_i32(caller, "cols", cols)?;
+    let _ = heatmap_count_to_i32(caller, "rows * cols", expected_size)?;
 
     if values_len != expected_size {
         return Err(PlotError::DataLengthMismatch {
@@ -38,6 +39,46 @@ fn validate_grid_counts(
 fn heatmap_count_to_i32(caller: &str, name: &str, value: usize) -> Result<i32, PlotError> {
     i32::try_from(value)
         .map_err(|_| PlotError::InvalidData(format!("{caller} {name} exceeded ImPlot's i32 range")))
+}
+
+fn heatmap_scale<T: Copy + Into<f64>>(
+    caller: &str,
+    values: &[T],
+    rows: usize,
+    cols: usize,
+    mut min: f64,
+    mut max: f64,
+) -> Result<(f64, f64), PlotError> {
+    if values.is_empty() {
+        return Err(PlotError::EmptyData);
+    }
+    validate_grid_counts(caller, rows, cols, values.len())?;
+
+    // Native RenderHeatmap uses the normalized value as an integer colormap index.
+    if min == 0.0 && max == 0.0 {
+        min = f64::INFINITY;
+        max = f64::NEG_INFINITY;
+        for &sample in values {
+            let value: f64 = sample.into();
+            if !value.is_finite() {
+                return Err(PlotError::InvalidData(
+                    "automatic heatmap scaling requires finite values".into(),
+                ));
+            }
+            min = min.min(value);
+            max = max.max(value);
+        }
+    } else if min != max && values.iter().any(|&v| f64::is_nan(v.into())) {
+        return Err(PlotError::InvalidData(
+            "cannot map a NaN heatmap value to a color".into(),
+        ));
+    }
+    if !(max - min).is_finite() {
+        return Err(PlotError::InvalidData(
+            "heatmap color scale must have a finite span".into(),
+        ));
+    }
+    Ok((min, max))
 }
 
 /// Builder for heatmap plots with extensive customization options
@@ -164,32 +205,25 @@ impl<'a, F: AsRef<str>> HeatmapPlot<'a, F> {
         self
     }
 
-    /// Validate the plot data
+    /// Checks the grid dimensions and that each value can be mapped to the selected color scale.
     pub fn validate(&self) -> Result<(), PlotError> {
-        if self.values.is_empty() {
-            return Err(PlotError::EmptyData);
-        }
+        self.checked_scale().map(|_| ())
+    }
 
-        validate_grid_counts(
+    fn checked_scale(&self) -> Result<(f64, f64), PlotError> {
+        heatmap_scale(
             "HeatmapPlot::validate()",
+            self.values,
             self.rows,
             self.cols,
-            self.values.len(),
+            self.scale_min,
+            self.scale_max,
         )
     }
-}
 
-impl<F: AsRef<str>> Plot for HeatmapPlot<'_, F> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
-        if self.validate().is_err() {
-            return; // Skip plotting if data is invalid
-        }
-        let Ok(rows) = heatmap_count_to_i32("HeatmapPlot::plot()", "rows", self.rows) else {
-            return;
-        };
-        let Ok(cols) = heatmap_count_to_i32("HeatmapPlot::plot()", "cols", self.cols) else {
-            return;
-        };
+    pub(super) fn plot_checked(&self, plot_ui: &crate::PlotScope<'_>) -> Result<(), PlotError> {
+        let (min, max) = self.checked_scale()?;
+        let (rows, cols) = (self.rows as i32, self.cols as i32);
         let label_fmt = self.label_fmt.as_ref().map(AsRef::as_ref);
         plot_ui.with_bound_context(|| match label_fmt {
             Some(label_fmt) => {
@@ -200,6 +234,7 @@ impl<F: AsRef<str>> Plot for HeatmapPlot<'_, F> {
                 };
                 with_scratch_txt_two(label, label_fmt, |label_ptr, label_fmt_ptr| unsafe {
                     let spec = plot_spec_with_style(
+                        plot_ui,
                         self.style,
                         self.flags.bits() | self.item_flags.bits(),
                         PlotDataLayout::DEFAULT,
@@ -209,8 +244,8 @@ impl<F: AsRef<str>> Plot for HeatmapPlot<'_, F> {
                         self.values.as_ptr(),
                         rows,
                         cols,
-                        self.scale_min,
-                        self.scale_max,
+                        min,
+                        max,
                         label_fmt_ptr,
                         self.bounds_min,
                         self.bounds_max,
@@ -220,6 +255,7 @@ impl<F: AsRef<str>> Plot for HeatmapPlot<'_, F> {
             }
             None => with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     PlotDataLayout::DEFAULT,
@@ -229,15 +265,22 @@ impl<F: AsRef<str>> Plot for HeatmapPlot<'_, F> {
                     self.values.as_ptr(),
                     rows,
                     cols,
-                    self.scale_min,
-                    self.scale_max,
+                    min,
+                    max,
                     std::ptr::null(),
                     self.bounds_min,
                     self.bounds_max,
                     spec,
                 );
             }),
-        })
+        });
+        Ok(())
+    }
+}
+
+impl<F: AsRef<str>> Plot for HeatmapPlot<'_, F> {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
+        let _ = self.plot_checked(plot_ui);
     }
 
     fn label(&self) -> &str {
@@ -355,32 +398,25 @@ impl<'a, F: AsRef<str>> HeatmapPlotF32<'a, F> {
         self
     }
 
-    /// Validate the plot data
+    /// Checks the grid dimensions and that each value can be mapped to the selected color scale.
     pub fn validate(&self) -> Result<(), PlotError> {
-        if self.values.is_empty() {
-            return Err(PlotError::EmptyData);
-        }
+        self.checked_scale().map(|_| ())
+    }
 
-        validate_grid_counts(
+    fn checked_scale(&self) -> Result<(f64, f64), PlotError> {
+        heatmap_scale(
             "HeatmapPlotF32::validate()",
+            self.values,
             self.rows,
             self.cols,
-            self.values.len(),
+            self.scale_min,
+            self.scale_max,
         )
     }
-}
 
-impl<F: AsRef<str>> Plot for HeatmapPlotF32<'_, F> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
-        if self.validate().is_err() {
-            return;
-        }
-        let Ok(rows) = heatmap_count_to_i32("HeatmapPlotF32::plot()", "rows", self.rows) else {
-            return;
-        };
-        let Ok(cols) = heatmap_count_to_i32("HeatmapPlotF32::plot()", "cols", self.cols) else {
-            return;
-        };
+    fn plot_checked(&self, plot_ui: &crate::PlotScope<'_>) -> Result<(), PlotError> {
+        let (min, max) = self.checked_scale()?;
+        let (rows, cols) = (self.rows as i32, self.cols as i32);
         let label_fmt = self.label_fmt.as_ref().map(AsRef::as_ref);
         plot_ui.with_bound_context(|| match label_fmt {
             Some(label_fmt) => {
@@ -391,6 +427,7 @@ impl<F: AsRef<str>> Plot for HeatmapPlotF32<'_, F> {
                 };
                 with_scratch_txt_two(label, label_fmt, |label_ptr, label_fmt_ptr| unsafe {
                     let spec = plot_spec_with_style(
+                        plot_ui,
                         self.style,
                         self.flags.bits() | self.item_flags.bits(),
                         PlotDataLayout::DEFAULT,
@@ -400,8 +437,8 @@ impl<F: AsRef<str>> Plot for HeatmapPlotF32<'_, F> {
                         self.values.as_ptr(),
                         rows,
                         cols,
-                        self.scale_min,
-                        self.scale_max,
+                        min,
+                        max,
                         label_fmt_ptr,
                         self.bounds_min,
                         self.bounds_max,
@@ -411,6 +448,7 @@ impl<F: AsRef<str>> Plot for HeatmapPlotF32<'_, F> {
             }
             None => with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     PlotDataLayout::DEFAULT,
@@ -420,15 +458,22 @@ impl<F: AsRef<str>> Plot for HeatmapPlotF32<'_, F> {
                     self.values.as_ptr(),
                     rows,
                     cols,
-                    self.scale_min,
-                    self.scale_max,
+                    min,
+                    max,
                     std::ptr::null(),
                     self.bounds_min,
                     self.bounds_max,
                     spec,
                 );
             }),
-        })
+        });
+        Ok(())
+    }
+}
+
+impl<F: AsRef<str>> Plot for HeatmapPlotF32<'_, F> {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
+        let _ = self.plot_checked(plot_ui);
     }
 
     fn label(&self) -> &str {
@@ -437,7 +482,7 @@ impl<F: AsRef<str>> Plot for HeatmapPlotF32<'_, F> {
 }
 
 /// Convenience functions for quick heatmap plotting
-impl<'ui> crate::PlotUi<'ui> {
+impl<'ui> crate::PlotScope<'ui> {
     /// Plot a heatmap with f64 data
     pub fn heatmap_plot(
         &self,
@@ -446,10 +491,7 @@ impl<'ui> crate::PlotUi<'ui> {
         rows: usize,
         cols: usize,
     ) -> Result<(), PlotError> {
-        let plot = HeatmapPlot::new(label, values, rows, cols);
-        plot.validate()?;
-        plot.plot(self);
-        Ok(())
+        HeatmapPlot::new(label, values, rows, cols).plot_checked(self)
     }
 
     /// Plot a heatmap with f32 data
@@ -460,10 +502,7 @@ impl<'ui> crate::PlotUi<'ui> {
         rows: usize,
         cols: usize,
     ) -> Result<(), PlotError> {
-        let plot = HeatmapPlotF32::new(label, values, rows, cols);
-        plot.validate()?;
-        plot.plot(self);
-        Ok(())
+        HeatmapPlotF32::new(label, values, rows, cols).plot_checked(self)
     }
 
     /// Plot a heatmap with custom scale and bounds
@@ -478,19 +517,44 @@ impl<'ui> crate::PlotUi<'ui> {
         bounds_min: sys::ImPlotPoint,
         bounds_max: sys::ImPlotPoint,
     ) -> Result<(), PlotError> {
-        let plot = HeatmapPlot::new(label, values, rows, cols)
+        HeatmapPlot::new(label, values, rows, cols)
             .with_scale(scale_min, scale_max)
-            .with_bounds_points(bounds_min, bounds_max);
-        plot.validate()?;
-        plot.plot(self);
-        Ok(())
+            .with_bounds_points(bounds_min, bounds_max)
+            .plot_checked(self)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{HeatmapPlot, HeatmapPlotF32};
+    use super::{HeatmapPlot, HeatmapPlotF32, validate_grid_counts};
     use crate::PlotError;
+
+    #[test]
+    fn heatmap_values_must_produce_defined_colormap_indices() {
+        assert!(
+            HeatmapPlot::new("auto", &[0.0, f64::NAN], 1, 2)
+                .validate()
+                .is_err()
+        );
+        assert!(
+            HeatmapPlotF32::new("explicit", &[f32::NAN], 1, 1)
+                .with_scale(1.0, 0.0)
+                .validate()
+                .is_err()
+        );
+        assert!(
+            HeatmapPlot::new("extremes", &[-f64::MAX, f64::MAX], 1, 2)
+                .validate()
+                .is_err()
+        );
+        // An explicit reversed scale still saturates both infinite endpoints.
+        assert_eq!(
+            HeatmapPlotF32::new("clamped", &[f32::INFINITY, f32::NEG_INFINITY], 1, 2)
+                .with_scale(1.0, 0.0)
+                .checked_scale(),
+            Ok((1.0, 0.0))
+        );
+    }
 
     fn invalid_data_message(err: PlotError) -> String {
         match err {
@@ -533,5 +597,12 @@ mod tests {
             .validate()
             .expect_err("oversized column count must be rejected");
         assert!(invalid_data_message(err).contains("cols exceeded ImPlot's i32 range"));
+    }
+
+    #[test]
+    fn heatmap_rejects_a_cell_count_outside_native_index_range() {
+        let cols = i32::MAX as usize / 2 + 1;
+        let err = validate_grid_counts("heatmap", 2, cols, 2 * cols).unwrap_err();
+        assert!(invalid_data_message(err).contains("rows * cols exceeded ImPlot's i32 range"));
     }
 }

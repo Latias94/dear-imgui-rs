@@ -71,9 +71,9 @@ impl Context {
 
     /// Get mutable access to the platform IO.
     ///
-    /// Note: `ImGuiPlatformIO` exists even when multi-viewport is disabled. We expose it
-    /// unconditionally for platform configuration. Managed renderer texture work is exposed through
-    /// request-bound `PendingFrame` or `FrameSnapshot` APIs, not raw texture pointers.
+    /// Platform configuration is available even when multi-viewport is disabled. Callback
+    /// registration always targets this Context, including inside another Context's binding scope.
+    /// Managed renderer texture work uses the request-bound `PendingFrame` or `FrameSnapshot` APIs.
     pub fn platform_io_mut(&mut self) -> &mut crate::platform_io::PlatformIo {
         let _guard = CTX_MUTEX.lock();
         unsafe {
@@ -144,14 +144,14 @@ impl Context {
     /// Render platform windows with default implementation
     ///
     /// This function renders all platform windows using the default implementation.
-    /// It calls the platform and renderer backends to render each viewport.
+    /// It calls the installed render callbacks for visible secondary viewports, then calls their
+    /// swap callbacks. Backends that render the viewports themselves may install only a swap callback.
     ///
     /// # Panics
     ///
     /// Panics unless [`Self::update_platform_windows`] completed for the current frame after
-    /// [`Self::render`], or unless the installed backends provide `Platform_RenderWindow` or
-    /// `Renderer_RenderWindow`. Snapshot-driven renderers should render their detached viewport
-    /// data directly instead of calling this default callback pump.
+    /// [`Self::render`], or if the backends provide no render or swap callback. Managed-texture
+    /// renderers must also reconcile the current frame before using this method.
     #[cfg(feature = "multi-viewport")]
     #[doc(alias = "RenderPlatformWindowsDefault")]
     pub fn render_platform_windows_default(&mut self) {
@@ -165,12 +165,14 @@ impl Context {
                         && raw.FrameCountPlatformEnded == raw.FrameCount,
                     "Context::render_platform_windows_default() requires a rendered frame followed by Context::update_platform_windows()"
                 );
-                let platform_io = sys::igGetPlatformIO_Nil();
+                let platform_io =
+                    self.platform_io_ptr("Context::render_platform_windows_default()");
                 assert!(
-                    !platform_io.is_null()
-                        && ((*platform_io).Platform_RenderWindow.is_some()
-                            || (*platform_io).Renderer_RenderWindow.is_some()),
-                    "Context::render_platform_windows_default() requires Platform_RenderWindow or Renderer_RenderWindow; render snapshots directly when the renderer does not use default callbacks"
+                    (*platform_io).Platform_RenderWindow.is_some()
+                        || (*platform_io).Renderer_RenderWindow.is_some()
+                        || (*platform_io).Platform_SwapBuffers.is_some()
+                        || (*platform_io).Renderer_SwapBuffers.is_some(),
+                    "Context::render_platform_windows_default() requires a platform or renderer render or swap callback"
                 );
                 let renderer_has_textures =
                     (*self.io_ptr("Context::render_platform_windows_default()")).BackendFlags
@@ -199,7 +201,7 @@ impl Context {
     /// destruction. This lets backends revoke UI access before destroying secondary windows. A
     /// rejected observer preflight still leaves that frame ended.
     ///
-    /// Platform backends receive a bounded observer scope around the native call so they can
+    /// Platform backends receive a bounded observer scope with this Context current so they can
     /// validate callback ownership and keep their teardown state coherent. If that preflight
     /// fails, native teardown does not begin.
     ///
@@ -215,16 +217,13 @@ impl Context {
     #[cfg(feature = "multi-viewport")]
     #[doc(alias = "DestroyPlatformWindows")]
     pub fn destroy_platform_windows(&mut self) -> Result<(), ContextPlatformWindowTeardownError> {
-        let _guard = CTX_MUTEX.lock();
-        self.end_frame_for_teardown_unlocked();
-        let teardown = ContextPlatformWindowTeardown::new(&self.state);
-        let invocation = self.attachments.begin_platform_window_teardown(&teardown)?;
-        unsafe {
-            with_bound_context(self.raw, || {
-                sys::igDestroyPlatformWindows();
-            });
-        }
-        invocation.finish(&teardown)
+        with_bound_context(self.raw, || {
+            self.end_frame_for_teardown_unlocked();
+            let teardown = ContextPlatformWindowTeardown::new(&self.state);
+            let invocation = self.attachments.begin_platform_window_teardown(&teardown)?;
+            unsafe { sys::igDestroyPlatformWindows() };
+            invocation.finish(&teardown)
+        })
     }
 
     #[cfg(feature = "multi-viewport")]
@@ -401,6 +400,182 @@ impl Context {
 #[cfg(all(test, feature = "multi-viewport"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn platform_teardown_observers_run_with_the_receiver_bound() {
+        use crate::context::{
+            ContextAttachment, ContextAttachmentRole, ContextAttachmentTeardownError,
+        };
+        use std::{cell::RefCell, rc::Rc};
+
+        thread_local! {
+            static CALLS: RefCell<Vec<(&'static str, *mut sys::ImGuiContext)>> = const { RefCell::new(Vec::new()) };
+        }
+        fn record(phase: &'static str) {
+            CALLS.with_borrow_mut(|calls| {
+                calls.push((phase, unsafe { sys::igGetCurrentContext() }))
+            });
+        }
+        unsafe extern "C" fn destroy(_: *mut crate::Viewport) {
+            record("destroy");
+        }
+        struct Observer;
+
+        impl ContextAttachment for Observer {
+            fn begin_platform_window_teardown(
+                &self,
+                _: &ContextPlatformWindowTeardown<'_>,
+            ) -> Result<(), ContextAttachmentTeardownError> {
+                record("begin");
+                Ok(())
+            }
+
+            fn end_platform_window_teardown(
+                &self,
+                _: &ContextPlatformWindowTeardown<'_>,
+            ) -> Result<(), ContextAttachmentTeardownError> {
+                record("end");
+                Ok(())
+            }
+        }
+
+        let _guard = crate::test_support::imgui_context_guard();
+        let first = Context::create();
+        let binding = first.binding();
+        let first_raw = first.as_raw();
+        let _first = first.suspend_or_panic();
+        let mut target = Context::create();
+        let target_raw = target.as_raw();
+        let _lease = target
+            .register_attachment::<Observer>(ContextAttachmentRole::Platform, Rc::new(Observer))
+            .unwrap();
+        unsafe {
+            target
+                .platform_io_mut()
+                .set_platform_destroy_window(Some(destroy))
+        };
+
+        binding.with_bound_context(|| {
+            target.destroy_platform_windows().unwrap();
+            assert_eq!(unsafe { sys::igGetCurrentContext() }, first_raw);
+        });
+        assert_eq!(
+            CALLS.take(),
+            [
+                ("begin", target_raw),
+                ("destroy", target_raw),
+                ("end", target_raw)
+            ]
+        );
+        assert_eq!(unsafe { sys::igGetCurrentContext() }, target_raw);
+    }
+
+    #[test]
+    fn default_platform_render_dispatches_swap_only_backends() {
+        use crate::context::{
+            ContextAttachment, ContextAttachmentRole, ContextAttachmentTeardownError,
+            ContextTeardown, FramePrepareOptions,
+        };
+        use std::{cell::Cell, ffi::c_void, rc::Rc};
+
+        struct Platform;
+        impl ContextAttachment for Platform {
+            fn release_platform_windows(
+                &self,
+                context: &ContextTeardown<'_>,
+            ) -> Result<(), ContextAttachmentTeardownError> {
+                context.with_bound_context(|| unsafe { sys::igDestroyPlatformWindows() });
+                Ok(())
+            }
+        }
+        thread_local! { static SWAPPED: Cell<Option<crate::Id>> = const { Cell::new(None) }; }
+        unsafe extern "C" fn window(_: *mut sys::ImGuiViewport) {}
+        unsafe extern "C" fn title(_: *mut sys::ImGuiViewport, _: *const std::ffi::c_char) {}
+        unsafe extern "C" fn set_vec(_: *mut sys::ImGuiViewport, _: *const sys::ImVec2) {}
+        unsafe extern "C" fn get_pos(vp: *mut sys::ImGuiViewport, out: *mut sys::ImVec2) {
+            unsafe { out.write((*vp).Pos) };
+        }
+        unsafe extern "C" fn get_size(vp: *mut sys::ImGuiViewport, out: *mut sys::ImVec2) {
+            unsafe { out.write((*vp).Size) };
+        }
+        unsafe extern "C" fn swap(vp: *mut crate::platform_io::Viewport, _: *mut c_void) {
+            SWAPPED.set(Some(unsafe { (*vp).id() }));
+        }
+
+        let _guard = crate::test_support::imgui_context_guard();
+        let mut context = Context::create();
+        context
+            .register_attachment::<Platform>(ContextAttachmentRole::Platform, Rc::new(Platform))
+            .unwrap()
+            .defer_to_context();
+        context.set_ini_filename(None::<&str>).unwrap();
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        context.prepare_frame(FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
+        let flags = context.io().backend_flags()
+            | crate::BackendFlags::PLATFORM_HAS_VIEWPORTS
+            | crate::BackendFlags::RENDERER_HAS_VIEWPORTS;
+        context.io_mut().set_backend_flags(flags);
+        context.io_mut().set_config_viewports_no_auto_merge(true);
+        context.enable_multi_viewport();
+        let screen = sys::ImVec2::new(1920.0, 1080.0);
+        unsafe {
+            context
+                .main_viewport()
+                .set_platform_handle(std::ptr::dangling_mut::<u8>().cast());
+            let io = context.platform_io_mut();
+            io.set_monitors(&[sys::ImGuiPlatformMonitor {
+                MainSize: screen,
+                WorkSize: screen,
+                DpiScale: 1.0,
+                ..Default::default()
+            }]);
+            io.set_platform_create_window_raw(Some(window));
+            io.set_platform_destroy_window_raw(Some(window));
+            io.set_platform_show_window_raw(Some(window));
+            io.set_platform_set_window_title_raw(Some(title));
+            io.set_platform_set_window_pos_raw(Some(set_vec));
+            io.set_platform_set_window_size_raw(Some(set_vec));
+            io.set_platform_get_window_pos_raw(Some(get_pos));
+            io.set_platform_get_window_size_raw(Some(get_size));
+        }
+        for _ in 0..2 {
+            let ui = context.frame();
+            ui.window("Secondary swap target")
+                .position([200.0, 20.0], crate::Condition::Always)
+                .size([80.0, 80.0], crate::Condition::Always)
+                .build(|| ui.text("secondary"));
+            drop(context.render_legacy());
+            context.update_platform_windows();
+        }
+        let secondary = context
+            .platform_io()
+            .viewports_iter()
+            .find(|v| !v.is_main())
+            .unwrap()
+            .id();
+        unsafe {
+            context
+                .platform_io_mut()
+                .set_platform_swap_buffers(Some(swap))
+        };
+        SWAPPED.set(None);
+        context.render_platform_windows_default();
+        assert_eq!(SWAPPED.get(), Some(secondary));
+
+        unsafe {
+            context.platform_io_mut().set_platform_swap_buffers(None);
+            context
+                .platform_io_mut()
+                .set_renderer_swap_buffers(Some(swap));
+        }
+        SWAPPED.set(None);
+        context.render_platform_windows_default();
+        assert_eq!(SWAPPED.get(), Some(secondary));
+    }
 
     #[test]
     fn managed_platform_draw_texture_mask_restores_every_pointer() {

@@ -24,7 +24,9 @@ static_assert(offsetof(TextEditor::Glyph, columns) == 6);
 static_assert(offsetof(TextEditor::Glyph, squiggle) == 8);
 static_assert(static_cast<int>(TextEditor::Color::currentLineHighlight) == 22);
 static_assert(static_cast<int>(TextEditor::Color::currentLineHighlightBorder) == 23);
-static_assert(static_cast<int>(TextEditor::Color::count) == 24);
+static_assert(static_cast<int>(TextEditor::Color::customColor1) == 24);
+static_assert(static_cast<int>(TextEditor::Color::customColor9) == 32);
+static_assert(static_cast<int>(TextEditor::Color::count) == 33);
 
 struct DearImGuiCteAutocompleteConfig {
     TextEditor::AutoCompleteConfig value;
@@ -34,16 +36,6 @@ namespace {
 
 bool valid_bytes(const char* data, size_t length) noexcept {
     return data != nullptr || length == 0;
-}
-
-TextEditor::AutoCompleteState* autocomplete_state(
-    DearImGuiCteAutocompleteState* state) noexcept {
-    return reinterpret_cast<TextEditor::AutoCompleteState*>(state);
-}
-
-const TextEditor::AutoCompleteState* autocomplete_state(
-    const DearImGuiCteAutocompleteState* state) noexcept {
-    return reinterpret_cast<const TextEditor::AutoCompleteState*>(state);
 }
 
 class DearImGuiCteBridgeTextEditor final : public TextEditor {
@@ -477,6 +469,18 @@ DearImGuiCteStatus dear_imgui_cte_autocomplete_config_set_auto_insert_single(
     return DearImGuiCteStatus_Ok;
 }
 
+DearImGuiCteStatus dear_imgui_cte_autocomplete_config_set_characters(
+    DearImGuiCteAutocompleteConfig* config,
+    const char* trigger_characters,
+    const char* word_characters) noexcept {
+    if (config == nullptr || trigger_characters == nullptr || word_characters == nullptr) {
+        return DearImGuiCteStatus_NullArgument;
+    }
+    AutoCompleteConfig_SetTriggerCharacters(&config->value, trigger_characters);
+    AutoCompleteConfig_SetWordCharacters(&config->value, word_characters);
+    return DearImGuiCteStatus_Ok;
+}
+
 DearImGuiCteStatus dear_imgui_cte_autocomplete_config_set_trigger_delay(
     DearImGuiCteAutocompleteConfig* config,
     uint64_t delay_ms) noexcept {
@@ -525,9 +529,7 @@ DearImGuiCteStatus dear_imgui_cte_autocomplete_config_set_callback(
     } else {
         config->value.callback =
             [callback, userdata](TextEditor::AutoCompleteState& state) {
-                callback(
-                    userdata,
-                    reinterpret_cast<DearImGuiCteAutocompleteState*>(&state));
+                callback(userdata, &state);
             };
     }
     return DearImGuiCteStatus_Ok;
@@ -575,9 +577,8 @@ DearImGuiCteStatus dear_imgui_cte_autocomplete_state_get_search_term(
     if (state == nullptr || text == nullptr || text_len == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
-    const auto* value = autocomplete_state(state);
-    *text = value->searchTerm.data();
-    *text_len = value->searchTerm.size();
+    *text = state->searchTerm.data();
+    *text_len = state->searchTerm.size();
     return DearImGuiCteStatus_Ok;
 }
 
@@ -588,9 +589,8 @@ DearImGuiCteStatus dear_imgui_cte_autocomplete_state_get_range(
     if (state == nullptr || start == nullptr || end == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
-    const auto* value = autocomplete_state(state);
-    *start = {value->searchTermStart.line, value->searchTermStart.index};
-    *end = {value->searchTermEnd.line, value->searchTermEnd.index};
+    *start = {state->searchTermStart.line, state->searchTermStart.index};
+    *end = {state->searchTermEnd.line, state->searchTermEnd.index};
     return DearImGuiCteStatus_Ok;
 }
 
@@ -600,14 +600,13 @@ DearImGuiCteStatus dear_imgui_cte_autocomplete_state_get_context(
     if (state == nullptr || context == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
-    const auto* value = autocomplete_state(state);
     *context = {
-        value->inIdentifier,
-        value->inNumber,
-        value->inComment,
-        value->inString,
-        value->language,
-        value->userData,
+        state->inIdentifier,
+        state->inNumber,
+        state->inComment,
+        state->inString,
+        state->language,
+        state->userData,
     };
     return DearImGuiCteStatus_Ok;
 }
@@ -617,7 +616,7 @@ DearImGuiCteStatus dear_imgui_cte_autocomplete_state_clear_suggestions(
     if (state == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
-    autocomplete_state(state)->suggestions.clear();
+    AutoCompleteState_ClearSuggestions(state);
     return DearImGuiCteStatus_Ok;
 }
 
@@ -628,9 +627,12 @@ DearImGuiCteStatus dear_imgui_cte_autocomplete_state_add_suggestion(
     if (state == nullptr || !valid_bytes(suggestion, suggestion_len)) {
         return DearImGuiCteStatus_NullArgument;
     }
-    autocomplete_state(state)->suggestions.emplace_back(
+    state->suggestions.emplace_back(
         suggestion_len == 0 ? "" : suggestion,
         suggestion_len);
+    if (!state->labels.empty()) {
+        state->labels.push_back(state->suggestions.back());
+    }
     return DearImGuiCteStatus_Ok;
 }
 
@@ -640,6 +642,6 @@ DearImGuiCteStatus dear_imgui_cte_autocomplete_state_set_promise(
     if (state == nullptr) {
         return DearImGuiCteStatus_NullArgument;
     }
-    autocomplete_state(state)->suggestionsPromise = promised;
+    state->suggestionsPromise = promised;
     return DearImGuiCteStatus_Ok;
 }

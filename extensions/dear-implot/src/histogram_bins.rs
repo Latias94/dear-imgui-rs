@@ -34,17 +34,6 @@ impl HistogramBins {
     pub const fn method(method: BinMethod) -> Self {
         Self::Method(method)
     }
-
-    pub(crate) fn raw(self, caller: &str) -> i32 {
-        match self {
-            Self::Count(count) => {
-                assert!(count > 0, "{caller} bin count must be positive");
-                i32::try_from(count)
-                    .unwrap_or_else(|_| panic!("{caller} bin count exceeded ImPlot's i32 range"))
-            }
-            Self::Method(method) => method as i32,
-        }
-    }
 }
 
 impl Default for HistogramBins {

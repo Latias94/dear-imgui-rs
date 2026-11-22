@@ -17,48 +17,33 @@ Safe, idiomatic Rust bindings for ImGuIZMO.quat (quaternion + 3D gizmo helpers) 
 
 ## Compatibility
 
-The `0.22` release train requires Rust 1.95 or newer. Upgrade all workspace crates together. See the [0.22 migration notes](../../docs/COMPATIBILITY.md#022-release-train).
+Use Rust 1.95 or newer and keep all `dear-*` dependencies on the `0.23` release train. See the [0.23 migration notes](../../docs/COMPATIBILITY.md#023-release-train).
 
 | Item                   | Version |
 |------------------------|---------|
-| Crate                  | 0.22.0  |
-| dear-imgui-rs          | 0.22.0  |
-| dear-imguizmo-quat-sys | 0.22.0  |
-
-See also: docs/COMPATIBILITY.md in the workspace for the full matrix.
+| Crate                  | 0.23.0  |
+| dear-imgui-rs          | 0.23.0  |
+| dear-imguizmo-quat-sys | 0.23.0  |
 
 ### WASM (WebAssembly) support
 
-This crate has **experimental** support for `wasm32-unknown-unknown` targets via the same import-style design used by the core ImGui bindings:
+For the experimental `wasm32-unknown-unknown` target, enable `wasm` on both direct dependencies.
 
-- `dear-imguizmo-quat` + `dear-imguizmo-quat-sys` expose a `wasm` feature which:
-  - Enables import-style FFI that links against the shared `imgui-sys-v1` provider module.
-  - Avoids compiling C/C++ during the Rust build for wasm.
-- The provider module (`imgui-sys-v1`) is built once using Emscripten and contains:
-  - Dear ImGui + cimgui (from `dear-imgui-sys`)
-  - ImGuizmo + cimguizmo (from `dear-imguizmo-sys`)
-  - ImGuIZMO.quat + cimguizmo_quat (from `dear-imguizmo-quat-sys`)
+```toml
+[dependencies]
+dear-imgui-rs = { version = "0.23", features = ["wasm"] }
+dear-imguizmo-quat = { version = "0.23", features = ["wasm"] }
+```
 
-To try the web demo with ImGuIZMO.quat enabled:
+From the matching workspace checkout, build the demo and its `imgui-sys-v1` provider with the checked-in bindings.
 
 ```bash
-# 1) Generate pregenerated wasm bindings (Dear ImGui core + ImGuIZMO.quat)
-cargo run -p xtask -- wasm-bindgen
-cargo run -p xtask -- wasm-bindgen-imguizmo-quat
-
-# 2) Build the main wasm + JS (includes an "ImGuIZMO.quat (Web)" window)
 cargo run -p xtask -- web-demo imguizmo-quat
-
-# 3) Build the provider (Emscripten imgui-sys-v1 with ImGui + ImGuIZMO.quat)
 cargo run -p xtask -- build-cimgui-provider
-
-# 4) Serve and open in a browser
 python -m http.server -d target/web-demo 8080
 ```
 
-Notes:
-- The `dear-imgui-web-demo` crate in `examples-wasm` can enable the `imguizmo-quat` feature; when present, an “ImGuIZMO.quat (Web)” window is shown if bindings + provider are available.
-- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific compatible `0.22` release and follow changes in `docs/WASM.md`.
+The 0.23 browser application uses `WasmProviderAllocator` and imports the provider's memory and function table. Rebuild and deploy both modules together when upgrading from 0.22. See the [tool versions and local demo](../../docs/WASM.md#local-demo) and [application setup](../../docs/WASM.md#runtime-model).
 
 ## Features
 
@@ -89,6 +74,9 @@ let _settings_token = gizmo.push_settings(settings);
 // Dropping the token restores the previous getter-backed global settings.
 ```
 
+Nested tokens share the process-wide settings across ImGui contexts. Releasing
+an outer token early keeps the inner settings active until that token also ends.
+
 Color, modifier, and resize helpers are direct upstream wrappers. Their restore functions
 use one saved value rather than a stack, so avoid nesting `set_*`/`restore_*` or
 `resize_*`/`restore_*` pairs.
@@ -99,8 +87,8 @@ Use compatible stable requirements:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.22"
-dear-imguizmo-quat = "0.22"
+dear-imgui-rs = "0.23"
+dear-imguizmo-quat = "0.23"
 glam = "0.34"
 ```
 
@@ -143,7 +131,7 @@ ui.gizmo_quat()
 
 ## Notes
 
-- Begin once per frame with `ui.gizmo_quat()` and call into the builder; no extra context is required.
+- Obtain `ui.gizmo_quat()` wherever you draw. Each widget uses the current window of that `Ui` and accepts a positive finite size in pixels.
 - RAII and ID usage follow dear-imgui patterns; use unique labels or `##suffix` to avoid ID clashes in loops.
 - Start with `examples/03-features/imguizmo_quat_minimal.rs` for a copy-ready integration.
 - See `examples/03-features/imguizmo_quat_showcase.rs` for the complete WGPU demo with cube and view controls.

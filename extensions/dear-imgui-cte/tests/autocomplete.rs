@@ -1,4 +1,6 @@
-use dear_imgui_cte::{AutocompleteConfig, CteError, CteUiExt, Language, Position, TextEditor};
+use dear_imgui_cte::{
+    AutocompleteConfig, CteError, CteUiExt, Language, Position, Selection, TextEditor,
+};
 use dear_imgui_rs::{Context, FramePrepareOptions, Key, KeyChord, KeyMods};
 use std::{cell::Cell, rc::Rc, time::Duration};
 
@@ -139,26 +141,30 @@ fn trie_attachment_is_exclusive_replaceable_and_editor_owned() {
 }
 
 #[test]
-fn configured_autocomplete_callback_runs_from_the_render_loop() {
+fn autocomplete_observes_julia_nested_comments_from_the_render_loop() {
     let mut context = context();
     let mut editor = TextEditor::create(&context);
-    editor.set_text("al").unwrap();
-    editor.set_cursor(Position::new(0, 2)).unwrap();
-    editor.set_language(Some(Language::Cpp));
+    editor.set_text("#= outer\n#= inner =#\nal\n=#").unwrap();
+    editor.set_cursor(Position::new(2, 2)).unwrap();
+    editor.set_language(Some(Language::Julia));
     let calls = Rc::new(Cell::new(0));
     let callback_calls = Rc::clone(&calls);
     editor
         .set_autocomplete(
             &AutocompleteConfig::new()
                 .trigger_on_typing(false)
+                .trigger_in_comments(true)
+                .shortcut(KeyChord::new(Key::Space).with_mods(KeyMods::CTRL))
                 .trigger_delay(Duration::ZERO),
             move |request| {
                 let call = callback_calls.get();
                 callback_calls.set(call + 1);
                 if call == 0 {
                     assert_eq!(request.search_term().unwrap(), "al");
-                    assert_eq!(request.range().unwrap().start, Position::new(0, 0));
-                    assert_eq!(request.context().unwrap().language, Some(Language::Cpp));
+                    assert_eq!(request.range().unwrap().start, Position::new(2, 0));
+                    let context = request.context().unwrap();
+                    assert_eq!(context.language, Some(Language::Julia));
+                    assert!(context.in_comment);
                 }
                 request.set_suggestions(["alpha", "alpine"]).unwrap();
             },
@@ -185,7 +191,7 @@ fn configured_autocomplete_callback_runs_from_the_render_loop() {
     render(&mut context, &mut editor, 7);
     context.io_mut().add_key_event(Key::Enter, false);
     render(&mut context, &mut editor, 8);
-    assert_eq!(editor.text().unwrap(), "alpha");
+    assert_eq!(editor.text().unwrap(), "#= outer\n#= inner =#\nalpha\n=#");
 }
 
 #[test]
@@ -229,6 +235,101 @@ fn replacing_autocomplete_cancels_queued_activation() {
 
     assert_eq!(old_calls.get(), 0);
     assert_eq!(new_calls.get(), 0);
+}
+
+#[test]
+fn accepting_a_labeled_completion_replaces_the_requested_glyphs() {
+    let mut context = context();
+    let mut editor = TextEditor::create(&context);
+    editor.set_text("界 @\\alSuffix!").unwrap();
+    editor.set_cursor(Position::new(0, 6)).unwrap();
+    let config = AutocompleteConfig::new()
+        .word_characters("\\")
+        .shortcut(KeyChord::new(Key::Space).with_mods(KeyMods::CTRL))
+        .trigger_delay(Duration::ZERO);
+    editor
+        .set_autocomplete(&config, |request| {
+            let range = |start, end| Selection::new(Position::new(0, start), Position::new(0, end));
+            assert_eq!(request.search_term().unwrap(), "\\al");
+            assert_eq!(request.range().unwrap(), range(3, 6));
+            assert_eq!(request.replacement_range(), range(3, 12));
+            assert!(request.set_replacement_range(range(7, 9)).is_err());
+            assert!(request.set_replacement_range(range(1, 14)).is_err());
+            assert_eq!(request.replacement_range(), range(3, 12));
+            request.set_replacement_range(range(2, 6)).unwrap();
+            request
+                .add_labeled_suggestion("stale", "stale label")
+                .unwrap();
+            request.set_suggestions(["first"]).unwrap();
+            assert_eq!(request.suggestion_label(0).unwrap(), None);
+            request.add_labeled_suggestion("λ", "Greek lambda").unwrap();
+            request.add_suggestion("third").unwrap();
+            assert_eq!(request.suggestion_count(), 3);
+            assert_eq!(request.suggestion(1).unwrap(), Some("λ"));
+            assert_eq!(request.suggestion_label(0).unwrap(), Some("first"));
+            assert_eq!(request.suggestion_label(1).unwrap(), Some("Greek lambda"));
+            assert_eq!(request.suggestion_label(2).unwrap(), Some("third"));
+            assert_eq!(request.suggestion(3).unwrap(), None);
+        })
+        .unwrap();
+    render(&mut context, &mut editor, 0);
+    editor.focus();
+    render(&mut context, &mut editor, 1);
+    request_ctrl_space(&mut context, &mut editor, 2);
+    render(&mut context, &mut editor, 3);
+    context.io_mut().add_key_event(Key::DownArrow, true);
+    render(&mut context, &mut editor, 4);
+    context.io_mut().add_key_event(Key::DownArrow, false);
+    context.io_mut().add_key_event(Key::Enter, true);
+    render(&mut context, &mut editor, 5);
+    assert_eq!(editor.text().unwrap(), "界 λSuffix!");
+}
+
+#[test]
+fn typing_a_custom_trigger_accepts_async_insertion_text() {
+    let mut context = context();
+    let mut editor = TextEditor::create(&context);
+    editor.set_text("界 ").unwrap();
+    editor.set_cursor(Position::new(0, 2)).unwrap();
+    let called = Rc::new(Cell::new(false));
+    let seen = Rc::clone(&called);
+    editor
+        .set_autocomplete(
+            &AutocompleteConfig::new()
+                .trigger_characters("§")
+                .word_characters("§")
+                .trigger_delay(Duration::ZERO),
+            move |request| {
+                assert_eq!(request.search_term().unwrap(), "§");
+                assert_eq!(request.range().unwrap().start, Position::new(0, 2));
+                request.clear_suggestions().unwrap();
+                request.set_promised(true).unwrap();
+                seen.set(true);
+            },
+        )
+        .unwrap();
+    render(&mut context, &mut editor, 0);
+    editor.focus();
+    render(&mut context, &mut editor, 1);
+    context.io_mut().add_input_character('§');
+    for frame in 2..5 {
+        render(&mut context, &mut editor, frame);
+    }
+    assert!(called.get());
+    editor
+        .set_labeled_autocomplete_suggestions(std::iter::empty::<(&str, &str)>())
+        .unwrap();
+    editor
+        .set_labeled_autocomplete_suggestions([("結果", "Display label")])
+        .unwrap();
+    assert!(
+        editor
+            .set_labeled_autocomplete_suggestions([("lost", "bad\0label")])
+            .is_err()
+    );
+    context.io_mut().add_key_event(Key::Enter, true);
+    render(&mut context, &mut editor, 5);
+    assert_eq!(editor.text().unwrap(), "界 結果");
 }
 
 #[test]

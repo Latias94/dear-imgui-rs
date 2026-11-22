@@ -1,5 +1,5 @@
 use super::{Plot3D, Plot3DError, validate_lengths, validate_nonempty};
-use crate::{Plot3DDataLayout, Plot3DDataOffset, Plot3DUi, Scatter3DFlags};
+use crate::{Plot3DDataLayout, Plot3DDataOffset, Plot3DScope, Scatter3DFlags};
 
 pub struct Scatter3D<'a> {
     pub label: &'a str,
@@ -54,11 +54,16 @@ impl<'a> Plot3D for Scatter3D<'a> {
     fn label(&self) -> &str {
         self.label
     }
-    fn try_plot(&self, ui: &Plot3DUi<'_>) -> Result<(), Plot3DError> {
+    fn try_plot(&self, ui: &Plot3DScope<'_>) -> Result<(), Plot3DError> {
         if let (Some(x), Some(y), Some(z)) = (self.xs_f32, self.ys_f32, self.zs_f32) {
             validate_nonempty(x)?;
             validate_lengths(x, y, "x/y")?;
             validate_lengths(y, z, "y/z")?;
+            self.layout
+                .sample_count(x.len())
+                .ok_or(Plot3DError::NativeCountOutOfRange {
+                    what: "scatter samples",
+                })?;
             unsafe {
                 // High-level plots keep the automatic contiguous stride; offset is normalized by
                 // ImPlot3D within the validated slice count.
@@ -69,6 +74,11 @@ impl<'a> Plot3D for Scatter3D<'a> {
             validate_nonempty(x)?;
             validate_lengths(x, y, "x/y")?;
             validate_lengths(y, z, "y/z")?;
+            self.layout
+                .sample_count(x.len())
+                .ok_or(Plot3DError::NativeCountOutOfRange {
+                    what: "scatter samples",
+                })?;
             unsafe {
                 // High-level plots keep the automatic contiguous stride; offset is normalized by
                 // ImPlot3D within the validated slice count.

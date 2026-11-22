@@ -24,47 +24,33 @@ This project is a Rust wrapper around the C shim (cimguizmo), not a direct C++ b
 
 ## Compatibility
 
-The `0.22` release train requires Rust 1.95 or newer. Upgrade all workspace crates together. See the [0.22 migration notes](../../docs/COMPATIBILITY.md#022-release-train).
+Use Rust 1.95 or newer and keep all `dear-*` dependencies on the `0.23` release train. See the [0.23 migration notes](../../docs/COMPATIBILITY.md#023-release-train).
 
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.22.0  |
-| dear-imgui-rs     | 0.22.0  |
-| dear-imguizmo-sys | 0.22.0  |
-
-See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
+| Crate             | 0.23.0  |
+| dear-imgui-rs     | 0.23.0  |
+| dear-imguizmo-sys | 0.23.0  |
 
 ### WASM (WebAssembly) support
 
-This crate has **experimental** support for `wasm32-unknown-unknown` targets via the same import-style design used by the core ImGui bindings:
+For the experimental `wasm32-unknown-unknown` target, enable `wasm` on both direct dependencies.
 
-- `dear-imguizmo` + `dear-imguizmo-sys` expose a `wasm` feature which:
-  - Enables import-style FFI that links against the shared `imgui-sys-v1` provider module.
-  - Avoids compiling C/C++ during the Rust build for wasm.
-- The provider module (`imgui-sys-v1`) is built once using Emscripten and contains:
-  - Dear ImGui + cimgui (from `dear-imgui-sys`)
-  - ImGuizmo + cimguizmo (from `dear-imguizmo-sys`)
+```toml
+[dependencies]
+dear-imgui-rs = { version = "0.23", features = ["wasm"] }
+dear-imguizmo = { version = "0.23", features = ["wasm"] }
+```
 
-To try the web demo with ImGuizmo enabled:
+From the matching workspace checkout, build the demo and its `imgui-sys-v1` provider with the checked-in bindings.
 
 ```bash
-# 1) Generate pregenerated wasm bindings (Dear ImGui core + ImGuizmo)
-cargo run -p xtask -- wasm-bindgen
-cargo run -p xtask -- wasm-bindgen-imguizmo
-
-# 2) Build the main wasm + JS (includes an "ImGuizmo (Web)" window)
 cargo run -p xtask -- web-demo imguizmo
-
-# 3) Build the provider (Emscripten imgui-sys-v1 with ImGui + ImGuizmo)
 cargo run -p xtask -- build-cimgui-provider
-
-# 4) Serve and open in a browser
 python -m http.server -d target/web-demo 8080
 ```
 
-Notes:
-- The `dear-imgui-web-demo` crate in `examples-wasm` can enable the `imguizmo` feature; when present, an “ImGuizmo (Web)” window is shown if bindings + provider are available.
-- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific compatible `0.22` release and follow changes in `docs/WASM.md`.
+The 0.23 browser application uses `WasmProviderAllocator` and imports the provider's memory and function table. Rebuild and deploy both modules together when upgrading from 0.22. See the [tool versions and local demo](../../docs/WASM.md#local-demo) and [application setup](../../docs/WASM.md#runtime-model).
 
 ## Features
 
@@ -80,8 +66,8 @@ Use compatible stable requirements:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.22"
-dear-imguizmo = "0.22"
+dear-imgui-rs = "0.23"
+dear-imguizmo = "0.23"
 glam = "0.34"
 ```
 
@@ -95,16 +81,15 @@ use glam::Mat4;
 
 fn draw(ui: &Ui, model: &mut Mat4, view: &Mat4, proj: &Mat4) {
     let giz = ui.guizmo();
-    let ds = ui.io().display_size();
-    giz.set_rect(0.0, 0.0, ds[0], ds[1]);
     giz.set_drawlist_window();
+    giz.set_rect_pos_size(ui.window_pos(), ui.window_size());
 
     let used = giz
         .manipulate_config(view, proj, model)
         .operation(Operation::TRANSLATE)
         .mode(Mode::Local)
         //.snap([1.0, 1.0, 1.0])
-        //.bounds([minx,miny,minz], [maxx,maxy,maxz])
+        //.bounds([min_x, min_y, min_z], [max_x, max_y, max_z])
         .build();
 
     if used { /* object moved */ }
@@ -120,12 +105,11 @@ bounds, and helpers.
 Typical usage order within a single frame:
 
 ```rust
-let giz = ui.guizmo(); // call once per frame
+let giz = ui.guizmo();
 
 // 1) Configure drawing area and destination
-let ds = ui.io().display_size();
-giz.set_rect(0.0, 0.0, ds[0], ds[1]);
 giz.set_drawlist_window(); // or Background/Foreground
+giz.set_rect_pos_size(ui.window_pos(), ui.window_size());
 
 // 2) Manipulate
 let used = giz
@@ -136,9 +120,10 @@ let used = giz
 ```
 
 Notes:
-- Call `ui.guizmo()` exactly once per frame, then set `set_rect(...)` and a draw target before calling `manipulate`/`draw_*`.
-- You can select draw target with `giz.set_drawlist(DrawListTarget::Window|Background|Foreground)`.
-- Use RAII ID helpers: `let _id = giz.push_id(i);`.
+- The first `ui.guizmo()` opens the helper window. Further handles in the same ImGui frame share its draw target, ID scopes, and interaction state. Finish that frame before starting ImGuizmo in another ImGui context.
+- Consecutive frames of the same context continue drags and view interpolation. Handing ImGuizmo to another context cancels the previous interaction, including when the old context has been destroyed. Style, enablement, drawing rectangle, orthographic mode, axis options, and gizmo size remain process-global.
+- Set the drawing area with `set_rect(...)`. Use `set_drawlist_window()` to draw while the selected window is current, or select a viewport layer with `DrawListTarget::Background` or `DrawListTarget::Foreground`. Each frame starts on the helper window. A named alternative hover window is resolved by ID on subsequent frames of the same context.
+- Keep `let _id = giz.push_id(i);` alive while drawing the corresponding gizmo. An early outer drop preserves active inner IDs. The next frame starts at the root ID.
 - Style access: `let mut st = giz.style(); st.set_color(Color::Selection, [1.0,0.2,0.2,1.0]);`.
   More fields: `translation_line_arrow_size()`, `rotation_outer_line_thickness()`,
   `scale_line_circle_size()`, `hatched_axis_line_thickness()`, etc.
@@ -156,8 +141,7 @@ Simple utility methods you may find handy:
 
 ```rust
 // Hover test near a world-space position (in pixels)
-// Call after you've established view/projection for the frame
-// via manipulate/draw_grid/draw_cubes.
+// Call after manipulate has established the view and projection.
 let hovered = giz.is_over_at([0.0, 0.0, 0.0], 8.0);
 
 // Compute an ImGuizmo hashed ID from a pointer

@@ -101,6 +101,7 @@ pub(crate) struct ManagedTextureRegistry {
     context: ContextId,
     slots: Vec<TextureSlot>,
     reusable: Vec<u32>,
+    frame_removals: Vec<u32>,
     by_native: HashMap<usize, ManagedTextureId>,
     native_refresh_generation: u64,
     sync: TextureSyncQueue,
@@ -120,6 +121,7 @@ enum TextureSlot {
 }
 
 struct TextureEntry {
+    retire_after_frame: bool,
     generation: NonZeroU64,
     last_reference_epoch: u64,
     destroy_ack_epoch: Option<u64>,
@@ -147,6 +149,7 @@ impl fmt::Debug for ManagedTextureRegistry {
             .debug_struct("ManagedTextureRegistry")
             .field("context", &self.context)
             .field("active", &active)
+            .field("retire_after_frame", &self.frame_removals.len())
             .field("retiring", &retiring)
             .field("native_exposed", &native_exposed)
             .field("slot_count", &self.slots.len())
@@ -160,6 +163,7 @@ impl ManagedTextureRegistry {
             context,
             slots: Vec::new(),
             reusable: Vec::new(),
+            frame_removals: Vec::new(),
             by_native: HashMap::new(),
             native_refresh_generation: 0,
             sync: TextureSyncQueue::default(),
@@ -198,8 +202,10 @@ impl ManagedTextureRegistry {
 
     fn active_entry(&self, id: ManagedTextureId) -> Result<&TextureEntry, ManagedTextureError> {
         match self.slot(id)? {
-            TextureSlot::Active(entry) => Ok(entry),
-            TextureSlot::Retiring(_) => Err(ManagedTextureError::Retiring(id)),
+            TextureSlot::Active(entry) if !entry.retire_after_frame => Ok(entry),
+            TextureSlot::Active(_) | TextureSlot::Retiring(_) => {
+                Err(ManagedTextureError::Retiring(id))
+            }
             TextureSlot::NativeExposed { .. }
             | TextureSlot::Retired { .. }
             | TextureSlot::Exhausted => Err(ManagedTextureError::AlreadyRemoved(id)),
@@ -210,28 +216,11 @@ impl ManagedTextureRegistry {
         &mut self,
         id: ManagedTextureId,
     ) -> Result<&mut TextureEntry, ManagedTextureError> {
-        self.validate_context(id)?;
-        let slot = self
-            .slots
-            .get_mut(id.slot() as usize)
-            .ok_or(ManagedTextureError::UnknownSlot(id))?;
-        let generation = match slot {
-            TextureSlot::Active(entry)
-            | TextureSlot::Retiring(entry)
-            | TextureSlot::NativeExposed { entry, .. } => entry.generation,
-            TextureSlot::Retired { generation } => *generation,
-            TextureSlot::Exhausted => return Err(ManagedTextureError::AlreadyRemoved(id)),
+        self.active_entry(id)?;
+        let TextureSlot::Active(entry) = &mut self.slots[id.slot() as usize] else {
+            unreachable!("validated active texture slot changed without a mutable alias")
         };
-        if generation != id.generation() {
-            return Err(ManagedTextureError::StaleGeneration(id));
-        }
-        match slot {
-            TextureSlot::Active(entry) => Ok(entry),
-            TextureSlot::Retiring(_) => Err(ManagedTextureError::Retiring(id)),
-            TextureSlot::NativeExposed { .. }
-            | TextureSlot::Retired { .. }
-            | TextureSlot::Exhausted => Err(ManagedTextureError::AlreadyRemoved(id)),
-        }
+        Ok(entry)
     }
 
     fn allocate_slot(&mut self) -> (u32, NonZeroU64) {
@@ -267,6 +256,7 @@ impl ManagedTextureRegistry {
             sys::igRegisterUserTexture(native);
         }
         let entry = TextureEntry {
+            retire_after_frame: false,
             generation,
             last_reference_epoch: 0,
             destroy_ack_epoch: None,
@@ -471,41 +461,39 @@ impl ManagedTextureRegistry {
         Ok(self.sync.requests())
     }
 
-    fn remove(&mut self, id: ManagedTextureId, watermark: u64) -> Result<(), ManagedTextureError> {
+    fn remove(
+        &mut self,
+        id: ManagedTextureId,
+        watermark: u64,
+        retain_frame: bool,
+    ) -> Result<(), ManagedTextureError> {
         self.reap_destroyed(watermark);
-        self.validate_context(id)?;
-        let slot_index = id.slot() as usize;
-        let slot = self
-            .slots
-            .get(slot_index)
-            .ok_or(ManagedTextureError::UnknownSlot(id))?;
-        match slot {
-            TextureSlot::Active(entry) if entry.generation == id.generation() => {}
-            TextureSlot::Active(_) => return Err(ManagedTextureError::StaleGeneration(id)),
-            TextureSlot::Retiring(entry) if entry.generation == id.generation() => {
-                return Err(ManagedTextureError::AlreadyRetiring(id));
-            }
-            TextureSlot::Retiring(_) => return Err(ManagedTextureError::StaleGeneration(id)),
-            TextureSlot::NativeExposed { entry, .. } if entry.generation == id.generation() => {
-                return Err(ManagedTextureError::AlreadyRemoved(id));
-            }
-            TextureSlot::NativeExposed { .. } => {
-                return Err(ManagedTextureError::StaleGeneration(id));
-            }
-            TextureSlot::Retired { generation } if *generation == id.generation() => {
-                return Err(ManagedTextureError::AlreadyRemoved(id));
-            }
-            TextureSlot::Retired { .. } => return Err(ManagedTextureError::StaleGeneration(id)),
-            TextureSlot::Exhausted => return Err(ManagedTextureError::AlreadyRemoved(id)),
+        let entry = self.active_entry_mut(id).map_err(|error| match error {
+            ManagedTextureError::Retiring(_) => ManagedTextureError::AlreadyRetiring(id),
+            other => other,
+        })?;
+        if retain_frame {
+            // Revoke the handle now. Renderers can still resolve the native texture and upload
+            // its current pixels until all draw lists for this frame have expired.
+            entry.retire_after_frame = true;
+            self.frame_removals.push(id.slot());
+        } else {
+            self.begin_retirement(id.slot() as usize, watermark);
         }
+        Ok(())
+    }
 
-        let placeholder = TextureSlot::Retired {
-            generation: id.generation(),
-        };
+    pub(super) fn finish_frame_removals(&mut self, watermark: u64) {
+        while let Some(index) = self.frame_removals.pop() {
+            self.begin_retirement(index as usize, watermark);
+        }
+    }
+
+    fn begin_retirement(&mut self, slot_index: usize, watermark: u64) {
         let TextureSlot::Active(mut entry) =
-            std::mem::replace(&mut self.slots[slot_index], placeholder)
+            std::mem::replace(&mut self.slots[slot_index], TextureSlot::Exhausted)
         else {
-            unreachable!("validated active texture slot changed without a mutable alias")
+            unreachable!("texture awaiting retirement must still be registered")
         };
         let has_renderer_binding =
             !entry.texture.tex_id().is_null() || !entry.texture.backend_user_data().is_null();
@@ -517,7 +505,6 @@ impl ManagedTextureRegistry {
         } else {
             self.unregister_and_expose(slot_index, entry);
         }
-        Ok(())
     }
 
     pub(crate) fn apply_snapshot_feedback(
@@ -769,6 +756,7 @@ impl ManagedTextureRegistry {
         }
         self.by_native.clear();
         self.reusable.clear();
+        self.frame_removals.clear();
     }
 
     pub(super) fn release_after_native_destroy(&mut self) {
@@ -881,11 +869,18 @@ impl Context {
     }
 
     /// Stop accepting new draw references and retire a managed texture.
+    ///
+    /// An open or rendered frame retains its texture data and binding so already submitted
+    /// commands can still be rendered or captured. Retirement starts when that frame expires.
     pub fn remove_texture(&mut self, id: ManagedTextureId) -> Result<(), ManagedTextureError> {
         let _guard = CTX_MUTEX.lock();
         self.assert_current_context("Context::remove_texture()");
         let watermark = self.snapshot_hub.completion_watermark();
-        self.texture_registry.borrow_mut().remove(id, watermark)
+        let retain_frame =
+            self.frame_lifecycle_state_unlocked() != super::FrameLifecycleState::Idle;
+        self.texture_registry
+            .borrow_mut()
+            .remove(id, watermark, retain_frame)
     }
 
     pub(crate) fn collect_retired_textures(&mut self) {
@@ -1013,7 +1008,9 @@ mod tests {
                 entry.texture.set_tex_id(TextureId::new(73));
                 entry.texture.set_status(TextureStatus::OK);
             }
-            registry.remove(id, 0).expect("bound texture should retire");
+            registry
+                .remove(id, 0, false)
+                .expect("bound texture should retire");
         }
 
         let captured = vec![CapturedTextureOperation {

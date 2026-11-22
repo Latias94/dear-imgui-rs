@@ -47,22 +47,26 @@ impl Application for ImPlotMinimal {
                     *y = amplitude * x.sin();
                 }
 
-                if let Some(_plot) = plot_ui.begin_plot_with_size("Sine wave", [-1.0, 320.0]) {
-                    plot_ui.setup_axes(
-                        Some("x"),
-                        Some("amplitude × sin(x)"),
-                        AxisFlags::NONE,
-                        AxisFlags::NONE,
-                    );
-                    plot_ui.setup_axes_limits(
-                        0.0,
-                        std::f64::consts::TAU,
-                        -2.2,
-                        2.2,
-                        PlotCond::Once,
-                    );
-                    LinePlot::new("signal", &self.x, &self.y).plot(&plot_ui);
-                }
+                plot_ui.with_plot_setup(
+                    "Sine wave",
+                    [-1.0, 320.0],
+                    |setup| {
+                        setup.setup_axes(
+                            Some("x"),
+                            Some("amplitude × sin(x)"),
+                            AxisFlags::NONE,
+                            AxisFlags::NONE,
+                        );
+                        setup.setup_axes_limits(
+                            0.0,
+                            std::f64::consts::TAU,
+                            -2.2,
+                            2.2,
+                            PlotCond::Once,
+                        );
+                    },
+                    |plot| LinePlot::new("signal", &self.x, &self.y).plot(plot),
+                );
             });
 
         Ok(())

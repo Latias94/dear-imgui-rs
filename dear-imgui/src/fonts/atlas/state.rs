@@ -6,6 +6,7 @@ use crate::error::ImGuiError;
 use crate::render::snapshot::{RendererConsumerError, SnapshotTextureId};
 use crate::sys;
 
+use super::FontAtlas;
 use super::error::FontAtlasModeError;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -754,43 +755,34 @@ pub(crate) fn assert_no_open_font_atlas_frames(raw: *mut sys::ImFontAtlas, calle
             let context = context as *mut sys::ImGuiContext;
             assert!(
                 !unsafe { (*context).WithinFrameScope },
-                "{caller} cannot modify a font atlas while a registered ImGui context is mid-frame"
+                "{caller} requires every context using this font atlas to be between frames"
             );
         }
     });
 }
 
-pub(super) fn acquire_font_atlas_texture_borrow(raw: *mut sys::ImFontAtlas) -> u64 {
-    assert!(!raw.is_null(), "font atlas pointer must not be null");
+pub(super) fn acquire_font_atlas_texture_borrow(atlas: &FontAtlas) {
     FONT_ATLAS_STATES.with(|states| {
         let mut states = states.borrow_mut();
-        let state = states.get_or_insert(raw);
+        let state = states.get_or_insert(atlas.raw());
         state.texture_borrows = state
             .texture_borrows
             .checked_add(1)
             .expect("font atlas texture borrow counter overflowed");
-        state.stamp
-    })
+    });
 }
 
-pub(super) fn release_font_atlas_texture_borrow(raw: *mut sys::ImFontAtlas, stamp: u64) {
-    if raw.is_null() {
-        return;
-    }
+pub(super) fn release_font_atlas_texture_borrow(atlas: &FontAtlas) {
     FONT_ATLAS_STATES.with(|states| {
         let mut states = states.borrow_mut();
-        let Some(state) = states.by_atlas.get_mut(&(raw as usize)) else {
-            debug_assert!(false, "font atlas texture borrow outlived its atlas state");
-            return;
-        };
-        debug_assert_eq!(
-            state.stamp, stamp,
-            "font atlas texture borrow belongs to a reused atlas address"
-        );
-        if state.stamp == stamp {
-            debug_assert!(state.texture_borrows > 0);
-            state.texture_borrows = state.texture_borrows.saturating_sub(1);
-        }
+        let state = states
+            .by_atlas
+            .get_mut(&(atlas.raw() as usize))
+            .expect("a borrowed font atlas must still be registered");
+        state.texture_borrows = state
+            .texture_borrows
+            .checked_sub(1)
+            .expect("font atlas texture borrow counter underflowed");
     });
 }
 

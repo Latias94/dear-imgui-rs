@@ -1,3 +1,7 @@
+use std::cell::UnsafeCell;
+
+use crate::context::binding::ContextThreadLease;
+use crate::error::{ImGuiError, ImGuiResult};
 use crate::sys;
 
 /// Borrowed handle to a complete Dear ImGui font-loader callback table.
@@ -6,18 +10,26 @@ use crate::sys;
 /// be created in native code and enter through [`FontLoader::from_raw`], whose
 /// safety contract covers every callback and stored pointer.
 #[repr(transparent)]
-pub struct FontLoader(sys::ImFontLoader);
+pub struct FontLoader(UnsafeCell<sys::ImFontLoader>);
 
 impl FontLoader {
-    /// Return Dear ImGui's built-in stb_truetype loader.
+    /// Return the built-in stb_truetype loader, panicking if [`Self::try_stb_truetype`] fails.
     #[doc(alias = "ImFontAtlasGetFontLoaderForStbTruetype")]
     pub fn stb_truetype() -> &'static Self {
+        Self::try_stb_truetype().expect("Failed to get Dear ImGui's stb_truetype font loader")
+    }
+
+    /// Return the built-in loader on the Dear ImGui owner thread, or any thread while unowned.
+    ///
+    /// Returns [`ImGuiError::ContextThreadConflict`] if another thread owns Dear ImGui.
+    pub fn try_stb_truetype() -> ImGuiResult<&'static Self> {
+        // The upstream getter writes its static callback table on every call, including during
+        // native atlas builds. Existing handles view that storage through UnsafeCell.
+        let _lease = ContextThreadLease::acquire()?;
         let raw = unsafe { sys::igImFontAtlasGetFontLoaderForStbTruetype() };
-        assert!(
-            !raw.is_null(),
-            "Dear ImGui returned a null stb_truetype font loader"
-        );
-        unsafe { &*raw.cast::<Self>() }
+        unsafe { raw.cast::<Self>().as_ref() }.ok_or_else(|| {
+            ImGuiError::font_loading("Dear ImGui returned a null stb_truetype loader")
+        })
     }
 
     /// Borrow an externally owned font loader.
@@ -38,7 +50,7 @@ impl FontLoader {
 
     /// Return the borrowed raw loader pointer.
     pub(crate) fn as_ptr(&self) -> *const sys::ImFontLoader {
-        &self.0
+        self.0.get().cast_const()
     }
 }
 
@@ -103,6 +115,8 @@ impl std::ops::BitOrAssign for FontLoaderFlags {
 mod tests {
     #[test]
     fn builtin_font_loader_has_required_callbacks() {
+        let _guard = crate::test_support::imgui_context_guard();
+        let _owner = crate::Context::create();
         let loader = super::FontLoader::stb_truetype();
         let raw = loader.as_ptr();
         assert!(!raw.is_null());

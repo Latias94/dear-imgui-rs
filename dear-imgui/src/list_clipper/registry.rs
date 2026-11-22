@@ -13,28 +13,17 @@ struct ClipperScope {
 
 #[derive(Clone, Copy)]
 struct ClipperEntry {
-    id: u64,
+    handle: ClipperHandle,
     ptr: *mut sys::ImGuiListClipper,
     scope: ClipperScope,
     abandoned: bool,
 }
 
-enum ClipperCleanup {
-    OriginalScope(ClipperEntry),
-    WithoutLayout(ClipperEntry),
-}
-
 #[derive(Clone, Copy)]
 pub(super) struct ClipperHandle {
     id: u64,
-    ptr: *mut sys::ImGuiListClipper,
     context: *mut sys::ImGuiContext,
-}
-
-impl ClipperHandle {
-    pub(super) fn ptr(self) -> *mut sys::ImGuiListClipper {
-        self.ptr
-    }
+    boundary_depth: usize,
 }
 
 struct ClipperRegistry {
@@ -86,6 +75,11 @@ unsafe fn try_current_scope(ui: &Ui) -> Option<ClipperScope> {
         return None;
     }
     let scope = ui.current_native_scope();
+    // End can seek the cursor and close a table row. Release native storage without changing
+    // layout when an outer clipper is dropped from inside an extension using that row.
+    if ui.native_window_scope_holds_table(scope.table()) {
+        return None;
+    }
     Some(ClipperScope {
         context,
         window: scope.window()?,
@@ -95,6 +89,7 @@ unsafe fn try_current_scope(ui: &Ui) -> Option<ClipperScope> {
 
 pub(super) unsafe fn assert_can_begin(ui: &Ui, caller: &str) {
     let scope = unsafe { current_scope(ui, caller) };
+    ui.assert_host_table_can_change(scope.table, caller);
     let context = scope.context;
     CLIPPERS.with(|registry| {
         let registry = registry.borrow();
@@ -105,10 +100,12 @@ pub(super) unsafe fn assert_can_begin(ui: &Ui, caller: &str) {
         else {
             return;
         };
-        assert_eq!(
-            entry.scope, scope,
-            "{caller} cannot begin a nested list clipper in a different ImGui window or table scope"
-        );
+        if entry.handle.boundary_depth == ui.native_window_scope_depth() {
+            assert_eq!(
+                entry.scope, scope,
+                "{caller} cannot begin a nested list clipper in a different ImGui window or table scope"
+            );
+        }
     });
 }
 
@@ -127,17 +124,22 @@ pub(super) unsafe fn register_current(
             .next_id
             .checked_add(1)
             .expect("list clipper token counter overflowed");
+        let handle = ClipperHandle {
+            id,
+            context,
+            boundary_depth: ui.native_window_scope_depth(),
+        };
         registry
             .by_context
             .entry(context as usize)
             .or_default()
             .push(ClipperEntry {
-                id,
+                handle,
                 ptr,
                 scope,
                 abandoned: false,
             });
-        ClipperHandle { id, ptr, context }
+        handle
     })
 }
 
@@ -162,12 +164,8 @@ pub(super) unsafe fn assert_current(
             .last()
             .unwrap_or_else(|| panic!("{caller} used a list clipper that is no longer active"));
         assert_eq!(
-            entry.id, handle.id,
+            entry.handle.id, handle.id,
             "{caller} must follow list clipper LIFO order; a nested clipper is still active"
-        );
-        assert_eq!(
-            entry.ptr, handle.ptr,
-            "{caller} encountered an invalid list clipper registration"
         );
         assert!(
             !entry.abandoned,
@@ -181,86 +179,60 @@ pub(super) unsafe fn assert_current(
     })
 }
 
-pub(super) unsafe fn complete(ui: &Ui, handle: ClipperHandle) {
-    let current_scope = unsafe { try_current_scope(ui) };
-    let entries_to_destroy = CLIPPERS.with(|registry| {
-        let mut registry = registry.borrow_mut();
-        let key = handle.context as usize;
-        let stack = registry
-            .by_context
-            .get_mut(&key)
-            .expect("completed list clipper was not registered");
-        let entry = stack
-            .last()
-            .expect("completed list clipper stack was empty");
-        assert_eq!(
-            entry.id, handle.id,
-            "completed list clipper must be the active native LIFO entry"
-        );
-        assert_eq!(
-            entry.ptr, handle.ptr,
-            "completed list clipper registration was invalid"
-        );
-        assert!(!entry.abandoned, "completed list clipper was abandoned");
-        let _completed = stack
-            .pop()
-            .expect("completed list clipper stack entry disappeared");
+pub(super) unsafe fn assert_can_modify(
+    ui: &Ui,
+    handle: ClipperHandle,
+    caller: &str,
+) -> *mut sys::ImGuiListClipper {
+    assert_eq!(
+        handle.boundary_depth,
+        ui.native_window_scope_depth(),
+        "{caller} cannot modify a list clipper across a native window scope"
+    );
+    unsafe { assert_current(ui, handle, caller) }
+}
 
-        let mut entries = Vec::new();
-        while stack.last().is_some_and(|entry| entry.abandoned) {
-            let entry = stack.pop().expect("abandoned clipper entry disappeared");
-            entries.push(if current_scope == Some(entry.scope) {
-                ClipperCleanup::OriginalScope(entry)
-            } else {
-                ClipperCleanup::WithoutLayout(entry)
-            });
-        }
-        if stack.is_empty() {
-            registry.by_context.remove(&key);
-        }
-        entries
-    });
-
-    for cleanup in entries_to_destroy {
-        match cleanup {
-            ClipperCleanup::OriginalScope(entry) => unsafe { destroy_in_original_scope(entry) },
-            ClipperCleanup::WithoutLayout(entry) => unsafe { destroy_without_layout(entry) },
-        }
-    }
+pub(super) unsafe fn assert_can_seek(
+    ui: &Ui,
+    handle: ClipperHandle,
+    caller: &str,
+) -> *mut sys::ImGuiListClipper {
+    let ptr = unsafe { assert_can_modify(ui, handle, caller) };
+    ui.assert_host_table_can_change(ui.current_native_scope().table(), caller);
+    ptr
 }
 
 pub(super) unsafe fn release(ui: &Ui, handle: ClipperHandle) {
-    if handle.context.is_null() || handle.ptr.is_null() {
-        return;
+    let registered = CLIPPERS.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let stack = registry.by_context.get_mut(&(handle.context as usize))?;
+        let entry = stack
+            .iter_mut()
+            .rev()
+            .find(|entry| entry.handle.id == handle.id)?;
+        entry.abandoned = true;
+        Some(())
+    });
+    if registered.is_some() {
+        unsafe { drain_finished(ui) };
     }
-    let current_scope = unsafe { try_current_scope(ui) };
+}
 
+// Called with the Ui bound, after dropping a token or leaving a native extension boundary.
+pub(crate) unsafe fn drain_finished(ui: &Ui) {
+    let depth = ui.native_window_scope_depth();
     let entries_to_destroy = CLIPPERS.with(|registry| {
         let mut registry = registry.borrow_mut();
-        let key = handle.context as usize;
+        let key = ui.context_raw() as usize;
         let Some(stack) = registry.by_context.get_mut(&key) else {
             return Vec::new();
         };
-        let Some(position) = stack.iter().position(|entry| entry.id == handle.id) else {
-            return Vec::new();
-        };
-        if position + 1 != stack.len() {
-            stack[position].abandoned = true;
-            return Vec::new();
-        }
-        let entry = stack.pop().expect("clipper stack was checked as non-empty");
-        let mut entries = vec![if current_scope == Some(entry.scope) && !entry.abandoned {
-            ClipperCleanup::OriginalScope(entry)
-        } else {
-            ClipperCleanup::WithoutLayout(entry)
-        }];
-        while stack.last().is_some_and(|entry| entry.abandoned) {
-            let entry = stack.pop().expect("abandoned clipper entry disappeared");
-            entries.push(if current_scope == Some(entry.scope) {
-                ClipperCleanup::OriginalScope(entry)
-            } else {
-                ClipperCleanup::WithoutLayout(entry)
-            });
+        let mut entries = Vec::new();
+        while stack.last().is_some_and(|entry| {
+            entry.handle.boundary_depth > depth
+                || (entry.handle.boundary_depth == depth && entry.abandoned)
+        }) {
+            entries.push(stack.pop().expect("clipper stack was checked as non-empty"));
         }
         if stack.is_empty() {
             registry.by_context.remove(&key);
@@ -268,10 +240,15 @@ pub(super) unsafe fn release(ui: &Ui, handle: ClipperHandle) {
         entries
     });
 
-    for cleanup in entries_to_destroy {
-        match cleanup {
-            ClipperCleanup::OriginalScope(entry) => unsafe { destroy_in_original_scope(entry) },
-            ClipperCleanup::WithoutLayout(entry) => unsafe { destroy_without_layout(entry) },
+    if !entries_to_destroy.is_empty() {
+        let current_scope = unsafe { try_current_scope(ui) };
+        for entry in entries_to_destroy {
+            if entry.handle.boundary_depth == depth && current_scope == Some(entry.scope) {
+                unsafe { destroy_in_original_scope(entry) };
+            } else {
+                // An escaped clipper must not seek a cursor now owned by its enclosing extension.
+                unsafe { destroy_without_layout(entry) };
+            }
         }
     }
 }

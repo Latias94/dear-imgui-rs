@@ -23,7 +23,7 @@ pub(super) fn produce_scan_batches(
     let batch_entries = batch_entries.max(1);
     let mut pending = Vec::with_capacity(batch_entries);
     let mut loaded = 0usize;
-    let result = filesystem.visit_dir(&cwd, &mut |entry| {
+    let result = filesystem.visit_dir_for_scan(&cwd, &mut |entry| {
         if is_cancelled() {
             return ScanVisit::Stop;
         }

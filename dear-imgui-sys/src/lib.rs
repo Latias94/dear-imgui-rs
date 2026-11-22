@@ -19,7 +19,8 @@
 //!
 //! On `wasm32-unknown-unknown`, the explicit `wasm` feature selects bindings that
 //! import cimgui functions from the fixed `imgui-sys-v1` provider. Build the
-//! matching Emscripten provider and share its memory with the Rust application.
+//! matching Emscripten provider, import its memory and function table, and select
+//! `WasmProviderAllocator` as the application's global allocator.
 //! WASI and Rust's Emscripten targets are unsupported. Enabling this feature on a
 //! native target leaves the native ABI selected. Native shims, prebuilts, and
 //! Test Engine cannot be used on the browser target.
@@ -66,7 +67,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! dear-imgui-sys = { version = "0.22", features = ["backend-shim-android", "backend-shim-opengl3"] }
+//! dear-imgui-sys = { version = "0.23", features = ["backend-shim-android", "backend-shim-opengl3"] }
 //! ```
 //!
 //! Recommended split of responsibilities:
@@ -109,6 +110,11 @@ compile_error!("feature `prebuilt` is native-only and cannot be combined with WA
 // possible inner attributes in the generated file are accepted at module root.
 mod ffi;
 pub use ffi::*;
+
+#[cfg(all(feature = "wasm", dear_imgui_rs_wasm_import_target))]
+mod wasm_provider_allocator;
+#[cfg(all(feature = "wasm", dear_imgui_rs_wasm_import_target))]
+pub use wasm_provider_allocator::WasmProviderAllocator;
 
 #[cfg_attr(
     dear_imgui_rs_wasm_import_target,
@@ -1660,8 +1666,6 @@ mod aggregate_callback_identity_tests {
         );
     }
 }
-
-// (No wasm-specific shims are required when using shared memory import style.)
 
 impl ImVec2 {
     #[inline]

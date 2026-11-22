@@ -191,6 +191,72 @@ fn abandoned_managed_frame_cannot_enter_default_platform_renderer_callbacks() {
     });
 }
 
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn resetting_textures_or_dropping_the_renderer_revokes_the_reconciled_viewport_frame() {
+    let _guard = test_guard();
+    enum Action {
+        CancelReset,
+        CommitReset,
+        DropRenderer,
+    }
+    for action in [
+        Action::CancelReset,
+        Action::CommitReset,
+        Action::DropRenderer,
+    ] {
+        let mut ctx = imgui::Context::create();
+        prepare_context(&mut ctx);
+        let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
+        unsafe {
+            ctx.platform_io_mut()
+                .set_renderer_render_window_raw(Some(test_platform_renderer_callback))
+        };
+        drop(reconcile_test_frame(
+            ctx.begin_frame().render(&consumer),
+            &[],
+        ));
+        ctx.update_platform_windows();
+        match action {
+            Action::CancelReset => {
+                drop(ctx.prepare_renderer_texture_reset(&consumer).unwrap());
+                ctx.render_platform_windows_default();
+                continue;
+            }
+            Action::CommitReset => ctx
+                .prepare_renderer_texture_reset(&consumer)
+                .unwrap()
+                .commit(),
+            Action::DropRenderer => drop(consumer),
+        }
+        assert_panics!({
+            ctx.render_platform_windows_default();
+        });
+    }
+}
+
+#[test]
+fn an_engine_owned_frame_can_retry_synchronous_render_with_its_own_consumer() {
+    let _guard = test_guard();
+    let mut other = imgui::Context::create();
+    let foreign = other.create_synchronous_renderer_consumer().unwrap();
+    let _other = other.suspend_or_panic();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let consumer = ctx.create_synchronous_renderer_consumer().unwrap();
+    ctx.frame().text("one frame");
+    let stamp = ctx.frame_lifecycle_stamp();
+    assert!(matches!(
+        ctx.try_render(&foreign),
+        Err(imgui::render::SnapshotError::Consumer(
+            imgui::render::RendererConsumerError::ForeignContext { .. }
+        ))
+    ));
+    assert_eq!(ctx.frame_lifecycle_stamp(), stamp);
+    assert!(reconcile_test_frame(ctx.try_render(&consumer).unwrap(), &[]).valid());
+}
+
 #[test]
 fn context_can_snapshot_an_engine_owned_main_viewport_frame() {
     let _guard = test_guard();
@@ -718,6 +784,9 @@ fn renderer_consumer_kind_is_selected_at_creation() {
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
     drop(pending.reconcile_texture_feedback(feedback).unwrap());
+    ctx.prepare_renderer_texture_reset(&consumer)
+        .unwrap()
+        .commit();
     drop(consumer);
     ctx.poll_snapshot_completions().unwrap();
 
@@ -887,6 +956,7 @@ fn renderer_reset_acknowledges_retiring_textures_after_the_last_epoch() {
     ctx.remove_texture(texture_id).unwrap();
     let reset = ctx.prepare_renderer_texture_reset(&consumer).unwrap();
     reset.commit();
+    drop(ctx.begin_frame());
     assert_eq!(
         ctx.with_texture(texture_id, |_| ()),
         Err(imgui::ManagedTextureError::AlreadyRemoved(texture_id))
@@ -940,14 +1010,14 @@ fn renderer_reset_handles_atlas_active_and_retiring_bindings_as_one_transaction(
         assert!(texture.texture_id().is_null());
     })
     .unwrap();
-    assert_eq!(
-        ctx.with_texture(retiring, |_| ()),
-        Err(imgui::ManagedTextureError::AlreadyRemoved(retiring))
-    );
-
     let frame = ctx.begin_frame();
     frame.ui().image(active, [16.0, 16.0]);
     let pending = frame.render(&consumer);
+    assert!(
+        pending.texture_requests().iter().all(|request| {
+            request.texture() != imgui::render::SnapshotTextureId::User(retiring)
+        })
+    );
     assert!(pending.texture_requests().iter().any(|request| {
         request.texture() == imgui::render::SnapshotTextureId::User(active)
             && matches!(request.operation(), imgui::render::TextureOp::Create { .. })
@@ -958,6 +1028,11 @@ fn renderer_reset_handles_atlas_active_and_retiring_bindings_as_one_transaction(
             imgui::render::SnapshotTextureId::FontAtlas { .. }
         ) && matches!(request.operation(), imgui::render::TextureOp::Create { .. })
     }));
+    drop(pending);
+    assert_eq!(
+        ctx.with_texture(retiring, |_| ()),
+        Err(imgui::ManagedTextureError::AlreadyRemoved(retiring))
+    );
 }
 
 #[test]

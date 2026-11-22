@@ -1,74 +1,41 @@
-use std::marker::PhantomData;
-
 use crate::builder::Plot3DBuilder;
+use crate::plots::primitive_vertex_count;
 use crate::{
-    Line3DFlags, Plot3DDataLayout, Plot3DFlags, Quad3DFlags, Scatter3DFlags, Triangle3DFlags,
-    len_i32, plot3d_spec_from, sys,
+    Line3DFlags, Plot3DContext, Plot3DDataLayout, Plot3DFlags, Plot3DScope, Quad3DFlags,
+    Scatter3DFlags, Triangle3DFlags, len_i32, sys,
 };
 use dear_imgui_rs::Ui;
 
-use super::binding::Plot3DContextBinding;
-
-/// Per-frame access helper mirroring `dear-implot`
+/// Frame access to an ImPlot3D context. Begin a plot to configure axes and submit items.
 ///
-/// This provides access to all 3D plotting functions. It is tied to the lifetime
-/// of the current ImGui frame and should be obtained via `Plot3DContext::get_plot_ui()`.
-///
-/// # Example
-///
-/// ```no_run
-/// use dear_implot3d::*;
-///
-/// # let plot_ui: Plot3DUi = todo!();
-/// if let Some(_token) = plot_ui.begin_plot("My 3D Plot").build() {
-///     plot_ui.setup_axes("X", "Y", "Z", Axis3DFlags::NONE, Axis3DFlags::NONE, Axis3DFlags::NONE);
-///
-///     let xs = [0.0, 1.0, 2.0];
-///     let ys = [0.0, 1.0, 0.0];
-///     let zs = [0.0, 0.5, 1.0];
-///     plot_ui.plot_line_f32("Line", &xs, &ys, &zs, Line3DFlags::NONE);
-/// }
+/// ```compile_fail,E0599
+/// use dear_implot3d::Plot3DUi;
+/// fn query_outside_plot(ui: &Plot3DUi<'_>) { ui.get_frame_size(); }
 /// ```
+#[derive(Clone, Copy)]
 pub struct Plot3DUi<'ui> {
-    pub(crate) _ui: &'ui Ui,
-    pub(crate) binding: Plot3DContextBinding,
+    pub(crate) imgui: &'ui Ui,
+    pub(crate) context: &'ui Plot3DContext,
 }
 
 impl<'ui> Plot3DUi<'ui> {
     pub(crate) fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
-        self.binding.with_bound_context(f)
+        self.imgui
+            .with_bound_context(|| self.context.with_plot_context(f))
     }
 
-    /// Builder to configure and begin a 3D plot
-    ///
-    /// Returns a `Plot3DBuilder` that allows you to configure the plot before calling `.build()`.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// use dear_implot3d::*;
-    ///
-    /// # let plot_ui: Plot3DUi = todo!();
-    /// if let Some(_token) = plot_ui
-    ///     .begin_plot("My Plot")
-    ///     .size([600.0, 400.0])
-    ///     .flags(Plot3DFlags::NO_LEGEND)
-    ///     .build()
-    /// {
-    ///     // Plot content here
-    /// }
-    /// ```
-    pub fn begin_plot<S: AsRef<str>>(&self, title: S) -> Plot3DBuilder<'ui> {
-        self.with_bound_context(|| Plot3DBuilder {
-            binding: self.binding.clone(),
-            ui: self._ui,
+    /// Configure a plot for the current window and table cell.
+    pub fn begin_plot(&self, title: impl AsRef<str>) -> Plot3DBuilder<'ui> {
+        Plot3DBuilder {
+            ui: *self,
             title: title.as_ref().into(),
-            size: None,
+            size: [0.0; 2],
             flags: Plot3DFlags::empty(),
-            _lifetime: PhantomData,
-        })
+        }
     }
+}
 
+impl Plot3DScope<'_> {
     /// Convenience: plot a simple 3D line (f32)
     ///
     /// This is a quick way to plot a line without using the builder pattern.
@@ -87,11 +54,12 @@ impl<'ui> Plot3DUi<'ui> {
     /// ```no_run
     /// use dear_implot3d::*;
     ///
-    /// # let plot_ui: Plot3DUi = todo!();
+    /// # fn draw(plot_ui: &Plot3DScope<'_>) {
     /// let xs = [0.0, 1.0, 2.0];
     /// let ys = [0.0, 1.0, 0.0];
     /// let zs = [0.0, 0.5, 1.0];
     /// plot_ui.plot_line_f32("Line", &xs, &ys, &zs, Line3DFlags::NONE);
+    /// # }
     /// ```
     pub fn plot_line_f32<S: AsRef<str>>(
         &self,
@@ -101,6 +69,7 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f32],
         flags: Line3DFlags,
     ) {
+        let label = label.as_ref();
         self.with_bound_context(|| {
             if xs.len() != ys.len() || ys.len() != zs.len() {
                 return;
@@ -108,12 +77,14 @@ impl<'ui> Plot3DUi<'ui> {
             let Some(count) = len_i32(xs.len()) else {
                 return;
             };
-            let label = label.as_ref();
             if label.contains('\0') {
                 return;
             }
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
+                let spec = self.next_item.spec(flags.bits(), Plot3DDataLayout::DEFAULT);
+                if count == i32::MAX && (spec.Flags as u32 & Line3DFlags::LOOP.bits()) != 0 {
+                    return;
+                }
                 sys::ImPlot3D_PlotLine_FloatPtr(
                     label_ptr,
                     xs.as_ptr(),
@@ -141,19 +112,22 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Line3DFlags,
         layout: Plot3DDataLayout,
     ) {
+        let label = label.as_ref();
         self.with_bound_context(|| {
             if xs.len() != ys.len() || ys.len() != zs.len() {
                 return;
             }
-            let Some(count) = len_i32(xs.len()) else {
+            let Some(count) = layout.sample_count(xs.len()) else {
                 return;
             };
-            let label = label.as_ref();
             if label.contains('\0') {
                 return;
             }
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_from(flags.bits(), layout);
+                let spec = self.next_item.spec(flags.bits(), layout);
+                if count == i32::MAX && (spec.Flags as u32 & Line3DFlags::LOOP.bits()) != 0 {
+                    return;
+                }
                 sys::ImPlot3D_PlotLine_FloatPtr(
                     label_ptr,
                     xs.as_ptr(),
@@ -175,6 +149,7 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f64],
         flags: Line3DFlags,
     ) {
+        let label = label.as_ref();
         self.with_bound_context(|| {
             if xs.len() != ys.len() || ys.len() != zs.len() {
                 return;
@@ -182,12 +157,14 @@ impl<'ui> Plot3DUi<'ui> {
             let Some(count) = len_i32(xs.len()) else {
                 return;
             };
-            let label = label.as_ref();
             if label.contains('\0') {
                 return;
             }
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
+                let spec = self.next_item.spec(flags.bits(), Plot3DDataLayout::DEFAULT);
+                if count == i32::MAX && (spec.Flags as u32 & Line3DFlags::LOOP.bits()) != 0 {
+                    return;
+                }
                 sys::ImPlot3D_PlotLine_doublePtr(
                     label_ptr,
                     xs.as_ptr(),
@@ -215,19 +192,22 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Line3DFlags,
         layout: Plot3DDataLayout,
     ) {
+        let label = label.as_ref();
         self.with_bound_context(|| {
             if xs.len() != ys.len() || ys.len() != zs.len() {
                 return;
             }
-            let Some(count) = len_i32(xs.len()) else {
+            let Some(count) = layout.sample_count(xs.len()) else {
                 return;
             };
-            let label = label.as_ref();
             if label.contains('\0') {
                 return;
             }
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_from(flags.bits(), layout);
+                let spec = self.next_item.spec(flags.bits(), layout);
+                if count == i32::MAX && (spec.Flags as u32 & Line3DFlags::LOOP.bits()) != 0 {
+                    return;
+                }
                 sys::ImPlot3D_PlotLine_doublePtr(
                     label_ptr,
                     xs.as_ptr(),
@@ -249,6 +229,7 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f32],
         flags: Scatter3DFlags,
     ) {
+        let label = label.as_ref();
         self.with_bound_context(|| {
             if xs.len() != ys.len() || ys.len() != zs.len() {
                 return;
@@ -256,12 +237,11 @@ impl<'ui> Plot3DUi<'ui> {
             let Some(count) = len_i32(xs.len()) else {
                 return;
             };
-            let label = label.as_ref();
             if label.contains('\0') {
                 return;
             }
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
+                let spec = self.next_item.spec(flags.bits(), Plot3DDataLayout::DEFAULT);
                 sys::ImPlot3D_PlotScatter_FloatPtr(
                     label_ptr,
                     xs.as_ptr(),
@@ -289,19 +269,19 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Scatter3DFlags,
         layout: Plot3DDataLayout,
     ) {
+        let label = label.as_ref();
         self.with_bound_context(|| {
             if xs.len() != ys.len() || ys.len() != zs.len() {
                 return;
             }
-            let Some(count) = len_i32(xs.len()) else {
+            let Some(count) = layout.sample_count(xs.len()) else {
                 return;
             };
-            let label = label.as_ref();
             if label.contains('\0') {
                 return;
             }
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_from(flags.bits(), layout);
+                let spec = self.next_item.spec(flags.bits(), layout);
                 sys::ImPlot3D_PlotScatter_FloatPtr(
                     label_ptr,
                     xs.as_ptr(),
@@ -323,6 +303,7 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f64],
         flags: Scatter3DFlags,
     ) {
+        let label = label.as_ref();
         self.with_bound_context(|| {
             if xs.len() != ys.len() || ys.len() != zs.len() {
                 return;
@@ -330,12 +311,11 @@ impl<'ui> Plot3DUi<'ui> {
             let Some(count) = len_i32(xs.len()) else {
                 return;
             };
-            let label = label.as_ref();
             if label.contains('\0') {
                 return;
             }
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
+                let spec = self.next_item.spec(flags.bits(), Plot3DDataLayout::DEFAULT);
                 sys::ImPlot3D_PlotScatter_doublePtr(
                     label_ptr,
                     xs.as_ptr(),
@@ -363,19 +343,19 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Scatter3DFlags,
         layout: Plot3DDataLayout,
     ) {
+        let label = label.as_ref();
         self.with_bound_context(|| {
             if xs.len() != ys.len() || ys.len() != zs.len() {
                 return;
             }
-            let Some(count) = len_i32(xs.len()) else {
+            let Some(count) = layout.sample_count(xs.len()) else {
                 return;
             };
-            let label = label.as_ref();
             if label.contains('\0') {
                 return;
             }
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_from(flags.bits(), layout);
+                let spec = self.next_item.spec(flags.bits(), layout);
                 sys::ImPlot3D_PlotScatter_doublePtr(
                     label_ptr,
                     xs.as_ptr(),
@@ -397,29 +377,8 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f32],
         flags: Triangle3DFlags,
     ) {
-        self.with_bound_context(|| {
-            if xs.len() != ys.len() || ys.len() != zs.len() {
-                return;
-            }
-            let Some(count) = len_i32(xs.len()) else {
-                return;
-            };
-            let label = label.as_ref();
-            if label.contains('\0') {
-                return;
-            }
-            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
-                sys::ImPlot3D_PlotTriangle_FloatPtr(
-                    label_ptr,
-                    xs.as_ptr(),
-                    ys.as_ptr(),
-                    zs.as_ptr(),
-                    count,
-                    spec,
-                );
-            })
-        })
+        // The default stride addresses one element of each slice per vertex.
+        unsafe { self.plot_triangles_f32_raw(label, xs, ys, zs, flags, Plot3DDataLayout::DEFAULT) }
     }
 
     /// Plot f32 triangle coordinates with an explicit data layout.
@@ -437,19 +396,25 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Triangle3DFlags,
         layout: Plot3DDataLayout,
     ) {
+        let label = label.as_ref();
         self.with_bound_context(|| {
             if xs.len() != ys.len() || ys.len() != zs.len() {
                 return;
             }
-            let Some(count) = len_i32(xs.len()) else {
+            let Ok(count) = primitive_vertex_count(
+                xs.len(),
+                3,
+                "triangles",
+                layout,
+                !flags.contains(Triangle3DFlags::NO_LINES),
+            ) else {
                 return;
             };
-            let label = label.as_ref();
             if label.contains('\0') {
                 return;
             }
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_from(flags.bits(), layout);
+                let spec = self.next_item.spec(flags.bits(), layout);
                 sys::ImPlot3D_PlotTriangle_FloatPtr(
                     label_ptr,
                     xs.as_ptr(),
@@ -471,29 +436,8 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f32],
         flags: Quad3DFlags,
     ) {
-        self.with_bound_context(|| {
-            if xs.len() != ys.len() || ys.len() != zs.len() {
-                return;
-            }
-            let Some(count) = len_i32(xs.len()) else {
-                return;
-            };
-            let label = label.as_ref();
-            if label.contains('\0') {
-                return;
-            }
-            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
-                sys::ImPlot3D_PlotQuad_FloatPtr(
-                    label_ptr,
-                    xs.as_ptr(),
-                    ys.as_ptr(),
-                    zs.as_ptr(),
-                    count,
-                    spec,
-                );
-            })
-        })
+        // The default stride addresses one element of each slice per vertex.
+        unsafe { self.plot_quads_f32_raw(label, xs, ys, zs, flags, Plot3DDataLayout::DEFAULT) }
     }
 
     /// Plot f32 quad coordinates with an explicit data layout.
@@ -511,19 +455,25 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Quad3DFlags,
         layout: Plot3DDataLayout,
     ) {
+        let label = label.as_ref();
         self.with_bound_context(|| {
             if xs.len() != ys.len() || ys.len() != zs.len() {
                 return;
             }
-            let Some(count) = len_i32(xs.len()) else {
+            let Ok(count) = primitive_vertex_count(
+                xs.len(),
+                4,
+                "quads",
+                layout,
+                !flags.contains(Quad3DFlags::NO_LINES),
+            ) else {
                 return;
             };
-            let label = label.as_ref();
             if label.contains('\0') {
                 return;
             }
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_from(flags.bits(), layout);
+                let spec = self.next_item.spec(flags.bits(), layout);
                 sys::ImPlot3D_PlotQuad_FloatPtr(
                     label_ptr,
                     xs.as_ptr(),
@@ -545,29 +495,8 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f64],
         flags: Triangle3DFlags,
     ) {
-        self.with_bound_context(|| {
-            if xs.len() != ys.len() || ys.len() != zs.len() {
-                return;
-            }
-            let Some(count) = len_i32(xs.len()) else {
-                return;
-            };
-            let label = label.as_ref();
-            if label.contains('\0') {
-                return;
-            }
-            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
-                sys::ImPlot3D_PlotTriangle_doublePtr(
-                    label_ptr,
-                    xs.as_ptr(),
-                    ys.as_ptr(),
-                    zs.as_ptr(),
-                    count,
-                    spec,
-                );
-            })
-        })
+        // The default stride addresses one element of each slice per vertex.
+        unsafe { self.plot_triangles_f64_raw(label, xs, ys, zs, flags, Plot3DDataLayout::DEFAULT) }
     }
 
     /// Plot f64 triangle coordinates with an explicit data layout.
@@ -585,19 +514,25 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Triangle3DFlags,
         layout: Plot3DDataLayout,
     ) {
+        let label = label.as_ref();
         self.with_bound_context(|| {
             if xs.len() != ys.len() || ys.len() != zs.len() {
                 return;
             }
-            let Some(count) = len_i32(xs.len()) else {
+            let Ok(count) = primitive_vertex_count(
+                xs.len(),
+                3,
+                "triangles",
+                layout,
+                !flags.contains(Triangle3DFlags::NO_LINES),
+            ) else {
                 return;
             };
-            let label = label.as_ref();
             if label.contains('\0') {
                 return;
             }
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_from(flags.bits(), layout);
+                let spec = self.next_item.spec(flags.bits(), layout);
                 sys::ImPlot3D_PlotTriangle_doublePtr(
                     label_ptr,
                     xs.as_ptr(),
@@ -619,29 +554,8 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f64],
         flags: Quad3DFlags,
     ) {
-        self.with_bound_context(|| {
-            if xs.len() != ys.len() || ys.len() != zs.len() {
-                return;
-            }
-            let Some(count) = len_i32(xs.len()) else {
-                return;
-            };
-            let label = label.as_ref();
-            if label.contains('\0') {
-                return;
-            }
-            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
-                sys::ImPlot3D_PlotQuad_doublePtr(
-                    label_ptr,
-                    xs.as_ptr(),
-                    ys.as_ptr(),
-                    zs.as_ptr(),
-                    count,
-                    spec,
-                );
-            })
-        })
+        // The default stride addresses one element of each slice per vertex.
+        unsafe { self.plot_quads_f64_raw(label, xs, ys, zs, flags, Plot3DDataLayout::DEFAULT) }
     }
 
     /// Plot f64 quad coordinates with an explicit data layout.
@@ -659,19 +573,25 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Quad3DFlags,
         layout: Plot3DDataLayout,
     ) {
+        let label = label.as_ref();
         self.with_bound_context(|| {
             if xs.len() != ys.len() || ys.len() != zs.len() {
                 return;
             }
-            let Some(count) = len_i32(xs.len()) else {
+            let Ok(count) = primitive_vertex_count(
+                xs.len(),
+                4,
+                "quads",
+                layout,
+                !flags.contains(Quad3DFlags::NO_LINES),
+            ) else {
                 return;
             };
-            let label = label.as_ref();
             if label.contains('\0') {
                 return;
             }
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_from(flags.bits(), layout);
+                let spec = self.next_item.spec(flags.bits(), layout);
                 sys::ImPlot3D_PlotQuad_doublePtr(
                     label_ptr,
                     xs.as_ptr(),

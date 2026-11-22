@@ -1,0 +1,9 @@
+{
+  "browser": {
+    "browserName": "chromium",
+    "launchOptions": {
+      "channel": "chrome",
+      "args": ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"]
+    }
+  }
+}

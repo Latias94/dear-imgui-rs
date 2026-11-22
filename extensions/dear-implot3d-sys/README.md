@@ -10,22 +10,17 @@ Low-level FFI bindings for ImPlot3D via the `cimplot3d` C API. This crate pairs 
 
 ## Build Modes
 
-Prebuilt artifacts must match the release train, target, CRT, source revisions,
-binding identity, feature profile, and shared Dear ImGui core recorded in their
-manifest. Bare remote `.lib`/`.a` downloads do not supply that manifest.
+Use a 0.23.0 archive whose manifest matches the target, CRT, source revisions,
+binding identity, feature profile, and shared Dear ImGui core. Bare remote `.lib`/`.a` downloads do not supply that manifest.
 
-`IMPLOT3D_SYS_BUILD_MODE` accepts `auto` (default), `source`, `prebuilt`, or `bindings-only`. In the 0.22 release train, explicit `IMPLOT3D_SYS_LIB_DIR`, `IMPLOT3D_SYS_PREBUILT_URL`, and `IMPLOT3D_SYS_PACKAGE_DIR` selectors are mutually exclusive; missing or incompatible selections stop the build. Strict prebuilt mode never falls back to source. In automatic mode, `build-from-source` or `IMPLOT3D_SYS_FORCE_BUILD=1` forces source compilation; explicit prebuilt and bindings-only modes reject source-only requirements. See the [native build policy migration](../../docs/COMPATIBILITY.md#0220-native-build-policy).
+`IMPLOT3D_SYS_BUILD_MODE` accepts `auto` (default), `source`, `prebuilt`, or `bindings-only`. Explicit `IMPLOT3D_SYS_LIB_DIR`, `IMPLOT3D_SYS_PREBUILT_URL`, and `IMPLOT3D_SYS_PACKAGE_DIR` selectors are mutually exclusive; missing or incompatible selections stop the build. Strict prebuilt mode never falls back to source. In automatic mode, `build-from-source` or `IMPLOT3D_SYS_FORCE_BUILD=1` forces source compilation; explicit prebuilt and bindings-only modes reject source-only requirements. See the [native build policy migration](../../docs/COMPATIBILITY.md#0220-native-build-policy).
 
 Source builds are the default and do not require libclang unless binding
 regeneration is explicitly requested. `wasm` uses import bindings for the fixed
 `imgui-sys-v1` provider and skips C++ compilation in Cargo; build the provider
 separately with Emscripten.
 
-Native and WebAssembly providers share an `implot3d-draw-flags-v2` source adaptation
-for Dear ImGui 1.93. It updates the internal drawing flags and delegates line texture
-selection to Dear ImGui, preserving fractional widths and framebuffer density while
-avoiding atlas-index overflow on thick lines. Lines widened to one physical pixel
-retain their original alpha coverage. The adaptation is part of artifact identity.
+Native and WebAssembly builds use the upstream `implot3d_internal.h` supplied in the prebuilt archive. The shared `implot3d-draw-flags-v5` source adaptation delegates line texture selection to Dear ImGui, preserves fractional widths and framebuffer density, and keeps the original alpha coverage when widening a line to one physical pixel. Axis menus display application labels such as `CPU (%)` verbatim. The demo uses the core's font-atlas-filtered ImGui tools. Saved styles, color previews and demo colormap selections belong to the plot context. The adaptation is part of the artifact identity.
 Legend scrolling also requires the plot's window to be hovered, so overlapping windows retain input.
 
 This crate supports multiple ways to obtain the native `dear_implot3d` static library:

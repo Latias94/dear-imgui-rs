@@ -1,5 +1,5 @@
-use super::{Plot3D, Plot3DError, validate_nonempty};
-use crate::{Mesh3DFlags, Plot3DUi};
+use super::{Plot3D, Plot3DError};
+use crate::{Mesh3DFlags, Plot3DScope};
 
 pub struct Mesh3D<'a> {
     pub label: &'a str,
@@ -27,12 +27,9 @@ impl<'a> Plot3D for Mesh3D<'a> {
     fn label(&self) -> &str {
         self.label
     }
-    fn try_plot(&self, ui: &Plot3DUi<'_>) -> Result<(), Plot3DError> {
-        validate_nonempty(self.vertices)?;
-        validate_nonempty(self.indices)?;
+    fn try_plot(&self, ui: &Plot3DScope<'_>) -> Result<(), Plot3DError> {
         ui.mesh(self.label, self.vertices, self.indices)
             .flags(self.flags)
-            .plot();
-        Ok(())
+            .try_plot()
     }
 }

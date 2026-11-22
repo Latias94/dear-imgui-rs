@@ -355,11 +355,6 @@ impl AppWindow {
             .build(|| {
                 if let Some(tab_bar) = ui.tab_bar("imnodes_tabs") {
                     if let Some(tab) = ui.tab_item("Hello") {
-                        // ImNodes uses ImGui's cursor screen position as the editor canvas origin.
-                        // Capture it so we can place new nodes from a popup action without relying
-                        // on ImNodes' screen->grid conversion helpers (which depend on global
-                        // editor state).
-                        self.editor_a_canvas_origin = ui.cursor_screen_pos();
                         let editor = ui.imnodes_editor(
                             &self.imgui.nodes_context,
                             Some(&self.imgui.editor_context),
@@ -376,73 +371,56 @@ impl AppWindow {
                                 editor.set_node_pos_grid(*node_id, grid_pos);
                             }
                         }
-                        let editor = editor.begin_nodes();
-
-                        // Initialize positions once
-                        // Node 1
-                        let _n1 = editor.node(node_id(1));
-                        _n1.title_bar(|| ui.text("Node A"));
-                        {
-                            let _in = _n1.input_attr(pin_id(10), imnodes::PinShape::CircleFilled);
-                            ui.text("In");
-                            _in.end();
-                        }
-                        {
-                            let _out = _n1.output_attr(pin_id(11), imnodes::PinShape::QuadFilled);
-                            ui.text("Out");
-                            _out.end();
-                        }
-                        _n1.end();
-
-                        // Node 2
-                        let _n2 = editor.node(node_id(2));
-                        _n2.title_bar(|| ui.text("Node B"));
-                        {
-                            let _in = _n2.input_attr(pin_id(20), imnodes::PinShape::Circle);
-                            ui.text("In");
-                            _in.end();
-                        }
-                        {
-                            let _out =
-                                _n2.output_attr(pin_id(21), imnodes::PinShape::TriangleFilled);
-                            ui.text("Out");
-                            _out.end();
-                        }
-                        _n2.end();
-
-                        // Added nodes rendering
-                        for (nid, _pending_pos) in &mut self.graph.added_nodes {
-                            let _n = editor.node(*nid);
-                            _n.title_bar(|| ui.text(format!("Node {}", nid)));
-                            {
-                                let _in =
-                                    _n.input_attr(nid_to_pin_in(*nid), imnodes::PinShape::Circle);
-                                ui.text("In");
-                                _in.end();
-                            }
-                            {
-                                let _out = _n.output_attr(
-                                    nid_to_pin_out(*nid),
+                        let post = editor.with_nodes(|editor| {
+                            self.editor_a_canvas_origin = ui.cursor_screen_pos();
+                            editor.node(node_id(1), |node| {
+                                node.title_bar(|| ui.text("Node A"));
+                                node.input_attr(
+                                    pin_id(10),
                                     imnodes::PinShape::CircleFilled,
+                                    || ui.text("In"),
                                 );
-                                ui.text("Out");
-                                _out.end();
+                                node.output_attr(pin_id(11), imnodes::PinShape::QuadFilled, || {
+                                    ui.text("Out")
+                                });
+                            });
+
+                            editor.node(node_id(2), |node| {
+                                node.title_bar(|| ui.text("Node B"));
+                                node.input_attr(pin_id(20), imnodes::PinShape::Circle, || {
+                                    ui.text("In")
+                                });
+                                node.output_attr(
+                                    pin_id(21),
+                                    imnodes::PinShape::TriangleFilled,
+                                    || ui.text("Out"),
+                                );
+                            });
+
+                            // Added nodes rendering
+                            for (nid, _pending_pos) in &mut self.graph.added_nodes {
+                                editor.node(*nid, |node| {
+                                    node.title_bar(|| ui.text(format!("Node {}", nid)));
+                                    node.input_attr(
+                                        nid_to_pin_in(*nid),
+                                        imnodes::PinShape::Circle,
+                                        || ui.text("In"),
+                                    );
+                                    node.output_attr(
+                                        nid_to_pin_out(*nid),
+                                        imnodes::PinShape::CircleFilled,
+                                        || ui.text("Out"),
+                                    );
+                                });
                             }
-                            _n.end();
-                        }
 
-                        // Existing links (render)
-                        for (id, a, b) in &self.graph.links {
-                            editor.link(*id, *a, *b);
-                        }
+                            // Existing links (render)
+                            for (id, a, b) in &self.graph.links {
+                                editor.link(*id, *a, *b);
+                            }
 
-                        // Minimap + post-editor queries must be driven by the same Begin/EndNodeEditor
-                        // frame that actually built the editor contents. Running post-editor queries
-                        // from a minimap-only frame can leave ImNodes in an inconsistent state.
-                        editor.minimap(self.minimap_size, self.minimap_location);
-
-                        // Ensure NodeEditor ends before post-editor queries / TabItem end.
-                        let post = editor.end();
+                            editor.minimap(self.minimap_size, self.minimap_location);
+                        });
 
                         // Selection counts (Editor A)
                         let sel_nodes = post.selected_nodes();
@@ -566,28 +544,25 @@ impl AppWindow {
                             editor.set_node_pos_grid(node_id(102), [420.0, 260.0]);
                             self.graph_b.positions_initialized = true;
                         }
-                        let editor = editor.begin_nodes();
-                        let _n1 = editor.node(node_id(101));
-                        _n1.title_bar(|| ui.text("Node X"));
-                        {
-                            let _out =
-                                _n1.output_attr(pin_id(111), imnodes::PinShape::CircleFilled);
-                            ui.text("Out");
-                            _out.end();
-                        }
-                        _n1.end();
-                        let _n2 = editor.node(node_id(102));
-                        _n2.title_bar(|| ui.text("Node Y"));
-                        {
-                            let _in = _n2.input_attr(pin_id(120), imnodes::PinShape::Circle);
-                            ui.text("In");
-                            _in.end();
-                        }
-                        _n2.end();
-                        for (id, a, b) in &self.graph_b.links {
-                            editor.link(*id, *a, *b);
-                        }
-                        editor.end();
+                        editor.with_nodes(|editor| {
+                            editor.node(node_id(101), |node| {
+                                node.title_bar(|| ui.text("Node X"));
+                                node.output_attr(
+                                    pin_id(111),
+                                    imnodes::PinShape::CircleFilled,
+                                    || ui.text("Out"),
+                                );
+                            });
+                            editor.node(node_id(102), |node| {
+                                node.title_bar(|| ui.text("Node Y"));
+                                node.input_attr(pin_id(120), imnodes::PinShape::Circle, || {
+                                    ui.text("In")
+                                });
+                            });
+                            for (id, a, b) in &self.graph_b.links {
+                                editor.link(*id, *a, *b);
+                            }
+                        });
                         tab.end();
                     }
                     if let Some(tab) = ui.tab_item("Style") {
@@ -605,7 +580,6 @@ impl AppWindow {
                                 Some(&self.imgui.editor_context),
                             );
                             editor.set_grid_spacing(self.node_options.grid_spacing);
-                            editor.end();
                         }
                         if ui.slider_f32(
                             "Link Thickness",
@@ -618,7 +592,6 @@ impl AppWindow {
                                 Some(&self.imgui.editor_context),
                             );
                             editor.set_link_thickness(self.node_options.link_thickness);
-                            editor.end();
                         }
                         if ui.slider_f32(
                             "Node Rounding",
@@ -631,7 +604,6 @@ impl AppWindow {
                                 Some(&self.imgui.editor_context),
                             );
                             editor.set_node_corner_rounding(self.node_options.corner_round);
-                            editor.end();
                         }
                         if ui.slider_f32(
                             "Auto Pan Speed (LMB Box)",
@@ -645,7 +617,6 @@ impl AppWindow {
                                 Some(&self.imgui.editor_context),
                             );
                             editor.set_auto_panning_speed(self.node_options.auto_panning_speed);
-                            editor.end();
                         }
                         if ui.slider_f32(
                             "Node Border Thickness",
@@ -659,7 +630,6 @@ impl AppWindow {
                             );
                             editor
                                 .set_node_border_thickness(self.node_options.node_border_thickness);
-                            editor.end();
                         }
                         if ui.slider_f32(
                             "Node Padding X",
@@ -677,7 +647,6 @@ impl AppWindow {
                                 Some(&self.imgui.editor_context),
                             );
                             editor.set_node_padding(self.node_options.node_padding);
-                            editor.end();
                         }
 
                         ui.separator();
@@ -691,7 +660,6 @@ impl AppWindow {
                                 dear_imnodes::ColorElement::TitleBar,
                                 self.node_options.color_title,
                             );
-                            editor.end();
                         }
                         if ui.color_edit4("Node Background", &mut self.node_options.color_node_bg) {
                             let editor = ui.imnodes_editor(
@@ -702,7 +670,6 @@ impl AppWindow {
                                 dear_imnodes::ColorElement::NodeBackground,
                                 self.node_options.color_node_bg,
                             );
-                            editor.end();
                         }
                         if ui.color_edit4("Link", &mut self.node_options.color_link) {
                             let editor = ui.imnodes_editor(
@@ -713,98 +680,81 @@ impl AppWindow {
                                 dear_imnodes::ColorElement::Link,
                                 self.node_options.color_link,
                             );
-                            editor.end();
                         }
 
                         ui.separator();
                         ui.text("Save/Load State (file)");
                         ui.input_text("INI Path", &mut self.ini_path).build();
                         if ui.button("Save To File") {
-                            let post = ui
-                                .imnodes_editor(
-                                    &self.imgui.nodes_context,
-                                    Some(&self.imgui.editor_context),
-                                )
-                                .end();
-                            post.save_state_to_ini_file(&self.ini_path);
+                            let bound = self
+                                .imgui
+                                .nodes_context
+                                .bind_editor(&self.imgui.editor_context);
+                            bound.save_state_to_ini_file(&self.ini_path);
                         }
                         ui.same_line();
                         if ui.button("Load From File") {
-                            let post = ui
-                                .imnodes_editor(
-                                    &self.imgui.nodes_context,
-                                    Some(&self.imgui.editor_context),
-                                )
-                                .end();
-                            post.load_state_from_ini_file(&self.ini_path);
+                            let bound = self
+                                .imgui
+                                .nodes_context
+                                .bind_editor(&self.imgui.editor_context);
+                            bound.load_state_from_ini_file(&self.ini_path);
                         }
                         tab.end();
                     }
                     if let Some(tab) = ui.tab_item("Save/Load") {
                         ui.text("Current Editor A (string)");
                         if ui.button("Save A (string)") {
-                            let post = ui
-                                .imnodes_editor(
-                                    &self.imgui.nodes_context,
-                                    Some(&self.imgui.editor_context),
-                                )
-                                .end();
-                            self.imgui.saved_ini = Some(post.save_state_to_ini_string());
+                            let bound = self
+                                .imgui
+                                .nodes_context
+                                .bind_editor(&self.imgui.editor_context);
+                            self.imgui.saved_ini = Some(bound.save_state_to_ini_string());
                         }
                         ui.same_line();
                         if ui.button("Load A (string)")
                             && let Some(ref s) = self.imgui.saved_ini
                         {
-                            let post = ui
-                                .imnodes_editor(
-                                    &self.imgui.nodes_context,
-                                    Some(&self.imgui.editor_context),
-                                )
-                                .end();
-                            post.load_state_from_ini_string(s);
+                            let bound = self
+                                .imgui
+                                .nodes_context
+                                .bind_editor(&self.imgui.editor_context);
+                            bound.load_state_from_ini_string(s);
                         }
                         ui.separator();
                         ui.text("INI File path");
                         ui.input_text("Path", &mut self.ini_path).build();
                         if ui.button("Save A to File") {
-                            let post = ui
-                                .imnodes_editor(
-                                    &self.imgui.nodes_context,
-                                    Some(&self.imgui.editor_context),
-                                )
-                                .end();
-                            post.save_state_to_ini_file(&self.ini_path);
+                            let bound = self
+                                .imgui
+                                .nodes_context
+                                .bind_editor(&self.imgui.editor_context);
+                            bound.save_state_to_ini_file(&self.ini_path);
                         }
                         ui.same_line();
                         if ui.button("Load A from File") {
-                            let post = ui
-                                .imnodes_editor(
-                                    &self.imgui.nodes_context,
-                                    Some(&self.imgui.editor_context),
-                                )
-                                .end();
-                            post.load_state_from_ini_file(&self.ini_path);
+                            let bound = self
+                                .imgui
+                                .nodes_context
+                                .bind_editor(&self.imgui.editor_context);
+                            bound.load_state_from_ini_file(&self.ini_path);
                         }
                         ui.separator();
                         ui.text("Editor B (file)");
                         if ui.button("Save B to File") {
-                            let post = ui
-                                .imnodes_editor(
-                                    &self.imgui.nodes_context,
-                                    Some(&self.imgui.editor_context_b),
-                                )
-                                .end();
-                            post.save_state_to_ini_file(&self.ini_path);
+                            let bound = self
+                                .imgui
+                                .nodes_context
+                                .bind_editor(&self.imgui.editor_context_b);
+                            bound.save_state_to_ini_file(&self.ini_path);
                         }
                         ui.same_line();
                         if ui.button("Load B from File") {
-                            let post = ui
-                                .imnodes_editor(
-                                    &self.imgui.nodes_context,
-                                    Some(&self.imgui.editor_context_b),
-                                )
-                                .end();
-                            post.load_state_from_ini_file(&self.ini_path);
+                            let bound = self
+                                .imgui
+                                .nodes_context
+                                .bind_editor(&self.imgui.editor_context_b);
+                            bound.load_state_from_ini_file(&self.ini_path);
                         }
                         tab.end();
                     }
@@ -814,8 +764,7 @@ impl AppWindow {
                             &self.imgui.nodes_context,
                             Some(&self.imgui.editor_context_b),
                         );
-                        let editor = editor.begin_nodes();
-                        {
+                        editor.with_nodes(|editor| {
                             let _c_title = editor.push_color(
                                 dear_imnodes::ColorElement::TitleBar,
                                 [0.90, 0.50, 0.30, 1.0],
@@ -824,26 +773,22 @@ impl AppWindow {
                                 dear_imnodes::ColorElement::Link,
                                 [0.10, 0.80, 0.40, 1.0],
                             );
-                            let _n1 = editor.node(node_id(201));
-                            _n1.title_bar(|| ui.text("Scoped Node 201"));
-                            {
-                                let _out =
-                                    _n1.output_attr(pin_id(211), imnodes::PinShape::CircleFilled);
-                                ui.text("Out");
-                                _out.end();
-                            }
-                            _n1.end();
-                            let _n2 = editor.node(node_id(202));
-                            _n2.title_bar(|| ui.text("Scoped Node 202"));
-                            {
-                                let _in = _n2.input_attr(pin_id(220), imnodes::PinShape::Circle);
-                                ui.text("In");
-                                _in.end();
-                            }
-                            _n2.end();
+                            editor.node(node_id(201), |node| {
+                                node.title_bar(|| ui.text("Scoped Node 201"));
+                                node.output_attr(
+                                    pin_id(211),
+                                    imnodes::PinShape::CircleFilled,
+                                    || ui.text("Out"),
+                                );
+                            });
+                            editor.node(node_id(202), |node| {
+                                node.title_bar(|| ui.text("Scoped Node 202"));
+                                node.input_attr(pin_id(220), imnodes::PinShape::Circle, || {
+                                    ui.text("In")
+                                });
+                            });
                             editor.link(link_id(5000), pin_id(211), pin_id(220));
-                        }
-                        let _post = editor.end();
+                        });
                         tab.end();
                     }
                     if let Some(tab) = ui.tab_item("Advanced Style") {
@@ -1013,32 +958,27 @@ impl AppWindow {
                                     editor.set_node_pos_grid(node_id(9002), [440.0, 220.0]);
                                     self.style_preview_initialized = true;
                                 }
-                                let editor = editor.begin_nodes();
+                                editor.with_nodes(|editor| {
+                                    editor.node(node_id(9001), |node| {
+                                        node.title_bar(|| ui.text("Preview A"));
+                                        node.output_attr(
+                                            pin_id(9011),
+                                            imnodes::PinShape::TriangleFilled,
+                                            || ui.text("Out"),
+                                        );
+                                    });
 
-                                let n1 = editor.node(node_id(9001));
-                                n1.title_bar(|| ui.text("Preview A"));
-                                {
-                                    let out = n1.output_attr(
-                                        pin_id(9011),
-                                        imnodes::PinShape::TriangleFilled,
-                                    );
-                                    ui.text("Out");
-                                    out.end();
-                                }
-                                n1.end();
+                                    editor.node(node_id(9002), |node| {
+                                        node.title_bar(|| ui.text("Preview B"));
+                                        node.input_attr(
+                                            pin_id(9020),
+                                            imnodes::PinShape::CircleFilled,
+                                            || ui.text("In"),
+                                        );
+                                    });
 
-                                let n2 = editor.node(node_id(9002));
-                                n2.title_bar(|| ui.text("Preview B"));
-                                {
-                                    let input = n2
-                                        .input_attr(pin_id(9020), imnodes::PinShape::CircleFilled);
-                                    ui.text("In");
-                                    input.end();
-                                }
-                                n2.end();
-
-                                editor.link(link_id(90001), pin_id(9011), pin_id(9020));
-                                editor.end();
+                                    editor.link(link_id(90001), pin_id(9011), pin_id(9020));
+                                });
                             });
                         tab.end();
                     }
@@ -1077,111 +1017,92 @@ impl AppWindow {
                             push_link(30041, 30052);
                             self.graph_shader.positions_initialized = true;
                         }
-                        let editor = editor.begin_nodes();
-                        // Nodes
-                        // UV Node (3002)
-                        let n_uv = editor.node(node_id(3002));
-                        n_uv.title_bar(|| ui.text("UV"));
-                        {
-                            let _out =
-                                n_uv.output_attr(pin_id(30021), imnodes::PinShape::CircleFilled);
-                            ui.text("UV");
-                            _out.end();
-                        }
-                        n_uv.end();
-                        // Texture Node (3001)
-                        let n_tex = editor.node(node_id(3001));
-                        n_tex.title_bar(|| ui.text("Texture2D"));
-                        {
-                            let _in = n_tex.input_attr(pin_id(30011), imnodes::PinShape::Circle);
-                            ui.text("UV");
-                            _in.end();
-                        }
-                        {
-                            let _out =
-                                n_tex.output_attr(pin_id(30012), imnodes::PinShape::QuadFilled);
-                            ui.text("Color");
-                            _out.end();
-                        }
-                        n_tex.end();
-                        // Multiply Node (3003)
-                        let n_mul = editor.node(node_id(3003));
-                        n_mul.title_bar(|| ui.text("Multiply"));
-                        {
-                            let _in = n_mul.input_attr(pin_id(30032), imnodes::PinShape::Circle);
-                            ui.text("A");
-                            _in.end();
-                        }
-                        {
-                            let _in = n_mul.input_attr(pin_id(30033), imnodes::PinShape::Circle);
-                            ui.text("B");
-                            _in.end();
-                        }
-                        {
-                            let _out =
-                                n_mul.output_attr(pin_id(30031), imnodes::PinShape::TriangleFilled);
-                            ui.text("Out");
-                            _out.end();
-                        }
-                        n_mul.end();
-                        // Color Const nodes (3006/3007) as outputs
-                        let n_c1 = editor.node(node_id(3006));
-                        n_c1.title_bar(|| ui.text("ColorConst A"));
-                        {
-                            let _out =
-                                n_c1.output_attr(pin_id(30022), imnodes::PinShape::QuadFilled);
-                            ui.text("Color");
-                            _out.end();
-                        }
-                        n_c1.end();
-                        let n_c2 = editor.node(node_id(3007));
-                        n_c2.title_bar(|| ui.text("ColorConst B"));
-                        {
-                            let _out =
-                                n_c2.output_attr(pin_id(30023), imnodes::PinShape::QuadFilled);
-                            ui.text("Color");
-                            _out.end();
-                        }
-                        n_c2.end();
-                        // Add Node (3004)
-                        let n_add = editor.node(node_id(3004));
-                        n_add.title_bar(|| ui.text("Add"));
-                        {
-                            let _in = n_add.input_attr(pin_id(30042), imnodes::PinShape::Circle);
-                            ui.text("A");
-                            _in.end();
-                        }
-                        {
-                            let _in = n_add.input_attr(pin_id(30043), imnodes::PinShape::Circle);
-                            ui.text("B");
-                            _in.end();
-                        }
-                        {
-                            let _out =
-                                n_add.output_attr(pin_id(30041), imnodes::PinShape::TriangleFilled);
-                            ui.text("Out");
-                            _out.end();
-                        }
-                        n_add.end();
-                        // Output Node (3005)
-                        let n_out = editor.node(node_id(3005));
-                        n_out.title_bar(|| ui.text("Output"));
-                        {
-                            let _in = n_out.input_attr(pin_id(30052), imnodes::PinShape::Circle);
-                            ui.text("Color");
-                            _in.end();
-                        }
-                        n_out.end();
+                        editor.with_nodes(|editor| {
+                            // Nodes
+                            // UV Node (3002)
+                            editor.node(node_id(3002), |node| {
+                                node.title_bar(|| ui.text("UV"));
+                                node.output_attr(
+                                    pin_id(30021),
+                                    imnodes::PinShape::CircleFilled,
+                                    || ui.text("UV"),
+                                );
+                            });
+                            // Texture Node (3001)
+                            editor.node(node_id(3001), |node| {
+                                node.title_bar(|| ui.text("Texture2D"));
+                                node.input_attr(pin_id(30011), imnodes::PinShape::Circle, || {
+                                    ui.text("UV")
+                                });
+                                node.output_attr(
+                                    pin_id(30012),
+                                    imnodes::PinShape::QuadFilled,
+                                    || ui.text("Color"),
+                                );
+                            });
+                            // Multiply Node (3003)
+                            editor.node(node_id(3003), |node| {
+                                node.title_bar(|| ui.text("Multiply"));
+                                node.input_attr(pin_id(30032), imnodes::PinShape::Circle, || {
+                                    ui.text("A")
+                                });
+                                node.input_attr(pin_id(30033), imnodes::PinShape::Circle, || {
+                                    ui.text("B")
+                                });
+                                node.output_attr(
+                                    pin_id(30031),
+                                    imnodes::PinShape::TriangleFilled,
+                                    || ui.text("Out"),
+                                );
+                            });
+                            // Color Const nodes (3006/3007) as outputs
+                            editor.node(node_id(3006), |node| {
+                                node.title_bar(|| ui.text("ColorConst A"));
+                                node.output_attr(
+                                    pin_id(30022),
+                                    imnodes::PinShape::QuadFilled,
+                                    || ui.text("Color"),
+                                );
+                            });
+                            editor.node(node_id(3007), |node| {
+                                node.title_bar(|| ui.text("ColorConst B"));
+                                node.output_attr(
+                                    pin_id(30023),
+                                    imnodes::PinShape::QuadFilled,
+                                    || ui.text("Color"),
+                                );
+                            });
+                            // Add Node (3004)
+                            editor.node(node_id(3004), |node| {
+                                node.title_bar(|| ui.text("Add"));
+                                node.input_attr(pin_id(30042), imnodes::PinShape::Circle, || {
+                                    ui.text("A")
+                                });
+                                node.input_attr(pin_id(30043), imnodes::PinShape::Circle, || {
+                                    ui.text("B")
+                                });
+                                node.output_attr(
+                                    pin_id(30041),
+                                    imnodes::PinShape::TriangleFilled,
+                                    || ui.text("Out"),
+                                );
+                            });
+                            // Output Node (3005)
+                            editor.node(node_id(3005), |node| {
+                                node.title_bar(|| ui.text("Output"));
+                                node.input_attr(pin_id(30052), imnodes::PinShape::Circle, || {
+                                    ui.text("Color")
+                                });
+                            });
 
-                        // Draw links
-                        for (id, a, b) in &self.graph_shader.links {
-                            editor.link(*id, *a, *b);
-                        }
-
-                        editor.end();
+                            // Draw links
+                            for (id, a, b) in &self.graph_shader.links {
+                                editor.link(*id, *a, *b);
+                            }
+                        });
                         tab.end();
                     }
-                    if let Some(tab) = ui.tab_item("MiniMap Callback") {
+                    if let Some(tab) = ui.tab_item("MiniMap Hover") {
                         ui.text("Hover a node in the minimap to see its id.");
                         ui.slider_f32("MiniMap Size", &mut self.minimap_size, 0.1, 0.5);
                         if let Some(_combo) = ui.begin_combo(
@@ -1206,25 +1127,18 @@ impl AppWindow {
                                 self.minimap_location = imnodes::MiniMapLocation::TopRight;
                             }
                         }
-                        // Draw Editor A minimap with a callback capturing hovered node id
-                        let mut editor = ui
-                            .imnodes_editor(
-                                &self.imgui.nodes_context,
-                                Some(&self.imgui.editor_context),
-                            )
-                            .begin_nodes();
-                        editor.minimap_with_callback(
-                            self.minimap_size,
-                            self.minimap_location,
-                            |node_id| {
-                                self.minimap_hovered = Some(node_id);
-                            },
-                        );
-                        editor.end();
                         match self.minimap_hovered {
-                            Some(id) => ui.text(format!("Hovered node: {}", id)),
+                            Some(id) => ui.text(format!("Hovered node: {id}")),
                             None => ui.text("Hovered node: (none)"),
                         }
+                        let post = ui
+                            .imnodes_editor(&self.imgui.nodes_context, None)
+                            .with_nodes(|editor| {
+                                editor
+                                    .node(node_id(1), |node| node.title_bar(|| ui.text("Preview")));
+                                editor.minimap(self.minimap_size, self.minimap_location);
+                            });
+                        self.minimap_hovered = post.minimap_hovered_nodes().last().copied();
                         tab.end();
                     }
                     tab_bar.end();

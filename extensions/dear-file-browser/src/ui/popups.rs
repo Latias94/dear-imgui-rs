@@ -9,6 +9,12 @@ use dear_imgui_rs::Ui;
 
 use super::file_table;
 
+fn is_entry_name(name: &str) -> bool {
+    !name.contains(['/', '\\', '\0'])
+        && !(cfg!(windows) && name.contains(':'))
+        && Path::new(name).file_name() == Some(std::ffi::OsStr::new(name))
+}
+
 pub(super) fn draw_new_folder_modal(ui: &Ui, state: &mut FileDialogState) {
     const POPUP_ID: &str = "New Folder";
 
@@ -59,13 +65,7 @@ pub(super) fn draw_new_folder_modal(ui: &Ui, state: &mut FileDialogState) {
 pub(super) fn try_create_new_folder_in_cwd(state: &mut FileDialogState) -> bool {
     state.ui.operations.new_folder.error = None;
     let name = state.ui.operations.new_folder.name.trim();
-    let invalid = name.is_empty()
-        || name == "."
-        || name == ".."
-        || name.contains('/')
-        || name.contains('\\')
-        || name.contains('\0');
-    if invalid {
+    if !is_entry_name(name) {
         state.ui.operations.new_folder.error = Some("Invalid folder name".into());
         return false;
     }
@@ -293,9 +293,8 @@ pub(super) fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState) {
 
         let from_name = from_path
             .file_name()
-            .and_then(|name| name.to_str())
             .filter(|name| !name.is_empty())
-            .map(ToOwned::to_owned)
+            .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| from_path.display().to_string());
 
         ui.text("Rename in:");
@@ -322,13 +321,7 @@ pub(super) fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState) {
         if rename {
             state.ui.operations.rename.error = None;
             let to_name = state.ui.operations.rename.to.trim();
-            let invalid = to_name.is_empty()
-                || to_name == "."
-                || to_name == ".."
-                || to_name.contains('/')
-                || to_name.contains('\\')
-                || to_name.contains('\0');
-            if invalid {
+            if !is_entry_name(to_name) {
                 state.ui.operations.rename.error = Some("Invalid target name".into());
             } else if to_name == from_name.as_str() {
                 state.ui.operations.rename.error = Some("Target name is unchanged".into());
@@ -336,28 +329,24 @@ pub(super) fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState) {
                 let to_name = to_name.to_string();
                 let to_path = from_path.with_file_name(&to_name);
 
-                let target_exists = state.filesystem.as_file_system().metadata(&to_path).is_ok();
-                if target_exists {
-                    state.ui.operations.rename.error = Some("Target already exists".into());
-                } else {
-                    let rename_result = state
-                        .filesystem
-                        .as_file_system()
-                        .rename(&from_path, &to_path);
-                    match rename_result {
-                        Ok(()) => {
-                            let id = EntryId::from_path(&to_path);
-                            state.core.focus_and_select_by_id(id);
-                            state.ui.operations.reveal_id_next = Some(id);
-                            state.core.invalidate_dir_cache();
-                            state.ui.operations.rename.target_id = None;
-                            state.ui.operations.rename.to.clear();
-                            ui.close_current_popup();
-                        }
-                        Err(e) => {
-                            state.ui.operations.rename.error =
-                                Some(format!("Failed to rename '{from_name}': {e}"));
-                        }
+                match state
+                    .filesystem
+                    .as_file_system()
+                    .rename_noreplace(&from_path, &to_path)
+                {
+                    Ok(()) => {
+                        let id = EntryId::from_path(&to_path);
+                        state.core.focus_and_select_by_id(id);
+                        state.ui.operations.reveal_id_next = Some(id);
+                        state.core.invalidate_dir_cache();
+                        state.ui.operations.rename.target_id = None;
+                        state.ui.operations.rename.to.clear();
+                        ui.close_current_popup();
+                    }
+                    Err(e) => {
+                        state.ui.operations.rename.error = Some(format!(
+                            "Failed to rename '{from_name}' to '{to_name}': {e}"
+                        ));
                     }
                 }
             }
@@ -390,6 +379,7 @@ pub(super) fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState) {
             return;
         }
 
+        let mut any_dir = false;
         let delete_targets = state
             .ui
             .operations
@@ -397,11 +387,18 @@ pub(super) fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState) {
             .target_ids
             .iter()
             .copied()
-            .filter_map(|id| state.core.entry_path_by_id(id).map(Path::to_path_buf))
+            .filter_map(|id| {
+                let entry = state.core.entry_by_id(id)?;
+                any_dir |= entry.is_dir && !entry.is_symlink;
+                Some(entry.path.clone())
+            })
             .collect::<Vec<_>>();
 
         if delete_targets.len() != state.ui.operations.delete.target_ids.len() {
             ui.text_disabled("Some selected entries are no longer available.");
+            if let Some(err) = &state.ui.operations.delete.error {
+                ui.text_colored([1.0, 0.3, 0.3, 1.0], err);
+            }
             if ui.button("Close") {
                 state.ui.operations.delete.error = None;
                 state.ui.operations.delete.target_ids.clear();
@@ -447,12 +444,6 @@ pub(super) fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState) {
 
         ui.separator();
 
-        let any_dir = {
-            let fs = state.filesystem.as_file_system();
-            delete_targets
-                .iter()
-                .any(|path| fs.metadata(path).map(|m| m.is_dir).unwrap_or(false))
-        };
         if any_dir {
             ui.checkbox("Recursive", &mut state.ui.operations.delete.recursive);
             ui.same_line();
@@ -472,39 +463,8 @@ pub(super) fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState) {
             ui.close_current_popup();
         }
 
-        if del {
-            state.ui.operations.delete.error = None;
-            let recursive = state.ui.operations.delete.recursive;
-            let delete_error = {
-                let fs = state.filesystem.as_file_system();
-                let mut error = None;
-                for (path, name) in delete_targets.iter().zip(delete_target_names.iter()) {
-                    let is_dir = fs.metadata(path).map(|m| m.is_dir).unwrap_or(false);
-                    let result = if is_dir {
-                        if recursive {
-                            fs.remove_dir_all(path)
-                        } else {
-                            fs.remove_dir(path)
-                        }
-                    } else {
-                        fs.remove_file(path)
-                    };
-                    if let Err(cause) = result {
-                        error = Some(format!("Failed to delete '{name}': {cause}"));
-                        break;
-                    }
-                }
-                error
-            };
-            state.ui.operations.delete.error = delete_error;
-
-            if state.ui.operations.delete.error.is_none() {
-                state.core.clear_selection();
-                state.core.invalidate_dir_cache();
-                state.ui.operations.delete.target_ids.clear();
-                state.ui.operations.delete.recursive = false;
-                ui.close_current_popup();
-            }
+        if del && super::ops::delete_targets(state, &delete_targets) {
+            ui.close_current_popup();
         }
 
         if let Some(err) = &state.ui.operations.delete.error {
@@ -566,7 +526,7 @@ pub(super) fn draw_paste_conflict_modal(ui: &Ui, state: &mut FileDialogState) {
         let cancel = ui.button("Cancel Paste");
 
         if cancel {
-            state.ui.operations.paste.job = None;
+            super::ops::cancel_paste_job(state);
             ui.close_current_popup();
             return;
         }
@@ -590,11 +550,7 @@ pub(super) fn draw_paste_conflict_modal(ui: &Ui, state: &mut FileDialogState) {
                 job.conflict = None;
             }
             ui.close_current_popup();
-            state.ui.runtime.error = None;
-            if let Err(e) = super::ops::run_paste_job_until_wait_or_done(state) {
-                state.ui.runtime.error = Some(e);
-                state.ui.operations.paste.job = None;
-            }
+            state.ui.runtime.error = super::ops::run_paste_job_until_wait_or_done(state).err();
         } else if let Some(job) = state.ui.operations.paste.job.as_mut() {
             if let Some(conflict) = job.conflict.as_mut() {
                 conflict.apply_to_all = apply_to_all;
@@ -604,3 +560,11 @@ pub(super) fn draw_paste_conflict_modal(ui: &Ui, state: &mut FileDialogState) {
 }
 
 // Places helpers live in `places.rs`.
+
+#[cfg(windows)]
+#[test]
+fn rename_and_new_folder_names_stay_in_the_current_directory() {
+    assert!(is_entry_name("report.txt"));
+    assert!(!is_entry_name("D:report.txt"));
+    assert!(!is_entry_name("report.txt:stream"));
+}

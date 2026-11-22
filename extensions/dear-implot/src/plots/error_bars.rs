@@ -31,7 +31,7 @@ impl<'a> ErrorBarsPlot<'a> {
     /// * `label` - The label for the error bars
     /// * `x_data` - X coordinates of the data points
     /// * `y_data` - Y coordinates of the data points
-    /// * `err_data` - Error values (symmetric, ±err)
+    /// * `err_data` - Deltas applied on either side of each value (`value ± err`)
     pub fn new(label: &'a str, x_data: &'a [f64], y_data: &'a [f64], err_data: &'a [f64]) -> Self {
         Self {
             label,
@@ -94,30 +94,22 @@ impl<'a> ErrorBarsPlot<'a> {
     /// Validate the plot data
     pub fn validate(&self) -> Result<(), PlotError> {
         validate_data_lengths(self.x_data, self.y_data)?;
-        validate_data_lengths(self.x_data, self.err_data)?;
-
-        // Check for negative error values
-        if self.err_data.iter().any(|&err| err < 0.0) {
-            return Err(PlotError::InvalidData(
-                "Error values cannot be negative".to_string(),
-            ));
-        }
-
-        Ok(())
+        validate_data_lengths(self.x_data, self.err_data)
     }
 }
 
 impl<'a> Plot for ErrorBarsPlot<'a> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
         if self.validate().is_err() {
             return;
         }
-        let Ok(count) = i32::try_from(self.x_data.len()) else {
+        let Some(count) = self.layout.sample_count(self.x_data.len()) else {
             return;
         };
         plot_ui.with_bound_context(|| {
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     self.layout,
@@ -165,8 +157,8 @@ impl<'a> AsymmetricErrorBarsPlot<'a> {
     /// * `label` - The label for the error bars
     /// * `x_data` - X coordinates of the data points
     /// * `y_data` - Y coordinates of the data points
-    /// * `err_neg` - Negative error values (downward/leftward)
-    /// * `err_pos` - Positive error values (upward/rightward)
+    /// * `err_neg` - Signed deltas subtracted from the plotted coordinate for the first endpoint
+    /// * `err_pos` - Signed deltas added to the plotted coordinate for the second endpoint
     pub fn new(
         label: &'a str,
         x_data: &'a [f64],
@@ -237,30 +229,22 @@ impl<'a> AsymmetricErrorBarsPlot<'a> {
     pub fn validate(&self) -> Result<(), PlotError> {
         validate_data_lengths(self.x_data, self.y_data)?;
         validate_data_lengths(self.x_data, self.err_neg)?;
-        validate_data_lengths(self.x_data, self.err_pos)?;
-
-        // Check for negative error values
-        if self.err_neg.iter().any(|&err| err < 0.0) || self.err_pos.iter().any(|&err| err < 0.0) {
-            return Err(PlotError::InvalidData(
-                "Error values cannot be negative".to_string(),
-            ));
-        }
-
-        Ok(())
+        validate_data_lengths(self.x_data, self.err_pos)
     }
 }
 
 impl<'a> Plot for AsymmetricErrorBarsPlot<'a> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
         if self.validate().is_err() {
             return;
         }
-        let Ok(count) = i32::try_from(self.x_data.len()) else {
+        let Some(count) = self.layout.sample_count(self.x_data.len()) else {
             return;
         };
         plot_ui.with_bound_context(|| {
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     self.layout,
@@ -348,20 +332,12 @@ impl<'a> SimpleErrorBarsPlot<'a> {
 
     /// Validate the plot data
     pub fn validate(&self) -> Result<(), PlotError> {
-        validate_data_lengths(self.values, self.errors)?;
-
-        if self.errors.iter().any(|&err| err < 0.0) {
-            return Err(PlotError::InvalidData(
-                "Error values cannot be negative".to_string(),
-            ));
-        }
-
-        Ok(())
+        validate_data_lengths(self.values, self.errors)
     }
 }
 
 impl<'a> Plot for SimpleErrorBarsPlot<'a> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
         if self.validate().is_err() {
             return;
         }
@@ -377,6 +353,7 @@ impl<'a> Plot for SimpleErrorBarsPlot<'a> {
         plot_ui.with_bound_context(|| {
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     PlotDataLayout::DEFAULT,
@@ -399,7 +376,7 @@ impl<'a> Plot for SimpleErrorBarsPlot<'a> {
 }
 
 /// Convenience functions for quick error bars plotting
-impl<'ui> crate::PlotUi<'ui> {
+impl<'ui> crate::PlotScope<'ui> {
     /// Plot error bars with symmetric errors
     pub fn error_bars_plot(
         &self,
@@ -446,6 +423,24 @@ impl<'ui> crate::PlotUi<'ui> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strided_errors_validate_the_logical_series_lengths() {
+        let rows = [[1.0, 5.0, 0.1, 0.3], [-2.0, 6.0, 0.2, 0.4]];
+        let data = rows.as_flattened();
+        let field = |column| &data[column..column + rows.len()];
+        let stride = PlotDataStride::for_type::<[f64; 4]>();
+        // Each field has two samples 32 bytes apart. The next row's negative X lies in
+        // the packed prefix of the upper-error view, between its two actual error values.
+        let symmetric =
+            unsafe { ErrorBarsPlot::new("sym", field(0), field(1), field(3)).with_stride(stride) };
+        let asymmetric = unsafe {
+            AsymmetricErrorBarsPlot::new("asym", field(0), field(1), field(2), field(3))
+                .with_stride(stride)
+        };
+        assert_eq!(symmetric.validate(), Ok(()));
+        assert_eq!(asymmetric.validate(), Ok(()));
+    }
 
     #[test]
     fn test_simple_error_bars_plot_flags() {

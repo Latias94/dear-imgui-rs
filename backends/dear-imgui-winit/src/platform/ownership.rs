@@ -16,9 +16,10 @@ use dear_imgui_rs::{
     ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding, ContextDestroyed,
     ContextId, ContextTeardown, NativeWindowInstanceId, NativeWindowTarget,
 };
+use winit::dpi::PhysicalPosition;
 use winit::window::Window;
 
-use crate::{cursor::CursorSettings, sanitize};
+use crate::cursor::CursorSettings;
 
 use super::WinitPlatformError;
 use super::frame::HiDpiMode;
@@ -129,6 +130,8 @@ pub(crate) struct WinitPlatformControl {
     pub(super) ime_enabled_windows: RefCell<HashSet<NativeWindowInstanceId>>,
     pub(super) ime_event_source: Cell<Option<NativeWindowInstanceId>>,
     pub(super) active_touch: Cell<Option<u64>>,
+    pub(super) hidpi_factor: Cell<f64>,
+    pub(super) last_local_pointer: Cell<Option<PhysicalPosition<f64>>>,
     pub(super) pointer_control: RefCell<Option<super::pointer_control::ActivePointerControl>>,
     pub(super) pointer_release_events: RefCell<VecDeque<super::WinitPointerReleaseReport>>,
     pub(super) terminal_fault: RefCell<Option<WinitPlatformError>>,
@@ -202,6 +205,8 @@ impl WinitPlatformControl {
             ime_enabled_windows: RefCell::new(HashSet::new()),
             ime_event_source: Cell::new(None),
             active_touch: Cell::new(None),
+            hidpi_factor: Cell::new(1.0),
+            last_local_pointer: Cell::new(None),
             pointer_control: RefCell::new(None),
             pointer_release_events: RefCell::new(VecDeque::new()),
             terminal_fault: RefCell::new(None),
@@ -396,14 +401,19 @@ impl WinitPlatformControl {
     }
 
     fn owns_any_publication_or_callback_in_current_context(&self) -> bool {
-        if self.owns_base_publication_in_current_context() {
-            return true;
-        }
         #[cfg(feature = "multi-viewport")]
-        if let Some(runtime) = self.runtime.borrow().as_ref() {
-            return runtime.owns_any_platform_callback_in_current_context();
+        {
+            self.owns_base_publication_in_current_context()
+                || self
+                    .runtime
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|runtime| runtime.owns_any_platform_callback_in_current_context())
         }
-        false
+        #[cfg(not(feature = "multi-viewport"))]
+        {
+            self.owns_base_publication_in_current_context()
+        }
     }
 
     pub(crate) fn fail_current_contract(&self, error: WinitPlatformError) {
@@ -463,6 +473,7 @@ impl WinitPlatformControl {
             return Err(WinitPlatformError::RuntimeAlreadyAttached);
         }
         *slot = Some(runtime);
+        self.last_local_pointer.set(None);
         Ok(())
     }
 
@@ -664,7 +675,6 @@ pub struct WinitPlatform {
     pub(super) control: Rc<WinitPlatformControl>,
     pub(super) attachment: Option<ContextAttachmentLease>,
     pub(super) hidpi_mode: HiDpiMode,
-    pub(super) hidpi_factor: f64,
     pub(super) cursor_cache: Option<CursorSettings>,
     pub(super) ime_enabled: bool,
     pub(super) ime_auto_manage: bool,
@@ -689,7 +699,6 @@ impl WinitPlatform {
             control,
             attachment: Some(attachment),
             hidpi_mode: HiDpiMode::default(),
-            hidpi_factor: 1.0,
             cursor_cache: None,
             ime_enabled: false,
             ime_auto_manage: true,
@@ -719,17 +728,11 @@ impl WinitPlatform {
         self.ensure_runtime_configuration_mutable()?;
         self.control.attach_window(imgui_ctx, Arc::clone(&window))?;
         self.hidpi_mode = hidpi_mode;
-        self.hidpi_factor = self.hidpi_factor_for_window(&window);
-
-        // Convert via winit scale then adapt to our active HiDPI mode
-        let logical_size = window
-            .inner_size()
-            .to_logical(sanitize::positive_finite_or(window.scale_factor(), 1.0));
-        let logical_size = self.scale_size_from_winit(&window, logical_size);
-        let io = imgui_ctx.io_mut();
-
-        io.set_display_size(sanitize::finite_non_negative_size(logical_size));
-        io.set_display_framebuffer_scale(sanitize::framebuffer_scale(self.hidpi_factor, 1.0));
+        self.update_single_window_geometry(
+            imgui_ctx,
+            window.inner_size(),
+            self.hidpi_factor_for_window(&window),
+        );
 
         // Enable IME by default so WindowEvent::Ime events and IME composition
         // are available on desktop platforms. Auto-management (when enabled)
@@ -751,6 +754,7 @@ impl WinitPlatform {
         }
         let window = self.control.attached_window()?;
         self.control.detach_window(imgui_ctx, &window)?;
+        self.control.last_local_pointer.set(None);
         window.set_ime_allowed(false);
         self.ime_enabled = false;
         Ok(window)

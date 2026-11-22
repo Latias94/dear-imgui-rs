@@ -69,13 +69,16 @@ def _git_submodule_declarations(repo: Path) -> dict[str, str]:
     return declarations
 
 
-def _is_git_worktree(path: Path) -> bool:
+def _is_worktree_root(path: Path) -> bool:
     result = run(
-        ("git", "-C", path, "rev-parse", "--git-dir"),
+        ("git", "-C", path, "rev-parse", "--show-toplevel"),
         capture_output=True,
         accepted_returncodes=None,
     )
-    return result.returncode == 0
+    return (
+        result.returncode == 0
+        and Path(result.stdout.rstrip("\r\n")).resolve() == path.resolve()
+    )
 
 
 def _configure_local_submodule(
@@ -85,7 +88,7 @@ def _configure_local_submodule(
     name: str,
 ) -> None:
     source_path = source_root.joinpath(PurePosixPath(relative_path))
-    if _is_git_worktree(source_path):
+    if _is_worktree_root(source_path):
         run(
             (
                 "git",

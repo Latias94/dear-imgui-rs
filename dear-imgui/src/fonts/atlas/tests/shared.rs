@@ -1,6 +1,60 @@
 use super::*;
 
 #[test]
+fn shared_atlas_keeps_its_owner_thread_after_the_last_context_drops() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let context = crate::Context::create_with_shared_font_atlas(SharedFontAtlas::create());
+    let retained = context.clone_shared_font_atlas().unwrap();
+    drop(context);
+
+    std::thread::spawn(|| {
+        assert!(matches!(
+            crate::Context::try_create(),
+            Err(crate::ImGuiError::ContextThreadConflict)
+        ));
+        assert!(matches!(
+            SharedFontAtlas::try_create(),
+            Err(crate::ImGuiError::ContextThreadConflict)
+        ));
+    })
+    .join()
+    .unwrap();
+
+    drop(retained);
+    std::thread::spawn(|| {
+        let atlas = SharedFontAtlas::try_create().unwrap();
+        let _context = crate::Context::try_create_with_shared_font_atlas(atlas).unwrap();
+    })
+    .join()
+    .unwrap();
+}
+
+#[test]
+fn standalone_font_constructors_respect_a_live_context_on_another_thread() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let _context = crate::Context::create();
+
+    std::thread::spawn(|| {
+        assert!(matches!(
+            SharedFontAtlas::try_create(),
+            Err(crate::ImGuiError::ContextThreadConflict)
+        ));
+        assert!(matches!(
+            FontLoader::try_stb_truetype(),
+            Err(crate::ImGuiError::ContextThreadConflict)
+        ));
+
+        let data = StbTrueTypeFontData::from_slice(include_bytes!(
+            "../../../../../dear-imgui-sys/third-party/cimgui/imgui/misc/fonts/ProggyClean.ttf"
+        ))
+        .unwrap();
+        let _source = FontSource::stb_truetype(data).with_config(FontConfig::default());
+    })
+    .join()
+    .unwrap();
+}
+
+#[test]
 fn shared_atlas_updates_once_per_context_frame_and_has_one_owner() {
     let shared_atlas = SharedFontAtlas::create();
     let raw = shared_atlas.as_ptr();

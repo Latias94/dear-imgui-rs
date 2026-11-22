@@ -508,8 +508,8 @@ pub(crate) struct PendingPasteJob {
     pub dest_dir: PathBuf,
     /// Next source index to process.
     pub next_index: usize,
-    /// Destination entry names created by this job.
-    pub created: Vec<String>,
+    /// Destination entries already installed by this job, including before a conflict prompt.
+    pub created: Vec<EntryId>,
     /// Optional action reused for all remaining conflicts.
     pub apply_all_conflicts: Option<PasteConflictAction>,
     /// One-shot action for the next pending conflict only.
@@ -700,7 +700,7 @@ pub(crate) struct FileDialogUiRuntime {
     /// Accumulated IGFD-style type-to-select prefix.
     pub(crate) type_select_buffer: String,
     /// Last keypress timestamp used to expire the type-to-select prefix.
-    pub(crate) type_select_last_input: Option<std::time::Instant>,
+    pub(crate) type_select_last_input: Option<web_time::Instant>,
     /// Breadcrumb runtime state.
     pub(crate) breadcrumb: BreadcrumbUiRuntime,
     /// Footer runtime state.

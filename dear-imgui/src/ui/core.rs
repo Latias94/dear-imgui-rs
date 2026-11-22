@@ -27,7 +27,7 @@ impl Ui {
             texture_registry,
             ime,
             native_scopes: std::cell::RefCell::new(crate::scope::NativeScopeTracker::default()),
-            buffer: UnsafeCell::new(UiBuffer::new(1024)),
+            scratch_buffers: std::rc::Rc::default(),
         }
     }
 
@@ -72,12 +72,15 @@ impl Ui {
         }
     }
 
-    /// Resolve a logical texture for an adjacent extension FFI call.
+    /// Resolve a logical texture for submission to this frame's native draw lists.
     ///
     /// # Safety
     ///
-    /// A returned managed pointer is valid only for an immediate native call while this `Ui` and
-    /// its frame remain borrowed. It must not be stored, sent, or used after the call returns.
+    /// Use the reference on the owning context's thread. An extension may queue it until the
+    /// end of its drawing scope to emit commands into this same ImGui frame. The context keeps
+    /// managed and atlas textures alive for the resulting draw data. Limit the extension's own
+    /// copy to this submission and consume the resulting frame through its renderer API.
+    /// For a legacy texture ID, the caller supplies the renderer binding and its lifetime.
     #[doc(hidden)]
     pub unsafe fn resolve_texture_ref_raw(
         &self,
@@ -110,10 +113,7 @@ impl Ui {
 
     /// Internal method to push a single text to our scratch buffer.
     pub(crate) fn scratch_txt(&self, txt: impl AsRef<str>) -> *const std::os::raw::c_char {
-        unsafe {
-            let handle = &mut *self.buffer.get();
-            handle.scratch_txt(txt)
-        }
+        self.with_scratch_buffer(|buf| buf.scratch_txt(txt))
     }
 
     /// Stages an explicit text range with a readable NUL sentinel at its end.
@@ -121,10 +121,7 @@ impl Ui {
         &self,
         txt: impl AsRef<str>,
     ) -> std::ops::Range<*const std::os::raw::c_char> {
-        unsafe {
-            let handle = &mut *self.buffer.get();
-            handle.scratch_txt_range(txt)
-        }
+        self.with_scratch_buffer(|buf| buf.scratch_txt_range(txt))
     }
 
     /// Helper method for two strings
@@ -133,10 +130,7 @@ impl Ui {
         txt_0: impl AsRef<str>,
         txt_1: impl AsRef<str>,
     ) -> (*const std::os::raw::c_char, *const std::os::raw::c_char) {
-        unsafe {
-            let handle = &mut *self.buffer.get();
-            handle.scratch_txt_two(txt_0, txt_1)
-        }
+        self.with_scratch_buffer(|buf| buf.scratch_txt_two(txt_0, txt_1))
     }
 
     /// Helper method with one optional value
@@ -145,15 +139,13 @@ impl Ui {
         txt_0: impl AsRef<str>,
         txt_1: Option<impl AsRef<str>>,
     ) -> (*const std::os::raw::c_char, *const std::os::raw::c_char) {
-        unsafe {
-            let handle = &mut *self.buffer.get();
-            handle.scratch_txt_with_opt(txt_0, txt_1)
-        }
+        self.with_scratch_buffer(|buf| buf.scratch_txt_with_opt(txt_0, txt_1))
     }
 
-    /// Get access to the scratch buffer for complex string operations
-    pub(crate) fn scratch_buffer(&self) -> &UnsafeCell<UiBuffer> {
-        &self.buffer
+    /// Keeps the latest scratch allocation alive throughout `f`. Reentrant calls use another
+    /// buffer. On return or unwind this buffer becomes the next one available for reuse.
+    pub(crate) fn with_scratch_buffer<R>(&self, f: impl FnOnce(&mut UiBuffer) -> R) -> R {
+        self.scratch_buffers.with(f)
     }
 
     /// Returns an ID from a string label in the current ID scope.

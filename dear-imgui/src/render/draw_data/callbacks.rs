@@ -1,4 +1,6 @@
-use crate::sys;
+use super::DrawList;
+use crate::context::binding::rendered_draw_callbacks;
+use crate::{internal::RawWrapper, sys};
 
 type RawDrawCallback = unsafe extern "C" fn(*const sys::ImDrawList, *const sys::ImDrawCmd);
 
@@ -13,6 +15,25 @@ pub(crate) enum StandardDrawCallback {
     SetSamplerFromTexture,
 }
 
+#[derive(Copy, Clone)]
+pub(crate) struct StandardDrawCallbacks {
+    reset: sys::ImDrawCallback,
+    linear: sys::ImDrawCallback,
+    nearest: sys::ImDrawCallback,
+    from_texture: sys::ImDrawCallback,
+}
+
+impl From<&sys::ImGuiPlatformIO> for StandardDrawCallbacks {
+    fn from(io: &sys::ImGuiPlatformIO) -> Self {
+        Self {
+            reset: io.DrawCallback_ResetRenderState,
+            linear: io.DrawCallback_SetSamplerLinear,
+            nearest: io.DrawCallback_SetSamplerNearest,
+            from_texture: io.DrawCallback_SetSamplerFromTex,
+        }
+    }
+}
+
 #[inline]
 fn callback_matches(callback: RawDrawCallback, standard: sys::ImDrawCallback) -> bool {
     standard.is_some_and(|standard| standard as usize == callback as usize)
@@ -20,6 +41,7 @@ fn callback_matches(callback: RawDrawCallback, standard: sys::ImDrawCallback) ->
 
 #[inline]
 pub(crate) fn classify_standard_draw_callback(
+    draw_list: &DrawList,
     callback: sys::ImDrawCallback,
 ) -> Option<StandardDrawCallback> {
     let callback = callback?;
@@ -31,24 +53,25 @@ pub(crate) fn classify_standard_draw_callback(
         return Some(StandardDrawCallback::ResetRenderState);
     }
 
-    let context = unsafe { sys::igGetCurrentContext() };
+    // A reconciled draw list can be read while a different Context is bound. Dear ImGui
+    // sets this back-pointer when it initializes the list owner's shared draw data.
+    let context = unsafe { draw_list.raw()._Data.as_ref()?.Context };
     if context.is_null() {
         return None;
     }
 
-    let platform_io = unsafe { sys::igGetPlatformIO_ContextPtr(context) };
-    if platform_io.is_null() {
-        return None;
-    }
-
-    let platform_io = unsafe { &*platform_io };
-    if callback_matches(callback, platform_io.DrawCallback_ResetRenderState) {
+    // Managed draw data is valid through the end of its rendered frame. A raw context or
+    // a list inspected before Render still uses its owner's current registrations.
+    let frame = unsafe { (*context).FrameCount };
+    let callbacks = rendered_draw_callbacks(context, frame)
+        .unwrap_or_else(|| StandardDrawCallbacks::from(unsafe { &(*context).PlatformIO }));
+    if callback_matches(callback, callbacks.reset) {
         Some(StandardDrawCallback::ResetRenderState)
-    } else if callback_matches(callback, platform_io.DrawCallback_SetSamplerLinear) {
+    } else if callback_matches(callback, callbacks.linear) {
         Some(StandardDrawCallback::SetSamplerLinear)
-    } else if callback_matches(callback, platform_io.DrawCallback_SetSamplerNearest) {
+    } else if callback_matches(callback, callbacks.nearest) {
         Some(StandardDrawCallback::SetSamplerNearest)
-    } else if callback_matches(callback, platform_io.DrawCallback_SetSamplerFromTex) {
+    } else if callback_matches(callback, callbacks.from_texture) {
         Some(StandardDrawCallback::SetSamplerFromTexture)
     } else {
         None

@@ -6,44 +6,44 @@ use dear_imgui_rs::MouseButton;
 impl<'ui> NodeEditorFrame<'ui> {
     pub fn set_node_position(&self, node: NodeId, position: [f32; 2]) {
         assert_finite_vec2("NodeEditorFrame::set_node_position()", "position", position);
-        self.with_current("NodeEditorFrame::set_node_position()", || unsafe {
+        self.with_editor("NodeEditorFrame::set_node_position()", || unsafe {
             sys::dne_set_node_position(node.raw(), vec2(position))
         });
     }
 
     pub fn node_position(&self, node: NodeId) -> [f32; 2] {
-        self.with_current("NodeEditorFrame::node_position()", || {
+        self.with_editor("NodeEditorFrame::node_position()", || {
             from_vec2(unsafe { sys::dne_get_node_position(node.raw()) })
         })
     }
 
     pub fn node_size(&self, node: NodeId) -> [f32; 2] {
-        self.with_current("NodeEditorFrame::node_size()", || {
+        self.with_editor("NodeEditorFrame::node_size()", || {
             from_vec2(unsafe { sys::dne_get_node_size(node.raw()) })
         })
     }
 
     pub fn set_node_z_position(&self, node: NodeId, z: f32) {
         assert_finite_f32("NodeEditorFrame::set_node_z_position()", "z", z);
-        self.with_current("NodeEditorFrame::set_node_z_position()", || unsafe {
+        self.with_editor("NodeEditorFrame::set_node_z_position()", || unsafe {
             sys::dne_set_node_z_position(node.raw(), z)
         });
     }
 
     pub fn node_z_position(&self, node: NodeId) -> f32 {
-        self.with_current("NodeEditorFrame::node_z_position()", || unsafe {
+        self.with_editor("NodeEditorFrame::node_z_position()", || unsafe {
             sys::dne_get_node_z_position(node.raw())
         })
     }
 
     pub fn restore_node_state(&self, node: NodeId) {
-        self.with_current("NodeEditorFrame::restore_node_state()", || unsafe {
+        self.with_editor("NodeEditorFrame::restore_node_state()", || unsafe {
             sys::dne_restore_node_state(node.raw())
         });
     }
 
     pub fn center_node_on_screen(&self, node: NodeId) {
-        self.with_current("NodeEditorFrame::center_node_on_screen()", || unsafe {
+        self.with_canvas("NodeEditorFrame::center_node_on_screen()", || unsafe {
             sys::dne_center_node_on_screen(node.raw())
         });
     }
@@ -54,7 +54,7 @@ impl<'ui> NodeEditorFrame<'ui> {
             "duration",
             duration,
         );
-        self.with_current("NodeEditorFrame::navigate_to_content()", || unsafe {
+        self.with_canvas("NodeEditorFrame::navigate_to_content()", || unsafe {
             sys::dne_navigate_to_content(duration)
         });
     }
@@ -65,25 +65,25 @@ impl<'ui> NodeEditorFrame<'ui> {
             "duration",
             duration,
         );
-        self.with_current("NodeEditorFrame::navigate_to_selection()", || unsafe {
+        self.with_canvas("NodeEditorFrame::navigate_to_selection()", || unsafe {
             sys::dne_navigate_to_selection(zoom_in, duration)
         });
     }
 
     pub fn is_active(&self) -> bool {
-        self.with_current("NodeEditorFrame::is_active()", || unsafe {
+        self.with_editor("NodeEditorFrame::is_active()", || unsafe {
             sys::dne_is_active()
         })
     }
 
     pub fn has_selection_changed(&self) -> bool {
-        self.with_current("NodeEditorFrame::has_selection_changed()", || unsafe {
+        self.with_editor("NodeEditorFrame::has_selection_changed()", || unsafe {
             sys::dne_has_selection_changed()
         })
     }
 
     pub fn selected_object_count(&self) -> usize {
-        self.with_current("NodeEditorFrame::selected_object_count()", || unsafe {
+        self.with_editor("NodeEditorFrame::selected_object_count()", || unsafe {
             sys::dne_get_selected_object_count()
         })
         .max(0) as usize
@@ -91,7 +91,7 @@ impl<'ui> NodeEditorFrame<'ui> {
 
     pub fn selected_nodes(&self) -> Vec<NodeId> {
         let count = self.selected_object_count();
-        self.with_current("NodeEditorFrame::selected_nodes()", || {
+        self.with_editor("NodeEditorFrame::selected_nodes()", || {
             collect_node_ids(count, |ptr, len| unsafe {
                 sys::dne_get_selected_nodes(ptr, len)
             })
@@ -100,7 +100,7 @@ impl<'ui> NodeEditorFrame<'ui> {
 
     pub fn selected_links(&self) -> Vec<LinkId> {
         let count = self.selected_object_count();
-        self.with_current("NodeEditorFrame::selected_links()", || {
+        self.with_editor("NodeEditorFrame::selected_links()", || {
             collect_link_ids(count, |ptr, len| unsafe {
                 sys::dne_get_selected_links(ptr, len)
             })
@@ -108,117 +108,121 @@ impl<'ui> NodeEditorFrame<'ui> {
     }
 
     pub fn is_node_selected(&self, node: NodeId) -> bool {
-        self.with_current("NodeEditorFrame::is_node_selected()", || unsafe {
+        self.with_editor("NodeEditorFrame::is_node_selected()", || unsafe {
             sys::dne_is_node_selected(node.raw())
         })
     }
 
     pub fn is_link_selected(&self, link: LinkId) -> bool {
-        self.with_current("NodeEditorFrame::is_link_selected()", || unsafe {
+        self.with_editor("NodeEditorFrame::is_link_selected()", || unsafe {
             sys::dne_is_link_selected(link.raw())
         })
     }
 
     pub fn clear_selection(&self) {
-        self.with_current("NodeEditorFrame::clear_selection()", || unsafe {
+        self.with_editor("NodeEditorFrame::clear_selection()", || unsafe {
             sys::dne_clear_selection()
         });
     }
 
     pub fn select_node(&self, node: NodeId) {
-        self.with_current("NodeEditorFrame::select_node()", || unsafe {
+        self.with_editor("NodeEditorFrame::select_node()", || unsafe {
             sys::dne_select_node(node.raw(), false)
         });
     }
 
     pub fn add_node_to_selection(&self, node: NodeId) {
-        self.with_current("NodeEditorFrame::add_node_to_selection()", || unsafe {
+        self.with_editor("NodeEditorFrame::add_node_to_selection()", || unsafe {
             sys::dne_select_node(node.raw(), true)
         });
     }
 
     pub fn select_link(&self, link: LinkId) {
-        self.with_current("NodeEditorFrame::select_link()", || unsafe {
+        self.with_editor("NodeEditorFrame::select_link()", || unsafe {
             sys::dne_select_link(link.raw(), false)
         });
     }
 
     pub fn add_link_to_selection(&self, link: LinkId) {
-        self.with_current("NodeEditorFrame::add_link_to_selection()", || unsafe {
+        self.with_editor("NodeEditorFrame::add_link_to_selection()", || unsafe {
             sys::dne_select_link(link.raw(), true)
         });
     }
 
     pub fn deselect_node(&self, node: NodeId) {
-        self.with_current("NodeEditorFrame::deselect_node()", || unsafe {
+        self.with_editor("NodeEditorFrame::deselect_node()", || unsafe {
             sys::dne_deselect_node(node.raw())
         });
     }
 
     pub fn deselect_link(&self, link: LinkId) {
-        self.with_current("NodeEditorFrame::deselect_link()", || unsafe {
+        self.with_editor("NodeEditorFrame::deselect_link()", || unsafe {
             sys::dne_deselect_link(link.raw())
         });
     }
 
+    /// Queues `node` for a later [`Self::begin_delete`] session. Returns `true` when queued.
     pub fn delete_node(&self, node: NodeId) -> bool {
-        self.with_current("NodeEditorFrame::delete_node()", || unsafe {
+        self.with_editor("NodeEditorFrame::delete_node()", || unsafe {
             sys::dne_delete_node(node.raw())
         })
     }
 
+    /// Queues `link` for a later [`Self::begin_delete`] session. Returns `true` when queued.
     pub fn delete_link(&self, link: LinkId) -> bool {
-        self.with_current("NodeEditorFrame::delete_link()", || unsafe {
+        self.with_editor("NodeEditorFrame::delete_link()", || unsafe {
             sys::dne_delete_link(link.raw())
         })
     }
 
     pub fn node_has_any_links(&self, node: NodeId) -> bool {
-        self.with_current("NodeEditorFrame::node_has_any_links()", || unsafe {
+        self.with_editor("NodeEditorFrame::node_has_any_links()", || unsafe {
             sys::dne_has_any_links_node(node.raw())
         })
     }
 
     pub fn pin_has_any_links(&self, pin: PinId) -> bool {
-        self.with_current("NodeEditorFrame::pin_has_any_links()", || unsafe {
+        self.with_editor("NodeEditorFrame::pin_has_any_links()", || unsafe {
             sys::dne_has_any_links_pin(pin.raw())
         })
     }
 
+    /// Queues the live links attached to `node` for deletion and returns the number queued.
     pub fn break_node_links(&self, node: NodeId) -> usize {
-        self.with_current("NodeEditorFrame::break_node_links()", || unsafe {
+        self.with_editor("NodeEditorFrame::break_node_links()", || unsafe {
             sys::dne_break_links_node(node.raw())
         })
         .max(0) as usize
     }
 
+    /// Queues the live links attached to `pin` for deletion and returns the number queued.
     pub fn break_pin_links(&self, pin: PinId) -> usize {
-        self.with_current("NodeEditorFrame::break_pin_links()", || unsafe {
+        self.with_editor("NodeEditorFrame::break_pin_links()", || unsafe {
             sys::dne_break_links_pin(pin.raw())
         })
         .max(0) as usize
     }
 
     pub fn hovered_node(&self) -> Option<NodeId> {
-        self.with_current("NodeEditorFrame::hovered_node()", || {
+        self.with_editor("NodeEditorFrame::hovered_node()", || {
             optional_id(NodeId, |ptr| unsafe { sys::dne_get_hovered_node(ptr) })
         })
     }
 
     pub fn hovered_pin(&self) -> Option<PinId> {
-        self.with_current("NodeEditorFrame::hovered_pin()", || {
+        self.with_editor("NodeEditorFrame::hovered_pin()", || {
             optional_id(PinId, |ptr| unsafe { sys::dne_get_hovered_pin(ptr) })
         })
     }
 
     pub fn hovered_link(&self) -> Option<LinkId> {
-        self.with_current("NodeEditorFrame::hovered_link()", || {
+        self.with_editor("NodeEditorFrame::hovered_link()", || {
             optional_id(LinkId, |ptr| unsafe { sys::dne_get_hovered_link(ptr) })
         })
     }
 
     pub fn double_clicked_node(&self) -> Option<NodeId> {
-        self.with_current("NodeEditorFrame::double_clicked_node()", || {
+        self.with_editor("NodeEditorFrame::double_clicked_node()", || {
             optional_id(NodeId, |ptr| unsafe {
                 sys::dne_get_double_clicked_node(ptr)
             })
@@ -226,13 +230,13 @@ impl<'ui> NodeEditorFrame<'ui> {
     }
 
     pub fn double_clicked_pin(&self) -> Option<PinId> {
-        self.with_current("NodeEditorFrame::double_clicked_pin()", || {
+        self.with_editor("NodeEditorFrame::double_clicked_pin()", || {
             optional_id(PinId, |ptr| unsafe { sys::dne_get_double_clicked_pin(ptr) })
         })
     }
 
     pub fn double_clicked_link(&self) -> Option<LinkId> {
-        self.with_current("NodeEditorFrame::double_clicked_link()", || {
+        self.with_editor("NodeEditorFrame::double_clicked_link()", || {
             optional_id(LinkId, |ptr| unsafe {
                 sys::dne_get_double_clicked_link(ptr)
             })
@@ -240,7 +244,7 @@ impl<'ui> NodeEditorFrame<'ui> {
     }
 
     pub fn show_node_context_menu(&self) -> Option<NodeId> {
-        self.with_current("NodeEditorFrame::show_node_context_menu()", || {
+        self.with_canvas("NodeEditorFrame::show_node_context_menu()", || {
             optional_id(NodeId, |ptr| unsafe {
                 sys::dne_show_node_context_menu(ptr)
             })
@@ -248,13 +252,13 @@ impl<'ui> NodeEditorFrame<'ui> {
     }
 
     pub fn show_pin_context_menu(&self) -> Option<PinId> {
-        self.with_current("NodeEditorFrame::show_pin_context_menu()", || {
+        self.with_canvas("NodeEditorFrame::show_pin_context_menu()", || {
             optional_id(PinId, |ptr| unsafe { sys::dne_show_pin_context_menu(ptr) })
         })
     }
 
     pub fn show_link_context_menu(&self) -> Option<LinkId> {
-        self.with_current("NodeEditorFrame::show_link_context_menu()", || {
+        self.with_canvas("NodeEditorFrame::show_link_context_menu()", || {
             optional_id(LinkId, |ptr| unsafe {
                 sys::dne_show_link_context_menu(ptr)
             })
@@ -262,20 +266,20 @@ impl<'ui> NodeEditorFrame<'ui> {
     }
 
     pub fn show_background_context_menu(&self) -> bool {
-        self.with_current(
+        self.with_canvas(
             "NodeEditorFrame::show_background_context_menu()",
             || unsafe { sys::dne_show_background_context_menu() },
         )
     }
 
     pub fn set_shortcuts_enabled(&self, enabled: bool) {
-        self.with_current("NodeEditorFrame::set_shortcuts_enabled()", || unsafe {
+        self.with_editor("NodeEditorFrame::set_shortcuts_enabled()", || unsafe {
             sys::dne_enable_shortcuts(enabled)
         });
     }
 
     pub fn shortcuts_enabled(&self) -> bool {
-        self.with_current("NodeEditorFrame::shortcuts_enabled()", || unsafe {
+        self.with_editor("NodeEditorFrame::shortcuts_enabled()", || unsafe {
             sys::dne_are_shortcuts_enabled()
         })
     }
@@ -285,38 +289,38 @@ impl<'ui> NodeEditorFrame<'ui> {
     /// For example, a persisted `view.zoom` of `0.5` displays content at half size
     /// and is reported here as `2.0`.
     pub fn current_zoom(&self) -> f32 {
-        self.with_current("NodeEditorFrame::current_zoom()", || unsafe {
+        self.with_canvas("NodeEditorFrame::current_zoom()", || unsafe {
             sys::dne_get_current_zoom()
         })
     }
 
     pub fn is_background_clicked(&self) -> bool {
-        self.with_current("NodeEditorFrame::is_background_clicked()", || unsafe {
+        self.with_editor("NodeEditorFrame::is_background_clicked()", || unsafe {
             sys::dne_is_background_clicked()
         })
     }
 
     pub fn is_background_double_clicked(&self) -> bool {
-        self.with_current(
+        self.with_editor(
             "NodeEditorFrame::is_background_double_clicked()",
             || unsafe { sys::dne_is_background_double_clicked() },
         )
     }
 
     pub fn background_click_button(&self) -> Option<MouseButton> {
-        self.with_current("NodeEditorFrame::background_click_button()", || {
+        self.with_editor("NodeEditorFrame::background_click_button()", || {
             mouse_button_from_index(unsafe { sys::dne_get_background_click_button_index() })
         })
     }
 
     pub fn background_double_click_button(&self) -> Option<MouseButton> {
-        self.with_current("NodeEditorFrame::background_double_click_button()", || {
+        self.with_editor("NodeEditorFrame::background_double_click_button()", || {
             mouse_button_from_index(unsafe { sys::dne_get_background_double_click_button_index() })
         })
     }
 
     pub fn link_pins(&self, link: LinkId) -> Option<(PinId, PinId)> {
-        self.with_current("NodeEditorFrame::link_pins()", || {
+        self.with_editor("NodeEditorFrame::link_pins()", || {
             let mut start = 0usize;
             let mut end = 0usize;
             unsafe { sys::dne_get_link_pins(link.raw(), &mut start, &mut end) }
@@ -325,33 +329,33 @@ impl<'ui> NodeEditorFrame<'ui> {
     }
 
     pub fn pin_had_any_links(&self, pin: PinId) -> bool {
-        self.with_current("NodeEditorFrame::pin_had_any_links()", || unsafe {
+        self.with_editor("NodeEditorFrame::pin_had_any_links()", || unsafe {
             sys::dne_pin_had_any_links(pin.raw())
         })
     }
 
     pub fn screen_size(&self) -> [f32; 2] {
-        self.with_current("NodeEditorFrame::screen_size()", || {
+        self.with_canvas("NodeEditorFrame::screen_size()", || {
             from_vec2(unsafe { sys::dne_get_screen_size() })
         })
     }
 
     pub fn screen_to_canvas(&self, pos: [f32; 2]) -> [f32; 2] {
         assert_finite_vec2("NodeEditorFrame::screen_to_canvas()", "pos", pos);
-        self.with_current("NodeEditorFrame::screen_to_canvas()", || {
+        self.with_canvas("NodeEditorFrame::screen_to_canvas()", || {
             from_vec2(unsafe { sys::dne_screen_to_canvas(vec2(pos)) })
         })
     }
 
     pub fn canvas_to_screen(&self, pos: [f32; 2]) -> [f32; 2] {
         assert_finite_vec2("NodeEditorFrame::canvas_to_screen()", "pos", pos);
-        self.with_current("NodeEditorFrame::canvas_to_screen()", || {
+        self.with_canvas("NodeEditorFrame::canvas_to_screen()", || {
             from_vec2(unsafe { sys::dne_canvas_to_screen(vec2(pos)) })
         })
     }
 
     pub fn node_count(&self) -> usize {
-        self.with_current("NodeEditorFrame::node_count()", || unsafe {
+        self.with_editor("NodeEditorFrame::node_count()", || unsafe {
             sys::dne_get_node_count()
         })
         .max(0) as usize
@@ -359,7 +363,7 @@ impl<'ui> NodeEditorFrame<'ui> {
 
     pub fn ordered_node_ids(&self) -> Vec<NodeId> {
         let count = self.node_count();
-        self.with_current("NodeEditorFrame::ordered_node_ids()", || {
+        self.with_editor("NodeEditorFrame::ordered_node_ids()", || {
             collect_node_ids(count, |ptr, len| unsafe {
                 sys::dne_get_ordered_node_ids(ptr, len)
             })

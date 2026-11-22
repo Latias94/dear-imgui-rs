@@ -1,23 +1,46 @@
 use crate::sys;
 use std::ffi::c_int;
+use std::mem;
 
-pub(super) fn make_string_input_buffer(buf: &String, capacity_hint: Option<usize>) -> Vec<u8> {
-    let spare_hint = capacity_hint.unwrap_or(0);
-    let desired = buf
-        .capacity()
-        .saturating_add(1)
-        .max(buf.len().saturating_add(spare_hint).saturating_add(1))
-        .max(1);
+const MAX_INPUT_BUFFER_SIZE: usize = i32::MAX as usize - 1;
+
+pub(super) fn validate_input_buffer_size(size: usize) {
+    // InputTextEx takes an int and allocates its internal TextA with buf_size + 1.
     assert!(
-        desired <= i32::MAX as usize,
-        "InputText buffer exceeds Dear ImGui's i32 callback range"
+        size <= MAX_INPUT_BUFFER_SIZE,
+        "InputText buffer exceeds Dear ImGui's i32 size range"
     );
+}
 
-    let mut buffer = Vec::with_capacity(desired);
-    buffer.extend_from_slice(buf.as_bytes());
-    buffer.push(0);
-    buffer.resize(desired, 0);
-    buffer
+pub(super) struct StringInputBuffer<'a> {
+    target: &'a mut String,
+    pub(super) bytes: Vec<u8>,
+}
+
+impl<'a> StringInputBuffer<'a> {
+    pub(super) fn new(target: &'a mut String, capacity_hint: Option<usize>) -> Self {
+        let spare = capacity_hint.unwrap_or(0);
+        let needed = target.len().saturating_add(spare).saturating_add(1);
+        validate_input_buffer_size(needed);
+        let size = target.capacity().min(MAX_INPUT_BUFFER_SIZE).max(needed);
+
+        if spare == 0 {
+            // A full String only needs a terminator to display its existing contents.
+            target.reserve_exact(1);
+        } else {
+            // Amortize the requested spare bytes as the field grows across frames.
+            target.reserve(spare + 1);
+        }
+        let mut bytes = mem::take(target).into_bytes();
+        bytes.resize(size, 0);
+        Self { target, bytes }
+    }
+}
+
+impl Drop for StringInputBuffer<'_> {
+    fn drop(&mut self) {
+        finish_string_input_buffer(self.target, mem::take(&mut self.bytes));
+    }
 }
 
 pub(super) unsafe fn resize_string_input_buffer(

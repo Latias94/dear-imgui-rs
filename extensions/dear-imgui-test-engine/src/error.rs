@@ -4,6 +4,7 @@ use std::fmt;
 
 use dear_imgui_rs::{
     ContextAttachmentDetachError, ContextAttachmentError, ContextBindingError, ContextId,
+    ImGuiError,
 };
 use dear_imgui_test_engine_sys as sys;
 
@@ -44,6 +45,8 @@ impl TestEngineStatus {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum TestEngineError {
+    /// Creating a native engine could not reserve the Dear ImGui owner thread.
+    ThreadLease(ImGuiError),
     /// The native ABI rejected an operation. `diagnostic` is copied before another ABI call.
     Ffi {
         operation: &'static str,
@@ -166,6 +169,10 @@ impl TestEngineError {
 impl fmt::Display for TestEngineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ThreadLease(source) => write!(
+                f,
+                "could not acquire the Test Engine thread lease ({source})"
+            ),
             Self::Ffi {
                 operation,
                 status,
@@ -251,6 +258,7 @@ impl fmt::Display for TestEngineError {
 impl Error for TestEngineError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::ThreadLease(source) => Some(source),
             Self::ContextBinding { source, .. } => Some(source),
             Self::Attachment { source, .. } => Some(source),
             Self::AttachmentDetach { source, .. } => Some(source),

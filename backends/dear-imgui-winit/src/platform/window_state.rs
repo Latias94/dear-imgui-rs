@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use dear_imgui_rs::{ConfigFlags, Context, Id, NativeWindowInstanceId, NativeWindowTarget};
-use winit::dpi::{LogicalPosition, LogicalSize};
+use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::window::Window;
 
 use crate::cursor::CursorSettings;
@@ -57,32 +57,26 @@ pub(super) unsafe extern "C" fn imgui_winit_set_ime_data(
             } else {
                 16.0_f32
             };
+            let input_pos = [ime.InputPos.x, ime.InputPos.y];
+            let viewport_pos = [vp.Pos.x, vp.Pos.y];
             #[cfg(feature = "multi-viewport")]
-            let area = if control.has_live_runtime() {
-                crate::multi_viewport::ime_cursor_area_for_viewport(
+            if control.has_live_runtime() {
+                if let Some((position, size)) = crate::multi_viewport::ime_cursor_area_for_viewport(
                     &window,
-                    [ime.InputPos.x, ime.InputPos.y],
-                    [vp.Pos.x, vp.Pos.y],
+                    input_pos,
+                    viewport_pos,
                     line_height,
-                )
-            } else {
-                Some((
-                    LogicalPosition::new(
-                        f64::from(ime.InputPos.x - vp.Pos.x),
-                        f64::from(ime.InputPos.y - vp.Pos.y),
-                    ),
-                    LogicalSize::new(f64::from(line_height), f64::from(line_height)),
-                ))
-            };
-            #[cfg(not(feature = "multi-viewport"))]
-            let area = Some((
-                LogicalPosition::new(
-                    f64::from(ime.InputPos.x - vp.Pos.x),
-                    f64::from(ime.InputPos.y - vp.Pos.y),
-                ),
-                LogicalSize::new(f64::from(line_height), f64::from(line_height)),
-            ));
-            if let Some((position, size)) = area {
+                ) {
+                    window.set_ime_cursor_area(position, size);
+                }
+                return;
+            }
+            if let Some((position, size)) = single_window_ime_cursor_area(
+                input_pos,
+                viewport_pos,
+                line_height,
+                control.hidpi_factor.get(),
+            ) {
                 window.set_ime_cursor_area(position, size);
             }
         });
@@ -96,6 +90,20 @@ pub(super) unsafe extern "C" fn imgui_winit_set_ime_data(
             });
         });
     }
+}
+
+fn single_window_ime_cursor_area(
+    input: [f32; 2],
+    viewport: [f32; 2],
+    line_height: f32,
+    hidpi: f64,
+) -> Option<(PhysicalPosition<f64>, PhysicalSize<f64>)> {
+    let [x, y] =
+        crate::sanitize::finite_vec2_f32([input[0] - viewport[0], input[1] - viewport[1]])?;
+    let size = f64::from(line_height) * hidpi;
+    let position = PhysicalPosition::new(f64::from(x) * hidpi, f64::from(y) * hidpi);
+    (position.x.is_finite() && position.y.is_finite() && size.is_finite() && size > 0.0)
+        .then_some((position, PhysicalSize::new(size, size)))
 }
 
 pub(super) fn ime_callback_eq(
@@ -400,5 +408,21 @@ impl WinitPlatform {
             self.control.set_cursor_settings(None);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ime_caret_uses_the_ui_scale_for_its_client_position_and_size() {
+        assert_eq!(
+            single_window_ime_cursor_area([90.0, 56.0], [10.0, 8.0], 12.0, 1.5),
+            Some((
+                PhysicalPosition::new(120.0, 72.0),
+                PhysicalSize::new(18.0, 18.0)
+            ))
+        );
     }
 }

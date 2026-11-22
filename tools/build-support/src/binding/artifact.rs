@@ -193,6 +193,9 @@ pub fn core_source_contract_hash() -> String {
         match transform {
             ProviderTransform::Direct => ("direct", "v1"),
             ProviderTransform::PatchImguiCore => ("patch-imgui-core", "safe-demo-boundary-v1"),
+            ProviderTransform::PatchImguizmo => {
+                ("patch-imguizmo", crate::IMGUIZMO_INTERACTION_PATCH_VERSION)
+            }
             ProviderTransform::PatchImguiDemo => ("patch-imgui-demo", "safe-demo-boundary-v1"),
             ProviderTransform::PatchImguiWidgetsNumericConversions => (
                 "patch-imgui-widgets-numeric-conversions",
@@ -204,10 +207,6 @@ pub fn core_source_contract_hash() -> String {
             ProviderTransform::PatchCteTextEditor => (
                 "patch-cte-text-editor",
                 crate::CTE_TEXT_EDITOR_PATCH_VERSION,
-            ),
-            ProviderTransform::PatchCteTextDiffDrawFlags => (
-                "patch-cte-text-diff-draw-flags",
-                crate::CTE_TEXT_DIFF_DRAW_FLAGS_PATCH_VERSION,
             ),
             ProviderTransform::PatchImplot3dDrawFlags => (
                 "patch-implot3d-draw-flags",
@@ -252,7 +251,7 @@ pub fn core_source_contract_hash() -> String {
     );
     hash.field(
         "native_platform_io_contract",
-        "aggregate-hooks-v3+live-viewport-address-v1+aggregate-identity-getters-v1",
+        "aggregate-hooks-v3+live-viewport-address-v1+aggregate-identity-getters-v1+checked-framebuffer-scale-v1+exact-slot-release-v1",
     );
     hash.finish()
 }

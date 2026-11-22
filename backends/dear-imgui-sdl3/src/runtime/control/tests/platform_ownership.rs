@@ -1,6 +1,111 @@
 use super::*;
 
 #[test]
+fn shutdown_preserves_live_application_viewport_callbacks() {
+    unsafe extern "C" fn dpi(_: *mut sys::ImGuiViewport) -> f32 {
+        1.25
+    }
+    unsafe extern "C" fn replacement_dpi(_: *mut sys::ImGuiViewport) -> f32 {
+        2.5
+    }
+    unsafe extern "C" fn changed(_: *mut sys::ImGuiViewport) {}
+    unsafe extern "C" fn insets(_: *mut sys::ImGuiViewport, out: *mut sys::ImVec4) {
+        unsafe { out.write(sys::ImVec4::zero()) };
+    }
+    unsafe extern "C" fn replacement_insets(_: *mut sys::ImGuiViewport, out: *mut sys::ImVec4) {
+        unsafe { out.write(sys::ImVec4::new(1.0, 2.0, 3.0, 4.0)) };
+    }
+
+    let _guard = crate::tests::test_guard();
+    for replace in [false, true] {
+        let mut context = Context::create();
+        let pio = context.platform_io_mut().as_raw_mut();
+        unsafe {
+            (*pio).Platform_GetWindowDpiScale = Some(dpi);
+            (*pio).Platform_OnChangedViewport = Some(changed);
+            sys::ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(pio, Some(insets));
+        }
+        let mut runtime = synthetic_claimed_registration(
+            &mut context,
+            Rc::new(Cell::new(0)),
+            Rc::new(Cell::new(0)),
+            Rc::new(Cell::new(0)),
+            synthetic_create_window,
+        );
+        if replace {
+            unsafe {
+                (*pio).Platform_GetWindowDpiScale = Some(replacement_dpi);
+                (*pio).Platform_OnChangedViewport = None;
+                sys::ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(
+                    pio,
+                    Some(replacement_insets),
+                );
+            }
+        }
+        runtime.shutdown_platform(&mut context).unwrap();
+
+        let viewport = context.main_viewport().as_raw_mut();
+        assert_eq!(
+            unsafe { (*pio).Platform_GetWindowDpiScale.unwrap()(viewport) },
+            if replace { 2.5 } else { 1.25 }
+        );
+        if replace {
+            assert!(unsafe { (*pio).Platform_OnChangedViewport }.is_none());
+            assert!(unsafe {
+                sys::ImGuiPlatformIO_ClearPlatformGetWindowWorkAreaInsetsIfOutParam(
+                    pio,
+                    replacement_insets,
+                )
+            });
+        } else {
+            assert!(std::ptr::fn_addr_eq(
+                unsafe { (*pio).Platform_OnChangedViewport }.unwrap(),
+                changed as unsafe extern "C" fn(*mut sys::ImGuiViewport)
+            ));
+            assert!(unsafe {
+                sys::ImGuiPlatformIO_ClearPlatformGetWindowWorkAreaInsetsIfOutParam(pio, insets)
+            });
+        }
+    }
+}
+
+#[test]
+fn failed_initialization_restores_unclaimed_viewport_callbacks() {
+    unsafe extern "C" fn dpi(_: *mut sys::ImGuiViewport) -> f32 {
+        1.5
+    }
+    unsafe extern "C" fn changed(_: *mut sys::ImGuiViewport) {}
+    unsafe extern "C" fn insets(_: *mut sys::ImGuiViewport, out: *mut sys::ImVec4) {
+        unsafe { out.write(sys::ImVec4::zero()) };
+    }
+
+    let _guard = crate::tests::test_guard();
+    let mut context = Context::create();
+    let pio = context.platform_io_mut().as_raw_mut();
+    unsafe {
+        (*pio).Platform_GetWindowDpiScale = Some(dpi);
+        (*pio).Platform_OnChangedViewport = Some(changed);
+        sys::ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(pio, Some(insets));
+    }
+    let mut registration = registration_with_lifecycle(&mut context, None, Rc::new(|| {}));
+    unsafe { sys::ImGuiPlatformIO_ClearPlatformHandlers(pio) };
+    registration.native_initialization_failed();
+
+    let viewport = context.main_viewport().as_raw_mut();
+    assert_eq!(
+        unsafe { (*pio).Platform_GetWindowDpiScale.unwrap()(viewport) },
+        1.5
+    );
+    assert!(std::ptr::fn_addr_eq(
+        unsafe { (*pio).Platform_OnChangedViewport }.unwrap(),
+        changed as unsafe extern "C" fn(*mut sys::ImGuiViewport)
+    ));
+    assert!(unsafe {
+        sys::ImGuiPlatformIO_ClearPlatformGetWindowWorkAreaInsetsIfOutParam(pio, insets)
+    });
+}
+
+#[test]
 fn platform_claim_wraps_every_official_sdl3_window_callback() {
     let _guard = crate::tests::test_guard();
     let mut context = Context::create();

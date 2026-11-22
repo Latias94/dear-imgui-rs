@@ -263,7 +263,7 @@ impl Context {
             log_filename: None,
             platform_name: None,
             renderer_name: None,
-            clipboard_ctx: Box::new(ClipboardContext::dummy()),
+            clipboard_ctx: Box::new(ClipboardContext::dummy(ui.scratch_buffers.clone())),
             ui,
         })
     }
@@ -386,9 +386,6 @@ impl Drop for Context {
             self.texture_registry
                 .borrow_mut()
                 .release_after_native_destroy();
-            // Native context destruction may invoke typed destroy callbacks, so their registry
-            // entries must outlive `igDestroyContext` itself.
-            crate::platform_io::clear_typed_callbacks_for_context(raw);
             crate::fonts::forget_font_atlas_generation(owned_font_atlas);
         }
 

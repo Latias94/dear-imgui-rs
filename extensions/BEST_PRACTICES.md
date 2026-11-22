@@ -14,8 +14,8 @@ Follow the `dear-imgui-rs` crate's style for a uniform developer experience:
 
 - Entry via `Ui` extensions
   - Provide `Ui` extension methods to access your extension's per-frame UI (e.g., `ui.guizmo()` returning a `GizmoUi`).
-- RAII tokens
-  - For push/pop stacks and begin/end scopes, return tokens that pop/end on `Drop`. Offer an explicit `.pop()`/`.end()` as convenience.
+- Native scopes
+  - Expose drawing through a closure when a native `Begin`/`End` pair depends on the current window, table cell, or draw channel. Keep the guard inside the wrapper so return and unwinding both run its destructor. A public token for a style push needs to tolerate an early or skipped `Drop`.
 - Builder pattern
   - Complex widgets/operations use a builder with `.build()` (e.g., `manipulate_config(...).operation(...).mode(...).build()`).
 - Strongly-typed flags and enums
@@ -31,23 +31,17 @@ Example (ImGuizmo):
 use dear_imgui_rs::Ui;
 use dear_imguizmo::{GuizmoExt, Operation, Mode, DrawListTarget};
 
-fn draw(ui: &Ui) {
+fn draw(ui: &Ui, view: &[f32; 16], projection: &[f32; 16], model: &mut [f32; 16]) -> bool {
     let giz = ui.guizmo();
     giz.set_drawlist(DrawListTarget::Window);
-    giz.set_rect(0.0, 0.0, 800.0, 600.0);
-
-    let view = [1.0; 16];
-    let proj = [1.0; 16];
-    let mut model = [1.0; 16];
+    giz.set_rect_pos_size(ui.window_pos(), ui.window_size());
 
     let _id = giz.push_id("cube-0");
-    let used = giz
-        .manipulate_config(&view, &proj, &mut model)
+    giz.manipulate_config(view, projection, model)
         .operation(Operation::TRANSLATE | Operation::ROTATE)
         .mode(Mode::World)
         .translate_snap([1.0, 1.0, 1.0])
-        .build();
-    if used { /* changed this frame */ }
+        .build()
 }
 ```
 
@@ -57,35 +51,34 @@ Naming convention for Ui extensions and entry points:
 
 - `GuizmoExt::guizmo` -> returns `GizmoUi`
 - `ImPlotExt::implot` -> returns `PlotUi<'_>` and takes a `PlotContext`
-- `ImNodesExt::imnodes` -> returns `NodesUi<'_>` and takes a `Context`
+- `ImNodesExt::imnodes_editor` takes an ImNodes `Context` and an optional `&EditorContext`. Its `with_nodes` closure receives the editor for drawing and returns a `PostEditor` for interaction queries.
 
 ## Context Binding to Dear ImGui
 
 Extensions that keep their own global/context state must explicitly bind to the current Dear ImGui context before creating or using that state.
 
-Prefer doing this inside your safe wrapper entry points (e.g. `Ui` extension methods and context constructors) so callers don't need to touch `-sys` APIs.
+Bind in the safe constructor and frame entry points. For example, create the plot context once, then submit samples inside its host window on each frame.
 
 ```rust
-// Safe wrapper usage (recommended)
-let implot = dear_implot::PlotContext::create(&imgui_ctx);
-let giz = ui.guizmo(); // binds and calls BeginFrame
-let imnodes = dear_imnodes::Context::create(&imgui_ctx);
+use dear_imgui_rs::{Context, ImGuiResult, Ui};
+use dear_implot::{ImPlotExt, PlotContext};
 
-// Low-level / -sys glue (only when building the wrapper)
-// ImPlot context creation
-unsafe { dear_implot_sys::ImPlot_SetImGuiContext(dear_imgui_sys::igGetCurrentContext()) }
-let implot = dear_implot::PlotContext::create(&imgui_ctx);
+fn init(imgui: &Context) -> ImGuiResult<PlotContext> {
+    PlotContext::try_create(imgui)
+}
 
-// ImGuizmo per-frame setup
-unsafe { dear_imguizmo_sys::ImGuizmo_SetImGuiContext(dear_imgui_sys::igGetCurrentContext()) }
-dear_imguizmo::GuizmoContext::new().begin_frame(ui);
-
-// ImNodes context creation
-unsafe { dear_imnodes_sys::imnodes_SetImGuiContext(dear_imgui_sys::igGetCurrentContext()) }
-let imnodes = dear_imnodes::Context::create(&imgui_ctx);
+fn draw(ui: &Ui, plots: &PlotContext, times: &[f64], cpu_ms: &[f64]) {
+    ui.window("Profiler").build(|| {
+        ui.implot(plots).with_plot("Frame time", |plot| {
+            plot.plot_line("CPU (ms)", times, cpu_ms);
+        });
+    });
+}
 ```
 
-Rationale: it prevents querying ImGui state through a stale or null context. Record the owner's `ContextBinding`, enter it for native calls and destruction, and reject a `Ui` with a different `ContextId`. Use `ContextAttachment` when hooks must detach before Context destruction. Applications should drop extension owners before their Context; after Context death, avoid native destruction rather than dereferencing stale state. Dear ImGui's process-current Context and extensions' global state require serial use across contexts.
+Record the owner's `ContextBinding` and validate the `Ui`'s `ContextId` before entering native frame code. For a window-bound native scope, construct the guard inside `Ui::with_native_window_scope` and invoke application code through `NativeWindowScope::run`. This balances scopes opened by the application before the guard ends the extension in its original window and table cell.
+
+`ContextBinding` is a weak reference. If native state needs a live ImGui context for cleanup, use `ContextAttachment` to release it during teardown. An object that can outlive its context and uses ImGui's allocator must acquire a `ContextThreadLease` before allocation and hold it through native destruction. The lease keeps the allocator on the owning thread. Serialize native calls that use process-global state across contexts.
 
 ## Layering
 
@@ -124,14 +117,14 @@ Centralize all prebuilt download/extract/naming logic via the shared helper crat
   Use at least the matching full release version so a lockfile cannot retain a helper that lacks the required APIs:
   ```toml
   [build-dependencies]
-  build-support = { package = "dear-imgui-build-support", version = "0.22.0", features = ["binding-spec"] }
+  build-support = { package = "dear-imgui-build-support", version = "0.23.0", features = ["binding-spec"] }
   ```
 
   Workspace members should inherit the repository catalog instead:
 
   ```toml
   [build-dependencies]
-  build-support.workspace = true
+  build-support = { workspace = true, features = ["binding-spec"] }
   ```
 
 - Use `CrateBindingSpec` and the maintained source inventory for bindings,
@@ -159,8 +152,8 @@ For extensions that support prebuilt artifacts, provide these routes:
 
 Use `native_build::NativeBuildPlan` to resolve `<EXT>_SYS_BUILD_MODE=auto|source|prebuilt|bindings-only` and legacy flags consistently. In automatic mode, source requirements win over prebuilt discovery; explicit prebuilt and bindings-only modes reject source-only requirements. Explicit `LIB_DIR`, `PREBUILT_URL`, and `PACKAGE_DIR` selectors are mutually exclusive and authoritative: acquisition or validation errors must stop the build. Strict prebuilt mode never falls back to source. `SKIP_CC=1` alone is check-only; with an artifact selector or feature `prebuilt`, it requires a compatible prebuilt. Do not mix the new mode with enabled legacy mode flags. Test Engine is source-only and retains its separate source/check-only routes. See the [0.22 native build policy migration](../docs/COMPATIBILITY.md#0220-native-build-policy).
 
-Tip: allow automated downloads from GitHub Releases by generating candidate URLs via
-`build_support::release_candidate_urls_env()` and trying them in order.
+For automatic release downloads, pass the release tags and archive names to
+`build_support::release_candidate_urls_env(&tags, &names)` and try the URLs in order.
 
 Naming convention for static libs:
 
@@ -177,7 +170,7 @@ Naming convention for static libs:
 
 ## High-Level API Design
 
-- RAII lifetimes: return tokens to guarantee paired begin/end calls
+- Give each drawing closure a handle for the active native scope. Keep native `End` calls under the wrapper's control.
 - Builders: prefer fluent configuration for complex options
 - Bitflags vs enums:
   - Use `bitflags` for C flag masks (e.g., plotting flags, gizmo operations)

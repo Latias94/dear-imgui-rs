@@ -22,7 +22,11 @@ fn representative_upstream_and_bridge_symbols_are_generated() {
     let _ = sys::VisPos_VisPos_Nil;
     let _ = sys::Glyph_Glyph_Nil;
     let _ = sys::Iterator_Iterator_Nil;
-    let _ = sys::Language_Cpp;
+    let _ = sys::TextEditor_LookupLanguage;
+    let _ = sys::TextEditor_LookupLanguageByExtension;
+    let _ = sys::AutoCompleteConfig_SetWordCharacters;
+    let _ = sys::AutoCompleteState_AddSuggestion;
+    let _ = sys::TextEditor_SetAutoCompleteSuggestions_array;
     let _ = sys::Palette_Palette;
     let _ = sys::Palette_destroy;
     let _ = sys::TrieAutoComplete_destroy;

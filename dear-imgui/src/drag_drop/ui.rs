@@ -5,6 +5,11 @@ use super::target::DragDropTarget;
 use crate::{Ui, sys};
 
 impl Ui {
+    pub(super) fn drag_drop_scope_available(&self) -> bool {
+        // Dear ImGui has one pair of source/target flags for the entire context.
+        unsafe { !(*self.ctx).DragDropWithinSource && !(*self.ctx).DragDropWithinTarget }
+    }
+
     /// Creates a new drag drop source configuration
     ///
     /// # Arguments
@@ -34,8 +39,8 @@ impl Ui {
 
     /// Creates a drag drop target for the last item
     ///
-    /// Returns `Some(DragDropTarget)` if the last item can accept drops,
-    /// `None` otherwise.
+    /// Returns `Some(DragDropTarget)` if the last item can accept drops. While a source or
+    /// target is open in this context, further attempts return `None`.
     ///
     /// # Example
     /// ```no_run
@@ -52,7 +57,9 @@ impl Ui {
     /// ```
     #[doc(alias = "BeginDragDropTarget")]
     pub fn drag_drop_target(&self) -> Option<DragDropTarget<'_>> {
-        let should_begin = self.run_with_bound_context(|| unsafe { sys::igBeginDragDropTarget() });
+        let should_begin = self.run_with_bound_context(|| {
+            self.drag_drop_scope_available() && unsafe { sys::igBeginDragDropTarget() }
+        });
         if should_begin {
             Some(DragDropTarget(
                 self,
@@ -70,8 +77,8 @@ impl Ui {
     ///
     /// This is a convenience wrapper over `ImGui::GetDragDropPayload`.
     ///
-    /// The returned payload is owned and managed by Dear ImGui and may become invalid
-    /// after the drag operation completes. Do not cache it beyond the current frame.
+    /// The metadata is copied. Dear ImGui owns the data pointer, which can be invalidated
+    /// by another submission or by ending the target after delivery in the same frame.
     #[doc(alias = "GetDragDropPayload")]
     pub fn drag_drop_payload(&self) -> Option<DragDropPayload> {
         self.run_with_bound_context(|| unsafe {

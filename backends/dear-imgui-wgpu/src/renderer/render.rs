@@ -1,4 +1,4 @@
-#[cfg(feature = "mv-log")]
+#[cfg(any(feature = "mv-log", feature = "tracing"))]
 use std::sync::{Mutex, OnceLock};
 
 use super::{
@@ -15,13 +15,6 @@ use dear_imgui_rs::{
     sys,
 };
 use wgpu::RenderPass;
-
-#[allow(unused_macros)]
-macro_rules! mvlog {
-    ($($arg:tt)*) => {
-        if cfg!(feature = "mv-log") { eprintln!($($arg)*); }
-    }
-}
 
 fn with_bound_context<R>(
     binding: &ContextBinding,
@@ -268,7 +261,7 @@ impl WgpuRenderer {
         })
     }
 
-    #[cfg(feature = "mv-log")]
+    #[cfg(any(feature = "mv-log", feature = "tracing"))]
     fn log_framebuffer_mismatch(
         &self,
         draw_data: &DrawData,
@@ -297,24 +290,35 @@ impl WgpuRenderer {
             .get_or_init(|| Mutex::new(None))
             .lock()
             .unwrap();
-        if *previous != Some(key) {
-            mvlog!(
-                "[wgpu-mv] fb mismatch expected=({}, {}) override=({}, {}) disp=({:.1},{:.1}) fb_scale=({:.2},{:.2}) main={}",
-                expected_width,
-                expected_height,
-                fb_width,
-                fb_height,
-                draw_data.display_size()[0],
-                draw_data.display_size()[1],
-                draw_data.framebuffer_scale()[0],
-                draw_data.framebuffer_scale()[1],
-                main_viewport
-            );
-            *previous = Some(key);
+        if previous.replace(key) == Some(key) {
+            return;
         }
+        drop(previous);
+        #[cfg(feature = "tracing")]
+        tracing::warn!(
+            expected_width,
+            expected_height,
+            fb_width,
+            fb_height,
+            main_viewport,
+            "framebuffer extent differs from draw data"
+        );
+        #[cfg(feature = "mv-log")]
+        eprintln!(
+            "[wgpu-mv] fb mismatch expected=({}, {}) override=({}, {}) disp=({:.1},{:.1}) fb_scale=({:.2},{:.2}) main={}",
+            expected_width,
+            expected_height,
+            fb_width,
+            fb_height,
+            draw_data.display_size()[0],
+            draw_data.display_size()[1],
+            draw_data.framebuffer_scale()[0],
+            draw_data.framebuffer_scale()[1],
+            main_viewport
+        );
     }
 
-    #[cfg(not(feature = "mv-log"))]
+    #[cfg(not(any(feature = "mv-log", feature = "tracing")))]
     fn log_framebuffer_mismatch(
         &self,
         _draw_data: &DrawData,

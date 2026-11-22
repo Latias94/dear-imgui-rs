@@ -22,6 +22,9 @@ permissions:
   contents: read
 
 env:
+  CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+  CARGO_INCREMENTAL: '0'
+  CARGO_TERM_COLOR: always
   RUNTIME_CONTRACT: ${{ inputs.contract }}
   RUNTIME_GATE_ATTEMPT: ${{ inputs.gate_attempt }}
 
@@ -31,7 +34,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:
-      retry_eligible: ${{ steps.gate.outputs.retry_eligible || steps.preparation.outputs.retry_eligible || (inputs.gate_attempt == 1 && 'true') || 'false' }}
+      retry_eligible: >-
+        ${{ steps.gate.outputs.retry_eligible || steps.preparation.outputs.retry_eligible ||
+            (steps.checkout.outcome == 'failure' && inputs.gate_attempt == 1 && 'true') || 'false' }}
     steps:
       - name: Checkout repository
         id: checkout
@@ -59,12 +64,12 @@ jobs:
           ((inputs.contract == 'ash-vulkan-validation-smoke' && steps.core_sources.outcome == 'success') ||
            (inputs.contract != 'ash-vulkan-validation-smoke' && steps.test_engine_sources.outcome == 'success'))
         continue-on-error: ${{ inputs.gate_attempt == 1 }}
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        run: rustup toolchain install --profile minimal --no-self-update
 
       - name: Cache Rust dependencies
         if: steps.toolchain.outcome == 'success'
         continue-on-error: true
-        uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           cache-bin: "false"
           key: native-runtime-${{ inputs.contract }}
@@ -110,13 +115,15 @@ jobs:
           IMGUI_SYS_FORCE_BUILD: "1"
         run: >-
           python3 tools/ci/run_contract.py "$RUNTIME_CONTRACT"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --candidate-sha "$CANDIDATE_SHA"
           --evidence-dir "target/runtime-evidence/$RUNTIME_CONTRACT"
           --attempt "$RUNTIME_GATE_ATTEMPT"
           --defer-infrastructure-retry
 
       - name: Test Glow external-context texture lifecycle
-        if: steps.gate.outcome == 'success' && inputs.contract == 'sdl3-glow-multi-viewport-smoke'
+        if: >-
+          steps.gate.outcome == 'success' && steps.gate.outputs.retry_eligible == 'false' &&
+          inputs.contract == 'sdl3-glow-multi-viewport-smoke'
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
           WINIT_UNIX_BACKEND: x11
@@ -129,17 +136,17 @@ jobs:
 
       - name: Classify runtime preparation failure
         id: preparation
-        if: always() && steps.gate.outcome == 'skipped' && hashFiles('tools/ci/run_contract.py') != ''
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && steps.gate.outcome == 'skipped' }}
         run: >-
           python3 tools/ci/run_contract.py runtime-preparation-failure
           --gate "$RUNTIME_CONTRACT"
-          --candidate-sha "${{ inputs.candidate_sha }}"
+          --candidate-sha "$CANDIDATE_SHA"
           --evidence-dir "target/runtime-evidence/$RUNTIME_CONTRACT"
           --attempt "$RUNTIME_GATE_ATTEMPT"
 
       - name: Retain native runtime evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-runtime-${{ inputs.contract }}-${{ inputs.candidate_sha }}-gate-${{ inputs.gate_attempt }}
           path: target/runtime-evidence/${{ inputs.contract }}

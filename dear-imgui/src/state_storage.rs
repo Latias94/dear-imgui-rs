@@ -3,7 +3,8 @@
 //! Dear ImGui provides a per-window key/value storage (`ImGuiStorage`) that is
 //! used by many widgets and can also be used by custom widgets to persist state.
 //!
-use crate::{Id, sys};
+use crate::context::binding::CTX_MUTEX;
+use crate::{ContextThreadLease, Id, ImGuiResult, sys};
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
@@ -16,7 +17,11 @@ pub struct StateStorage<'ui> {
 
 impl<'ui> StateStorage<'ui> {
     /// # Safety
-    /// `raw` must be a valid, non-null pointer to an `ImGuiStorage`.
+    /// `raw` must point to an initialized `ImGuiStorage` that remains live and accessible
+    /// on this thread for `'ui`, including through any copies of the returned view. Its
+    /// allocation must remain exclusively owned by the storage and its keys must stay sorted.
+    /// A Context or [`ContextThreadLease`] must cover any mutation that can allocate or free
+    /// entries through Dear ImGui.
     pub unsafe fn from_raw(raw: *mut sys::ImGuiStorage) -> Self {
         let raw = NonNull::new(raw).expect("StateStorage::from_raw() requires non-null pointer");
         Self {
@@ -32,6 +37,7 @@ impl<'ui> StateStorage<'ui> {
 
     /// Clears all storage entries.
     pub fn clear(&mut self) {
+        let _guard = CTX_MUTEX.lock();
         unsafe { sys::ImGuiStorage_Clear(self.raw.as_ptr()) }
     }
 
@@ -40,6 +46,7 @@ impl<'ui> StateStorage<'ui> {
     }
 
     pub fn set_int(&mut self, key: Id, value: i32) {
+        let _guard = CTX_MUTEX.lock();
         unsafe { sys::ImGuiStorage_SetInt(self.raw.as_ptr(), key.raw(), value) }
     }
 
@@ -48,7 +55,7 @@ impl<'ui> StateStorage<'ui> {
     }
 
     pub fn set_bool(&mut self, key: Id, value: bool) {
-        unsafe { sys::ImGuiStorage_SetBool(self.raw.as_ptr(), key.raw(), value) }
+        self.set_int(key, i32::from(value));
     }
 
     pub fn get_float(&self, key: Id, default: f32) -> f32 {
@@ -56,6 +63,7 @@ impl<'ui> StateStorage<'ui> {
     }
 
     pub fn set_float(&mut self, key: Id, value: f32) {
+        let _guard = CTX_MUTEX.lock();
         unsafe { sys::ImGuiStorage_SetFloat(self.raw.as_ptr(), key.raw(), value) }
     }
 }
@@ -65,17 +73,43 @@ impl<'ui> StateStorage<'ui> {
 /// This is useful when you want to keep widget state outside of the current
 /// window storage (e.g. sharing state across windows or providing custom storage
 /// for a widget subtree via [`crate::Ui::with_state_storage`]).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct OwnedStateStorage {
     raw: sys::ImGuiStorage,
+    _thread_lease: ContextThreadLease,
 }
 
 impl OwnedStateStorage {
+    /// Creates storage on the Dear ImGui owner thread.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the thread lease cannot be acquired. Use [`Self::try_new`] to handle this error.
     pub fn new() -> Self {
-        Self::default()
+        Self::try_new().expect("failed to acquire Dear ImGui thread ownership for state storage")
     }
 
-    pub fn as_mut(&mut self) -> &mut sys::ImGuiStorage {
+    /// Reserves the current thread for this storage's native entries and creates empty storage.
+    pub fn try_new() -> ImGuiResult<Self> {
+        let thread_lease = ContextThreadLease::acquire()?;
+        Ok(Self {
+            raw: sys::ImGuiStorage::default(),
+            _thread_lease: thread_lease,
+        })
+    }
+
+    /// Borrows the native storage for direct mutation.
+    ///
+    /// # Safety
+    ///
+    /// Preserve the native vector's allocation, length, capacity, and sorted-key invariants.
+    /// This storage must remain the sole owner of any allocation it will clear on drop.
+    ///
+    /// ```compile_fail,E0133
+    /// let mut storage = dear_imgui_rs::OwnedStateStorage::new();
+    /// let _ = storage.as_mut();
+    /// ```
+    pub unsafe fn as_mut(&mut self) -> &mut sys::ImGuiStorage {
         &mut self.raw
     }
 
@@ -92,19 +126,27 @@ impl OwnedStateStorage {
     }
 }
 
+impl Default for OwnedStateStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Drop for OwnedStateStorage {
     fn drop(&mut self) {
-        unsafe { sys::ImGuiStorage_Clear(self.as_raw_mut()) }
+        unsafe { StateStorage::from_raw(self.as_raw_mut()) }.clear();
     }
 }
 
 struct StateStorageOverride {
+    window: NonNull<sys::ImGuiWindow>,
     previous: *mut sys::ImGuiStorage,
 }
 
 impl Drop for StateStorageOverride {
     fn drop(&mut self) {
-        unsafe { sys::igSetStateStorage(self.previous) }
+        // The frame borrow keeps the window alive even if the closure changed the current window.
+        unsafe { (*self.window.as_ptr()).DC.StateStorage = self.previous };
     }
 }
 
@@ -126,8 +168,8 @@ impl crate::ui::Ui {
     /// Overrides the current state storage while `f` runs.
     ///
     /// The owning context remains current throughout the call. Nested overrides restore in LIFO
-    /// order, and restoration also runs if `f` panics. The replacement storage and its scoped view
-    /// cannot escape the closure.
+    /// order, including if `f` panics or leaves a different window current. The replacement
+    /// storage and its scoped view cannot escape the closure.
     ///
     /// ```compile_fail
     /// use dear_imgui_rs::{Context, OwnedStateStorage, StateStorage};
@@ -148,9 +190,12 @@ impl crate::ui::Ui {
         self.run_with_bound_context(|| {
             let replacement = storage.as_raw_mut();
             let scoped_storage = unsafe { StateStorage::from_raw(replacement) };
-            let previous = unsafe { sys::igGetStateStorage() };
-            unsafe { sys::igSetStateStorage(replacement) };
-            let storage_override = StateStorageOverride { previous };
+            let window = NonNull::new(unsafe { sys::igGetCurrentWindowRead() })
+                .expect("with_state_storage requires a current window");
+            let previous = unsafe {
+                std::ptr::replace(&raw mut (*window.as_ptr()).DC.StateStorage, replacement)
+            };
+            let storage_override = StateStorageOverride { window, previous };
             let result = f(scoped_storage);
             drop(storage_override);
             result

@@ -12,12 +12,12 @@ native and WebAssembly targets.
 
 ## Compatibility
 
-This Preview crate uses the `0.22` release train and requires Rust 1.95 or newer. Use it from the same release train as `dear-imgui-rs` and `dear-imgui-cte-sys`; mixing release trains is unsupported. The checked-in source identity is recorded in the sys crate README and Cargo metadata. See the [native build policy migration](../../docs/COMPATIBILITY.md#0220-native-build-policy).
+This Preview crate requires Rust 1.95 or newer. Use `dear-imgui-rs` and `dear-imgui-cte-sys` from the same `0.23` release train. Rebuild custom archives and browser providers with the [pinned CTE sources](../dear-imgui-cte-sys/README.md#compatibility-and-provenance). For build settings carried forward from 0.21, see the [0.22 native build policy migration](../../docs/COMPATIBILITY.md#0220-native-build-policy).
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.22"
-dear-imgui-cte = "0.22"
+dear-imgui-rs = "0.23"
+dear-imgui-cte = "0.23"
 ```
 
 ## Quick Start
@@ -72,7 +72,10 @@ cargo run -p xtask -- web-demo cte
 - Typed callbacks cover changes, transactions, decorators, carets, line numbers, popups,
   language changes, identifier iteration, and atomic selection/line filters.
 - Custom autocomplete owns its callback and exposes only callback-scoped request
-  state. The built-in Trie is attached to and destroyed with its editor.
+  state. Configure extra trigger and word characters for completions such as
+  `\alpha`. A request can supply display labels and choose the glyph range to
+  replace. Submit asynchronous results on the editor's render thread. The
+  built-in Trie is attached to and destroyed with its editor.
 - `TextDiff` supports integrated and side-by-side rendering with independent
   language, palette, and display configuration.
 - `dejavu_font_source` and `noto_sans_sc_font_source` expose bundled fonts through the safe managed atlas
@@ -82,13 +85,32 @@ The default occurrence and word-boundary methods retain upstream defaults.
 Use their `_with_whole_word` variants to request complete-word occurrences or
 word-only navigation that leaves whitespace and punctuation in place.
 
-See the family-level disposition ledger in
-[`docs/API_COVERAGE.md`](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/API_COVERAGE.md#imguicolortextedit-api-family-ledger)
-for the small set of raw-only capabilities.
+`Language::from_extension` accepts case-sensitive extensions with a leading dot,
+including `.jl` (Julia) and `.wgsl` (WGSL). Palettes have 33 slots, including
+`CustomColor1` through `CustomColor9`. Use `set_left_margin` for the editor margin
+in glyph columns. It also moves the text when line numbers are hidden. Smooth
+scrolling is opt-in through `set_smooth_scrolling_enabled`.
+
+For operations that require the raw API, see the [CTE API coverage table](../../docs/API_COVERAGE.md#imguicolortextedit-api-family-ledger).
+
+## Breaking changes
+
+The `cimCTE` revision shipped in 0.23 replaces the removed `Language_*` raw getters with
+registry lookup. Safe code should use the `Language` enum, `Language::from_name`,
+or `Language::from_extension`. The built-in set now contains Julia and WGSL.
+`PaletteColor::COUNT` is 33 and includes `CustomColor1` through `CustomColor9`.
+The raw line-number margin functions were replaced by `TextEditor_SetLeftMargin`
+and `TextEditor_GetLeftMargin`. The safe wrapper keeps deprecated forwarding
+methods while callers migrate to `set_left_margin` and `left_margin`.
+
+Autocomplete configuration now supports extra trigger and word characters.
+Callbacks can inspect and change the replacement range and add display labels.
+Asynchronous labeled suggestions are copied during the render-thread call, so
+the input strings only need to remain valid for that call.
 
 ## Migrating from 0.18
 
-The 0.20 source pin includes upstream wide-glyph column handling. Remove the
+Upstream already handled wide-glyph columns in the 0.22 source pin. Remove the
 `cte-wide-glyphs-v1` overlays and rebuild custom native archives and CTE-enabled
 WASM providers together with the matching core. Raw `Glyph` mirrors now use
 `columns: u8` and `squiggle: u32`; inspect the generated sys bindings before
@@ -104,10 +126,10 @@ migration, see [the compatibility guide](../../docs/COMPATIBILITY.md#020-stable-
 
 `TextEditor` and `TextDiff` are bound to the `Context` used at
 creation and are neither `Send` nor `Sync`. Rendering with a `Ui` from another
-context is rejected before FFI. Drop temporarily binds the owner context and
-restores the prior current context. Applications should destroy CTE state before
-destroying its Context; after Context teardown, the wrapper deliberately leaks
-the native handle rather than dereferencing dead native state.
+context is rejected before FFI. Drop temporarily binds the owner while it is live.
+After Context teardown, the editor, its optional connected Trie, and the diff can
+still release their native allocations on the owning thread. Drop the last such
+owner before creating a Dear ImGui context on a different thread.
 
 Callbacks and their Rust userdata are owned by the editor. Replacing, clearing,
 or dropping a callback unregisters the native slot before releasing its Rust
@@ -137,6 +159,7 @@ and wrapper invariant before returning to safe methods.
 
 Source wins when Cargo unifies `build-from-source` and `prebuilt`. WASM requires
 the explicit `wasm` feature on the highest safe crate in every dependency path.
+Rebuild the Rust application and the `imgui-sys-v1` provider together when upgrading a CTE-enabled web application. See the [browser runtime setup](../../docs/WASM.md#runtime-model).
 
 ## Raw Access
 

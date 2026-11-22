@@ -1,6 +1,6 @@
 use super::{
     Context, EditorContext, EditorContextInner, ImNodesContextAliveToken, ImNodesContextGuard,
-    ImNodesScope,
+    ImNodesScope, SavedBinding,
 };
 use crate::sys;
 use dear_imgui_rs::Context as ImGuiContext;
@@ -9,25 +9,26 @@ use std::cell::Cell;
 use std::os::raw::c_char;
 use std::rc::Rc;
 
-/// An ImNodes editor context bound to a specific ImNodes context.
-///
-/// Prefer using this type over calling methods directly on `EditorContext` to avoid
-/// accidentally operating on the wrong global ImNodes context.
+/// Access to an explicit editor's panning and saved state between submissions.
+/// This handle retains the editor and restores the caller's bindings after each operation.
 pub struct BoundEditor<'a> {
-    scope: ImNodesScope,
-    _ctx: &'a Context,
+    scope: ImNodesScope<'a>,
 }
 
 impl<'a> BoundEditor<'a> {
     #[inline]
     fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
-        self._ctx.assert_no_active_frame("BoundEditor operation");
+        self.scope
+            .ctx
+            .assert_no_active_frame("BoundEditor operation");
         self.scope.with_bound_context(f)
     }
 
     fn editor_raw(&self) -> *mut sys::ImNodesEditorContext {
         self.scope
-            .editor_raw
+            .editor_lease
+            .as_ref()
+            .map(|editor| editor.raw)
             .expect("BoundEditor always owns an explicit EditorContext lease")
     }
 
@@ -107,6 +108,7 @@ impl<'a> BoundEditor<'a> {
 impl Context {
     /// Try to create a new ImNodes context bound to the current Dear ImGui context
     pub fn try_create(imgui: &ImGuiContext) -> dear_imgui_rs::ImGuiResult<Self> {
+        let thread_lease = Rc::new(dear_imgui_rs::ContextThreadLease::acquire()?);
         let imgui_binding = imgui.binding();
         let raw = imgui_binding.with_bound_context(|| {
             let _nodes_guard = ImNodesContextGuard::bind(std::ptr::null_mut());
@@ -122,6 +124,8 @@ impl Context {
             imgui_binding,
             alive: Rc::new(()),
             frame_active: Cell::new(false),
+            default_editor_submission: Default::default(),
+            thread_lease,
         })
     }
 
@@ -149,7 +153,7 @@ impl Context {
     /// Bind an `EditorContext` to this ImNodes context.
     pub fn bind_editor<'a>(&'a self, editor: &EditorContext) -> BoundEditor<'a> {
         let scope = self.scope(Some(editor));
-        BoundEditor { scope, _ctx: self }
+        BoundEditor { scope }
     }
 
     pub fn try_create_editor_context(&self) -> dear_imgui_rs::ImGuiResult<EditorContext> {
@@ -168,6 +172,8 @@ impl Context {
                 bound_ctx_raw: self.raw,
                 bound_ctx_alive: self.alive_token(),
                 imgui_binding: self.imgui_binding.clone(),
+                last_submission: Default::default(),
+                _thread_lease: self.thread_lease.clone(),
             }),
         })
     }
@@ -181,7 +187,7 @@ impl Context {
         ImNodesContextAliveToken(Rc::downgrade(&self.alive))
     }
 
-    pub(crate) fn scope(&self, editor: Option<&EditorContext>) -> ImNodesScope {
+    pub(crate) fn scope(&self, editor: Option<&EditorContext>) -> ImNodesScope<'_> {
         let editor_lease = editor.map(|editor| {
             let owner = self.alive_token();
             assert!(
@@ -201,12 +207,8 @@ impl Context {
             editor.inner.clone()
         });
         ImNodesScope {
-            imgui_binding: self.imgui_binding.clone(),
-            ctx_raw: self.raw,
-            ctx_alive: self.alive_token(),
-            _ctx_lease: self.alive.clone(),
-            editor_raw: editor_lease.as_ref().map(|editor| editor.raw),
-            _editor_lease: editor_lease,
+            ctx: self,
+            editor_lease,
         }
     }
 
@@ -232,15 +234,9 @@ impl EditorContext {
 
 impl Drop for Context {
     fn drop(&mut self) {
-        if self.frame_active.get() || Rc::strong_count(&self.alive) > 1 {
-            // `mem::forget` is allowed to leak resources. Preserve that guarantee here: a
-            // forgotten native frame keeps a strong lease, so freeing the context would create
-            // dangling pointers inside ImNodes. Intentionally leak instead of panicking in Drop.
-            self.raw = std::ptr::null_mut();
-            return;
-        }
         if !self.raw.is_null() {
             let raw = std::mem::replace(&mut self.raw, std::ptr::null_mut());
+            SavedBinding::Context(raw).invalidate(SavedBinding::Context(std::ptr::null_mut()));
             if self
                 .imgui_binding
                 .try_with_bound_context(|| {
@@ -263,25 +259,17 @@ impl Drop for EditorContextInner {
     fn drop(&mut self) {
         if !self.raw.is_null() {
             let raw = std::mem::replace(&mut self.raw, std::ptr::null_mut());
-            let owner_is_alive = self.bound_ctx_alive.is_alive();
-            if self
-                .imgui_binding
-                .try_with_bound_context(|| {
-                    if owner_is_alive {
-                        let _nodes_guard = ImNodesContextGuard::bind(self.bound_ctx_raw);
-                        unsafe {
-                            sys::imnodes_EditorContextResetToDefaultIfCurrent(raw);
-                            sys::imnodes_EditorContextFree(raw);
-                        }
-                    } else {
-                        unsafe { sys::imnodes_EditorContextFree(raw) };
-                    }
-                })
-                .is_err()
-            {
-                // The editor allocation remains independently owned even when neither owning
-                // context can be entered anymore.
+            SavedBinding::Editor(raw).invalidate(SavedBinding::DefaultEditor);
+            let free = || {
+                if self.bound_ctx_alive.is_alive() {
+                    let _nodes_guard = ImNodesContextGuard::bind(self.bound_ctx_raw);
+                    unsafe { sys::imnodes_EditorContextResetToDefaultIfCurrent(raw) };
+                }
                 unsafe { sys::imnodes_EditorContextFree(raw) };
+            };
+            if self.imgui_binding.try_with_bound_context(free).is_err() {
+                // The ImNodes editor slot and allocation outlive Dear ImGui teardown.
+                free();
             }
         }
     }

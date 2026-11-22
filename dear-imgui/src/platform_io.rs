@@ -16,10 +16,10 @@
 #[cfg(all(target_arch = "wasm32", feature = "multi-viewport"))]
 compile_error!("The `multi-viewport` feature is not supported on wasm32 targets yet.");
 
+#[cfg(feature = "multi-viewport")]
+mod callback_abi;
 mod core;
 mod identity;
-#[cfg(feature = "multi-viewport")]
-mod trampolines;
 mod viewport;
 
 #[cfg(all(test, feature = "abi-probe"))]
@@ -40,6 +40,4 @@ pub use viewport::Viewport;
 
 #[cfg(feature = "multi-viewport")]
 pub(crate) use accessors::assert_monitor_contract;
-pub(crate) use core::{
-    clear_aggregate_callbacks_for_current_context, clear_typed_callbacks_for_context,
-};
+pub(crate) use core::clear_aggregate_callbacks_for_current_context;

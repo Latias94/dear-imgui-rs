@@ -108,17 +108,18 @@ impl<'a> BarPlot<'a> {
 }
 
 impl<'a> Plot for BarPlot<'a> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
         if self.validate().is_err() {
             return; // Skip plotting if data is invalid
         }
-        let Ok(count) = i32::try_from(self.values.len()) else {
+        let Some(count) = self.layout.sample_count(self.values.len()) else {
             return;
         };
 
         plot_ui.with_bound_context(|| {
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     self.layout,
@@ -202,7 +203,7 @@ impl<'a> PositionalBarPlot<'a> {
 }
 
 impl<'a> Plot for PositionalBarPlot<'a> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
         if self.validate().is_err() {
             return; // Skip plotting if data is invalid
         }
@@ -213,6 +214,7 @@ impl<'a> Plot for PositionalBarPlot<'a> {
         plot_ui.with_bound_context(|| {
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     PlotDataLayout::DEFAULT,
@@ -235,7 +237,7 @@ impl<'a> Plot for PositionalBarPlot<'a> {
 }
 
 /// Convenience functions for quick bar plotting
-impl<'ui> crate::PlotUi<'ui> {
+impl<'ui> crate::PlotScope<'ui> {
     /// Plot a bar chart with values (X will be indices)
     pub fn bar_plot(&self, label: &str, values: &[f64]) -> Result<(), PlotError> {
         let plot = BarPlot::new(label, values);

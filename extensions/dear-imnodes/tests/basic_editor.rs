@@ -27,21 +27,14 @@ fn basic_editor_smoke_test() {
 
     let frame = imgui.begin_frame();
 
-    // Begin an editor scope and end it explicitly
-    let editor_ui = frame
+    let node_id = imnodes::NodeId::new(1);
+    let post = frame
         .ui()
         .imnodes(&imnodes_ctx)
         .editor(Some(&editor))
-        .begin_nodes();
-
-    // Create a trivial node (no actual widgets, just exercise Begin/End)
-    let node_id = imnodes::NodeId::new(1);
-    let node = editor_ui.node(node_id);
-    // Normally you'd draw title and attributes here using NodeToken helpers.
-    // Explicitly end the node so the borrow ends before we end the editor.
-    node.end();
-
-    let post = editor_ui.end();
+        .with_nodes(|editor_ui| {
+            editor_ui.node(node_id, |_| {});
+        });
 
     // Exercise some post-editor helpers; we don't assert contents, just ensure
     // the calls don't panic and respect basic contracts.

@@ -15,11 +15,11 @@ revision instead of renaming its files or remapping it under the v1 module name.
 
 ## Feature contract
 
-WASM support is explicit and target-specific. The only supported Rust target is `wasm32-unknown-unknown`, and every dependency path to the core crate must enable the `wasm` feature. The examples below target the `0.22` release train and require Rust 1.95 or newer; upgrade all workspace crates together. Use matching requirements:
+WASM support is explicit and target-specific. The only supported Rust target is `wasm32-unknown-unknown`, and every dependency path to the core crate must enable the `wasm` feature. The examples below target the `0.23` release train and require Rust 1.95 or newer; upgrade all workspace crates together. Use matching requirements:
 
 ```toml
 [dependencies]
-dear-imgui-rs = { version = "0.22", features = ["wasm"] }
+dear-imgui-rs = { version = "0.23", features = ["wasm"] }
 ```
 
 For Bevy, enable `wasm` alongside the features needed by the application and take both packages from the same release train. The Bevy backend requires Bevy exactly 0.20.1 and Rust 1.97.1 or newer:
@@ -27,8 +27,8 @@ For Bevy, enable `wasm` alongside the features needed by the application and tak
 ```toml
 [dependencies]
 bevy = "=0.20.1"
-dear-imgui-bevy = { version = "0.22", features = ["render", "wasm"] }
-dear-imgui-rs = { version = "0.22", features = ["wasm"] }
+dear-imgui-bevy = { version = "0.23", features = ["render", "wasm"] }
+dear-imgui-rs = { version = "0.23", features = ["wasm"] }
 ```
 
 Six published safe native extensions expose the same `wasm` feature and forward it to
@@ -154,9 +154,8 @@ CTE's native and WASM profiles are maintained by the repository-wide
 Prerequisites:
 
 - `rustup target add wasm32-unknown-unknown`
-- a `wasm-bindgen-cli` version matching `Cargo.lock` (`0.2.130` for the 0.22.0 lockfile)
-- `wasm-tools`
-- Emscripten SDK for the provider build
+- a `wasm-bindgen-cli` version matching `Cargo.lock` (`0.2.130` for the 0.23.0 lockfile)
+- Emscripten SDK for the provider build (CI uses 7.0.1)
 
 Re-read the lockfile after dependency updates before installing `wasm-bindgen-cli`; the lockfile is the version source of truth rather than a separately maintained script constant.
 
@@ -176,32 +175,100 @@ cargo run -p xtask -- build-cimgui-provider
 python3 -m http.server -d target/web-demo 8080
 ```
 
-Open `http://127.0.0.1:8080`. The provider command emits
-`imgui-sys-v1.wasm`, its JavaScript loader, a shared-memory wrapper, and the
-import map used by the web demo.
+Open `http://127.0.0.1:8080`. With `web-demo cte`, click in the upper source
+editor and type a character. The next frames show the edited text and a higher
+`transaction events` count. C++ calls the registered Rust closure while handling
+the edit. The lower diff pane and the autocomplete list use the same renderer.
+
+To repeat the browser regression with Playwright CLI, serve a build with `cte`
+as above and run these commands from the workspace root. The check also keeps
+a native allocation live while Rust reallocates an aligned buffer to 72 MiB.
+
+```sh
+playwright-cli -s=imgui-provider-abi open http://127.0.0.1:8080/
+playwright-cli -s=imgui-provider-abi run-code --filename=examples-wasm/tests/provider-abi.js
+playwright-cli -s=imgui-provider-abi close
+```
+
+The WASM CI job opens `/?webgl2` in headless Chrome with the software GL configuration in `examples-wasm/tests/chrome-software-gl.json`. The test verifies the fallback backend and edits the CTE document through the shared provider. With `@playwright/cli` 0.1.14, use `--json run-code` and check `.result == "true"`. The CLI can return exit code zero for a browser assertion failure.
 
 ## Runtime model
 
-The Rust and C++ modules share one `WebAssembly.Memory`:
+The supported browser runtime pairs one Rust application with one instance of
+the repository's Emscripten provider on a single thread. Data pointers refer to
+their common linear memory. C function pointers in either direction are indices
+in their common `funcref` table. wasm-bindgen keeps its JavaScript `externref`
+table private to Rust.
 
-1. The page creates `globalThis.__imgui_shared_memory`.
-2. `xtask web-demo` patches the wasm-bindgen module to import and re-export
-   `env.memory`.
-3. `xtask build-cimgui-provider` builds cimgui with imported memory and passes
-   the same object to the Emscripten module.
-4. The browser resolves all generated cimgui imports through `imgui-sys-v1`.
+| Resource | Layout used by the provider and `xtask web-demo` |
+| --- | --- |
+| Linear memory | One fixed 256 MiB `WebAssembly.Memory`. Rust's stack, statics and linker-defined `System` arena fit below 64 MiB. The provider places its statics at 64 MiB, followed by its stack and `emmalloc` heap. |
+| Ordinary allocations | The application selects `WasmProviderAllocator`. Rust `Box`, `Vec`, wasm-bindgen and provider C/C++ allocations then use the same `emmalloc` heap. The wrapper exports `dear_imgui_wasm_memalign` and `dear_imgui_wasm_free` for this purpose. |
+| Function pointers | Slots `0..4096` (end exclusive) are reserved for the provider, including the null slot. Rust's first table element is at 4096. Before Rust starts, the wrapper checks the native table fits, then grows it to 16,384 entries. This leaves 12,288 slots for the application. |
 
-This is why the provider cannot be replaced by arbitrary Rust-side imports or
-by compiling native C++ through Cargo on a WASM target. A custom single-module
-design would require a separate reviewed ABI, memory, startup, and symbol-export
-contract; it is not a supported fallback.
+The fixed memory size matters even with a global allocator. Rust's standard
+library can use `std::alloc::System` directly for thread metadata. Its wasm
+allocator first uses the linker's `__heap_base..__heap_end` arena, then tries
+`memory.grow` when that arena is full. A fixed memory makes that request fail
+and keeps `System` out of the provider heap. A larger Rust data segment or stack
+fails at link time. A Rust table import requiring more slots fails at instantiation.
 
-With the `cte` demo feature, the Rust module keeps editor, diff, Trie, callback,
-and notification state beside the one Dear ImGui Context. All CTE imports still
-resolve through `imgui-sys-v1` and share its memory; no second provider or JS
-loader is created. The demo adds the bundled DejaVu font before constructing the
-WGPU renderer, whose managed texture consumer handles subsequent font-atlas
-requests.
+### Using the provider in another application
+
+1. Enable the target features above. Select the allocator in the final Rust
+   application so it also covers ordinary allocations in dependencies.
+
+   ```rust
+   #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+   #[global_allocator]
+   static ALLOCATOR: dear_imgui_rs::sys::WasmProviderAllocator =
+       dear_imgui_rs::sys::WasmProviderAllocator;
+   ```
+
+2. Apply the demo's linker flags to the final `cdylib`, then run the matching
+   wasm-bindgen CLI. For a browser application named `my_app`, run the first two
+   commands from the application crate.
+
+   ```sh
+   cargo rustc --lib --target wasm32-unknown-unknown --release -- \
+     -C link-arg=--import-memory -C link-arg=--export-memory \
+     -C link-arg=--initial-memory=67108864 -C link-arg=--max-memory=268435456 \
+     -C link-arg=--import-table -C link-arg=--growable-table -C link-arg=--table-base=4096
+   wasm-bindgen --target web --out-dir dist target/wasm32-unknown-unknown/release/my_app.wasm
+   ```
+
+   From the matching dear-imgui-rs checkout, build the provider into the same
+   directory. Ship its `.js`, `.wasm` and `-wrapper.js` alongside the wasm-bindgen output.
+
+   ```sh
+   cargo run -p xtask -- build-cimgui-provider --out-dir /path/to/my_app/dist
+   ```
+
+3. Resolve both module names to the **same wrapper URL**. The wrapper creates
+   the memory, instantiates C++ and exports its live table under the linker's
+   `env.__indirect_function_table` name. Pass its memory to wasm-bindgen.
+
+   ```html
+   <script type="importmap">
+     { "imports": {
+       "env": "./imgui-sys-v1-wrapper.js",
+       "imgui-sys-v1": "./imgui-sys-v1-wrapper.js"
+     } }
+   </script>
+   <script type="module">
+     import init from './my_app.js';
+     import { memory } from 'imgui-sys-v1';
+     await init({ memory });
+   </script>
+   ```
+
+**Migration from the memory-only wrapper.** The raw cimgui import name remains
+`imgui-sys-v1`. Earlier v1 bundles used private function tables and independent
+growable heaps. Rebuild and deploy the Rust module, provider and page together.
+Remove the old `globalThis.__imgui_shared_memory` bootstrap. The new wrapper
+rejects that bootstrap, and the new Rust module requires allocator and table
+exports that older wrappers lack. Additional Rust modules, workers sharing this
+instance and custom provider layouts are outside this runtime contract.
 
 ## Troubleshooting
 
@@ -211,10 +278,9 @@ requests.
 - `unsupported Dear ImGui WASM target`: switch to `wasm32-unknown-unknown`.
   WASI and Emscripten targets require different imports/runtime contracts and
   are intentionally not aliases for this provider ABI.
-- `Failed to resolve import imgui-sys-v1`: build the provider and verify the
-  generated import map points to `imgui-sys-v1-wrapper.js`.
-- `env.memory` or callable import errors: install `wasm-tools`, rebuild the web
-  demo, then rebuild the provider so both artifacts use the same memory wiring.
+- An unresolved `env` or `imgui-sys-v1` import means the page needs both import
+  map entries above. For memory or callable import errors, rebuild both modules
+  from the same checkout and pass the wrapper's memory to wasm-bindgen.
 - Browser module MIME errors: serve `.js` as JavaScript and `.wasm` as
   `application/wasm`.
 - Stale binding errors: run `xtask verify-bindings`; only use `--update` after

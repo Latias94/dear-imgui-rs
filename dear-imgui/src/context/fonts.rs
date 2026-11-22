@@ -6,9 +6,9 @@ use super::binding::CTX_MUTEX;
 impl Context {
     /// Borrow the font atlas from the IO structure.
     ///
-    /// Font-atlas mutation is exposed through this shared view because Dear ImGui permits one
-    /// native atlas to be registered with multiple contexts. Mutating methods validate the native
-    /// atlas lock before entering FFI.
+    /// Contexts on the same OS thread may share a [`SharedFontAtlas`]. Configure fonts and
+    /// borrow CPU texture data between frames. To draw an atlas image in an open frame, use
+    /// [`Ui::font_atlas_texture`](crate::Ui::font_atlas_texture).
     pub fn font_atlas(&self) -> &FontAtlas {
         let _guard = CTX_MUTEX.lock();
 
@@ -45,7 +45,8 @@ impl Context {
         }
     }
 
-    /// Attempts to clone the interior shared font atlas **if it exists**.
+    /// Clone the shared atlas supplied at creation, if any. The clone keeps this OS thread as
+    /// Dear ImGui's owner after the Context is dropped.
     pub fn clone_shared_font_atlas(&self) -> Option<SharedFontAtlas> {
         self.shared_font_atlas.clone()
     }

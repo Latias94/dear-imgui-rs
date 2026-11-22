@@ -171,27 +171,31 @@ fn demo_line_plots(ui: &Ui, plot_ui: &Plot3DUi) {
         zs2[i] = xs2[i] * ys2[i];
     }
 
-    if let Some(_tok) = plot_ui.begin_plot("Line Plots").build() {
-        plot_ui.setup_axes(
-            "x",
-            "y",
-            "z",
-            Axis3DFlags::NONE,
-            Axis3DFlags::NONE,
-            Axis3DFlags::NONE,
-        );
-        Line3D::f32("f(x)", &xs1, &ys1, &zs1).plot(plot_ui);
-        plot_ui.set_next_marker_style(
-            Marker3D::Circle,
-            4.0,
-            [1.0, 1.0, 1.0, 1.0],
-            1.0,
-            [1.0, 1.0, 1.0, 1.0],
-        );
-        Line3D::f64("g(x)", &xs2, &ys2, &zs2)
-            .flags(Line3DFlags::SEGMENTS)
-            .plot(plot_ui);
-    }
+    plot_ui.begin_plot("Line Plots").build_with_setup(
+        |setup| {
+            setup.setup_axes(
+                "x",
+                "y",
+                "z",
+                Axis3DFlags::NONE,
+                Axis3DFlags::NONE,
+                Axis3DFlags::NONE,
+            );
+        },
+        |plot| {
+            Line3D::f32("f(x)", &xs1, &ys1, &zs1).plot(plot);
+            plot.set_next_marker_style(
+                Marker3D::Circle,
+                4.0,
+                [1.0, 1.0, 1.0, 1.0],
+                1.0,
+                [1.0, 1.0, 1.0, 1.0],
+            );
+            Line3D::f64("g(x)", &xs2, &ys2, &zs2)
+                .flags(Line3DFlags::SEGMENTS)
+                .plot(plot);
+        },
+    );
 }
 
 fn demo_scatter_plots(_ui: &Ui, plot_ui: &Plot3DUi) {
@@ -214,13 +218,14 @@ fn demo_scatter_plots(_ui: &Ui, plot_ui: &Plot3DUi) {
         zs2[i] = 0.75 + 0.2 * ((i as f32 * 45.164).sin() * 43758.5453).fract();
     }
 
-    if let Some(_tok) = plot_ui.begin_plot("Scatter Plots").build() {
-        Scatter3D::f32("Data 1", &xs1, &ys1, &zs1).plot(plot_ui);
-        let _fill_alpha = plot_ui.push_style_var_f32(Plot3DStyleVar::FillAlpha, 0.25);
-        let col1 = cmap(plot_ui, 1);
-        plot_ui.set_next_marker_style(Marker3D::Square, 6.0, col1, -1.0, col1);
-        Scatter3D::f32("Data 2", &xs2, &ys2, &zs2).plot(plot_ui);
-    }
+    plot_ui.begin_plot("Scatter Plots").build(|plot| {
+        Scatter3D::f32("Data 1", &xs1, &ys1, &zs1).plot(plot);
+        plot_ui.with_style_vars(&[Plot3DStyleVar::FillAlpha(0.25)], || {
+            let col1 = cmap(plot_ui, 1);
+            plot.set_next_marker_style(Marker3D::Square, 6.0, col1, -1.0, col1);
+            Scatter3D::f32("Data 2", &xs2, &ys2, &zs2).plot(plot);
+        });
+    });
 }
 
 fn demo_triangle_plots(ui: &Ui, plot_ui: &Plot3DUi) {
@@ -276,16 +281,20 @@ fn demo_triangle_plots(ui: &Ui, plot_ui: &Plot3DUi) {
     );
     FLAGS.with(|f| f.set(flags));
 
-    if let Some(_tok) = plot_ui.begin_plot("Triangle Plots").build() {
-        plot_ui.setup_axes_limits(-1.0, 1.0, -1.0, 1.0, -0.5, 1.5, Plot3DCond::Once);
-        plot_ui.set_next_fill_style(cmap(plot_ui, 0), 1.0);
-        plot_ui.set_next_line_style(cmap(plot_ui, 1), 2.0);
-        let col2 = cmap(plot_ui, 2);
-        plot_ui.set_next_marker_style(Marker3D::Square, 3.0, col2, -1.0, col2);
-        Triangles3D::f32("Pyramid", &xs, &ys, &zs)
-            .flags(flags)
-            .plot(plot_ui);
-    }
+    plot_ui.begin_plot("Triangle Plots").build_with_setup(
+        |setup| {
+            setup.setup_axes_limits(-1.0, 1.0, -1.0, 1.0, -0.5, 1.5, Plot3DCond::Once);
+        },
+        |plot| {
+            plot.set_next_fill_style(cmap(plot_ui, 0), 1.0);
+            plot.set_next_line_style(cmap(plot_ui, 1), 2.0);
+            let col2 = cmap(plot_ui, 2);
+            plot.set_next_marker_style(Marker3D::Square, 3.0, col2, -1.0, col2);
+            Triangles3D::f32("Pyramid", &xs, &ys, &zs)
+                .flags(flags)
+                .plot(plot);
+        },
+    );
 }
 
 fn demo_quad_plots(ui: &Ui, plot_ui: &Plot3DUi) {
@@ -353,34 +362,37 @@ fn demo_quad_plots(ui: &Ui, plot_ui: &Plot3DUi) {
     ui.checkbox_flags("NoMarkers##Quads", &mut flags, Quad3DFlags::NO_MARKERS);
     FLAGS.with(|f| f.set(flags));
 
-    if let Some(_tok) = plot_ui.begin_plot("Quad Plots").build() {
-        plot_ui.setup_axes_limits(-1.5, 1.5, -1.5, 1.5, -1.5, 1.5, Plot3DCond::Once);
+    plot_ui.begin_plot("Quad Plots").build_with_setup(
+        |setup| {
+            setup.setup_axes_limits(-1.5, 1.5, -1.5, 1.5, -1.5, 1.5, Plot3DCond::Once);
+        },
+        |plot| {
+            let color_x = [0.8, 0.2, 0.2, 0.8];
+            let color_y = [0.2, 0.8, 0.2, 0.8];
+            let color_z = [0.2, 0.2, 0.8, 0.8];
 
-        let color_x = [0.8, 0.2, 0.2, 0.8];
-        let color_y = [0.2, 0.8, 0.2, 0.8];
-        let color_z = [0.2, 0.2, 0.8, 0.8];
+            plot.set_next_fill_style(color_x, 1.0);
+            plot.set_next_line_style(color_x, 2.0);
+            plot.set_next_marker_style(Marker3D::Square, 3.0, color_x, -1.0, color_x);
+            Quads3D::f32("X", &xs[0..8], &ys[0..8], &zs[0..8])
+                .flags(flags)
+                .plot(plot);
 
-        plot_ui.set_next_fill_style(color_x, 1.0);
-        plot_ui.set_next_line_style(color_x, 2.0);
-        plot_ui.set_next_marker_style(Marker3D::Square, 3.0, color_x, -1.0, color_x);
-        Quads3D::f32("X", &xs[0..8], &ys[0..8], &zs[0..8])
-            .flags(flags)
-            .plot(plot_ui);
+            plot.set_next_fill_style(color_y, 1.0);
+            plot.set_next_line_style(color_y, 2.0);
+            plot.set_next_marker_style(Marker3D::Square, 3.0, color_y, -1.0, color_y);
+            Quads3D::f32("Y", &xs[8..16], &ys[8..16], &zs[8..16])
+                .flags(flags)
+                .plot(plot);
 
-        plot_ui.set_next_fill_style(color_y, 1.0);
-        plot_ui.set_next_line_style(color_y, 2.0);
-        plot_ui.set_next_marker_style(Marker3D::Square, 3.0, color_y, -1.0, color_y);
-        Quads3D::f32("Y", &xs[8..16], &ys[8..16], &zs[8..16])
-            .flags(flags)
-            .plot(plot_ui);
-
-        plot_ui.set_next_fill_style(color_z, 1.0);
-        plot_ui.set_next_line_style(color_z, 2.0);
-        plot_ui.set_next_marker_style(Marker3D::Square, 3.0, color_z, -1.0, color_z);
-        Quads3D::f32("Z", &xs[16..24], &ys[16..24], &zs[16..24])
-            .flags(flags)
-            .plot(plot_ui);
-    }
+            plot.set_next_fill_style(color_z, 1.0);
+            plot.set_next_line_style(color_z, 2.0);
+            plot.set_next_marker_style(Marker3D::Square, 3.0, color_z, -1.0, color_z);
+            Quads3D::f32("Z", &xs[16..24], &ys[16..24], &zs[16..24])
+                .flags(flags)
+                .plot(plot);
+        },
+    );
 }
 
 fn demo_surface_plots(ui: &Ui, plot_ui: &Plot3DUi) {
@@ -438,16 +450,17 @@ fn demo_surface_plots(ui: &Ui, plot_ui: &Plot3DUi) {
             .build();
     }
 
+    let colormaps = [
+        "Viridis", "Plasma", "Hot", "Cool", "Pink", "Jet", "Twilight", "RdBu", "BrBG", "PiYG",
+        "Spectral", "Greys",
+    ];
     // Choose colormap
     if ui.radio_button("Colormap", selected_fill == 1) {
         selected_fill = 1;
     }
     if selected_fill == 1 {
         ui.same_line();
-        let colormaps = [
-            "Viridis", "Plasma", "Hot", "Cool", "Pink", "Jet", "Twilight", "RdBu", "BrBG", "PiYG",
-            "Spectral", "Greys",
-        ];
+
         if let Some(_combo) = ui.begin_combo("##SurfaceColormap", colormaps[sel_colormap as usize])
         {
             for (i, name) in colormaps.iter().enumerate() {
@@ -496,58 +509,58 @@ fn demo_surface_plots(ui: &Ui, plot_ui: &Plot3DUi) {
     FLAGS.with(|f| f.set(flags));
 
     // Begin the plot
-    let _colormap = if selected_fill == 1 {
-        let colormaps = [
-            "Viridis", "Plasma", "Hot", "Cool", "Pink", "Jet", "Twilight", "RdBu", "BrBG", "PiYG",
-            "Spectral", "Greys",
-        ];
-        Some(plot_ui.push_colormap_name(colormaps[sel_colormap as usize]))
-    } else {
-        None
+    let draw_surface = || {
+        plot_ui
+            .begin_plot("Surface Plots")
+            .size([-1.0, 400.0])
+            .flags(Plot3DFlags::NO_CLIP)
+            .build_with_setup(
+                |setup| {
+                    setup.setup_axes_limits(-1.0, 1.0, -1.0, 1.0, -1.5, 1.5, Plot3DCond::Once);
+                },
+                |plot| {
+                    // Set fill style
+                    plot_ui.with_style_vars(&[Plot3DStyleVar::FillAlpha(0.8)], || {
+                        if selected_fill == 0 {
+                            plot.set_next_fill_style(solid_color, 1.0);
+                        }
+
+                        // Set line style
+                        plot.set_next_line_style(cmap(plot_ui, 1), 1.0);
+
+                        // Set marker style
+                        plot.set_next_marker_style(
+                            Marker3D::Square,
+                            -1.0,
+                            cmap(plot_ui, 2),
+                            -1.0,
+                            cmap(plot_ui, 2),
+                        );
+
+                        let x_grid: Vec<f32> = (0..N).map(|j| MIN_VAL + j as f32 * STEP).collect();
+                        let y_grid: Vec<f32> = (0..N).map(|i| MIN_VAL + i as f32 * STEP).collect();
+
+                        if custom_range {
+                            Surface3D::new("Wave Surface", &x_grid, &y_grid, &zs)
+                                .scale(range_min as f64, range_max as f64)
+                                .flags(flags)
+                                .try_plot(plot)
+                                .expect("surface grid must remain valid");
+                        } else {
+                            Surface3D::new("Wave Surface", &x_grid, &y_grid, &zs)
+                                .scale(0.0, 0.0)
+                                .flags(flags)
+                                .try_plot(plot)
+                                .expect("surface grid must remain valid");
+                        }
+                    });
+                },
+            );
     };
-
-    if let Some(_tok) = plot_ui
-        .begin_plot("Surface Plots")
-        .size([-1.0, 400.0])
-        .flags(Plot3DFlags::NO_CLIP)
-        .build()
-    {
-        plot_ui.setup_axes_limits(-1.0, 1.0, -1.0, 1.0, -1.5, 1.5, Plot3DCond::Once);
-
-        // Set fill style
-        let _fill_alpha = plot_ui.push_style_var_f32(Plot3DStyleVar::FillAlpha, 0.8);
-        if selected_fill == 0 {
-            plot_ui.set_next_fill_style(solid_color, 1.0);
-        }
-
-        // Set line style
-        plot_ui.set_next_line_style(cmap(plot_ui, 1), 1.0);
-
-        // Set marker style
-        plot_ui.set_next_marker_style(
-            Marker3D::Square,
-            -1.0,
-            cmap(plot_ui, 2),
-            -1.0,
-            cmap(plot_ui, 2),
-        );
-
-        let x_grid: Vec<f32> = (0..N).map(|j| MIN_VAL + j as f32 * STEP).collect();
-        let y_grid: Vec<f32> = (0..N).map(|i| MIN_VAL + i as f32 * STEP).collect();
-
-        if custom_range {
-            Surface3D::new("Wave Surface", &x_grid, &y_grid, &zs)
-                .scale(range_min as f64, range_max as f64)
-                .flags(flags)
-                .try_plot(plot_ui)
-                .expect("surface grid must remain valid");
-        } else {
-            Surface3D::new("Wave Surface", &x_grid, &y_grid, &zs)
-                .scale(0.0, 0.0)
-                .flags(flags)
-                .try_plot(plot_ui)
-                .expect("surface grid must remain valid");
-        }
+    if selected_fill == 1 {
+        plot_ui.with_colormap_name(colormaps[sel_colormap as usize], draw_surface);
+    } else {
+        draw_surface();
     }
 }
 
@@ -602,22 +615,26 @@ fn demo_mesh_plots(ui: &Ui, plot_ui: &Plot3DUi) {
     FILL_COLOR.with(|c| c.set(fill_color));
     MARKER_COLOR.with(|c| c.set(marker_color));
 
-    if let Some(_tok) = plot_ui.begin_plot("Mesh Plots").build() {
-        plot_ui.setup_axes_limits(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, Plot3DCond::Once);
-        plot_ui.set_next_fill_style(fill_color, 1.0);
-        plot_ui.set_next_line_style(line_color, 1.0);
-        plot_ui.set_next_marker_style(Marker3D::Square, 3.0, marker_color, -1.0, marker_color);
-        if mesh_id == 0 {
-            Mesh3D::new("Tetrahedron", &vertices, &indices)
-                .flags(flags)
-                .plot(plot_ui);
-        } else {
-            use implot3d::meshes::{CUBE_INDICES, CUBE_VERTICES};
-            Mesh3D::new("Cube", CUBE_VERTICES, CUBE_INDICES)
-                .flags(flags)
-                .plot(plot_ui);
-        }
-    }
+    plot_ui.begin_plot("Mesh Plots").build_with_setup(
+        |setup| {
+            setup.setup_axes_limits(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, Plot3DCond::Once);
+        },
+        |plot| {
+            plot.set_next_fill_style(fill_color, 1.0);
+            plot.set_next_line_style(line_color, 1.0);
+            plot.set_next_marker_style(Marker3D::Square, 3.0, marker_color, -1.0, marker_color);
+            if mesh_id == 0 {
+                Mesh3D::new("Tetrahedron", &vertices, &indices)
+                    .flags(flags)
+                    .plot(plot);
+            } else {
+                use implot3d::meshes::{CUBE_INDICES, CUBE_VERTICES};
+                Mesh3D::new("Cube", CUBE_VERTICES, CUBE_INDICES)
+                    .flags(flags)
+                    .plot(plot);
+            }
+        },
+    );
 }
 
 // Scrolling buffers (1D) for realtime demo
@@ -656,58 +673,60 @@ fn demo_realtime_plots(ui: &Ui, plot_ui: &Plot3DUi) {
         static ZS: RefCell<ScrollingBuffer1D> = RefCell::new(ScrollingBuffer1D::new(2000));
     }
 
-    if let Some(_tok) = plot_ui
+    plot_ui
         .begin_plot("Scrolling Plot")
         .size([-1.0, 400.0])
-        .build()
-    {
-        let t = T.with(|tc| {
-            let v = tc.get() + ui.io().delta_time();
-            tc.set(v);
-            v
-        });
-
-        // Set up axes BEFORE any plot-utils or plot items
-        let flags = Axis3DFlags::NO_TICK_LABELS;
-        plot_ui.setup_axes("Time", "Mouse X", "Mouse Y", flags, flags, flags);
-        plot_ui.setup_axis_limits(Axis3D::X, (t - 10.0) as f64, t as f64, Plot3DCond::Always);
-        plot_ui.setup_axis_limits(Axis3D::Y, -400.0, 400.0, Plot3DCond::Once);
-        plot_ui.setup_axis_limits(Axis3D::Z, -400.0, 400.0, Plot3DCond::Once);
-
-        // Now sample/fill buffers and use plot utils
-        let last_t = LAST_T.with(|lt| lt.get());
-        if t - last_t > 0.01 {
-            LAST_T.with(|lt| lt.set(t));
-            let mouse = ui.io().mouse_pos();
-            if mouse[0].abs() < 1.0e4 && mouse[1].abs() < 1.0e4 {
-                let pos = plot_ui.get_frame_pos();
-                let sz = plot_ui.get_frame_size();
-                let center = [pos[0] + sz[0] / 2.0, pos[1] + sz[1] / 2.0];
-                XS.with(|b| b.borrow_mut().add(t));
-                YS.with(|b| b.borrow_mut().add(mouse[0] - center[0]));
-                ZS.with(|b| b.borrow_mut().add(mouse[1] - center[1]));
-            }
-        }
-
-        // Plot line using raw ring-buffer data
-        XS.with(|xs| {
-            let xs = xs.borrow();
-            YS.with(|ys| {
-                let ys = ys.borrow();
-                ZS.with(|zs| {
-                    let zs = zs.borrow();
-                    if !xs.data.is_empty()
-                        && xs.data.len() == ys.data.len()
-                        && ys.data.len() == zs.data.len()
-                    {
-                        Line3D::f32("Mouse", &xs.data, &ys.data, &zs.data)
-                            .offset(Plot3DDataOffset::samples(xs.offset as i32))
-                            .plot(plot_ui);
-                    }
+        .build_with_setup(
+            |setup| {
+                let t = T.with(|tc| {
+                    let v = tc.get() + ui.io().delta_time();
+                    tc.set(v);
+                    v
                 });
-            });
-        });
-    }
+
+                let flags = Axis3DFlags::NO_TICK_LABELS;
+                setup.setup_axes("Time", "Mouse X", "Mouse Y", flags, flags, flags);
+                setup.setup_axis_limits(Axis3D::X, (t - 10.0) as f64, t as f64, Plot3DCond::Always);
+                setup.setup_axis_limits(Axis3D::Y, -400.0, 400.0, Plot3DCond::Once);
+                setup.setup_axis_limits(Axis3D::Z, -400.0, 400.0, Plot3DCond::Once);
+            },
+            |plot| {
+                let t = T.with(Cell::get);
+                // Now sample/fill buffers and use plot utils
+                let last_t = LAST_T.with(|lt| lt.get());
+                if t - last_t > 0.01 {
+                    LAST_T.with(|lt| lt.set(t));
+                    let mouse = ui.io().mouse_pos();
+                    if mouse[0].abs() < 1.0e4 && mouse[1].abs() < 1.0e4 {
+                        let pos = plot.get_frame_pos();
+                        let sz = plot.get_frame_size();
+                        let center = [pos[0] + sz[0] / 2.0, pos[1] + sz[1] / 2.0];
+                        XS.with(|b| b.borrow_mut().add(t));
+                        YS.with(|b| b.borrow_mut().add(mouse[0] - center[0]));
+                        ZS.with(|b| b.borrow_mut().add(mouse[1] - center[1]));
+                    }
+                }
+
+                // Plot line using raw ring-buffer data
+                XS.with(|xs| {
+                    let xs = xs.borrow();
+                    YS.with(|ys| {
+                        let ys = ys.borrow();
+                        ZS.with(|zs| {
+                            let zs = zs.borrow();
+                            if !xs.data.is_empty()
+                                && xs.data.len() == ys.data.len()
+                                && ys.data.len() == zs.data.len()
+                            {
+                                Line3D::f32("Mouse", &xs.data, &ys.data, &zs.data)
+                                    .offset(Plot3DDataOffset::samples(xs.offset as i32))
+                                    .plot(plot);
+                            }
+                        });
+                    });
+                });
+            },
+        );
 }
 
 fn demo_box_scale(ui: &Ui, plot_ui: &Plot3DUi) {
@@ -732,10 +751,14 @@ fn demo_box_scale(ui: &Ui, plot_ui: &Plot3DUi) {
         .build_array(&mut scale);
     SCALE.with(|s| s.set(scale));
 
-    if let Some(_tok) = plot_ui.begin_plot("##BoxScale").build() {
-        plot_ui.setup_box_scale(scale[0], scale[1], scale[2]);
-        Line3D::f32("3D Curve", &xs, &ys, &zs).plot(plot_ui);
-    }
+    plot_ui.begin_plot("##BoxScale").build_with_setup(
+        |setup| {
+            setup.setup_box_scale(scale[0], scale[1], scale[2]);
+        },
+        |plot| {
+            Line3D::f32("3D Curve", &xs, &ys, &zs).plot(plot);
+        },
+    );
 }
 
 fn demo_box_rotation(ui: &Ui, plot_ui: &Plot3DUi) {
@@ -775,23 +798,26 @@ fn demo_box_rotation(ui: &Ui, plot_ui: &Plot3DUi) {
     INIT_ELEVATION.with(|e| e.set(init_elevation));
     INIT_AZIMUTH.with(|a| a.set(init_azimuth));
 
-    if let Some(_tok) = plot_ui.begin_plot("##BoxRotation").build() {
-        plot_ui.setup_axes_limits(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, Plot3DCond::Always);
-        plot_ui.setup_box_initial_rotation(init_elevation, init_azimuth);
-        if changed {
-            plot_ui.setup_box_rotation(elevation, azimuth, animate, Plot3DCond::Always);
-        }
-
-        // Plot axis lines
-        let origin = [0.0f32, 0.0];
-        let axis = [0.0f32, 1.0];
-        plot_ui.set_next_line_style([0.8, 0.2, 0.2, 1.0], 1.0);
-        Line3D::f32("X-Axis", &axis, &origin, &origin).plot(plot_ui);
-        plot_ui.set_next_line_style([0.2, 0.8, 0.2, 1.0], 1.0);
-        Line3D::f32("Y-Axis", &origin, &axis, &origin).plot(plot_ui);
-        plot_ui.set_next_line_style([0.2, 0.2, 0.8, 1.0], 1.0);
-        Line3D::f32("Z-Axis", &origin, &origin, &axis).plot(plot_ui);
-    }
+    plot_ui.begin_plot("##BoxRotation").build_with_setup(
+        |setup| {
+            setup.setup_axes_limits(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, Plot3DCond::Always);
+            setup.setup_box_initial_rotation(init_elevation, init_azimuth);
+            if changed {
+                setup.setup_box_rotation(elevation, azimuth, animate, Plot3DCond::Always);
+            }
+        },
+        |plot| {
+            // Plot axis lines
+            let origin = [0.0f32, 0.0];
+            let axis = [0.0f32, 1.0];
+            plot.set_next_line_style([0.8, 0.2, 0.2, 1.0], 1.0);
+            Line3D::f32("X-Axis", &axis, &origin, &origin).plot(plot);
+            plot.set_next_line_style([0.2, 0.8, 0.2, 1.0], 1.0);
+            Line3D::f32("Y-Axis", &origin, &axis, &origin).plot(plot);
+            plot.set_next_line_style([0.2, 0.2, 0.8, 1.0], 1.0);
+            Line3D::f32("Z-Axis", &origin, &origin, &axis).plot(plot);
+        },
+    );
 }
 
 fn demo_tick_labels(ui: &Ui, plot_ui: &Plot3DUi) {
@@ -809,43 +835,46 @@ fn demo_tick_labels(ui: &Ui, plot_ui: &Plot3DUi) {
     CUSTOM_TICKS.with(|c| c.set(custom_ticks));
     CUSTOM_LABELS.with(|c| c.set(custom_labels));
 
-    if let Some(_tok) = plot_ui.begin_plot("##Ticks").build() {
-        plot_ui.setup_axes_limits(2.0, 5.0, 0.0, 1.0, 0.0, 1.0, Plot3DCond::Once);
-        if custom_ticks {
-            let pi = std::f64::consts::PI;
-            let letters_ticks = [0.0f64, 0.2, 0.4, 0.6, 0.8, 1.0];
-            let pi_lbl = ["PI"];
-            let letters_lbl = ["A", "B", "C", "D", "E", "F"];
-            plot_ui.setup_axis_ticks_values(
-                Axis3D::X,
-                &[pi],
-                if custom_labels { Some(&pi_lbl) } else { None },
-                true,
-            );
-            plot_ui.setup_axis_ticks_values(
-                Axis3D::Y,
-                &letters_ticks,
-                if custom_labels {
-                    Some(&letters_lbl)
-                } else {
-                    None
-                },
-                false,
-            );
-            plot_ui.setup_axis_ticks_range(
-                Axis3D::Z,
-                0.0,
-                1.0,
-                6,
-                if custom_labels {
-                    Some(&letters_lbl)
-                } else {
-                    None
-                },
-                false,
-            );
-        }
-    }
+    plot_ui.begin_plot("##Ticks").build_with_setup(
+        |setup| {
+            setup.setup_axes_limits(2.0, 5.0, 0.0, 1.0, 0.0, 1.0, Plot3DCond::Once);
+            if custom_ticks {
+                let pi = std::f64::consts::PI;
+                let letters_ticks = [0.0f64, 0.2, 0.4, 0.6, 0.8, 1.0];
+                let pi_lbl = ["PI"];
+                let letters_lbl = ["A", "B", "C", "D", "E", "F"];
+                setup.setup_axis_ticks_values(
+                    Axis3D::X,
+                    &[pi],
+                    if custom_labels { Some(&pi_lbl) } else { None },
+                    true,
+                );
+                setup.setup_axis_ticks_values(
+                    Axis3D::Y,
+                    &letters_ticks,
+                    if custom_labels {
+                        Some(&letters_lbl)
+                    } else {
+                        None
+                    },
+                    false,
+                );
+                setup.setup_axis_ticks_range(
+                    Axis3D::Z,
+                    0.0,
+                    1.0,
+                    6,
+                    if custom_labels {
+                        Some(&letters_lbl)
+                    } else {
+                        None
+                    },
+                    false,
+                );
+            }
+        },
+        |_| {},
+    );
 }
 
 fn demo_axis_constraints(ui: &Ui, plot_ui: &Plot3DUi) {
@@ -865,24 +894,26 @@ fn demo_axis_constraints(ui: &Ui, plot_ui: &Plot3DUi) {
     ZOOMS.with(|c| c.set(zooms));
     FLAGS.with(|f| f.set(axis_flags));
 
-    if let Some(_tok) = plot_ui.begin_plot("##AxisConstraints").build() {
-        plot_ui.setup_axes("X", "Y", "Z", axis_flags, axis_flags, axis_flags);
-        plot_ui.setup_axes_limits(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, Plot3DCond::Once);
-        plot_ui.setup_axis_limits_constraints(Axis3D::X, limits[0] as f64, limits[1] as f64);
-        plot_ui.setup_axis_limits_constraints(Axis3D::Y, limits[0] as f64, limits[1] as f64);
-        plot_ui.setup_axis_limits_constraints(Axis3D::Z, limits[0] as f64, limits[1] as f64);
-        plot_ui.setup_axis_zoom_constraints(Axis3D::X, zooms[0] as f64, zooms[1] as f64);
-        plot_ui.setup_axis_zoom_constraints(Axis3D::Y, zooms[0] as f64, zooms[1] as f64);
-        plot_ui.setup_axis_zoom_constraints(Axis3D::Z, zooms[0] as f64, zooms[1] as f64);
-    }
+    plot_ui.begin_plot("##AxisConstraints").build_with_setup(
+        |setup| {
+            setup.setup_axes("X", "Y", "Z", axis_flags, axis_flags, axis_flags);
+            setup.setup_axes_limits(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, Plot3DCond::Once);
+            setup.setup_axis_limits_constraints(Axis3D::X, limits[0] as f64, limits[1] as f64);
+            setup.setup_axis_limits_constraints(Axis3D::Y, limits[0] as f64, limits[1] as f64);
+            setup.setup_axis_limits_constraints(Axis3D::Z, limits[0] as f64, limits[1] as f64);
+            setup.setup_axis_zoom_constraints(Axis3D::X, zooms[0] as f64, zooms[1] as f64);
+            setup.setup_axis_zoom_constraints(Axis3D::Y, zooms[0] as f64, zooms[1] as f64);
+            setup.setup_axis_zoom_constraints(Axis3D::Z, zooms[0] as f64, zooms[1] as f64);
+        },
+        |_| {},
+    );
 }
 
 fn demo_image_plots(ui: &Ui, plot_ui: &Plot3DUi) {
-    let Some(font_texture) = ui.font_atlas_texture() else {
+    let Some(tex) = ui.font_atlas_texture() else {
         ui.text("Font atlas texture not ready yet.");
         return;
     };
-    let tex = font_texture.texture_ref();
 
     // Controls/info
     ui.bullet_text("Using font atlas texture for demo");
@@ -909,38 +940,35 @@ fn demo_image_plots(ui: &Ui, plot_ui: &Plot3DUi) {
     }
 
     // Plot
-    if let Some(_tok) = plot_ui
+    plot_ui
         .begin_plot("Image Plot")
         .flags(Plot3DFlags::NO_CLIP)
-        .build()
-    {
-        let center1 = CENTER1.with(|c| c.get());
-        let axis_u1 = AXIS_U1.with(|c| c.get());
-        let axis_v1 = AXIS_V1.with(|c| c.get());
-        let uv0_1 = UV0_1.with(|c| c.get());
-        let uv1_1 = UV1_1.with(|c| c.get());
-        let tint1 = TINT1.with(|c| c.get());
-        plot_ui
-            .image_by_axes("Image 1", tex, center1, axis_u1, axis_v1)
-            .uv(uv0_1, uv1_1)
-            .tint(tint1)
-            .plot();
+        .build(|plot| {
+            let center1 = CENTER1.with(|c| c.get());
+            let axis_u1 = AXIS_U1.with(|c| c.get());
+            let axis_v1 = AXIS_V1.with(|c| c.get());
+            let uv0_1 = UV0_1.with(|c| c.get());
+            let uv1_1 = UV1_1.with(|c| c.get());
+            let tint1 = TINT1.with(|c| c.get());
+            plot.image_by_axes("Image 1", tex, center1, axis_u1, axis_v1)
+                .uv(uv0_1, uv1_1)
+                .tint(tint1)
+                .plot();
 
-        let p0 = P0.with(|c| c.get());
-        let p1 = P1.with(|c| c.get());
-        let p2 = P2.with(|c| c.get());
-        let p3 = P3.with(|c| c.get());
-        let uv0 = UV0.with(|c| c.get());
-        let uv1 = UV1.with(|c| c.get());
-        let uv2 = UV2.with(|c| c.get());
-        let uv3 = UV3.with(|c| c.get());
-        let tint2 = TINT2.with(|c| c.get());
-        plot_ui
-            .image_by_corners("Image 2", tex, p0, p1, p2, p3)
-            .uvs(uv0, uv1, uv2, uv3)
-            .tint(tint2)
-            .plot();
-    }
+            let p0 = P0.with(|c| c.get());
+            let p1 = P1.with(|c| c.get());
+            let p2 = P2.with(|c| c.get());
+            let p3 = P3.with(|c| c.get());
+            let uv0 = UV0.with(|c| c.get());
+            let uv1 = UV1.with(|c| c.get());
+            let uv2 = UV2.with(|c| c.get());
+            let uv3 = UV3.with(|c| c.get());
+            let tint2 = TINT2.with(|c| c.get());
+            plot.image_by_corners("Image 2", tex, p0, p1, p2, p3)
+                .uvs(uv0, uv1, uv2, uv3)
+                .tint(tint2)
+                .plot();
+        });
 }
 
 fn demo_markers_and_text(ui: &Ui, plot_ui: &Plot3DUi) {
@@ -956,105 +984,111 @@ fn demo_markers_and_text(ui: &Ui, plot_ui: &Plot3DUi) {
     MK_SIZE.with(|c| c.set(mk_size));
     MK_WEIGHT.with(|c| c.set(mk_weight));
 
-    if let Some(_tok) = plot_ui
+    plot_ui
         .begin_plot("##MarkerStyles")
         .flags(Plot3DFlags::CANVAS_ONLY)
-        .build()
-    {
-        plot_ui.setup_axes(
-            "",
-            "",
-            "",
-            Axis3DFlags::NO_DECORATIONS,
-            Axis3DFlags::NO_DECORATIONS,
-            Axis3DFlags::NO_DECORATIONS,
+        .build_with_setup(
+            |setup| {
+                setup.setup_axes(
+                    "",
+                    "",
+                    "",
+                    Axis3DFlags::NO_DECORATIONS,
+                    Axis3DFlags::NO_DECORATIONS,
+                    Axis3DFlags::NO_DECORATIONS,
+                );
+                setup.setup_axes_limits(-0.5, 1.5, -0.5, 1.5, 0.0, 12.0, Plot3DCond::Once);
+            },
+            |plot| {
+                // Prepare two points; marker is drawn at both
+                let mut xs = [0.0f32, 0.0];
+                let mut ys = [0.0f32, 0.0];
+                let mut zs = [0.0f32, 0.0];
+
+                let markers = [
+                    Marker3D::Circle,
+                    Marker3D::Square,
+                    Marker3D::Diamond,
+                    Marker3D::Up,
+                    Marker3D::Down,
+                    Marker3D::Left,
+                    Marker3D::Right,
+                    Marker3D::Cross,
+                    Marker3D::Plus,
+                    Marker3D::Asterisk,
+                ];
+
+                // Filled markers column at x=0
+                zs[0] = markers.len() as f32;
+                zs[1] = zs[0] + 1.0;
+                for (i, &m) in markers.iter().enumerate() {
+                    xs[0] = 0.0;
+                    ys[0] = 0.0;
+                    xs[1] = xs[0]
+                        + (zs[0] / markers.len() as f32 * 2.0 * std::f32::consts::PI).cos() * 0.5;
+                    ys[1] = ys[0]
+                        + (zs[0] / markers.len() as f32 * 2.0 * std::f32::consts::PI).sin() * 0.5;
+                    plot.set_next_marker_style(
+                        m,
+                        mk_size,
+                        cmap(plot_ui, 0),
+                        mk_weight,
+                        cmap(plot_ui, 0),
+                    );
+                    Line3D::f32(&format!("##Filled_{}", i), &xs, &ys, &zs).plot(plot);
+                    zs[0] -= 1.0;
+                    zs[1] -= 1.0;
+                }
+
+                // Open markers column at x=1
+                zs[0] = markers.len() as f32;
+                zs[1] = zs[0] + 1.0;
+                xs[0] = 1.0;
+                ys[0] = 1.0;
+                for (i, &m) in markers.iter().enumerate() {
+                    xs[1] = xs[0]
+                        + (zs[0] / markers.len() as f32 * 2.0 * std::f32::consts::PI).cos() * 0.5;
+                    ys[1] = ys[0]
+                        - (zs[0] / markers.len() as f32 * 2.0 * std::f32::consts::PI).sin() * 0.5;
+                    plot.set_next_marker_style(
+                        m,
+                        mk_size,
+                        [0.0, 0.0, 0.0, 0.0],
+                        mk_weight,
+                        cmap(plot_ui, 0),
+                    );
+                    Line3D::f32(&format!("##Open_{}", i), &xs, &ys, &zs).plot(plot);
+                    zs[0] -= 1.0;
+                    zs[1] -= 1.0;
+                }
+
+                // Labels
+                plot.plot_text(
+                    "Filled Markers",
+                    0.0,
+                    0.0,
+                    markers.len() as f32 + 2.0,
+                    0.0,
+                    [0.0, 0.0],
+                );
+                plot.plot_text(
+                    "Open Markers",
+                    1.0,
+                    1.0,
+                    markers.len() as f32 + 2.0,
+                    0.0,
+                    [0.0, 0.0],
+                );
+                plot.plot_text(
+                    "Rotated Text",
+                    0.5,
+                    0.5,
+                    6.0,
+                    std::f32::consts::PI / 4.0,
+                    [0.0, 0.0],
+                );
+            },
         );
-        plot_ui.setup_axes_limits(-0.5, 1.5, -0.5, 1.5, 0.0, 12.0, Plot3DCond::Once);
-
-        // Prepare two points; marker is drawn at both
-        let mut xs = [0.0f32, 0.0];
-        let mut ys = [0.0f32, 0.0];
-        let mut zs = [0.0f32, 0.0];
-
-        let markers = [
-            Marker3D::Circle,
-            Marker3D::Square,
-            Marker3D::Diamond,
-            Marker3D::Up,
-            Marker3D::Down,
-            Marker3D::Left,
-            Marker3D::Right,
-            Marker3D::Cross,
-            Marker3D::Plus,
-            Marker3D::Asterisk,
-        ];
-
-        // Filled markers column at x=0
-        zs[0] = markers.len() as f32;
-        zs[1] = zs[0] + 1.0;
-        for (i, &m) in markers.iter().enumerate() {
-            xs[0] = 0.0;
-            ys[0] = 0.0;
-            xs[1] = xs[0] + (zs[0] / markers.len() as f32 * 2.0 * std::f32::consts::PI).cos() * 0.5;
-            ys[1] = ys[0] + (zs[0] / markers.len() as f32 * 2.0 * std::f32::consts::PI).sin() * 0.5;
-            plot_ui.set_next_marker_style(
-                m,
-                mk_size,
-                cmap(plot_ui, 0),
-                mk_weight,
-                cmap(plot_ui, 0),
-            );
-            Line3D::f32(&format!("##Filled_{}", i), &xs, &ys, &zs).plot(plot_ui);
-            zs[0] -= 1.0;
-            zs[1] -= 1.0;
-        }
-
-        // Open markers column at x=1
-        zs[0] = markers.len() as f32;
-        zs[1] = zs[0] + 1.0;
-        xs[0] = 1.0;
-        ys[0] = 1.0;
-        for (i, &m) in markers.iter().enumerate() {
-            xs[1] = xs[0] + (zs[0] / markers.len() as f32 * 2.0 * std::f32::consts::PI).cos() * 0.5;
-            ys[1] = ys[0] - (zs[0] / markers.len() as f32 * 2.0 * std::f32::consts::PI).sin() * 0.5;
-            plot_ui.set_next_marker_style(
-                m,
-                mk_size,
-                [0.0, 0.0, 0.0, 0.0],
-                mk_weight,
-                cmap(plot_ui, 0),
-            );
-            Line3D::f32(&format!("##Open_{}", i), &xs, &ys, &zs).plot(plot_ui);
-            zs[0] -= 1.0;
-            zs[1] -= 1.0;
-        }
-
-        // Labels
-        plot_ui.plot_text(
-            "Filled Markers",
-            0.0,
-            0.0,
-            markers.len() as f32 + 2.0,
-            0.0,
-            [0.0, 0.0],
-        );
-        plot_ui.plot_text(
-            "Open Markers",
-            1.0,
-            1.0,
-            markers.len() as f32 + 2.0,
-            0.0,
-            [0.0, 0.0],
-        );
-        plot_ui.plot_text(
-            "Rotated Text",
-            0.5,
-            0.5,
-            6.0,
-            std::f32::consts::PI / 4.0,
-            [0.0, 0.0],
-        );
-    }
 }
 
 fn demo_nan_values(ui: &Ui, plot_ui: &Plot3DUi) {
@@ -1077,18 +1111,16 @@ fn demo_nan_values(ui: &Ui, plot_ui: &Plot3DUi) {
         xs[2] = f32::NAN;
     }
 
-    if let Some(_tok) = plot_ui.begin_plot("##NaNValues").build() {
-        plot_ui.set_next_marker_style(
+    plot_ui.begin_plot("##NaNValues").build(|plot| {
+        plot.set_next_marker_style(
             Marker3D::Square,
             6.0,
             cmap(plot_ui, 0),
             -1.0,
             cmap(plot_ui, 0),
         );
-        Line3D::f32("Line", &xs, &ys, &zs)
-            .flags(flags)
-            .plot(plot_ui);
-    }
+        Line3D::f32("Line", &xs, &ys, &zs).flags(flags).plot(plot);
+    });
 }
 
 fn demo_custom_styles(ui: &Ui, plot_ui: &Plot3DUi) {
@@ -1133,22 +1165,30 @@ fn demo_custom_styles(ui: &Ui, plot_ui: &Plot3DUi) {
         zs[i] = t * 2.0 - 1.0;
     }
 
-    if let Some(_tok) = plot_ui.begin_plot("Custom Styles").build() {
-        plot_ui.setup_axes_limits(-1.5, 1.5, -1.5, 1.5, -1.5, 1.5, Plot3DCond::Once);
-
-        let _line_weight = plot_ui.push_style_var_f32(Plot3DStyleVar::LineWeight, line_weight);
-        let _marker_size = plot_ui.push_style_var_f32(Plot3DStyleVar::MarkerSize, marker_size);
-        let _fill_alpha = plot_ui.push_style_var_f32(Plot3DStyleVar::FillAlpha, fill_alpha);
-
-        plot_ui.set_next_marker_style(
-            Marker3D::Circle,
-            -1.0,
-            cmap(plot_ui, 0),
-            marker_weight,
-            cmap(plot_ui, 0),
-        );
-        Line3D::f32("Styled Line", &xs, &ys, &zs).plot(plot_ui);
-    }
+    plot_ui.begin_plot("Custom Styles").build_with_setup(
+        |setup| {
+            setup.setup_axes_limits(-1.5, 1.5, -1.5, 1.5, -1.5, 1.5, Plot3DCond::Once);
+        },
+        |plot| {
+            plot_ui.with_style_vars(
+                &[
+                    Plot3DStyleVar::LineWeight(line_weight),
+                    Plot3DStyleVar::MarkerSize(marker_size),
+                    Plot3DStyleVar::FillAlpha(fill_alpha),
+                ],
+                || {
+                    plot.set_next_marker_style(
+                        Marker3D::Circle,
+                        -1.0,
+                        cmap(plot_ui, 0),
+                        marker_weight,
+                        cmap(plot_ui, 0),
+                    );
+                    Line3D::f32("Styled Line", &xs, &ys, &zs).plot(plot);
+                },
+            );
+        },
+    );
 }
 
 fn demo_array_backed_item_styles(ui: &Ui, plot_ui: &Plot3DUi) {
@@ -1181,50 +1221,58 @@ fn demo_array_backed_item_styles(ui: &Ui, plot_ui: &Plot3DUi) {
         Color::rgb(0.28, 0.50, 0.95).to_imgui_u32(),
     ];
 
-    let _axis_bg = plot_ui.push_style_color(Plot3DColorElement::AxisBg, [0.12, 0.18, 0.28, 0.18]);
-    let _axis_bg_hovered =
-        plot_ui.push_style_color(Plot3DColorElement::AxisBgHovered, [0.22, 0.42, 0.78, 0.28]);
-    let _axis_bg_active =
-        plot_ui.push_style_color(Plot3DColorElement::AxisBgActive, [0.88, 0.50, 0.18, 0.34]);
+    plot_ui.with_style_colors(
+        &[
+            (Plot3DColorElement::AxisBg, [0.12, 0.18, 0.28, 0.18]),
+            (Plot3DColorElement::AxisBgHovered, [0.22, 0.42, 0.78, 0.28]),
+            (Plot3DColorElement::AxisBgActive, [0.88, 0.50, 0.18, 0.34]),
+        ],
+        || {
+            plot_ui
+                .begin_plot("Array-backed Item Styles")
+                .build_with_setup(
+                    |setup| {
+                        setup.setup_axes(
+                            "X",
+                            "Y",
+                            "Z",
+                            Axis3DFlags::NONE,
+                            Axis3DFlags::NONE,
+                            Axis3DFlags::NONE,
+                        );
+                        setup.setup_axes_limits(-0.2, 1.2, -1.2, 1.2, -0.2, 1.2, Plot3DCond::Once);
+                    },
+                    |plot| {
+                        unsafe {
+                            // One line color is provided for every submitted path sample.
+                            plot.with_next_plot3d_item_array_style(
+                                Plot3DItemArrayStyle::new().with_line_colors(&line_colors),
+                                |plot| {
+                                    Line3D::f32("Gradient Path", &xs, &ys, &zs)
+                                        .with_line_weight(3.0)
+                                        .plot(plot);
+                                },
+                            );
+                        }
 
-    if let Some(_tok) = plot_ui.begin_plot("Array-backed Item Styles").build() {
-        plot_ui.setup_axes(
-            "X",
-            "Y",
-            "Z",
-            Axis3DFlags::NONE,
-            Axis3DFlags::NONE,
-            Axis3DFlags::NONE,
-        );
-        plot_ui.setup_axes_limits(-0.2, 1.2, -1.2, 1.2, -0.2, 1.2, Plot3DCond::Once);
-
-        unsafe {
-            // One line color is provided for every submitted path sample.
-            plot_ui.with_next_plot3d_item_array_style(
-                Plot3DItemArrayStyle::new().with_line_colors(&line_colors),
-                |plot_ui| {
-                    Line3D::f32("Gradient Path", &xs, &ys, &zs)
-                        .with_line_weight(3.0)
-                        .plot(plot_ui);
-                },
-            );
-        }
-
-        unsafe {
-            // Every marker style array has one entry per submitted scatter sample.
-            plot_ui.with_next_plot3d_item_array_style(
-                Plot3DItemArrayStyle::new()
-                    .with_marker_sizes(&marker_sizes)
-                    .with_marker_fill_colors(&marker_colors)
-                    .with_marker_line_colors(&marker_colors),
-                |plot_ui| {
-                    Scatter3D::f32("Colored Markers", &xs, &ys, &zs)
-                        .with_marker(Marker3D::Circle)
-                        .plot(plot_ui);
-                },
-            );
-        }
-    }
+                        unsafe {
+                            // Every marker style array has one entry per submitted scatter sample.
+                            plot.with_next_plot3d_item_array_style(
+                                Plot3DItemArrayStyle::new()
+                                    .with_marker_sizes(&marker_sizes)
+                                    .with_marker_fill_colors(&marker_colors)
+                                    .with_marker_line_colors(&marker_colors),
+                                |plot| {
+                                    Scatter3D::f32("Colored Markers", &xs, &ys, &zs)
+                                        .with_marker(Marker3D::Circle)
+                                        .plot(plot);
+                                },
+                            );
+                        }
+                    },
+                );
+        },
+    );
 }
 
 fn demo_custom_rendering(ui: &Ui, plot_ui: &Plot3DUi) {
@@ -1243,42 +1291,45 @@ fn demo_custom_rendering(ui: &Ui, plot_ui: &Plot3DUi) {
         zs[i] = t / (4.0 * PI) * 2.0 - 1.0;
     }
 
-    if let Some(_tok) = plot_ui.begin_plot("Custom Rendering").build() {
-        plot_ui.setup_axes_limits(-1.5, 1.5, -1.5, 1.5, -1.5, 1.5, Plot3DCond::Once);
+    plot_ui.begin_plot("Custom Rendering").build_with_setup(
+        |setup| {
+            setup.setup_axes_limits(-1.5, 1.5, -1.5, 1.5, -1.5, 1.5, Plot3DCond::Once);
+        },
+        |plot| {
+            // Draw the helix
+            Line3D::f32("Helix", &xs, &ys, &zs).plot(plot);
 
-        // Draw the helix
-        Line3D::f32("Helix", &xs, &ys, &zs).plot(plot_ui);
+            // Custom rendering: highlight start and end points
+            let draw_list = plot.plot_draw_list();
 
-        // Custom rendering: highlight start and end points
-        let draw_list = ui.get_window_draw_list();
+            // Convert 3D points to 2D screen coordinates
+            let start_pixel = plot.plot_to_pixels([xs[0], ys[0], zs[0]]);
+            let end_pixel = plot.plot_to_pixels([xs[99], ys[99], zs[99]]);
 
-        // Convert 3D points to 2D screen coordinates
-        let start_pixel = plot_ui.plot_to_pixels([xs[0], ys[0], zs[0]]);
-        let end_pixel = plot_ui.plot_to_pixels([xs[99], ys[99], zs[99]]);
+            // Draw circles at start and end
+            draw_list
+                .add_circle([start_pixel[0], start_pixel[1]], 10.0, [0.0, 1.0, 0.0, 1.0])
+                .filled(true)
+                .build();
 
-        // Draw circles at start and end
-        draw_list
-            .add_circle([start_pixel[0], start_pixel[1]], 10.0, [0.0, 1.0, 0.0, 1.0])
-            .filled(true)
-            .build();
+            draw_list
+                .add_circle([end_pixel[0], end_pixel[1]], 10.0, [1.0, 0.0, 0.0, 1.0])
+                .filled(true)
+                .build();
 
-        draw_list
-            .add_circle([end_pixel[0], end_pixel[1]], 10.0, [1.0, 0.0, 0.0, 1.0])
-            .filled(true)
-            .build();
-
-        // Add text labels
-        draw_list.add_text(
-            [start_pixel[0] + 15.0, start_pixel[1]],
-            [0.0, 1.0, 0.0, 1.0],
-            "Start",
-        );
-        draw_list.add_text(
-            [end_pixel[0] + 15.0, end_pixel[1]],
-            [1.0, 0.0, 0.0, 1.0],
-            "End",
-        );
-    }
+            // Add text labels
+            draw_list.add_text(
+                [start_pixel[0] + 15.0, start_pixel[1]],
+                [0.0, 1.0, 0.0, 1.0],
+                "Start",
+            );
+            draw_list.add_text(
+                [end_pixel[0] + 15.0, end_pixel[1]],
+                [1.0, 0.0, 0.0, 1.0],
+                "End",
+            );
+        },
+    );
 }
 
 fn demo_help(ui: &Ui) {

@@ -1,5 +1,5 @@
 use super::flags::{DragDropPayloadCond, DragDropSourceFlags, validate_drag_drop_source_flags};
-use super::payload::{TypedPayload, make_typed_payload};
+use super::payload::{TYPED_PAYLOAD_TAG, TypedPayload, TypedPayloadName, write_typed_payload};
 use super::validation::validate_payload_submission;
 use crate::{Ui, sys};
 use std::ffi;
@@ -43,7 +43,8 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
     /// This is the safest option for simple drag and drop operations.
     /// Use shared state or other mechanisms to transfer actual data.
     ///
-    /// Returns a tooltip token if dragging started, `None` otherwise.
+    /// Returns a tooltip token if dragging started. While a source or target is open in this
+    /// context, or when the item has no ID and `ALLOW_NULL_ID` is unset, returns `None`.
     #[inline]
     pub fn begin(self) -> Option<DragDropSourceTooltip<'ui>> {
         self.begin_payload(())
@@ -51,8 +52,9 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
 
     /// Begin drag source with typed payload
     ///
-    /// The payload data will be copied and managed by ImGui.
-    /// The data must be `Copy + 'static` for safety.
+    /// ImGui copies the data for Rust typed targets in this context. The application name can
+    /// contain 1 to 32 bytes. Names starting with `_` are reserved for native payloads.
+    /// Use [`Self::begin_payload_unchecked`] to send a native payload with its own layout.
     ///
     /// # Arguments
     /// * `payload` - Data to transfer (must be Copy + 'static)
@@ -61,18 +63,25 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
     #[inline]
     #[doc(alias = "BeginDragDropSource", alias = "SetDragDropPayload")]
     pub fn begin_payload<P: Copy + 'static>(
-        self,
+        mut self,
         payload: P,
     ) -> Option<DragDropSourceTooltip<'ui>> {
+        let name = TypedPayloadName::new(self.name.as_ref());
+        let payload_size = std::mem::size_of::<TypedPayload<P>>();
+        assert!(
+            payload_size <= i32::MAX as usize,
+            "DragDropSource::begin_payload() payload size exceeds Dear ImGui's i32 payload range"
+        );
+        let mut storage = std::mem::MaybeUninit::uninit();
+        write_typed_payload(&mut storage, name, payload);
+        self.flags |= DragDropSourceFlags::PAYLOAD_NO_CROSS_CONTEXT
+            | DragDropSourceFlags::PAYLOAD_NO_CROSS_PROCESS;
         unsafe {
-            let payload_size = std::mem::size_of::<TypedPayload<P>>();
-            assert!(
-                payload_size <= i32::MAX as usize,
-                "DragDropSource::begin_payload() payload size exceeds Dear ImGui's i32 payload range"
-            );
-
-            let payload = make_typed_payload(payload);
-            self.begin_payload_unchecked(&payload as *const _ as *const ffi::c_void, payload_size)
+            self.submit_payload(
+                TYPED_PAYLOAD_TAG.as_ptr(),
+                storage.as_ptr().cast(),
+                payload_size,
+            )
         }
     }
 
@@ -81,8 +90,9 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
     /// # Safety
     /// The caller must ensure:
     /// - `ptr` points to valid data of `size` bytes
-    /// - The data remains valid for the duration of the drag operation
-    /// - The data layout matches what targets expect
+    /// - The data remains readable until this call returns; Dear ImGui copies it on submission
+    /// - The bytes match every native target's layout for this name and do not overlap
+    ///   ImGui's destination payload storage. The Rust typed transport tag is reserved.
     ///
     /// # Arguments
     /// * `ptr` - Pointer to payload data
@@ -92,23 +102,40 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
         ptr: *const ffi::c_void,
         size: usize,
     ) -> Option<DragDropSourceTooltip<'ui>> {
-        validate_payload_submission(
-            self.name.as_ref(),
-            ptr,
-            size,
-            "DragDropSource::begin_payload_unchecked()",
+        let name = self.name.as_ref();
+        validate_payload_submission(name, ptr, size, "DragDropSource::begin_payload_unchecked()");
+        assert_ne!(
+            name.as_bytes(),
+            TYPED_PAYLOAD_TAG.to_bytes(),
+            "reserved Rust typed payload tag"
         );
+        crate::string::with_scratch_txt(name, |name| unsafe {
+            self.submit_payload(name, ptr, size)
+        })
+    }
+
+    unsafe fn submit_payload(
+        &self,
+        name: *const ffi::c_char,
+        ptr: *const ffi::c_void,
+        size: usize,
+    ) -> Option<DragDropSourceTooltip<'ui>> {
         validate_drag_drop_source_flags("DragDropSource::begin_payload_unchecked()", self.flags);
         self.ui.run_with_bound_context(|| unsafe {
+            if !self.ui.drag_drop_scope_available() {
+                return None;
+            }
+            if !self
+                .flags
+                .intersects(DragDropSourceFlags::EXTERN | DragDropSourceFlags::ALLOW_NULL_ID)
+                && (*self.ui.ctx).LastItemData.ID == 0
+            {
+                return None;
+            }
             let should_begin = sys::igBeginDragDropSource(self.flags.bits() as i32);
 
             if should_begin {
-                sys::igSetDragDropPayload(
-                    self.ui.scratch_txt(self.name.as_ref()),
-                    ptr,
-                    size,
-                    self.cond as i32,
-                );
+                sys::igSetDragDropPayload(name, ptr, size, self.cond as i32);
 
                 Some(DragDropSourceTooltip::new(self.ui))
             } else {

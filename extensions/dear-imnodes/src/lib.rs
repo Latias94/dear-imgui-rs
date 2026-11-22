@@ -1,8 +1,8 @@
 //! Dear ImNodes - Rust Bindings with Dear ImGui Compatibility
 //!
 //! High-level Rust bindings for ImNodes, the node editor for Dear ImGui.
-//! This crate follows the same patterns as our `dear-implot` and `dear-imguizmo`
-//! crates: Ui extensions, RAII tokens, and strongly-typed flags/enums.
+//! Configure an editor with [`ImNodesExt::imnodes_editor`], draw its nodes inside
+//! [`NodeEditorSetup::with_nodes`], and read the captured interactions from [`PostEditor`].
 
 use dear_imnodes_sys as sys;
 

@@ -12,8 +12,8 @@ use std::{marker::PhantomData, ptr::NonNull, rc::Rc};
 
 /// An owned, context-bound syntax-highlighted text diff.
 ///
-/// The diff is intentionally neither [`Send`] nor [`Sync`]. Every native call is
-/// made while its originating Dear ImGui context is current.
+/// Editing and rendering bind the originating Dear ImGui context. The diff
+/// retains the allocator thread through destruction, even if its context ends first.
 pub struct TextDiff {
     raw: NonNull<sys::TextDiff>,
     binding: CteContextBinding,
@@ -23,7 +23,7 @@ pub struct TextDiff {
 impl TextDiff {
     /// Creates a text diff bound to `context`.
     pub fn try_create(context: &Context) -> CteResult<Self> {
-        let binding = CteContextBinding::new(context);
+        let binding = CteContextBinding::new(context)?;
         let raw = binding.try_with_bound_context("TextDiff::try_create", || unsafe {
             sys::TextDiff_TextDiff()
         })?;
@@ -217,13 +217,8 @@ bool_property!(
 impl Drop for TextDiff {
     fn drop(&mut self) {
         let raw = self.raw;
-        let _ = self
-            .binding
-            .try_with_bound_context("TextDiff::drop", || unsafe {
-                sys::TextDiff_destroy(raw.as_ptr())
-            });
-        // If context teardown already started, touching CTE state is no longer proven safe.
-        // The native handle is intentionally leaked rather than calling into a dead context.
+        self.binding
+            .destroy(|| unsafe { sys::TextDiff_destroy(raw.as_ptr()) });
     }
 }
 

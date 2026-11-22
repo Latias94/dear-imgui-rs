@@ -102,17 +102,28 @@ impl TextEditor {
         })
     }
 
-    pub fn set_line_number_left_margin(&mut self, value: usize) {
-        self.with_context("TextEditor::set_line_number_left_margin", |raw| unsafe {
-            sys::TextEditor_SetLineNumberLeftMargin(raw, value)
+    /// Sets the editor's left margin, including when line numbers are hidden.
+    pub fn set_left_margin(&mut self, value: usize) {
+        self.with_context("TextEditor::set_left_margin", |raw| unsafe {
+            sys::TextEditor_SetLeftMargin(raw, value)
         });
         self.invalidate_layout();
     }
 
-    pub fn line_number_left_margin(&self) -> usize {
-        self.with_context("TextEditor::line_number_left_margin", |raw| unsafe {
-            sys::TextEditor_GetLineNumberLeftMargin(raw)
+    pub fn left_margin(&self) -> usize {
+        self.with_context("TextEditor::left_margin", |raw| unsafe {
+            sys::TextEditor_GetLeftMargin(raw)
         })
+    }
+
+    #[deprecated(note = "use set_left_margin, which also applies when line numbers are hidden")]
+    pub fn set_line_number_left_margin(&mut self, value: usize) {
+        self.set_left_margin(value);
+    }
+
+    #[deprecated(note = "use left_margin, which also applies when line numbers are hidden")]
+    pub fn line_number_left_margin(&self) -> usize {
+        self.left_margin()
     }
 
     pub fn set_decoration_left_margin(&mut self, value: usize) {
@@ -141,6 +152,12 @@ impl TextEditor {
         })
     }
 
+    bool_property!(
+        set_smooth_scrolling_enabled,
+        is_smooth_scrolling_enabled,
+        sys::TextEditor_SetSmoothScrollingEnabled,
+        sys::TextEditor_IsSmoothScrollingEnabled
+    );
     bool_property!(
         set_insert_spaces_on_tabs,
         inserts_spaces_on_tabs,

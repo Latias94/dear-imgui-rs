@@ -23,10 +23,9 @@
 //! # }
 //! ```
 //!
-//! Native owners are neither [`Send`] nor [`Sync`]. Rendering with a `Ui` from another Context is
-//! rejected before FFI, and applications should drop every CTE owner before its Context. If the
-//! Context has already died, Drop deliberately leaks the native handle rather than dereferencing
-//! invalid native state.
+//! Native owners are neither [`Send`] nor [`Sync`]. Rendering checks the `Ui` against the
+//! editor's Context. Editors and diffs retain the allocator thread and can release their
+//! native storage after that Context has been destroyed.
 //!
 //! Stateful callbacks are owned by their editor. Reentering the same mutable callback skips the
 //! nested invocation; text filters validate a complete batch before mutation. A callback panic is

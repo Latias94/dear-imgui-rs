@@ -261,11 +261,11 @@ def _parse_source_file(raw: Any, source_context: str, index: int) -> MaintainedS
         if transform not in {
             "direct",
             "patch-imgui-core",
+            "patch-imguizmo",
             "patch-imgui-demo",
             "patch-imgui-widgets-numeric-conversions",
             "patch-imnodes",
             "patch-cte-text-editor",
-            "patch-cte-text-diff-draw-flags",
             "patch-implot3d-draw-flags",
             "patch-implot",
         }:

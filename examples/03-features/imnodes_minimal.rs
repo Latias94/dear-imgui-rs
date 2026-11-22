@@ -55,25 +55,19 @@ impl Application for ImNodesMinimal {
                     setup.set_node_pos_grid(TARGET_NODE, [340.0, 120.0]);
                 }
 
-                let editor = setup.begin_nodes();
-                {
-                    let node = editor.node(SOURCE_NODE);
-                    node.title_bar(|| ui.text("Source"));
-                    {
-                        let _output = node.output_attr(SOURCE_OUTPUT, PinShape::CircleFilled);
-                        ui.text("value");
-                    }
-                }
-                {
-                    let node = editor.node(TARGET_NODE);
-                    node.title_bar(|| ui.text("Target"));
-                    {
-                        let _input = node.input_attr(TARGET_INPUT, PinShape::CircleFilled);
-                        ui.text("value");
-                    }
-                }
-                editor.link(LINK, SOURCE_OUTPUT, TARGET_INPUT);
-                let _post = editor.end();
+                setup.with_nodes(|editor| {
+                    editor.node(SOURCE_NODE, |node| {
+                        node.title_bar(|| ui.text("Source"));
+                        node.output_attr(SOURCE_OUTPUT, PinShape::CircleFilled, || {
+                            ui.text("value")
+                        });
+                    });
+                    editor.node(TARGET_NODE, |node| {
+                        node.title_bar(|| ui.text("Target"));
+                        node.input_attr(TARGET_INPUT, PinShape::CircleFilled, || ui.text("value"));
+                    });
+                    editor.link(LINK, SOURCE_OUTPUT, TARGET_INPUT);
+                });
                 submitted = true;
             });
 

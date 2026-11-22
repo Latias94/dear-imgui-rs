@@ -4,7 +4,7 @@ use super::{
     Plot, PlotDataLayout, PlotError, PlotItemStyle, plot_spec_with_style, with_plot_str_or_empty,
 };
 use crate::sys;
-use crate::{HistogramBins, HistogramFlags, ItemFlags};
+use crate::{BinMethod, HistogramBins, HistogramFlags, ItemFlags};
 
 /// Builder for 1D histogram plots
 pub struct HistogramPlot<'a> {
@@ -100,33 +100,34 @@ impl<'a> HistogramPlot<'a> {
         self
     }
 
-    /// Validate the plot data
+    /// Checks the sample count, range, and bin width used by ImPlot.
     pub fn validate(&self) -> Result<(), PlotError> {
-        if self.values.is_empty() {
-            return Err(PlotError::EmptyData);
-        }
-        Ok(())
+        self.bin_axis().map(|_| ())
     }
-}
 
-impl<'a> Plot for HistogramPlot<'a> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
-        if self.validate().is_err() {
-            return;
-        }
-        let Ok(count) = i32::try_from(self.values.len()) else {
-            return;
-        };
-
-        let range = if let Some(range) = &self.range {
-            *range
+    fn bin_axis(&self) -> Result<(sys::ImPlotRange, i32), PlotError> {
+        let (range, bins) = histogram_axis(self.values, self.range, self.bins)?;
+        let flags = HistogramFlags::from_bits_retain(self.flags.bits() | self.item_flags.bits());
+        let width = if flags.contains(HistogramFlags::CUMULATIVE) {
+            1.0
         } else {
-            sys::ImPlotRange { Min: 0.0, Max: 0.0 }
+            (range.Max - range.Min) / f64::from(bins)
         };
+        validate_density(flags, self.values.len(), width, 1.0, || {
+            self.values
+                .iter()
+                .filter(|v| (range.Min..=range.Max).contains(*v))
+                .count()
+        })?;
+        Ok((range, bins))
+    }
 
+    pub(super) fn plot_checked(&self, plot_ui: &crate::PlotScope<'_>) -> Result<(), PlotError> {
+        let (range, bins) = self.bin_axis()?;
         plot_ui.with_bound_context(|| {
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     PlotDataLayout::DEFAULT,
@@ -134,14 +135,21 @@ impl<'a> Plot for HistogramPlot<'a> {
                 sys::ImPlot_PlotHistogram_doublePtr(
                     label_ptr,
                     self.values.as_ptr(),
-                    count,
-                    self.bins.raw("HistogramPlot::plot()"),
+                    self.values.len() as i32,
+                    bins,
                     self.bar_scale,
                     range,
                     spec,
                 );
             })
-        })
+        });
+        Ok(())
+    }
+}
+
+impl Plot for HistogramPlot<'_> {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
+        let _ = self.plot_checked(plot_ui);
     }
 
     fn label(&self) -> &str {
@@ -195,7 +203,7 @@ impl<'a> Histogram2DPlot<'a> {
         self
     }
 
-    /// Set the data range for binning
+    /// Set the data range for binning. A `(0.0, 0.0)` pair auto-ranges that axis.
     pub fn with_range(mut self, x_min: f64, x_max: f64, y_min: f64, y_max: f64) -> Self {
         self.range = Some(sys::ImPlotRect {
             X: sys::ImPlotRange {
@@ -246,33 +254,53 @@ impl<'a> Histogram2DPlot<'a> {
         self
     }
 
-    /// Validate the plot data
+    /// Check that the samples, ranges, and resulting 2D bin grid can be passed to ImPlot.
     pub fn validate(&self) -> Result<(), PlotError> {
-        super::validate_data_lengths(self.x_values, self.y_values)
+        self.bin_grid().map(|_| ())
     }
-}
 
-impl<'a> Plot for Histogram2DPlot<'a> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
-        if self.validate().is_err() {
-            return;
-        }
-        let Ok(count) = i32::try_from(self.x_values.len()) else {
-            return;
-        };
-
-        let range = if let Some(range) = &self.range {
-            *range
-        } else {
+    fn bin_grid(&self) -> Result<(sys::ImPlotRect, i32, i32), PlotError> {
+        super::validate_data_lengths(self.x_values, self.y_values)?;
+        let (x_range, x_bins) =
+            histogram_axis(self.x_values, self.range.map(|r| r.X), self.x_bins)?;
+        let (y_range, y_bins) =
+            histogram_axis(self.y_values, self.range.map(|r| r.Y), self.y_bins)?;
+        x_bins.checked_mul(y_bins).ok_or_else(|| {
+            PlotError::InvalidData("2D histogram bin count exceeded ImPlot's i32 range".into())
+        })?;
+        let flags = HistogramFlags::from_bits_retain(self.flags.bits() | self.item_flags.bits());
+        validate_density(
+            flags,
+            self.x_values.len(),
+            (x_range.Max - x_range.Min) / f64::from(x_bins),
+            (y_range.Max - y_range.Min) / f64::from(y_bins),
+            || {
+                self.x_values
+                    .iter()
+                    .zip(self.y_values)
+                    .filter(|(x, y)| {
+                        (x_range.Min..=x_range.Max).contains(*x)
+                            && (y_range.Min..=y_range.Max).contains(*y)
+                    })
+                    .count()
+            },
+        )?;
+        Ok((
             sys::ImPlotRect {
-                X: sys::ImPlotRange { Min: 0.0, Max: 0.0 },
-                Y: sys::ImPlotRange { Min: 0.0, Max: 0.0 },
-            }
-        };
+                X: x_range,
+                Y: y_range,
+            },
+            x_bins,
+            y_bins,
+        ))
+    }
 
+    fn plot_checked(&self, plot_ui: &crate::PlotScope<'_>) -> Result<(), PlotError> {
+        let (range, x_bins, y_bins) = self.bin_grid()?;
         plot_ui.with_bound_context(|| {
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     PlotDataLayout::DEFAULT,
@@ -281,14 +309,132 @@ impl<'a> Plot for Histogram2DPlot<'a> {
                     label_ptr,
                     self.x_values.as_ptr(),
                     self.y_values.as_ptr(),
-                    count,
-                    self.x_bins.raw("Histogram2DPlot::plot()"),
-                    self.y_bins.raw("Histogram2DPlot::plot()"),
+                    self.x_values.len() as i32,
+                    x_bins,
+                    y_bins,
                     range,
                     spec,
                 );
             })
+        });
+        Ok(())
+    }
+}
+
+fn validate_density(
+    flags: HistogramFlags,
+    sample_count: usize,
+    width: f64,
+    height: f64,
+    in_range_count: impl FnOnce() -> usize,
+) -> Result<(), PlotError> {
+    if flags.contains(HistogramFlags::DENSITY) {
+        let count = if flags.contains(HistogramFlags::NO_OUTLIERS) {
+            in_range_count()
+        } else {
+            sample_count
+        } as f64;
+        // ImPlot multiplies bin counts by this reciprocal, including bins whose count is zero.
+        let scale = (count * width * height).recip();
+        if scale == 0.0 || !scale.is_finite() || !(count * scale).is_finite() {
+            return Err(PlotError::InvalidData(
+                "histogram density requires a finite normalization over a nonempty sample set"
+                    .into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+// ImPlot converts the sample's distance divided by the bin width to int. Resolve the
+// automatic range here so constant samples have a usable width on either histogram path.
+fn histogram_axis(
+    values: &[f64],
+    range: Option<sys::ImPlotRange>,
+    bins: HistogramBins,
+) -> Result<(sys::ImPlotRange, i32), PlotError> {
+    if values.is_empty() {
+        return Err(PlotError::EmptyData);
+    }
+    if values.len() > i32::MAX as usize {
+        return Err(PlotError::InvalidData(
+            "histogram sample count exceeded ImPlot's i32 range".into(),
+        ));
+    }
+    let range = range
+        .filter(|r| r.Min != 0.0 || r.Max != 0.0)
+        .unwrap_or_else(|| automatic_range(values));
+    let span = range.Max - range.Min;
+    if !span.is_finite() || span <= 0.0 {
+        return Err(PlotError::InvalidData(
+            "histogram range must have a positive finite width".into(),
+        ));
+    }
+    let n = values.len() as f64;
+    let count = match bins {
+        HistogramBins::Count(count) => count as f64,
+        HistogramBins::Method(BinMethod::Sqrt) => n.sqrt().ceil(),
+        HistogramBins::Method(BinMethod::Sturges) => (1.0 + n.log2()).ceil(),
+        HistogramBins::Method(BinMethod::Rice) => (2.0 * n.cbrt()).ceil(),
+        HistogramBins::Method(BinMethod::Scott) => scott_bins(values, span)?,
+    };
+    // ImPlot casts the upper endpoint's quotient to int before clamping it to the last bin.
+    let width = span / count;
+    if !(1.0..=f64::from(i32::MAX)).contains(&count) || span / width >= f64::from(i32::MAX) + 1.0 {
+        return Err(PlotError::InvalidData(
+            "histogram bin count or width is outside ImPlot's range".into(),
+        ));
+    }
+    Ok((range, count as i32))
+}
+
+fn automatic_range(values: &[f64]) -> sys::ImPlotRange {
+    let (mut min, mut max) = (f64::INFINITY, f64::NEG_INFINITY);
+    for &value in values.iter().filter(|v| v.is_finite()) {
+        min = min.min(value);
+        max = max.max(value);
+    }
+    if min == max {
+        // A constant axis still needs a nonzero width, even at zero or f64::MAX.
+        let pad = (min.abs() * f64::EPSILON).max(0.5);
+        min = (min - pad).max(-f64::MAX);
+        max = (max + pad).min(f64::MAX);
+    }
+    sys::ImPlotRange { Min: min, Max: max }
+}
+
+fn scott_bins(values: &[f64], span: f64) -> Result<f64, PlotError> {
+    if values[0].is_finite() && values.iter().all(|&v| v == values[0]) {
+        return Ok(1.0);
+    }
+    // Match the operation order of ImPlot's ImMean and ImStdDev. At large offsets a
+    // different mean or variance algorithm can move Scott's result across a rounding boundary.
+    let n = values.len() as f64;
+    let weight = n.recip();
+    let mean = values.iter().map(|v| v * weight).sum::<f64>();
+    let weight = (n - 1.0).recip();
+    let variance = values
+        .iter()
+        .map(|v| {
+            let delta = v - mean;
+            delta * delta * weight
         })
+        .sum::<f64>();
+    if !variance.is_finite() {
+        return Err(PlotError::InvalidData(
+            "Scott histogram binning requires finite sample variance".into(),
+        ));
+    }
+    if variance == 0.0 {
+        return Ok(1.0);
+    }
+    let width = 3.49 * variance.sqrt() / n.cbrt();
+    Ok((span / width).round().max(1.0))
+}
+
+impl<'a> Plot for Histogram2DPlot<'a> {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
+        let _ = self.plot_checked(plot_ui);
     }
 
     fn label(&self) -> &str {
@@ -297,13 +443,10 @@ impl<'a> Plot for Histogram2DPlot<'a> {
 }
 
 /// Convenience functions for quick histogram plotting
-impl<'ui> crate::PlotUi<'ui> {
+impl<'ui> crate::PlotScope<'ui> {
     /// Plot a 1D histogram with default settings
     pub fn histogram_plot(&self, label: &str, values: &[f64]) -> Result<(), PlotError> {
-        let plot = HistogramPlot::new(label, values);
-        plot.validate()?;
-        plot.plot(self);
-        Ok(())
+        HistogramPlot::new(label, values).plot_checked(self)
     }
 
     /// Plot a 1D histogram with custom bin count
@@ -313,10 +456,9 @@ impl<'ui> crate::PlotUi<'ui> {
         values: &[f64],
         bins: impl Into<HistogramBins>,
     ) -> Result<(), PlotError> {
-        let plot = HistogramPlot::new(label, values).with_bins(bins);
-        plot.validate()?;
-        plot.plot(self);
-        Ok(())
+        HistogramPlot::new(label, values)
+            .with_bins(bins)
+            .plot_checked(self)
     }
 
     /// Plot a 2D histogram (bivariate histogram as heatmap)
@@ -326,10 +468,7 @@ impl<'ui> crate::PlotUi<'ui> {
         x_values: &[f64],
         y_values: &[f64],
     ) -> Result<(), PlotError> {
-        let plot = Histogram2DPlot::new(label, x_values, y_values);
-        plot.validate()?;
-        plot.plot(self);
-        Ok(())
+        Histogram2DPlot::new(label, x_values, y_values).plot_checked(self)
     }
 
     /// Plot a 2D histogram with custom bin counts
@@ -341,48 +480,97 @@ impl<'ui> crate::PlotUi<'ui> {
         x_bins: impl Into<HistogramBins>,
         y_bins: impl Into<HistogramBins>,
     ) -> Result<(), PlotError> {
-        let plot = Histogram2DPlot::new(label, x_values, y_values).with_bins(x_bins, y_bins);
-        plot.validate()?;
-        plot.plot(self);
-        Ok(())
+        Histogram2DPlot::new(label, x_values, y_values)
+            .with_bins(x_bins, y_bins)
+            .plot_checked(self)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{Histogram2DPlot, HistogramPlot};
-    use crate::{BinMethod, HistogramBins};
+    use crate::BinMethod;
 
     #[test]
-    fn histogram_bins_distinguish_counts_from_methods() {
-        assert_eq!(HistogramBins::from(8usize).raw("test"), 8);
-        assert_eq!(
-            HistogramBins::from(BinMethod::Rice).raw("test"),
-            BinMethod::Rice as i32
-        );
-        assert_eq!(
-            HistogramBins::DEFAULT.raw("test"),
-            BinMethod::Sturges as i32
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "test bin count must be positive")]
-    fn histogram_bins_reject_zero_counts_before_ffi() {
-        let _ = HistogramBins::from(0usize).raw("test");
-    }
-
-    #[test]
-    #[should_panic(expected = "test bin count exceeded ImPlot's i32 range")]
-    fn histogram_bins_reject_oversized_counts_before_ffi() {
-        let _ = HistogramBins::from(i32::MAX as usize + 1).raw("test");
-    }
-
-    #[test]
-    fn histogram_builders_accept_typed_bins() {
+    fn histogram_builders_validate_counts_and_methods() {
         let values = [1.0, 2.0, 3.0];
-        let _ = HistogramPlot::new("hist", &values).with_bins(8usize);
-        let _ = HistogramPlot::new("hist", &values).with_bins(BinMethod::Scott);
-        let _ = Histogram2DPlot::new("hist2d", &values, &values).with_bins(4usize, BinMethod::Rice);
+        let histogram = || HistogramPlot::new("hist", &values);
+        assert!(histogram().with_bins(8usize).validate().is_ok());
+        assert!(histogram().with_bins(BinMethod::Scott).validate().is_ok());
+        assert!(histogram().with_range(2.0, 2.0).validate().is_err());
+        for bins in [0, i32::MAX as usize + 1] {
+            assert!(histogram().with_bins(bins).validate().is_err());
+        }
+    }
+
+    #[test]
+    fn histogram_2d_resolves_each_range_sentinel_independently() {
+        let xs = [f64::NAN, 14.0, 10.0, f64::INFINITY];
+        let ys = [3.0, -5.0, -1.0, 0.0];
+        for (input, expected) in [
+            ([0.0, 0.0, -8.0, 0.0], [10.0, 14.0, -8.0, 0.0]),
+            ([0.0, 30.0, 0.0, 0.0], [0.0, 30.0, -5.0, 3.0]),
+        ] {
+            let [x_min, x_max, y_min, y_max] = input;
+            let (range, _, _) = Histogram2DPlot::new("mixed", &xs, &ys)
+                .with_range(x_min, x_max, y_min, y_max)
+                .bin_grid()
+                .unwrap();
+            assert_eq!(
+                [range.X.Min, range.X.Max, range.Y.Min, range.Y.Max],
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn histogram_2d_scott_gives_a_constant_axis_one_finite_bin() {
+        for value in [0.0, -f64::MAX, f64::MAX] {
+            let values = [value; 3];
+            let (range, x_bins, y_bins) = Histogram2DPlot::new("constant", &values, &values)
+                .with_bins(BinMethod::Scott, BinMethod::Scott)
+                .bin_grid()
+                .unwrap();
+            assert_eq!((x_bins, y_bins), (1, 1));
+            assert!(range.X.Min <= value && value <= range.X.Max);
+            let width = range.X.Max - range.X.Min;
+            assert!(width.is_finite() && width > 0.0);
+        }
+    }
+
+    #[test]
+    fn density_excluding_outliers_requires_a_sample_inside_the_range() {
+        let xs = [0.0, 2.0];
+        let ys = [2.0, 0.0];
+        let histogram = HistogramPlot::new("1d", &xs).with_range(3.0, 4.0).density();
+        assert!(histogram.validate().is_ok());
+        assert!(histogram.no_outliers().validate().is_err());
+        // Each axis has an in-range sample, but neither pair is in the rectangle.
+        let histogram = Histogram2DPlot::new("2d", &xs, &ys)
+            .with_range(-1.0, 1.0, -1.0, 1.0)
+            .density();
+        assert!(histogram.validate().is_ok());
+        assert!(histogram.no_outliers().validate().is_err());
+    }
+
+    #[test]
+    fn histogram_2d_checks_the_resolved_bin_product_before_allocation() {
+        let values = [0.0, 1.0];
+        let grid = |y| {
+            Histogram2DPlot::new("capacity", &values, &values)
+                .with_bins(BinMethod::Sqrt, y)
+                .validate()
+        };
+        assert!(grid(2usize).is_ok());
+        assert!(grid(0usize).is_err());
+        assert!(grid(1usize << 30).is_err()); // Two X bins put the product one past i32::MAX.
+    }
+
+    #[test]
+    fn histogram_2d_rejects_widths_that_round_the_last_bin_index_past_i32() {
+        let values = [0.0, f64::from_bits(1 << 31)];
+        let plot = Histogram2DPlot::new("subnormal", &values, &values)
+            .with_bins(i32::MAX as usize, 1usize);
+        assert!(plot.validate().is_err());
     }
 }

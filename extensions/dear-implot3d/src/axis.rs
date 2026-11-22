@@ -1,10 +1,10 @@
 use crate::{
-    Axis3D, Axis3DFlags, Plot3DCond, Plot3DUi, axis_tick_count_to_i32, debug_before_plot,
-    debug_before_setup, imvec2, len_i32, sys,
+    Axis3D, Axis3DFlags, Plot3DCond, Plot3DScope, Plot3DSetup, axis_tick_count_to_i32, imvec2,
+    len_i32, sys,
 };
 
-/// Axis helpers
-impl<'ui> Plot3DUi<'ui> {
+impl Plot3DSetup<'_> {
+    /// Sets the axis labels and flags. Labels may contain literal percent signs.
     pub fn setup_axes(
         &self,
         x_label: &str,
@@ -15,7 +15,6 @@ impl<'ui> Plot3DUi<'ui> {
         z_flags: Axis3DFlags,
     ) {
         self.with_bound_context(|| {
-            debug_before_setup();
             if x_label.contains('\0') || y_label.contains('\0') || z_label.contains('\0') {
                 return;
             }
@@ -37,9 +36,9 @@ impl<'ui> Plot3DUi<'ui> {
         })
     }
 
+    /// Sets one axis label and its flags. The axis menu displays the label verbatim.
     pub fn setup_axis(&self, axis: Axis3D, label: &str, flags: Axis3DFlags) {
         self.with_bound_context(|| {
-            debug_before_setup();
             if label.contains('\0') {
                 return;
             }
@@ -50,9 +49,8 @@ impl<'ui> Plot3DUi<'ui> {
     }
 
     pub fn setup_axis_limits(&self, axis: Axis3D, min: f64, max: f64, cond: Plot3DCond) {
-        self.with_bound_context(|| {
-            debug_before_setup();
-            unsafe { sys::ImPlot3D_SetupAxisLimits(axis as i32, min, max, cond as i32) }
+        self.with_bound_context(|| unsafe {
+            sys::ImPlot3D_SetupAxisLimits(axis as i32, min, max, cond as i32)
         })
     }
 
@@ -66,25 +64,20 @@ impl<'ui> Plot3DUi<'ui> {
         z_max: f64,
         cond: Plot3DCond,
     ) {
-        self.with_bound_context(|| {
-            debug_before_setup();
-            unsafe {
-                sys::ImPlot3D_SetupAxesLimits(x_min, x_max, y_min, y_max, z_min, z_max, cond as i32)
-            }
+        self.with_bound_context(|| unsafe {
+            sys::ImPlot3D_SetupAxesLimits(x_min, x_max, y_min, y_max, z_min, z_max, cond as i32)
         })
     }
 
     pub fn setup_axis_limits_constraints(&self, axis: Axis3D, v_min: f64, v_max: f64) {
-        self.with_bound_context(|| {
-            debug_before_setup();
-            unsafe { sys::ImPlot3D_SetupAxisLimitsConstraints(axis as i32, v_min, v_max) }
+        self.with_bound_context(|| unsafe {
+            sys::ImPlot3D_SetupAxisLimitsConstraints(axis as i32, v_min, v_max)
         })
     }
 
     pub fn setup_axis_zoom_constraints(&self, axis: Axis3D, z_min: f64, z_max: f64) {
-        self.with_bound_context(|| {
-            debug_before_setup();
-            unsafe { sys::ImPlot3D_SetupAxisZoomConstraints(axis as i32, z_min, z_max) }
+        self.with_bound_context(|| unsafe {
+            sys::ImPlot3D_SetupAxisZoomConstraints(axis as i32, z_min, z_max)
         })
     }
 
@@ -99,7 +92,6 @@ impl<'ui> Plot3DUi<'ui> {
         keep_default: bool,
     ) {
         self.with_bound_context(|| {
-            debug_before_setup();
             let Some(n_ticks) = len_i32(values.len()) else {
                 return;
             };
@@ -157,12 +149,11 @@ impl<'ui> Plot3DUi<'ui> {
             // ImPlot3D clamps the count to at least 2 before indexing labels.
             assert!(
                 n_ticks >= 2,
-                "Plot3DUi::setup_axis_ticks_range() n_ticks must be at least 2 when labels are provided"
+                "Plot3DSetup::setup_axis_ticks_range() n_ticks must be at least 2 when labels are provided"
             );
         }
-        let n_ticks_i32 = axis_tick_count_to_i32("Plot3DUi::setup_axis_ticks_range()", n_ticks);
+        let n_ticks_i32 = axis_tick_count_to_i32("Plot3DSetup::setup_axis_ticks_range()", n_ticks);
         self.with_bound_context(|| {
-            debug_before_setup();
             if let Some(lbls) = labels {
                 if lbls.len() != n_ticks {
                     return;
@@ -197,9 +188,12 @@ impl<'ui> Plot3DUi<'ui> {
     }
 
     pub fn setup_box_scale(&self, x: f32, y: f32, z: f32) {
-        self.with_bound_context(|| {
-            debug_before_setup();
-            unsafe { sys::ImPlot3D_SetupBoxScale(x as f64, y as f64, z as f64) }
+        assert!(
+            [x, y, z].into_iter().all(|v| v.is_finite() && v > 0.0),
+            "ImPlot3D box scale must be finite and positive"
+        );
+        self.with_bound_context(|| unsafe {
+            sys::ImPlot3D_SetupBoxScale(x as f64, y as f64, z as f64)
         })
     }
 
@@ -210,35 +204,30 @@ impl<'ui> Plot3DUi<'ui> {
         animate: bool,
         cond: Plot3DCond,
     ) {
-        self.with_bound_context(|| {
-            debug_before_setup();
-            unsafe {
-                sys::ImPlot3D_SetupBoxRotation_double(
-                    elevation as f64,
-                    azimuth as f64,
-                    animate,
-                    cond as i32,
-                )
-            }
+        self.with_bound_context(|| unsafe {
+            sys::ImPlot3D_SetupBoxRotation_double(
+                elevation as f64,
+                azimuth as f64,
+                animate,
+                cond as i32,
+            )
         })
     }
 
     pub fn setup_box_initial_rotation(&self, elevation: f32, azimuth: f32) {
-        self.with_bound_context(|| {
-            debug_before_setup();
-            unsafe {
-                sys::ImPlot3D_SetupBoxInitialRotation_double(elevation as f64, azimuth as f64)
-            }
+        self.with_bound_context(|| unsafe {
+            sys::ImPlot3D_SetupBoxInitialRotation_double(elevation as f64, azimuth as f64)
         })
     }
+}
 
+impl Plot3DScope<'_> {
     pub fn plot_text(&self, text: &str, x: f32, y: f32, z: f32, angle: f32, pix_offset: [f32; 2]) {
         self.with_bound_context(|| {
             if text.contains('\0') {
                 return;
             }
             dear_imgui_rs::with_scratch_txt(text, |text_ptr| unsafe {
-                debug_before_plot();
                 sys::ImPlot3D_PlotText(
                     text_ptr,
                     x as f64,

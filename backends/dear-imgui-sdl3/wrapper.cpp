@@ -938,9 +938,6 @@ void dear_imgui_sdl3_backend_sdlrenderer3_destroy_device_objects() {
     ImGui_ImplSDLRenderer3_DestroyDeviceObjects();
 }
 
-void dear_imgui_sdl3_backend_sdlrenderer3_update_texture(ImTextureData* tex) {
-    ImGui_ImplSDLRenderer3_UpdateTexture(tex);
-}
 #endif
 
 #if defined(DEAR_IMGUI_SDL3_ENABLE_SDLGPU3)
@@ -977,9 +974,6 @@ void dear_imgui_sdl3_backend_sdlgpu3_destroy_device_objects() {
     ImGui_ImplSDLGPU3_DestroyDeviceObjects();
 }
 
-void dear_imgui_sdl3_backend_sdlgpu3_update_texture(ImTextureData* tex) {
-    ImGui_ImplSDLGPU3_UpdateTexture(tex);
-}
 #endif
 
 } // extern "C"

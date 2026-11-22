@@ -68,9 +68,9 @@ pub enum ProviderTransform {
     PatchImguiCore,
     PatchImguiDemo,
     PatchImguiWidgetsNumericConversions,
+    PatchImguizmo,
     PatchImnodes,
     PatchCteTextEditor,
-    PatchCteTextDiffDrawFlags,
     PatchImplot3dDrawFlags,
     PatchImplot,
 }
@@ -1068,19 +1068,21 @@ unsafe extern "C" {
     }
 
     #[test]
-    fn checked_in_imguizmo_contract_includes_compute_mouse_ray() {
+    fn checked_in_imguizmo_contract_includes_ray_and_interaction_reset() {
         let inventory = SourceInventory::embedded();
         let source = inventory.source_by_id("imguizmo").unwrap();
         let provider = source.provider.as_ref().unwrap();
-        assert!(
-            provider
-                .required_exports
-                .iter()
-                .any(|symbol| symbol == "ImGuizmo_ComputeMouseRay")
-        );
         let bindings =
             include_str!("../../../extensions/dear-imguizmo-sys/src/wasm_bindings_pregenerated.rs");
         let imports = parse_wasm_imports(bindings, &inventory.wasm_import_module).unwrap();
-        assert!(imports.symbols.contains("ImGuizmo_ComputeMouseRay"));
+        for symbol in ["ImGuizmo_ComputeMouseRay", "ImGuizmo_ResetInteraction"] {
+            assert!(
+                provider
+                    .required_exports
+                    .iter()
+                    .any(|export| export == symbol)
+            );
+            assert!(imports.symbols.contains(symbol));
+        }
     }
 }

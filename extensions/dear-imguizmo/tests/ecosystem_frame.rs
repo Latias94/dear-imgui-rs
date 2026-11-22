@@ -32,45 +32,45 @@ fn extensions_compose_inside_one_engine_managed_imgui_frame() {
     let ui = frame.ui();
 
     let plot_ui = ui.implot(&plot_ctx);
-    if let Some(plot) = plot_ui.begin_plot("bevy-shared-frame-plot") {
-        plot_ui.plot_line("line", &[0.0, 1.0, 2.0], &[0.0, 1.0, 0.0]);
-        plot.end();
-    }
+    plot_ui.with_plot("bevy-shared-frame-plot", |plot| {
+        plot.plot_line("line", &[0.0, 1.0, 2.0], &[0.0, 1.0, 0.0]);
+    });
 
     let imnodes_ui = ui.imnodes(&imnodes_ctx);
-    let imnodes = imnodes_ui.editor(Some(&imnodes_editor)).begin_nodes();
-    let output = dear_imnodes::PinId::new(11);
-    let input = dear_imnodes::PinId::new(21);
-    {
-        let node = imnodes.node(dear_imnodes::NodeId::new(1));
-        node.title_bar(|| ui.text("Source"));
-        drop(node.output_attr(output, dear_imnodes::PinShape::CircleFilled));
-    }
-    {
-        let node = imnodes.node(dear_imnodes::NodeId::new(2));
-        node.title_bar(|| ui.text("Target"));
-        drop(node.input_attr(input, dear_imnodes::PinShape::CircleFilled));
-    }
-    imnodes.link(dear_imnodes::LinkId::new(100), output, input);
-    let _ = imnodes.end();
+    imnodes_ui
+        .editor(Some(&imnodes_editor))
+        .with_nodes(|imnodes| {
+            let output = dear_imnodes::PinId::new(11);
+            let input = dear_imnodes::PinId::new(21);
+            imnodes.node(dear_imnodes::NodeId::new(1), |node| {
+                node.title_bar(|| ui.text("Source"));
+                node.output_attr(output, dear_imnodes::PinShape::CircleFilled, || {});
+            });
+            imnodes.node(dear_imnodes::NodeId::new(2), |node| {
+                node.title_bar(|| ui.text("Target"));
+                node.input_attr(input, dear_imnodes::PinShape::CircleFilled, || {});
+            });
+            imnodes.link(dear_imnodes::LinkId::new(100), output, input);
+        });
 
-    let node_editor = ui.node_editor(
+    ui.with_node_editor(
         &node_editor_ctx,
         "bevy-shared-frame-node-editor",
         [240.0, 160.0],
+        |node_editor| {
+            let node_a = dear_node_editor::NodeId::new(1);
+            let node_b = dear_node_editor::NodeId::new(2);
+            let pin_a = dear_node_editor::PinId::new(11);
+            let pin_b = dear_node_editor::PinId::new(21);
+            node_editor.node(node_a, |node| {
+                node.pin(pin_a, dear_node_editor::PinKind::Output, |_| ui.text("out"));
+            });
+            node_editor.node(node_b, |node| {
+                node.pin(pin_b, dear_node_editor::PinKind::Input, |_| ui.text("in"));
+            });
+            let _ = node_editor.link(dear_node_editor::LinkId::new(100), pin_a, pin_b);
+        },
     );
-    let node_a = dear_node_editor::NodeId::new(1);
-    let node_b = dear_node_editor::NodeId::new(2);
-    let pin_a = dear_node_editor::PinId::new(11);
-    let pin_b = dear_node_editor::PinId::new(21);
-    node_editor.node(node_a, |node| {
-        node.pin(pin_a, dear_node_editor::PinKind::Output, |_| ui.text("out"));
-    });
-    node_editor.node(node_b, |node| {
-        node.pin(pin_b, dear_node_editor::PinKind::Input, |_| ui.text("in"));
-    });
-    let _ = node_editor.link(dear_node_editor::LinkId::new(100), pin_a, pin_b);
-    node_editor.end();
 
     let gizmo = ui.guizmo();
     gizmo.set_drawlist(DrawListTarget::Foreground);

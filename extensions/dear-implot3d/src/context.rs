@@ -1,12 +1,12 @@
 use crate::sys;
-use crate::ui::{Plot3DContextBinding, Plot3DUi};
-use dear_imgui_rs::{Context, ContextBinding, Ui};
+use crate::ui::Plot3DUi;
+use dear_imgui_rs::{Context, ContextBinding, ContextThreadLease, Ui};
+use std::cell::{RefCell, RefMut};
 
 /// Plot3D context wrapper
 ///
-/// This manages ImPlot3D state bound to one owning Dear ImGui Context. Keep it
-/// across frames and drop it before that Context. Multiple plotting contexts are
-/// supported, but native current-context access must remain serial.
+/// Plotting requires the originating Dear ImGui context. The native plot allocation
+/// reserves its owner thread until this `Plot3DContext` is dropped.
 ///
 /// # Example
 ///
@@ -19,26 +19,27 @@ use dear_imgui_rs::{Context, ContextBinding, Ui};
 ///
 /// // In your main loop:
 /// let ui = imgui_ctx.frame();
-/// let plot_ui = plot3d_ctx.get_plot_ui(&ui);
+/// let plot_ui = plot3d_ctx.get_plot_ui(ui);
 /// ```
 pub struct Plot3DContext {
     pub(crate) raw: *mut sys::ImPlot3DContext,
     pub(crate) imgui_binding: ContextBinding,
-    pub(crate) owns_context: bool,
+    plot_scope: RefCell<()>,
+    _thread_lease: ContextThreadLease,
 }
 
 impl Plot3DContext {
-    pub(crate) fn binding(&self) -> Plot3DContextBinding {
-        Plot3DContextBinding {
-            plot_ctx_raw: self.raw,
-            imgui_binding: self.imgui_binding.clone(),
-        }
+    pub(crate) fn enter_plot(&self) -> RefMut<'_, ()> {
+        self.plot_scope
+            .try_borrow_mut()
+            .expect("ImPlot3D requires a context with no open plot")
     }
 
     /// Try to create a new ImPlot3D context.
     ///
     /// This should be called once after creating your ImGui context.
     pub fn try_create(imgui: &Context) -> dear_imgui_rs::ImGuiResult<Self> {
+        let thread_lease = ContextThreadLease::acquire()?;
         let imgui_binding = imgui.binding();
         let ctx = imgui_binding.with_bound_context(|| unsafe {
             let prev_plot = sys::ImPlot3D_GetCurrentContext();
@@ -57,7 +58,8 @@ impl Plot3DContext {
         Ok(Self {
             raw: ctx,
             imgui_binding,
-            owns_context: true,
+            plot_scope: RefCell::default(),
+            _thread_lease: thread_lease,
         })
     }
 
@@ -70,9 +72,9 @@ impl Plot3DContext {
     ///
     /// # Safety
     ///
-    /// Use it only while this plotting context and its owning Dear ImGui Context are
-    /// alive and correctly bound. Preserve native ownership and pointer invariants; do
-    /// not destroy the context or retain the pointer beyond this wrapper's lifetime.
+    /// Both contexts must be alive and correctly bound. Keep wrapper-owned plots, cached
+    /// items and style stacks intact. Balance raw Begin/End and Push/Pop pairs within their
+    /// own scopes. This wrapper retains sole ownership of the native allocation.
     pub unsafe fn raw(&self) -> *mut sys::ImPlot3DContext {
         self.raw
     }
@@ -80,36 +82,40 @@ impl Plot3DContext {
     /// Get a per-frame plotting interface
     ///
     /// Call this once per frame to get access to plotting functions.
-    /// The returned `Plot3DUi` is tied to the lifetime of the `Ui` frame.
-    pub fn get_plot_ui<'ui>(&self, ui: &'ui Ui) -> Plot3DUi<'ui> {
+    /// The returned `Plot3DUi` borrows both this plot context and the frame.
+    ///
+    /// ```compile_fail,E0515
+    /// use dear_imgui_rs::Ui;
+    /// use dear_implot3d::{Plot3DContext, Plot3DUi};
+    /// fn view(ui: &Ui, plot: Plot3DContext) -> Plot3DUi<'_> {
+    ///     plot.get_plot_ui(ui)
+    /// }
+    /// ```
+    pub fn get_plot_ui<'ui>(&'ui self, ui: &'ui Ui) -> Plot3DUi<'ui> {
         assert_eq!(
             ui.context_id(),
             self.imgui_binding.id(),
             "dear-implot3d: Plot3DContext::get_plot_ui() requires a Ui from the owning ImGui context"
         );
         Plot3DUi {
-            _ui: ui,
-            binding: self.binding(),
+            imgui: ui,
+            context: self,
         }
     }
 }
 
 impl Drop for Plot3DContext {
     fn drop(&mut self) {
-        if !self.owns_context || self.raw.is_null() {
-            return;
+        // DestroyContext frees the plot's own allocations and clears GImPlot3D only if current.
+        let raw = self.raw;
+        if self
+            .imgui_binding
+            .try_with_bound_context(|| unsafe { sys::ImPlot3D_DestroyContext(raw) })
+            .is_err()
+        {
+            // The thread lease still covers the allocator after the ImGui context has gone.
+            unsafe { sys::ImPlot3D_DestroyContext(raw) };
         }
-
-        let _ = self.imgui_binding.try_with_bound_context(|| unsafe {
-            let prev_plot = sys::ImPlot3D_GetCurrentContext();
-            let restore_plot = if prev_plot == self.raw {
-                std::ptr::null_mut()
-            } else {
-                prev_plot
-            };
-            sys::ImPlot3D_DestroyContext(self.raw);
-            sys::ImPlot3D_SetCurrentContext(restore_plot);
-        });
     }
 }
 
@@ -145,7 +151,7 @@ mod tests {
 
         unsafe { sys::ImPlot3D_SetCurrentContext(raw_b) };
 
-        plot_a.binding().with_bound_context(|| {
+        plot_a.with_bound_context(|| {
             assert_eq!(unsafe { sys::ImPlot3D_GetCurrentContext() }, raw_a);
         });
 
@@ -156,7 +162,7 @@ mod tests {
     }
 
     #[test]
-    fn plot3d_tokens_bind_own_context_before_drop() {
+    fn scoped_styles_and_plot_cleanup_bind_their_owner() {
         let _guard = test_guard();
         let mut imgui = Context::create();
         {
@@ -176,17 +182,33 @@ mod tests {
         {
             let frame = imgui.begin_frame();
             let plot_ui = plot_a.get_plot_ui(frame.ui());
-            let style = plot_ui.push_style_var_f32(crate::Plot3DStyleVar::FillAlpha, 0.5);
-            unsafe { sys::ImPlot3D_SetCurrentContext(raw_b) };
-            drop(style);
+            let style = || plot_a.with_bound_context(|| unsafe { *sys::ImPlot3D_GetStyle() });
+            let initial = style();
+            plot_ui.with_style_vars(
+                &[
+                    crate::Plot3DStyleVar::FillAlpha(0.5),
+                    crate::Plot3DStyleVar::PlotPadding([3.0, 4.0]),
+                    crate::Plot3DStyleVar::Marker(crate::Marker3D::Square),
+                ],
+                || {
+                    let applied = style();
+                    assert_eq!(applied.FillAlpha, 0.5);
+                    assert_eq!([applied.PlotPadding.x, applied.PlotPadding.y], [3.0, 4.0]);
+                    assert_eq!(applied.Marker, crate::Marker3D::Square as i32);
+                    unsafe { sys::ImPlot3D_SetCurrentContext(raw_b) };
+                },
+            );
             assert_eq!(unsafe { sys::ImPlot3D_GetCurrentContext() }, raw_b);
-
-            let token = plot_ui
-                .begin_plot("token")
-                .build()
-                .expect("failed to begin 3D plot");
-            unsafe { sys::ImPlot3D_SetCurrentContext(raw_b) };
-            drop(token);
+            assert_eq!(style().FillAlpha, initial.FillAlpha);
+            assert_eq!(style().PlotPadding, initial.PlotPadding);
+            assert_eq!(style().Marker, initial.Marker);
+            plot_ui
+                .begin_plot("plot")
+                .build(|plot| {
+                    assert!(plot.get_frame_size()[0] > 0.0);
+                    assert_eq!(unsafe { sys::ImPlot3D_GetCurrentContext() }, raw_b);
+                })
+                .expect("visible plot");
             assert_eq!(unsafe { sys::ImPlot3D_GetCurrentContext() }, raw_b);
         }
 
@@ -205,6 +227,35 @@ mod tests {
         drop(plot);
 
         assert!(unsafe { sys::ImPlot3D_GetCurrentContext() }.is_null());
+    }
+
+    #[test]
+    fn plot3d_owner_keeps_its_thread_and_destroys_the_native_plot_after_imgui_drops() {
+        let _guard = test_guard();
+        let imgui = Context::create();
+        let plot = Plot3DContext::create(&imgui);
+        unsafe { sys::ImPlot3D_SetCurrentContext(plot.raw) };
+        drop(imgui);
+
+        assert_eq!(
+            plot.imgui_binding.try_with_bound_context(|| ()),
+            Err(dear_imgui_rs::ContextBindingError::NativeDestroyed)
+        );
+        std::thread::spawn(|| {
+            assert!(matches!(
+                dear_imgui_rs::ContextThreadLease::acquire(),
+                Err(dear_imgui_rs::ImGuiError::ContextThreadConflict)
+            ))
+        })
+        .join()
+        .unwrap();
+        drop(plot);
+        std::thread::spawn(|| {
+            let _lease = dear_imgui_rs::ContextThreadLease::acquire().unwrap();
+            assert!(unsafe { sys::ImPlot3D_GetCurrentContext() }.is_null());
+        })
+        .join()
+        .unwrap();
     }
 
     #[test]
@@ -235,7 +286,7 @@ mod tests {
             unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
             imgui_b.as_raw()
         );
-        plot_a.binding().with_bound_context(|| {
+        plot_a.with_bound_context(|| {
             assert_eq!(
                 unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
                 imgui_a_raw

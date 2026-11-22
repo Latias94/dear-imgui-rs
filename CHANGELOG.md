@@ -8,9 +8,64 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-11-23
+
+This release updates the native extensions and SDL3 backend, changes the plot and node-editor APIs, and fixes texture ownership across frames and renderer replacements. Upgrade all workspace crates together and rebuild native archives or browser providers. [Compatibility and migration](https://github.com/Latias94/dear-imgui-rs/blob/v0.23.0/docs/COMPATIBILITY.md#023-release-train) · [PR #101](https://github.com/Latias94/dear-imgui-rs/pull/101)
+
 ### Breaking Changes and Migration
 
 - `dear-imgui-wgpu` adds `GammaMode::Srgb` to decode sRGB fragment colors to linear light before blending. Downstream exhaustive matches on `GammaMode` must handle the new variant. The default `Auto` mode retains its existing behavior. Contributed by [@acfrazier](https://github.com/acfrazier) in [PR #100](https://github.com/Latias94/dear-imgui-rs/pull/100).
+- Update direct dependencies on `sdl3` to `"0.22.1"` when passing SDL windows, events, or renderer objects to the SDL3 backend. The workspace now uses `sdl3-sys` 0.7.3 and SDL 3.4.20.
+- `OwnedStateStorage::as_mut` now requires `unsafe` because the returned native storage contains the allocation that its destructor frees. Use `Ui::with_state_storage` for scoped access to storage values.
+- `Ui::table_get_column_name` returns an owned `String` that remains valid after the table changes.
+- Rust typed drag-and-drop payloads use a private native tag. Use `begin_payload_unchecked` and `accept_payload_unchecked` for C/C++ payload layouts. Rust application names accept 1–32 bytes and must start with a character other than `_`.
+- Exhaustive matches on `Plot3DError` must handle `NativeCountOutOfRange`, `MeshIndexOutOfBounds`, `InvalidSurfaceScale` and `NonFiniteSurfaceHeight`.
+- CTE palettes now have 33 entries, including nine custom colors. For fixed arrays passed to `Palette::from_colors`, use `PaletteColor::COUNT` or start with a built-in palette and set individual entries. `Language::ALL` now includes Julia and WGSL.
+- Custom provider builders should use `ProviderTransform::PatchCteTextEditor` for `TextEditor.cpp` and compile `TextDiff.cpp` directly. The old CTE Unicode-range and TextDiff draw-flag transform variants have been removed.
+- Rebuild the browser application and `imgui-sys-v1` provider together. Browser applications use `WasmProviderAllocator`, import the provider's function table, and pass its memory to wasm-bindgen. See the [browser migration instructions](https://github.com/Latias94/dear-imgui-rs/blob/v0.23.0/docs/WASM.md#runtime-model).
+- `Ui::font_atlas_texture()` returns `Option<TextureRef<'_>>`. Pass the handle directly to image and plotting APIs. Legacy renderers can read CPU pixels through `LegacyFontAtlas::tex_data()` between frames. Keep the CPU copy for glyph repacking. To discard the atlas, call `FontAtlas::clear()` and rebuild it from its sources.
+- Typed callbacks passed to `set_platform_set_window_pos`, `set_platform_set_window_size` and `set_renderer_set_window_size` now receive `&ImVec2`. Custom native core archives must be rebuilt for the updated platform hook contract. See the [custom backend guide](https://github.com/Latias94/dear-imgui-rs/blob/v0.23.0/docs/CUSTOM_BACKENDS.md).
+- Build node-editor UIs with `ui.with_node_editor(&editor, id, size, |frame| { ... })`. Use `node`, `pin`, `group_hint`, `with_create` and `with_suspended` for nested scopes. Their manually balanced counterparts now require `unsafe`. Exhaustive matches on `NodeEditorError` must handle `ThreadLease`. See the [node-editor migration examples](https://github.com/Latias94/dear-imgui-rs/blob/v0.23.0/extensions/dear-node-editor/README.md).
+- `Plot3DContext::get_plot_ui` borrows the plot context and the `Ui` for the lifetime of the returned view. Keep the plot owner alive until drawing finishes.
+- Submit ImPlot items inside `PlotUi::with_plot` or `with_plot_size`. For axis configuration, call `with_plot_setup` and use its separate setup and drawing closures. In ImPlot3D, pass the drawing closure to `begin_plot(...).build(...)` or use `build_with_setup` to configure axes first.
+- In ImNodes, `setup.with_nodes(|editor| { ... })` returns the completed editor's `PostEditor`. Submit nodes and attributes through their closures. Read minimap hover events from `post.minimap_hovered_nodes()` after the canvas closes.
+- Rebuild custom ImPlot, ImPlot3D, ImNodes and ImGuizmo archives and the browser provider. The ImGuizmo wrapper uses the new `ImGuizmo_ResetInteraction` entry point when switching ImGui contexts.
+- Use `dear_imguizmo::Color::COUNT` for the palette length. Every `Color` enum variant now names a usable style slot.
+- Custom renderers must release the previous renderer's texture resources and commit a renderer texture reset when taking over its Context. A replacement consumer reports `RendererTextureResetRequired` until this handoff is complete.
+
+### Changed
+
+- Update the native file picker to `rfd` 0.18 and the development and publishing toolchain to Rust 1.100.0. Refresh the workspace and mobile example lockfiles, including WGPU 30.0.2 and glam 0.34.3.
+- The file browser uses Jiff 1.0 for local dates and a browser-compatible clock for scans and keyboard search. Filesystem implementations can continue supplying modification times as `std::time::SystemTime`.
+- Update the ImPlot, ImPlot3D, ImNodes, Color Text Edit, Node Editor, ImGuizmo and ImGuIZMO.quat wrappers and the native Test Engine. The [native source matrix](https://github.com/Latias94/dear-imgui-rs/blob/v0.23.0/docs/COMPATIBILITY.md#native-sources-in-023) lists the revisions used to build the native archives and browser provider.
+
+### Fixed
+
+- Acknowledging an old table sort snapshot preserves any newer sort order requested in the same frame. `TableSortSpecs::clear_dirty` returns `false` when the caller needs to read the new order.
+- List clippers opened in a native extension callback release their native temporary storage on return or unwind. An enclosing list can continue from its own window after the callback.
+- ImPlot and ImPlot3D display axis names containing percent signs literally in their context menus. Each plot context owns its saved reference style and demo colormap selections. Their embedded ImGui debug windows use the same font-atlas filtering as the core safe API. ImPlot's metrics window reads the axes of the selected plot even after the native plot pool grows.
+- ImNodes restores positions to the editor named by the load operation, ignores unrecognized INI sections and includes the body origin in the bounds of title-only nodes.
+- Multiple gizmos can share an ImGui frame without consuming the next window's settings. Switching ImGui contexts cancels the previous gizmo gesture. Dragging and view interpolation continue across frames belonging to the same context.
+- A suspended Node Editor canvas accepts selection, deletion and node placement from a popup menu. Pending drawing scopes still close on their original canvas.
+- A directory scan can continue when a child entry disappears. Copies and cross-device moves still report a missing source entry before replacing the destination.
+- SDL GPU reuploads same-size textures after recreating device objects. A retryable upload error on an SDL multi-viewport frame completes its platform update and skips drawing and swapping until the next frame retries.
+- Removing a managed texture immediately revokes the application handle and preserves the pixels and binding needed by commands already submitted to the current frame. The same frame can still be captured for a second viewport pass before retirement begins.
+- Live draw commands and snapshots use the standard callback identities recorded when their owning Context rendered the frame. Removing the renderer or switching to another Context keeps those commands readable. Engine-owned frames stay open when `try_render` or snapshot capture rejects a foreign renderer, allowing the correct renderer to retry the same frame.
+- Standalone native textures, text filters, selections, and state storage retain the allocator's thread through destruction. CTE and plot contexts can release their native objects after their ImGui Context is dropped. An ImNodes editor selection is restored on the context that owned it before the operation.
+- Winit and Bevy detect callbacks replaced behind a shared C++ hook. SDL3 preserves application DPI, viewport-change and work-area callbacks during shutdown and restores their previous values after failed initialization. A detached Test Engine now keeps its allocator on its owner thread until native destruction succeeds.
+- Text inputs reuse their `String` allocation across frames, keep labels and hints alive through callbacks, and handle edits that grow the native buffer. Text filters respect the end of the requested byte range.
+- Restore scoped state storage on its original window when a closure changes the current window.
+- Preserve outer widget labels and clipboard text when callbacks make nested UI calls. Typed drag-and-drop checks the stored type before reading the value.
+- ImPlot preserves series order in grouped bars, plots interleaved error bars, and handles constant histogram samples. Heatmaps and surfaces validate their color inputs before calling native code. CTE line selections include the final requested line. ImNodes clears selections before reusing node and link slots.
+- ImPlot3D applies offsets to packed triangles and quads, checks mesh indices and surface wireframe sizes, and uses the upstream automatic color range for surfaces. `Mesh3DBuilder::try_plot` reports invalid mesh input.
+- The Test Engine runner preserves pending results and stays ready after it rejects an invalid request. Top-level runs reject flags that require a parent test context.
+- File dialogs honor an explicit ImGui backend in the async entry point and report failures to check a save target before confirming it.
+- File-browser navigation, save and paste preserve native filenames. Overwrite rollback retains the backup if another writer claims the target name. Cross-device cuts install the complete destination before source cleanup, and retrying a batch skips completed items. Shared filesystem backends can implement `FileSystem::rename_noreplace` and `inspect_move_source` for atomic renames and stable entry identity. Backends with symbolic links should implement `inspect_entry` to identify the link itself.
+- SDL renderers report native texture upload failures, preserve proxy pixels for retries, and acknowledge operations that succeeded earlier in the batch. Winit rescales queued pointer events and click origins when DPI changes. `dear-app` checks drawable area before each main-surface acquisition, including recovery retries.
+- The web demo shares its allocator and function table with C++ so native widgets can call Rust callbacks. Building either half preserves the other half's output. The provider builds with Emscripten 7.0.1.
+- The web demo falls back to WebGL2 when WebGPU has no available adapter. The WGPU browser backend binds the vertex range for each draw list so multi-window UIs render on WebGL2.
+- Prebuilt ImPlot3D archives include the internal header used to compile the library. Node Editor source builds compile with LLVM-MinGW's current C++ standard library.
+- The WGPU `tracing` feature reports framebuffer-size mismatches and device-object invalidation. SDL3 native self-tests also link in debug profiles with debug symbols disabled.
 
 ## [0.22.0] - 2026-11-01
 

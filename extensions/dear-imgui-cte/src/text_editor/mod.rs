@@ -19,8 +19,8 @@ use std::{
 
 /// An owned, context-bound ImGuiColorTextEdit editor.
 ///
-/// The editor is intentionally neither [`Send`] nor [`Sync`]. Every native call is
-/// made while its originating Dear ImGui context is current.
+/// Editing and rendering bind the originating Dear ImGui context. The editor
+/// retains the allocator thread through destruction, even if its context ends first.
 pub struct TextEditor {
     raw: NonNull<sys::TextEditor>,
     binding: CteContextBinding,
@@ -34,7 +34,7 @@ pub struct TextEditor {
 impl TextEditor {
     /// Creates an editor bound to `context`.
     pub fn try_create(context: &Context) -> CteResult<Self> {
-        let binding = CteContextBinding::new(context);
+        let binding = CteContextBinding::new(context)?;
         let raw = binding.try_with_bound_context("TextEditor::try_create", || unsafe {
             sys::dear_imgui_cte_text_editor_create()
         })?;
@@ -238,7 +238,7 @@ impl TextEditor {
         self.binding.try_with_bound_context(operation, || f(raw))
     }
 
-    fn raw_ptr(&self) -> *mut sys::TextEditor {
+    pub(crate) fn raw_ptr(&self) -> *mut sys::TextEditor {
         self.raw.as_ptr()
     }
 
@@ -254,26 +254,20 @@ impl Drop for TextEditor {
         let trie = self.trie.take();
         let callbacks = &mut self.callbacks;
         let mut callback_panic = None;
-        let native_result = self
-            .binding
-            .try_with_bound_context("TextEditor::drop", || unsafe {
-                if let Some(trie) = trie {
-                    let _ = sys::dear_imgui_cte_text_editor_reset_autocomplete(raw.as_ptr());
-                    sys::TrieAutoComplete_Disconnect(trie.as_ptr());
-                    sys::TrieAutoComplete_destroy(trie.as_ptr());
-                }
-                let _ = sys::dear_imgui_cte_text_editor_clear_callbacks(raw.as_ptr());
-                let owned = callbacks.take_owned();
-                callback_panic = catch_unwind(AssertUnwindSafe(|| drop(owned))).err();
-                sys::dear_imgui_cte_text_editor_destroy(raw.as_ptr());
-            });
-        if native_result.is_err() {
-            callbacks.clear_owned();
-        } else if let Some(payload) = callback_panic {
+        self.binding.destroy(|| unsafe {
+            if let Some(trie) = trie {
+                let _ = sys::dear_imgui_cte_text_editor_reset_autocomplete(raw.as_ptr());
+                sys::TrieAutoComplete_Disconnect(trie.as_ptr());
+                sys::TrieAutoComplete_destroy(trie.as_ptr());
+            }
+            let _ = sys::dear_imgui_cte_text_editor_clear_callbacks(raw.as_ptr());
+            let owned = callbacks.take_owned();
+            callback_panic = catch_unwind(AssertUnwindSafe(|| drop(owned))).err();
+            sys::dear_imgui_cte_text_editor_destroy(raw.as_ptr());
+        });
+        if let Some(payload) = callback_panic {
             resume_unwind(payload);
         }
-        // If context teardown already started, touching CTE state is no longer proven safe.
-        // Native handles are intentionally leaked rather than calling into a dead context.
     }
 }
 
@@ -320,7 +314,7 @@ unsafe fn validate_cursor(
     Ok(())
 }
 
-unsafe fn validate_position(
+pub(crate) unsafe fn validate_position(
     raw: *mut sys::TextEditor,
     operation: &'static str,
     position: Position,

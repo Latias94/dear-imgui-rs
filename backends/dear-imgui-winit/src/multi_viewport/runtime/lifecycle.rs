@@ -132,10 +132,13 @@ impl WinitPlatformRuntime {
             prepared_monitors,
             |_, _| Ok(()),
         )?;
-        let io = context.io_mut();
-        io.set_display_size(super::super::desktop_size_for_window(&main_window));
-        io.set_display_framebuffer_scale(super::super::framebuffer_scale_for_window(&main_window));
-        invalidate_mouse_coordinate_cache(io);
+        // SAFETY: runtime construction holds exclusive access to this live Context.
+        let io = unsafe { &mut (*context.as_raw()).IO };
+        apply_raw_io_coordinate_contract(
+            io,
+            super::super::desktop_size_for_window(&main_window),
+            super::super::framebuffer_scale_for_window(&main_window),
+        );
         Ok(runtime)
     }
 

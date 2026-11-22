@@ -753,6 +753,11 @@ pub enum RendererConsumerError {
     SharedFontAtlasRendererReleasePending,
     #[error("the previous renderer consumer is still draining outstanding epochs")]
     ConsumerDraining,
+    /// The previous renderer's texture resources must be released before this generation draws.
+    #[error(
+        "release the previous renderer's texture resources and commit a renderer texture reset"
+    )]
+    RendererTextureResetRequired,
     #[error("this Context has no active renderer consumer")]
     NoActiveConsumer,
     #[error("{caller} requires a renderer that advertises RENDERER_HAS_TEXTURES")]
@@ -1156,11 +1161,12 @@ fn snapshot_draw_data(
 }
 
 fn detached_callback_kind(
+    draw_list: &DrawList,
     callback: sys::ImDrawCallback,
 ) -> Result<Option<StandardDrawCallback>, SnapshotError> {
     match callback {
         None => Ok(None),
-        Some(_) => classify_standard_draw_callback(callback)
+        Some(_) => classify_standard_draw_callback(draw_list, callback)
             .map(Some)
             .ok_or(SnapshotError::UserCallbackUnsupported),
     }
@@ -1169,7 +1175,7 @@ fn detached_callback_kind(
 fn preflight_detached_callbacks(draw_data: &DrawData) -> Result<(), SnapshotError> {
     for draw_list in draw_data.draw_lists() {
         for command in unsafe { draw_list.cmd_buffer() } {
-            let _ = detached_callback_kind(command.UserCallback)?;
+            let _ = detached_callback_kind(draw_list, command.UserCallback)?;
         }
     }
     Ok(())
@@ -1185,7 +1191,7 @@ fn snapshot_draw_list(
     let idx = draw_list.idx_buffer().to_vec();
     let mut commands = Vec::new();
     for cmd in unsafe { draw_list.cmd_buffer() } {
-        if let Some(callback) = detached_callback_kind(cmd.UserCallback)? {
+        if let Some(callback) = detached_callback_kind(draw_list, cmd.UserCallback)? {
             match callback {
                 StandardDrawCallback::ResetRenderState => {
                     commands.push(DrawCmdSnapshot::ResetRenderState)

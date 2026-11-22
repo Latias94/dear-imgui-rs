@@ -5,13 +5,10 @@
 
 Safe, idiomatic Rust bindings for [ImNodes](https://github.com/Nelarius/imnodes) via the [cimnodes](https://github.com/cimgui/cimnodes) C API, aligned with our dear-imgui workspace and BEST_PRACTICES.
 
-- Ui extension: `ui.imnodes(&ctx)` returns a `NodesUi` for the current frame
-- Contexts: `Context` (global) and `EditorContext` (per-editor) with `Drop`
-- Typestate editor phases: configure through `NodeEditorSetup`, then consume it with
-  `begin_nodes()` before submitting nodes
-- RAII tokens: `node(id)`, then node-owned `input_attr(id)`, `output_attr(id)`, and `static_attr(id)` scopes
-- Strongly-typed enums/bitflags for style and attributes
-- Helpers: links, selection, node positions, minimap, IO setup
+- `ui.imnodes(&ctx)` provides access to ImNodes during a Dear ImGui frame.
+- Each `Context` owns a default editor and can create independent `EditorContext` instances.
+- Configure a `NodeEditorSetup`, draw nodes and attributes in closures, and read interactions from `PostEditor`.
+- Scoped style tokens restore colors, style variables, and attribute flags.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/imnodes-basic.png" alt="ImNodes" width="75%"/>
@@ -25,176 +22,114 @@ Safe, idiomatic Rust bindings for [ImNodes](https://github.com/Nelarius/imnodes)
 
 ## Compatibility
 
-The `0.22` release train requires Rust 1.95 or newer. Upgrade all workspace crates together. See the [0.22 migration notes](../../docs/COMPATIBILITY.md#022-release-train).
+Use Rust 1.95 or newer and keep all `dear-*` dependencies on the `0.23` release train. See the [0.23 migration notes](../../docs/COMPATIBILITY.md#023-release-train).
 
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.22.0  |
-| dear-imgui-rs     | 0.22.0  |
-| dear-imnodes-sys  | 0.22.0  |
+| Crate             | 0.23.0  |
+| dear-imgui-rs     | 0.23.0  |
+| dear-imnodes-sys  | 0.23.0  |
 
-See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
+On `wasm32-unknown-unknown`, enable `wasm` on `dear-imnodes` and direct `dear-imgui-rs` dependencies. Rebuild the application and its `imgui-sys-v1` provider together. See the [browser runtime setup](../../docs/WASM.md#runtime-model).
 
 ## Quick Start
 
-Basic setup and per-frame usage:
+Create the ImNodes context and editor once. Call `draw` inside the window that hosts the graph.
 
 ```rust
 use dear_imgui_rs::Ui;
-use dear_imnodes as imnodes;
+use dear_imnodes::{Context, EditorContext, ImNodesExt, LinkId, MiniMapLocation, NodeId, PinId, PinShape};
 
- // One-time setup (alongside your ImGui context)
- fn init(imgui_ctx: &dear_imgui_rs::Context) -> (imnodes::Context, imnodes::EditorContext) {
-     let nodes_ctx = imnodes::Context::create(imgui_ctx);
-     let editor_ctx = nodes_ctx.create_editor_context();
-     (nodes_ctx, editor_ctx)
- }
+fn init(imgui: &dear_imgui_rs::Context) -> (Context, EditorContext) {
+    let nodes = Context::create(imgui);
+    let graph = nodes.create_editor_context();
+    (nodes, graph)
+}
 
-// Per-frame draw
- fn draw(ui: &Ui, nodes_ctx: &imnodes::Context, editor_ctx: &imnodes::EditorContext) {
-    let nodes = ui.imnodes(nodes_ctx);
-    let setup = nodes.editor(Some(editor_ctx));
+fn draw(ui: &Ui, nodes: &Context, graph: &EditorContext, first_frame: bool) {
+    let source = NodeId::new(1);
+    let target = NodeId::new(2);
+    let output = PinId::new(10);
+    let input = PinId::new(20);
+    let setup = ui.imnodes_editor(nodes, Some(graph));
+    if first_frame {
+        setup.set_node_pos_grid(source, [40.0, 60.0]);
+        setup.set_node_pos_grid(target, [260.0, 100.0]);
+    }
+    let post = setup.with_nodes(|editor| {
+        editor.node(source, |node| {
+            node.title_bar(|| ui.text("Source"));
+            node.output_attr(output, PinShape::QuadFilled, || ui.text("Out"));
+        });
+        editor.node(target, |node| {
+            node.title_bar(|| ui.text("Target"));
+            node.input_attr(input, PinShape::CircleFilled, || ui.text("In"));
+        });
+        editor.link(LinkId::new(100), output, input);
+        editor.minimap(0.25, MiniMapLocation::TopRight);
+    });
+    for id in post.minimap_hovered_nodes() {
+        ui.text(format!("Minimap node {id}"));
+    }
+}
+```
 
-    // Native node-record mutations must happen before node submission starts.
-    setup.set_node_pos_grid(imnodes::NodeId::new(1), [100.0, 120.0]);
-    let editor = setup.begin_nodes();
+### Migrating editor scopes
 
-    // A simple node with input/output pins
-    let node = imnodes::NodeId::new(1);
-    let input = imnodes::PinId::new(10);
-    let output = imnodes::PinId::new(11);
-    let link_id = imnodes::LinkId::new(100);
+Replace `setup.begin_nodes()` and `editor.end()` with `let post = setup.with_nodes(|editor| { ... });`. Put each node's contents inside `editor.node(id, |node| { ... })`. Use `node.title_bar(|| ...)`, `node.input_attr(id, shape, || ...)`, `node.output_attr(id, shape, || ...)`, and `node.static_attr(id, || ...)`. The closure owns the matching native `End`, including during panic unwinding. Use `setup.end()` when you intend to submit an empty graph.
 
-    let node_token = editor.node(node);
-    node_token.title_bar(|| ui.text("My Node"));
-    let _in = node_token.input_attr(input, imnodes::PinShape::CircleFilled);
-    ui.text("In");
-    _in.end();
-    let _out = node_token.output_attr(output, imnodes::PinShape::QuadFilled);
-    ui.text("Out");
-    _out.end();
-    node_token.end();
+Each drawing handle belongs to its current node or editor canvas. Render a nested window inside the closure and return to the canvas before submitting another node. Call `editor.minimap(0.25, MiniMapLocation::TopRight)` after submitting nodes and links. Replace `minimap_with_callback` with `post.minimap_hovered_nodes()` to handle all hovered IDs in native draw order after the minimap window closes.
 
-     // Draw a link
-     editor.link(link_id, input, output);
+### IO and interaction
 
-     // Optional: Mini-map
-     editor.minimap(0.25, imnodes::MiniMapLocation::TopRight);
-
-     // End the editor and handle post-editor interactions
-     let post = editor.end();
-     if let Some(link) = post.is_link_created() {
-         // link.start_attr, link.end_attr, link.from_snap
-     }
- }
- ```
-
-### IO and Interaction
-
-Bind common shortcuts to ImNodes IO during the setup phase:
+Configure persistent input and style settings before drawing. Node position, drag, and snap requests take effect on submission of the matching node.
 
 ```rust
-// Ctrl to detach links; multi-select via Shift; emulate 3-button mouse with Alt
 setup.enable_link_detach_with_ctrl();
 setup.enable_multiple_select_with_shift();
 setup.emulate_three_button_mouse_with_alt();
-
-// Misc IO tweaks
-setup.set_alt_mouse_button(MouseButton::Right);
+setup.set_alt_mouse_button(dear_imgui_rs::MouseButton::Right);
 setup.set_auto_panning_speed(200.0);
 ```
 
 ### Styling
 
-Use presets or fine-tune values. You can push scoped styles/colors (RAII) or set persistent style:
-
 ```rust
-// Persistent configuration belongs to the setup phase.
+use dear_imnodes::{ColorElement, StyleVar};
+
 setup.style_colors_dark();
 setup.set_grid_spacing(32.0);
-setup.set_node_corner_rounding(6.0);
-let link_rgba = setup.get_color(imnodes::ColorElement::Link);
-setup.set_color(imnodes::ColorElement::GridLinePrimary, [0.6, 0.6, 0.8, 1.0]);
-
-let editor = setup.begin_nodes();
-
-// Scoped styles belong to the node-submission phase.
-let _color = editor.push_color(imnodes::ColorElement::Link, [0.9, 0.3, 0.3, 1.0]);
-
-// Push a style var for this scope
-let _sv = editor.push_style_var(
-    imnodes::StyleVar::LinkThickness,
-    imnodes::style::StyleVarValue::Float(3.0),
-);
-
+let post = setup.with_nodes(|editor| {
+    let _color = editor.push_color(ColorElement::TitleBar, [0.9, 0.3, 0.3, 1.0]);
+    let _padding = editor.push_style_var_vec2(StyleVar::NodePadding, [6.0, 4.0]);
+    editor.node(node_id, |node| node.title_bar(|| ui.text("Styled")));
+});
 ```
 
-### Node Positions and Queries
+### Selection and link lifecycle
+
+`PostEditor` captures hover and link events for its submission. Selection and panning operate on the bound editor. ID-specific operations return `false` if the object is absent from the captured or latest submission.
 
 ```rust
-// Position nodes before submitting them (grid/editor/screen space helpers available)
-let node = imnodes::NodeId::new(1);
-setup.set_node_pos_grid(node, [100.0, 120.0]);
-let editor = setup.begin_nodes();
-
-// The queued position is applied only when this matching ID is submitted.
-let node_token = editor.node(node);
-// ... submit its title and pins ...
-node_token.end();
-
-// End the editor before running post-editor queries
-let post = editor.end();
-if post.is_editor_hovered() { /* ... */ }
-if let Some(node_id) = post.hovered_node() { /* ... */ }
-if post.is_attribute_active() { /* ... */ }
-
-// Panning changes apply to the next frame and only accept IDs submitted by this frame.
-let centered = post.center_on_submitted_node(node);
+let selected_nodes = post.selected_nodes();
+let selected_links = post.selected_links();
+let centered = post.center_on_submitted_node(node_id);
+if let Some(link) = post.is_link_created_with_nodes() {
+    // Add link.start_attr and link.end_attr to the application's graph.
+}
+if let Some(id) = post.is_link_destroyed() {
+    // Remove this link from the application's graph.
+}
 ```
 
-### Selection and Link Lifecycle
+### Saving and loading editor state
 
- ```rust
- let post = editor.end();
+`NodeEditorSetup`, `PostEditor`, and `BoundEditor` retain an explicit editor until the last handle is released. A `BoundEditor` can be kept across frames. Use it for panning and persistence while the ImNodes context is outside a drawing closure.
 
- // Selection helpers
- let selected_nodes = post.selected_nodes();
- let selected_links = post.selected_links();
+```rust
+let bound = nodes.bind_editor(graph);
+let ini = bound.save_state_to_ini_string();
+bound.load_state_from_ini_string(&ini);
+```
 
- // ID-specific operations return false without calling native code when that ID was not
- // submitted by the frame that produced this PostEditor snapshot.
- let selected = post.select_node(node_id);
-
- // Link lifecycle
- if let Some(created) = post.is_link_created_with_nodes() {
-     // created.start_node, created.start_attr, created.end_node, created.end_attr, created.from_snap
- }
- if let Some(link_id) = post.is_link_destroyed() {
-     // handle removal
- }
- ```
-
-`NodeEditorSetup`, `NodeEditor`, `PostEditor`, and `BoundEditor` retain an internal lease on an explicit `EditorContext`. Dropping the public editor handle after creating one of these scopes is safe; the native editor is released after its final Rust scope ends.
-
-### Saving/Loading Editor State
-
- Use `EditorContext` to persist per-editor state across sessions, or use post-editor helpers for the current editor:
-
- ```rust
- // Per-editor state (no active frame required)
- let bound = nodes_ctx.bind_editor(editor_ctx);
- let s = bound.save_state_to_ini_string();
- bound.load_state_from_ini_string(&s);
- bound.save_state_to_ini_file("nodes.ini");
- bound.load_state_from_ini_file("nodes.ini");
-
- // Or directly after ending a frame
- let post = editor.end();
- let s2 = post.save_state_to_ini_string();
- post.load_state_from_ini_string(&s2);
- post.save_state_to_ini_file("nodes.ini");
- ```
-
-The string-based save/load methods are available on every supported target. Direct file methods are native-only; on `wasm32`, persist the returned INI string through the browser or application storage layer instead.
-
-See crate docs for the full API surface and patterns.
+The string methods work on every target. Native callers can also use `save_state_to_ini_file` and `load_state_from_ini_file`. On `wasm32`, store the INI string through the application's browser storage.

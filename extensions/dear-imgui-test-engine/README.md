@@ -23,15 +23,13 @@ For native build/link options, see `extensions/dear-imgui-test-engine-sys/README
 
 ## Compatibility
 
-The `0.22` release train requires Rust 1.95 or newer. Upgrade all workspace crates together. See the [0.22 migration notes](../../docs/COMPATIBILITY.md#022-release-train).
+Use Rust 1.95 or newer and keep all `dear-*` dependencies on the `0.23` release train. See the [0.23 migration notes](../../docs/COMPATIBILITY.md#023-release-train).
 
 | Item                        | Version |
 |-----------------------------|---------|
-| Crate                       | 0.22.0  |
-| dear-imgui-rs               | 0.22.0  |
-| dear-imgui-test-engine-sys  | 0.22.0  |
-
-See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md).
+| Crate                       | 0.23.0  |
+| dear-imgui-rs               | 0.23.0  |
+| dear-imgui-test-engine-sys  | 0.23.0  |
 
 ## Quick Start
 
@@ -39,8 +37,8 @@ Use compatible stable requirements:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.22"
-dear-imgui-test-engine = "0.22"
+dear-imgui-rs = "0.23"
+dear-imgui-test-engine = "0.23"
 ```
 
 ```rust
@@ -151,6 +149,7 @@ headless run capable of screenshots.
 - Upstream Test Engine uses process-global state. Starting a second engine, even on a suspended
   Context, returns `TestEngineStatus::BindingOccupied`. `stop()` retains that ownership because the
   upstream hooks remain installed; `shutdown()` or Context destruction releases it after unbind.
+- Even a detached engine holds the Dear ImGui allocator on its creating thread until its native destruction succeeds. `TestEngine::create()` can return `TestEngineError::ThreadLease` if another thread owns the allocator.
 - Call `shutdown()` when cleanup errors must be handled. `Drop` is non-panicking and retries
   one-shot native failures on a best-effort basis.
 - `result_summary()` requires a queued, running, or terminal run; it returns

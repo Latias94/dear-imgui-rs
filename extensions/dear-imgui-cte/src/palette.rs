@@ -29,6 +29,15 @@ pub enum PaletteColor {
     CurrentLineNumber,
     CurrentLineHighlight,
     CurrentLineHighlightBorder,
+    CustomColor1,
+    CustomColor2,
+    CustomColor3,
+    CustomColor4,
+    CustomColor5,
+    CustomColor6,
+    CustomColor7,
+    CustomColor8,
+    CustomColor9,
 }
 
 impl PaletteColor {
@@ -58,6 +67,15 @@ impl PaletteColor {
         Self::CurrentLineNumber,
         Self::CurrentLineHighlight,
         Self::CurrentLineHighlightBorder,
+        Self::CustomColor1,
+        Self::CustomColor2,
+        Self::CustomColor3,
+        Self::CustomColor4,
+        Self::CustomColor5,
+        Self::CustomColor6,
+        Self::CustomColor7,
+        Self::CustomColor8,
+        Self::CustomColor9,
     ];
 
     pub(crate) const fn into_raw(self) -> sys::Color {

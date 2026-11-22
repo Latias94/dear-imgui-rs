@@ -6,7 +6,7 @@ This crate is intended for use in build scripts (`build.rs`) and internal packag
 It centralizes common logic around naming prebuilt archives, generating manifests, and
 downloading/extracting prebuilt static libraries.
 
-The `0.22` release train requires Rust 1.95 or newer. Build scripts should require at least the matching full release version (`0.22.0`, allowing later compatible patches) so a lockfile cannot retain an older helper without the required APIs. Review the shared [native build policy migration](../../docs/COMPATIBILITY.md#0220-native-build-policy).
+The `0.23` release train requires Rust 1.95 or newer. Use `version = "0.23.0"` for the build dependency so the lockfile can select compatible patches starting at 0.23.0. The [0.22 native build policy](../../docs/COMPATIBILITY.md#0220-native-build-policy) applies to prebuilt selection and legacy environment flags.
 
 ## Features
 

@@ -67,8 +67,10 @@ fn plot_binding_restores_imgui_and_implot_contexts_after_panic() {
         let result = catch_unwind(AssertUnwindSafe(|| {
             unsafe {
                 // The empty style contains no array pointers to validate.
-                plot_ui.with_next_plot_item_array_style(PlotItemArrayStyle::new(), |_| {
-                    panic!("binding panic probe")
+                plot_ui.with_plot("unwind", |plot| {
+                    plot.with_next_plot_item_array_style(PlotItemArrayStyle::new(), |_| {
+                        panic!("binding panic probe")
+                    });
                 });
             }
         }));
@@ -85,7 +87,7 @@ fn plot_binding_restores_imgui_and_implot_contexts_after_panic() {
 }
 
 #[test]
-fn dead_imgui_context_rejects_calls_and_plot_drop_skips_ffi() {
+fn dead_imgui_context_rejects_calls_and_plot_drop_preserves_the_current_owner() {
     let _guard = test_guard();
     let imgui_a = Context::create();
     let plot_a = PlotContext::create(&imgui_a);

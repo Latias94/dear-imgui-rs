@@ -11,22 +11,24 @@ Low-level FFI bindings for ImPlot via the cimplot C API. This crate pairs with `
 
 ## Build Modes
 
-Prebuilt artifacts must match the release train, target, CRT, source revisions,
-binding identity, feature profile, and shared Dear ImGui core recorded in their
-manifest. Bare remote `.lib`/`.a` downloads do not supply that manifest.
+Use a 0.23.0 archive whose manifest matches the target, CRT, source revisions,
+binding identity, feature profile, and shared Dear ImGui core. Bare remote `.lib`/`.a` downloads do not supply that manifest.
 
-`IMPLOT_SYS_BUILD_MODE` accepts `auto` (default), `source`, `prebuilt`, or `bindings-only`. In the 0.22 release train, explicit `IMPLOT_SYS_LIB_DIR`, `IMPLOT_SYS_PREBUILT_URL`, and `IMPLOT_SYS_PACKAGE_DIR` selectors are mutually exclusive; missing or incompatible selections stop the build. Strict prebuilt mode never falls back to source. In automatic mode, `build-from-source` or `IMPLOT_SYS_FORCE_BUILD=1` forces source compilation; explicit prebuilt and bindings-only modes reject source-only requirements. See the [native build policy migration](../../docs/COMPATIBILITY.md#0220-native-build-policy).
+`IMPLOT_SYS_BUILD_MODE` accepts `auto` (default), `source`, `prebuilt`, or `bindings-only`. Explicit `IMPLOT_SYS_LIB_DIR`, `IMPLOT_SYS_PREBUILT_URL`, and `IMPLOT_SYS_PACKAGE_DIR` selectors are mutually exclusive; missing or incompatible selections stop the build. Strict prebuilt mode never falls back to source. In automatic mode, `build-from-source` or `IMPLOT_SYS_FORCE_BUILD=1` forces source compilation; explicit prebuilt and bindings-only modes reject source-only requirements. See the [native build policy migration](../../docs/COMPATIBILITY.md#0220-native-build-policy).
 
 Source builds are the default and do not require libclang unless binding
 regeneration is explicitly requested. `wasm` uses import bindings for the fixed
 `imgui-sys-v1` provider and skips C++ compilation in Cargo; build the provider
 separately with Emscripten.
 
-Native and WebAssembly providers share the `implot-imgui-193-v2` correction:
-line textures use physical thickness at the active viewport's framebuffer density,
+Native and WebAssembly providers share the `implot-imgui-193-v5` adaptation.
+The demo uses the core's font-atlas-filtered ImGui tools. Its colormap selections and the style editor's saved reference belong to the plot context.
+Axis menus display application labels literally. The metrics window resolves orthogonal axes against the inspected plot before reading their IDs.
+Line textures use physical thickness at the active viewport's framebuffer density,
 while geometry remains in local coordinates. Lines widened to one physical pixel retain
 their original alpha coverage. Artifact identity includes this correction.
 It also normalizes digital/heatmap rectangle bounds and the demo's candlestick coordinates.
+`ImPlot_IsItemHidden` uses the plot's item ID scope even before its first item is submitted.
 
 This crate supports three ways to obtain the native `dear_implot` static library:
 

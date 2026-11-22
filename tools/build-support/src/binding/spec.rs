@@ -924,10 +924,6 @@ impl ExtensionBindingIdentity {
         hash.field("provenance", &self.provenance.identity_hash());
         if self.extension == ExtensionBinding::Cte {
             hash.field("source_overlay", crate::CTE_TEXT_EDITOR_PATCH_VERSION);
-            hash.field(
-                "text_diff_source_overlay",
-                crate::CTE_TEXT_DIFF_DRAW_FLAGS_PATCH_VERSION,
-            );
         }
         if self.extension == ExtensionBinding::ImPlot3d {
             hash.field("source_overlay", crate::IMPLOT3D_DRAW_FLAGS_PATCH_VERSION);
@@ -937,6 +933,9 @@ impl ExtensionBindingIdentity {
         }
         if self.extension == ExtensionBinding::ImPlot {
             hash.field("source_overlay", crate::IMPLOT_IMGUI_PATCH_VERSION);
+        }
+        if self.extension == ExtensionBinding::ImGuizmo {
+            hash.field("source_overlay", crate::IMGUIZMO_INTERACTION_PATCH_VERSION);
         }
         hash.finish()
     }
@@ -1435,7 +1434,8 @@ const CTE_FUNCTIONS: &[&str] = &[
     "VisPos_.*",
     "Glyph_.*",
     "Iterator_.*",
-    "Language_.*",
+    "AutoCompleteConfig_.*",
+    "AutoCompleteState_.*",
     "Palette_.*",
     "TrieAutoComplete_.*",
     "CodePoint_.*",
@@ -1498,7 +1498,23 @@ const CTE_SYMBOLS: &[&str] = &[
     "TextEditor_SetShowCurrentLineHighlightEnabled",
     "Palette_Palette",
     "Palette_destroy",
-    "Language_Cpp",
+    "TextEditor_LookupLanguage",
+    "TextEditor_LookupLanguageByExtension",
+    "TextEditor_SetLeftMargin",
+    "TextEditor_GetLeftMargin",
+    "TextEditor_SetSmoothScrollingEnabled",
+    "TextEditor_IsSmoothScrollingEnabled",
+    "AutoCompleteConfig_SetTriggerCharacters",
+    "AutoCompleteConfig_SetWordCharacters",
+    "AutoCompleteState_GetReplacementStart",
+    "AutoCompleteState_SetReplacementStart",
+    "AutoCompleteState_GetReplacementEnd",
+    "AutoCompleteState_SetReplacementEnd",
+    "AutoCompleteState_AddSuggestion",
+    "AutoCompleteState_GetSuggestionCount",
+    "AutoCompleteState_GetSuggestion",
+    "AutoCompleteState_GetLabel",
+    "TextEditor_SetAutoCompleteSuggestions_array",
     "CodePoint_write",
     "GetDejavu",
     "Getnotosans",
@@ -1526,6 +1542,7 @@ const CTE_SYMBOLS: &[&str] = &[
     "dear_imgui_cte_autocomplete_config_create",
     "dear_imgui_cte_autocomplete_config_destroy",
     "dear_imgui_cte_autocomplete_config_set_callback",
+    "dear_imgui_cte_autocomplete_config_set_characters",
     "dear_imgui_cte_text_editor_set_autocomplete_config",
     "dear_imgui_cte_text_editor_set_autocomplete_suggestions",
     "dear_imgui_cte_autocomplete_state_get_search_term",
@@ -1575,7 +1592,7 @@ const NODE_EDITOR_PROFILE: CrateBindgenProfile = crate_profile(
 );
 const NODE_EDITOR_SYMBOLS: &[&str] = &["dne_create_editor", "dne_pin_rect"];
 
-const IMGUIZMO_INPUTS: &[&str] = &["third-party/cimguizmo/cimguizmo.h"];
+const IMGUIZMO_INPUTS: &[&str] = &["third-party/cimguizmo/cimguizmo.h", "shim/imguizmo_extra.h"];
 const IMGUIZMO_INCLUDES: &[CrateBindingInclude] = &[
     CrateBindingInclude {
         root: CrateBindingIncludeRoot::CoreCimgui,
@@ -1618,7 +1635,11 @@ const IMGUIZMO_PROFILE: CrateBindgenProfile = crate_profile(
     DEFAULT_CRATE_DERIVES,
     true,
 );
-const IMGUIZMO_SYMBOLS: &[&str] = &["ImGuizmo_BeginFrame", "ImGuizmo_Manipulate"];
+const IMGUIZMO_SYMBOLS: &[&str] = &[
+    "ImGuizmo_BeginFrame",
+    "ImGuizmo_Manipulate",
+    "ImGuizmo_ResetInteraction",
+];
 
 const IMGUIZMO_QUAT_INPUTS: &[&str] = &["third-party/cimguizmo_quat/cimguizmo_quat.h"];
 const IMGUIZMO_QUAT_INCLUDES: &[CrateBindingInclude] = &[

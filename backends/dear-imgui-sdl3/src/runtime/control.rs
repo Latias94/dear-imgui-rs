@@ -626,6 +626,19 @@ impl RuntimeControl {
         }
     }
 
+    #[cfg(all(
+        feature = "multi-viewport",
+        any(
+            feature = "opengl3-renderer",
+            feature = "sdlrenderer3-renderer",
+            feature = "sdlgpu3-renderer"
+        )
+    ))]
+    pub(crate) fn has_pending_faults(&self) -> bool {
+        self.detect_callback_replacements();
+        !self.faults.borrow().is_empty()
+    }
+
     pub(crate) fn drain_faults(&self) -> Vec<Sdl3BackendError> {
         self.detect_callback_replacements();
         self.faults
@@ -696,7 +709,7 @@ impl RuntimeControl {
         &self,
         requests: &[TextureRequest],
         request_epoch: u64,
-    ) -> Result<ProcessedTextureRequests, Sdl3BackendError> {
+    ) -> ProcessedTextureRequests {
         let update_texture = self
             .lifecycle
             .renderer_texture_update

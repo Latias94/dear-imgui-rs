@@ -109,7 +109,11 @@ pub enum Color {
     HatchedAxisLines = sys::HATCHED_AXIS_LINES as u32,
     Text = sys::TEXT as u32,
     TextShadow = sys::TEXT_SHADOW as u32,
-    Count = sys::COUNT as u32,
+}
+
+impl Color {
+    /// Number of color slots in the native style palette.
+    pub const COUNT: usize = sys::COUNT as usize;
 }
 
 /// Draw list destination for ImGuizmo rendering

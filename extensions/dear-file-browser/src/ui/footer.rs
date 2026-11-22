@@ -432,7 +432,7 @@ fn footer_status_text(state: &FileDialogState, gate: &ConfirmGate) -> String {
         ScanStatus::Scanning { .. } => Some("Scanning".to_string()),
         ScanStatus::Partial { loaded, .. } => Some(format!("Loading {loaded}")),
         ScanStatus::Complete { .. } => None,
-        ScanStatus::Failed { .. } => Some("Scan failed".to_string()),
+        ScanStatus::Failed { message, .. } => Some(format!("Scan failed: {message}")),
     };
 
     let mut parts: Vec<String> = Vec::new();
@@ -499,4 +499,27 @@ fn draw_confirm_overwrite_modal(ui: &Ui, state: &mut FileDialogState) {
             ui.close_current_popup();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fs::StdFileSystem;
+    use crate::fs_ops::tests::TempDir;
+
+    #[test]
+    fn footer_shows_the_scan_error_from_the_filesystem() {
+        let temp = TempDir::new();
+        let mut state = FileDialogState::with_blocking_filesystem(
+            DialogMode::OpenFile,
+            Box::new(StdFileSystem),
+        );
+        state.core.set_cwd(temp.path().join("missing"));
+        state.core.rescan_if_needed(&StdFileSystem);
+        let ScanStatus::Failed { message, .. } = state.core.scan_status() else {
+            panic!("expected the missing directory scan to fail");
+        };
+        assert!(!message.is_empty());
+        assert!(footer_status_text(&state, &ConfirmGate::default()).contains(message.as_str()));
+    }
 }

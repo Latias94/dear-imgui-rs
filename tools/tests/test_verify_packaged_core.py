@@ -170,6 +170,21 @@ def write_base_extension_matrix(
 
 
 class CteBindingIdentityTests(unittest.TestCase):
+    def test_imguizmo_identity_matches_the_rust_producer_test_vector(self):
+        vector = json.loads(
+            (REPO_ROOT / "tools/build-support/tests/fixtures/imguizmo_binding_identity.json")
+            .read_text(encoding="utf-8")
+        )
+        spec = PREBUILT.EXTENSION_BY_ID["imguizmo"]
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            binding = root / "extensions" / spec.sys_crate / "src/bindings_pregenerated.rs"
+            binding.parent.mkdir(parents=True)
+            binding.write_text(vector["provenance"], encoding="utf-8")
+            actual = PREBUILT.expected_extension_binding_identity(root, spec)
+            self.assertEqual(actual, vector["identity"])
+            self.assertNotEqual(actual, vector["unpatched_identity"])
+
     def test_implot_identity_matches_the_rust_producer_test_vector(self):
         vector = json.loads(
             (REPO_ROOT / "tools/build-support/tests/fixtures/implot_binding_identity.json")
@@ -1099,7 +1114,22 @@ class ConsumerContractTests(unittest.TestCase):
             self.assertNotIn("features", sys_dependency)
             source = destination.joinpath("src/main.rs").read_text(encoding="utf-8")
             self.assertIn("use dear_node_editor as _;", source)
-            self.assertIn("dear_node_editor_sys::dne_create_editor", source)
+            self.assertIn(
+                "std::hint::black_box(dear_node_editor_sys::dne_create_editor as *const ());",
+                source,
+            )
+
+    def test_imguizmo_prebuilt_consumer_links_interaction_reset(self):
+        with TemporaryDirectory() as temporary:
+            destination = Path(temporary)
+            PREBUILT.write_extension_prebuilt_consumer(
+                destination, REPO_ROOT, PREBUILT.EXTENSION_BY_ID["imguizmo"], "normal"
+            )
+            source = (destination / "src/main.rs").read_text(encoding="utf-8")
+            self.assertIn(
+                "std::hint::black_box(dear_imguizmo_sys::ImGuizmo_ResetInteraction as *const ());",
+                source,
+            )
 
     def test_cte_consumer_runs_wide_glyph_layout_and_both_diff_views(self):
         with TemporaryDirectory() as temporary:
@@ -1454,6 +1484,22 @@ class PackageWorkspaceTests(unittest.TestCase):
         require_clean.assert_called_once_with(
             Path("repository"), "temporary workspace remained dirty"
         )
+
+    def test_local_submodule_url_requires_an_initialized_worktree(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "--quiet", root], check=True)
+            submodule = root / "vendor"
+            submodule.mkdir()
+            read_url = ["git", "-C", root, "config", "--local", "--get", "submodule.vendor.url"]
+
+            SOURCE_PACKAGES._configure_local_submodule(root, root, "vendor", "vendor")
+            self.assertEqual(subprocess.run(read_url, capture_output=True).returncode, 1)
+
+            subprocess.run(["git", "init", "--quiet", submodule], check=True)
+            SOURCE_PACKAGES._configure_local_submodule(root, root, "vendor", "vendor")
+            local_url = subprocess.check_output(read_url, text=True)
+            self.assertEqual(Path(local_url.rstrip("\r\n")), submodule)
 
     def test_package_submodules_follow_the_declared_nested_topology(self):
         nested = SOURCE_PACKAGES.PACKAGE_NESTED_SUBMODULES

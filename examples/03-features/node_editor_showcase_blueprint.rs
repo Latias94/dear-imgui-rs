@@ -1,6 +1,6 @@
 use dear_imgui_rs::{
-    DrawFlags, DrawListMut, DrawSegmentCount, HorizontalStackLayoutToken, IdStackToken,
-    ManagedTextureId, StackLayoutId, Ui, VerticalStackLayoutToken,
+    DrawFlags, DrawListMut, DrawSegmentCount, HorizontalStackLayoutToken, ManagedTextureId,
+    StackLayoutId, Ui, VerticalStackLayoutToken,
 };
 use dear_node_editor::{
     NodeEditorFrame, NodeId, NodeToken, PinId, PinKind, PinToken, StyleVar, StyleVarToken,
@@ -34,9 +34,6 @@ enum Stage {
 pub struct BlueprintNodeBuilder<'ui, 'frame> {
     editor: &'frame NodeEditorFrame<'ui>,
     ui: &'frame Ui,
-    node: Option<NodeToken<'frame>>,
-    node_padding: Option<StyleVarToken<'frame>>,
-    id_stack: Option<IdStackToken<'frame>>,
     node_layout: Option<VerticalStackLayoutToken<'frame>>,
     main_layout: Option<HorizontalStackLayoutToken<'frame>>,
     section_layout: Option<VerticalStackLayoutToken<'frame>>,
@@ -49,21 +46,21 @@ pub struct BlueprintNodeBuilder<'ui, 'frame> {
     content_min: [f32; 2],
     content_max: [f32; 2],
     has_header: bool,
-    ended: bool,
 }
 
 impl<'ui, 'frame> BlueprintNodeBuilder<'ui, 'frame> {
-    pub fn begin(editor: &'frame NodeEditorFrame<'ui>, ui: &'frame Ui, node_id: NodeId) -> Self {
-        let node_padding = editor.push_style_var_vec4(StyleVar::NodePadding, [8.0, 4.0, 8.0, 8.0]);
-        let node = editor.begin_node(node_id);
-        let id_stack = ui.push_id(node_id.raw() as *const c_void);
-
+    pub fn draw(
+        editor: &'frame NodeEditorFrame<'ui>,
+        ui: &'frame Ui,
+        node_id: NodeId,
+        header_texture: ManagedTextureId,
+        texture_size: [f32; 2],
+        draw: impl FnOnce(&mut Self, &NodeToken<'_>),
+    ) {
+        let _padding = editor.push_style_var_vec4(StyleVar::NodePadding, [8.0, 4.0, 8.0, 8.0]);
         let mut builder = Self {
             editor,
             ui,
-            node: Some(node),
-            node_padding: Some(node_padding),
-            id_stack: Some(id_stack),
             node_layout: None,
             main_layout: None,
             section_layout: None,
@@ -76,10 +73,16 @@ impl<'ui, 'frame> BlueprintNodeBuilder<'ui, 'frame> {
             content_min: [0.0, 0.0],
             content_max: [0.0, 0.0],
             has_header: false,
-            ended: false,
         };
-        builder.set_stage(Stage::Begin);
-        builder
+        editor.node(node_id, |node| {
+            let _id = ui.push_id(node_id.raw() as *const c_void);
+            builder.set_stage(Stage::Begin);
+            draw(&mut builder, node);
+            builder.set_stage(Stage::End);
+        });
+        if ui.is_item_visible() {
+            builder.draw_header(header_texture, texture_size);
+        }
     }
 
     pub fn header<R>(&mut self, color: [f32; 4], f: impl FnOnce() -> R) -> R {
@@ -92,7 +95,12 @@ impl<'ui, 'frame> BlueprintNodeBuilder<'ui, 'frame> {
         self.set_stage(Stage::Content);
     }
 
-    pub fn input<R>(&mut self, id: PinId, f: impl FnOnce(&PinToken<'_>) -> R) -> R {
+    pub fn input<R>(
+        &mut self,
+        node: &NodeToken<'_>,
+        id: PinId,
+        f: impl FnOnce(&PinToken<'_>) -> R,
+    ) -> R {
         if self.current_stage == Stage::Begin {
             self.set_stage(Stage::Content);
         }
@@ -103,15 +111,14 @@ impl<'ui, 'frame> BlueprintNodeBuilder<'ui, 'frame> {
             self.ui.spring(0.0, -1.0);
         }
 
-        let node = self.node.as_ref().expect("node is active");
-        let pin = node.begin_pin(id, PinKind::Input);
-        let horizontal =
-            self.ui
-                .begin_horizontal(StackLayoutId::pointer_value(id.raw()), [0.0, 0.0], -1.0);
-        let result = f(&pin);
-        horizontal.end();
-        pin.end();
-        result
+        node.pin(id, PinKind::Input, |pin| {
+            let horizontal =
+                self.ui
+                    .begin_horizontal(StackLayoutId::pointer_value(id.raw()), [0.0, 0.0], -1.0);
+            let result = f(pin);
+            horizontal.end();
+            result
+        })
     }
 
     pub fn middle<R>(&mut self, f: impl FnOnce() -> R) -> R {
@@ -122,7 +129,12 @@ impl<'ui, 'frame> BlueprintNodeBuilder<'ui, 'frame> {
         f()
     }
 
-    pub fn output<R>(&mut self, id: PinId, f: impl FnOnce(&PinToken<'_>) -> R) -> R {
+    pub fn output<R>(
+        &mut self,
+        node: &NodeToken<'_>,
+        id: PinId,
+        f: impl FnOnce(&PinToken<'_>) -> R,
+    ) -> R {
         if self.current_stage == Stage::Begin {
             self.set_stage(Stage::Content);
         }
@@ -133,40 +145,14 @@ impl<'ui, 'frame> BlueprintNodeBuilder<'ui, 'frame> {
             self.ui.spring(0.0, -1.0);
         }
 
-        let node = self.node.as_ref().expect("node is active");
-        let pin = node.begin_pin(id, PinKind::Output);
-        let horizontal =
-            self.ui
-                .begin_horizontal(StackLayoutId::pointer_value(id.raw()), [0.0, 0.0], -1.0);
-        let result = f(&pin);
-        horizontal.end();
-        pin.end();
-        result
-    }
-
-    pub fn end(mut self, header_texture: ManagedTextureId, texture_size: [f32; 2]) {
-        self.end_inner(header_texture, texture_size);
-    }
-
-    fn end_inner(&mut self, header_texture: ManagedTextureId, texture_size: [f32; 2]) {
-        if self.ended {
-            return;
-        }
-
-        self.set_stage(Stage::End);
-        if let Some(node) = self.node.take() {
-            node.end();
-        }
-
-        if self.ui.is_item_visible() {
-            self.draw_header(header_texture, texture_size);
-        }
-
-        self.current_node_id = NodeId::new(0);
-        self.id_stack.take();
-        self.node_padding.take();
-        self.set_stage(Stage::Invalid);
-        self.ended = true;
+        node.pin(id, PinKind::Output, |pin| {
+            let horizontal =
+                self.ui
+                    .begin_horizontal(StackLayoutId::pointer_value(id.raw()), [0.0, 0.0], -1.0);
+            let result = f(pin);
+            horizontal.end();
+            result
+        })
     }
 
     fn set_stage(&mut self, stage: Stage) -> bool {
@@ -330,9 +316,6 @@ impl Drop for BlueprintNodeBuilder<'_, '_> {
         self.section_layout.take();
         self.main_layout.take();
         self.node_layout.take();
-        self.node.take();
-        self.id_stack.take();
-        self.node_padding.take();
     }
 }
 

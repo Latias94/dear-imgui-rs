@@ -176,105 +176,6 @@ fn first_owned_flag_drift(
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-unsafe fn validate_aggregate_callback_contract(
-    platform_io: *mut sys::ImGuiPlatformIO,
-) -> Result<(), ImguiViewportCallbackOwnershipError> {
-    macro_rules! validate_aggregate_slot {
-        ($clear:path, $set:path, $callback:path, $slot:literal) => {{
-            if !unsafe { $clear(platform_io, $callback) } {
-                return Err(
-                    ImguiViewportCallbackOwnershipError::PlatformCallbackReplaced { slot: $slot },
-                );
-            }
-            unsafe { $set(platform_io, Some($callback)) };
-        }};
-    }
-
-    validate_aggregate_slot!(
-        sys::ImGuiPlatformIO_ClearPlatformSetWindowPosIfPointerParam,
-        sys::ImGuiPlatformIO_Set_Platform_SetWindowPos_PointerParam,
-        platform_set_window_pos_raw_callback,
-        "Platform_SetWindowPos"
-    );
-    validate_aggregate_slot!(
-        sys::ImGuiPlatformIO_ClearPlatformSetWindowSizeIfPointerParam,
-        sys::ImGuiPlatformIO_Set_Platform_SetWindowSize_PointerParam,
-        platform_set_window_size_raw_callback,
-        "Platform_SetWindowSize"
-    );
-    Ok(())
-}
-
-#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-fn validate_hidden_callback_contract_raw(
-    context_raw: *mut sys::ImGuiContext,
-) -> Result<(), ImguiViewportCallbackOwnershipError> {
-    let platform_io = unsafe { sys::igGetPlatformIO_ContextPtr(context_raw) };
-    if platform_io.is_null() {
-        return Err(ImguiViewportCallbackOwnershipError::CallbackContractUnavailable);
-    }
-    // SAFETY: the caller enters through ContextPlatformWindowTeardown or ContextBinding, which
-    // keeps this Context current and prevents concurrent PlatformIO access for the callback
-    // contract transaction.
-    let platform_io = unsafe { imgui::PlatformIo::from_raw_mut(platform_io) };
-    unsafe {
-        if !platform_io
-            .clear_platform_set_window_pos_if_pointer_callback(platform_set_window_pos_raw_callback)
-        {
-            return Err(
-                ImguiViewportCallbackOwnershipError::PlatformCallbackReplaced {
-                    slot: "Platform_SetWindowPos",
-                },
-            );
-        }
-        platform_io.set_platform_set_window_pos_raw(Some(platform_set_window_pos_raw_callback));
-        if !platform_io.clear_platform_set_window_size_if_pointer_callback(
-            platform_set_window_size_raw_callback,
-        ) {
-            return Err(
-                ImguiViewportCallbackOwnershipError::PlatformCallbackReplaced {
-                    slot: "Platform_SetWindowSize",
-                },
-            );
-        }
-        platform_io.set_platform_set_window_size_raw(Some(platform_set_window_size_raw_callback));
-        if !platform_io
-            .clear_platform_get_window_pos_if_raw_callback(platform_get_window_pos_raw_callback)
-        {
-            return Err(
-                ImguiViewportCallbackOwnershipError::PlatformCallbackReplaced {
-                    slot: "Platform_GetWindowPos",
-                },
-            );
-        }
-        platform_io.set_platform_get_window_pos_raw(Some(platform_get_window_pos_raw_callback));
-        if !platform_io
-            .clear_platform_get_window_size_if_raw_callback(platform_get_window_size_raw_callback)
-        {
-            return Err(
-                ImguiViewportCallbackOwnershipError::PlatformCallbackReplaced {
-                    slot: "Platform_GetWindowSize",
-                },
-            );
-        }
-        platform_io.set_platform_get_window_size_raw(Some(platform_get_window_size_raw_callback));
-        if !platform_io.clear_platform_get_window_framebuffer_scale_if_raw_callback(
-            platform_get_window_framebuffer_scale_raw_callback,
-        ) {
-            return Err(
-                ImguiViewportCallbackOwnershipError::PlatformCallbackReplaced {
-                    slot: "Platform_GetWindowFramebufferScale",
-                },
-            );
-        }
-        platform_io.set_platform_get_window_framebuffer_scale_raw(Some(
-            platform_get_window_framebuffer_scale_raw_callback,
-        ));
-    }
-    Ok(())
-}
-
-#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(super) fn latch_platform_ownership_fault(
     context_raw: *mut sys::ImGuiContext,
     main_viewport: *const sys::ImGuiViewport,
@@ -348,7 +249,7 @@ pub(super) fn validate_platform_contract_raw(
     if !keepalive.owns_raw_monitors(platform_io) {
         return Err(ImguiViewportCallbackOwnershipError::PlatformMonitorsReplaced);
     }
-    unsafe { validate_aggregate_callback_contract(platform_io) }
+    Ok(())
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -383,7 +284,6 @@ pub(crate) fn preflight_platform_callback_ownership(
             unsafe { sys::igGetMainViewport() },
             keepalive,
         )
-        .and_then(|()| validate_hidden_callback_contract_raw(context.as_raw()))
     })
 }
 
@@ -405,9 +305,7 @@ pub(super) fn platform_callback_ownership_raw(
     {
         return Err(error);
     }
-    let validation = validate_platform_contract_raw(context_raw, main_viewport, keepalive)
-        .and_then(|()| validate_hidden_callback_contract_raw(context_raw));
-    match validation {
+    match validate_platform_contract_raw(context_raw, main_viewport, keepalive) {
         Ok(()) => Ok(()),
         Err(error) => Err(latch_platform_ownership_fault(
             context_raw,

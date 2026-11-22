@@ -45,11 +45,15 @@ pub(super) mod ffi {
     unsafe extern "C" {
         #[cfg(test)]
         pub fn dear_imgui_sdl3_backend_sizeof_imgui_io() -> usize;
-        #[cfg(all(test, debug_assertions))]
+        #[cfg(all(test, sdl3_native_self_test))]
         pub fn dear_imgui_sdl3_native_contract_self_test() -> u64;
+        #[cfg(all(test, sdl3_native_self_test, feature = "sdlrenderer3-renderer"))]
+        pub fn dear_imgui_sdl3_backend_sdlrenderer3_texture_self_test() -> bool;
+        #[cfg(all(test, sdl3_native_self_test, feature = "sdlgpu3-renderer"))]
+        pub fn dear_imgui_sdl3_backend_sdlgpu3_texture_self_test() -> bool;
         #[cfg(all(
             test,
-            debug_assertions,
+            sdl3_native_self_test,
             any(
                 feature = "opengl3-renderer",
                 feature = "sdlrenderer3-renderer",
@@ -65,11 +69,11 @@ pub(super) mod ffi {
             current_frame: i32,
             buttons_down: i32,
         ) -> bool;
-        #[cfg(all(test, debug_assertions))]
+        #[cfg(all(test, sdl3_native_self_test))]
         pub fn dear_imgui_sdl3_create_live_viewport_for_test(
             id: u32,
         ) -> *mut dear_imgui_rs::sys::ImGuiViewport;
-        #[cfg(all(test, debug_assertions))]
+        #[cfg(all(test, sdl3_native_self_test))]
         pub fn dear_imgui_sdl3_delete_live_viewport_for_test(
             viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
         );

@@ -1,5 +1,5 @@
 use dear_imgui_rs::{Context, FramePrepareOptions};
-use dear_imnodes::{ImNodesExt, NodeId, PinId, PinShape};
+use dear_imnodes::{ImNodesExt, LinkId, NodeId, PinId, PinShape};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Mutex, OnceLock};
 
@@ -22,6 +22,35 @@ fn prepare_imgui(imgui: &mut Context) {
 }
 
 #[test]
+fn title_only_nodes_include_the_body_origin_in_the_group_bounds() {
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    prepare_imgui(&mut imgui);
+    let nodes = dear_imnodes::Context::create(&imgui);
+    let ui = imgui.frame();
+    ui.window("Node bounds")
+        .size([400.0, 300.0], dear_imgui_rs::Condition::Always)
+        .build(|| {
+            ui.imnodes(&nodes).editor(None).with_nodes(|editor| {
+                let body_origin = editor.node(NodeId::new(1), |node| {
+                    node.title_bar(|| ui.text("Title"));
+                    ui.cursor_screen_pos()
+                });
+                assert!(ui.item_rect_max()[1] >= body_origin[1]);
+
+                let body_bottom = editor.node(NodeId::new(2), |node| {
+                    node.title_bar(|| ui.text("Title"));
+                    ui.dummy([100.0, 30.0]);
+                    ui.item_rect_max()[1]
+                });
+                assert_eq!(ui.item_rect_max()[1], body_bottom);
+            });
+        })
+        .unwrap();
+    assert!(imgui.end_frame());
+}
+
+#[test]
 fn queued_unsubmitted_node_options_do_not_touch_native_node_bookkeeping() {
     let _guard = test_guard();
     let mut imgui = Context::create();
@@ -39,8 +68,89 @@ fn queued_unsubmitted_node_options_do_not_touch_native_node_bookkeeping() {
             setup.snap_node_to_grid(NodeId::new(900));
 
             // No native setter is invoked because node 900 is never submitted.
-            let _ = setup.begin_nodes().end();
+            assert!(
+                !setup
+                    .end()
+                    .save_state_to_ini_string()
+                    .contains("[node.900]")
+            );
         });
+    assert!(imgui.end_frame());
+}
+
+#[test]
+fn selection_tracks_submitted_nodes_and_links() {
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    prepare_imgui(&mut imgui);
+    let nodes = dear_imnodes::Context::create(&imgui);
+    let graph = nodes.create_editor_context();
+    let keep = NodeId::new(1);
+    let remove = NodeId::new(2);
+    let output = PinId::new(10);
+    let input = PinId::new(20);
+    let link = LinkId::new(30);
+
+    let ui = imgui.frame();
+    let first = ui
+        .window("Initial graph")
+        .size([400.0, 300.0], dear_imgui_rs::Condition::Always)
+        .build(|| {
+            ui.imnodes(&nodes)
+                .editor(Some(&graph))
+                .with_nodes(|editor| {
+                    editor.node(keep, |node| {
+                        node.output_attr(output, PinShape::CircleFilled, || ui.text("out"));
+                    });
+                    editor.node(remove, |node| {
+                        node.input_attr(input, PinShape::CircleFilled, || ui.text("in"));
+                    });
+                    editor.link(link, output, input);
+                })
+        })
+        .unwrap();
+
+    for _ in 0..2 {
+        assert!(first.select_node(remove));
+        assert!(first.select_link(link));
+    }
+    assert_eq!(first.selected_nodes(), [remove]);
+    assert_eq!(first.selected_links(), [link]);
+    for _ in 0..2 {
+        assert!(first.clear_node_selection_of(remove));
+        assert!(first.clear_link_selection_of(link));
+    }
+    assert!(first.selected_nodes().is_empty());
+    assert!(first.selected_links().is_empty());
+    assert!(first.select_node(keep));
+    assert!(first.select_node(remove));
+    assert!(first.select_link(link));
+
+    ui.window("Independent graph")
+        .size([400.0, 300.0], dear_imgui_rs::Condition::Always)
+        .build(|| {
+            ui.imnodes(&nodes).editor(None).end();
+        })
+        .unwrap();
+    assert!(first.is_node_selected(remove));
+    assert!(first.is_link_selected(link));
+
+    ui.window("Updated graph")
+        .size([400.0, 300.0], dear_imgui_rs::Condition::Always)
+        .build(|| {
+            ui.imnodes(&nodes)
+                .editor(Some(&graph))
+                .with_nodes(|editor| {
+                    editor.node(keep, |_| {});
+                });
+        })
+        .unwrap();
+    assert!(!first.select_node(remove));
+    assert!(!first.select_link(link));
+    assert!(!first.center_on_submitted_node(remove));
+    assert_eq!(first.selected_nodes(), [keep]);
+    assert!(first.selected_links().is_empty());
+    drop(first);
     assert!(imgui.end_frame());
 }
 
@@ -65,195 +175,163 @@ fn editor_scopes_own_their_explicit_editor_context_lease() {
             let setup = ui.imnodes(&nodes).editor(Some(&editor_context));
             drop(editor_context);
 
-            let editor = setup.begin_nodes();
-            let node = editor.node(NodeId::new(1));
-            node.end();
-            let _ = editor.end();
+            let post = setup.with_nodes(|editor| editor.node(NodeId::new(1), |_| {}));
+            assert!(post.select_node(NodeId::new(1)));
         });
     assert!(imgui.end_frame());
 }
 
 #[test]
-fn native_scope_and_duplicate_ids_are_rejected_before_ffi() {
+fn unwinding_an_attribute_restores_the_host_and_allows_another_editor() {
     let _guard = test_guard();
     let mut imgui = Context::create();
     prepare_imgui(&mut imgui);
     let nodes = dear_imnodes::Context::create(&imgui);
-    let editor_context = nodes.create_editor_context();
-
     let ui = imgui.frame();
-    ui.window("scope contract")
+    ui.window("Parent")
         .size([400.0, 300.0], dear_imgui_rs::Condition::Always)
         .build(|| {
-            let editor = ui
-                .imnodes(&nodes)
-                .editor(Some(&editor_context))
-                .begin_nodes();
-            let node = editor.node(NodeId::new(1));
-
-            assert!(
-                catch_unwind(AssertUnwindSafe(|| {
-                    let _second = editor.node(NodeId::new(2));
-                }))
-                .is_err()
+            let window = || unsafe { dear_imgui_rs::sys::igGetCurrentWindowRead() };
+            let parent = window();
+            let parent_ids = unsafe { (*parent).IDStack.Size };
+            ui.open_popup("Graph");
+            let popup = ui.begin_popup("Graph").unwrap();
+            let popup_window = window();
+            let mut tooltip = None;
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                ui.imnodes(&nodes).editor(None).with_nodes(|editor| {
+                    assert_ne!(window(), popup_window);
+                    drop(popup);
+                    editor.node(NodeId::new(1), |node| {
+                        node.title_bar(|| ui.text("Title"));
+                        let id = ui.push_id("outside pin");
+                        node.input_attr(PinId::new(11), PinShape::CircleFilled, || {
+                            drop(id);
+                            tooltip = ui.begin_tooltip();
+                            panic!("pin contents");
+                        });
+                    });
+                });
+            }));
+            assert_eq!(
+                result.unwrap_err().downcast_ref::<&str>(),
+                Some(&"pin contents")
             );
-
-            let input = node.input_attr(PinId::new(11), PinShape::CircleFilled);
-            input.end();
-            assert!(
-                catch_unwind(AssertUnwindSafe(|| {
-                    let _duplicate = node.input_attr(PinId::new(11), PinShape::CircleFilled);
-                }))
-                .is_err()
-            );
-            node.end();
-            let _ = editor.end();
-        });
+            assert!(tooltip.is_some());
+            assert_eq!(window(), parent);
+            drop(tooltip);
+            assert_eq!(unsafe { (*parent).IDStack.Size }, parent_ids);
+            let _table = ui.begin_table("Graphs", 2).unwrap();
+            ui.table_next_column();
+            let column = ui.table_get_column_index().unwrap();
+            let post = ui.imnodes(&nodes).editor(None).with_nodes(|editor| {
+                editor.node(NodeId::new(2), |node| {
+                    node.title_bar(|| ui.text("Recovered"))
+                });
+            });
+            assert!(post.select_node(NodeId::new(2)));
+            assert_eq!(ui.table_get_column_index(), Some(column));
+            ui.table_next_column();
+            ui.text("Next cell");
+        })
+        .unwrap();
     assert!(imgui.end_frame());
 }
 
 #[test]
-fn forgotten_node_token_is_closed_before_explicit_editor_end() {
+fn submissions_are_bound_to_their_canvas_node_and_connectable_pins() {
     let _guard = test_guard();
     let mut imgui = Context::create();
     prepare_imgui(&mut imgui);
     let nodes = dear_imnodes::Context::create(&imgui);
-    let editor_context = nodes.create_editor_context();
-
+    let other = dear_imnodes::Context::create(&imgui);
+    let explicit = nodes.create_editor_context();
     let ui = imgui.frame();
-    ui.window("forgotten token")
+    ui.window("Outer graph")
         .size([400.0, 300.0], dear_imgui_rs::Condition::Always)
         .build(|| {
-            let editor = ui
-                .imnodes(&nodes)
-                .editor(Some(&editor_context))
-                .begin_nodes();
-            let node = editor.node(NodeId::new(1));
-            std::mem::forget(node);
-
-            // `end` repairs the native node scope instead of delegating the assertion to C++.
-            let _ = editor.end();
-        });
+            let next = ui.imnodes(&nodes).editor(Some(&explicit));
+            let post = ui.imnodes(&nodes).editor(None).with_nodes(|editor| {
+                assert!(catch_unwind(AssertUnwindSafe(|| next.set_grid_spacing(32.0))).is_err());
+                assert!(catch_unwind(AssertUnwindSafe(|| next.end())).is_err());
+                let a = NodeId::new(1);
+                let b = NodeId::new(2);
+                let output = PinId::new(10);
+                let input = PinId::new(20);
+                let label = PinId::new(21);
+                ui.window("Inner graph")
+                    .size([240.0, 200.0], dear_imgui_rs::Condition::Always)
+                    .build(|| {
+                        ui.imnodes(&other).editor(None).with_nodes(|inner| {
+                            assert!(
+                                catch_unwind(AssertUnwindSafe(|| editor.node(a, |_| {}))).is_err()
+                            );
+                            inner.node(a, |node| node.title_bar(|| ui.text("Inner")));
+                        });
+                    })
+                    .unwrap();
+                editor.node(a, |node| {
+                    node.output_attr(output, PinShape::CircleFilled, || {
+                        assert!(
+                            catch_unwind(AssertUnwindSafe(|| node.static_attr(label, || {})))
+                                .is_err()
+                        );
+                    });
+                });
+                editor.node(b, |node| {
+                    node.static_attr(label, || ui.text("Label"));
+                    node.input_attr(input, PinShape::CircleFilled, || ui.text("In"));
+                    assert!(
+                        catch_unwind(AssertUnwindSafe(|| node.static_attr(input, || {}))).is_err()
+                    );
+                });
+                let link = LinkId::new(30);
+                assert!(
+                    catch_unwind(AssertUnwindSafe(|| editor.link(link, label, input))).is_err()
+                );
+                editor.link(link, output, input);
+                assert!(
+                    catch_unwind(AssertUnwindSafe(
+                        || editor.minimap(0.0, dear_imnodes::MiniMapLocation::TopRight)
+                    ))
+                    .is_err()
+                );
+                editor.minimap(0.25, dear_imnodes::MiniMapLocation::TopRight);
+                assert!(
+                    catch_unwind(AssertUnwindSafe(|| editor.node(NodeId::new(3), |_| {}))).is_err()
+                );
+            });
+            assert!(post.select_link(LinkId::new(30)));
+            ui.imnodes(&nodes).editor(Some(&explicit)).end();
+        })
+        .unwrap();
     assert!(imgui.end_frame());
 }
 
 #[test]
-fn forgotten_attribute_token_is_closed_before_its_node() {
+fn temporary_style_stacks_restore_configuration_for_the_next_editor() {
+    use dear_imnodes::{ColorElement, StyleVar};
     let _guard = test_guard();
     let mut imgui = Context::create();
     prepare_imgui(&mut imgui);
     let nodes = dear_imnodes::Context::create(&imgui);
-    let editor_context = nodes.create_editor_context();
-
     let ui = imgui.frame();
-    ui.window("forgotten attribute")
-        .size([400.0, 300.0], dear_imgui_rs::Condition::Always)
-        .build(|| {
-            let editor = ui
-                .imnodes(&nodes)
-                .editor(Some(&editor_context))
-                .begin_nodes();
-            let node = editor.node(NodeId::new(1));
-            let input = node.input_attr(PinId::new(11), PinShape::CircleFilled);
-            std::mem::forget(input);
-
-            // Ending the node first closes the forgotten attribute scope.
-            node.end();
-            let _ = editor.end();
-        });
-    assert!(imgui.end_frame());
-}
-
-#[test]
-fn only_one_editor_frame_can_be_active_per_imnodes_context() {
-    let _guard = test_guard();
-    let mut imgui = Context::create();
-    prepare_imgui(&mut imgui);
-    let nodes = dear_imnodes::Context::create(&imgui);
-    let editor_context = nodes.create_editor_context();
-
-    let ui = imgui.frame();
-    ui.window("active frame lease")
-        .size([400.0, 300.0], dear_imgui_rs::Condition::Always)
-        .build(|| {
-            let first = ui
-                .imnodes(&nodes)
-                .editor(Some(&editor_context))
-                .begin_nodes();
-            assert!(
-                catch_unwind(AssertUnwindSafe(|| {
-                    let _second = ui
-                        .imnodes(&nodes)
-                        .editor(Some(&editor_context))
-                        .begin_nodes();
-                }))
-                .is_err()
-            );
-            drop(first);
-
-            let second = ui
-                .imnodes(&nodes)
-                .editor(Some(&editor_context))
-                .begin_nodes();
-            let _ = second.end();
-        });
-    assert!(imgui.end_frame());
-}
-
-#[test]
-fn minimap_finalization_rejects_later_node_submission() {
-    let _guard = test_guard();
-    let mut imgui = Context::create();
-    prepare_imgui(&mut imgui);
-    let nodes = dear_imnodes::Context::create(&imgui);
-    let editor_context = nodes.create_editor_context();
-
-    let ui = imgui.frame();
-    ui.window("minimap finalization")
-        .size([400.0, 300.0], dear_imgui_rs::Condition::Always)
-        .build(|| {
-            let editor = ui
-                .imnodes(&nodes)
-                .editor(Some(&editor_context))
-                .begin_nodes();
-            editor.minimap(0.25, dear_imnodes::MiniMapLocation::TopRight);
-            assert!(
-                catch_unwind(AssertUnwindSafe(|| {
-                    let _node = editor.node(NodeId::new(1));
-                }))
-                .is_err()
-            );
-            let _ = editor.end();
-        });
-    assert!(imgui.end_frame());
-}
-
-#[test]
-fn invalid_minimap_size_is_rejected_before_finalization_or_ffi() {
-    let _guard = test_guard();
-    let mut imgui = Context::create();
-    prepare_imgui(&mut imgui);
-    let nodes = dear_imnodes::Context::create(&imgui);
-    let editor_context = nodes.create_editor_context();
-
-    let ui = imgui.frame();
-    ui.window("invalid minimap")
-        .size([400.0, 300.0], dear_imgui_rs::Condition::Always)
-        .build(|| {
-            let editor = ui
-                .imnodes(&nodes)
-                .editor(Some(&editor_context))
-                .begin_nodes();
-            assert!(
-                catch_unwind(AssertUnwindSafe(|| {
-                    editor.minimap(0.0, dear_imnodes::MiniMapLocation::TopRight);
-                }))
-                .is_err()
-            );
-
-            let node = editor.node(NodeId::new(1));
-            node.end();
-            let _ = editor.end();
-        });
+    let setup = ui.imnodes(&nodes).editor(None);
+    let color = ColorElement::TitleBar;
+    let original = setup.get_color(color);
+    setup.with_nodes(|editor| {
+        let first = editor.push_color(color, [1.0; 4]);
+        let second = editor.push_color(color, [0.0; 4]);
+        first.pop();
+        std::mem::forget(second);
+        assert!(
+            catch_unwind(AssertUnwindSafe(
+                || editor.push_style_var_f32(StyleVar::NodePadding, 3.0)
+            ))
+            .is_err()
+        );
+        let _padding = editor.push_style_var_vec2(StyleVar::NodePadding, [3.0; 2]);
+    });
+    assert_eq!(ui.imnodes(&nodes).editor(None).get_color(color), original);
     assert!(imgui.end_frame());
 }

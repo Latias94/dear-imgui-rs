@@ -642,6 +642,9 @@ impl ImguiViewportCallbackContract {
 
     unsafe fn capture_raw(platform_io: *const sys::ImGuiPlatformIO) -> Option<Self> {
         let raw = unsafe { platform_io.as_ref() }?;
+        // The five aggregate slots installed by this bridge share native thunks across backends.
+        // The shim returns their stored functions only while those thunks occupy the live slots.
+        let platform_io = platform_io.cast_mut();
         Some(Self {
             platform: [
                 raw.Platform_CreateWindow
@@ -650,16 +653,18 @@ impl ImguiViewportCallbackContract {
                     .map_or(0, |callback| callback as usize),
                 raw.Platform_ShowWindow
                     .map_or(0, |callback| callback as usize),
-                raw.Platform_SetWindowPos
+                unsafe { sys::ImGuiPlatformIO_PlatformSetWindowPosPointerParam(platform_io) }
                     .map_or(0, |callback| callback as usize),
-                raw.Platform_GetWindowPos
+                unsafe { sys::ImGuiPlatformIO_PlatformGetWindowPosOutParam(platform_io) }
                     .map_or(0, |callback| callback as usize),
-                raw.Platform_SetWindowSize
+                unsafe { sys::ImGuiPlatformIO_PlatformSetWindowSizePointerParam(platform_io) }
                     .map_or(0, |callback| callback as usize),
-                raw.Platform_GetWindowSize
+                unsafe { sys::ImGuiPlatformIO_PlatformGetWindowSizeOutParam(platform_io) }
                     .map_or(0, |callback| callback as usize),
-                raw.Platform_GetWindowFramebufferScale
-                    .map_or(0, |callback| callback as usize),
+                unsafe {
+                    sys::ImGuiPlatformIO_PlatformGetWindowFramebufferScaleOutParam(platform_io)
+                }
+                .map_or(0, |callback| callback as usize),
                 raw.Platform_SetWindowFocus
                     .map_or(0, |callback| callback as usize),
                 raw.Platform_GetWindowFocus

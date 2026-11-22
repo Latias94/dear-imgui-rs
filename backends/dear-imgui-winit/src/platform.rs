@@ -210,7 +210,6 @@ mod tests {
     };
     use winit::event::{Event, WindowEvent};
 
-    use super::input_events::rescale_mouse_pos_for_hidpi_change;
     use super::ownership::{
         PlatformOwnerToken, PlatformState, WINIT_BASE_FLAGS, WINIT_RESERVED_FLAGS,
         winit_backend_name_ptr,
@@ -243,7 +242,7 @@ mod tests {
         let platform = WinitPlatform::new(&mut ctx).unwrap();
 
         assert_eq!(platform.hidpi_mode, HiDpiMode::Default);
-        assert_eq!(platform.hidpi_factor, 1.0);
+        assert_eq!(platform.hidpi_factor(), 1.0);
         assert_eq!(platform.cursor_cache, None);
         assert!(!platform.ime_enabled);
     }
@@ -650,26 +649,6 @@ mod tests {
         );
         assert_eq!(context.io().mouse_pos(), position);
         platform.shutdown(&mut context).unwrap();
-    }
-
-    #[test]
-    fn rescale_mouse_pos_for_hidpi_change_rejects_non_finite_results() {
-        assert_eq!(
-            rescale_mouse_pos_for_hidpi_change([10.0, 20.0], 1.0, 2.0),
-            Some([20.0, 40.0])
-        );
-        assert_eq!(
-            rescale_mouse_pos_for_hidpi_change([f32::NAN, 20.0], 1.0, 2.0),
-            None
-        );
-        assert_eq!(
-            rescale_mouse_pos_for_hidpi_change([10.0, 20.0], 0.0, 2.0),
-            Some([20.0, 40.0])
-        );
-        assert_eq!(
-            rescale_mouse_pos_for_hidpi_change([f32::MAX, 20.0], 1.0, f64::MAX),
-            None
-        );
     }
 
     #[test]

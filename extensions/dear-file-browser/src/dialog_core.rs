@@ -114,6 +114,10 @@ impl EntryId {
         Self(value)
     }
 
+    pub(crate) fn widget_id(self) -> i32 {
+        self.0 as i32
+    }
+
     /// Build a stable entry id from an absolute or relative path.
     ///
     /// The path is the complete identity: file type and other metadata do not
@@ -751,7 +755,7 @@ pub struct FileDialogCore {
     scan_status: ScanStatus,
     scan_generation: ScanGeneration,
     scan_requested_cwd: Option<PathBuf>,
-    scan_started_at: Option<std::time::Instant>,
+    scan_started_at: Option<web_time::Instant>,
     scan_runtime: ScanRuntime,
     dir_snapshot: DirSnapshot,
     dir_snapshot_dirty: bool,
@@ -1251,7 +1255,7 @@ impl FileDialogCore {
     }
 
     fn rebuild_projection(&mut self, key: ViewKey, reason: &'static str) {
-        let rebuild_started_at = std::time::Instant::now();
+        let rebuild_started_at = web_time::Instant::now();
         #[cfg(test)]
         let input_entries = self.dir_snapshot.entries.len();
         let mut entries = self.dir_snapshot.entries.clone();
@@ -1276,7 +1280,7 @@ impl FileDialogCore {
     fn append_projection_batch(&mut self, mut entries: Vec<DirEntry>) {
         // The caller has already verified that the existing view uses the
         // current projection inputs, so only this accepted batch needs work.
-        let project_started_at = std::time::Instant::now();
+        let project_started_at = web_time::Instant::now();
         let input_entries = entries.len();
         self.filter_projection_entries(&mut entries);
         let visible_entries = entries.len();
@@ -1353,7 +1357,7 @@ impl FileDialogCore {
             self.scan_requested_cwd = Some(cwd.clone());
             self.dir_snapshot = empty_snapshot_for_cwd(&cwd);
             self.last_view_key = None;
-            self.scan_started_at = Some(std::time::Instant::now());
+            self.scan_started_at = Some(web_time::Instant::now());
             self.scan_status = ScanStatus::Scanning { generation };
             if let Err(error) = filesystem.submit_scan(
                 &mut self.scan_runtime,
@@ -1416,7 +1420,7 @@ impl FileDialogCore {
                 }
                 self.last_view_key = None;
                 self.scan_started_at
-                    .get_or_insert_with(std::time::Instant::now);
+                    .get_or_insert_with(web_time::Instant::now);
                 self.scan_status = ScanStatus::Scanning {
                     generation: runtime_batch.generation,
                 };
@@ -1509,7 +1513,7 @@ impl FileDialogCore {
         true
     }
 
-    fn entry_by_id(&self, id: EntryId) -> Option<&DirEntry> {
+    pub(crate) fn entry_by_id(&self, id: EntryId) -> Option<&DirEntry> {
         self.entries.entry_by_id(id)
     }
 
@@ -1642,8 +1646,7 @@ impl FileDialogCore {
                     self.select_single_by_id(id);
                 }
                 ClickAction::Navigate => {
-                    let target = self.cwd.join(&entry.name);
-                    self.navigate_to_with_history(target);
+                    self.navigate_to_with_history(entry.path);
                 }
             }
             return;
@@ -1686,8 +1689,7 @@ impl FileDialogCore {
         };
 
         if entry.is_dir {
-            let target = self.cwd.join(&entry.name);
-            self.navigate_to_with_history(target);
+            self.navigate_to_with_history(entry.path);
             return false;
         }
 
@@ -1734,8 +1736,7 @@ impl FileDialogCore {
             && selected_entries.len() == 1
             && selected_entries[0].is_dir
         {
-            let target = self.cwd.join(&selected_entries[0].name);
-            self.navigate_to_with_history(target);
+            self.navigate_to_with_history(selected_entries[0].path.clone());
             return Ok(());
         }
 
@@ -1799,19 +1800,23 @@ impl FileDialogCore {
                 .get(0)
                 .cloned()
                 .unwrap_or_else(|| self.cwd.clone());
-            match fs.metadata(&target) {
-                Ok(md) => {
-                    if md.is_dir {
-                        return Err(FileDialogError::InvalidPath(
-                            "file name points to a directory".into(),
-                        ));
-                    }
-                    if self.save_policy.confirm_overwrite {
-                        self.pending_overwrite = Some(sel);
-                        return Ok(());
-                    }
+            let exists = match fs.metadata(&target) {
+                Ok(md) if md.is_dir => {
+                    return Err(FileDialogError::InvalidPath(
+                        "file name points to a directory".into(),
+                    ));
                 }
-                Err(_) => {}
+                Ok(_) => true,
+                // Following a dangling link reports NotFound even though saving here
+                // would write through an existing directory entry.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    crate::fs_ops::entry_exists(fs, &target)?
+                }
+                Err(e) => return Err(e.into()),
+            };
+            if exists && self.save_policy.confirm_overwrite {
+                self.pending_overwrite = Some(sel);
+                return Ok(());
             }
         }
 
@@ -2055,7 +2060,7 @@ fn plain_extension_token(token: &str) -> Option<&str> {
     if parse_regex_token(t).is_some() {
         return None;
     }
-    if t.contains('*') || t.contains('?') {
+    if t.contains(['*', '?', '/', '\\', '\0']) {
         return None;
     }
     Some(t)
@@ -2195,47 +2200,42 @@ fn finalize_selection(
             }
         }
         DialogMode::SaveFile => {
-            let name = normalize_save_name(save_name, &eff_filters, save_policy.extension_policy);
-            if name.is_empty() {
-                return Err(FileDialogError::InvalidPath("empty file name".into()));
-            }
-            sel.paths.push(cwd.join(name));
+            let with_extension =
+                |path| with_save_extension(path, &eff_filters, save_policy.extension_policy);
+            let target = if let Some(entry) = selected_entries
+                .into_iter()
+                .find(|entry| !entry.is_dir && entry.name == save_name)
+            {
+                with_extension(entry.path)
+            } else {
+                let name = save_name.trim();
+                if name.is_empty() {
+                    return Err(FileDialogError::InvalidPath("empty file name".into()));
+                }
+                cwd.join(with_extension(PathBuf::from(name)))
+            };
+            sel.paths.push(target);
         }
     }
     Ok(sel)
 }
 
-fn normalize_save_name(save_name: &str, filters: &[FileFilter], policy: ExtensionPolicy) -> String {
-    let name = save_name.trim().to_string();
-    if name.is_empty() {
-        return name;
-    }
-
+fn with_save_extension(
+    mut target: PathBuf,
+    filters: &[FileFilter],
+    policy: ExtensionPolicy,
+) -> PathBuf {
     let default_ext = filters
         .first()
         .and_then(|f| f.extensions.iter().find_map(|s| plain_extension_token(s)))
         .map(|s| s.trim_start_matches('.'));
-    let Some(default_ext) = default_ext else {
-        return name;
-    };
-
-    let p = Path::new(&name);
-    let has_ext = p.extension().and_then(|s| s.to_str()).is_some();
-
-    match policy {
-        ExtensionPolicy::KeepUser => name,
-        ExtensionPolicy::AddIfMissing => {
-            if has_ext {
-                name
-            } else {
-                format!("{name}.{default_ext}")
-            }
-        }
-        ExtensionPolicy::ReplaceByFilter => {
-            let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or(&name);
-            format!("{stem}.{default_ext}")
-        }
+    if let Some(extension) = default_ext
+        && (matches!(policy, ExtensionPolicy::ReplaceByFilter)
+            || matches!(policy, ExtensionPolicy::AddIfMissing) && target.extension().is_none())
+    {
+        target.set_extension(extension);
     }
+    target
 }
 
 fn filter_entries_in_place(
@@ -2785,6 +2785,7 @@ mod tests {
         visit_dir_calls: AtomicUsize,
         visit_threads: Mutex<Vec<std::thread::ThreadId>>,
         visit_dir_error: Option<std::io::ErrorKind>,
+        metadata_error: Option<std::io::ErrorKind>,
     }
 
     impl crate::fs::FileSystem for TestFs {
@@ -2814,6 +2815,9 @@ mod tests {
         }
 
         fn metadata(&self, path: &Path) -> std::io::Result<crate::fs::FsMetadata> {
+            if let Some(kind) = self.metadata_error {
+                return Err(kind.into());
+            }
             self.meta
                 .get(path)
                 .cloned()
@@ -3022,6 +3026,95 @@ mod tests {
             let id = EntryId::from_path(&path);
             assert_eq!(core.entry_path_by_id(id), Some(path.as_path()));
             assert_eq!(entry_id(&core, name), id);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn virtual_filesystem_keeps_non_utf8_names_distinct_when_naming_and_selecting_copies() {
+        use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+
+        // APFS can reject these names on disk. Use a virtual listing for the
+        // name allocator and selection projection on every Unix target.
+        let dir = Path::new("/virtual");
+        let mut fs = TestFs::default();
+        let mut copies = Vec::new();
+        for byte in [0xff, 0xfe] {
+            let native_name = |suffix: &[u8]| {
+                let mut name = vec![b'a', byte];
+                name.extend_from_slice(suffix);
+                dir.join(OsStr::from_bytes(&name))
+            };
+            let source = native_name(b".tar.gz");
+            let first = native_name(b" (copy).tar.gz");
+            for occupied in [&source, &first] {
+                fs.meta.insert(
+                    occupied.to_path_buf(),
+                    crate::fs::FsMetadata {
+                        is_dir: false,
+                        is_symlink: false,
+                    },
+                );
+            }
+            let next = crate::fs_ops::keep_both_target(&fs, &source).unwrap();
+            assert_eq!(next, native_name(b" (copy 2).tar.gz"));
+            let mut entry = make_raw_entry(dir, "display", false, false);
+            entry.name = next.file_name().unwrap().to_string_lossy().into_owned();
+            entry.path = next.clone();
+            fs.entries.push(entry);
+            fs.meta.insert(
+                next.clone(),
+                crate::fs::FsMetadata {
+                    is_dir: false,
+                    is_symlink: false,
+                },
+            );
+            copies.push(next);
+        }
+        assert_eq!(fs.entries[0].name, fs.entries[1].name);
+        let mut core = FileDialogCore::new(DialogMode::OpenFiles);
+        core.set_cwd(dir.to_owned());
+        core.rescan_if_needed(&fs);
+        core.replace_selection_by_ids(copies.iter().map(|path| EntryId::from_path(path)));
+        core.confirm(&fs, &ConfirmGate::default(), None).unwrap();
+        assert_eq!(core.take_result().unwrap().unwrap().paths, copies);
+
+        core.mode = DialogMode::SaveFile;
+        core.focus_and_select_by_id(EntryId::from_path(&copies[1]));
+        core.save_name = fs.entries[1].name.clone();
+        core.confirm(&fs, &ConfirmGate::default(), None).unwrap();
+        assert_eq!(core.pending_overwrite().unwrap().paths, [copies[1].clone()]);
+    }
+
+    #[test]
+    fn directory_navigation_uses_the_entry_path_for_click_double_click_and_confirm() {
+        let cwd = Path::new("/virtual");
+        let mut entry = make_raw_entry(cwd, "actual-name", true, false);
+        let target = entry.path.clone();
+        entry.name = "display name".into();
+        let fs = TestFs {
+            entries: vec![entry],
+            ..Default::default()
+        };
+        let id = EntryId::from_path(&target);
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        core.click_action = ClickAction::Navigate;
+        core.double_click = true;
+        for event in [
+            CoreEvent::ClickEntry {
+                id,
+                modifiers: mods(false, false),
+            },
+            CoreEvent::DoubleClickEntry { id },
+            CoreEvent::FocusAndSelectById(id),
+        ] {
+            core.set_cwd(cwd.to_owned());
+            core.rescan_if_needed(&fs);
+            let _ = core.handle_event(event);
+            if core.has_selection() {
+                core.confirm(&fs, &ConfirmGate::default(), None).unwrap();
+            }
+            assert_eq!(core.cwd, target);
         }
     }
 
@@ -3664,6 +3757,56 @@ mod tests {
         assert!(core.pending_overwrite().is_none());
         let sel = core.take_result().unwrap().unwrap();
         assert_eq!(sel.paths[0], PathBuf::from("/tmp/asset.png"));
+    }
+
+    #[test]
+    fn save_reports_failure_to_check_the_overwrite_target() {
+        let fs = TestFs {
+            metadata_error: Some(std::io::ErrorKind::PermissionDenied),
+            ..Default::default()
+        };
+        let mut core = FileDialogCore::new(DialogMode::SaveFile);
+        core.save_name = "asset.png".into();
+
+        let result = core.confirm(&fs, &ConfirmGate::default(), None);
+        assert!(
+            matches!(result, Err(FileDialogError::Io(e)) if e.kind() == std::io::ErrorKind::PermissionDenied)
+        );
+        assert!(core.take_result().is_none());
+        assert!(core.pending_overwrite().is_none());
+    }
+
+    #[test]
+    fn replacing_a_save_extension_preserves_the_typed_parent() {
+        let mut core = FileDialogCore::new(DialogMode::SaveFile);
+        core.set_cwd(PathBuf::from("/work"));
+        core.save_name = "subdir/asset.old".into();
+        core.set_filters(vec![FileFilter::new(
+            "Images",
+            vec!["a/b".into(), "png".into()],
+        )]);
+        core.save_policy.extension_policy = ExtensionPolicy::ReplaceByFilter;
+        core.confirm(&TestFs::default(), &ConfirmGate::default(), None)
+            .unwrap();
+        assert_eq!(
+            core.take_result().unwrap().unwrap().paths,
+            [PathBuf::from("/work/subdir/asset.png")]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saving_over_a_dangling_link_requires_overwrite_confirmation() {
+        let temp = crate::fs_ops::tests::TempDir::new();
+        let link = temp.path().join("link");
+        std::os::unix::fs::symlink(temp.path().join("missing"), &link).unwrap();
+        let mut core = FileDialogCore::new(DialogMode::SaveFile);
+        core.set_cwd(temp.path().to_owned());
+        core.save_name = "link".into();
+        core.confirm(&crate::fs::StdFileSystem, &ConfirmGate::default(), None)
+            .unwrap();
+        assert_eq!(core.pending_overwrite().unwrap().paths, [link]);
+        assert!(core.take_result().is_none());
     }
 
     #[test]

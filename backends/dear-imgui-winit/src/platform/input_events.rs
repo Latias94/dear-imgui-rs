@@ -1,4 +1,5 @@
 use dear_imgui_rs::Context;
+use winit::dpi::PhysicalPosition;
 use winit::event::{Event, WindowEvent};
 use winit::window::{Window, WindowId};
 
@@ -53,6 +54,7 @@ impl WinitPlatformControl {
         context: &mut Context,
     ) -> WinitEventForwarding {
         let released_touch = if !focused {
+            self.last_local_pointer.set(None);
             context
                 .binding()
                 .with_bound_context(|| self.release_single_touch_in_current_context())
@@ -341,12 +343,11 @@ impl WinitPlatform {
                     );
                     return WinitEventForwarding::default();
                 }
-                let logical_size = physical_size
-                    .to_logical(sanitize::positive_finite_or(window.scale_factor(), 1.0));
-                let logical_size = self.scale_size_from_winit(window, logical_size);
-                imgui_ctx
-                    .io_mut()
-                    .set_display_size(sanitize::finite_non_negative_size(logical_size));
+                self.update_single_window_geometry(
+                    imgui_ctx,
+                    *physical_size,
+                    self.hidpi_factor_for_window(window),
+                );
                 WinitEventForwarding::default()
             }
             WindowEvent::ScaleFactorChanged {
@@ -369,7 +370,7 @@ impl WinitPlatform {
                         .note_runtime_window_geometry(window.id(), true, true);
                     // Native desktop coordinates do not change when a viewport crosses a DPI
                     // boundary. Only its UI DPI and framebuffer relation change.
-                    self.hidpi_factor = new_hidpi;
+                    self.control.hidpi_factor.set(new_hidpi);
                     let io = imgui_ctx.io_mut();
                     io.set_display_size(crate::multi_viewport::desktop_size_for_window(window));
                     io.set_display_framebuffer_scale(
@@ -377,28 +378,7 @@ impl WinitPlatform {
                     );
                     return WinitEventForwarding::default();
                 }
-                // Adjust mouse position proportionally when DPI factor changes
-                {
-                    let io = imgui_ctx.io_mut();
-                    let mouse = io.mouse_pos();
-                    if let Some(scaled) =
-                        rescale_mouse_pos_for_hidpi_change(mouse, self.hidpi_factor, new_hidpi)
-                    {
-                        io.set_mouse_pos(scaled);
-                    }
-                }
-                self.hidpi_factor = new_hidpi;
-
-                let logical_size = window
-                    .inner_size()
-                    .to_logical(sanitize::positive_finite_or(window.scale_factor(), 1.0));
-                let logical_size = self.scale_size_from_winit(window, logical_size);
-                let io = imgui_ctx.io_mut();
-                io.set_display_size(sanitize::finite_non_negative_size(logical_size));
-                io.set_display_framebuffer_scale(sanitize::framebuffer_scale(
-                    self.hidpi_factor,
-                    1.0,
-                ));
+                self.update_single_window_geometry(imgui_ctx, window.inner_size(), new_hidpi);
                 WinitEventForwarding::default()
             }
             WindowEvent::KeyboardInput { event, .. } => {
@@ -425,11 +405,7 @@ impl WinitPlatform {
                         );
                     }
                 }
-                // Fallback: local logical coordinates
-                let position =
-                    position.to_logical(sanitize::positive_finite_or(window.scale_factor(), 1.0));
-                let position = self.scale_pos_from_winit(window, position);
-                events::handle_cursor_moved([position.x, position.y], imgui_ctx)
+                self.handle_local_cursor_moved(*position, imgui_ctx)
             }
             WindowEvent::MouseInput { button, state, .. } => {
                 #[cfg(feature = "multi-viewport")]
@@ -450,6 +426,7 @@ impl WinitPlatform {
                     self.control.note_runtime_cursor_left();
                     return WinitEventForwarding::default();
                 }
+                self.control.last_local_pointer.set(None);
                 {
                     let io = imgui_ctx.io_mut();
                     io.add_mouse_pos_event([-f32::MAX, -f32::MAX]);
@@ -480,9 +457,9 @@ impl WinitPlatform {
                 events::handle_modifiers_changed(modifiers, imgui_ctx)
             }
             WindowEvent::Touch(touch) => {
-                let mut forwarded = WinitEventForwarding::default();
                 #[cfg(feature = "multi-viewport")]
                 if self.control.has_live_runtime() {
+                    let mut forwarded = WinitEventForwarding::default();
                     let position = crate::multi_viewport::client_physical_to_screen_pos(
                         window,
                         [touch.location.x, touch.location.y],
@@ -505,19 +482,7 @@ impl WinitPlatform {
                     }
                     return forwarded;
                 }
-                let position = events::touch_logical_position(touch, window);
-                if position.is_some()
-                    || !matches!(
-                        touch.phase,
-                        winit::event::TouchPhase::Started | winit::event::TouchPhase::Moved
-                    )
-                {
-                    if let Some(action) = self.control.note_single_touch(touch) {
-                        forwarded =
-                            events::handle_touch_event_at(action, position, None, imgui_ctx);
-                    }
-                }
-                forwarded
+                self.handle_local_touch(touch, imgui_ctx)
             }
             WindowEvent::Focused(focused) => {
                 #[cfg(feature = "multi-viewport")]
@@ -535,27 +500,143 @@ impl WinitPlatform {
             _ => WinitEventForwarding::default(),
         }
     }
-}
 
-pub(super) fn rescale_mouse_pos_for_hidpi_change(
-    mouse: [f32; 2],
-    old_hidpi: f64,
-    new_hidpi: f64,
-) -> Option<[f32; 2]> {
-    let mouse = sanitize::finite_vec2_f32(mouse)?;
-    let old_hidpi = sanitize::positive_finite_or(old_hidpi, 1.0);
-    let scale = sanitize::positive_finite_or(new_hidpi / old_hidpi, 1.0);
-    sanitize::finite_vec2_f32([mouse[0] * scale as f32, mouse[1] * scale as f32])
+    fn handle_local_cursor_moved(
+        &self,
+        physical: PhysicalPosition<f64>,
+        context: &mut Context,
+    ) -> WinitEventForwarding {
+        let logical = physical.to_logical::<f64>(self.hidpi_factor());
+        let forwarded = events::handle_cursor_moved([logical.x, logical.y], context);
+        if forwarded.pointer {
+            self.control.last_local_pointer.set(Some(physical));
+        }
+        forwarded
+    }
+
+    fn handle_local_touch(
+        &self,
+        touch: &winit::event::Touch,
+        context: &mut Context,
+    ) -> WinitEventForwarding {
+        let position = sanitize::finite_position(touch.location.to_logical(self.hidpi_factor()));
+        if position.is_none()
+            && matches!(
+                touch.phase,
+                winit::event::TouchPhase::Started | winit::event::TouchPhase::Moved
+            )
+        {
+            return WinitEventForwarding::default();
+        }
+        let Some(action) = self.control.note_single_touch(touch) else {
+            return WinitEventForwarding::default();
+        };
+        if position.is_some() {
+            self.control.last_local_pointer.set(Some(touch.location));
+        }
+        events::handle_touch_event_at(action, position, None, context)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_util::test_sync::lock_context;
+    use dear_imgui_rs::input::{MouseButton, MouseSource};
     use winit::{
-        dpi::PhysicalPosition,
+        dpi::PhysicalSize,
         event::{DeviceId, Touch, TouchPhase},
     };
+
+    #[test]
+    fn dpi_change_keeps_queued_click_at_its_own_position_and_preserves_drag_origin() {
+        let _guard = lock_context();
+        let mut context = Context::create();
+        context.prepare_frame(
+            dear_imgui_rs::FramePrepareOptions::new([640.0, 480.0], 1.0 / 60.0)
+                .renderer_has_textures(),
+        );
+        let _consumer = context.create_synchronous_renderer_consumer().unwrap();
+        let platform = WinitPlatform::new(&mut context).unwrap();
+        let size = PhysicalSize::new(640, 480);
+        platform.handle_local_cursor_moved(PhysicalPosition::new(120.0, 80.0), &mut context);
+        context
+            .io_mut()
+            .add_mouse_button_event(MouseButton::Left, true);
+        platform.handle_local_cursor_moved(PhysicalPosition::new(122.0, 82.0), &mut context);
+        platform.update_single_window_geometry(&mut context, size, 2.0);
+
+        drop(context.begin_frame());
+        assert!(context.io().mouse_down(MouseButton::Left));
+        assert_eq!(context.io().mouse_pos(), [60.0, 40.0]);
+        drop(context.begin_frame());
+        assert_eq!(context.io().mouse_pos(), [61.0, 41.0]);
+
+        // The same physical position across a second scale change must not start a drag.
+        platform.update_single_window_geometry(&mut context, size, 1.0);
+        let frame = context.begin_frame();
+        assert_eq!(frame.ui().io().mouse_pos(), [122.0, 82.0]);
+        assert_eq!(frame.ui().io().mouse_delta(), [0.0, 0.0]);
+        assert!(!frame.ui().is_mouse_dragging(MouseButton::Left));
+    }
+
+    #[test]
+    fn dpi_change_reprojects_queued_mouse_and_touch_in_physical_pixels() {
+        let _guard = lock_context();
+        let mut context = Context::create();
+        context.prepare_frame(
+            dear_imgui_rs::FramePrepareOptions::new([640.0, 480.0], 1.0 / 60.0)
+                .renderer_has_textures(),
+        );
+        let _consumer = context.create_synchronous_renderer_consumer().unwrap();
+        let mut platform = WinitPlatform::new(&mut context).unwrap();
+        let size = PhysicalSize::new(640, 480);
+
+        // Both events arrive before Dear ImGui has consumed the first position.
+        platform.handle_local_cursor_moved(PhysicalPosition::new(120.0, 80.0), &mut context);
+        platform.update_single_window_geometry(&mut context, size, 2.0);
+        drop(context.begin_frame());
+        assert_eq!(context.io().mouse_pos(), [60.0, 40.0]);
+        assert_eq!(context.io().display_size(), [320.0, 240.0]);
+        assert_eq!(context.io().display_framebuffer_scale(), [2.0, 2.0]);
+
+        platform
+            .set_hidpi_mode(crate::HiDpiMode::Locked(2.0))
+            .unwrap();
+        let hidpi = platform.hidpi_factor_for_scale(1.25);
+        platform.update_single_window_geometry(&mut context, size, hidpi);
+        let touch = Touch {
+            device_id: DeviceId::dummy(),
+            phase: TouchPhase::Started,
+            location: PhysicalPosition::new(160.0, 90.0),
+            force: None,
+            id: 1,
+        };
+        assert!(platform.handle_local_touch(&touch, &mut context).pointer);
+        let other_touch = Touch {
+            id: 2,
+            location: PhysicalPosition::new(10.0, 20.0),
+            ..touch
+        };
+        assert!(
+            !platform
+                .handle_local_touch(&other_touch, &mut context)
+                .pointer
+        );
+        drop(context.begin_frame());
+        assert_eq!(context.io().mouse_pos(), [80.0, 45.0]);
+        assert_eq!(context.io().mouse_source(), MouseSource::TouchScreen);
+        // Dear ImGui trickles the touch press into the frame following the position event.
+        drop(context.begin_frame());
+
+        platform.set_hidpi_mode(crate::HiDpiMode::Rounded).unwrap();
+        let hidpi = platform.hidpi_factor_for_scale(1.25);
+        platform.update_single_window_geometry(&mut context, size, hidpi);
+        drop(context.begin_frame());
+        assert_eq!(context.io().mouse_pos(), [160.0, 90.0]);
+        assert_eq!(context.io().mouse_source(), MouseSource::TouchScreen);
+        platform.shutdown(&mut context).unwrap();
+    }
 
     #[test]
     fn already_enabled_native_source_can_take_over_a_cancelled_session() {

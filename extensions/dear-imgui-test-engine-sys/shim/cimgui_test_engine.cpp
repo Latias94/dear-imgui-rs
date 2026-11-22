@@ -1510,17 +1510,16 @@ ImGuiTestEngineStatus imgui_test_engine_queue_tests(
         if (group < ImGuiTestEngineGroup_Unknown || group > ImGuiTestEngineGroup_Perfs) {
             return abi::fail(ImGuiTestEngineStatus_OutOfRange, "group is out of range");
         }
-        constexpr int known_flags = ImGuiTestEngineRunFlags_GuiFuncDisable |
+        // Queued tests run with a null parent. Only RunChildTest can share its context or vars.
+        constexpr int queue_flags = ImGuiTestEngineRunFlags_GuiFuncDisable |
                                     ImGuiTestEngineRunFlags_GuiFuncOnly |
                                     ImGuiTestEngineRunFlags_NoSuccessMsg |
                                     ImGuiTestEngineRunFlags_EnableRawInputs |
                                     ImGuiTestEngineRunFlags_RunFromGui |
                                     ImGuiTestEngineRunFlags_RunFromCommandLine |
-                                    ImGuiTestEngineRunFlags_NoError |
-                                    ImGuiTestEngineRunFlags_ShareVars |
-                                    ImGuiTestEngineRunFlags_ShareTestContext;
-        if (run_flags < 0 || (run_flags & ~known_flags) != 0) {
-            return abi::fail(ImGuiTestEngineStatus_OutOfRange, "run_flags contains unknown bits");
+                                    ImGuiTestEngineRunFlags_NoError;
+        if ((run_flags & ~queue_flags) != 0) {
+            return abi::fail(ImGuiTestEngineStatus_OutOfRange, "unsupported flags for a top-level test run");
         }
         if (engine->UiContextTarget != nullptr &&
             engine->FrameCount < engine->UiContextTarget->FrameCount - 2) {

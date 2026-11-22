@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 
 use dear_imgui_rs::{
     ContextAttachment, ContextAttachmentTeardownError, ContextBinding, ContextDestroyed, ContextId,
-    ContextTeardown,
+    ContextTeardown, ContextThreadLease,
 };
 use dear_imgui_test_engine_sys as sys;
 
@@ -13,6 +13,7 @@ pub(crate) struct TestEngineAttachmentMarker;
 
 pub(crate) struct AttachmentControl {
     raw: Cell<*mut sys::ImGuiTestEngine>,
+    thread_lease: Cell<Option<ContextThreadLease>>,
     engine_id: EngineId,
     attachment: Cell<AttachmentState>,
     run: Cell<RunState>,
@@ -24,9 +25,14 @@ pub(crate) struct AttachmentControl {
 }
 
 impl AttachmentControl {
-    pub(crate) fn new(raw: *mut sys::ImGuiTestEngine, engine_id: EngineId) -> Self {
+    pub(crate) fn new(
+        raw: *mut sys::ImGuiTestEngine,
+        engine_id: EngineId,
+        thread_lease: ContextThreadLease,
+    ) -> Self {
         Self {
             raw: Cell::new(raw),
+            thread_lease: Cell::new(Some(thread_lease)),
             engine_id,
             attachment: Cell::new(AttachmentState::Detached),
             run: Cell::new(RunState::Inactive),
@@ -126,6 +132,7 @@ impl AttachmentControl {
         self.run.set(RunState::Inactive);
         self.active_run_id.set(None);
         self.completed_run_id.set(None);
+        self.thread_lease.set(None);
     }
 
     pub(crate) fn take_teardown_error(&self) -> Option<TestEngineError> {
@@ -147,6 +154,28 @@ impl AttachmentControl {
         }
         Ok(())
     }
+}
+
+impl Drop for AttachmentControl {
+    fn drop(&mut self) {
+        // Context teardown may retain this control after the TestEngine handle is dropped.
+        if let Some(lease) = self.thread_lease.take() {
+            drop_native_engine(self.raw.get(), lease);
+        }
+    }
+}
+
+/// Final cleanup for a native allocation whose Rust owner cannot retry later.
+pub(super) fn drop_native_engine(raw: *mut sys::ImGuiTestEngine, lease: ContextThreadLease) {
+    for _ in 0..2 {
+        if unsafe { sys::imgui_test_engine_destroy_context(raw) }
+            == sys::ImGuiTestEngineStatus_Success
+        {
+            return;
+        }
+    }
+    // A persistent ABI failure leaves native state live. Keep its allocator on this thread.
+    std::mem::forget(lease);
 }
 
 impl ContextAttachment for AttachmentControl {

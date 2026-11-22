@@ -1,48 +1,28 @@
-use super::{Context, ImNodesScope, NodeEditor, NodeEditorSetup};
+use super::{ImNodesScope, SubmittedObjects};
 use crate::sys;
-use dear_imgui_rs::Ui;
-use std::collections::BTreeSet;
-use std::marker::PhantomData;
 use std::os::raw::c_char;
 use std::rc::Rc;
 
 /// Post-editor queries (must be called after EndNodeEditor)
 pub struct PostEditor<'ui> {
-    #[allow(dead_code)]
-    pub(super) _ui: &'ui Ui,
-    #[allow(dead_code)]
-    pub(super) _ctx: &'ui Context,
-    pub(super) scope: ImNodesScope,
-    pub(super) editor_hovered: bool,
-    pub(super) hovered_node: Option<crate::NodeId>,
-    pub(super) hovered_link: Option<crate::LinkId>,
-    pub(super) hovered_pin: Option<crate::PinId>,
-    pub(super) link_created: Option<crate::LinkCreated>,
-    pub(super) link_created_ex: Option<crate::LinkCreatedEx>,
-    pub(super) link_destroyed: Option<crate::LinkId>,
-    pub(super) any_attribute_active: Option<crate::PinId>,
-    pub(super) link_started: Option<crate::PinId>,
-    pub(super) link_dropped_excluding_detached: Option<crate::PinId>,
-    pub(super) link_dropped_including_detached: Option<crate::PinId>,
-    pub(super) submitted_nodes: BTreeSet<crate::NodeId>,
-    pub(super) submitted_links: BTreeSet<crate::LinkId>,
-    pub(super) _not_send_sync: PhantomData<Rc<()>>,
+    scope: ImNodesScope<'ui>,
+    minimap_hovered: Vec<crate::NodeId>,
+    editor_hovered: bool,
+    hovered_node: Option<crate::NodeId>,
+    hovered_link: Option<crate::LinkId>,
+    hovered_pin: Option<crate::PinId>,
+    link_created: Option<crate::LinkCreated>,
+    link_created_ex: Option<crate::LinkCreatedEx>,
+    link_destroyed: Option<crate::LinkId>,
+    any_attribute_active: Option<crate::PinId>,
+    link_started: Option<crate::PinId>,
+    link_dropped_excluding_detached: Option<crate::PinId>,
+    link_dropped_including_detached: Option<crate::PinId>,
+    submitted: Rc<SubmittedObjects>,
 }
 
-impl<'ui> NodeEditorSetup<'ui> {
-    /// End an editor without entering the node-submission phase.
-    pub fn end(self) -> PostEditor<'ui> {
-        self.begin_nodes().end()
-    }
-}
-
-impl<'ui> NodeEditor<'ui> {
-    /// Explicitly end the node editor and return post-editor query handle
-    pub fn end(mut self) -> PostEditor<'ui> {
-        self.finish_native();
-        let submitted_nodes = std::mem::take(self.submitted_nodes.get_mut());
-        let submitted_links = std::mem::take(self.submitted_links.get_mut());
-        let scope = self.scope.clone();
+impl<'ui> PostEditor<'ui> {
+    pub(super) fn capture(scope: ImNodesScope<'ui>, minimap_hovered: Vec<crate::NodeId>) -> Self {
         let (
             editor_hovered,
             hovered_node,
@@ -178,10 +158,10 @@ impl<'ui> NodeEditor<'ui> {
             )
         });
 
-        PostEditor {
-            _ui: self._ui,
-            _ctx: self._ctx,
-            scope: self.scope.clone(),
+        let submitted = scope.last_submission().borrow().clone();
+        Self {
+            scope,
+            minimap_hovered,
             editor_hovered,
             hovered_node,
             hovered_link,
@@ -193,17 +173,15 @@ impl<'ui> NodeEditor<'ui> {
             link_started,
             link_dropped_excluding_detached,
             link_dropped_including_detached,
-            submitted_nodes,
-            submitted_links,
-            _not_send_sync: PhantomData,
+            submitted,
         }
     }
-}
 
-impl<'ui> PostEditor<'ui> {
     #[inline]
     fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
-        self._ctx.assert_no_active_frame("PostEditor operation");
+        self.scope
+            .ctx
+            .assert_no_active_frame("PostEditor operation");
         self.scope.with_bound_context(f)
     }
 
@@ -271,48 +249,77 @@ impl<'ui> PostEditor<'ui> {
         })
     }
 
-    /// Selection helpers per id
+    fn contains_node(&self, id: crate::NodeId) -> bool {
+        let latest = self.scope.last_submission().borrow();
+        self.submitted.nodes.contains(&id) && latest.nodes.contains(&id)
+    }
+
+    fn contains_link(&self, id: crate::LinkId) -> bool {
+        let latest = self.scope.last_submission().borrow();
+        self.submitted.links.contains(&id) && latest.links.contains(&id)
+    }
+
+    /// Selects a submitted node. Returns whether the ID is still present in this editor.
     pub fn select_node(&self, node_id: crate::NodeId) -> bool {
-        if !self.submitted_nodes.contains(&node_id) {
+        if !self.contains_node(node_id) {
             return false;
         }
-        self.with_bound_context(|| unsafe { sys::imnodes_SelectNode(node_id.raw()) });
+        self.with_bound_context(|| unsafe {
+            if !sys::imnodes_IsNodeSelected(node_id.raw()) {
+                sys::imnodes_SelectNode(node_id.raw());
+            }
+        });
         true
     }
 
+    /// Clears a submitted node's selection. Returns whether the ID is still present.
     pub fn clear_node_selection_of(&self, node_id: crate::NodeId) -> bool {
-        if !self.submitted_nodes.contains(&node_id) {
+        if !self.contains_node(node_id) {
             return false;
         }
-        self.with_bound_context(|| unsafe { sys::imnodes_ClearNodeSelection_Int(node_id.raw()) });
+        self.with_bound_context(|| unsafe {
+            if sys::imnodes_IsNodeSelected(node_id.raw()) {
+                sys::imnodes_ClearNodeSelection_Int(node_id.raw());
+            }
+        });
         true
     }
 
     pub fn is_node_selected(&self, node_id: crate::NodeId) -> bool {
-        if !self.submitted_nodes.contains(&node_id) {
+        if !self.contains_node(node_id) {
             return false;
         }
         self.with_bound_context(|| unsafe { sys::imnodes_IsNodeSelected(node_id.raw()) })
     }
 
+    /// Selects a submitted link. Returns whether the ID is still present in this editor.
     pub fn select_link(&self, link_id: crate::LinkId) -> bool {
-        if !self.submitted_links.contains(&link_id) {
+        if !self.contains_link(link_id) {
             return false;
         }
-        self.with_bound_context(|| unsafe { sys::imnodes_SelectLink(link_id.raw()) });
+        self.with_bound_context(|| unsafe {
+            if !sys::imnodes_IsLinkSelected(link_id.raw()) {
+                sys::imnodes_SelectLink(link_id.raw());
+            }
+        });
         true
     }
 
+    /// Clears a submitted link's selection. Returns whether the ID is still present.
     pub fn clear_link_selection_of(&self, link_id: crate::LinkId) -> bool {
-        if !self.submitted_links.contains(&link_id) {
+        if !self.contains_link(link_id) {
             return false;
         }
-        self.with_bound_context(|| unsafe { sys::imnodes_ClearLinkSelection_Int(link_id.raw()) });
+        self.with_bound_context(|| unsafe {
+            if sys::imnodes_IsLinkSelected(link_id.raw()) {
+                sys::imnodes_ClearLinkSelection_Int(link_id.raw());
+            }
+        });
         true
     }
 
     pub fn is_link_selected(&self, link_id: crate::LinkId) -> bool {
-        if !self.submitted_links.contains(&link_id) {
+        if !self.contains_link(link_id) {
             return false;
         }
         self.with_bound_context(|| unsafe { sys::imnodes_IsLinkSelected(link_id.raw()) })
@@ -355,10 +362,10 @@ impl<'ui> PostEditor<'ui> {
 
     /// Center this editor on a node submitted in the frame that produced this snapshot.
     ///
-    /// The panning change affects the next editor frame. `false` means `node_id` was not
-    /// submitted by this frame, so no native ImNodes call was made.
+    /// The panning change affects the next editor frame. Returns `false` when this snapshot
+    /// or the editor's latest submission does not contain `node_id`.
     pub fn center_on_submitted_node(&self, node_id: crate::NodeId) -> bool {
-        if !self.submitted_nodes.contains(&node_id) {
+        if !self.contains_node(node_id) {
             return false;
         }
         self.with_bound_context(|| unsafe { sys::imnodes_EditorContextMoveToNode(node_id.raw()) });
@@ -387,6 +394,11 @@ impl<'ui> PostEditor<'ui> {
 
     pub fn hovered_link(&self) -> Option<crate::LinkId> {
         self.hovered_link
+    }
+
+    /// Hovered minimap nodes in native draw order, captured when the editor ended.
+    pub fn minimap_hovered_nodes(&self) -> &[crate::NodeId] {
+        &self.minimap_hovered
     }
 
     pub fn hovered_pin(&self) -> Option<crate::PinId> {

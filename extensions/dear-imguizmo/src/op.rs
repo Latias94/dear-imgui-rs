@@ -1,5 +1,3 @@
-use dear_imguizmo_sys as sys;
-
 use crate::mat::Mat4Like;
 use crate::types::{AxisMask, Bounds, DrawListTarget, Mode, Operation, Vec3Like};
 use crate::ui::GizmoUi;
@@ -91,11 +89,7 @@ impl<'ui, T: Mat4Like> Manipulate<'ui, T> {
 
     /// Configure draw destination
     pub fn drawlist(self, target: DrawListTarget) -> Self {
-        match target {
-            DrawListTarget::Window => self.giz.set_drawlist_window(),
-            DrawListTarget::Background => self.giz.set_drawlist_background(),
-            DrawListTarget::Foreground => self.giz.set_drawlist_foreground(),
-        }
+        self.giz.set_drawlist(target);
         self
     }
     /// Set gizmo rect (x,y,width,height)
@@ -126,37 +120,16 @@ impl<'ui, T: Mat4Like> Manipulate<'ui, T> {
 
     /// Executes the manipulation and returns whether it was used this frame.
     pub fn build(self) -> bool {
-        let mut model_arr = self.model.to_cols_array();
-        let mut delta_arr = match &self.delta_out {
-            Some(dm) => dm.to_cols_array(),
-            None => T::identity().to_cols_array(),
-        };
-        let used = self.giz.with_bound_context(|| unsafe {
-            sys::ImGuizmo_Manipulate(
-                self.view.to_cols_array().as_ptr(),
-                self.projection.to_cols_array().as_ptr(),
-                self.operation.into(),
-                self.mode.into(),
-                model_arr.as_mut_ptr(),
-                delta_arr.as_mut_ptr(),
-                self.snap
-                    .as_ref()
-                    .map(|s| s.as_ptr())
-                    .unwrap_or(std::ptr::null()),
-                self.local_bounds
-                    .as_ref()
-                    .map(|b| b.as_ptr())
-                    .unwrap_or(std::ptr::null()),
-                self.bounds_snap
-                    .as_ref()
-                    .map(|b| b.as_ptr())
-                    .unwrap_or(std::ptr::null()),
-            )
-        });
-        self.model.set_from_cols_array(model_arr);
-        if let Some(dm) = self.delta_out {
-            dm.set_from_cols_array(delta_arr);
-        }
-        used
+        self.giz.manipulate(
+            self.view,
+            self.projection,
+            self.operation,
+            self.mode,
+            self.model,
+            self.delta_out,
+            self.snap.as_ref(),
+            self.local_bounds.as_ref(),
+            self.bounds_snap.as_ref(),
+        )
     }
 }

@@ -14,6 +14,7 @@ fn main() {
     println!("cargo:rerun-if-changed=wrapper.cpp");
     println!("cargo:rerun-if-changed=native_bridge.h");
     println!("cargo:rerun-if-changed=imgui_impl_sdl3_adapter.cpp");
+    println!("cargo:rerun-if-changed=imgui_impl_sdlrenderer3_adapter.cpp");
     println!("cargo:rerun-if-changed=imgui_impl_sdlgpu3_adapter.cpp");
     println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_IMGUI_BACKENDS_PATH");
     println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_THIRD_PARTY");
@@ -109,8 +110,11 @@ fn main() {
 
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
-    if env::var("DEBUG").as_deref() == Ok("true") {
+    // The test declarations must match the native archive, even with debuginfo disabled.
+    println!("cargo:rustc-check-cfg=cfg(sdl3_native_self_test)");
+    if env::var("PROFILE").as_deref() == Ok("debug") {
         build.define("DEAR_IMGUI_SDL3_NATIVE_SELF_TEST", None);
+        println!("cargo:rustc-cfg=sdl3_native_self_test");
     }
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
@@ -178,7 +182,7 @@ fn main() {
     build.file("imgui_impl_sdl3_adapter.cpp");
     if enable_sdlrenderer3 {
         build.define("DEAR_IMGUI_SDL3_ENABLE_SDLRENDERER3", None);
-        build.file(backends_root.join("imgui_impl_sdlrenderer3.cpp"));
+        build.file("imgui_impl_sdlrenderer3_adapter.cpp");
     }
     if enable_sdlgpu3 {
         build.define("DEAR_IMGUI_SDL3_ENABLE_SDLGPU3", None);

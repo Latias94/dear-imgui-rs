@@ -53,7 +53,9 @@ bitflags! {
         const RUN_FROM_GUI = sys::ImGuiTestEngineRunFlags_RunFromGui as u32;
         const RUN_FROM_COMMAND_LINE = sys::ImGuiTestEngineRunFlags_RunFromCommandLine as u32;
         const NO_ERROR = sys::ImGuiTestEngineRunFlags_NoError as u32;
+        /// Shares variables with a parent test. Top-level queue requests reject this flag.
         const SHARE_VARS = sys::ImGuiTestEngineRunFlags_ShareVars as u32;
+        /// Reuses a parent test's context. Top-level queue requests reject this flag.
         const SHARE_TEST_CONTEXT = sys::ImGuiTestEngineRunFlags_ShareTestContext as u32;
     }
 }

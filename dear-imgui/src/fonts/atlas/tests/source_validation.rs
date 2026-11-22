@@ -1,6 +1,20 @@
 use super::*;
 
 #[test]
+fn font_config_defaults_match_the_native_constructor() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let _context = crate::Context::create();
+    let expected = unsafe {
+        let config = sys::ImFontConfig_ImFontConfig();
+        assert!(!config.is_null());
+        let expected = *config;
+        sys::ImFontConfig_destroy(config);
+        expected
+    };
+    assert_eq!(FontConfig::new().raw, expected);
+}
+
+#[test]
 fn font_config_glyph_exclude_ranges_converts_and_terminates() {
     let cfg = FontConfig::new().glyph_exclude_ranges(&[(0x41, 0x5a)]);
     assert!(!cfg.raw.GlyphExcludeRanges.is_null());

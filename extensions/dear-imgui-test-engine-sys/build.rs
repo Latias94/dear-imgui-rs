@@ -418,6 +418,25 @@ fn build_with_cc(
         )
     });
     build.file(patched_engine_source);
+    let docking_source = sources
+        .file("upstream-docking-tests")
+        .unwrap_or_else(|error| panic!("dear-imgui-test-engine-sys: {error}"));
+    let internal_header = imgui_src.join("imgui_internal.h");
+    println!("cargo:rerun-if-changed={}", internal_header.display());
+    let internal = std::fs::read_to_string(&internal_header)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", internal_header.display()));
+    let docking = std::fs::read_to_string(&docking_source)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", docking_source.display()));
+    let docking = build_support::patch_test_engine_docking_cpp_for_visible_tab(&docking, &internal)
+        .unwrap_or_else(|error| panic!("failed to apply Test Engine docking tab overlay: {error}"));
+    let patched_docking_source = cfg.out_dir.join("imgui_tests_docking.cpp");
+    std::fs::write(&patched_docking_source, docking).unwrap_or_else(|error| {
+        panic!(
+            "failed to write {}: {error}",
+            patched_docking_source.display()
+        )
+    });
+    build.file(patched_docking_source);
     for file_id in [
         "exporters",
         "perftool",
@@ -428,7 +447,6 @@ fn build_with_cc(
         "hooks-register",
         "script-tests",
         "upstream-suite-bridge",
-        "upstream-docking-tests",
         "upstream-viewport-tests",
     ] {
         build.file(

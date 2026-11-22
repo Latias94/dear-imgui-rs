@@ -61,19 +61,16 @@ fn draw_editor_frame(
                     editor_setup.set_node_pos_screen(NODE_B, node_b);
                 }
 
-                let editor_ui = editor_setup.begin_nodes();
-
-                let node_a = editor_ui.node(NODE_A);
-                node_a.title_bar(|| ui.text("Node A"));
-                ui.text("First node");
-                node_a.end();
-
-                let node_b = editor_ui.node(NODE_B);
-                node_b.title_bar(|| ui.text("Node B"));
-                ui.text("Second node");
-                node_b.end();
-
-                let post = editor_ui.end();
+                let post = editor_setup.with_nodes(|editor_ui| {
+                    editor_ui.node(NODE_A, |node| {
+                        node.title_bar(|| ui.text("Node A"));
+                        ui.text("First node");
+                    });
+                    editor_ui.node(NODE_B, |node| {
+                        node.title_bar(|| ui.text("Node B"));
+                        ui.text("Second node");
+                    });
+                });
                 frame.hovered = post.is_editor_hovered();
                 frame.selected_nodes = post.selected_nodes();
             });
@@ -155,4 +152,48 @@ fn box_selection_tracks_nodes_in_the_active_editor_context() {
     queue_mouse(&mut imgui, [340.0, 340.0], Some((MouseButton::Left, false)));
     let release = draw_editor_frame(&mut imgui, &nodes, &editor, None);
     assert_eq!(release.selected_nodes, vec![NODE_A]);
+}
+
+#[test]
+fn minimap_hover_snapshot_includes_overlapping_nodes_in_draw_order() {
+    let _guard = test_guard();
+    let mut imgui = Context::create();
+    prepare_imgui(&mut imgui);
+    let nodes = imnodes::Context::create(&imgui);
+
+    let draw = |imgui: &mut Context| {
+        let ui = imgui.frame();
+        let mut probe = [0.0; 2];
+        let hovered = ui
+            .window(EDITOR_WINDOW)
+            .position([0.0, 0.0], Condition::Always)
+            .size([800.0, 600.0], Condition::Always)
+            .build(|| {
+                let setup = ui.imnodes(&nodes).editor(None);
+                for id in [NODE_A, NODE_B] {
+                    setup.set_node_pos_grid(id, [100.0; 2]);
+                }
+                let post = setup.with_nodes(|editor| {
+                    let [x, y] = ui.cursor_screen_pos();
+                    // Both nodes fill the same square in the top-left minimap.
+                    probe = [x + 48.0, y + 48.0];
+                    for id in [NODE_A, NODE_B] {
+                        editor.node(id, |_| ui.dummy([100.0; 2]));
+                    }
+                    editor.minimap(0.5, imnodes::MiniMapLocation::TopLeft);
+                });
+                post.minimap_hovered_nodes().to_vec()
+            })
+            .unwrap();
+        assert!(imgui.end_frame());
+        (probe, hovered)
+    };
+
+    queue_mouse(&mut imgui, [750.0, 550.0], None);
+    let (probe, hovered) = draw(&mut imgui);
+    assert!(hovered.is_empty());
+    queue_mouse(&mut imgui, probe, None);
+    assert_eq!(draw(&mut imgui).1, [NODE_A, NODE_B]);
+    queue_mouse(&mut imgui, [750.0, 550.0], None);
+    assert!(draw(&mut imgui).1.is_empty());
 }

@@ -375,24 +375,13 @@ fn build_with_cc(
         .include(source_root)
         .include(source_root.join("ImGuiColorTextEdit"));
     for source in native_sources {
-        let name = source.file_name().and_then(|name| name.to_str());
-        if matches!(name, Some("TextEditor.cpp" | "TextDiff.cpp")) {
+        if source.ends_with("TextEditor.cpp") {
             let contents = fs::read_to_string(source).unwrap_or_else(|error| {
                 panic!("{CRATE_LABEL}: read {}: {error}", source.display())
             });
-            let (patched, output_name) = if name == Some("TextEditor.cpp") {
-                (
-                    build_support::patch_cte_text_editor(&contents),
-                    "cte-text-editor-unicode-ranges.cpp",
-                )
-            } else {
-                (
-                    build_support::patch_cte_text_diff_draw_flags(&contents),
-                    "cte-text-diff-draw-flags.cpp",
-                )
-            };
-            let patched = patched.unwrap_or_else(|error| panic!("{CRATE_LABEL}: {error}"));
-            let output = config.out_dir.join(output_name);
+            let patched = build_support::patch_cte_text_editor(&contents)
+                .unwrap_or_else(|error| panic!("{CRATE_LABEL}: {error}"));
+            let output = config.out_dir.join("cte-text-editor.cpp");
             fs::write(&output, patched).unwrap_or_else(|error| {
                 panic!("{CRATE_LABEL}: write {}: {error}", output.display())
             });
@@ -422,6 +411,20 @@ fn emit_rerun_directives(sources: &build_support::source_inventory::MaintainedSo
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=shim/cte_bridge.h");
+    let wrapper = sources.crate_root().join(&sources.source().source_root);
+    for header in [
+        "cimCTE.h",
+        "ImGuiColorTextEdit/TextEditor.h",
+        "ImGuiColorTextEdit/TextEditorLanguages.h",
+        "ImGuiColorTextEdit/languages",
+        "ImGuiColorTextEdit/TextDiff.h",
+        "ImGuiColorTextEdit/dtl.h",
+        "ImGuiColorTextEdit/example/dejavu.h",
+        "ImGuiColorTextEdit/example/notosans.h",
+        "ImGuiColorTextEdit/extras/TrieAutoComplete.h",
+    ] {
+        println!("cargo:rerun-if-changed={}", wrapper.join(header).display());
+    }
     for path in sources.native_candidate_paths() {
         println!("cargo:rerun-if-changed={}", path.display());
     }

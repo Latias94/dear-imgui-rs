@@ -2,8 +2,7 @@ mod binding;
 mod core;
 #[cfg(feature = "mint")]
 mod mint;
-mod token;
+mod scope;
 
-pub(crate) use binding::Plot3DContextBinding;
 pub use core::Plot3DUi;
-pub use token::Plot3DToken;
+pub use scope::{Plot3DScope, Plot3DSetup};

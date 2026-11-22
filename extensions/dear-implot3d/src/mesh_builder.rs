@@ -1,13 +1,12 @@
 use std::borrow::Cow;
 
 use crate::item_style::{Plot3DItemStyle, plot3d_spec_with_style};
-use crate::{
-    Item3DFlags, Mesh3DFlags, Plot3DDataLayout, Plot3DUi, debug_before_plot, len_i32, sys,
-};
+use crate::plots::{Plot3DError, primitive_vertex_count};
+use crate::{Item3DFlags, Mesh3DFlags, Plot3DDataLayout, Plot3DScope, len_i32, sys};
 
 /// Mesh plot builder
 pub struct Mesh3DBuilder<'ui> {
-    pub(crate) _ui: &'ui Plot3DUi<'ui>,
+    pub(crate) _ui: &'ui Plot3DScope<'ui>,
     pub(crate) label: Cow<'ui, str>,
     pub(crate) vertices: &'ui [[f32; 3]],
     pub(crate) indices: &'ui [u32],
@@ -21,14 +20,16 @@ impl<'ui> Mesh3DBuilder<'ui> {
         self.flags = flags;
         self
     }
+    /// Submits a mesh if its indices form complete triangles within the vertex slice.
     pub fn plot(self) {
+        let _ = self.try_plot();
+    }
+
+    /// Checks the triangle indices and submits the mesh.
+    pub fn try_plot(self) -> Result<(), Plot3DError> {
+        let draw_lines = !self.flags.contains(Mesh3DFlags::NO_LINES);
+        let (vtx_count, idx_count) = mesh_counts(self.vertices.len(), self.indices, draw_lines)?;
         self._ui.with_bound_context(|| {
-            let Some(vtx_count) = len_i32(self.vertices.len()) else {
-                return;
-            };
-            let Some(idx_count) = len_i32(self.indices.len()) else {
-                return;
-            };
             let mut xs = Vec::with_capacity(self.vertices.len());
             let mut ys = Vec::with_capacity(self.vertices.len());
             let mut zs = Vec::with_capacity(self.vertices.len());
@@ -41,8 +42,8 @@ impl<'ui> Mesh3DBuilder<'ui> {
             let label = self.label.as_ref();
             let label = if label.contains('\0') { "mesh" } else { label };
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                debug_before_plot();
                 let spec = plot3d_spec_with_style(
+                    &self._ui.next_item,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     Plot3DDataLayout::DEFAULT,
@@ -58,11 +59,42 @@ impl<'ui> Mesh3DBuilder<'ui> {
                     spec,
                 );
             })
-        })
+        });
+        Ok(())
     }
 }
 
-impl<'ui> Plot3DUi<'ui> {
+fn mesh_counts(
+    vertex_count: usize,
+    indices: &[u32],
+    draw_lines: bool,
+) -> Result<(i32, i32), Plot3DError> {
+    if vertex_count == 0 {
+        return Err(Plot3DError::EmptyData);
+    }
+    let vertices = len_i32(vertex_count).ok_or(Plot3DError::NativeCountOutOfRange {
+        what: "mesh vertices",
+    })?;
+    let count = primitive_vertex_count(
+        indices.len(),
+        3,
+        "mesh indices",
+        Plot3DDataLayout::DEFAULT,
+        draw_lines,
+    )?;
+    if let Some(&index) = indices
+        .iter()
+        .find(|&&index| index as usize >= vertex_count)
+    {
+        return Err(Plot3DError::MeshIndexOutOfBounds {
+            index,
+            vertex_count,
+        });
+    }
+    Ok((vertices, count))
+}
+
+impl<'ui> Plot3DScope<'ui> {
     /// Start a mesh plot from vertices (x,y,z) and triangle indices
     pub fn mesh(
         &'ui self,
@@ -70,7 +102,7 @@ impl<'ui> Plot3DUi<'ui> {
         vertices: &'ui [[f32; 3]],
         indices: &'ui [u32],
     ) -> Mesh3DBuilder<'ui> {
-        self.with_bound_context(|| Mesh3DBuilder {
+        Mesh3DBuilder {
             _ui: self,
             label: label.into(),
             vertices,
@@ -78,6 +110,6 @@ impl<'ui> Plot3DUi<'ui> {
             flags: Mesh3DFlags::NONE,
             item_flags: Item3DFlags::NONE,
             style: Plot3DItemStyle::default(),
-        })
+        }
     }
 }

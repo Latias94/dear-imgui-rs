@@ -2,7 +2,6 @@
 mod tests {
     use crate::style::{
         Colormap, ColormapColorIndex, ColormapIndex, Plot3DItemArrayStyle, colormap,
-        with_scoped_next_plot3d_item_array_style,
     };
 
     #[test]
@@ -34,65 +33,40 @@ mod tests {
     }
 
     #[test]
-    fn next_plot3d_item_array_style_is_consumed_by_next_spec() {
-        let line_colors = [0x01020304u32, 0x05060708];
-        let marker_sizes = [1.5f32, 2.5];
-        let marker_fill_colors = [0x11223344u32];
-
-        with_scoped_next_plot3d_item_array_style(
-            Plot3DItemArrayStyle::new()
-                .with_line_colors(&line_colors)
-                .with_marker_sizes(&marker_sizes)
-                .with_marker_fill_colors(&marker_fill_colors),
-            || {
-                let spec = crate::plot3d_spec_from(
-                    9,
-                    crate::Plot3DDataLayout::new(
-                        crate::Plot3DDataOffset::samples(2),
-                        crate::Plot3DDataStride::bytes(24),
-                    ),
+    fn borrowed_array_style_restores_scalar_settings_on_unwind_and_stays_in_its_plot() {
+        use crate::{Plot3DDataLayout, layout::NextItemStyle};
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+        let next = NextItemStyle::default();
+        let other_plot = NextItemStyle::default();
+        let layout = Plot3DDataLayout::DEFAULT;
+        let colors = [0x01020304u32, 0x05060708];
+        let arrays = Plot3DItemArrayStyle::new()
+            .with_line_colors(&colors)
+            .with_marker_sizes(&[]);
+        next.update(|s| s.LineWeight = 2.0);
+        assert!(
+            catch_unwind(AssertUnwindSafe(|| {
+                next.scoped(
+                    |s| arrays.apply_to_spec(s),
+                    || {
+                        assert!(other_plot.spec(0, layout).LineColors.is_null());
+                        panic!("stop before submission");
+                    },
                 );
-                assert_eq!(spec.Flags, 9);
-                assert_eq!(spec.Offset, 2);
-                assert_eq!(spec.Stride, 24);
-                assert_eq!(spec.LineColors, line_colors.as_ptr() as *mut _);
-                assert_eq!(spec.MarkerSizes, marker_sizes.as_ptr() as *mut _);
-                assert_eq!(spec.MarkerFillColors, marker_fill_colors.as_ptr() as *mut _);
+            }))
+            .is_err()
+        );
+        let restored = next.spec(0, layout);
+        assert_eq!(restored.LineWeight, 2.0);
+        assert!(restored.LineColors.is_null());
+        next.scoped(
+            |s| arrays.apply_to_spec(s),
+            || {
+                let spec = next.spec(0, layout);
+                assert_eq!(spec.LineColors.cast_const(), colors.as_ptr());
+                assert!(spec.MarkerSizes.is_null());
             },
         );
-
-        let spec = crate::plot3d_spec_from(0, crate::Plot3DDataLayout::DEFAULT);
-        assert!(spec.LineColors.is_null());
-        assert!(spec.MarkerSizes.is_null());
-        assert!(spec.MarkerFillColors.is_null());
-    }
-
-    #[test]
-    fn next_plot3d_item_array_style_is_restored_if_unused() {
-        let fill_colors = [0xAABBCCDDu32];
-
-        with_scoped_next_plot3d_item_array_style(
-            Plot3DItemArrayStyle::new().with_fill_colors(&fill_colors),
-            || {},
-        );
-
-        let spec = crate::plot3d_spec_from(0, crate::Plot3DDataLayout::DEFAULT);
-        assert!(spec.FillColors.is_null());
-    }
-
-    #[test]
-    fn next_plot3d_item_array_style_is_restored_if_closure_panics() {
-        crate::set_next_plot3d_spec(None);
-        let line_colors = [0xAABBCCDDu32];
-
-        let result = std::panic::catch_unwind(|| {
-            with_scoped_next_plot3d_item_array_style(
-                Plot3DItemArrayStyle::new().with_line_colors(&line_colors),
-                || panic!("boom"),
-            );
-        });
-
-        assert!(result.is_err());
-        assert!(crate::take_next_plot3d_spec().is_none());
+        assert!(next.spec(0, layout).LineColors.is_null());
     }
 }

@@ -1,7 +1,8 @@
-use crate::{Plot3DUi, sys};
+use crate::{Plot3DScope, sys};
 use std::borrow::Cow;
 
 /// One-shot array-backed item style overrides for the next ImPlot3D submission.
+/// An empty slice uses the native scalar style for that property.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Plot3DItemArrayStyle<'a> {
     line_colors: Option<Cow<'a, [u32]>>,
@@ -47,73 +48,36 @@ impl<'a> Plot3DItemArrayStyle<'a> {
         self
     }
 
-    fn apply_to_spec(&self, spec: &mut sys::ImPlot3DSpec_c) {
+    pub(super) fn apply_to_spec(&self, spec: &mut sys::ImPlot3DSpec_c) {
         spec.LineColors = self
             .line_colors
-            .as_ref()
+            .as_deref()
+            .filter(|values| !values.is_empty())
             .map_or(std::ptr::null_mut(), |colors| colors.as_ptr() as *mut _);
         spec.FillColors = self
             .fill_colors
-            .as_ref()
+            .as_deref()
+            .filter(|values| !values.is_empty())
             .map_or(std::ptr::null_mut(), |colors| colors.as_ptr() as *mut _);
         spec.MarkerSizes = self
             .marker_sizes
-            .as_ref()
+            .as_deref()
+            .filter(|values| !values.is_empty())
             .map_or(std::ptr::null_mut(), |sizes| sizes.as_ptr() as *mut _);
         spec.MarkerLineColors = self
             .marker_line_colors
-            .as_ref()
+            .as_deref()
+            .filter(|values| !values.is_empty())
             .map_or(std::ptr::null_mut(), |colors| colors.as_ptr() as *mut _);
         spec.MarkerFillColors = self
             .marker_fill_colors
-            .as_ref()
+            .as_deref()
+            .filter(|values| !values.is_empty())
             .map_or(std::ptr::null_mut(), |colors| colors.as_ptr() as *mut _);
     }
 }
 
-struct ScopedNextPlot3DItemArrayStyle {
-    previous: Option<sys::ImPlot3DSpec_c>,
-    active: bool,
-}
-
-impl ScopedNextPlot3DItemArrayStyle {
-    fn restore_if_unused(&mut self) {
-        if !self.active {
-            return;
-        }
-
-        if crate::take_next_plot3d_spec().is_some() {
-            crate::set_next_plot3d_spec(self.previous.take());
-        }
-        self.active = false;
-    }
-}
-
-impl Drop for ScopedNextPlot3DItemArrayStyle {
-    fn drop(&mut self) {
-        self.restore_if_unused();
-    }
-}
-
-pub(crate) fn with_scoped_next_plot3d_item_array_style<'a, R>(
-    style: Plot3DItemArrayStyle<'a>,
-    f: impl FnOnce() -> R,
-) -> R {
-    let previous = crate::take_next_plot3d_spec();
-    let mut spec = previous.unwrap_or_else(crate::default_plot3d_spec);
-    style.apply_to_spec(&mut spec);
-    crate::set_next_plot3d_spec(Some(spec));
-
-    let mut guard = ScopedNextPlot3DItemArrayStyle {
-        previous,
-        active: true,
-    };
-    let out = f();
-    guard.restore_if_unused();
-    out
-}
-
-impl<'ui> Plot3DUi<'ui> {
+impl<'plot> Plot3DScope<'plot> {
     /// Apply array-backed item styling to the next ImPlot3D submission executed inside `f`.
     ///
     /// This is closure-scoped so borrowed slices stay valid for the entire next
@@ -123,12 +87,15 @@ impl<'ui> Plot3DUi<'ui> {
     ///
     /// Every non-empty style array must contain enough elements for every index the submitted plot
     /// may read. Upstream accepts only pointers and carries no array lengths, so this cannot be
-    /// validated by the wrapper.
+    /// validated by this method. In particular, a surface's wireframe can have more edges than
+    /// grid points. Only submissions to this plot consume the override. The native item reads
+    /// its arrays during submission and releases them in `EndItem`.
     pub unsafe fn with_next_plot3d_item_array_style<'a, R>(
         &self,
         style: Plot3DItemArrayStyle<'a>,
-        f: impl FnOnce(&Plot3DUi<'ui>) -> R,
+        f: impl FnOnce(&Plot3DScope<'plot>) -> R,
     ) -> R {
-        self.with_bound_context(|| with_scoped_next_plot3d_item_array_style(style, || f(self)))
+        self.next_item
+            .scoped(|spec| style.apply_to_spec(spec), || f(self))
     }
 }

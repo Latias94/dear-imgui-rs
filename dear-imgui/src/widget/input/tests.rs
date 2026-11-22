@@ -1,8 +1,61 @@
-use super::buffers::{finish_string_input_buffer, resize_string_input_buffer};
+use super::buffers::{StringInputBuffer, finish_string_input_buffer, resize_string_input_buffer};
 use super::validation::{
     validate_input_multiline_flags, validate_input_scalar_flags, validate_input_text_flags,
 };
 use crate::{InputScalarFlags, InputTextFlags, InputTextMultilineFlags, sys};
+
+#[test]
+fn unchanged_string_input_reuses_its_allocation_across_frames() {
+    let mut text = String::with_capacity(64);
+    text.push_str("café");
+    let allocation = text.as_ptr();
+    let capacity = text.capacity();
+    for _ in 0..3 {
+        let input = StringInputBuffer::new(&mut text, Some(16));
+        assert_eq!(input.bytes.as_ptr(), allocation);
+        assert_eq!(input.bytes.len(), capacity);
+        assert_eq!(&input.bytes[..6], "café\0".as_bytes());
+    }
+    assert_eq!(text, "café");
+    assert_eq!(text.capacity(), capacity);
+}
+
+#[test]
+fn growing_input_amortizes_the_capacity_hint_across_edits() {
+    let mut text = String::new();
+    let mut reused = false;
+    for i in 0..16 {
+        let capacity = text.capacity();
+        {
+            let mut input = StringInputBuffer::new(&mut text, Some(64));
+            assert!(input.bytes.len() > i + 64);
+            input.bytes[i] = b'x';
+        }
+        reused |= text.capacity() == capacity;
+    }
+    assert_eq!(text, "x".repeat(16));
+    assert!(reused, "a capacity hint should amortize successive edits");
+}
+
+#[test]
+fn input_widget_retains_its_labels_across_callback_scratch_queries() {
+    let mut ctx = crate::Context::create();
+    ctx.set_ini_filename::<std::path::PathBuf>(None).unwrap();
+    ctx.io_mut().set_display_size([320.0, 240.0]);
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .unwrap()
+        .build();
+    let ui = ctx.frame();
+    let (label, _) = ui.scratch_txt_with_opt("name", Some("hint"));
+    let scratch_allocation = || ui.with_scratch_buffer(|scratch| scratch.buffer.as_ptr());
+    let labels = scratch_allocation();
+    ui.run_input_widget(label, || {
+        ui.get_id("callback item");
+        assert_ne!(scratch_allocation(), labels);
+    });
+    assert_eq!(scratch_allocation(), labels);
+}
 
 #[test]
 fn string_input_buffer_finish_truncates_at_nul() {

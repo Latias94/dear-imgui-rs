@@ -74,7 +74,7 @@ pub struct TextCallbackData<'cb>(
 );
 
 impl<'cb> TextCallbackData<'cb> {
-    /// Creates the buffer.
+    /// `data` must remain live for `'cb` and describe a native text-edit callback buffer.
     pub(super) unsafe fn new(data: *mut sys::ImGuiInputTextCallbackData) -> Self {
         Self(data, std::marker::PhantomData)
     }
@@ -102,13 +102,21 @@ impl<'cb> TextCallbackData<'cb> {
             data.BufTextLen >= 0,
             "internal imgui error: BufTextLen was negative"
         );
+        let editable_resize = data.Flags & sys::ImGuiInputTextFlags_CallbackResize != 0
+            && data.Flags & sys::ImGuiInputTextFlags_ReadOnly == 0;
+        let size = if editable_resize {
+            // InputTextEx passes TextA to edit callbacks before resizing the caller's buffer.
+            // BufSize can still describe that smaller caller buffer after typing or pasting.
+            assert!(!data.Ctx.is_null(), "missing text callback context");
+            let text = unsafe { &(*data.Ctx).InputTextState.TextA };
+            assert_eq!(data.Buf, text.Data, "unexpected text callback buffer");
+            text.Size
+        } else {
+            data.BufSize
+        };
         assert!(
-            data.BufSize >= 0,
-            "internal imgui error: BufSize was negative"
-        );
-        assert!(
-            data.BufTextLen <= data.BufSize,
-            "internal imgui error: BufTextLen exceeded BufSize"
+            data.BufTextLen < size,
+            "internal imgui error: callback text must fit its buffer with a trailing NUL"
         );
         data.BufTextLen as usize
     }
@@ -229,11 +237,22 @@ impl<'cb> TextCallbackData<'cb> {
         }
     }
 
-    /// Insert text at the given position
+    /// Insert text at the given byte position. Insertion stops at the first NUL.
+    /// A read-only widget's callback can edit only within the caller's existing buffer.
     pub fn insert_chars(&mut self, pos: usize, text: &str) {
         let current = self.str();
         assert!(pos <= current.len(), "insert position out of bounds");
         Self::assert_byte_boundary(current, "insert position", pos);
+        let text = self.insertion_prefix(text, current.len());
+        if text.is_empty() {
+            return;
+        }
+        // InsertChars grows TextA using int arithmetic (up to 4 * insertion length).
+        assert!(
+            text.len() <= i32::MAX as usize / 4
+                && current.len() + text.len().max(256) <= i32::MAX as usize - 2,
+            "inserted text exceeds Dear ImGui's i32 growth range"
+        );
         let pos = Self::position_to_i32("insert position", pos);
         let text_ptr = text.as_ptr() as *const std::os::raw::c_char;
         unsafe {
@@ -246,13 +265,24 @@ impl<'cb> TextCallbackData<'cb> {
         }
     }
 
+    fn insertion_prefix<'a>(&self, text: &'a str, current_len: usize) -> &'a str {
+        let text = text.split_once('\0').map_or(text, |(prefix, _)| prefix);
+        let data = self.data();
+        if data.Flags & sys::ImGuiInputTextFlags_ReadOnly != 0 {
+            let available = data.BufSize as usize - current_len - 1;
+            &text[..text.floor_char_boundary(available)]
+        } else {
+            text
+        }
+    }
+
     /// Gives access to the underlying byte array MUTABLY.
     ///
     /// ## Safety
     ///
     /// This is very unsafe, and the following invariants must be
     /// upheld:
-    /// 1. Keep the data utf8 valid.
+    /// 1. Keep the data valid UTF-8 and free of NUL bytes.
     /// 2. After editing the string, call [set_dirty].
     ///
     /// To truncate the string, please use [remove_chars]. To extend
@@ -305,9 +335,8 @@ impl<'cb> TextCallbackData<'cb> {
         &text[start..end]
     }
 
-    /// Pushes the given str to the end of this buffer. If this
-    /// would require the String to resize, it will be resized.
-    /// This is automatically handled.
+    /// Appends text using the same NUL and read-only capacity rules as [`Self::insert_chars`].
+    /// Editable buffers grow as needed.
     pub fn push_str(&mut self, text: &str) {
         let current_len = self.valid_text_len();
         self.insert_chars(current_len, text);
@@ -350,6 +379,35 @@ mod tests {
     fn passthrough_char_filter_keeps_character() {
         let mut handler = PassthroughCallback;
         assert_eq!(handler.char_filter('x'), Some('x'));
+    }
+
+    #[test]
+    fn editable_callback_reads_native_text_before_caller_resize() {
+        let mut text = *b"edited text\0";
+        let mut data = callback_data_for_text(&mut text);
+        let mut ctx = sys::ImGuiContext::default();
+        ctx.InputTextState.TextA.Data = data.Buf;
+        ctx.InputTextState.TextA.Size = data.BufSize;
+        ctx.InputTextState.TextA.Capacity = data.BufSize;
+        data.Ctx = &raw mut ctx;
+        data.Flags = sys::ImGuiInputTextFlags_CallbackResize;
+        data.BufSize = 4;
+
+        let info = unsafe { TextCallbackData::new(&mut data) };
+        assert_eq!(info.str(), "edited text");
+    }
+
+    #[test]
+    fn read_only_callback_limits_insertions_to_complete_chars_and_its_terminator() {
+        let mut text = *b"ab\0\0\0\0";
+        let mut data = callback_data_for_text(&mut text);
+        data.BufTextLen = 2;
+        data.Flags =
+            (sys::ImGuiInputTextFlags_CallbackResize | sys::ImGuiInputTextFlags_ReadOnly) as i32;
+        let info = unsafe { TextCallbackData::new(&mut data) };
+        let len = info.str().len();
+        assert_eq!(info.insertion_prefix("éé", len), "é");
+        assert_eq!(info.insertion_prefix("a\0b", len), "a");
     }
 
     #[test]

@@ -5,6 +5,8 @@ use crate::{Context, EditorContext, NodeEditorSetup, NodesUi};
 /// Ui extension entry point for ImNodes
 pub trait ImNodesExt {
     fn imnodes<'ui>(&'ui self, ctx: &'ui Context) -> NodesUi<'ui>;
+    /// Prepares an explicit editor, or the context's default editor when `editor` is `None`.
+    /// Submit a frame with [`NodeEditorSetup::with_nodes`].
     fn imnodes_editor<'ui>(
         &'ui self,
         ctx: &'ui Context,
@@ -25,5 +27,3 @@ impl ImNodesExt for Ui {
         self.imnodes(ctx).editor(editor)
     }
 }
-
-// editor() is implemented in context.rs to access private fields

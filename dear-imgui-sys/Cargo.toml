@@ -6,7 +6,6 @@ rust-version.workspace = true
 description = "Low-level FFI bindings to Dear ImGui v1.93.1 WIP (docking branch) via cimgui (C API)"
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 authors.workspace = true
 documentation = "https://docs.rs/dear-imgui-sys"
 categories.workspace = true

@@ -646,6 +646,7 @@ impl<'engine> TestRunner<'engine> {
         ApplicationUi: FnMut(&Ui, u64) -> Result<RunnerControl, ApplicationError>,
         Driver: TestFrameDriver,
     {
+        self.validate_request(context)?;
         self.run_impl(context, RunMode::Graphical, application_ui, driver)
     }
 
@@ -665,6 +666,7 @@ impl<'engine> TestRunner<'engine> {
         ApplicationUi: FnMut(&Ui, u64) -> Result<RunnerControl, ApplicationError>,
         Driver: CapturingTestFrameDriver,
     {
+        self.validate_request(context)?;
         let mut slot = Box::new(CaptureDriverSlot::new(driver));
         let user_data = (&mut *slot as *mut CaptureDriverSlot<'_, Driver>).cast();
         let mut provider = self
@@ -714,12 +716,41 @@ impl<'engine> TestRunner<'engine> {
     where
         ApplicationUi: FnMut(&Ui, u64) -> Result<RunnerControl, ApplicationError>,
     {
+        self.validate_request(context)?;
         self.run_impl(
             context,
             RunMode::Headless,
             application_ui,
             &mut VirtualFrameDriver,
         )
+    }
+
+    fn validate_request<ApplicationError, PrepareError, RenderError, PresentError, CaptureError>(
+        &self,
+        context: &Context,
+    ) -> Result<
+        (),
+        RunnerError<ApplicationError, PrepareError, RenderError, PresentError, CaptureError>,
+    > {
+        let actual = context.id();
+        let expected = self.engine.attached_context_id().ok_or_else(|| {
+            RunnerError::TestEngine(TestEngineError::invalid_state(
+                "TestRunner::run",
+                self.engine.attachment_state(),
+                self.engine.run_state(),
+                "runner requires a live Test Engine attachment",
+            ))
+        })?;
+        if actual != expected {
+            return Err(RunnerError::ContextMismatch { expected, actual });
+        }
+        context
+            .binding()
+            .try_with_bound_context(|| self.require_closed_frame(context))
+            .map_err(RunnerError::ContextBinding)??;
+        self.engine
+            .validate_queue_request(self.filter.as_deref(), self.run_flags)?;
+        Ok(())
     }
 
     fn run_impl<ApplicationError, ApplicationUi, Driver, CaptureError>(
@@ -742,19 +773,6 @@ impl<'engine> TestRunner<'engine> {
         ApplicationUi: FnMut(&Ui, u64) -> Result<RunnerControl, ApplicationError>,
         Driver: TestFrameDriver,
     {
-        let actual = context.id();
-        let expected = self.engine.attached_context_id().ok_or_else(|| {
-            RunnerError::TestEngine(TestEngineError::invalid_state(
-                "TestRunner::run",
-                self.engine.attachment_state(),
-                self.engine.run_state(),
-                "runner requires a live Test Engine attachment",
-            ))
-        })?;
-        if actual != expected {
-            return Err(RunnerError::ContextMismatch { expected, actual });
-        }
-
         let binding = context.binding();
         match binding
             .try_with_bound_context(|| self.run_bound(context, mode, &mut application_ui, driver))
@@ -792,9 +810,8 @@ impl<'engine> TestRunner<'engine> {
         ApplicationUi: FnMut(&Ui, u64) -> Result<RunnerControl, ApplicationError>,
         Driver: TestFrameDriver,
     {
-        self.require_closed_frame(context)?;
         self.engine
-            .queue_tests(self.group, self.filter.as_deref(), self.run_flags)?;
+            .queue_validated_tests(self.group, self.filter.as_deref(), self.run_flags)?;
 
         if let Some(completion) = self.take_terminal_run()? {
             return self.natural_report(completion, 0, 0, mode);

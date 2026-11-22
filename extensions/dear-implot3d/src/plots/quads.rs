@@ -1,5 +1,5 @@
-use super::{Plot3D, Plot3DError, validate_lengths, validate_multiple, validate_nonempty};
-use crate::{Plot3DDataLayout, Plot3DDataOffset, Plot3DUi, Quad3DFlags};
+use super::{Plot3D, Plot3DError, primitive_vertex_count, validate_lengths};
+use crate::{Plot3DDataLayout, Plot3DDataOffset, Plot3DScope, Quad3DFlags};
 
 pub struct Quads3D<'a> {
     pub label: &'a str,
@@ -90,10 +90,15 @@ impl<'a> Plot3D for Quads3D<'a> {
     fn label(&self) -> &str {
         self.label
     }
-    fn try_plot(&self, ui: &Plot3DUi<'_>) -> Result<(), Plot3DError> {
+    fn try_plot(&self, ui: &Plot3DScope<'_>) -> Result<(), Plot3DError> {
         if let Some(pts) = self.points_f32 {
-            validate_nonempty(pts)?;
-            validate_multiple(pts.len(), 4, "quads(points)")?;
+            primitive_vertex_count(
+                pts.len(),
+                4,
+                "quads(points)",
+                self.layout,
+                !self.flags.contains(Quad3DFlags::NO_LINES),
+            )?;
             let mut xs = Vec::with_capacity(pts.len());
             let mut ys = Vec::with_capacity(pts.len());
             let mut zs = Vec::with_capacity(pts.len());
@@ -102,12 +107,18 @@ impl<'a> Plot3D for Quads3D<'a> {
                 ys.push(p[1]);
                 zs.push(p[2]);
             }
-            ui.plot_quads_f32(self.label, &xs, &ys, &zs, self.flags);
+            // The point rows were split into contiguous, equally sized coordinate arrays.
+            unsafe { ui.plot_quads_f32_raw(self.label, &xs, &ys, &zs, self.flags, self.layout) };
             return Ok(());
         }
         if let Some(pts) = self.points_f64 {
-            validate_nonempty(pts)?;
-            validate_multiple(pts.len(), 4, "quads(points)")?;
+            primitive_vertex_count(
+                pts.len(),
+                4,
+                "quads(points)",
+                self.layout,
+                !self.flags.contains(Quad3DFlags::NO_LINES),
+            )?;
             let mut xs = Vec::with_capacity(pts.len());
             let mut ys = Vec::with_capacity(pts.len());
             let mut zs = Vec::with_capacity(pts.len());
@@ -116,14 +127,20 @@ impl<'a> Plot3D for Quads3D<'a> {
                 ys.push(p[1]);
                 zs.push(p[2]);
             }
-            ui.plot_quads_f64(self.label, &xs, &ys, &zs, self.flags);
+            // The point rows were split into contiguous, equally sized coordinate arrays.
+            unsafe { ui.plot_quads_f64_raw(self.label, &xs, &ys, &zs, self.flags, self.layout) };
             return Ok(());
         }
         if let (Some(x), Some(y), Some(z)) = (self.xs_f32, self.ys_f32, self.zs_f32) {
-            validate_nonempty(x)?;
             validate_lengths(x, y, "x/y")?;
             validate_lengths(y, z, "y/z")?;
-            validate_multiple(x.len(), 4, "quads")?;
+            primitive_vertex_count(
+                x.len(),
+                4,
+                "quads",
+                self.layout,
+                !self.flags.contains(Quad3DFlags::NO_LINES),
+            )?;
             unsafe {
                 // High-level plots keep the automatic contiguous stride; offset is normalized by
                 // ImPlot3D within the validated slice count.
@@ -132,10 +149,15 @@ impl<'a> Plot3D for Quads3D<'a> {
             return Ok(());
         }
         if let (Some(x), Some(y), Some(z)) = (self.xs_f64, self.ys_f64, self.zs_f64) {
-            validate_nonempty(x)?;
             validate_lengths(x, y, "x/y")?;
             validate_lengths(y, z, "y/z")?;
-            validate_multiple(x.len(), 4, "quads")?;
+            primitive_vertex_count(
+                x.len(),
+                4,
+                "quads",
+                self.layout,
+                !self.flags.contains(Quad3DFlags::NO_LINES),
+            )?;
             unsafe {
                 // High-level plots keep the automatic contiguous stride; offset is normalized by
                 // ImPlot3D within the validated slice count.

@@ -165,7 +165,7 @@ impl<'a, F: AsRef<str>> PieChartPlot<'a, F> {
 }
 
 impl<F: AsRef<str>> Plot for PieChartPlot<'_, F> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
         if self.validate().is_err() {
             return;
         }
@@ -178,6 +178,7 @@ impl<F: AsRef<str>> Plot for PieChartPlot<'_, F> {
                 self.label_fmt.as_ref().map(AsRef::as_ref),
                 |label_ptrs, label_fmt_ptr| unsafe {
                     let spec = plot_spec_with_style(
+                        plot_ui,
                         self.style,
                         self.flags.bits() | self.item_flags.bits(),
                         PlotDataLayout::DEFAULT,
@@ -353,7 +354,7 @@ impl<'a, F: AsRef<str>> PieChartPlotF32<'a, F> {
 }
 
 impl<F: AsRef<str>> Plot for PieChartPlotF32<'_, F> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
         if self.validate().is_err() {
             return;
         }
@@ -366,6 +367,7 @@ impl<F: AsRef<str>> Plot for PieChartPlotF32<'_, F> {
                 self.label_fmt.as_ref().map(AsRef::as_ref),
                 |label_ptrs, label_fmt_ptr| unsafe {
                     let spec = plot_spec_with_style(
+                        plot_ui,
                         self.style,
                         self.flags.bits() | self.item_flags.bits(),
                         PlotDataLayout::DEFAULT,
@@ -392,7 +394,7 @@ impl<F: AsRef<str>> Plot for PieChartPlotF32<'_, F> {
 }
 
 /// Convenience functions for quick pie chart plotting
-impl<'ui> crate::PlotUi<'ui> {
+impl<'ui> crate::PlotScope<'ui> {
     /// Plot a pie chart with f64 data
     pub fn pie_chart_plot(
         &self,

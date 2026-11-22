@@ -19,15 +19,14 @@
 //! use dear_implot::*;
 //!
 //! let mut ctx = Context::create();
-//! let mut plot_ctx = PlotContext::create(&ctx);
+//! let plot_ctx = PlotContext::create(&ctx);
 //!
 //! let ui = ctx.frame();
-//! let plot_ui = plot_ctx.get_plot_ui(&ui);
+//! let plot_ui = plot_ctx.get_plot_ui(ui);
 //!
-//! if let Some(token) = plot_ui.begin_plot("My Plot") {
-//!     plot_ui.plot_line("Line", &[1.0, 2.0, 3.0, 4.0], &[1.0, 4.0, 2.0, 3.0]);
-//!     token.end();
-//! }
+//! plot_ui.with_plot("My Plot", |plot| {
+//!     plot.plot_line("Line", &[1.0, 2.0, 3.0, 4.0], &[1.0, 4.0, 2.0, 3.0]);
+//! });
 //! ```
 //!
 //! ## Integration with Dear ImGui
@@ -61,7 +60,7 @@ mod utils;
 // New modular plot types
 pub mod plots;
 
-pub use axis_types::{Axis, XAxis, YAxis, YAxisChoice};
+pub use axis_types::{Axis, AxisScale, XAxis, YAxis, YAxisChoice};
 pub(crate) use axis_types::{IMPLOT_AUTO, y_axis_choice_option_to_i32};
 pub use colormap::Colormap;
 pub use colors::PlotColorElement;
@@ -95,6 +94,6 @@ pub use plots::*;
 
 // Re-export advanced features (explicit to avoid AxisFlags name clash)
 pub use advanced::{
-    LegendFlags, LegendLocation, LegendManager, LegendToken, MultiAxisPlot, MultiAxisToken,
-    SubplotFlags, SubplotGrid, SubplotToken, YAxisConfig,
+    LegendFlags, LegendLocation, LegendManager, MultiAxisPlot, SubplotFlags, SubplotGrid,
+    YAxisConfig,
 };

@@ -229,16 +229,14 @@ fn plot_demo_ui(
             let x_max = (HISTORY_CAPACITY - 1) as f64;
 
             plot_ui.set_next_axes_limits(0.0, x_max, 0.0, 40.0, PlotCond::Always);
-            if let Some(plot) = plot_ui.begin_plot_with_size("Frame time (ms)", [-1.0, 115.0]) {
-                plot_ui.plot_line("frame time ms", &state.sample_x, &state.frame_time_ms);
-                plot.end();
-            }
+            plot_ui.with_plot_size("Frame time (ms)", [-1.0, 115.0], |plot| {
+                plot.plot_line("frame time ms", &state.sample_x, &state.frame_time_ms);
+            });
 
             plot_ui.set_next_axes_limits(0.0, x_max, 0.0, 240.0, PlotCond::Always);
-            if let Some(plot) = plot_ui.begin_plot_with_size("FPS", [-1.0, 115.0]) {
-                plot_ui.plot_line("fps capped at 240", &state.sample_x, &state.fps_history);
-                plot.end();
-            }
+            plot_ui.with_plot_size("FPS", [-1.0, 115.0], |plot| {
+                plot.plot_line("fps capped at 240", &state.sample_x, &state.fps_history);
+            });
 
             plot_ui.set_next_axes_limits(
                 0.0,
@@ -247,10 +245,9 @@ fn plot_demo_ui(
                 MOTION_LIMIT as f64 + 40.0,
                 PlotCond::Always,
             );
-            if let Some(plot) = plot_ui.begin_plot_with_size("Marker position", [-1.0, 115.0]) {
-                plot_ui.plot_line("x position", &state.sample_x, &state.x_history);
-                plot.end();
-            }
+            plot_ui.with_plot_size("Marker position", [-1.0, 115.0], |plot| {
+                plot.plot_line("x position", &state.sample_x, &state.x_history);
+            });
         });
 
     Ok(())

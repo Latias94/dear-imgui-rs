@@ -6,7 +6,6 @@ rust-version.workspace = true
 description = "Low-level FFI bindings for ImGuizmo via cimguizmo (C API)"
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 authors.workspace = true
 categories.workspace = true
 keywords.workspace = true
@@ -28,7 +27,7 @@ exclude = [
 ]
 
 [package.metadata.dear-imgui-binding]
-source-revision = "c4ff7b3f89e452d6a5df0d8cd31ab7bb49469bf1"
+source-revision = "566ff53a4ae6ab148312ffc41eef7ba03b312560"
 
 # docs.rs configuration for offline builds
 [package.metadata.docs.rs]

@@ -13,14 +13,14 @@ length-aware filters, transactions, and autocomplete configuration.
 
 ## Compatibility and Provenance
 
-This Preview `-sys` crate uses the `0.22` release train and requires Rust 1.95 or newer. It must use the same release train, workspace checkout, or Git revision as `dear-imgui-sys` and `dear-imgui-cte`. It shares the Dear ImGui and cimgui core supplied by `dear-imgui-sys`; upstream CMake files are not used because they compile a second core.
+This Preview crate requires Rust 1.95 or newer. Use `dear-imgui-cte-sys`, `dear-imgui-cte`, and `dear-imgui-sys` from the same `0.23` release train or Git revision. The source build links the Dear ImGui and cimgui core supplied by `dear-imgui-sys`.
 
 The checked-in binding and source identity is:
 
 | Component | Revision |
 | --- | --- |
-| `cimCTE` `main_goossens` | `3cdee0b5e1d8f0a59a40fda80c4a6b894d752240` |
-| nested ImGuiColorTextEdit | `f28136480fa4091164e0b528dc9cca147c5a6ee9` |
+| `cimCTE` `main_goossens` | `dbf2abe4841b9dd8a3f1f1864038ac9d60155c5e` |
+| nested ImGuiColorTextEdit | `7515d1c765f8f9d47cd704fd3fbd20eb03fcc304` |
 | Dear ImGui baseline | v1.93.1 WIP docking through the workspace cimgui pin |
 
 Native and WASM snapshots are generated from one canonical C++20 specification
@@ -51,9 +51,10 @@ backgrounds with the visible text area when a window moves or scrolls horizontal
 its identity remains part of native artifact validation. Re-audit it when upstream
 changes these functions or tables.
 
-The shared `cte-text-diff-draw-flags-v1` source transform also updates TextDiff's
-three scrollbar corner flags for Dear ImGui 1.93. It rejects upstream drift and
-is included in native artifact validation. MSVC source builds explicitly use UTF-8.
+Native and WASM builds compile upstream `TextDiff.cpp` directly. It calculates
+the scrollbar corner flags from the inner and outer rectangles in Dear ImGui 1.93.
+The packaged language registry includes `TextEditorLanguages.h` and all 13 definitions
+in `languages/`. MSVC source builds compile these UTF-8 sources with `/utf-8`.
 
 The public `Glyph` mirror follows upstream's `columns: u8` and `squiggle: u32`
 layout. Rust offset assertions and C++ source-build assertions check the mirror.
@@ -104,14 +105,15 @@ obey the same C++ runtime, ABI, shared-core, and no-unwind contract.
 ## API Families
 
 Generated native and WASM bindings cover editor/document/configuration,
-positions and selections, languages and palettes, glyph/iterator/codepoint
-helpers, TextDiff, Trie autocomplete, bundled fonts, and every
+positions and selections, the registry-backed 13-language set and 33-slot
+palettes, glyph/iterator/codepoint helpers, TextDiff, labeled and range-aware
+autocomplete, Trie autocomplete, bundled fonts, and every
 `dear_imgui_cte_*` bridge family. Required representative symbols are checked
 against both generated snapshots by the canonical binding specification. This
 is an ABI-presence check, not proof that a safe Rust wrapper is sound.
 
 The semantic safe/sys disposition is recorded in
-[`docs/API_COVERAGE.md`](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/API_COVERAGE.md#imguicolortextedit-api-family-ledger).
+[`docs/API_COVERAGE.md`](../../docs/API_COVERAGE.md#imguicolortextedit-api-family-ledger).
 
 ## Safety and Ownership
 
@@ -145,7 +147,10 @@ contracts of both cimCTE and Dear ImGui.
   ABI. Filter output and event pointers are callback-scoped borrows.
 - Applying bridge autocomplete configuration copies it into the editor. The
   configuration handle may be destroyed after a successful apply. State
-  pointers received by autocomplete callbacks are callback-scoped.
+  pointers received by autocomplete callbacks are callback-scoped. Suggestion
+  and label arrays are copied during their setter calls.
+- Serialize raw language registry lookups. Both registration and creation of each
+  language definition use mutable process-wide state on first lookup.
 - Trie `Connect` replaces the editor's autocomplete, change, and language-change
   slots. It must be disconnected before either the Trie or editor is destroyed.
 - `TextEditor_SetImGuiContext` mutates Dear ImGui's process-current Context. It

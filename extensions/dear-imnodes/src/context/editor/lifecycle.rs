@@ -1,49 +1,77 @@
-use super::super::{
-    Context, EditorContext, EditorScope, ImNodesScope, NodeEditor, NodeEditorSetup,
-    tokens::close_node_scope,
-};
-use crate::sys;
+use super::super::{ActiveEditor, Context, EditorContext, NodeEditor, NodeEditorSetup, PostEditor};
+use crate::{style::StyleStacks, sys};
 use dear_imgui_rs::Ui;
 
 impl<'ui> NodeEditorSetup<'ui> {
-    pub(crate) fn begin(ui: &'ui Ui, ctx: &'ui Context, editor: Option<&EditorContext>) -> Self {
-        let scope = ctx.scope(editor);
+    pub(crate) fn new(ui: &'ui Ui, ctx: &'ui Context, editor: Option<&EditorContext>) -> Self {
         Self {
-            _ui: ui,
-            _ctx: ctx,
-            scope,
+            ui,
+            scope: ctx.scope(editor),
             pending_node_options: Default::default(),
         }
     }
 
-    /// Enter the node-submission phase.
+    /// Draws the nodes and captures interactions in the window hosting this editor.
+    /// The editor and its child scopes end on return or unwind.
     ///
-    /// Persistent IO/style configuration is applied before native `BeginNodeEditor`. Deferred
-    /// node mutations are applied later, immediately before their matching node submission.
-    pub fn begin_nodes(self) -> NodeEditor<'ui> {
-        self._ctx
-            .assert_no_active_frame("NodeEditorSetup::begin_nodes()");
-        self.scope
-            .with_bound_context(|| unsafe { sys::imnodes_BeginNodeEditor() });
-        self._ctx.frame_active.set(true);
-        NodeEditor {
-            _ui: self._ui,
-            _ctx: self._ctx,
-            scope: self.scope,
-            ended: false,
-            state: std::cell::Cell::new(EditorScope::Editor),
-            pending_node_options: self.pending_node_options,
-            submitted_nodes: Default::default(),
-            submitted_pins: Default::default(),
-            submitted_links: Default::default(),
-            finalizing: std::cell::Cell::new(false),
-            frame_active: &self._ctx.frame_active,
-            minimap_callbacks: Vec::new(),
-        }
+    /// ```compile_fail
+    /// use dear_imnodes::{NodeEditor, NodeEditorSetup};
+    /// fn escape<'a>(setup: NodeEditorSetup<'a>) -> &'a NodeEditor<'a> {
+    ///     let mut saved = None;
+    ///     setup.with_nodes(|editor| saved = Some(editor));
+    ///     saved.unwrap()
+    /// }
+    /// ```
+    pub fn with_nodes(self, draw: impl FnOnce(&NodeEditor<'_>)) -> PostEditor<'ui> {
+        let Self {
+            ui,
+            scope,
+            pending_node_options,
+        } = self;
+        scope
+            .ctx
+            .assert_no_active_frame("NodeEditorSetup::with_nodes()");
+        ui.with_native_window_scope(|_| {
+            // BeginNodeEditor opens a native child window. Protect its parent until EndChild,
+            // and bind the drawing API to the child's own window and draw-list splitter.
+            let mut minimap_hovered = Vec::new();
+            {
+                scope.with_bound_context(|| {
+                    scope.ctx.frame_active.set(true);
+                    unsafe { sys::imnodes_BeginNodeEditor() };
+                });
+                let frame = ActiveEditor {
+                    scope: &scope,
+                    submitted: Default::default(),
+                    minimap: Default::default(),
+                    minimap_hovered: &mut minimap_hovered,
+                };
+                ui.with_native_window_scope(|host| {
+                    let editor = NodeEditor {
+                        ui,
+                        host,
+                        frame: &frame,
+                        pending_node_options,
+                        attributes: Default::default(),
+                        styles: StyleStacks::new(&scope),
+                    };
+                    draw(&editor);
+                });
+            }
+            PostEditor::capture(scope, minimap_hovered)
+        })
+    }
+
+    /// Draws an empty editor and returns its post-editor queries.
+    pub fn end(self) -> PostEditor<'ui> {
+        self.with_nodes(|_| {})
     }
 
     #[inline]
     pub(crate) fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
+        self.scope
+            .ctx
+            .assert_no_active_frame("NodeEditorSetup configuration");
         self.scope.with_bound_context(f)
     }
 
@@ -58,37 +86,5 @@ impl<'ui> NodeEditorSetup<'ui> {
                 .entry(node_id)
                 .or_default(),
         );
-    }
-}
-
-impl<'ui> NodeEditor<'ui> {
-    #[inline]
-    pub(crate) fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
-        self.scope.with_bound_context(f)
-    }
-
-    #[inline]
-    pub(crate) fn scope(&self) -> ImNodesScope {
-        self.scope.clone()
-    }
-
-    #[inline]
-    pub(crate) fn require_scope(&self, expected: EditorScope, caller: &str) {
-        let actual = self.state.get();
-        assert_eq!(
-            actual, expected,
-            "dear-imnodes: {caller} requires {expected:?} scope, but {actual:?} is active"
-        );
-    }
-
-    pub(crate) fn finish_native(&mut self) {
-        if self.ended {
-            return;
-        }
-        close_node_scope(&self.scope, &self.state);
-        self.with_bound_context(|| unsafe { sys::imnodes_EndNodeEditor() });
-        self.ended = true;
-        self.state.set(EditorScope::Ended);
-        self.frame_active.set(false);
     }
 }

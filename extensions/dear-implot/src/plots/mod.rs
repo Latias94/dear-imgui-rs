@@ -23,7 +23,6 @@ pub mod text;
 
 use crate::sys;
 use dear_imgui_rs::{with_scratch_txt, with_scratch_txt_slice, with_scratch_txt_slice_with_opt};
-use std::cell::RefCell;
 use std::os::raw::c_char;
 
 // Re-export all plot types for convenience
@@ -44,10 +43,6 @@ pub use shaded::*;
 pub use stairs::*;
 pub use stems::*;
 pub use text::*;
-
-thread_local! {
-    static NEXT_PLOT_SPEC: RefCell<Option<sys::ImPlotSpec_c>> = RefCell::new(None);
-}
 
 /// Sample-index offset used by ImPlot item data access.
 ///
@@ -147,6 +142,17 @@ impl PlotDataLayout {
     pub const fn with_stride(mut self, stride: PlotDataStride) -> Self {
         self.stride = stride;
         self
+    }
+
+    pub(crate) fn sample_count(self, len: usize) -> Option<i32> {
+        let count = i32::try_from(len).ok()?;
+        if count > i32::MAX / 2 && self.raw_offset() != 0 {
+            // Native ImPosMod adds count to the remainder, then IndexData adds the sample index.
+            let remainder = self.raw_offset() % count;
+            let offset = remainder.checked_add(count)? % count;
+            offset.checked_add(count - 1)?;
+        }
+        Some(count)
     }
 
     #[inline]
@@ -348,7 +354,7 @@ pub trait PlotItemStyled: Sized {
 /// Common trait for all plot types
 pub trait Plot {
     /// Plot this element
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>);
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>);
 
     /// Get the label for this plot
     fn label(&self) -> &str;
@@ -494,18 +500,12 @@ pub(crate) fn default_plot_spec() -> sys::ImPlotSpec_c {
     }
 }
 
-pub(crate) fn take_next_plot_spec() -> Option<sys::ImPlotSpec_c> {
-    NEXT_PLOT_SPEC.with(|cell| cell.borrow_mut().take())
-}
-
-pub(crate) fn set_next_plot_spec(spec: Option<sys::ImPlotSpec_c>) {
-    NEXT_PLOT_SPEC.with(|cell| {
-        *cell.borrow_mut() = spec;
-    })
-}
-
-pub(crate) fn plot_spec_from(flags: u32, layout: PlotDataLayout) -> sys::ImPlotSpec_c {
-    let mut spec = take_next_plot_spec().unwrap_or_else(default_plot_spec);
+pub(crate) fn plot_spec_from(
+    next: Option<sys::ImPlotSpec_c>,
+    flags: u32,
+    layout: PlotDataLayout,
+) -> sys::ImPlotSpec_c {
+    let mut spec = next.unwrap_or_else(default_plot_spec);
     spec.Flags = flags as sys::ImPlotItemFlags;
     spec.Offset = layout.raw_offset();
     spec.Stride = layout.raw_stride();
@@ -513,11 +513,12 @@ pub(crate) fn plot_spec_from(flags: u32, layout: PlotDataLayout) -> sys::ImPlotS
 }
 
 pub(crate) fn plot_spec_with_style(
+    plot: &crate::PlotScope<'_>,
     style: PlotItemStyle,
     flags: u32,
     layout: PlotDataLayout,
 ) -> sys::ImPlotSpec_c {
-    let mut spec = plot_spec_from(flags, layout);
+    let mut spec = plot_spec_from(plot.next_spec.take(), flags, layout);
     style.apply_to_spec(&mut spec);
     spec
 }
@@ -529,7 +530,7 @@ mod layout_tests {
     #[test]
     fn data_layout_allows_signed_sample_offsets() {
         let layout = PlotDataLayout::DEFAULT.with_offset(PlotDataOffset::samples(-8));
-        let spec = plot_spec_from(0, layout);
+        let spec = plot_spec_from(None, 0, layout);
         assert_eq!(spec.Offset, -8);
         assert_eq!(spec.Stride, crate::IMPLOT_AUTO);
     }
@@ -538,7 +539,7 @@ mod layout_tests {
     fn data_stride_bytes_are_positive() {
         let stride = PlotDataStride::bytes(16);
         let layout = PlotDataLayout::DEFAULT.with_stride(stride);
-        let spec = plot_spec_from(0, layout);
+        let spec = plot_spec_from(None, 0, layout);
         assert_eq!(spec.Stride, 16);
     }
 
@@ -681,7 +682,7 @@ impl<'a> PlotBuilder<'a> {
     }
 
     /// Build and plot the chart
-    pub fn build(self, plot_ui: &crate::PlotUi<'_>) -> Result<(), PlotError> {
+    pub fn build(self, plot_ui: &crate::PlotScope<'_>) -> Result<(), PlotError> {
         match self.plot_type {
             PlotType::Line {
                 label,
@@ -715,9 +716,9 @@ impl<'a> PlotBuilder<'a> {
                 values,
                 bins,
             } => {
-                let plot = histogram::HistogramPlot::new(label, values).with_bins(bins);
-                plot.validate()?;
-                plot.plot(plot_ui);
+                histogram::HistogramPlot::new(label, values)
+                    .with_bins(bins)
+                    .plot_checked(plot_ui)?;
             }
             PlotType::Heatmap {
                 label,
@@ -725,9 +726,7 @@ impl<'a> PlotBuilder<'a> {
                 rows,
                 cols,
             } => {
-                let plot = heatmap::HeatmapPlot::new(label, values, rows, cols);
-                plot.validate()?;
-                plot.plot(plot_ui);
+                heatmap::HeatmapPlot::new(label, values, rows, cols).plot_checked(plot_ui)?;
             }
             PlotType::PieChart {
                 labels,

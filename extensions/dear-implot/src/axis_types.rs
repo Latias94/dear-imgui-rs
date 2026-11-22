@@ -2,6 +2,17 @@ use crate::sys;
 
 pub(crate) const IMPLOT_AUTO: i32 = -1;
 
+/// Built-in ImPlot axis scales. Time ticks are supported on horizontal axes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(i32)]
+pub enum AxisScale {
+    #[default]
+    Linear = sys::ImPlotScale_Linear as i32,
+    Time = sys::ImPlotScale_Time as i32,
+    Log10 = sys::ImPlotScale_Log10 as i32,
+    SymLog = sys::ImPlotScale_SymLog as i32,
+}
+
 /// Choice of Y axis for multi-axis plots
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -14,7 +25,7 @@ pub enum YAxisChoice {
 /// Convert an Option<YAxisChoice> into an i32. Picks IMPLOT_AUTO for None.
 pub(crate) fn y_axis_choice_option_to_i32(y_axis_choice: Option<YAxisChoice>) -> i32 {
     match y_axis_choice {
-        Some(choice) => choice as i32,
+        Some(choice) => YAxis::Y1 as i32 + choice as i32,
         None => IMPLOT_AUTO,
     }
 }
@@ -35,13 +46,6 @@ pub enum YAxis {
     Y1 = 3,
     Y2 = 4,
     Y3 = 5,
-}
-
-impl YAxis {
-    /// Convert a Y axis (Y1..Y3) to the 0-based index used by ImPlotPlot_YAxis_Nil
-    pub(crate) fn to_index(self) -> i32 {
-        (self as i32) - 3
-    }
 }
 
 /// Any ImPlot axis selector matching ImPlot's ImAxis values.

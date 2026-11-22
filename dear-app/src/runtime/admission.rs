@@ -1,4 +1,5 @@
 use std::time::{Duration, Instant};
+use winit::dpi::PhysicalSize;
 
 use super::lifecycle::{LifecycleAction, SurfaceEvent};
 use crate::RunError;
@@ -120,6 +121,7 @@ impl SurfaceRedrawRetry {
 pub(crate) trait SurfaceAdmissionBackend {
     type Frame;
 
+    fn window_size(&self) -> PhysicalSize<u32>;
     fn acquire(&mut self) -> SurfaceAcquisition<Self::Frame>;
     fn record_event(&mut self, event: SurfaceEvent) -> LifecycleAction;
     fn recover(&mut self, action: LifecycleAction) -> Result<(), RunError>;
@@ -133,6 +135,10 @@ where
 {
     let mut recovery_retries = 0usize;
     loop {
+        let size = backend.window_size();
+        if size.width == 0 || size.height == 0 {
+            return Ok(SurfaceAdmission::Skipped(SurfaceSkipReason::Occluded));
+        }
         let acquisition = backend.acquire();
         let event = acquisition.event();
         let action = backend.record_event(event);
@@ -252,6 +258,7 @@ fn require_action(
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
+    use winit::dpi::PhysicalSize;
 
     use super::{
         AdmittedSurfaceFrame, SurfaceAcquisition, SurfaceAdmission, SurfaceAdmissionBackend,
@@ -261,8 +268,12 @@ mod tests {
     use crate::RunError;
     use crate::runtime::lifecycle::{LifecycleAction, LifecycleMachine, SurfaceEvent};
 
+    const DRAWABLE_SIZE: PhysicalSize<u32> = PhysicalSize::new(640, 480);
+
     struct ProbeBackend {
         acquisitions: VecDeque<SurfaceAcquisition<u32>>,
+        window_size: PhysicalSize<u32>,
+        size_after_recovery: Option<PhysicalSize<u32>>,
         lifecycle: LifecycleMachine,
         events: Vec<String>,
         fail_recovery: bool,
@@ -272,6 +283,8 @@ mod tests {
         fn new(acquisitions: impl IntoIterator<Item = SurfaceAcquisition<u32>>) -> Self {
             Self {
                 acquisitions: acquisitions.into_iter().collect(),
+                window_size: DRAWABLE_SIZE,
+                size_after_recovery: None,
                 lifecycle: LifecycleMachine::new(),
                 events: Vec::new(),
                 fail_recovery: false,
@@ -281,6 +294,10 @@ mod tests {
 
     impl SurfaceAdmissionBackend for ProbeBackend {
         type Frame = u32;
+
+        fn window_size(&self) -> PhysicalSize<u32> {
+            self.window_size
+        }
 
         fn acquire(&mut self) -> SurfaceAcquisition<Self::Frame> {
             self.events.push("acquire".to_owned());
@@ -296,6 +313,9 @@ mod tests {
 
         fn recover(&mut self, action: LifecycleAction) -> Result<(), RunError> {
             self.events.push(format!("recover:{action:?}"));
+            if let Some(size) = self.size_after_recovery.take() {
+                self.window_size = size;
+            }
             if self.fail_recovery {
                 Err(RunError::Recovery {
                     message: "injected surface recovery failure".to_owned(),
@@ -304,6 +324,45 @@ mod tests {
                 Ok(())
             }
         }
+    }
+
+    #[test]
+    fn zero_sized_window_skips_acquisition_until_drawable_again() {
+        let mut backend = ProbeBackend::new([SurfaceAcquisition::Success(7)]);
+        for size in [
+            PhysicalSize::new(0, 480),
+            PhysicalSize::new(640, 0),
+            PhysicalSize::new(0, 0),
+        ] {
+            backend.window_size = size;
+            assert_eq!(
+                admit_surface_frame(&mut backend).unwrap(),
+                SurfaceAdmission::Skipped(SurfaceSkipReason::Occluded)
+            );
+        }
+        assert!(backend.events.is_empty());
+        backend.window_size = DRAWABLE_SIZE;
+        assert!(matches!(
+            admit_surface_frame(&mut backend).unwrap(),
+            SurfaceAdmission::Admitted(AdmittedSurfaceFrame { frame: 7, .. })
+        ));
+    }
+
+    #[test]
+    fn minimize_during_recovery_defers_acquisition_until_restore() {
+        let mut backend =
+            ProbeBackend::new([SurfaceAcquisition::Lost, SurfaceAcquisition::Success(9)]);
+        backend.size_after_recovery = Some(PhysicalSize::new(0, 480));
+        assert_eq!(
+            admit_surface_frame(&mut backend).unwrap(),
+            SurfaceAdmission::Skipped(SurfaceSkipReason::Occluded)
+        );
+        assert_eq!(backend.acquisitions.len(), 1);
+        backend.window_size = DRAWABLE_SIZE;
+        assert!(matches!(
+            admit_surface_frame(&mut backend).unwrap(),
+            SurfaceAdmission::Admitted(AdmittedSurfaceFrame { frame: 9, .. })
+        ));
     }
 
     #[test]

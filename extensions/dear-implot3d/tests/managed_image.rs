@@ -77,28 +77,27 @@ fn managed_and_legacy_images_resolve_in_the_owner_context() {
             .size([400.0, 300.0], dear_imgui_rs::Condition::Always)
             .build(|| {
                 let plot_ui = plot.get_plot_ui(frame.ui());
-                let _plot = plot_ui
+                plot_ui
                     .begin_plot("owner images")
-                    .build()
+                    .build(|plot| {
+                        plot.image_by_axes(
+                            "managed",
+                            managed,
+                            [0.0, 0.0, 0.0],
+                            [1.0, 0.0, 0.0],
+                            [0.0, 1.0, 0.0],
+                        )
+                        .plot();
+                        plot.image_by_axes(
+                            "legacy",
+                            TextureId::new(17),
+                            [0.0, 0.0, 0.0],
+                            [1.0, 0.0, 0.0],
+                            [0.0, 1.0, 0.0],
+                        )
+                        .plot();
+                    })
                     .expect("plot should begin");
-                plot_ui
-                    .image_by_axes(
-                        "managed",
-                        managed,
-                        [0.0, 0.0, 0.0],
-                        [1.0, 0.0, 0.0],
-                        [0.0, 1.0, 0.0],
-                    )
-                    .plot();
-                plot_ui
-                    .image_by_axes(
-                        "legacy",
-                        TextureId::new(17),
-                        [0.0, 0.0, 0.0],
-                        [1.0, 0.0, 0.0],
-                        [0.0, 1.0, 0.0],
-                    )
-                    .plot();
             });
         frame
             .render_snapshot(&consumer)
@@ -198,19 +197,19 @@ fn managed_image_rejects_a_foreign_context_before_plot_ffi() {
         let frame = foreign.begin_frame();
         let plot_ui = plot.get_plot_ui(frame.ui());
         let result = catch_unwind(AssertUnwindSafe(|| {
-            let _plot = plot_ui
-                .begin_plot("foreign image")
-                .build()
-                .expect("plot should begin");
             plot_ui
-                .image_by_axes(
-                    "foreign",
-                    managed,
-                    [0.0, 0.0, 0.0],
-                    [1.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0],
-                )
-                .plot();
+                .begin_plot("foreign image")
+                .build(|plot| {
+                    plot.image_by_axes(
+                        "foreign",
+                        managed,
+                        [0.0, 0.0, 0.0],
+                        [1.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0],
+                    )
+                    .plot();
+                })
+                .expect("plot should begin");
         }));
         let message = panic_message(result.expect_err("foreign texture should be rejected"));
         assert!(
@@ -243,19 +242,19 @@ fn managed_image_rejects_a_retired_identity_before_plot_ffi() {
         let frame = imgui.begin_frame();
         let plot_ui = plot.get_plot_ui(frame.ui());
         let result = catch_unwind(AssertUnwindSafe(|| {
-            let _plot = plot_ui
-                .begin_plot("stale image")
-                .build()
-                .expect("plot should begin");
             plot_ui
-                .image_by_axes(
-                    "stale",
-                    stale,
-                    [0.0, 0.0, 0.0],
-                    [1.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0],
-                )
-                .plot();
+                .begin_plot("stale image")
+                .build(|plot| {
+                    plot.image_by_axes(
+                        "stale",
+                        stale,
+                        [0.0, 0.0, 0.0],
+                        [1.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0],
+                    )
+                    .plot();
+                })
+                .expect("plot should begin");
         }));
         let message = panic_message(result.expect_err("stale texture should be rejected"));
         assert!(

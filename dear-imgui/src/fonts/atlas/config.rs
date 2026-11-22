@@ -32,21 +32,20 @@ impl Clone for FontConfig {
 }
 
 impl FontConfig {
-    /// Creates a new font configuration with default settings
+    /// Creates a font configuration with Dear ImGui's defaults on any thread.
     pub fn new() -> Self {
-        // Use ImGui's constructor to ensure all defaults are initialized
-        // (e.g., RasterizerDensity defaults to 1.0f which avoids assertions).
-        unsafe {
-            let cfg = sys::ImFontConfig_ImFontConfig();
-            if cfg.is_null() {
-                panic!("ImFontConfig_ImFontConfig() returned null");
-            }
-            let raw = *cfg;
-            sys::ImFontConfig_destroy(cfg);
-            Self {
-                raw,
-                glyph_exclude_ranges: None,
-            }
+        // ImFontConfig::ImFontConfig zeroes the struct and sets these five fields.
+        // The cimgui heap constructor would also touch the current Context's allocator state.
+        Self {
+            raw: sys::ImFontConfig {
+                FontDataOwnedByAtlas: true,
+                ExtraSizeScale: 1.0,
+                GlyphMaxAdvanceX: f32::MAX,
+                RasterizerMultiply: 1.0,
+                RasterizerDensity: 1.0,
+                ..Default::default()
+            },
+            glyph_exclude_ranges: None,
         }
     }
 

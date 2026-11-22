@@ -5,6 +5,9 @@ use std::{ffi::NulError, str::Utf8Error};
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum CteError {
+    /// The native allocator could not be reserved for this thread.
+    #[error(transparent)]
+    ThreadLease(#[from] dear_imgui_rs::ImGuiError),
     /// A native owner could not be allocated.
     #[error("{object} creation returned a null pointer")]
     CreationFailed { object: &'static str },

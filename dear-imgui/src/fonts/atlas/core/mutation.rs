@@ -48,16 +48,3 @@ impl FontAtlas {
         bump_custom_rect_generation(raw);
     }
 }
-
-impl crate::fonts::atlas::LegacyFontAtlas<'_> {
-    /// Clear only the CPU atlas texture data while keeping font sources.
-    ///
-    /// This does not release any renderer-owned GPU texture. The legacy renderer remains
-    /// responsible for retiring that resource after its last use.
-    #[doc(alias = "ClearTexData")]
-    pub fn clear_cpu_texture_data(&self) {
-        self.atlas
-            .assert_mutation_allowed("LegacyFontAtlas::clear_cpu_texture_data()");
-        unsafe { sys::ImFontAtlas_ClearTexData(self.atlas.raw()) }
-    }
-}

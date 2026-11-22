@@ -28,6 +28,9 @@ use winit::{
     window::{Window, WindowId},
 };
 
+#[global_allocator]
+static ALLOCATOR: sys::WasmProviderAllocator = sys::WasmProviderAllocator;
+
 #[cfg(feature = "cte")]
 struct CteWebState {
     editor: TextEditor,
@@ -111,13 +114,14 @@ struct App {
 }
 
 impl AppWindow {
-    // Complete async GPU setup given an already-created window + surface.
-    async fn new_with_window(
-        window: Arc<Window>,
-        surface: wgpu::Surface<'static>,
-        instance: wgpu::Instance,
-    ) -> Result<Self, JsValue> {
-        // Request adapter and device
+    async fn new_with_window(window: Arc<Window>) -> Result<Self, JsValue> {
+        let instance = wgpu::util::new_instance_with_webgpu_detection(
+            wgpu::InstanceDescriptor::new_without_display_handle(),
+        )
+        .await;
+        let surface = instance
+            .create_surface(window.clone())
+            .map_err(|error| JsValue::from_str(&format!("create_surface: {error}")))?;
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
@@ -480,10 +484,7 @@ impl AppWindow {
                     let plot_ui = self.imgui.implot_ctx.get_plot_ui(ui);
                     let xs = [0.0_f64, 1.0, 2.0, 3.0];
                     let ys = [0.0_f64, 1.0, 0.0, 1.0];
-                    if let Some(token) = plot_ui.begin_plot("ImPlot demo") {
-                        plot_ui.plot_line("line", &xs, &ys);
-                        token.end();
-                    }
+                    plot_ui.with_plot("ImPlot demo", |plot| plot.plot_line("line", &xs, &ys));
                 });
         }
 
@@ -493,25 +494,34 @@ impl AppWindow {
                 .size([480.0, 320.0], Condition::FirstUseEver)
                 .build(|| {
                     let plot_ui = self.imgui.implot3d_ctx.get_plot_ui(ui);
-                    if let Some(_token) = plot_ui
+                    plot_ui
                         .begin_plot("ImPlot3D demo")
                         .size([0.0, 0.0])
                         .flags(Plot3DFlags::NONE)
-                        .build()
-                    {
-                        plot_ui.setup_axes(
-                            "X",
-                            "Y",
-                            "Z",
-                            Axis3DFlags::NONE,
-                            Axis3DFlags::NONE,
-                            Axis3DFlags::NONE,
+                        .build_with_setup(
+                            |setup| {
+                                setup.setup_axes(
+                                    "X",
+                                    "Y",
+                                    "Z",
+                                    Axis3DFlags::NONE,
+                                    Axis3DFlags::NONE,
+                                    Axis3DFlags::NONE,
+                                )
+                            },
+                            |plot| {
+                                let xs = [0.0_f32, 1.0, 2.0, 3.0];
+                                let ys = [0.0_f32, 1.0, 0.0, -1.0];
+                                let zs = [0.0_f32, 0.5, 1.0, 0.0];
+                                plot.plot_scatter_f32(
+                                    "points",
+                                    &xs,
+                                    &ys,
+                                    &zs,
+                                    Scatter3DFlags::NONE,
+                                );
+                            },
                         );
-                        let xs = [0.0_f32, 1.0, 2.0, 3.0];
-                        let ys = [0.0_f32, 1.0, 0.0, -1.0];
-                        let zs = [0.0_f32, 0.5, 1.0, 0.0];
-                        plot_ui.plot_scatter_f32("points", &xs, &ys, &zs, Scatter3DFlags::NONE);
-                    }
                 });
         }
 
@@ -523,30 +533,25 @@ impl AppWindow {
                 .size([480.0, 320.0], Condition::FirstUseEver)
                 .build(|| {
                     let nodes_ui = ui.imnodes(&self.imgui.imnodes_ctx);
-                    let editor = nodes_ui
+                    nodes_ui
                         .editor(Some(&self.imgui.imnodes_editor))
-                        .begin_nodes();
+                        .with_nodes(|editor| {
+                            editor.node(NodeId::from(1), |node| {
+                                ui.text("Input Node");
+                                node.input_attr(PinId::from(2), PinShape::CircleFilled, || {
+                                    ui.text("In")
+                                });
+                            });
 
-                    {
-                        let _node = editor.node(NodeId::from(1));
-                        ui.text("Input Node");
-                        {
-                            let _attr = _node.input_attr(PinId::from(2), PinShape::CircleFilled);
-                            ui.text("In");
-                        }
-                    }
+                            editor.node(NodeId::from(3), |node| {
+                                ui.text("Output Node");
+                                node.output_attr(PinId::from(4), PinShape::CircleFilled, || {
+                                    ui.text("Out")
+                                });
+                            });
 
-                    {
-                        let _node = editor.node(NodeId::from(3));
-                        ui.text("Output Node");
-                        {
-                            let _attr = _node.output_attr(PinId::from(4), PinShape::CircleFilled);
-                            ui.text("Out");
-                        }
-                    }
-
-                    editor.link(LinkId::from(5), PinId::from(2), PinId::from(4));
-                    let _ = editor.end();
+                            editor.link(LinkId::from(5), PinId::from(4), PinId::from(2));
+                        });
                 });
         }
 
@@ -706,9 +711,7 @@ impl ApplicationHandler for App {
             return;
         }
 
-        // Create window + surface synchronously, then finish GPU init asynchronously.
         use winit::platform::web::WindowAttributesExtWebSys;
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
 
         // Acquire target canvas from the page
         let win = web_sys::window().expect("no window");
@@ -730,14 +733,10 @@ impl ApplicationHandler for App {
                 .expect("create_window"),
         );
 
-        let surface = instance
-            .create_surface(window.clone())
-            .expect("create_surface");
-
         // Finish GPU init on the JS task queue
         let window_for_redraw = window.clone();
         wasm_bindgen_futures::spawn_local(async move {
-            match AppWindow::new_with_window(window, surface, instance).await {
+            match AppWindow::new_with_window(window).await {
                 Ok(appwin) => {
                     APP_READY.with(|cell| *cell.borrow_mut() = Some(appwin));
                     window_for_redraw.request_redraw();

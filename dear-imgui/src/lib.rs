@@ -203,6 +203,9 @@
 //!   loading and atlas mutation.
 //! - RAII tokens for windows, stacks, popups, tables, draw-list texture stacks, and extension scopes
 //!   are UI/current-context scoped and `!Send + !Sync`. Drop them on the creating UI thread.
+//! - Contexts and independently owned ImGui allocations share one OS thread. An extension that
+//!   uses the ImGui allocator can hold a [`ContextThreadLease`] from allocation through destruction,
+//!   including when its native objects outlive their originating Context.
 //! - Use `Ui::with_state_storage` for a panic-safe, nested state-storage override. Both the
 //!   replacement and its `StateStorage` view are confined to the closure.
 //! - Use `Ui::with_multi_select` for advanced multi-select flows. It returns an owned

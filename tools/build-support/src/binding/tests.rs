@@ -734,7 +734,7 @@ fn core_artifact_profile_hash_has_a_cross_language_test_vector() {
 
 #[test]
 fn core_source_contract_hash_covers_versioned_maintained_transforms() {
-    assert_eq!(core_source_contract_hash(), "fnv1a64:7ae7d563bf1926b4");
+    assert_eq!(core_source_contract_hash(), "fnv1a64:d0af92d1989b9a0d");
 }
 
 #[test]
@@ -1160,7 +1160,23 @@ fn cte_binding_specs_cover_the_upstream_and_bridge_surfaces() {
             "TrieAutoComplete_TrieAutoComplete",
             "TextEditor_DocPos2ScreenPos",
             "Palette_Palette",
-            "Language_Cpp",
+            "TextEditor_LookupLanguage",
+            "TextEditor_LookupLanguageByExtension",
+            "TextEditor_SetLeftMargin",
+            "TextEditor_GetLeftMargin",
+            "TextEditor_SetSmoothScrollingEnabled",
+            "TextEditor_IsSmoothScrollingEnabled",
+            "AutoCompleteConfig_SetTriggerCharacters",
+            "AutoCompleteConfig_SetWordCharacters",
+            "AutoCompleteState_GetReplacementStart",
+            "AutoCompleteState_SetReplacementStart",
+            "AutoCompleteState_GetReplacementEnd",
+            "AutoCompleteState_SetReplacementEnd",
+            "AutoCompleteState_AddSuggestion",
+            "AutoCompleteState_GetSuggestionCount",
+            "AutoCompleteState_GetSuggestion",
+            "AutoCompleteState_GetLabel",
+            "TextEditor_SetAutoCompleteSuggestions_array",
             "CodePoint_write",
             "GetDejavu",
             "SetDejavu",
@@ -1172,6 +1188,7 @@ fn cte_binding_specs_cover_the_upstream_and_bridge_surfaces() {
             "dear_imgui_cte_clear_callbacks",
             "dear_imgui_cte_set_transaction_callback",
             "dear_imgui_cte_autocomplete_config_create",
+            "dear_imgui_cte_autocomplete_config_set_characters",
             "dear_imgui_cte_autocomplete_state_get_context",
         ] {
             assert!(spec.required_symbols.contains(&symbol));
@@ -1822,17 +1839,6 @@ fn cte_prebuilt_rejects_unpatched_unicode_range_lookup() {
 }
 
 #[test]
-fn cte_prebuilt_rejects_unpatched_text_diff_draw_flags() {
-    let binding = extension_identity(ExtensionBinding::Cte);
-    let mut unpatched = super::StableHash::new();
-    unpatched.field("schema", "extension-binding-identity-v1");
-    unpatched.field("extension", "cte");
-    unpatched.field("provenance", &binding.provenance().identity_hash());
-    unpatched.field("source_overlay", crate::CTE_TEXT_EDITOR_PATCH_VERSION);
-    assert_ne!(binding.deterministic_hash(), unpatched.finish());
-}
-
-#[test]
 fn implot3d_binding_identity_matches_the_python_consumer_test_vector() {
     let vector: serde_json::Value = serde_json::from_str(include_str!(
         "../../tests/fixtures/implot3d_binding_identity.json"
@@ -1853,6 +1859,24 @@ fn implot3d_binding_identity_matches_the_python_consumer_test_vector() {
         binding.deterministic_hash(),
         vector["unpatched_identity"].as_str().unwrap()
     );
+}
+
+#[test]
+fn imguizmo_binding_identity_matches_the_python_consumer_test_vector() {
+    let vector: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/imguizmo_binding_identity.json"
+    ))
+    .unwrap();
+    let provenance = CrateBindingProvenance::parse(vector["provenance"].as_str().unwrap()).unwrap();
+    let binding = ExtensionBindingIdentity::new(
+        ExtensionBinding::ImGuizmo,
+        extension_spec(ExtensionBinding::ImGuizmo),
+        provenance,
+    )
+    .unwrap();
+    let identity = binding.deterministic_hash();
+    assert_eq!(identity, vector["identity"].as_str().unwrap());
+    assert_ne!(identity, vector["unpatched_identity"].as_str().unwrap());
 }
 
 #[test]

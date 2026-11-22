@@ -241,6 +241,9 @@ impl WgpuRenderer {
         self.gpu.texture_manager.clear_destroyed_managed_textures();
         self.renderer_consumer = Some(consumer);
 
+        #[cfg(feature = "tracing")]
+        tracing::debug!(context = ?imgui_context.id(), "invalidated WGPU device objects");
+
         Ok(())
     }
 

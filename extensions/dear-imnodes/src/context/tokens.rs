@@ -1,205 +1,122 @@
-use crate::sys;
-use std::cell::{Cell, RefCell};
-use std::collections::BTreeSet;
+use super::{ImNodesScope, NodeEditor};
+use crate::{PinId, PinShape, sys};
+use dear_imgui_rs::{NativeWindowScope, Ui};
+use std::collections::btree_map::Entry;
 
-use super::{EditorScope, ImNodesScope};
-
-/// RAII token for an active node block.
+/// A node borrowed for the duration of [`NodeEditor::node`].
+/// Each title or attribute closes before rendering returns to the node.
+///
+/// ```compile_fail
+/// use dear_imnodes::{NodeEditor, NodeId, NodeToken};
+/// fn escape<'a>(editor: &'a NodeEditor<'_>) -> &'a NodeToken<'a> {
+///     editor.node(NodeId::new(1), |node| node)
+/// }
+/// ```
 pub struct NodeToken<'a> {
-    pub(crate) scope: ImNodesScope,
-    pub(crate) state: &'a Cell<EditorScope>,
-    pub(crate) submitted_pins: &'a RefCell<BTreeSet<crate::PinId>>,
-    pub(crate) ended: bool,
+    pub(super) editor: &'a NodeEditor<'a>,
+    pub(super) host: &'a NativeWindowScope<'a>,
 }
 
 impl NodeToken<'_> {
-    pub fn title_bar<F: FnOnce()>(&self, f: F) {
-        require_scope(self.state, EditorScope::Node, "NodeToken::title_bar()");
-        self.scope
-            .with_bound_context(|| unsafe { sys::imnodes_BeginNodeTitleBar() });
-        self.state.set(EditorScope::TitleBar);
-        let _title_bar = TitleBarToken {
-            scope: self.scope.clone(),
-            state: self.state,
+    pub fn title_bar<R>(&self, draw: impl FnOnce() -> R) -> R {
+        with_child(
+            self.editor.ui,
+            self.host,
+            self.editor.frame.scope,
+            || unsafe { sys::imnodes_BeginNodeTitleBar() },
+            sys::imnodes_EndNodeTitleBar,
+            |_| draw(),
+        )
+    }
+
+    /// Draws the contents of an input pin.
+    pub fn input_attr<R>(&self, id: PinId, shape: PinShape, draw: impl FnOnce() -> R) -> R {
+        self.attribute(id, AttributeKind::Input(shape), draw)
+    }
+
+    /// Draws the contents of an output pin.
+    pub fn output_attr<R>(&self, id: PinId, shape: PinShape, draw: impl FnOnce() -> R) -> R {
+        self.attribute(id, AttributeKind::Output(shape), draw)
+    }
+
+    /// Draws an attribute without a link endpoint.
+    pub fn static_attr<R>(&self, id: PinId, draw: impl FnOnce() -> R) -> R {
+        self.attribute(id, AttributeKind::Static, draw)
+    }
+
+    fn attribute<R>(&self, id: PinId, kind: AttributeKind, draw: impl FnOnce() -> R) -> R {
+        let end = match kind {
+            AttributeKind::Input(_) => sys::imnodes_EndInputAttribute,
+            AttributeKind::Output(_) => sys::imnodes_EndOutputAttribute,
+            AttributeKind::Static => sys::imnodes_EndStaticAttribute,
         };
-        f();
-    }
-
-    /// Begin an input pin within this node.
-    pub fn input_attr(&self, id: crate::PinId, shape: crate::PinShape) -> AttributeToken<'_> {
-        self.begin_attribute(id, AttrKind::Input, Some(shape))
-    }
-
-    /// Begin an output pin within this node.
-    pub fn output_attr(&self, id: crate::PinId, shape: crate::PinShape) -> AttributeToken<'_> {
-        self.begin_attribute(id, AttrKind::Output, Some(shape))
-    }
-
-    /// Begin a static attribute within this node.
-    pub fn static_attr(&self, id: crate::PinId) -> AttributeToken<'_> {
-        self.begin_attribute(id, AttrKind::Static, None)
-    }
-
-    fn begin_attribute(
-        &self,
-        id: crate::PinId,
-        kind: AttrKind,
-        shape: Option<crate::PinShape>,
-    ) -> AttributeToken<'_> {
-        require_scope(self.state, EditorScope::Node, kind.begin_caller());
-        assert!(
-            self.submitted_pins.borrow_mut().insert(id),
-            "dear-imnodes: pin {id} was submitted more than once in one editor frame"
-        );
-
-        self.scope.with_bound_context(|| unsafe {
-            match kind {
-                AttrKind::Input => sys::imnodes_BeginInputAttribute(
-                    id.raw(),
-                    shape.expect("input pin shape") as sys::ImNodesPinShape,
-                ),
-                AttrKind::Output => sys::imnodes_BeginOutputAttribute(
-                    id.raw(),
-                    shape.expect("output pin shape") as sys::ImNodesPinShape,
-                ),
-                AttrKind::Static => sys::imnodes_BeginStaticAttribute(id.raw()),
-            }
-        });
-        self.state.set(kind.scope());
-        AttributeToken {
-            kind,
-            scope: self.scope.clone(),
-            state: self.state,
-            ended: false,
-        }
-    }
-
-    pub fn end(mut self) {
-        self.end_inner();
-    }
-
-    fn end_inner(&mut self) {
-        if !self.ended {
-            close_node_scope(&self.scope, self.state);
-            self.ended = true;
-        }
+        with_child(
+            self.editor.ui,
+            self.host,
+            self.editor.frame.scope,
+            || {
+                let mut attributes = self.editor.attributes.borrow_mut();
+                let Entry::Vacant(entry) = attributes.entry(id) else {
+                    panic!(
+                        "dear-imnodes: attribute {id} was submitted more than once in one editor frame"
+                    );
+                };
+                entry.insert(kind);
+                unsafe {
+                    match kind {
+                        AttributeKind::Input(shape) => {
+                            sys::imnodes_BeginInputAttribute(id.raw(), shape as _)
+                        }
+                        AttributeKind::Output(shape) => {
+                            sys::imnodes_BeginOutputAttribute(id.raw(), shape as _)
+                        }
+                        AttributeKind::Static => sys::imnodes_BeginStaticAttribute(id.raw()),
+                    }
+                }
+            },
+            end,
+            |_| draw(),
+        )
     }
 }
 
-impl Drop for NodeToken<'_> {
-    fn drop(&mut self) {
-        self.end_inner();
-    }
-}
-
-struct TitleBarToken<'a> {
-    scope: ImNodesScope,
-    state: &'a Cell<EditorScope>,
-}
-
-impl Drop for TitleBarToken<'_> {
-    fn drop(&mut self) {
-        if self.state.get() == EditorScope::TitleBar {
-            self.scope
-                .with_bound_context(|| unsafe { sys::imnodes_EndNodeTitleBar() });
-            self.state.set(EditorScope::Node);
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub(crate) enum AttrKind {
-    Input,
-    Output,
+#[derive(Copy, Clone)]
+pub(super) enum AttributeKind {
+    Input(PinShape),
+    Output(PinShape),
     Static,
 }
 
-impl AttrKind {
-    fn scope(self) -> EditorScope {
-        match self {
-            Self::Input => EditorScope::InputAttribute,
-            Self::Output => EditorScope::OutputAttribute,
-            Self::Static => EditorScope::StaticAttribute,
-        }
-    }
-
-    fn begin_caller(self) -> &'static str {
-        match self {
-            Self::Input => "NodeToken::input_attr()",
-            Self::Output => "NodeToken::output_attr()",
-            Self::Static => "NodeToken::static_attr()",
-        }
-    }
-
-    unsafe fn end_native(self) {
-        match self {
-            Self::Input => unsafe { sys::imnodes_EndInputAttribute() },
-            Self::Output => unsafe { sys::imnodes_EndOutputAttribute() },
-            Self::Static => unsafe { sys::imnodes_EndStaticAttribute() },
-        }
+impl AttributeKind {
+    pub(super) fn is_pin(self) -> bool {
+        !matches!(self, Self::Static)
     }
 }
 
-pub struct AttributeToken<'a> {
-    kind: AttrKind,
-    scope: ImNodesScope,
-    state: &'a Cell<EditorScope>,
-    ended: bool,
+struct EndChildScope<'a> {
+    scope: &'a ImNodesScope<'a>,
+    end: unsafe extern "C" fn(),
 }
 
-impl AttributeToken<'_> {
-    pub fn end(mut self) {
-        self.end_inner();
-    }
-
-    fn end_inner(&mut self) {
-        if !self.ended && self.state.get() == self.kind.scope() {
-            self.scope
-                .with_bound_context(|| unsafe { self.kind.end_native() });
-            self.state.set(EditorScope::Node);
-        }
-        self.ended = true;
-    }
-}
-
-impl Drop for AttributeToken<'_> {
+impl Drop for EndChildScope<'_> {
     fn drop(&mut self) {
-        self.end_inner();
+        self.scope.with_bound_context(|| unsafe { (self.end)() });
     }
 }
 
-pub(crate) fn close_node_scope(scope: &ImNodesScope, state: &Cell<EditorScope>) {
-    scope.with_bound_context(|| unsafe {
-        match state.get() {
-            EditorScope::TitleBar => {
-                sys::imnodes_EndNodeTitleBar();
-                state.set(EditorScope::Node);
-            }
-            EditorScope::InputAttribute => {
-                sys::imnodes_EndInputAttribute();
-                state.set(EditorScope::Node);
-            }
-            EditorScope::OutputAttribute => {
-                sys::imnodes_EndOutputAttribute();
-                state.set(EditorScope::Node);
-            }
-            EditorScope::StaticAttribute => {
-                sys::imnodes_EndStaticAttribute();
-                state.set(EditorScope::Node);
-            }
-            _ => {}
-        }
-        if state.get() == EditorScope::Node {
-            sys::imnodes_EndNode();
-            state.set(EditorScope::Editor);
-        }
-    });
-}
-
-fn require_scope(state: &Cell<EditorScope>, expected: EditorScope, caller: &str) {
-    let actual = state.get();
-    assert_eq!(
-        actual, expected,
-        "dear-imnodes: {caller} requires {expected:?} scope, but {actual:?} is active"
-    );
+pub(super) fn with_child<R>(
+    ui: &Ui,
+    parent: &NativeWindowScope<'_>,
+    scope: &ImNodesScope<'_>,
+    begin: impl FnOnce(),
+    end: unsafe extern "C" fn(),
+    draw: impl FnOnce(&NativeWindowScope<'_>) -> R,
+) -> R {
+    parent.run(|| {
+        scope.with_bound_context(begin);
+        let _end = EndChildScope { scope, end };
+        // A distinct identity keeps captured parent handles from re-entering a node or
+        // attribute. Its boundary restores application windows/groups/IDs before native End.
+        ui.with_native_window_scope(draw)
+    })
 }

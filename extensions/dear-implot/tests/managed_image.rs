@@ -63,17 +63,16 @@ fn managed_and_legacy_images_resolve_in_the_owner_context() {
             .size([400.0, 300.0], dear_imgui_rs::Condition::Always)
             .build(|| {
                 let plot_ui = plot.get_plot_ui(frame.ui());
-                let _plot = plot_ui
-                    .begin_plot("owner images")
+                plot_ui
+                    .with_plot("owner images", |plot| {
+                        let min = ImPlotPoint { x: 0.0, y: 0.0 };
+                        let max = ImPlotPoint { x: 1.0, y: 1.0 };
+                        plot.plot_image("managed", managed, min, max)
+                            .expect("owner-managed image should plot");
+                        plot.plot_image("legacy", TextureId::new(17), min, max)
+                            .expect("legacy image should plot without registry lookup");
+                    })
                     .expect("plot should begin");
-                let min = ImPlotPoint { x: 0.0, y: 0.0 };
-                let max = ImPlotPoint { x: 1.0, y: 1.0 };
-                plot_ui
-                    .plot_image("managed", managed, min, max)
-                    .expect("owner-managed image should plot");
-                plot_ui
-                    .plot_image("legacy", TextureId::new(17), min, max)
-                    .expect("legacy image should plot without registry lookup");
             });
         frame
             .render_snapshot(&consumer)
@@ -176,17 +175,17 @@ fn managed_image_rejects_a_foreign_context_before_plot_ffi() {
         let frame = foreign.begin_frame();
         let plot_ui = plot.get_plot_ui(frame.ui());
         let result = catch_unwind(AssertUnwindSafe(|| {
-            let _plot = plot_ui
-                .begin_plot("foreign image")
-                .expect("plot should begin");
             plot_ui
-                .plot_image(
-                    "foreign",
-                    managed,
-                    ImPlotPoint { x: 0.0, y: 0.0 },
-                    ImPlotPoint { x: 1.0, y: 1.0 },
-                )
-                .expect("texture validation should panic before returning");
+                .with_plot("foreign image", |plot| {
+                    plot.plot_image(
+                        "foreign",
+                        managed,
+                        ImPlotPoint { x: 0.0, y: 0.0 },
+                        ImPlotPoint { x: 1.0, y: 1.0 },
+                    )
+                    .expect("texture validation should panic before returning");
+                })
+                .expect("plot should begin");
         }));
         let message = panic_message(result.expect_err("foreign texture should be rejected"));
         assert!(
@@ -229,17 +228,17 @@ fn managed_image_rejects_a_stale_generation_before_plot_ffi() {
         let frame = imgui.begin_frame();
         let plot_ui = plot.get_plot_ui(frame.ui());
         let result = catch_unwind(AssertUnwindSafe(|| {
-            let _plot = plot_ui
-                .begin_plot("stale image")
-                .expect("plot should begin");
             plot_ui
-                .plot_image(
-                    "stale",
-                    stale,
-                    ImPlotPoint { x: 0.0, y: 0.0 },
-                    ImPlotPoint { x: 1.0, y: 1.0 },
-                )
-                .expect("texture validation should panic before returning");
+                .with_plot("stale image", |plot| {
+                    plot.plot_image(
+                        "stale",
+                        stale,
+                        ImPlotPoint { x: 0.0, y: 0.0 },
+                        ImPlotPoint { x: 1.0, y: 1.0 },
+                    )
+                    .expect("texture validation should panic before returning");
+                })
+                .expect("plot should begin");
         }));
         let message = panic_message(result.expect_err("stale texture should be rejected"));
         assert!(

@@ -19,8 +19,7 @@ editor support needs its own provider wiring before it can be exposed safely on
 wasm.
 
 The sys layer deliberately exposes `NodeId`, `PinId`, and `LinkId` as pointer-sized integer values
-instead of upstream C++ helper pointers. The safe layer wraps those values as Rust newtypes and uses
-RAII tokens for editor frames, nodes, pins, create/delete sessions, shortcuts, and style pushes.
+instead of upstream C++ helper pointers. The safe layer wraps those values as Rust newtypes. Draw the editor canvas, nodes, pins, and creation previews in closures. Deletion sessions, shortcuts, and style pushes use scope tokens.
 
 ## Upstream Relationship
 
@@ -44,47 +43,61 @@ layout compatibility notice.
 
 ## Compatibility
 
-The `0.22` release train requires Rust 1.95 or newer. Upgrade all workspace crates together. See the [0.22 migration notes](../../docs/COMPATIBILITY.md#022-release-train).
+Use Rust 1.95 or newer and keep all `dear-*` dependencies on the `0.23` release train. See the [0.23 migration notes](../../docs/COMPATIBILITY.md#023-release-train).
 
 | Item                 | Version |
 |----------------------|---------|
-| Crate                | 0.22.0  |
-| dear-imgui-rs        | 0.22.0  |
-| dear-node-editor-sys | 0.22.0  |
+| Crate                | 0.23.0  |
+| dear-imgui-rs        | 0.23.0  |
+| dear-node-editor-sys | 0.23.0  |
 
 ## Quick Start
 
 ```rust
-use dear_node_editor::{EditorContext, NodeEditorUiExt, NodeId, PinId, LinkId, PinKind};
+use dear_node_editor::{
+    EditorConfig, EditorContext, LinkId, NodeEditorError, NodeEditorUiExt, NodeId, PinId, PinKind,
+};
 
-fn setup(imgui: &dear_imgui_rs::Context) -> EditorContext {
-    EditorContext::create(imgui)
+fn setup(imgui: &dear_imgui_rs::Context) -> Result<EditorContext, NodeEditorError> {
+    EditorContext::try_create_with_config(imgui, EditorConfig::default())
 }
 
 fn draw(ui: &dear_imgui_rs::Ui, editor_ctx: &EditorContext) {
-    let editor = ui.node_editor(editor_ctx, "node-editor", [0.0, 400.0]);
-
-    editor.node(NodeId::new(1), |node| {
-        ui.text("Node A");
-        node.pin(PinId::new(11), PinKind::Output, |_pin| {
-            ui.text("out");
+    ui.with_node_editor(editor_ctx, "node-editor", [0.0, 400.0], |editor| {
+        editor.node(NodeId::new(1), |node| {
+            ui.text("Node A");
+            node.pin(PinId::new(11), PinKind::Output, |_pin| ui.text("out"));
         });
-    });
 
-    editor.node(NodeId::new(2), |node| {
-        node.pin(PinId::new(21), PinKind::Input, |_pin| {
-            ui.text("in");
+        editor.node(NodeId::new(2), |node| {
+            node.pin(PinId::new(21), PinKind::Input, |_pin| ui.text("in"));
         });
+        editor.link(LinkId::new(100), PinId::new(11), PinId::new(21));
     });
-
-    editor.link(LinkId::new(100), PinId::new(11), PinId::new(21));
-    editor.end();
 }
 ```
 
+To migrate from `ui.node_editor(...)`, move the statements up to `editor.end()`
+inside `ui.with_node_editor(..., |editor| { ... })`. Return any result from the
+closure. It owns the editor frame through normal return and unwinding. The
+manual `unsafe` entry point requires the caller to balance the native canvas in
+the same window and drawing channel. Use `editor.with_suspended(|| ...)` for
+screen-space popups. Suspensions can nest inside a node or pin.
+
+Call `show_node_context_menu` or `show_link_context_menu` on the suspended canvas
+before opening `ui.popup`. A successful query moves the host window's cursor.
+Store the returned ID until the user chooses a menu item. Inside the popup you
+can position a newly created node with `set_node_position`, change its Z order,
+read or change the editor's selection, inspect link endpoints, and queue a
+`delete_node` or `delete_link` request. `break_node_links` and `break_pin_links`
+queue the live links attached to a node or pin. On a later frame, call
+`begin_delete` on the canvas and update your graph for each accepted ID.
+
 If an application stores `dear_imgui_rs::Context` and `EditorContext` in the same owner struct,
 declare `EditorContext` before the ImGui context so the editor is dropped first. Native
-`imgui-node-editor` state is tied to the owning ImGui context.
+`imgui-node-editor` state is tied to the owning ImGui context. Its native owner
+holds the allocator thread until the editor has been destroyed.
+Add `NodeEditorError::ThreadLease` to exhaustive matches on fallible editor creation.
 
 ```rust
 struct UiState {
@@ -102,18 +115,19 @@ fn inspect(editor: &dear_node_editor::EditorContext) {
 }
 ```
 
-The lower-level RAII tokens are still available when manual scoping is clearer:
+The corresponding scoped and manual entry points are:
 
-```rust
-fn draw_manual(ui: &dear_imgui_rs::Ui, editor: &dear_node_editor::NodeEditorFrame<'_>) {
-    let node = editor.begin_node(NodeId::new(1));
-    ui.text("Node A");
-    let pin = node.begin_pin(PinId::new(11), PinKind::Output);
-    ui.text("out");
-    pin.end();
-    node.end();
-}
-```
+| Operation | Scoped entry point | Unsafe manual entry point |
+| --- | --- | --- |
+| Editor | `ui.with_node_editor` | `ui.node_editor` |
+| Node and pin | `editor.node`, `node.pin` | `editor.begin_node`, `node.begin_pin` |
+| Group hint | `editor.group_hint` | `editor.begin_group_hint` |
+| Creation preview | `editor.with_create` | `editor.begin_create` |
+| Screen-space drawing | `editor.with_suspended` | `editor.suspend` |
+
+`with_create` supplies a `CreateCandidate` and a response handle. Match on the
+candidate and use the response to accept or reject it. The initial color and
+thickness style the preview, and the styled response methods can override them.
 
 Run the repository examples:
 

@@ -6,7 +6,6 @@ rust-version.workspace = true
 description = "Safe Rust wrapper for Dear ImGui Test Engine"
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 authors.workspace = true
 documentation = "https://docs.rs/dear-imgui-test-engine"
 categories.workspace = true

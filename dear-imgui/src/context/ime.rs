@@ -146,7 +146,9 @@ impl crate::Ui {
                 let font = (*self.ctx).Font;
                 (font, (*self.ctx).FontSize, (*font).CurrentRasterizerDensity)
             };
-            let result = f();
+            // InputTextEx renders the label and hint after user callbacks have returned. Keep
+            // their allocation here so a callback using Ui scratch strings gets a separate buffer.
+            let result = self.with_scratch_buffer(|_| f());
             unsafe {
                 let raw = &*self.ctx;
                 if raw.ActiveId == owner

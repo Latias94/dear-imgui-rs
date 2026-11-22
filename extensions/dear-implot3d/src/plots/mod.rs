@@ -4,11 +4,11 @@
 //! Validation helpers are implementation details and are not part of the public API:
 //!
 //! ```compile_fail
-//! use dear_implot3d::plots::{validate_lengths, validate_multiple, validate_nonempty};
+//! use dear_implot3d::plots::{primitive_vertex_count, validate_lengths, validate_nonempty};
 //! ```
 //!
 //! ```compile_fail
-//! use dear_implot3d::{validate_lengths, validate_multiple, validate_nonempty};
+//! use dear_implot3d::{primitive_vertex_count, validate_lengths, validate_nonempty};
 //! ```
 
 pub mod image;
@@ -41,6 +41,13 @@ pub enum Plot3DError {
         k: usize,
         what: &'static str,
     },
+    NativeCountOutOfRange {
+        what: &'static str,
+    },
+    MeshIndexOutOfBounds {
+        index: u32,
+        vertex_count: usize,
+    },
     GridSizeMismatch {
         x_count: usize,
         y_count: usize,
@@ -56,6 +63,10 @@ pub enum Plot3DError {
         y_count: usize,
         point_count: usize,
     },
+    InvalidSurfaceScale,
+    NonFiniteSurfaceHeight {
+        index: usize,
+    },
     StringConversion(&'static str),
 }
 
@@ -68,6 +79,18 @@ impl std::fmt::Display for Plot3DError {
             }
             Plot3DError::NotMultipleOf { len, k, what } => {
                 write!(f, "length of {} = {} is not multiple of {}", what, len, k)
+            }
+            Plot3DError::NativeCountOutOfRange { what } => {
+                write!(f, "{what} exceeded ImPlot3D's i32 range")
+            }
+            Plot3DError::MeshIndexOutOfBounds {
+                index,
+                vertex_count,
+            } => {
+                write!(
+                    f,
+                    "mesh index {index} is out of bounds for {vertex_count} vertices"
+                )
             }
             Plot3DError::GridSizeMismatch {
                 x_count,
@@ -93,6 +116,12 @@ impl std::fmt::Display for Plot3DError {
                 "surface grid x_count={} y_count={} has {} points, exceeding ImPlot3D's i32 range",
                 x_count, y_count, point_count
             ),
+            Plot3DError::InvalidSurfaceScale => f.write_str(
+                "surface color scale endpoints must be finite or both NaN for automatic scaling",
+            ),
+            Plot3DError::NonFiniteSurfaceHeight { index } => {
+                write!(f, "surface height at sample {index} must be finite")
+            }
             Plot3DError::StringConversion(what) => write!(f, "string conversion error: {}", what),
         }
     }
@@ -103,8 +132,8 @@ impl std::error::Error for Plot3DError {}
 /// Common trait for 3D plot elements
 pub trait Plot3D {
     fn label(&self) -> &str;
-    fn try_plot(&self, ui: &crate::Plot3DUi<'_>) -> Result<(), Plot3DError>;
-    fn plot(&self, ui: &crate::Plot3DUi<'_>) {
+    fn try_plot(&self, ui: &crate::Plot3DScope<'_>) -> Result<(), Plot3DError>;
+    fn plot(&self, ui: &crate::Plot3DScope<'_>) {
         let _ = self.try_plot(ui);
     }
 }
@@ -136,14 +165,45 @@ pub(crate) fn validate_lengths<T, U>(
 }
 
 #[inline]
-pub(crate) fn validate_multiple(
+pub(crate) fn primitive_vertex_count(
     len: usize,
     k: usize,
     what: &'static str,
-) -> Result<(), Plot3DError> {
-    if len % k != 0 {
-        Err(Plot3DError::NotMultipleOf { len, k, what })
-    } else {
-        Ok(())
+    layout: crate::Plot3DDataLayout,
+    draw_lines: bool,
+) -> Result<i32, Plot3DError> {
+    if len == 0 {
+        return Err(Plot3DError::EmptyData);
+    }
+    if !len.is_multiple_of(k) {
+        return Err(Plot3DError::NotMultipleOf { len, k, what });
+    }
+    // The native triangle and quad wireframe getters double the vertex count.
+    if draw_lines && len > i32::MAX as usize / 2 {
+        return Err(Plot3DError::NativeCountOutOfRange { what });
+    }
+    layout
+        .sample_count(len)
+        .ok_or(Plot3DError::NativeCountOutOfRange { what })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Plot3DDataLayout;
+
+    #[test]
+    fn complete_faces_fit_the_selected_native_renderer() {
+        let layout = Plot3DDataLayout::DEFAULT;
+        assert!(matches!(
+            primitive_vertex_count(4, 3, "triangles", layout, true),
+            Err(Plot3DError::NotMultipleOf { .. })
+        ));
+        let count = (i32::MAX as usize / 2 + 1).next_multiple_of(3);
+        assert!(primitive_vertex_count(count, 3, "triangles", layout, true).is_err());
+        assert_eq!(
+            primitive_vertex_count(count, 3, "triangles", layout, false),
+            Ok(count as i32)
+        );
     }
 }

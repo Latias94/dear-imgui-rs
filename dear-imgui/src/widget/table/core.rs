@@ -109,7 +109,7 @@ impl Ui {
         let column_count = table_column_count_to_i32(column_count);
 
         let should_render = self.run_with_bound_context(|| {
-            self.assert_no_active_table_channel("Ui::begin_table_with_sizing()");
+            self.assert_can_begin_table();
             unsafe {
                 sys::igBeginTable(
                     str_id_ptr,
@@ -250,11 +250,11 @@ impl Ui {
             init_width_or_weight.is_finite(),
             "Ui::table_setup_column_with_indent_and_user_data() width or weight must be finite"
         );
-        let label_ptr = self.scratch_txt(label);
         let raw_flags = flags.bits()
             | width.map_or(0, TableColumnWidth::raw_flags)
             | indent.map_or(0, TableColumnIndent::raw_flags);
         let user_data = user_data.into().get();
+        let label_ptr = self.scratch_txt(label);
         self.run_with_bound_context(|| {
             let table = assert_current_table("Ui::table_setup_column_with_indent_and_user_data()");
             assert!(
@@ -301,12 +301,13 @@ impl Ui {
     ///
     /// # Panics
     ///
-    /// Panics outside a table or while a table draw-channel scope is active.
+    /// Panics outside a table, while a table draw-channel scope is active, or while this cell
+    /// hosts a native extension.
     #[doc(alias = "TableHeadersRow")]
     pub fn table_headers_row(&self) {
         self.run_with_bound_context(|| {
             assert_current_table("Ui::table_headers_row()");
-            self.assert_no_active_table_channel("Ui::table_headers_row()");
+            self.assert_table_cell_can_change("Ui::table_headers_row()");
             unsafe {
                 sys::igTableHeadersRow();
             }
@@ -320,11 +321,11 @@ impl Ui {
     ///
     /// # Panics
     ///
-    /// Panics while a table draw-channel scope is active.
+    /// Panics while a table draw-channel scope is active or this cell hosts a native extension.
     #[doc(alias = "TableNextColumn")]
     pub fn table_next_column(&self) -> bool {
         self.run_with_bound_context(|| {
-            self.assert_no_active_table_channel("Ui::table_next_column()");
+            self.assert_table_cell_can_change("Ui::table_next_column()");
             unsafe { sys::igTableNextColumn() }
         })
     }
@@ -335,14 +336,14 @@ impl Ui {
     ///
     /// # Panics
     ///
-    /// Panics if `column` is outside the current table or while a table draw-channel scope is
-    /// active.
+    /// Panics if `column` is outside the current table, a table draw-channel scope is active,
+    /// or this cell hosts a native extension.
     #[doc(alias = "TableSetColumnIndex")]
     pub fn table_set_column_index(&self, column: impl Into<TableColumnIndex>) -> bool {
         let column = column.into();
         let column_n = column.into_i32("Ui::table_set_column_index()");
         self.run_with_bound_context(|| {
-            self.assert_no_active_table_channel("Ui::table_set_column_index()");
+            self.assert_table_cell_can_change("Ui::table_set_column_index()");
             if let Some(table) = current_table_if_any() {
                 assert_valid_table_column_raw_in(table, column_n, "Ui::table_set_column_index()");
             }
@@ -354,7 +355,8 @@ impl Ui {
     ///
     /// # Panics
     ///
-    /// Panics outside a table or while a table draw-channel scope is active.
+    /// Panics outside a table, while a table draw-channel scope is active, or while this cell
+    /// hosts a native extension.
     #[doc(alias = "TableNextRow")]
     pub fn table_next_row(&self) {
         self.table_next_row_with_flags(TableRowFlags::NONE, 0.0);
@@ -364,8 +366,8 @@ impl Ui {
     ///
     /// # Panics
     ///
-    /// Panics outside a table, while a table draw-channel scope is active, or when
-    /// `min_row_height` is negative or non-finite.
+    /// Panics outside a table, while a table draw-channel scope is active, while this cell
+    /// hosts a native extension, or when `min_row_height` is negative or non-finite.
     pub fn table_next_row_with_flags(&self, flags: TableRowFlags, min_row_height: f32) {
         assert_non_negative_finite_f32(
             "Ui::table_next_row_with_flags()",
@@ -374,7 +376,7 @@ impl Ui {
         );
         self.run_with_bound_context(|| {
             assert_current_table("Ui::table_next_row_with_flags()");
-            self.assert_no_active_table_channel("Ui::table_next_row_with_flags()");
+            self.assert_table_cell_can_change("Ui::table_next_row_with_flags()");
             unsafe { sys::igTableNextRow(flags.bits(), min_row_height) };
         });
     }
@@ -446,7 +448,8 @@ impl Ui {
         })
     }
 
-    /// Return the name of a column by index.
+    /// Return an owned copy of a column's name. It remains valid after further column setup
+    /// and after the table or frame ends.
     ///
     /// Returns an empty string when no table is current.
     ///
@@ -454,22 +457,19 @@ impl Ui {
     ///
     /// Panics when a table is current and the requested/current column is invalid.
     #[doc(alias = "TableGetColumnName")]
-    pub fn table_get_column_name(&self, column: impl Into<TableColumnRef>) -> &str {
+    pub fn table_get_column_name(&self, column: impl Into<TableColumnRef>) -> String {
         let column = column.into();
-        let column_n = match column {
-            TableColumnRef::Current => -1,
-            TableColumnRef::Index(index) => index.into_i32("Ui::table_get_column_name()"),
-        };
         self.run_with_bound_context(|| {
-            if current_table_if_any().is_some() {
-                resolve_table_column(column, "Ui::table_get_column_name()");
-            }
+            let Some(table) = current_table_if_any() else {
+                return String::new();
+            };
+            let column_n = resolve_table_column(table, column, "Ui::table_get_column_name()");
             unsafe {
                 let ptr = sys::igTableGetColumnName_Int(column_n);
                 if ptr.is_null() {
-                    ""
+                    String::new()
                 } else {
-                    CStr::from_ptr(ptr).to_str().unwrap_or("")
+                    CStr::from_ptr(ptr).to_str().unwrap_or("").to_owned()
                 }
             }
         })
@@ -488,22 +488,11 @@ impl Ui {
         column: impl Into<TableColumnRef>,
     ) -> TableColumnStateFlags {
         let column = column.into();
-        let column_n = match column {
-            TableColumnRef::Current => -1,
-            TableColumnRef::Index(index) => index.into_i32("Ui::table_get_column_flags()"),
-        };
         self.run_with_bound_context(|| {
-            if let Some(table) = current_table_if_any() {
-                let column_count = unsafe { (*table).ColumnsCount };
-                let resolved_column = match column {
-                    TableColumnRef::Current => unsafe { (*table).CurrentColumn },
-                    TableColumnRef::Index(_) => column_n,
-                };
-                assert!(
-                    (0..column_count).contains(&resolved_column),
-                    "Ui::table_get_column_flags() column index {resolved_column} is outside the current table column range 0..{column_count}"
-                );
-            }
+            let Some(table) = current_table_if_any() else {
+                return TableColumnStateFlags::empty();
+            };
+            let column_n = resolve_table_column(table, column, "Ui::table_get_column_flags()");
             unsafe { TableColumnStateFlags::from_bits_retain(sys::igTableGetColumnFlags(column_n)) }
         })
     }
@@ -517,13 +506,12 @@ impl Ui {
     #[doc(alias = "TableSetColumnEnabled")]
     pub fn table_set_column_enabled(&self, column: impl Into<TableColumnRef>, enabled: bool) {
         let column = column.into();
-        let column_n = match column {
-            TableColumnRef::Current => -1,
-            TableColumnRef::Index(index) => index.into_i32("Ui::table_set_column_enabled()"),
-        };
         self.run_with_bound_context(|| {
-            assert_current_table_has_flags(TableFlags::HIDEABLE, "Ui::table_set_column_enabled()");
-            resolve_table_column(column, "Ui::table_set_column_enabled()");
+            let table = assert_current_table_has_flags(
+                TableFlags::HIDEABLE,
+                "Ui::table_set_column_enabled()",
+            );
+            let column_n = resolve_table_column(table, column, "Ui::table_set_column_enabled()");
             unsafe { sys::igTableSetColumnEnabled(column_n, enabled) }
         });
     }
@@ -578,13 +566,9 @@ impl Ui {
     #[doc(alias = "TableSetBgColor")]
     pub fn table_set_cell_bg_color_u32(&self, color: u32, column: impl Into<TableColumnRef>) {
         let column = column.into();
-        let column_n = match column {
-            TableColumnRef::Current => -1,
-            TableColumnRef::Index(index) => index.into_i32("Ui::table_set_cell_bg_color_u32()"),
-        };
         self.run_with_bound_context(|| {
-            assert_current_table_row("Ui::table_set_cell_bg_color_u32()");
-            resolve_table_column(column, "Ui::table_set_cell_bg_color_u32()");
+            let table = assert_current_table_row("Ui::table_set_cell_bg_color_u32()");
+            let column_n = resolve_table_column(table, column, "Ui::table_set_cell_bg_color_u32()");
             unsafe { sys::igTableSetBgColor(TableBgTarget::CellBg as i32, color, column_n) }
         });
     }

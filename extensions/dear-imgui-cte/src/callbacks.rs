@@ -82,7 +82,7 @@ type CaretCallback = dyn FnMut(&Ui, CaretEvent);
 type LineNumberCallback = dyn FnMut(&Ui, LineNumberEvent);
 type PopupCallback = dyn FnMut(&Ui, PopupEvent);
 
-pub(crate) type AutocompleteCallback = dyn for<'a> FnMut(&mut crate::AutocompleteRequest<'a>);
+pub(crate) type AutocompleteCallback = dyn FnMut(std::ptr::NonNull<sys::AutoCompleteState>);
 
 pub(crate) struct CallbackSlot<T: ?Sized> {
     invoking: Cell<bool>,

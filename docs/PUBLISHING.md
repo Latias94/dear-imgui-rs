@@ -16,25 +16,25 @@ The repository workflow token defaults to read-only. The protected crates.io job
 
 Preparation intentionally changes the worktree; validation requires the resulting commit to be clean.
 
-Install both the development/publishing toolchain (Rust 1.99.0) and the
+Install both the development/publishing toolchain (Rust 1.100.0) and the
 canonical binding toolchain before preparing or validating a release:
 
 ```bash
-rustup toolchain install 1.99.0 --profile minimal --component rustfmt --component clippy
+rustup toolchain install 1.100.0 --profile minimal --component rustfmt --component clippy
 rustup toolchain install 1.95.0 --profile minimal --component rustfmt
 ```
 
 The binding updater and pre-publication checks explicitly run Rust 1.95.0
 and its rustfmt, independently of the workspace development toolchain or a
 parent `RUSTUP_TOOLCHAIN` setting. Keep the canonical LLVM version available
-through `LIBCLANG_PATH` when regenerating bindings (LLVM 14.0.6 in CI).
+through `LIBCLANG_PATH` when regenerating bindings (LLVM 14.0.0 in Linux CI).
 Install `cargo-nextest`, add the `wasm32-unknown-unknown` target, and activate
-Emscripten 5.0.1 for the packaged WASM-provider gate:
+Emscripten 7.0.1 for the packaged WASM-provider gate:
 
 ```bash
 cargo install cargo-nextest --locked
 rustup target add wasm32-unknown-unknown
-# In an emsdk checkout, install and activate 5.0.1, then load its environment.
+# In an emsdk checkout, install and activate 7.0.1, then load its environment.
 ```
 
 When testing with Rust 1.100 or newer, use cargo-nextest 0.9.143 or newer. Earlier
@@ -46,13 +46,13 @@ The package gate intentionally uses a clean clone and isolated consumers so
 workspace files and previously built libraries cannot hide missing crate inputs.
 
 ```bash
-python3 tools/tasks.py release-prepare 0.22.0
+python3 tools/tasks.py release-prepare 0.23.0
 
 # Review generated bindings, source metadata, Cargo.lock, CHANGELOG.md, and docs.
 git diff
 git add -p
 # Stage reviewed new files explicitly with git add -- <path>.
-git commit -m "chore(release): prepare v0.22.0"
+git commit -m "chore(release): prepare v0.23.0"
 
 python3 tools/tasks.py release-check
 ```
@@ -64,7 +64,7 @@ Before merging, require normal CI to pass on Linux, Windows, and macOS. The root
 Merge the candidate to `main`, then dispatch the release workflow with the matching tag:
 
 ```bash
-gh workflow run release.yml --ref main -f tag=v0.22.0
+gh workflow run release.yml --ref main -f tag=v0.23.0
 ```
 
 The workflow binds the tag to the workspace version and the exact `main` commit before doing any irreversible work. It then:

@@ -149,10 +149,11 @@ fn route_allows_native_viewport_pump(fault_free: bool, native_route_enabled: boo
 fn capture_renderer_frame<'ctx>(
     runtime: &RuntimeRegistration,
     frame: FrameToken<'ctx>,
+    native_viewports: bool,
 ) -> Result<ReconciledFrame<'ctx>, Sdl3BackendError> {
     runtime.control().ensure_bound_entry()?;
     let frame = frame.try_render(runtime.renderer_consumer())?;
-    reconcile_renderer_frame(runtime, frame)
+    reconcile_renderer_frame(runtime, frame, native_viewports)
 }
 
 #[cfg(any(feature = "opengl3-renderer", feature = "sdlgpu3-renderer"))]
@@ -168,7 +169,7 @@ fn pump_platform_windows(
     }
 
     #[cfg(not(feature = "multi-viewport"))]
-    let _ = (frame, enabled);
+    let _ = (runtime, frame, enabled);
 }
 
 #[cfg(any(feature = "opengl3-renderer", feature = "sdlgpu3-renderer"))]
@@ -192,6 +193,7 @@ fn ensure_matching_reconciled_frame(
 fn reconcile_renderer_frame<'ctx>(
     runtime: &RuntimeRegistration,
     frame: PendingFrame<'ctx>,
+    update_viewports_on_retry: bool,
 ) -> Result<ReconciledFrame<'ctx>, Sdl3BackendError> {
     ensure_matching_pending_frame(runtime.control().binding(), &frame)?;
     let request_epoch = frame.epoch().sequence();
@@ -201,7 +203,7 @@ fn reconcile_renderer_frame<'ctx>(
         runtime
             .control()
             .process_texture_requests(frame.texture_requests(), request_epoch)
-    })??;
+    })?;
     let frame = frame.reconcile_texture_feedback(processed.feedback)?;
     runtime
         .control()
@@ -209,6 +211,19 @@ fn reconcile_renderer_frame<'ctx>(
     runtime
         .control()
         .prune_destroyed_textures(frame.completion_progress().watermark());
+    if let Some(error) = processed.error {
+        #[cfg(feature = "multi-viewport")]
+        if update_viewports_on_retry && !runtime.control().has_pending_faults() {
+            // The texture feedback is committed. Finish this frame's platform update so the
+            // next frame can retry uploads. Draw and swap require all textures to be ready.
+            let _dispatch = runtime.control().begin_platform_dispatch();
+            let mut frame = frame;
+            frame.update_platform_windows();
+        }
+        #[cfg(not(feature = "multi-viewport"))]
+        let _ = update_viewports_on_retry;
+        return Err(error);
+    }
     entry.finish()?;
     Ok(frame)
 }
@@ -1360,6 +1375,7 @@ impl Sdl3OpenGl3Backend {
                 match capture_renderer_frame(
                     &self.runtime,
                     frame.take().expect("the route owns one open frame"),
+                    native_viewports_pumped,
                 ) {
                     Ok(captured) => reconciled = Some(captured),
                     Err(error) => faults.push(Sdl3OpenGl3ViewportRouteFault::Backend(error)),
@@ -1537,7 +1553,7 @@ impl_sdl3_event_controls!(SdlGpu3RendererBackend);
 
 #[cfg(feature = "sdlgpu3-renderer")]
 impl SdlGpu3RendererBackend {
-    fn from_initialized_context(runtime: RuntimeRegistration) -> Self {
+    pub(crate) fn from_initialized_context(runtime: RuntimeRegistration) -> Self {
         Self { runtime }
     }
 
@@ -1599,6 +1615,7 @@ impl SdlGpu3RendererBackend {
                 match capture_renderer_frame(
                     &self.runtime,
                     frame.take().expect("the route owns one open frame"),
+                    native_viewports_pumped,
                 ) {
                     Ok(captured) => reconciled = Some(captured),
                     Err(error) => faults.push(error),
@@ -1907,7 +1924,7 @@ impl SdlRenderer3Backend {
         canvas: &WindowCanvas,
     ) -> Result<(), Sdl3BackendError> {
         ensure_matching_sdl_renderer(self.renderer, canvas.raw())?;
-        let frame = reconcile_renderer_frame(&self.runtime, frame)?;
+        let frame = reconcile_renderer_frame(&self.runtime, frame, false)?;
         let entry = self.runtime.control().enter_bound()?;
         self.runtime
             .control()

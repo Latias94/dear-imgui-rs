@@ -300,6 +300,27 @@ pub fn patch_test_engine_cpp_for_presentation_abort(source: &str) -> Result<Stri
     Ok(restore_cpp_newlines(patched, newline))
 }
 
+/// Select the docking suite's upstream field alias for the pre-rename 19301 core.
+pub fn patch_test_engine_docking_cpp_for_visible_tab(
+    source: &str,
+    imgui_internal: &str,
+) -> Result<String, String> {
+    // Both sides of the rename report 19301. The actual ImGuiTabBar declaration
+    // distinguishes them; only the two content-ID reads in docking_tab_state need the alias.
+    if !imgui_internal.contains("VisibleTabId;") || imgui_internal.contains("VisibleTabContentsId;")
+    {
+        return Ok(source.to_owned());
+    }
+    let (source, newline) = normalize_cpp_source(source);
+    let patched = replace_cpp_source_once(
+        &source,
+        "#if IMGUI_VERSION_NUM < 19301\n#define VisibleTabContentsId VisibleTabId",
+        "#if IMGUI_VERSION_NUM <= 19301\n#define VisibleTabContentsId VisibleTabId",
+        "Test Engine docking tab contents alias",
+    )?;
+    Ok(restore_cpp_newlines(patched, newline))
+}
+
 /// Patch Test Engine capture geometry so sentinel rectangles are never converted to integers.
 pub fn patch_test_engine_capture_cpp_for_defined_geometry(source: &str) -> Result<String, String> {
     let (mut patched, newline) = normalize_cpp_source(source);
@@ -1073,32 +1094,28 @@ bool ImGui::DataTypeApplyFromText(const char* buf, ImGuiDataType data_type, void
     Ok(restore_cpp_newlines(patched, newline))
 }
 
-/// Source contract for ImNodes's Dear ImGui 1.93 drawing flags and file handles.
-pub const IMNODES_IMGUI_PATCH_VERSION: &str = "imnodes-imgui-193-v1";
+/// Source contract for ImNodes node layout, file handles, and editor-local INI loading.
+pub const IMNODES_IMGUI_PATCH_VERSION: &str = "imnodes-ini-state-v2";
 
-/// Adapt ImNodes drawing flags and persistence to Dear ImGui's current APIs.
+/// Finalize node bounds, use Dear ImGui file handles, and isolate each editor's INI load.
 ///
 /// Upstream ImNodes currently assigns `ImFileOpen()` to `FILE*` and calls the
 /// C runtime directly. That is incompatible with `IMGUI_DISABLE_FILE_FUNCTIONS`,
 /// where Dear ImGui intentionally defines `ImFileHandle` as an opaque pointer
 /// and provides fail-closed inline file helpers.
 pub fn patch_imnodes_cpp_for_imgui(source: &str) -> Result<String, String> {
-    let (mut patched, newline) = normalize_cpp_source(source);
-
-    for (old, new, expected) in [
-        ("ImDrawFlags_RoundCornersTop", "ImDrawFlags_RoundTop", 1),
-        ("ImDrawFlags_RoundCornersAll", "ImDrawFlags_RoundAll", 2),
-    ] {
-        let count = patched.matches(old).count();
-        if count != expected {
-            return Err(format!(
-                "ImNodes drawing flags: expected exactly {expected} {old} identifiers, found {count}"
-            ));
-        }
-        patched = patched.replace(old, new);
-    }
-
-    patched = replace_cpp_source_once(
+    let (source, newline) = normalize_cpp_source(source);
+    let patched = replace_cpp_source_once(
+        &source,
+        "    // The node's rectangle depends on the ImGui UI group size.\n    ImGui::EndGroup();",
+        r#"    // EndNodeTitleBar moves to the body origin even when there is no body item.
+    const ImGuiWindowTempData& dc = ImGui::GetCurrentWindowRead()->DC;
+    if (dc.IsSetPos && (dc.CursorPos.x > dc.CursorMaxPos.x || dc.CursorPos.y > dc.CursorMaxPos.y))
+        ImGui::Dummy(ImVec2(0.0f, 0.0f));
+    ImGui::EndGroup();"#,
+        "ImNodes node group layout",
+    )?;
+    let patched = replace_cpp_source_once(
         &patched,
         concat!(
             "    size_t      data_size = 0u;\n",
@@ -1112,7 +1129,7 @@ pub fn patch_imnodes_cpp_for_imgui(source: &str) -> Result<String, String> {
         ),
         "ImNodes save-state file handle",
     )?;
-    patched = replace_cpp_source_once(
+    let patched = replace_cpp_source_once(
         &patched,
         concat!(
             "    fwrite(data, sizeof(char), data_size, file);\n",
@@ -1123,6 +1140,99 @@ pub fn patch_imnodes_cpp_for_imgui(source: &str) -> Result<String, String> {
             "    ImFileClose(file);"
         ),
         "ImNodes save-state file operations",
+    )?;
+    let patched = replace_cpp_source_once(
+        &patched,
+        "#include <limits.h>",
+        "#include <errno.h>\n#include <limits.h>",
+        "ImNodes INI integer range check",
+    )?;
+    let patched = replace_cpp_source_once(
+        &patched,
+        r#"void NodeLineHandler(ImNodesEditorContext& editor, const char* const line)
+{
+    int id;
+    int x, y;
+    if (sscanf(line, "[node.%i", &id) == 1)
+    {
+        const int node_idx = ObjectPoolFindOrCreateIndex(editor.Nodes, id);
+        GImNodes->CurrentNodeIdx = node_idx;
+        ImNodeData& node = editor.Nodes.Pool[node_idx];
+        node.Id = id;
+    }
+    else if (sscanf(line, "origin=%i,%i", &x, &y) == 2)
+    {
+        ImNodeData& node = editor.Nodes.Pool[GImNodes->CurrentNodeIdx];
+        node.Origin = SnapOriginToGrid(ImVec2((float)x, (float)y));
+    }
+}"#,
+        r#"int ReadIniNodeHeader(ImNodesEditorContext& editor, const char* line, const char* line_end)
+{
+    const char prefix[] = "[node.";
+    if (strncmp(line, prefix, sizeof(prefix) - 1) != 0 || line_end[-1] != ']')
+        return -1;
+
+    const char* first = line + sizeof(prefix) - 1;
+    char* end = NULL;
+    errno = 0;
+    const long id = strtol(first, &end, 0);
+    if (end == first || end != line_end - 1 || errno == ERANGE || id < INT_MIN || id > INT_MAX)
+        return -1;
+    return ObjectPoolFindOrCreateIndex(editor.Nodes, static_cast<int>(id));
+}"#,
+        "ImNodes INI node section reader",
+    )?;
+    let patched = replace_cpp_source_once(
+        &patched,
+        "    void (*line_handler)(ImNodesEditorContext&, const char*);\n    line_handler = NULL;",
+        r#"    // Node-pool insertion also updates the current editor's depth order.
+    struct RestoreEditor
+    {
+        ImNodesEditorContext* previous;
+        ~RestoreEditor() { EditorContextSet(previous); }
+    } restore_editor{GImNodes->EditorCtx};
+    EditorContextSet(&editor);
+
+    int node_idx = -1;
+    bool editor_section = false;"#,
+        "ImNodes INI load-local editor and section",
+    )?;
+    let patched = replace_cpp_source_once(
+        &patched,
+        r#"        if (line[0] == '[' && line_end[-1] == ']')
+        {
+            line_end[-1] = 0;
+            if (strncmp(line + 1, "node", 4) == 0)
+            {
+                line_handler = NodeLineHandler;
+            }
+            else if (strcmp(line + 1, "editor") == 0)
+            {
+                line_handler = EditorLineHandler;
+            }
+        }
+
+        if (line_handler != NULL)
+        {
+            line_handler(editor, line);
+        }"#,
+        r#"        if (*line == '[')
+        {
+            node_idx = ReadIniNodeHeader(editor, line, line_end);
+            editor_section = static_cast<size_t>(line_end - line) == sizeof("[editor]") - 1 &&
+                             strcmp(line, "[editor]") == 0;
+        }
+        else if (node_idx >= 0)
+        {
+            int x, y;
+            if (sscanf(line, "origin=%i,%i", &x, &y) == 2)
+                editor.Nodes.Pool[node_idx].Origin = SnapOriginToGrid(ImVec2((float)x, (float)y));
+        }
+        else if (editor_section)
+        {
+            EditorLineHandler(editor, line);
+        }"#,
+        "ImNodes INI section dispatch",
     )?;
 
     Ok(restore_cpp_newlines(patched, newline))
@@ -1192,32 +1302,147 @@ pub fn patch_cte_text_editor(source: &str) -> Result<String, String> {
     Ok(restore_cpp_newlines(patched, newline))
 }
 
-/// Source contract for TextDiff's Dear ImGui 1.93 drawing flags.
-pub const CTE_TEXT_DIFF_DRAW_FLAGS_PATCH_VERSION: &str = "cte-text-diff-draw-flags-v1";
+/// Source contract for ImPlot3D rendering and context-owned demo tools.
+pub const IMPLOT3D_DRAW_FLAGS_PATCH_VERSION: &str = "implot3d-draw-flags-v5";
 
-/// Rename the three scrollbar corner flags without enabling obsolete Dear ImGui APIs.
-pub fn patch_cte_text_diff_draw_flags(source: &str) -> Result<String, String> {
-    const OLD: &str = "ImDrawFlags_RoundCornersAll";
-    const NEW: &str = "ImDrawFlags_RoundAll";
-    let count = source.matches(OLD).count();
-    if count != 3 {
-        return Err(format!(
-            "CTE TextDiff drawing flags: expected exactly three {OLD} identifiers, found {count}"
-        ));
-    }
-    Ok(source.replace(OLD, NEW))
+/// Source contract for ImPlot drawing, inspectors and context-owned demo tools.
+pub const IMPLOT_IMGUI_PATCH_VERSION: &str = "implot-imgui-193-v5";
+
+// implot_demo.cpp includes the internal header again next to its custom plotter example.
+// Match the opening include block shared by the core and demo of each library.
+const IMPLOT_TOOL_INCLUDES: &str =
+    "\n#include \"implot.h\"\n#ifndef IMGUI_DISABLE\n#include \"implot_internal.h\"\n";
+const IMPLOT3D_TOOL_INCLUDES: &str =
+    "\n#include \"implot3d.h\"\n#include \"implot3d_internal.h\"\n";
+
+fn add_plot_tool_state(source: &str, includes: &str) -> Result<String, String> {
+    let state = include_str!("plot_demo_state.hpp").replace("\r\n", "\n");
+    replace_cpp_source_once(
+        source,
+        includes,
+        &format!("{includes}{state}"),
+        "plot demo context state",
+    )
 }
 
-/// Source contract for ImPlot3D's Dear ImGui 1.93 flags and line-texture selection.
-pub const IMPLOT3D_DRAW_FLAGS_PATCH_VERSION: &str = "implot3d-draw-flags-v2";
+fn patch_plot_style_reference(source: &str, plot: &str) -> Result<String, String> {
+    let comment = if plot == "ImPlot" {
+        "    // Default to using internal storage as reference\n"
+    } else {
+        ""
+    };
+    let original = format!(
+        "    static {plot}Style ref_saved_style;
+{comment}    static bool init = true;
+    if (init && ref == nullptr)
+        ref_saved_style = style;
+    init = false;"
+    );
+    let replacement = format!(
+        "    auto& tools = DearImGuiRs::{plot}Tools::Get(&gp);
+    if (!tools.reference)
+        tools.reference.emplace(style);
+    auto& ref_saved_style = *tools.reference;"
+    );
+    replace_cpp_source_once(
+        source,
+        &original,
+        &replacement,
+        "plot style editor reference",
+    )
+}
 
-/// Source contract for ImPlot drawing with Dear ImGui 1.93.
-pub const IMPLOT_IMGUI_PATCH_VERSION: &str = "implot-imgui-193-v2";
+fn filter_plot_demo_imgui_tools(source: &str) -> Result<String, String> {
+    // These are the same C entry points used by dear-imgui-rs. Its filtered demo
+    // also routes its own nested metrics and style windows through the safe variants.
+    let mut source = source.to_owned();
+    for (call, filtered) in [
+        (
+            "ImGui::ShowStyleEditor();",
+            "dear_imgui_rs_show_style_editor_without_font_atlas(nullptr);",
+        ),
+        (
+            "ImGui::ShowMetricsWindow(&show_imgui_metrics);",
+            "dear_imgui_rs_show_metrics_window_without_font_atlas(&show_imgui_metrics);",
+        ),
+        (
+            "ImGui::ShowDemoWindow(&show_imgui_demo);",
+            "dear_imgui_rs_show_demo_window_without_font_atlas(&show_imgui_demo);",
+        ),
+    ] {
+        source = replace_cpp_source_once(&source, call, filtered, "plot demo ImGui tool")?;
+    }
+    Ok(source)
+}
 
-/// Adapt ImPlot line textures, rectangle bounds, and demo coordinates to Dear ImGui 1.93.
+/// Adapt ImPlot rendering and establish the plot ID scope for item visibility queries.
 pub fn patch_implot_cpp_for_imgui(source: &str, file_name: &str) -> Result<String, String> {
     let (source, newline) = normalize_cpp_source(source);
+    if file_name == "implot.cpp" {
+        let source = add_plot_tool_state(&source, IMPLOT_TOOL_INCLUDES)?;
+        let source = replace_cpp_source_once(
+            &source,
+            "    IM_DELETE(ctx);",
+            "    DearImGuiRs::ImPlotTools::Forget(ctx);\n    IM_DELETE(ctx);",
+            "ImPlot tool state destruction",
+        )?;
+        let source = patch_plot_style_reference(&source, "ImPlot")?;
+        let source = replace_cpp_source_once(
+            &source,
+            r#"ImGui::Text(x_axis.HasLabel() ? plot.GetAxisLabel(x_axis) :  i == 0 ? "X-Axis" : "X-Axis %d", i + 1);"#,
+            r#"if (x_axis.HasLabel())
+                ImGui::TextUnformatted(plot.GetAxisLabel(x_axis));
+            else
+                ImGui::Text(i == 0 ? "X-Axis" : "X-Axis %d", i + 1);"#,
+            "ImPlot X-axis context menu heading",
+        )?;
+        let source = replace_cpp_source_once(
+            &source,
+            r#"ImGui::Text(y_axis.HasLabel() ? plot.GetAxisLabel(y_axis) : i == 0 ? "Y-Axis" : "Y-Axis %d", i + 1);"#,
+            r#"if (y_axis.HasLabel())
+                ImGui::TextUnformatted(plot.GetAxisLabel(y_axis));
+            else
+                ImGui::Text(i == 0 ? "Y-Axis" : "Y-Axis %d", i + 1);"#,
+            "ImPlot Y-axis context menu heading",
+        )?;
+        // The inspector may display a cached plot after its pool has moved. Read an ID only
+        // from an axis in the live plot, not through the address saved during layout.
+        let source = replace_cpp_source_once(
+            &source,
+            r#"ImGui::BulletText(axis.OrthoAxis == nullptr ? "OrthoAxis: NULL" : "OrthoAxis: 0x%08X", axis.OrthoAxis->ID);"#,
+            r#"const ImPlotAxis* ortho = nullptr;
+    for (const ImPlotAxis& candidate : plot.Axes)
+        if (&candidate == axis.OrthoAxis)
+            ortho = &candidate;
+    if (ortho)
+        ImGui::BulletText("OrthoAxis: 0x%08X", ortho->ID);
+    else
+        ImGui::BulletText("OrthoAxis: %s", axis.OrthoAxis ? "unavailable" : "NULL");"#,
+            "ImPlot cached axis metrics",
+        )?;
+        return Ok(restore_cpp_newlines(source, newline));
+    }
     if file_name == "implot_demo.cpp" {
+        let source = add_plot_tool_state(&source, IMPLOT_TOOL_INCLUDES)?;
+        let source = filter_plot_demo_imgui_tools(&source)?;
+        let source = replace_cpp_source_once(
+            &source,
+            "static ImPlotColormap Liars = -1;",
+            "ImPlotColormap Liars = ImPlot::GetColormapIndex(\"Liars\");",
+            "stacked bar demo colormap registration",
+        )?;
+        let source = replace_cpp_source_once(
+            &source,
+            "static ImPlotColormap map = ImPlotColormap_Viridis;",
+            "auto& map = DearImGuiRs::ImPlotTools::Get(ImPlot::GetCurrentContext()).heatmap_colormap;",
+            "heatmap demo colormap selection",
+        )?;
+        let source = replace_cpp_source_once(
+            &source,
+            "static int cmap = ImPlotColormap_Viridis;",
+            "auto& cmap = DearImGuiRs::ImPlotTools::Get(ImPlot::GetCurrentContext()).widget_colormap;",
+            "colormap widget demo selection",
+        )?;
         let source = replace_cpp_source_once(
             &source,
             "ImPlot::AddLineV(draw_list, (float)xs[i], (float)lows[i], (float)highs[i], color);",
@@ -1272,6 +1497,19 @@ pub fn patch_implot_cpp_for_imgui(source: &str, file_name: &str) -> Result<Strin
         "ImPlot line texture selection",
     )?;
     let patched = patch_plot_line_coverage(&patched, false)?;
+    // SetupFinish pushes the plot's item ID seed. A lookup before the first item
+    // needs the same seed as item submission; a shared subplot group can exist on its own.
+    let patched = replace_cpp_source_once(
+        &patched,
+        "    ImPlotItem* item = GetItem(label_id);\n    return item != nullptr && !item->Show;",
+        concat!(
+            "    if (GImPlot->CurrentPlot != nullptr)\n",
+            "        SetupLock();\n",
+            "    ImPlotItem* item = GetItem(label_id);\n",
+            "    return item != nullptr && !item->Show;"
+        ),
+        "ImPlot item visibility lookup before first submission",
+    )?;
     let patched = replace_cpp_source_once(
         &patched,
         "draw_list.AddRectFilled(a, b, col);",
@@ -1287,95 +1525,84 @@ pub fn patch_implot_cpp_for_imgui(source: &str, file_name: &str) -> Result<Strin
     Ok(restore_cpp_newlines(patched, newline))
 }
 
-/// Stage an ImPlot3D implementation and its internal header without changing upstream files.
-///
-/// Native and WebAssembly builds share this exact adaptation. The line renderer delegates
-/// atlas selection and anti-alias fringe calculation to Dear ImGui's current implementation.
+/// Stage ImPlot3D's drawing, inspectors and demo tools for native and WASM.
 pub fn stage_implot3d_draw_flags(
     source_path: &std::path::Path,
     out_dir: &std::path::Path,
 ) -> Result<std::path::PathBuf, String> {
-    const HEADER: &str = "implot3d-imgui-193-internal.h";
     let file_name = source_path
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| format!("invalid ImPlot3D source path {}", source_path.display()))?;
-    if !matches!(
-        file_name,
-        "implot3d.cpp" | "implot3d_items.cpp" | "implot3d_demo.cpp"
-    ) {
-        return Err(format!("unsupported ImPlot3D source {file_name}"));
-    }
-    let header_path = source_path.with_file_name("implot3d_internal.h");
-    let header = std::fs::read_to_string(&header_path)
-        .map_err(|error| format!("read {}: {error}", header_path.display()))?;
-    let header = replace_cpp_source_once(
-        &header,
-        "ImDrawListFlags _Flags;",
-        "ImDrawFlags _Flags;",
-        "ImPlot3D internal draw flags type",
-    )?;
-    let header = replace_cpp_source_once(
-        &header,
-        "ImDrawListFlags_None",
-        "ImDrawFlags_None",
-        "ImPlot3D internal draw flags initializer",
-    )?;
     let source = std::fs::read_to_string(source_path)
         .map_err(|error| format!("read {}: {error}", source_path.display()))?;
     let (source, newline) = normalize_cpp_source(&source);
-    let mut source = replace_cpp_source_once(
-        &source,
-        "#include \"implot3d_internal.h\"",
-        &format!("#include \"{HEADER}\""),
-        "ImPlot3D internal header include",
-    )?;
-    if file_name == "implot3d.cpp" {
-        source = replace_cpp_source_once(
-            &source,
-            "legend.Hovered = legend.Hovered || legend.RectClamped.Contains(IO.MousePos);",
-            "legend.Hovered = legend.Hovered || (ImGui::IsWindowHovered() && legend.RectClamped.Contains(IO.MousePos));",
-            "ImPlot3D legend window hover ownership",
-        )?;
-    }
-    if file_name == "implot3d_items.cpp" {
-        const ORIGINAL: &str = r#"IMPLOT3D_INLINE void GetLineRenderProps(const ImDrawList3D& draw_list_3d, float& half_weight, ImVec2& tex_uv0, ImVec2& tex_uv1) {
-    const bool aa = ImPlot3D::ImHasFlag(draw_list_3d._Flags, ImDrawListFlags_AntiAliasedLines) &&
-                    ImPlot3D::ImHasFlag(draw_list_3d._Flags, ImDrawListFlags_AntiAliasedLinesUseTex);
-    if (aa) {
-        ImVec4 tex_uvs = draw_list_3d._SharedData->TexUvLines[(int)(half_weight * 2)];
-        tex_uv0 = ImVec2(tex_uvs.x, tex_uvs.y);
-        tex_uv1 = ImVec2(tex_uvs.z, tex_uvs.w);
-        half_weight += 1;
-    } else {
-        tex_uv0 = tex_uv1 = draw_list_3d._SharedData->TexUvWhitePixel;
-    }
-}"#;
-        const REPLACEMENT: &str = r#"IMPLOT3D_INLINE float GetLineRenderProps(const ImDrawList3D& draw_list_3d, float& half_weight, ImVec2& tex_uv0, ImVec2& tex_uv1) {
-    ImDrawList* owner = ImGui::GetWindowDrawList();
-    const float coverage = ImMin(1.0f, 2.0f * half_weight * owner->_InvFringeScale);
-    const float thickness = ImMax(2.0f * half_weight, owner->_FringeScale);
-    const float screen_thickness = ImMax(1.0f, thickness * owner->_InvFringeScale);
-    float fringe = 0.0f;
-    owner->_SelectLineTexture(screen_thickness, &tex_uv0, &tex_uv1, &fringe, draw_list_3d._Flags);
-    half_weight = (thickness + fringe) * 0.5f;
-    return coverage;
-}"#;
-        source = replace_cpp_source_once(
-            &source,
-            ORIGINAL,
-            REPLACEMENT,
-            "ImPlot3D line texture selection",
-        )?;
-        source = patch_plot_line_coverage(&source, true)?;
-    }
+    let patched = match file_name {
+        "implot3d.cpp" => {
+            let source = add_plot_tool_state(&source, IMPLOT3D_TOOL_INCLUDES)?;
+            let source = replace_cpp_source_once(
+                &source,
+                "    IM_DELETE(ctx);",
+                "    DearImGuiRs::ImPlot3DTools::Forget(ctx);\n    IM_DELETE(ctx);",
+                "ImPlot3D tool state destruction",
+            )?;
+            let source = replace_cpp_source_once(
+                &source,
+                "legend.Hovered = legend.Hovered || legend.RectClamped.Contains(IO.MousePos);",
+                "legend.Hovered = legend.Hovered || (ImGui::IsWindowHovered() && legend.RectClamped.Contains(IO.MousePos));",
+                "ImPlot3D legend window hover ownership",
+            )?;
+            replace_cpp_source_once(
+                &source,
+                r#"ImGui::Text(axis.HasLabel() ? axis.GetLabel() : "%c-Axis", 'X' + i);"#,
+                "ImGui::TextUnformatted(axis.HasLabel() ? axis.GetLabel() : axis_labels[i]);",
+                "ImPlot3D literal axis menu label",
+            )?
+        }
+        "implot3d_items.cpp" => {
+            // Upstream selects the correct parent's atlas and supplies the fringe. Match the
+            // core primitive's minimum logical width and convert to device pixels for selection.
+            let source = replace_cpp_source_once(
+                &source,
+                "const float screen_thickness = half_weight * 2.0f; // callers clamp weight to >= 1, so screen_thickness >= 1",
+                "half_weight = ImMax(half_weight, 0.5f * draw_list_3d._ParentDrawList->_FringeScale);\n    const float screen_thickness = ImMax(1.0f, 2.0f * half_weight * draw_list_3d._ParentDrawList->_InvFringeScale);",
+                "ImPlot3D device-pixel line width",
+            )?;
+            patch_plot_line_coverage(&source, true)?
+        }
+        "implot3d_demo.cpp" => {
+            let source = add_plot_tool_state(&source, IMPLOT3D_TOOL_INCLUDES)?;
+            let source = filter_plot_demo_imgui_tools(&source)?;
+            let source = patch_plot_style_reference(&source, "ImPlot3D")?;
+            let source = replace_cpp_source_once(
+                &source,
+                "    static float flash_color_time = 0.5f;
+    static ImPlot3DCol flash_color_idx = ImPlot3DCol_COUNT;
+    static ImVec4 flash_color_backup = ImVec4(0, 0, 0, 0);",
+                "    auto& flash_color_time = tools.flash_color_time;
+    auto& flash_color_idx = tools.flash_color_idx;
+    auto& flash_color_backup = tools.flash_color_backup;",
+                "ImPlot3D style color preview",
+            )?;
+            let source = replace_cpp_source_once(
+                &source,
+                "static int sel_colormap = 5; // Jet by default",
+                "auto& sel_colormap = DearImGuiRs::ImPlot3DTools::Get(ImPlot3D::GetCurrentContext()).surface_colormap;",
+                "ImPlot3D surface demo colormap selection",
+            )?;
+            replace_cpp_source_once(
+                &source,
+                "static ImPlot3DColormap cmap = ImPlot3DColormap_Viridis;",
+                "auto& cmap = DearImGuiRs::ImPlot3DTools::Get(ImPlot3D::GetCurrentContext()).marker_colormap;",
+                "ImPlot3D per-point color demo selection",
+            )?
+        }
+        _ => return Err(format!("unsupported ImPlot3D source {file_name}")),
+    };
     std::fs::create_dir_all(out_dir)
         .map_err(|error| format!("create {}: {error}", out_dir.display()))?;
-    let staged_header = out_dir.join(HEADER);
-    std::fs::write(&staged_header, header)
-        .map_err(|error| format!("write {}: {error}", staged_header.display()))?;
     let output = out_dir.join(format!("imgui-193-{file_name}"));
-    std::fs::write(&output, restore_cpp_newlines(source, newline))
+    std::fs::write(&output, restore_cpp_newlines(patched, newline))
         .map_err(|error| format!("write {}: {error}", output.display()))?;
     Ok(output)
 }
@@ -1384,7 +1611,7 @@ pub fn stage_implot3d_draw_flags(
 fn patch_plot_line_coverage(source: &str, three_dimensional: bool) -> Result<String, String> {
     // Core's alpha helper is private to imgui_draw.cpp; preserve its integer rounding here.
     let signature = if three_dimensional {
-        "IMPLOT3D_INLINE float GetLineRenderProps("
+        "IMPLOT3D_INLINE void GetLineRenderProps("
     } else {
         "IMPLOT_INLINE float GetLineRenderProps("
     };
@@ -1400,7 +1627,7 @@ fn patch_plot_line_coverage(source: &str, three_dimensional: bool) -> Result<Str
         &[
             (
                 "GetLineRenderProps(draw_list_3d, HalfWeight, UV0, UV1);",
-                "LineCoverage = GetLineRenderProps(draw_list_3d, HalfWeight, UV0, UV1);",
+                "LineCoverage = ImMin(1.0f, 2.0f * HalfWeight * draw_list_3d._ParentDrawList->_InvFringeScale); GetLineRenderProps(draw_list_3d, HalfWeight, UV0, UV1);",
                 4,
             ),
             (
@@ -1465,6 +1692,39 @@ fn patch_plot_line_coverage(source: &str, three_dimensional: bool) -> Result<Str
     Ok(patched)
 }
 
+/// Native and WASM contract for handing ImGuizmo interactions between ImGui contexts.
+pub const IMGUIZMO_INTERACTION_PATCH_VERSION: &str = "imguizmo-interaction-v1";
+
+pub fn patch_imguizmo_cpp(source: &str) -> Result<String, String> {
+    let (source, newline) = normalize_cpp_source(source);
+    let source = replace_cpp_source_once(
+        &source,
+        "ImGuiWindow* window = ImGui::FindWindowByName(gContext.mDrawList->_OwnerName);",
+        "const char* owner = gContext.mDrawList->_OwnerName;\n      ImGuiWindow* window = owner ? ImGui::FindWindowByName(owner) : nullptr;\n      if (window && window->DrawList != gContext.mDrawList)\n         window = nullptr; // A viewport layer can share a debug name with a window.",
+        "ImGuizmo draw list hover owner",
+    )?;
+    let source = replace_cpp_source_once(
+        &source,
+        "int mInterpolationFrames = 0;",
+        "int mInterpolationFrames = 0;\n      int mClickedBox = -1;",
+        "ImGuizmo per-ID view state",
+    )?;
+    let source = replace_cpp_source_once(
+        &source,
+        "static int overBox = -1;",
+        "int& overBox = vms.mClickedBox;",
+        "ImGuizmo view manipulator clicked face",
+    )?;
+    let mut source = replace_cpp_source_once(
+        &source,
+        "if (!gContext.mIsOrthographic && camSpacePosition.z < 0.001f && !gContext.mbUsing)\n      {\n         return false;",
+        "if (!gContext.mIsOrthographic && camSpacePosition.z < 0.001f && !gContext.mbUsing)\n      {\n         gContext.mDrawList->PopClipRect();\n         return false;",
+        "ImGuizmo culled manipulation clip rectangle",
+    )?;
+    source.push_str("\n#include \"imguizmo_reset.inc\"\n");
+    Ok(restore_cpp_newlines(source, newline))
+}
+
 fn normalize_cpp_source(source: &str) -> (String, &'static str) {
     let newline = if source.contains("\r\n") {
         "\r\n"
@@ -1500,12 +1760,25 @@ fn replace_cpp_source_once(
 #[cfg(test)]
 mod tests {
     use super::{
-        patch_cte_text_diff_draw_flags, patch_cte_text_editor, patch_imgui_cpp_for_safe_demo,
-        patch_imgui_demo_cpp_for_safe_demo,
+        patch_cte_text_editor, patch_imgui_cpp_for_safe_demo, patch_imgui_demo_cpp_for_safe_demo,
         patch_imgui_widgets_cpp_for_defined_numeric_conversions, patch_imnodes_cpp_for_imgui,
         patch_implot_cpp_for_imgui, patch_test_engine_capture_cpp_for_defined_geometry,
         patch_test_engine_cpp_for_presentation_abort, stage_implot3d_draw_flags,
     };
+
+    #[test]
+    fn imguizmo_interaction_patch_matches_upstream_and_rejects_drift() {
+        let source = include_str!(concat!(
+            "../../../extensions/dear-imguizmo-sys/third-party/cimguizmo/",
+            "ImGuizmo/src/ImGuizmo.cpp"
+        ));
+        let patched = super::patch_imguizmo_cpp(source).unwrap();
+        assert!(patched.contains("int& overBox = vms.mClickedBox;"));
+        assert!(patched.contains("#include \"imguizmo_reset.inc\""));
+        assert!(super::patch_imguizmo_cpp(&patched).is_err());
+        let drifted = source.replace("camSpacePosition.z < 0.001f", "camSpacePosition.z <= 0.f");
+        assert!(super::patch_imguizmo_cpp(&drifted).is_err());
+    }
 
     #[test]
     fn implot_line_texture_patch_matches_upstream_and_rejects_drift() {
@@ -1549,6 +1822,13 @@ mod tests {
                 .contains("AddRectFilled(ImMin(open_pos, close_pos), ImMax(open_pos, close_pos),")
         );
         assert!(patch_implot_cpp_for_imgui(&patched_demo, "implot_demo.cpp").is_err());
+        // The custom plotter's later include cannot supply declarations to the earlier demos.
+        let missing_opening_include = demo.replacen(
+            "#include \"implot_internal.h\"",
+            "// #include \"implot_internal.h\"",
+            1,
+        );
+        assert!(patch_implot_cpp_for_imgui(&missing_opening_include, "implot_demo.cpp").is_err());
         let drifted_demo = demo.replacen(
             "draw_list->AddRectFilled(open_pos, close_pos, color);",
             "ChangedDrawRect();",
@@ -1562,80 +1842,37 @@ mod tests {
         let source_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../extensions/dear-implot3d-sys/third-party/cimplot3d/implot3d");
         let output = tempfile::tempdir().unwrap();
-        for name in ["implot3d.cpp", "implot3d_items.cpp", "implot3d_demo.cpp"] {
-            let source = source_root.join(name);
-            let staged = stage_implot3d_draw_flags(&source, output.path()).unwrap();
+        for (name, expected, marker) in [
+            (
+                "implot3d.cpp",
+                "ImGui::IsWindowHovered() && legend.RectClamped.Contains(IO.MousePos)",
+                "legend.Hovered || legend.RectClamped",
+            ),
+            (
+                "implot3d.cpp",
+                "ImGui::TextUnformatted(axis.HasLabel() ? axis.GetLabel() : axis_labels[i]);",
+                "ImGui::Text(axis.HasLabel()",
+            ),
+            (
+                "implot3d_items.cpp",
+                "ApplyLineCoverage(ColGetter(prim), LineCoverage)",
+                "const float screen_thickness = half_weight * 2.0f;",
+            ),
+            (
+                "implot3d_demo.cpp",
+                "auto& flash_color_backup = tools.flash_color_backup;",
+                "static ImVec4 flash_color_backup =",
+            ),
+        ] {
+            let path = source_root.join(name);
+            let staged = stage_implot3d_draw_flags(&path, output.path()).unwrap();
             let patched = std::fs::read_to_string(staged).unwrap();
-            assert!(patched.contains("#include \"implot3d-imgui-193-internal.h\""));
-            if name == "implot3d_items.cpp" {
-                assert!(patched.contains("owner->_SelectLineTexture(screen_thickness,"));
-                assert_eq!(
-                    patched
-                        .matches("ApplyLineCoverage(ColGetter(prim), LineCoverage)")
-                        .count(),
-                    3
-                );
-                assert!(patched.contains("ApplyLineCoverage(col, LineCoverage)"));
-                assert!(!patched.contains("TexUvLines[(int)(half_weight * 2)]"));
-                assert!(!patched.contains("ImDrawListFlags_"));
-            }
-            if name == "implot3d.cpp" {
-                assert!(patched.contains(
-                    "ImGui::IsWindowHovered() && legend.RectClamped.Contains(IO.MousePos)"
-                ));
-            }
+            assert!(patched.contains(expected));
+            let drifted = output.path().join(name);
+            let source = std::fs::read_to_string(path).unwrap();
+            std::fs::write(&drifted, source.replace(marker, "changed")).unwrap();
+            assert!(stage_implot3d_draw_flags(&drifted, output.path()).is_err());
         }
-        let header =
-            std::fs::read_to_string(output.path().join("implot3d-imgui-193-internal.h")).unwrap();
-        assert!(header.contains("ImDrawFlags _Flags;"));
-        assert!(!header.contains("ImDrawListFlags"));
-
-        let drift = tempfile::tempdir().unwrap();
-        let header = std::fs::read_to_string(source_root.join("implot3d_internal.h")).unwrap();
-        let source = std::fs::read_to_string(source_root.join("implot3d_items.cpp")).unwrap();
-        let drift_source = drift.path().join("implot3d_items.cpp");
-        let drift_header = drift.path().join("implot3d_internal.h");
-        std::fs::write(&drift_source, &source).unwrap();
-        std::fs::write(
-            &drift_header,
-            header.replace("ImDrawListFlags _Flags;", "int _Flags;"),
-        )
-        .unwrap();
-        assert!(stage_implot3d_draw_flags(&drift_source, output.path()).is_err());
-        std::fs::write(&drift_header, &header).unwrap();
-        std::fs::write(
-            &drift_source,
-            source.replace("half_weight += 1;", "half_weight += 2;"),
-        )
-        .unwrap();
-        assert!(stage_implot3d_draw_flags(&drift_source, output.path()).is_err());
-        std::fs::write(
-            &drift_source,
-            source.replace("#include \"implot3d_internal.h\"", "#include \"changed.h\""),
-        )
-        .unwrap();
-        assert!(stage_implot3d_draw_flags(&drift_source, output.path()).is_err());
-    }
-
-    #[test]
-    fn cte_text_diff_draw_flags_patch_matches_upstream_and_rejects_drift() {
-        let source = include_str!(concat!(
-            "../../../extensions/dear-imgui-cte-sys/third-party/cimCTE/",
-            "ImGuiColorTextEdit/TextDiff.cpp"
-        ));
-        let patched = patch_cte_text_diff_draw_flags(source).unwrap();
-        assert_eq!(patched.matches("ImDrawFlags_RoundAll").count(), 3);
-        assert!(!patched.contains("ImDrawFlags_RoundCornersAll"));
-        assert!(patch_cte_text_diff_draw_flags(&patched).is_err());
-        let drifted = source.replacen("ImDrawFlags_RoundCornersAll", "ImDrawFlags_RoundNone", 1);
-        assert!(patch_cte_text_diff_draw_flags(&drifted).is_err());
-        let crlf = source.replace("\r\n", "\n").replace('\n', "\r\n");
-        assert_eq!(
-            patch_cte_text_diff_draw_flags(&crlf)
-                .unwrap()
-                .replace("\r\n", "\n"),
-            patched.replace("\r\n", "\n")
-        );
     }
 
     #[test]
@@ -1908,11 +2145,8 @@ mod tests {
         assert!(!patched.contains("FILE*       file = ImFileOpen(file_name, \"wt\");"));
         assert!(!patched.contains("fwrite(data, sizeof(char), data_size, file);"));
         assert!(!patched.contains("fclose(file);"));
-        assert!(!patched.contains("ImDrawFlags_RoundCorners"));
-        assert_eq!(patched.matches("ImDrawFlags_RoundTop").count(), 1);
-        assert_eq!(patched.matches("ImDrawFlags_RoundAll").count(), 2);
         assert!(patch_imnodes_cpp_for_imgui(&patched).is_err());
-        let drifted = source.replacen("ImDrawFlags_RoundCornersTop", "ImDrawFlags_RoundNone", 1);
+        let drifted = source.replace("fwrite(data, sizeof(char), data_size, file);", "");
         assert!(patch_imnodes_cpp_for_imgui(&drifted).is_err());
     }
 

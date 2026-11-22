@@ -11,6 +11,7 @@ use crate::sys;
 mod registry;
 
 use registry::ClipperHandle;
+pub(crate) use registry::drain_finished as drain_finished_clippers;
 
 fn items_count_to_i32(items_count: usize, caller: &str) -> i32 {
     i32::try_from(items_count)
@@ -154,22 +155,22 @@ impl<'ui> ActiveListClipper<'ui> {
 
     fn include_items_by_index(&mut self, item_begin: i32, item_end: i32, caller: &str) {
         self.ui.run_with_bound_context(|| unsafe {
-            let ptr = registry::assert_current(self.ui, self.handle, caller);
+            let ptr = registry::assert_can_modify(self.ui, self.handle, caller);
             sys::ImGuiListClipper_IncludeItemsByIndex(ptr, item_begin, item_end);
         });
     }
 
     fn step(&mut self, caller: &str) -> bool {
-        self.stepped = true;
         let has_range = self.ui.run_with_bound_context(|| unsafe {
-            let ptr = registry::assert_current(self.ui, self.handle, caller);
+            let ptr = registry::assert_can_seek(self.ui, self.handle, caller);
             sys::ImGuiListClipper_Step(ptr)
         });
+        self.stepped = true;
         if !has_range {
             self.ended = true;
             if !self.retain_registration_after_exhaustion {
                 self.ui.run_with_bound_context(|| unsafe {
-                    registry::complete(self.ui, self.handle);
+                    registry::release(self.ui, self.handle);
                 });
                 self.registered = false;
             }
@@ -180,12 +181,12 @@ impl<'ui> ActiveListClipper<'ui> {
     fn end(&mut self, caller: &str) {
         if !self.ended {
             self.ui.run_with_bound_context(|| unsafe {
-                let ptr = registry::assert_current(self.ui, self.handle, caller);
+                let ptr = registry::assert_can_seek(self.ui, self.handle, caller);
                 sys::ImGuiListClipper_End(ptr);
             });
             self.ended = true;
             self.ui.run_with_bound_context(|| unsafe {
-                registry::complete(self.ui, self.handle);
+                registry::release(self.ui, self.handle);
             });
             self.registered = false;
         }
@@ -208,14 +209,11 @@ impl<'ui> ActiveListClipper<'ui> {
 
 impl Drop for ActiveListClipper<'_> {
     fn drop(&mut self) {
-        let binding = self.ui.ctx_binding.clone();
-        let _ = binding.try_with_bound_context(|| unsafe {
-            if self.registered {
+        if self.registered {
+            let _ = self.ui.ctx_binding.try_with_bound_context(|| unsafe {
                 registry::release(self.ui, self.handle);
-            } else {
-                sys::ImGuiListClipper_destroy(self.handle.ptr());
-            }
-        });
+            });
+        }
     }
 }
 
@@ -228,6 +226,8 @@ impl Drop for ActiveListClipper<'_> {
 /// Nested clippers must be operated in LIFO order and from the same window and table scope where
 /// they began. Dropping tokens out of order is supported; native cleanup is deferred until all
 /// clippers above the dropped token have exited.
+/// A clipper opened in a [`crate::NativeWindowScope`] callback must finish there. The callback
+/// releases any remaining clippers on return or unwind. Enclosing clippers can resume afterward.
 pub struct ListClipperToken<'ui> {
     active: ActiveListClipper<'ui>,
     items_count: usize,
@@ -435,7 +435,7 @@ impl UnknownCountListClipperToken<'_> {
             "UnknownCountListClipperToken::finish() could not determine a positive item height"
         );
         self.active.ui.run_with_bound_context(|| unsafe {
-            let ptr = registry::assert_current(
+            let ptr = registry::assert_can_seek(
                 self.active.ui,
                 self.active.handle,
                 "UnknownCountListClipperToken::finish()",
@@ -707,8 +707,10 @@ mod tests {
             let visible = clipper
                 .next_range()
                 .expect("measuring the first item should produce the visible range");
-            let raw = clipper.active.handle.ptr();
-            let measured_height = unsafe { (*raw).ItemsHeight };
+            let (start_y, measured_height) = ui.with_bound_context(|| unsafe {
+                let raw = &*registry::assert_current(ui, clipper.active.handle, "measured clipper");
+                (raw.StartPosY + raw.StartSeekOffsetY, raw.ItemsHeight)
+            });
             assert!(measured_height.is_finite() && measured_height > 0.0);
             for index in visible {
                 if index >= 5 {
@@ -716,10 +718,7 @@ mod tests {
                 }
                 ui.dummy([1.0, 10.0]);
             }
-            let expected_y = unsafe {
-                ((*raw).StartPosY + (*raw).StartSeekOffsetY + 5.0 * f64::from(measured_height))
-                    as f32
-            };
+            let expected_y = (start_y + 5.0 * f64::from(measured_height)) as f32;
 
             clipper.finish(5);
             assert!((ui.cursor_screen_pos()[1] - expected_y).abs() < 0.01);

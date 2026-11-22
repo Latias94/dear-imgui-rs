@@ -34,7 +34,7 @@ fn run_inner(_argc: c_int, _argv: *mut *mut c_char) -> Result<c_int, Box<dyn std
         ..wgpu::InstanceDescriptor::new_without_display_handle()
     });
 
-    let surface = create_surface::create_surface(&instance, &window)
+    let surface = create_surface(&instance, &window)
         .map_err(|err| format!("failed to create WGPU surface from SDL3 window: {err}"))?;
 
     let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -328,34 +328,14 @@ pub extern "C" fn dear_imgui_ios_sdl3_smoke_main(argc: c_int, argv: *mut *mut c_
     }
 }
 
-mod create_surface {
-    use crate::wgpu;
-    use sdl3::video::Window;
-    use wgpu::rwh::{HasDisplayHandle, HasWindowHandle};
-
-    struct SyncWindow<'a>(&'a Window);
-
-    unsafe impl<'a> Send for SyncWindow<'a> {}
-    unsafe impl<'a> Sync for SyncWindow<'a> {}
-
-    impl<'a> HasWindowHandle for SyncWindow<'a> {
-        fn window_handle(&self) -> Result<wgpu::rwh::WindowHandle<'_>, wgpu::rwh::HandleError> {
-            self.0.window_handle()
-        }
-    }
-
-    impl<'a> HasDisplayHandle for SyncWindow<'a> {
-        fn display_handle(&self) -> Result<wgpu::rwh::DisplayHandle<'_>, wgpu::rwh::HandleError> {
-            self.0.display_handle()
-        }
-    }
-
-    pub fn create_surface<'a>(
-        instance: &wgpu::Instance,
-        window: &'a Window,
-    ) -> Result<wgpu::Surface<'a>, String> {
-        instance
-            .create_surface(SyncWindow(window))
-            .map_err(|err| err.to_string())
+fn create_surface<'window>(
+    instance: &wgpu::Instance,
+    window: &'window sdl3::video::Window,
+) -> Result<wgpu::Surface<'window>, Box<dyn std::error::Error>> {
+    // SAFETY: Both handles are read on the SDL thread. The returned surface borrows
+    // the window, which keeps the native window and display alive until surface drop.
+    unsafe {
+        let target = wgpu::SurfaceTargetUnsafe::from_display_and_window(window, window)?;
+        Ok(instance.create_surface_unsafe(target)?)
     }
 }

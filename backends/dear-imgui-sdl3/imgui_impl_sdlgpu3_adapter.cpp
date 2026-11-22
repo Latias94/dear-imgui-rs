@@ -13,6 +13,47 @@
 
 namespace {
 
+// Keep the upstream reusable transfer buffer. Publish its new capacity only after allocation
+// succeeds, and acknowledge the request only once SDL accepts the upload command buffer.
+bool upload_texture_region(ImGui_ImplSDLGPU3_Data& bd, ImTextureData& tex, SDL_GPUTextureRegion region) {
+    SDL_GPUDevice* device = bd.InitInfo.Device;
+    const Uint32 pitch = region.w * tex.BytesPerPixel;
+    const Uint32 bytes = pitch * region.h; // Rust validates the entire CPU image fits in i32.
+    // DestroyDeviceObjects releases the transfer buffer but keeps its previous capacity.
+    if (!bd.TexTransferBuffer || bd.TexTransferBufferSize < bytes) {
+        SDL_GPUTransferBufferCreateInfo info = {};
+        info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+        info.size = bytes + 1024;
+        SDL_GPUTransferBuffer* buffer = SDL_CreateGPUTransferBuffer(device, &info);
+        if (!buffer)
+            return false;
+        SDL_ReleaseGPUTransferBuffer(device, bd.TexTransferBuffer);
+        bd.TexTransferBuffer = buffer;
+        bd.TexTransferBufferSize = info.size;
+    }
+
+    auto* mapped = static_cast<Uint8*>(SDL_MapGPUTransferBuffer(device, bd.TexTransferBuffer, true));
+    if (!mapped)
+        return false;
+    for (Uint32 y = 0; y < region.h; ++y)
+        memcpy(mapped + y * pitch, tex.GetPixelsAt(region.x, region.y + y), pitch);
+    SDL_UnmapGPUTransferBuffer(device, bd.TexTransferBuffer);
+
+    SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
+    if (!cmd)
+        return false;
+    SDL_GPUCopyPass* pass = SDL_BeginGPUCopyPass(cmd);
+    if (!pass) {
+        SDL_CancelGPUCommandBuffer(cmd);
+        return false;
+    }
+    SDL_GPUTextureTransferInfo source = {};
+    source.transfer_buffer = bd.TexTransferBuffer;
+    SDL_UploadToGPUTexture(pass, &source, &region, false);
+    SDL_EndGPUCopyPass(pass);
+    return SDL_SubmitGPUCommandBuffer(cmd);
+}
+
 struct DearImguiSdlGpu3RenderOps {
     decltype(&SDL_AcquireGPUCommandBuffer) acquire_command_buffer;
     decltype(&SDL_AcquireGPUSwapchainTexture) acquire_swapchain_texture;
@@ -213,6 +254,51 @@ const DearImguiSdlGpu3RenderOps fake_render_ops = {
 
 } // namespace
 
+static void update_gpu_texture(ImGui_ImplSDLGPU3_Data* bd, ImTextureData* tex, decltype(&upload_texture_region) upload) {
+    if (tex->Status != ImTextureStatus_WantCreate && tex->Status != ImTextureStatus_WantUpdates) {
+        ImGui_ImplSDLGPU3_UpdateTexture(tex);
+        return;
+    }
+
+    const bool creating = tex->Status == ImTextureStatus_WantCreate;
+    SDL_GPUTextureRegion region = {};
+    region.d = 1;
+    if (creating) {
+        SDL_GPUTextureCreateInfo info = {};
+        info.type = SDL_GPU_TEXTURETYPE_2D;
+        info.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+        info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        region.w = tex->Width;
+        region.h = tex->Height;
+        info.width = region.w;
+        info.height = region.h;
+        info.layer_count_or_depth = 1;
+        info.num_levels = 1;
+        info.sample_count = SDL_GPU_SAMPLECOUNT_1;
+        region.texture = SDL_CreateGPUTexture(bd->InitInfo.Device, &info);
+        if (!region.texture)
+            return;
+    } else {
+        region.texture = (SDL_GPUTexture*)(intptr_t)tex->GetTexID();
+        region.x = tex->UpdateRect.x;
+        region.y = tex->UpdateRect.y;
+        region.w = tex->UpdateRect.w;
+        region.h = tex->UpdateRect.h;
+    }
+    if (!upload(*bd, *tex, region)) {
+        if (creating)
+            SDL_ReleaseGPUTexture(bd->InitInfo.Device, region.texture);
+        return;
+    }
+    if (creating)
+        tex->SetTexID((ImTextureID)(intptr_t)region.texture);
+    tex->SetStatus(ImTextureStatus_OK);
+}
+
+extern "C" void dear_imgui_sdl3_backend_sdlgpu3_update_texture(ImTextureData* tex) {
+    update_gpu_texture(ImGui_ImplSDLGPU3_GetBackendData(), tex, upload_texture_region);
+}
+
 extern "C" std::uint64_t dear_imgui_sdl3_backend_sdlgpu3_render_viewport(
     ImGuiViewport* viewport,
     std::uint64_t* first_fault
@@ -234,6 +320,22 @@ extern "C" std::uint64_t dear_imgui_sdl3_backend_sdlgpu3_render_viewport(
 }
 
 #if defined(DEAR_IMGUI_SDL3_NATIVE_SELF_TEST)
+extern "C" bool dear_imgui_sdl3_backend_sdlgpu3_texture_self_test() {
+    ImGui_ImplSDLGPU3_Data bd{};
+    ImTextureData tex;
+    tex.Create(ImTextureFormat_RGBA32, 4, 2);
+    tex.UpdateRect = {2, 1, 1, 1};
+    tex.SetTexID(77);
+    tex.SetStatus(ImTextureStatus_WantUpdates);
+    update_gpu_texture(&bd, &tex, [](ImGui_ImplSDLGPU3_Data&, ImTextureData&, SDL_GPUTextureRegion) { return false; });
+    if (tex.Status != ImTextureStatus_WantUpdates || tex.GetTexID() != 77)
+        return false;
+    update_gpu_texture(&bd, &tex, [](ImGui_ImplSDLGPU3_Data&, ImTextureData&, SDL_GPUTextureRegion region) {
+        return region.x == 2 && region.y == 1 && region.w == 1 && region.h == 1;
+    });
+    return tex.Status == ImTextureStatus_OK && tex.GetTexID() == 77;
+}
+
 extern "C" std::uint64_t dear_imgui_sdl3_backend_sdlgpu3_render_contract_self_test() {
     std::uint64_t failures = 0;
     SDL_GPUDevice* device = reinterpret_cast<SDL_GPUDevice*>(static_cast<std::uintptr_t>(0x601));

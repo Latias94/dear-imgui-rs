@@ -2,6 +2,63 @@
 
 This document tracks compatibility across the workspace crates, upstream Dear ImGui, and key external dependencies. The root README shows the latest recommendations; this file keeps version history and compatibility policy.
 
+## 0.23 Release Train
+
+All 29 publishable crates share version `0.23.0`. Upgrade their requirements to `"0.23"` together. Applications passing SDL windows or events to the backend should also use `sdl3 = "0.22.1"`. Its `sdl3-sys` 0.7.3 bindings target SDL 3.4.20. The 0.22.0 backend uses `sdl3` 0.20.
+
+Development and publishing use Rust 1.100.0. The core MSRV is Rust 1.95, the Bevy backend requires Rust 1.97.1, and binding generation uses Rust 1.95.0 with LLVM 14.
+
+### Native resources and frame lifetimes
+
+`Ui::font_atlas_texture()` returns a frame-borrowed `TextureRef`. Pass it directly to `ui.image`, an ImPlot image builder, or a draw list. A legacy renderer that needs upload bytes can borrow `LegacyFontAtlas::tex_data()` between frames and release the borrow before the next frame. Keep those pixels for future atlas repacking. To replace the contents, call `FontAtlas::clear()`, add the font sources again and rebuild.
+
+`Context::remove_texture` revokes the handle immediately. A frame already being built or captured can finish using its texture, including when the renderer captures the platform viewports after the main viewport. During that interval, access through the removed handle returns `ManagedTextureError::Retiring`. A renderer should keep servicing texture requests until it receives and acknowledges the destroy operation.
+
+Dear ImGui's native allocator consults process-wide state. Release owned native resources, including shared font atlases, before moving Dear ImGui to a different OS thread. An extension that allocates through Dear ImGui and can outlive its Context can acquire `ContextThreadLease` before allocation and keep it through native destruction. An isolated `ContextBinding` remains a weak reference to its original Context.
+
+Custom multi-viewport backends should accept `&ImVec2` in typed window position and size setters. Raw setters retain their `*const ImVec2` signature. The native core now checks both framebuffer-scale values in its C++ hook and only reports a successful conditional uninstall when it owned the installed slot. Rebuild custom native archives and their manifests together. See the [PlatformIO callback ABI](CUSTOM_BACKENDS.md#aggregate-callback-abi).
+
+When replacing a custom renderer that has received texture requests, release its GPU resources and commit a reset prepared with `Context::prepare_renderer_texture_reset`. A replacement consumer returns `RendererConsumerError::RendererTextureResetRequired` until that reset completes. Its first capture can then upload the complete textures for its own device. Committing the reset also expires the previous frame's permission to render secondary viewports.
+
+### Drawing plots and node graphs
+
+ImPlot and ImPlot3D separate frame access, axis setup, and item submission. Move calls on the former frame-wide plotting handle into the corresponding closure. Each plot finishes in its original window and table cell, including when application code unwinds.
+
+```rust
+use dear_implot3d::{Axis3DFlags, Line3DFlags};
+
+plot_ui.with_plot("Frame time", |plot| {
+    plot.plot_line("CPU", &sample_times, &cpu_ms);
+});
+
+plot3d_ui.begin_plot("Trajectory").build_with_setup(
+    |setup| setup.setup_axes("X", "Y", "Z", Axis3DFlags::NONE, Axis3DFlags::NONE, Axis3DFlags::NONE),
+    |plot| plot.plot_line_f32("Path", &x, &y, &z, Line3DFlags::NONE),
+);
+```
+
+For 2D plots with custom axes or a legend, use `plot_ui.with_plot_setup(title, size, setup, draw)`. The setup closure runs before ImPlot locks the axes. Pass a `dear_implot::AxisScale` to `setup_x_axis_scale` or `setup_y_axis_scale`. A subplot grid supplies a `PlotUi` for its own cells. For 3D plots using the default axes, pass just the drawing closure to `build`.
+
+For ImNodes, configure positions on `ui.imnodes_editor(&nodes, Some(&graph))`, then call `with_nodes`. Use `editor.node(id, |node| { ... })`, `node.title_bar(...)`, and the `input_attr`, `output_attr` or `static_attr` closures to submit contents. Links refer to pins already submitted in that frame. Read selection, link events and `minimap_hovered_nodes()` from the returned `PostEditor`.
+
+ImGuizmo starts its native overlay once per frame. A gesture belongs to one ImGui context, so switching the active gizmo to a different context cancels the drag or view transition. Repeated operations on the same context preserve it. Custom native archives and browser providers must include `ImGuizmo_ResetInteraction` along with the updated ImPlot, ImPlot3D and ImNodes source adaptations.
+
+### Native sources in 0.23
+
+These wrapper revisions determine the C headers and the native source each extension builds. Rebuild custom native archives and the browser provider when upgrading a checkout across these revisions.
+
+| Extension | Wrapper | Nested native source |
+| --- | --- | --- |
+| ImPlot | `cimplot` `c809ff29c8` | `72de27832d` (1.2 WIP) |
+| ImPlot3D | `cimplot3d` `c7b527f318` | `c54525f8d4` (0.6 WIP) |
+| ImNodes | `cimnodes` `712f574082` | `2d0c280b07` |
+| Color Text Edit | `cimCTE` `dbf2abe484` | `7515d1c765` |
+| Node Editor | `cimnodes_editor` `917728f588` | `1e0e494f1a` |
+| ImGuizmo | `cimguizmo` `566ff53a4a` | `105e4fde45` |
+| ImGuIZMO.quat | `cimguizmo_quat` `91499ef659` | `df0927ea22` |
+
+Dear ImGui uses the docking-enabled `d88f238d` source through `cimgui` at `5d7cc7e1`. The newer `cimgui` commit `2a6a93fc` omits the docking and platform-window entry points required by the workspace. The native Test Engine uses `10a5c08e78`. Its docking suite builds against the visible-tab field supplied by the selected core headers.
+
 ## 0.22.0 Native Build Policy
 
 The 0.22 release train introduces a breaking native environment policy for the core and seven prebuilt-capable extension sys crates. They share `<PREFIX>_BUILD_MODE=auto|source|prebuilt|bindings-only`. The default remains source-capable with downloads opt-in. Strict prebuilt mode never falls back to compiling that library; enabled core backend shims still compile locally. Only bindings-only intentionally omits native symbols, and it is not a supported external-provider contract.
@@ -25,7 +82,8 @@ paths, see [the Apple platform guide](workstreams/apple-platform-support.md).
 ## Versioning Policy
 
 - Unified release train: all published `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
-- Current release train: unified `v0.22.0` (use `version = "0.22"`; Git dependencies must use the same revision across workspace crates).
+- Current release train: unified `v0.23.0` (use `version = "0.23"`; use the same revision for Git dependencies).
+- Previous stable train: unified `v0.22.0` (use `version = "0.22"`).
 - Published stable 0.21 train: unified `v0.21.0` (use `version = "0.21"`).
 - Previous stable 0.20 train: unified `v0.20.0` (use `version = "0.20"`).
 - Previous stable train: unified `v0.19.0` (use `version = "0.19"`).
@@ -41,7 +99,7 @@ paths, see [the Apple platform guide](workstreams/apple-platform-support.md).
 - Previous train: unified `v0.10.4` (use `version = "0.10"`).
 - Previous train: unified `v0.9.0` (use `version = "0.9"`).
 - Previous train: unified `v0.8.0` (use `version = "0.8"`).
-- Internal dependency constraints require at least the current full release version (`0.22.0`) and allow later compatible patches; prerelease trains use exact requirements. This prevents a lockfile from retaining older internal packages that lack newly used APIs. Consumer dependencies for the new train may use `"0.22"`. Mixing different release trains across our crates is unsupported.
+- Internal dependency constraints require at least the current full release version (`0.23.0`) and allow later compatible patches. Prerelease trains use exact requirements. Consumer applications may use `"0.23"` across the workspace crates.
 
 ## 0.22 Release Train
 

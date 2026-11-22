@@ -27,6 +27,10 @@ struct RuntimeSurfaceAdmission<'a> {
 impl SurfaceAdmissionBackend for RuntimeSurfaceAdmission<'_> {
     type Frame = wgpu::SurfaceTexture;
 
+    fn window_size(&self) -> winit::dpi::PhysicalSize<u32> {
+        self.window.window.inner_size()
+    }
+
     fn acquire(&mut self) -> SurfaceAcquisition<Self::Frame> {
         let Some(surface) = self.window.surface.as_ref() else {
             return SurfaceAcquisition::Validation;

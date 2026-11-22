@@ -5,7 +5,7 @@
 
 High-level Rust bindings for ImPlot, the immediate mode plotting library. This crate provides safe, idiomatic Rust bindings designed to work seamlessly with `dear-imgui-rs` (which uses cimgui C API) and `dear-implot-sys` (which uses cimplot C API).
 
-For native build/link options (source, system/prebuilt, remote prebuilt), see `extensions/dear-implot-sys/README.md`.
+For native source builds and matching prebuilt archives, see the [sys crate build modes](../dear-implot-sys/README.md#build-modes).
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/implot-basic.png" alt="ImPlot" width="75%"/>
@@ -19,48 +19,33 @@ For native build/link options (source, system/prebuilt, remote prebuilt), see `e
 
 ## Compatibility
 
-The `0.22` release train requires Rust 1.95 or newer. Upgrade all workspace crates together. See the [0.22 migration notes](../../docs/COMPATIBILITY.md#022-release-train).
+Use Rust 1.95 or newer and keep all `dear-*` dependencies on the `0.23` release train. See the [0.23 migration notes](../../docs/COMPATIBILITY.md#023-release-train).
 
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.22.0  |
-| dear-imgui-rs     | 0.22.0  |
-| dear-implot-sys   | 0.22.0  |
+| Crate             | 0.23.0  |
+| dear-imgui-rs     | 0.23.0  |
+| dear-implot-sys   | 0.23.0  |
 
 ### WASM (WebAssembly) support
 
-This crate has **experimental** support for `wasm32-unknown-unknown` targets via the same import-style design used by the core ImGui bindings:
+For the experimental `wasm32-unknown-unknown` target, enable `wasm` on both direct dependencies.
 
-- `dear-implot` + `dear-implot-sys` expose a `wasm` feature which:
-  - Enables import-style FFI that links against the shared `imgui-sys-v1` provider module.
-  - Avoids compiling C/C++ during the Rust build for wasm.
-- The provider module (`imgui-sys-v1`) is built once using Emscripten and contains:
-  - Dear ImGui + cimgui (from `dear-imgui-sys`)
-  - ImPlot + cimplot (from `dear-implot-sys`)
+```toml
+[dependencies]
+dear-imgui-rs = { version = "0.23", features = ["wasm"] }
+dear-implot = { version = "0.23", features = ["wasm"] }
+```
 
-To try the web demo with ImPlot enabled:
+From the matching workspace checkout, build the demo and its `imgui-sys-v1` provider with the checked-in bindings.
 
 ```bash
-# 1) Generate pregenerated wasm bindings (Dear ImGui core + ImPlot)
-cargo run -p xtask -- wasm-bindgen
-cargo run -p xtask -- wasm-bindgen-implot
-
-# 2) Build the main wasm + JS (includes ImPlot demo window)
 cargo run -p xtask -- web-demo implot
-
-# 3) Build the provider (Emscripten imgui-sys-v1 with ImGui + ImPlot)
 cargo run -p xtask -- build-cimgui-provider
-
-# 4) Serve and open in a browser
 python -m http.server -d target/web-demo 8080
 ```
 
-Notes:
-- The `dear-imgui-web-demo` crate in `examples-wasm` enables `implot` when passed to `xtask web-demo implot`; it is not a default feature.
-- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific compatible `0.22` release and follow changes in `docs/WASM.md`.
-
-See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
-
+The 0.23 browser application uses `WasmProviderAllocator` and imports the provider's memory and function table. Rebuild and deploy both modules together when upgrading from 0.22. See the [tool versions and local demo](../../docs/WASM.md#local-demo) and [application setup](../../docs/WASM.md#runtime-model).
 
 ## Integration Quickstart
 
@@ -70,8 +55,8 @@ Use compatible stable requirements:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.22"
-dear-implot = "0.22"
+dear-imgui-rs = "0.23"
+dear-implot = "0.23"
 ```
 
 ```rust
@@ -88,17 +73,13 @@ fn main() {
 
     // Build one CPU-only frame without a platform or GPU renderer.
     let ui = ctx.frame();
-    // Ui extension: obtain PlotUi from Ui + PlotContext
-    let plot_ui = ui.implot(&plot_ctx);
     ui.window("Plot Example").build(|| {
-        if let Some(token) = plot_ui.begin_plot("Line") {
+        ui.implot(&plot_ctx).with_plot("Line", |plot| {
             let x = [0.0, 1.0, 2.0, 3.0];
             let y = [0.0, 1.0, 4.0, 9.0];
-            LinePlot::new("y=x^2", &x, &y).plot(&plot_ui);
-            token.end();
-        }
+            LinePlot::new("y=x^2", &x, &y).plot(plot);
+        });
     });
-    drop(plot_ui);
     drop(ctx.render_legacy());
 }
 ```
@@ -112,21 +93,25 @@ Notes:
 - Base ImGui static library linking is handled by `dear-imgui-sys`; you do not need to link it here.
 - Refer to the `-sys` README for `IMPLOT_SYS_*` env vars when using prebuilt libraries.
 
-### Migrating live axis links
+### Plot scopes and axis links
 
-`PlotUi::setup_axis_links` and `set_next_axis_links` now require `unsafe`, like
-their raw-axis variants. ImPlot retains the supplied `f64` pointers and writes
-back at `EndPlot`, so a short Rust reference cannot prove their full lifetime.
-Keep storage at a stable address without other access until `PlotContext` is
-destroyed, or explicitly clear all stored/pending links. To clear an applied
-link, begin the same plot ID, enable the axis, call `setup_axis_links` with
-`None`, then end that plot. Clear pending next-plot links separately.
-`EndPlot` alone does not unlink every axis: subsequent plots can still write
-through a retained secondary-axis pointer. Rejected begin calls and frame
-changes do not generally discard pending links. `set_next_axis_links` targets
-the next plot, not the next frame. Follow each method's setup-phase requirements.
-Prefer `setup_*_axis_limits` / `set_next_*_axis_limits` when live writeback is
-unnecessary; these copy values and remain safe.
+`PlotUi::with_plot(title, draw)` and `with_plot_size(title, size, draw)` supply a
+`&PlotScope` to item builders, coordinate queries and drawing methods. Use
+`with_plot_setup(title, size, setup, draw)` to configure axes or the legend.
+Setup finishes before drawing starts. Each closure runs in the window and
+selected table cell that began the plot. A skipped plot returns `None`.
+
+`SubplotGrid::build` supplies the `PlotUi` for its cells. `MultiAxisPlot::build`
+passes a configured `PlotScope`. Use `with_plot_clip_rect` for clipped drawing
+and `LegendManager::with_popup` for a legend entry's ImGui controls. Context
+styles also use closures, such as `plot_ui.with_colormap(map, || { ... })`.
+
+Set next-plot limits on `PlotUi` before opening a plot. For live writeback,
+`PlotSetup::setup_axis_links` requires stable, distinct values until the plot
+ends, including unwinding. The wrapper clears the cached pointers after
+native writeback. `PlotUi::set_next_axis_links` also requires the values to
+survive while the links are pending. Clear pending links explicitly if the
+plot that would consume them is skipped. Both link methods are `unsafe`.
 
 ### Validated numeric formats
 
@@ -134,8 +119,10 @@ ImPlot value labels use validated `FloatFormat` values instead of arbitrary C
 format strings. Axis formats additionally use `AxisFormat`, which enforces
 ImPlot's fixed 15-byte storage limit. These formats must be ASCII because
 ImPlot forwards the complete string to locale-sensitive native formatting
-paths. Use an axis formatter closure when labels need localized or arbitrary
-UTF-8 text.
+paths. Explicit tick labels accept UTF-8 and are copied during setup. Custom
+formatter and transform callbacks run inside ImPlot and must not reenter ImGui
+or ImPlot. Their unsafe registration methods keep them alive through native
+writeback and detach them before dropping the Rust closures.
 
 ```rust
 let value_format = FloatFormat::new("%.2f ms")?;
@@ -163,8 +150,8 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.22"
-dear-implot = "0.22"
+dear-imgui-rs = "0.23"
+dear-implot = "0.23"
 ```
 
 Basic usage:
@@ -183,23 +170,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // One CPU-only frame; use a renderer-driven loop in a visible application.
     let ui = ctx.frame();
-    // Or via Ui extension:
-    let plot_ui = ui.implot(&plot_ctx);
-
     ui.window("My Plots")
         .size([800.0, 600.0], Condition::FirstUseEver)
         .build(|| {
-            if let Some(token) = plot_ui.begin_plot("Line Plot") {
+            ui.implot(&plot_ctx).with_plot("Line Plot", |plot| {
                 let x_data = [0.0, 1.0, 2.0, 3.0, 4.0];
                 let y_data = [0.0, 1.0, 4.0, 9.0, 16.0];
 
                 // New modular API
-                LinePlot::new("Quadratic", &x_data, &y_data).plot(&plot_ui);
-
-                token.end();
-            }
+                LinePlot::new("Quadratic", &x_data, &y_data).plot(plot);
+            });
         });
-    drop(plot_ui);
     drop(ctx.render_legacy());
     Ok(())
 }
@@ -211,14 +192,16 @@ active plot, and application-owned input arrays. They illustrate API calls;
 
 ## Plot Types
 
+The following item examples use the `plot` argument of a drawing closure.
+
 ### Line and Scatter Plots
 
 ```rust
 // Line plot
-LinePlot::new("My Line", &x_data, &y_data).plot(&plot_ui);
+LinePlot::new("My Line", &x_data, &y_data).plot(plot);
 
 // Scatter plot
-ScatterPlot::new("My Points", &x_data, &y_data).plot(&plot_ui);
+ScatterPlot::new("My Points", &x_data, &y_data).plot(plot);
 
 // Item styling via ImPlotSpec-backed builder helpers
 LinePlot::new("Styled Line", &x_data, &y_data)
@@ -227,14 +210,14 @@ LinePlot::new("Styled Line", &x_data, &y_data)
     .with_marker(Marker::Circle)
     .with_marker_size(6.0)
     .with_marker_fill_color([0.20, 0.70, 1.00, 0.85])
-    .plot(&plot_ui);
+    .plot(plot);
 
 // The same styling helpers are available on other ImPlotSpec-backed builders
 BarPlot::new("Styled Bars", &values)
     .with_fill_color([0.90, 0.45, 0.20, 0.80])
     .with_line_color([0.45, 0.15, 0.05, 1.00])
     .with_line_weight(1.5)
-    .plot(&plot_ui);
+    .plot(plot);
 ```
 
 ### Bar Charts
@@ -243,12 +226,12 @@ BarPlot::new("Styled Bars", &values)
 // Simple bar chart
 BarPlot::new("Bars", &values)
     .with_bar_size(0.8)
-    .plot(&plot_ui);
+    .plot(plot);
 
 // Positional bar chart
 PositionalBarPlot::new("Positioned Bars", &x_positions, &values)
     .with_bar_size(0.5)
-    .plot(&plot_ui);
+    .plot(plot);
 ```
 
 ### Histograms
@@ -259,17 +242,17 @@ HistogramPlot::new("Distribution", &data)
     .with_bins(20usize)
     .density()
     .cumulative()
-    .plot(&plot_ui);
+    .plot(plot);
 
 // Automatic binning method
 HistogramPlot::new("Auto Distribution", &data)
     .with_bins(BinMethod::Scott)
-    .plot(&plot_ui);
+    .plot(plot);
 
 // 2D Histogram
 Histogram2DPlot::new("2D Distribution", &x_data, &y_data)
     .with_bins(10usize, 10usize)
-    .plot(&plot_ui);
+    .plot(plot);
 ```
 
 ### Heatmaps
@@ -282,7 +265,7 @@ HeatmapPlot::new("Heat", &data, 10, 10)
     .with_bounds(0.0, 0.0, 1.0, 1.0)
     .try_label_format("%.2f")
     .expect("static numeric format is valid")
-    .plot(&plot_ui);
+    .plot(plot);
 ```
 
 ### Pie Charts
@@ -295,7 +278,7 @@ PieChartPlot::new(labels, &values, 0.5, 0.5, 0.4)
     .normalize()
     .exploding()
     .with_start_angle(90.0)
-    .plot(&plot_ui);
+    .plot(plot);
 ```
 
 ### Error Bars
@@ -305,7 +288,7 @@ let errors = [0.1, 0.2, 0.15, 0.3, 0.25];
 
 ErrorBarsPlot::new("Measurements", &x_data, &y_data, &errors)
     .horizontal()
-    .plot(&plot_ui);
+    .plot(plot);
 ```
 
 ### Shaded Plots
@@ -314,11 +297,11 @@ ErrorBarsPlot::new("Measurements", &x_data, &y_data, &errors)
 // Shaded area plot
 ShadedPlot::new("Area", &x_data, &y_data)
     .with_y_ref(0.0)
-    .plot(&plot_ui);
+    .plot(plot);
 
 // Shaded between two curves
 ShadedBetweenPlot::new("Between", &x_data, &y1_data, &y2_data)
-    .plot(&plot_ui);
+    .plot(plot);
 ```
 
 ## Advanced Features
@@ -326,27 +309,12 @@ ShadedBetweenPlot::new("Between", &x_data, &y1_data, &y2_data)
 ### Subplots
 
 ```rust
-if let Ok(token) = SubplotGrid::new("My Subplots", 2usize, 2usize)
-    .with_size([800.0, 600.0])
-    .with_flags(SubplotFlags::NONE)
-    .begin(&plot_ui) {
-
-    // First subplot
-    if let Some(plot_token) = plot_ui.begin_plot("") {
-        LinePlot::new("Line", &x_data, &y_data).plot(&plot_ui);
-        plot_token.end();
-    }
-
-    // Second subplot
-    if let Some(plot_token) = plot_ui.begin_plot("") {
-        BarPlot::new("Bars", &values).plot(&plot_ui);
-        plot_token.end();
-    }
-
-    // ... more subplots
-
-    token.end();
-}
+SubplotGrid::new("My Subplots", 1, 2)
+    .with_size([800.0, 300.0])
+    .build(&plot_ui, |grid| {
+        grid.with_plot("", |plot| LinePlot::new("Line", &x_data, &y_data).plot(plot));
+        grid.with_plot("", |plot| BarPlot::new("Bars", &values).plot(plot));
+    })?;
 ```
 
 ### Multi-Axis Plots
@@ -364,57 +332,44 @@ let multi_plot = MultiAxisPlot::new("Multi-Axis")
         range: Some((900.0, 1100.0)),
     });
 
-if let Ok(token) = multi_plot.begin(&plot_ui) {
-    // Plot on first Y-axis
-    token.set_y_axis(YAxis::Y1);
-    LinePlot::new("Temperature", &time, &temp).plot(&plot_ui);
-
-    // Plot on second Y-axis
-    token.set_y_axis(YAxis::Y2);
-    LinePlot::new("Pressure", &time, &pressure).plot(&plot_ui);
-
-    token.end();
-}
+multi_plot.build(&plot_ui, |plot| {
+    plot.set_axes(XAxis::X1, YAxis::Y1);
+    LinePlot::new("Temperature", &time, &temp).plot(plot);
+    plot.set_axes(XAxis::X1, YAxis::Y2);
+    LinePlot::new("Pressure", &time, &pressure).plot(plot);
+})?;
 ```
 
 ### Axis Setup & Selection
 
 ```rust
-// Inside an active plot (between begin_plot/end)
-// Configure axes labels/flags
-plot_ui.setup_axes(Some("Time (s)"), Some("Value"), AxisFlags::NO_GRID_LINES, AxisFlags::NONE);
-
-// Set explicit ticks on X1
-let tick_pos = [0.0, 1.0, 2.0, 3.0];
-let tick_lbl = ["0s", "1s", "2s", "3s"];
-plot_ui.setup_x_axis_ticks_positions(XAxis::X1, &tick_pos, Some(&tick_lbl), true);
-
-// Format Y1 ticks
-let y_axis_format = AxisFormat::new("%.2f").expect("static axis format is valid");
-plot_ui.setup_y_axis_format(YAxis::Y1, &y_axis_format);
-
-// Apply limits
-plot_ui.setup_axes_limits(0.0, 3.0, -1.0, 1.0, PlotCond::Once);
-
-// Selection query
-if plot_ui.is_plot_selected() {
-    if let Some(rect) = plot_ui.plot_selection_axes(XAxis::X1, YAxis::Y1) {
-        // rect.X.Min/Max, rect.Y.Min/Max
+plot_ui.with_plot_setup("Measurements", [-1.0, 0.0], |setup| {
+    setup.setup_axes(Some("Time (s)"), Some("Value"), AxisFlags::NO_GRID_LINES, AxisFlags::NONE);
+    setup.setup_x_axis_ticks_positions(XAxis::X1, &[0.0, 1.0, 2.0], Some(&["0s", "1s", "2s"]), true);
+    setup.setup_y_axis_scale(YAxis::Y1, AxisScale::SymLog);
+    setup.setup_y_axis_format(YAxis::Y1, &AxisFormat::new("%.2f").unwrap());
+    setup.setup_axes_limits(0.0, 3.0, -1.0, 1.0, PlotCond::Once);
+}, |plot| {
+    LinePlot::new("Values", &time, &values).plot(plot);
+    if let Some(rect) = plot.plot_selection_axes(XAxis::X1, YAxis::Y1) {
+        // Use rect.X and rect.Y to inspect the selection.
     }
-}
+});
 ```
 
 ### Infinite Lines & Image
 
 ```rust
 // Infinite lines
-plot_ui.inf_lines_vertical("vlines", &[1.0, 2.0, 3.0])?;
-plot_ui.inf_lines_horizontal("hlines", &[0.0])?;
+plot.inf_lines_vertical("vlines", &[1.0, 2.0, 3.0])?;
+plot.inf_lines_horizontal("hlines", &[0.0])?;
 
-// Image plot (using ImTextureID)
-let bounds_min = ImPlotPoint { x: 0.0, y: 0.0 };
-let bounds_max = ImPlotPoint { x: 1.0, y: 1.0 };
-plot_ui.plot_image("image", my_tex_id, bounds_min, bounds_max)?;
+// Pass the frame's borrowed atlas texture directly to the plot.
+if let Some(atlas) = ui.font_atlas_texture() {
+    let bounds_min = ImPlotPoint { x: 0.0, y: 0.0 };
+    let bounds_max = ImPlotPoint { x: 1.0, y: 1.0 };
+    plot.plot_image("Font atlas", atlas, bounds_min, bounds_max)?;
+}
 ```
 
 ### Universal Plot Builder
@@ -423,21 +378,21 @@ For a unified fallible API, use `PlotBuilder`:
 
 ```rust
 // Line plot
-PlotBuilder::line("My Line", &x_data, &y_data).build(&plot_ui)?;
+PlotBuilder::line("My Line", &x_data, &y_data).build(plot)?;
 
 // Bar plot
-PlotBuilder::bar("My Bars", &values).build(&plot_ui)?;
+PlotBuilder::bar("My Bars", &values).build(plot)?;
 
 // Histogram
-PlotBuilder::histogram("Distribution", &data).build(&plot_ui)?;
+PlotBuilder::histogram("Distribution", &data).build(plot)?;
 
 // Heatmap
-PlotBuilder::heatmap("Heat", &data, 10, 10).build(&plot_ui)?;
+PlotBuilder::heatmap("Heat", &data, 10, 10).build(plot)?;
 ```
 
 ## Error Handling
 
-`PlotBuilder::build` and the fallible `PlotUi` helpers return `Result<(), PlotError>`.
+`PlotBuilder::build` and the fallible `PlotScope` helpers return `Result<(), PlotError>`.
 The `Plot::plot` trait method returns `()` and skips invalid data; call `validate()`
 first when the application needs an error:
 
@@ -445,10 +400,10 @@ first when the application needs an error:
 match LinePlot::new("My Plot", &x_data, &y_data).validate() {
     Ok(_) => {
         // Plot is valid, proceed
-        LinePlot::new("My Plot", &x_data, &y_data).plot(&plot_ui);
+        LinePlot::new("My Plot", &x_data, &y_data).plot(plot);
     }
-    Err(PlotError::DataLengthMismatch { expected, actual }) => {
-        eprintln!("Data length mismatch: expected {}, got {}", expected, actual);
+    Err(PlotError::DataLengthMismatch { x_len, y_len }) => {
+        eprintln!("Data length mismatch: x = {}, y = {}", x_len, y_len);
     }
     Err(PlotError::EmptyData) => {
         eprintln!("Cannot plot empty data");
@@ -504,7 +459,7 @@ The build process automatically handles:
 This crate follows the same architectural patterns as `dear-imgui-rs`:
 
 - **Context Management**: Separate ImPlot context that works alongside Dear ImGui
-- **Lifetime Safety**: Plot tokens ensure proper begin/end pairing
+- Setup and drawing closures borrow the active plot until its native `EndPlot`.
 - **RAII**: Automatic cleanup of resources and style stacks
 - **Builder Patterns**: Fluent APIs for configuration
 - **Modular Design**: Each plot type is in its own module

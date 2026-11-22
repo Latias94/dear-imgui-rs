@@ -19,7 +19,8 @@ impl<'ui> ChannelsSplit<'ui> {
         }
     }
 
-    /// Change current channel. Panics if `channel_index >= channels_count`.
+    /// Change the current channel. Panics if `channel_index >= channels_count` or a native
+    /// extension is using this draw list's splitter.
     #[doc(alias = "ChannelsSetCurrent")]
     pub fn set_current(&self, channel_index: usize) {
         assert!(
@@ -33,6 +34,7 @@ impl<'ui> ChannelsSplit<'ui> {
             "channel_index",
             channel_index,
         );
+        self.draw_list.assert_splitter_available();
         unsafe { sys::ImDrawList_ChannelsSetCurrent(self.draw_list.draw_list, channel_index_i32) };
     }
 }

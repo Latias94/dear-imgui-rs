@@ -7,6 +7,57 @@ fn test_guard() -> std::sync::MutexGuard<'static, ()> {
 }
 
 #[test]
+fn edit_callback_reads_native_growth_and_writes_utf8_back_to_the_string() {
+    struct Append<'a> {
+        seen: &'a mut String,
+        ui: &'a imgui::Ui,
+    }
+    impl imgui::InputTextCallbackHandler for Append<'_> {
+        fn on_edit(&mut self, mut data: imgui::TextCallbackData<'_>) {
+            self.ui.get_id("callback query");
+            self.seen.push_str(data.str());
+            data.push_str(" — done");
+        }
+    }
+
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    ctx.io_mut().set_display_size([800.0, 600.0]);
+    ctx.font_atlas()
+        .try_claim_legacy_renderer()
+        .unwrap()
+        .build();
+    ctx.set_ini_filename::<std::path::PathBuf>(None).unwrap();
+    let input = "café with more text";
+    let mut text = String::new();
+    let mut seen = String::new();
+    for frame in 0..3 {
+        if frame == 2 {
+            ctx.io_mut().add_input_characters_utf8(input);
+        }
+        let ui = ctx.frame();
+        ui.window("edit callback")
+            .size([400.0, 180.0], imgui::Condition::Always)
+            .build(|| {
+                if frame == 0 {
+                    ui.set_keyboard_focus_here();
+                }
+                ui.input_text("title", &mut text)
+                    .hint("type here")
+                    .callback_flags(imgui::InputTextCallback::EDIT)
+                    .callback(Append {
+                        seen: &mut seen,
+                        ui,
+                    })
+                    .build();
+            });
+        let _ = ctx.render_legacy();
+    }
+    assert_eq!(seen, input);
+    assert_eq!(text, format!("{input} — done"));
+}
+
+#[test]
 fn input_text_growable_buffer_no_panic() {
     let _guard = test_guard();
     let mut ctx = imgui::Context::create();

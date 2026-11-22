@@ -3,13 +3,11 @@ use std::borrow::Cow;
 use dear_imgui_rs::texture::TextureRef;
 
 use crate::item_style::{Plot3DItemStyle, plot3d_spec_with_style};
-use crate::{
-    Image3DFlags, Item3DFlags, Plot3DDataLayout, Plot3DUi, debug_before_plot, imvec2, imvec4, sys,
-};
+use crate::{Image3DFlags, Item3DFlags, Plot3DDataLayout, Plot3DScope, imvec2, imvec4, sys};
 
 /// Image by axes builder
 pub struct Image3DByAxesBuilder<'ui, 'tex> {
-    pub(crate) _ui: &'ui Plot3DUi<'ui>,
+    pub(crate) _ui: &'ui Plot3DScope<'ui>,
     pub(crate) label: Cow<'ui, str>,
     pub(crate) texture: TextureRef<'tex>,
     pub(crate) center: [f32; 3],
@@ -43,8 +41,8 @@ impl<'ui, 'tex> Image3DByAxesBuilder<'ui, 'tex> {
             let label = self.label.as_ref();
             let label = if label.contains('\0') { "image" } else { label };
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                debug_before_plot();
                 let spec = plot3d_spec_with_style(
+                    &self._ui.next_item,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     Plot3DDataLayout::DEFAULT,
@@ -79,7 +77,7 @@ impl<'ui, 'tex> Image3DByAxesBuilder<'ui, 'tex> {
 
 /// Image by corners builder
 pub struct Image3DByCornersBuilder<'ui, 'tex> {
-    pub(crate) _ui: &'ui Plot3DUi<'ui>,
+    pub(crate) _ui: &'ui Plot3DScope<'ui>,
     pub(crate) label: Cow<'ui, str>,
     pub(crate) texture: TextureRef<'tex>,
     pub(crate) p0: [f32; 3],
@@ -118,8 +116,8 @@ impl<'ui, 'tex> Image3DByCornersBuilder<'ui, 'tex> {
             let label = self.label.as_ref();
             let label = if label.contains('\0') { "image" } else { label };
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                debug_before_plot();
                 let spec = plot3d_spec_with_style(
+                    &self._ui.next_item,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     Plot3DDataLayout::DEFAULT,
@@ -159,7 +157,7 @@ impl<'ui, 'tex> Image3DByCornersBuilder<'ui, 'tex> {
     }
 }
 
-impl<'ui> Plot3DUi<'ui> {
+impl<'ui> Plot3DScope<'ui> {
     /// Image oriented by center and axes
     pub fn image_by_axes<'tex, T: Into<TextureRef<'tex>>>(
         &'ui self,
@@ -215,8 +213,8 @@ impl<'ui> Plot3DUi<'ui> {
     }
 }
 
-fn to_sys_texture_ref(ui: &Plot3DUi<'_>, texture: TextureRef<'_>) -> sys::ImTextureRef_c {
-    let texture = unsafe { ui._ui.resolve_texture_ref_raw(texture) }
+fn to_sys_texture_ref(ui: &Plot3DScope<'_>, texture: TextureRef<'_>) -> sys::ImTextureRef_c {
+    let texture = unsafe { ui.ui.imgui.resolve_texture_ref_raw(texture) }
         .unwrap_or_else(|error| panic!("ImPlot3D image rejected texture: {error}"));
     sys::ImTextureRef_c {
         _TexData: texture._TexData as *mut sys::ImTextureData,

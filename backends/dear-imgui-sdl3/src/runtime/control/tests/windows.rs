@@ -127,7 +127,7 @@ fn callback_drop_keeps_observed_registration_after_retirement_without_aliasing_r
     });
 }
 
-#[cfg(all(target_os = "windows", debug_assertions))]
+#[cfg(all(target_os = "windows", sdl3_native_self_test))]
 #[test]
 fn native_lease_freezes_owner_changes_and_parent_retirement_does_not_destroy_child() {
     let _guard = crate::tests::test_guard();
@@ -209,7 +209,7 @@ fn native_lease_freezes_owner_changes_and_parent_retirement_does_not_destroy_chi
     });
 }
 
-#[cfg(all(target_os = "windows", debug_assertions))]
+#[cfg(all(target_os = "windows", sdl3_native_self_test))]
 #[test]
 fn retired_secondary_native_lease_releases_child_before_owner_after_context_teardown() {
     let _guard = crate::tests::test_guard();
@@ -459,7 +459,7 @@ fn transparent_creation_bridge_preserves_backend_flags_and_clears_policy_between
     });
 }
 
-#[cfg(all(target_os = "windows", debug_assertions))]
+#[cfg(all(target_os = "windows", sdl3_native_self_test))]
 #[test]
 fn native_secondary_configuration_is_applied_hidden_and_failed_creation_rolls_back_once() {
     let _guard = crate::tests::test_guard();

@@ -114,17 +114,18 @@ impl<'a> PolygonPlot<'a> {
 }
 
 impl<'a> Plot for PolygonPlot<'a> {
-    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
+    fn plot(&self, plot_ui: &crate::PlotScope<'_>) {
         if self.validate().is_err() {
             return;
         }
-        let Ok(count) = i32::try_from(self.x_data.len()) else {
+        let Some(count) = self.layout.sample_count(self.x_data.len()) else {
             return;
         };
 
         plot_ui.with_bound_context(|| {
             with_plot_str_or_empty(self.label, |label_ptr| unsafe {
                 let spec = plot_spec_with_style(
+                    plot_ui,
                     self.style,
                     self.flags.bits() | self.item_flags.bits(),
                     self.layout,
@@ -146,7 +147,7 @@ impl<'a> Plot for PolygonPlot<'a> {
 }
 
 /// Convenience functions for quick polygon plotting.
-impl<'ui> crate::PlotUi<'ui> {
+impl<'ui> crate::PlotScope<'ui> {
     /// Plot a polygon with X and Y vertex data.
     pub fn polygon_plot(
         &self,
